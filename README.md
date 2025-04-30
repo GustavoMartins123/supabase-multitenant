@@ -1,8 +1,9 @@
-# Documentação do Script `generate_project.sh`
+# Documentação
 
-Este script **automatiza** a criação de novos projetos no ambiente Supabase, otimizando serviços como Realtime e Supavisor.  
-Cada projeto usa o mesmo _JWT secret_. Se você quiser um secret diferente para cada projeto, altere o script para injetar esse valor no Realtime do banco `<PROJECT_ID>` correspondente, no Pooler e no arquivo `.env`.  
-No `docker-compose`, altere as variáveis de ambiente para consumir o `.env` gerado; assim, você terá um banco dedicado dentro do mesmo Postgres, com tokens assinados por chaves distintas. Além disso, o script:
+Este projeto **automatiza** a criação de novos projetos no ambiente Supabase, otimizando serviços como Realtime e Supavisor.
+
+    Cada projeto usa o mesmo _JWT secret_. Se você quiser um secret diferente para cada projeto, altere o script para injetar esse valor no Realtime do banco `<PROJECT_ID>` correspondente, no Pooler e no arquivo `.env`. 
+    No `docker-compose`, altere as variáveis de ambiente para consumir o `.env` gerado; assim, você terá um banco dedicado dentro do mesmo Postgres, com tokens assinados por chaves distintas. Além disso, o script:
 
 - Configura um banco de dados dedicado.  
 - Cria tenants para os serviços Realtime e Supavisor.  
@@ -12,7 +13,7 @@ No `docker-compose`, altere as variáveis de ambiente para consumir o `.env` ger
 
 ## Propósito
 
-O `generate_project.sh` simplifica a inicialização de projetos Supabase, criando automaticamente:
+Simplificar a inicialização de projetos Supabase, criando automaticamente:
 
 - Um **database dedicado** para o projeto.  
 - Configurações de **tenants** para Realtime e Supavisor.  
@@ -46,7 +47,7 @@ docker compose --env-file ../secrets/.env --env-file ../.env up -d
 ```
 Altere os valores em secrets/.env e .env antes de subir.
 
-###3. Gerar o template _supabase_template
+### 3. Gerar o template _supabase_template
 
 Assim que o Postgres estiver no ar, o script create_template.sh (pasta docker/) tentará criar o template automaticamente.
 
@@ -175,7 +176,7 @@ Algumas observações importantes sobre o realtime e o pooler
         No docker compose o supabase auth ou outros pode se notar que é o nome do usuario do banco '.' o nome do tenant
             'postgres://supabase_auth_admin.<PROJECT_ID>...'
         É como o pooler consegue saber qual tenant usar, e dentro do tenant tem as configurações para a conexão daquele database específico
-        
+
     Realtime:
         Na conf do nginx na rota do realtime pode se notar essa variavel:
             'proxy_set_header Host "<PROJECT_ID>.localhost";'
