@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -e
 
+echo "Criando schema _analytics..."
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+  CREATE SCHEMA IF NOT EXISTS _analytics AUTHORIZATION "$POSTGRES_USER";
+EOSQL
+
 echo "Criando database _supabase_template..."
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
   CREATE DATABASE _supabase_template;

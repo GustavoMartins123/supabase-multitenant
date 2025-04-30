@@ -71,6 +71,9 @@ Exemplo:
 
 ./generate_project.sh myproject
 
+Observação
+    Não use caracteres especiais diferentes de um '_', pois o postgres não aceita.
+
 Verifique a saída – ela mostrará o banco criado e a porta NGINX alocada.
 Saída Esperada
 
@@ -150,9 +153,9 @@ map "" $storage_upstream  { default "supabase-storage-<PROJECT_ID>:5000"; }
 
 Altere <PROJECT_ID> com o nome do seu projeto
 
-Suba o Studio:
+Suba o Studio
 
-docker compose --env-file ../secrets/.env --env-file .env up -d
+docker compose --env-file ../secrets/.env --env-file ../.env --env-file .env up -d
 
 Algumas observações importantes sobre o realtime e o pooler
     Pooler:

@@ -15,6 +15,14 @@ set +a
 PROJECT_ID="${1:-}"
 [[ -z "$PROJECT_ID" ]] && { echo "Uso: $0 <project_id>"; exit 1; }
 
+#O postgres não aceita caracteres especiais
+if [[ ! "$PROJECT_ID" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+  echo "Erro: O project_id deve começar com uma letra ou underscore e conter apenas letras, dígitos ou underscores."
+  exit 1
+fi
+
+#Caso for usar um analytics no projeto
+# LOGFLARE_API_KEY=$(head -c 32 /dev/urandom | base64 | tr -d '\n')
 
 die() { echo "❌  $*" >&2; exit 1; }
 
@@ -81,6 +89,9 @@ generate_db() {
 # porta aleatória 4000-14000
 NGINX_PORT=$(generate_unique_port)
 
+
+#adicione se for usar o analytics com o projeto 
+#-e "s/{{logflare_api_key}}/$LOGFLARE_API_KEY/g"\
 template_to_file() {
   local template="$1" outfile="$2"
   sed -e "s/{{anon_key}}/$ANON_TOKEN/g" \

@@ -210,6 +210,23 @@ services:
         "--main-service",
         "/home/deno/functions/main"
       ]
+  # vector:
+  #   image: timberio/vector:0.34.1-alpine   # ≥ 0.34 se for usar sink PostgreSQL
+  #   container_name: supabase-vector-global
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ./volumes/logs/vector.yml:/etc/vector/vector.yml:ro,z
+  #     - /var/run/docker.sock:/var/run/docker.sock:ro
+  #   networks:
+  #     - rede-supabase
+  #   environment:
+  #     LOGFLARE_API_KEY: ${LOGFLARE_API_KEY}
+  #     PG_URI: postgres://vector_writer:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/logs_db
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "wget -qO- http://localhost:8686/health | grep -q running"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 3
 
 networks:
   rede-supabase:
