@@ -1,13 +1,19 @@
-# Documentação
+# Documentação Supabase-Traefik-Nginx
 
-Este projeto **automatiza** a criação de novos projetos no ambiente Supabase, otimizando serviços como Realtime e Supavisor.
+## Visão geral
 
-    Cada projeto usa o mesmo _JWT secret_. Se você quiser um secret diferente para cada projeto, altere o script para injetar esse valor no Realtime do banco `<PROJECT_ID>` correspondente, no Pooler e no arquivo `.env`. 
-    No `docker-compose`, altere as variáveis de ambiente para consumir o `.env` gerado; assim, você terá um banco dedicado dentro do mesmo Postgres, com tokens assinados por chaves distintas. Além disso, o script:
+Este script **automatiza** a criação de múltiplos projetos Supabase em um único host, configurando
+automaticamente os serviços **Realtime** e **Supavisor** de cada instância.
 
-- Configura um banco de dados dedicado.  
-- Cria tenants para os serviços Realtime e Supavisor.  
-- Gera arquivos de configuração necessários (NGINX, Docker Compose, variáveis de ambiente).  
+### JWT Secret por projeto
+
+> **Observação**  
+> Por padrão, todos os projetos compartilham o mesmo `JWT_SECRET`.  
+> Se precisar de um segredo exclusivo para cada projeto:
+> 1. Edite o script para injetar o novo valor nas três frentes abaixo:  
+>  - **Realtime** do projeto `<PROJECT_ID>`  
+>  - **Pooler (Supavisor)** do mesmo projeto  
+>  - Arquivo `.env` gerado para o serviço
 
 ---
 
