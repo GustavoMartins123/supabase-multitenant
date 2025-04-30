@@ -38,39 +38,41 @@ O `generate_project.sh` simplifica a inicialização de projetos Supabase, crian
 ```bash
 git clone git@github.com:GustavoMartins123/Supabase-Traefik-Nginx.git
 cd Supabase-Traefik-Nginx
-
-2. Subir o banco base
-
-# dentro da pasta docker/
+```
+### 2. Subir o banco base
+dentro da pasta docker/    
+```bash
 docker compose --env-file ../secrets/.env --env-file ../.env up -d
+```
+Altere os valores em secrets/.env e .env antes de subir.
 
-    Altere os valores em secrets/.env e .env antes de subir.
+###3. Gerar o template _supabase_template
 
-3. Gerar o template _supabase_template
+Assim que o Postgres estiver no ar, o script create_template.sh (pasta docker/) tentará criar o template automaticamente.
 
-    Assim que o Postgres estiver no ar, o script create_template.sh (pasta docker/) tentará criar o template automaticamente.
-
-    Verifique se ele existe:
-
+Verifique se ele existe:
+```bash
 docker exec -it supabase-db bash
 psql -U supabase_admin
-\l   # liste bancos; procure _supabase_template
-
+\l   # lista os bancos; procure _supabase_template
+```
 Caso não apareça, rode manualmente dentro do contêiner:
-
+```bash
 cd docker-entrypoint-initdb.d/
+
 chmod +x zzz-create_template.sh
+
 ./zzz-create_template.sh
+```
+###4. Executar o gerador de projetos
 
-4. Executar o gerador de projetos
-
-# pasta docker/generateProject
+pasta docker/generateProject
 ./generate_project.sh <PROJECT_ID>
 
 Exemplo:
-
+```bash
 ./generate_project.sh myproject
-
+```
 Observação
     Não use caracteres especiais diferentes de um '_', pois o postgres não aceita.
 
@@ -91,15 +93,15 @@ projects/<PROJECT_ID>/	Arquivos gerados para cada projeto (NGINX, .env, docker-c
 
 Estrutura interna de projects/<PROJECT_ID>:
 
-projects/
-└── <PROJECT_ID>/
-    ├── docker-compose.yml
-    ├── .env
-    ├── nginx/
-    │   └── nginx_<PROJECT_ID>.conf
-    └── storage/
-        └── stub/
+    projects/
+    └── <PROJECT_ID>/
+        ├── docker-compose.yml
+        ├── .env
+        ├── nginx/
+        │   └── nginx_<PROJECT_ID>.conf
+        └── storage/
             └── stub/
+                └── stub/
 
 Solução de Problemas
 | Erro | Causa & Ação |
@@ -109,13 +111,23 @@ Solução de Problemas
 | **"Porta em uso"** | O script tenta até 20 portas NGINX (4000–14000). Libere portas ou edite o range. |
 
 Levantando o projeto gerado
-# dentro de docker/<PROJECT_ID> (criado após o script)
+### dentro de docker/<PROJECT_ID> (criado após o script)
+
 docker compose -p <PROJECT_ID> \
   --env-file ../../secrets/.env \
   --env-file ../../.env \
   --env-file .env \
   up -d
 
+Exemplo:
+
+```bash
+docker compose -p myproject \
+  --env-file ../../secrets/.env \
+  --env-file ../../.env \
+  --env-file .env \
+  up -d
+```
 
 Observações
 
@@ -133,35 +145,37 @@ Subindo o Supabase Studio
 
     Acesse docker/studio/ e edite:
 
-        SUPABASE_PUBLIC_URL=http://<SEU_IP>:4000
+    SUPABASE_PUBLIC_URL=http://<SEU_IP>:4000
 
-        Remova a exposição externa da porta NGINX se quiser:
+    Remova a exposição externa da porta NGINX se quiser:
 
     # docker-compose.yml
     # ports:
     #   - "4000:4000"
 
-Ajuste .env (na mesma pasta):
+    Ajuste .env (na mesma pasta):
 
-STUDIO_DB=_supabase_<PROJECT_ID>   # ex.: _supabase_myproject
+    STUDIO_DB=_supabase_<PROJECT_ID>   # ex.: _supabase_myproject
 
-Edite /nginx/nginx.conf na pasta docker/studio/nginx/:
+    Edite /nginx/nginx.conf na pasta docker/studio/nginx/:
 
-map "" $auth_upstream     { default "supabase-auth-<PROJECT_ID>:9999"; }
-map "" $rest_upstream     { default "supabase-rest-<PROJECT_ID>:3000"; }
-map "" $storage_upstream  { default "supabase-storage-<PROJECT_ID>:5000"; }
+    map "" $auth_upstream     { default "supabase-auth-<PROJECT_ID>:9999"; }
+    map "" $rest_upstream     { default "supabase-rest-<PROJECT_ID>:3000"; }
+    map "" $storage_upstream  { default "supabase-storage-<PROJECT_ID>:5000"; }
 
-Altere <PROJECT_ID> com o nome do seu projeto
+    Altere <PROJECT_ID> com o nome do seu projeto
 
 Suba o Studio
 
-docker compose --env-file ../secrets/.env --env-file ../.env --env-file .env up -d
+    docker compose --env-file ../secrets/.env --env-file ../.env --env-file .env up -d
 
 Algumas observações importantes sobre o realtime e o pooler
+
     Pooler:
         No docker compose o supabase auth ou outros pode se notar que é o nome do usuario do banco '.' o nome do tenant
             'postgres://supabase_auth_admin.<PROJECT_ID>...'
         É como o pooler consegue saber qual tenant usar, e dentro do tenant tem as configurações para a conexão daquele database específico
+        
     Realtime:
         Na conf do nginx na rota do realtime pode se notar essa variavel:
             'proxy_set_header Host "<PROJECT_ID>.localhost";'
