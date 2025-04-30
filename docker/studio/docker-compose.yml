@@ -1,0 +1,67 @@
+#docker compose --env-file ../secrets/.env --env-file .env up -d
+services:
+  nginx:
+    image: openresty/openresty:1.21.4.1-0-alpine
+    container_name: nginx
+    ports:
+      - 4000:4000
+    restart: unless-stopped
+    networks:
+      - rede-supabase
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf
+      # - ./nginx/empty:/etc/nginx/conf.d:ro
+  studio:
+    container_name: supabase-studio
+    image: supabase/studio:20250324-13e75a5
+    restart: unless-stopped
+    env_file:
+      - ../secrets/.env
+      - .env
+    networks:
+      - rede-supabase
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://studio:3000/api/profile').then((r) => {if (r.status !== 200) throw new Error(r.status)})"
+        ]
+      timeout: 10s
+      interval: 5s
+      retries: 3
+    environment:
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DEFAULT_ORGANIZATION_NAME: Default Organization
+      DEFAULT_PROJECT_NAME: SupabasePrimario
+      OPENAI_API_KEY: 
+      SUPABASE_URL: http://rest:3000
+      SUPABASE_PUBLIC_URL: http://<SEU_IP>:4000
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+      NEXT_PUBLIC_ENABLE_LOGS: false
+      NEXT_ANALYTICS_BACKEND_PROVIDER: postgres
+  
+  meta:
+    container_name: supabase-meta
+    image: supabase/postgres-meta:v0.88.7
+    restart: unless-stopped
+    networks:
+      - rede-supabase
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: 172.20.200.10
+      PG_META_DB_PORT: 6755
+      PG_META_DB_NAME: ${STUDIO_DB}
+      # PG_META_DB_NAME: _supabase_idrteste2
+      PG_META_DB_USER: supabase_admin
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+
+
+networks:
+  rede-supabase:
+    external: true

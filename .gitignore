@@ -1,0 +1,5 @@
+docker/projects/**
+!docker/projects/**/.gitkeep
+
+docker/volumes/db/data/*
+# docker/secrets/*

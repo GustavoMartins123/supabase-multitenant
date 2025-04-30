@@ -1,0 +1,14 @@
+entryPoints:
+  web:
+    address: ":80"
+  dashboard:
+    address: ":8082"  # Porta para o dashboard
+
+providers:
+  docker:
+    exposedByDefault: false  # Só roteia containers com 'traefik.enable=true'
+log:
+  level: DEBUG
+api:
+  dashboard: true  # Habilita o dashboard
+  insecure: true   # Permite acesso sem autenticação (apenas para testes locais)
