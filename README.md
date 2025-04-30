@@ -36,8 +36,8 @@ O `generate_project.sh` simplifica a inicialização de projetos Supabase, crian
 ### 1. Clonar o repositório
 
 ```bash
-git clone https://github.com/GustavoMartins123/Supabase-Traefik-Nginx.git
-cd <NOME_DO_REPOSITORIO>
+git clone git@github.com:GustavoMartins123/Supabase-Traefik-Nginx.git
+cd Supabase-Traefik-Nginx
 
 2. Subir o banco base
 
