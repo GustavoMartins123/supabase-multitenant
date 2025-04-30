@@ -1,7 +1,7 @@
 # Documentação do Script `generate_project.sh`
 
 Este script **automatiza** a criação de novos projetos no ambiente Supabase, otimizando serviços como Realtime e Supavisor.  
-Cada projeto usa um _JWT secret_ **único**. Se você quiser um secret diferente para cada projeto, altere o script para injetar esse valor no Realtime do banco `<PROJECT_ID>` correspondente, no Pooler e no arquivo `.env`.  
+Cada projeto usa o mesmo _JWT secret_. Se você quiser um secret diferente para cada projeto, altere o script para injetar esse valor no Realtime do banco `<PROJECT_ID>` correspondente, no Pooler e no arquivo `.env`.  
 No `docker-compose`, altere as variáveis de ambiente para consumir o `.env` gerado; assim, você terá um banco dedicado dentro do mesmo Postgres, com tokens assinados por chaves distintas. Além disso, o script:
 
 - Configura um banco de dados dedicado.  
