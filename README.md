@@ -120,8 +120,11 @@ Observações
 
     Para roteamento externo, suba o Traefik localizado em docker/traefik.
 
-    Ajuste a regra da dashboard:
-    "traefik.http.routers.dashboard.rule=Host(`localhost`) || Host(`127.0.0.1`) || Host(`<SEU_DOMINIO>`)"
+Subindo o Traefik
+
+    Acesse docker/traefik e edite:
+        "traefik.http.routers.dashboard.rule=Host(`localhost`) || Host(`127.0.0.1`) || Host(`<SEU_DOMINIO>`)" - colocando o seu ip ou dominio
+    agora estando na pasta correta rode 'docker compose up -d'
 
 Subindo o Supabase Studio
 
@@ -129,7 +132,7 @@ Subindo o Supabase Studio
 
         SUPABASE_PUBLIC_URL=http://<SEU_IP>:4000
 
-        Remova a exposição externa da porta NGINX:
+        Remova a exposição externa da porta NGINX se quiser:
 
     # docker-compose.yml
     # ports:
