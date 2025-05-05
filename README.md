@@ -5,6 +5,8 @@
 Este script **automatiza** a criação de múltiplos projetos Supabase em um único host, configurando
 automaticamente os serviços **Realtime** e **Supavisor** de cada instância.
 
+**<PROJECT_ID> é o nome da pasta gerada**
+
 ### JWT Secret por projeto
 
 > **Observação**  
@@ -145,8 +147,29 @@ Observações
 Subindo o Traefik
 
     Acesse docker/traefik e edite:
-        "traefik.http.routers.dashboard.rule=Host(`localhost`) || Host(`127.0.0.1`) || Host(`<SEU_DOMINIO>`)" - colocando o seu ip ou dominio
+        "traefik.http.routers.dashboard.rule=Host(`localhost`) || Host(`127.0.0.1`) || Host(`<DOMAIN>`)" - colocando o seu ip ou dominio
     agora estando na pasta correta rode 'docker compose up -d'
+
+Como usar
+
+    "http://<DOMAIN>/<PROJECT_ID>"
+    
+exemplo testando o realtime:
+```bash
+wscat -c "ws://<DOMAIN>/<PROJECT_ID>/realtime/v1/websocket?apikey=<ANON_KEY>&vsn=1.0.0"
+```
+Como ver a ANON_KEY:
+
+    Navegue até:
+        projects/
+    └── <PROJECT_ID>/
+        ├── .env
+    No '.env' terá a 'ANON_KEY'
+
+Se tudo der certo, irá aparecer isso:
+
+    Connected (press CTRL+C to quit)
+
 
 Subindo o Supabase Studio
 
