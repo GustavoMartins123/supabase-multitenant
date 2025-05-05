@@ -173,6 +173,12 @@ services:
       DATABASE_URL: postgres://supabase_storage_admin.{{project_id}}:${POSTGRES_PASSWORD}@${POSTGRES_POOLER}:${POOLER_PROXY_PORT_TRANSACTION}/${POSTGRES_DATABASE}
       FILE_SIZE_LIMIT: 52428800
       STORAGE_BACKEND: file
+
+      #Permite usar o Tus
+      REQUEST_ALLOW_X_FORWARDED_PATH: "true"
+      TUS_URL_PATH: /storage/v1/upload/resumable
+
+
       FILE_STORAGE_BACKEND_PATH: /var/lib/storage
       TENANT_ID: stub
       # TODO: https://github.com/supabase/storage-api/issues/55
