@@ -34,6 +34,7 @@ Simplificar a inicialização de projetos Supabase, criando automaticamente:
 | Item | Descrição |
 |------|-----------|
 | Docker & Docker Compose | Instalados e funcionando. |
+| jq    |   Instalado na maquina. |
 | Contêineres em execução | `supabase-db` (PostgreSQL), `realtime-dev.supabase-realtime` (Realtime) e `supabase-pooler` (Supavisor). |
 | Arquivos de ambiente | `secrets/.env` (JWT_SECRET, POSTGRES_PASSWORD) e `.env` (POSTGRES_HOST, POSTGRES_PORT). |
 | PROJECT_ID | Identificador único a ser passado como argumento. |
@@ -51,7 +52,7 @@ cd Supabase-Traefik-Nginx
 ### 2. Subir o banco base
 dentro da pasta docker/    
 ```bash
-docker compose --env-file ../secrets/.env --env-file ../.env up -d
+docker compose  --env-file secrets/.env   --env-file .env up -d
 ```
 Altere os valores em secrets/.env e .env antes de subir.
 

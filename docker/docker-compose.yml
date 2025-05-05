@@ -1,5 +1,5 @@
 services:
-#docker compose   --env-file secrets/.env   --env-file .env
+#docker compose  --env-file secrets/.env   --env-file .env up -d
   db:
     container_name: supabase-db
     image: supabase/postgres:15.8.1.071
@@ -152,6 +152,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    ulimits:
+      nofile:
+        soft: 100000
+        hard: 100000
     environment:
       PORT: 4000
       POSTGRES_HOST: ${POSTGRES_HOST}
