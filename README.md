@@ -73,7 +73,7 @@ chmod +x zzz-create_template.sh
 
 ./zzz-create_template.sh
 ```
-###4. Executar o gerador de projetos
+### 4. Executar o gerador de projetos
 
 pasta docker/generateProject
 ./generate_project.sh <PROJECT_ID>
