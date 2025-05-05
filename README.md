@@ -34,6 +34,7 @@ Simplificar a inicialização de projetos Supabase, criando automaticamente:
 | Item | Descrição |
 |------|-----------|
 | Docker & Docker Compose | Instalados e funcionando. |
+| Usuario    |   Com permissão para rodar comandos docker. |
 | jq    |   Instalado na maquina. |
 | Contêineres em execução | `supabase-db` (PostgreSQL), `realtime-dev.supabase-realtime` (Realtime) e `supabase-pooler` (Supavisor). |
 | Arquivos de ambiente | `secrets/.env` (JWT_SECRET, POSTGRES_PASSWORD) e `.env` (POSTGRES_HOST, POSTGRES_PORT). |
@@ -84,7 +85,13 @@ Exemplo:
 ./generate_project.sh myproject
 ```
 Observação
-    Não use caracteres especiais diferentes de um '_', pois o postgres não aceita.
+
+    1. Não use caracteres especiais diferentes de um '_', pois o postgres não aceita.
+
+    2. Garanta que o 'Usuario' da maquina tenha permissão para rodar docker
+        - Rode o comando 'sudo usermod -aG docker $USER'
+        - Desligue o computador e ligue de novo
+        - Rode 'docker run hello-world' e veja se roda
 
 Verifique a saída – ela mostrará o banco criado e a porta NGINX alocada.
 Saída Esperada
