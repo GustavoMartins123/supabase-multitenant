@@ -43,6 +43,7 @@ services:
       SUPABASE_ANON_KEY: ${ANON_KEY}
       SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
       AUTH_JWT_SECRET: ${JWT_SECRET}
+      # AUTH_JWT_SECRET: ${JWT_SECRET_STUDIO}
       NEXT_PUBLIC_ENABLE_LOGS: false
       NEXT_ANALYTICS_BACKEND_PROVIDER: postgres
   
@@ -57,7 +58,6 @@ services:
       PG_META_DB_HOST: 172.20.200.10
       PG_META_DB_PORT: 6755
       PG_META_DB_NAME: ${STUDIO_DB}
-      # PG_META_DB_NAME: _supabase_idrteste2
       PG_META_DB_USER: supabase_admin
       PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
 

@@ -18,10 +18,10 @@ version =
 # Define a lista de tenants com configurações
 tenants = [
   %{
-    "external_id" => "postgres",
+    "external_id" => "projeto",
     "db_host" => System.get_env("POSTGRES_HOST"),
     "db_port" => System.get_env("POSTGRES_PORT"),
-    "db_database" => System.get_env("POSTGRES_DB"),
+    "db_database" => System.get_env("POSTGRES_DATABASE"),
     "require_user" => false,
     "auth_query" => "SELECT * FROM pgbouncer.get_auth($1)",
     "default_max_clients" => System.get_env("POOLER_MAX_CLIENT_CONN") || "100",
