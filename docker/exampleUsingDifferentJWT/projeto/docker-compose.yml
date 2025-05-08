@@ -59,7 +59,7 @@ services:
       GOTRUE_JWT_AUD: authenticated
       GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
       GOTRUE_JWT_EXP: ${JWT_EXPIRY}
-      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET_PROJETO}
 
       GOTRUE_EXTERNAL_EMAIL_ENABLED: ${ENABLE_EMAIL_SIGNUP}
       GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: ${ENABLE_ANONYMOUS_USERS}
@@ -123,11 +123,11 @@ services:
       PGRST_DB_URI: postgres://authenticator.projeto:${POSTGRES_PASSWORD}@supabase-pooler-projeto:${POOLER_PROXY_PORT_TRANSACTION_PROJETO}/${POSTGRES_DATABASE}
       PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS}
       PGRST_DB_ANON_ROLE: anon
-      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_JWT_SECRET: ${JWT_SECRET_PROJETO}
       PGRST_DB_USE_LEGACY_GUCS: "false"
       #Porque no modo de transaction pooling não garante que a mesma sessão do PostgreSQL será usada em requisições subsequentes — cada transação pode cair em um backend diferente
       PGRST_DB_PREPARED_STATEMENTS: false
-      PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET}
+      PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET_PROJETO}
       PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY}
     command:
       [
@@ -169,7 +169,7 @@ services:
       ANON_KEY: ${ANON_KEY_PROJETO}
       SERVICE_KEY: ${SERVICE_ROLE_KEY_PROJETO}
       POSTGREST_URL: http://rest:3000
-      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_JWT_SECRET: ${JWT_SECRET_PROJETO}
       DATABASE_URL: postgres://supabase_storage_admin.projeto:${POSTGRES_PASSWORD}@supabase-pooler-projeto:${POOLER_PROXY_PORT_TRANSACTION_PROJETO}/${POSTGRES_DATABASE}
       FILE_SIZE_LIMIT: 524288000
       STORAGE_BACKEND: file
