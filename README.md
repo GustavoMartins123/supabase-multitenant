@@ -241,6 +241,7 @@ Se tudo der certo, irá aparecer isso:
     map "" $storage_upstream  { default "supabase-storage-<PROJECT_ID>:5000"; }
 
     Altere <PROJECT_ID> com o nome do seu projeto
+      
 
 Suba o Studio
 
@@ -356,6 +357,14 @@ Troque o jwt, anon_key e role_key no compose do Supabase Studio porque ele preci
     SERVICE_ROLE_KEY=
     JWT_SECRET_STUDIO=
 
+Observação importante:
+
+Não esqueça de mudar a variavel:
+```bash
+set $service_role_key '...'
+```
+Coloque a sua nova 'SERVICE_ROLE_KEY' para os serviços terem permissão para usar as apis.
+
 Essa configuração garante que cada projeto tenha seu próprio segredo JWT, caso desejado.
 
 Na pasta 'exampleUsingDifferentJWT' é um projeto que foi gerado seguindo esses passos como exemplo.
@@ -371,7 +380,7 @@ Na pasta 'exampleUsingDifferentJWT' é um projeto que foi gerado seguindo esses 
 |------|--------------|
 | **"JWT_SECRET ausente"** | Defina `JWT_SECRET` em `secrets/.env`. |
 | **"Contêiner não encontrado"** | Verifique se `supabase-db`, `realtime-dev.supabase-realtime` e `supabase-pooler` estão ativos. |
-| **"Porta em uso"** | O script tenta até 20 portas NGINX (4000–14000). Libere portas ou edite o range. |
+| **"Porta em uso"** | O script tenta até 20 vezes para conseguir uma porta para o Nginx ou pooler  (4000–14000). Libere portas ou edite o range. |
 
 ### Algumas observações importantes
 
