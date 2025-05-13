@@ -61,7 +61,9 @@ services:
         "-c",
         "config_file=/etc/postgresql/postgresql.conf",
         "-c",
-        "log_min_messages=fatal" # prevents Realtime polling queries from appearing in logs
+        "log_min_messages=fatal", # prevents Realtime polling queries from appearing in logs
+        "-c",
+        "max_connections=500"
       ]
   realtime:
     # This container name looks inconsistent but is correct because realtime constructs tenant id by parsing the subdomain

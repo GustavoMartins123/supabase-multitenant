@@ -222,26 +222,23 @@ services:
   #     - .env
   #   networks:
   #     - rede-supabase
-  #   # healthcheck:
-  #   #   test:
-  #   #     [
-  #   #       "CMD",
-  #   #       "curl",
-  #   #       "-sSfL",
-  #   #       "--head",
-  #   #       "-o",
-  #   #       "/dev/null",
-  #   #       "-H",
-  #   #       "Authorization: Bearer ${ANON_KEY}",
-  #   #       "http://localhost:4000/api/tenants/realtime-dev/health"
-  #   #     ]
-  #   #   timeout: 5s
-  #   #   interval: 5s
-  #   #   retries: 3
+  #   healthcheck:
+  #     test:
+  #       [
+  #         "CMD",
+  #         "curl",
+  #         "-sSfL",
+  #         "--head",
+  #         "-o",
+  #         "/dev/null",
+  #         "-H",
+  #         "Authorization: Bearer ${ANON_KEY_PROJETO}",
+  #         "http://localhost:4000/api/tenants/realtime-dev/health"
+  #       ]
+  #     timeout: 5s
+  #     interval: 5s
+  #     retries: 3
   #   environment:
-  #     MULTI_TENANT: true
-  #     # SLOT_NAME_SUFFIX: "_repl"
-  #     # DATABASE_MULTITENANT_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@172.20.0.9:6745/postgres
   #     PORT: 4000
   #     DB_HOST: ${POSTGRES_HOST}
   #     #DB_PORT: 6543
@@ -258,7 +255,7 @@ services:
   #     DNS_NODES: "''"
   #     RLIMIT_NOFILE: "10000"
   #     APP_NAME: realtime
-  #     SEED_SELF_HOST: true
+  #     SEED_SELF_HOST: false
   #     SELF_HOST_TENANT_NAME: realtime-dev
   #     RUN_JANITOR: true
   #     NUM_ACCEPTORS: ${NUM_ACCEPTORS}
@@ -271,6 +268,9 @@ services:
   #     - ../../.env
   #     - .env
   #   restart: unless-stopped
+  #   depends_on:
+  #     realtime:
+  #       condition: service_healthy
   #   networks:
   #     - rede-supabase
   #   # ports:
@@ -278,6 +278,7 @@ services:
   #   #   - ${POOLER_PROXY_PORT_TRANSACTION}:6543
   #   volumes:
   #     - ./pooler/pooler.exs:/etc/pooler/pooler.exs:ro
+  #     - ../../volumes/pooler/init-tenant-realtime.sh:/etc/pooler/init-tenant.sh:ro
   #   # healthcheck:
   #   #   test:
   #   #     [
@@ -297,6 +298,10 @@ services:
   #       soft: 100000
   #       hard: 100000
   #   environment:
+  #     #realtime
+  #     PROJECT_ID: ${PROJECT_ID}
+  #     ANON_KEY_PROJETO: ${ANON_KEY_PROJETO}
+  #     #pooler
   #     PORT: 4000
   #     PROXY_PORT_SESSION: ${POOLER_PROXY_PORT_SESSION_PROJETO}    
   #     PROXY_PORT_TRANSACTION: ${POOLER_PROXY_PORT_TRANSACTION_PROJETO}
@@ -325,10 +330,23 @@ services:
   #         "host=$POSTGRES_HOST port=$POSTGRES_PORT user=$POSTGRES_USER dbname=$POSTGRES_DATABASE sslmode=disable" \
   #         -c "CREATE SCHEMA IF NOT EXISTS _supavisor;" \
   #       && echo "Schema _supavisor OK" \
+  #       && /bin/sh /etc/pooler/init-tenant.sh \
   #       && /app/bin/migrate \
   #       && /app/bin/supavisor eval "$$(cat /etc/pooler/pooler.exs)" \
   #       && /app/bin/server
-
+  # meta:
+  #   container_name: supabase-meta-{{project_id}}
+  #   image: supabase/postgres-meta:v0.88.7
+  #   restart: unless-stopped
+  #   networks:
+  #     - rede-supabase
+  #   environment:
+  #     PG_META_PORT: ${META_PORT}
+  #     PG_META_DB_HOST: ${POSTGRES_HOST}
+  #     PG_META_DB_PORT: ${POSTGRES_PORT}
+  #     PG_META_DB_NAME: ${POSTGRES_DATABASE}
+  #     PG_META_DB_USER: supabase_admin
+  #     PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
 
 networks:
   rede-supabase:

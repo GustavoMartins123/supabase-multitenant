@@ -9,9 +9,7 @@ services:
     networks:
       - rede-supabase
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf
-      # - ./nginx/empty:/etc/nginx/conf.d:ro
+      - ./nginx/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
   studio:
     container_name: supabase-studio
     image: supabase/studio:20250324-13e75a5
@@ -33,10 +31,11 @@ services:
       interval: 5s
       retries: 3
     environment:
-      STUDIO_PG_META_URL: http://meta:8080
+      # STUDIO_PG_META_URL: http://meta:8080
+      STUDIO_PG_META_URL: http://nginx:4000/api/platform/pg-meta
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      DEFAULT_ORGANIZATION_NAME: Default Organization
-      DEFAULT_PROJECT_NAME: SupabasePrimario
+      DEFAULT_ORGANIZATION_NAME: ${STUDIO_DB}
+      DEFAULT_PROJECT_NAME: ${STUDIO_DB}
       OPENAI_API_KEY: 
       SUPABASE_URL: http://rest:3000
       SUPABASE_PUBLIC_URL: http://<SEU_IP>:4000
