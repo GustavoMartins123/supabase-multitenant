@@ -300,13 +300,7 @@ Troque o jwt, anon_key e role_key no compose do Supabase Studio porque ele preci
     SERVICE_ROLE_KEY=
     JWT_SECRET_STUDIO=
 
-Observação importante:
 
-Não esqueça de mudar a variavel:
-```bash
-set $service_role_key '...'
-```
-Coloque a sua nova 'SERVICE_ROLE_KEY' para os serviços terem permissão para usar as apis.
 
 Essa configuração garante que cada projeto tenha seu próprio segredo JWT, caso desejado.
 
