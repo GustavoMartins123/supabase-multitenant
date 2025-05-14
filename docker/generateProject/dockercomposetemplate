@@ -255,7 +255,7 @@ services:
   #     DNS_NODES: "''"
   #     RLIMIT_NOFILE: "10000"
   #     APP_NAME: realtime
-  #     SEED_SELF_HOST: false
+  #     SEED_SELF_HOST: true
   #     SELF_HOST_TENANT_NAME: realtime-dev
   #     RUN_JANITOR: true
   #     NUM_ACCEPTORS: ${NUM_ACCEPTORS}

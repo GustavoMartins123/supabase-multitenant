@@ -93,7 +93,7 @@ generate_db() {
 
 # porta aleatória 4000-14000
 NGINX_PORT=$(generate_unique_port)
-
+META_PORT=$(generate_unique_port)
 
 #Descomente caso for usar um JWT_SECRET diferente em cada projeto
 POOLER_PROXY_PORT_TRANSACTION_PROJETO=$(generate_unique_port)
@@ -113,6 +113,7 @@ template_to_file() {
     -e "s|{{service_role_key}}|$SERVICE_TOKEN|g" \
     -e "s|{{project_id}}|$PROJECT_ID|g" \
     -e "s|{{nginx_port}}|$NGINX_PORT|g" \
+    -e "s|{{meta_port}}|$META_PORT|g" \
     -e "s|{{pooler_transaction}}|$POOLER_PROXY_PORT_TRANSACTION_PROJETO|g" \
     -e "s|{{pooler_session}}|$POOLER_PROXY_PORT_SESSION_PROJETO|g" \
     -e "s|{{jwt_secret}}|$JWT_SECRET|g" \

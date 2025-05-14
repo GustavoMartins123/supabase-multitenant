@@ -1,5 +1,5 @@
 #para subir estando no diretorio do projeto -> docker/projects/projeto
-#docker compose -p projeto --env-file ../secrets/.env --env-file ../.env  --env-file .env up -d
+#docker compose -p projeto --env-file ../../secrets/.env --env-file ../../.env  --env-file .env up -d
 name: supabase
 services:
   nginx:
@@ -14,7 +14,7 @@ services:
       - "traefik.enable=true"                     
       - "traefik.http.routers.supabase-nginx-projeto.rule=PathPrefix(`/projeto`)"
       - "traefik.http.routers.supabase-nginx-projeto.entrypoints=web"
-      - "traefik.http.services.supabase-nginx-projeto.loadbalancer.server.port=5940"
+      - "traefik.http.services.supabase-nginx-projeto.loadbalancer.server.port=5286"
       - "traefik.http.middlewares.nginx-projeto-stripprefix.stripprefix.prefixes=/projeto" 
       - "traefik.http.routers.supabase-nginx-projeto.middlewares=nginx-projeto-stripprefix@docker"
   auth:
@@ -22,8 +22,8 @@ services:
     image: supabase/gotrue:v2.170.0
     restart: unless-stopped
     env_file:
-      - ../secrets/.env
-      - ../.env
+      - ../../secrets/.env
+      - ../../.env
       - .env
     networks:
       - rede-supabase
@@ -108,8 +108,8 @@ services:
     image: postgrest/postgrest:v12.2.8
     restart: unless-stopped
     env_file:
-      - ../secrets/.env
-      - ../.env
+      - ../../secrets/.env
+      - ../../.env
       - .env
     networks:
       - rede-supabase
@@ -140,8 +140,8 @@ services:
     image: supabase/storage-api:v1.22.2
     restart: unless-stopped
     env_file:
-      - ../secrets/.env
-      - ../.env
+      - ../../secrets/.env
+      - ../../.env
       - .env
     networks:
       - rede-supabase
@@ -217,31 +217,28 @@ services:
     image: supabase/realtime:v2.34.46
     restart: unless-stopped
     env_file:
-      - ../secrets/.env
-      - ../.env
+      - ../../secrets/.env
+      - ../../.env
       - .env
     networks:
       - rede-supabase
-    # healthcheck:
-    #   test:
-    #     [
-    #       "CMD",
-    #       "curl",
-    #       "-sSfL",
-    #       "--head",
-    #       "-o",
-    #       "/dev/null",
-    #       "-H",
-    #       "Authorization: Bearer ${ANON_KEY}",
-    #       "http://localhost:4000/api/tenants/realtime-dev/health"
-    #     ]
-    #   timeout: 5s
-    #   interval: 5s
-    #   retries: 3
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-sSfL",
+          "--head",
+          "-o",
+          "/dev/null",
+          "-H",
+          "Authorization: Bearer ${ANON_KEY_PROJETO}",
+          "http://localhost:4000/api/tenants/realtime-dev/health"
+        ]
+      timeout: 5s
+      interval: 5s
+      retries: 3
     environment:
-      MULTI_TENANT: true
-      # SLOT_NAME_SUFFIX: "_repl"
-      # DATABASE_MULTITENANT_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@172.20.0.9:6745/postgres
       PORT: 4000
       DB_HOST: ${POSTGRES_HOST}
       #DB_PORT: 6543
@@ -267,10 +264,13 @@ services:
     container_name: supabase-pooler-projeto
     image: supabase/supavisor:2.0.21
     env_file:
-      - ../secrets/.env
-      - ../.env
+      - ../../secrets/.env
+      - ../../.env
       - .env
     restart: unless-stopped
+    depends_on:
+      realtime:
+        condition: service_healthy
     networks:
       - rede-supabase
     # ports:
@@ -278,6 +278,7 @@ services:
     #   - ${POOLER_PROXY_PORT_TRANSACTION_PROJETO}:6543
     volumes:
       - ./pooler/pooler.exs:/etc/pooler/pooler.exs:ro
+      - ../../volumes/pooler/init-tenant-realtime.sh:/etc/pooler/init-tenant.sh:ro
     # healthcheck:
     #   test:
     #     [
@@ -297,6 +298,10 @@ services:
         soft: 100000
         hard: 100000
     environment:
+      #realtime
+      PROJECT_ID: ${PROJECT_ID}
+      ANON_KEY_PROJETO: ${ANON_KEY_PROJETO}
+      #pooler
       PORT: 4000
       PROXY_PORT_SESSION: ${POOLER_PROXY_PORT_SESSION_PROJETO}    
       PROXY_PORT_TRANSACTION: ${POOLER_PROXY_PORT_TRANSACTION_PROJETO}
@@ -325,10 +330,23 @@ services:
           "host=$POSTGRES_HOST port=$POSTGRES_PORT user=$POSTGRES_USER dbname=$POSTGRES_DATABASE sslmode=disable" \
           -c "CREATE SCHEMA IF NOT EXISTS _supavisor;" \
         && echo "Schema _supavisor OK" \
+        && /bin/sh /etc/pooler/init-tenant.sh \
         && /app/bin/migrate \
         && /app/bin/supavisor eval "$$(cat /etc/pooler/pooler.exs)" \
         && /app/bin/server
-
+  meta:
+    container_name: supabase-meta-projeto
+    image: supabase/postgres-meta:v0.88.7
+    restart: unless-stopped
+    networks:
+      - rede-supabase
+    environment:
+      PG_META_PORT: ${META_PORT}
+      PG_META_DB_HOST: ${POSTGRES_HOST}
+      PG_META_DB_PORT: ${POSTGRES_PORT}
+      PG_META_DB_NAME: ${POSTGRES_DATABASE}
+      PG_META_DB_USER: supabase_admin
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
 
 networks:
   rede-supabase:
