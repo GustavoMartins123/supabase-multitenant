@@ -230,17 +230,29 @@ Se tudo der certo, irá aparecer isso:
     # ports:
     #   - "4000:4000"
 
-    Ajuste .env (na mesma pasta):
-
-    STUDIO_DB=_supabase_<PROJECT_ID>   # ex.: _supabase_myproject
-
     Edite /nginx/nginx.conf na pasta docker/studio/nginx/:
 
-    map "" $auth_upstream     { default "supabase-auth-<PROJECT_ID>:9999"; }
-    map "" $rest_upstream     { default "supabase-rest-<PROJECT_ID>:3000"; }
-    map "" $storage_upstream  { default "supabase-storage-<PROJECT_ID>:5000"; }
+    map $project_ref $auth_upstream {
+        projeto           supabase-auth-projeto:9999;
+    }
 
-    Altere <PROJECT_ID> com o nome do seu projeto
+    map $project_ref $rest_upstream {
+        projeto           supabase-rest-projeto:3000;
+    }
+
+    map $project_ref $storage_upstream {
+        projeto           supabase-storage-projeto:5000;
+    }
+
+    map $project_ref $service_role_key {
+        projeto           "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoicHJvamV0byIsImlhdCI6MTc0MDAyODgwMCwiZXhwIjoxOTk5NTM1NjAwfQ.HL3behP36XOjcTFgBwwap2xEqWwO29dOr9HUfOHy7cw";
+    }
+
+    map $project_ref $pg_meta_port {
+            projeto   11233;             
+    }
+
+    Adicione novos projetos que criar. Por padrão ele está mapeado para o projeto que fica na pasta 'docker/exampleUsingDifferentJWTPerProject/projeto', basta mover o projeto dessa pasta e colocar dentro de 'docker/projects/' e subir assim o studio terá acesso posteriormente
       
 
 Suba o Studio
@@ -269,80 +281,11 @@ troque as variaveis necessarias:
     POOLER_PROXY_PORT_SESSION por POOLER_PROXY_PORT_SESSION_PROJETO - para o auth
     POSTGRES_POOLER por supabase-pooler-<PROJECT_ID>
 
-Tendo colocado no compose do projeto o realtime e o pooler suba o projeto, entre no container do realtime:
-```bash
-docker exec -it realtime-dev.supabase-realtime-<PROJECT_ID> bash
-```
-Após isso você precisa injetar no realtime do seu projeto o tenant dele, monte:
-```bash
-curl -X POST \
-  -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <ANON_KEY>' \
-  -d $'{
-    "tenant" : {
-      "name": "<PROJECT_ID>",
-      "external_id": "<PROJECT_ID>",
-      "jwt_secret": "<JWT_SECRET>",
-      "extensions": [
-        {
-          "type": "postgres_cdc_rls",
-          "settings": {
-            "db_name": "_supabase_<PROJECT_ID>",
-            "db_host": "<POSTGRES_IP OU O NOME DO SERVIÇO>",
-            "db_user": "supabase_admin",
-            "db_password": "<POSTGRES_PASSWORD>",
-            "db_port": "<POSTGRES_PORT>",
-            "region": "us-west-1",
-            "poll_interval_ms": 100,
-            "poll_max_record_bytes": 1048576,
-            "ssl_enforced": false
-          }
-        }
-      ]
-    }
-  }' \
-  http://localhost:4000/api/tenants
-```
-Exemplo:
-```bash
-curl -X POST \
-  -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6ImRhdGFiYXNlIiwiaWF0IjoxNzQwMDI4ODAwLCJleHAiOjE5OTk1MzU2MDB9.-jv7_S01MWg3LbyVh6dN9dRLbINy_na3AL09CKpcHEc' \
-  -d $'{
-    "tenant" : {
-      "name": "myproject",
-      "external_id": "myproject",
-      "jwt_secret": "ckAhjmmZVag0Wyptbk/Zpc2OHVQrqG+S4zRzJtK9GycmljDAtmSNQlfdqPaO2tS+x7JwaeIMWGKa0rSUt/C6rA==",
-      "extensions": [
-        {
-          "type": "postgres_cdc_rls",
-          "settings": {
-            "db_name": "_supabase_myproject",
-            "db_host": "172.20.200.10",
-            "db_user": "supabase_admin",
-            "db_password": "1flz+Mz7tzVwZSGZj5B4q8l72Fg2W7GE",
-            "db_port": "6755",
-            "region": "us-west-1",
-            "poll_interval_ms": 100,
-            "poll_max_record_bytes": 1048576,
-            "ssl_enforced": false
-          }
-        }
-      ]
-    }
-  }' \
-  http://localhost:4000/api/tenants
-```
-Deve aparecer algo nesse formato se deu certo:
+Tendo colocado no compose do projeto o realtime e o pooler suba o projeto
 
-    {"data":{"id":"29b39b2d-2ac7-4674-8cf9-2695c259b2b6","name":"myproject","extensions":[{"type":"postgres_cdc_rls","inserted_at":"2025-05-07T13:22:00","updated_at":"2025-05-07T13:22:00","settings":{"db_host":"S01Cnd7uGS/72nKUzRqPOg==","db_name":"wVFmbWxqRLWvhtmSRtvcZg==","db_port":"85fLfqCQw/z1PzuXaLBPgQ==","db_user":"/E0DLeOskFoEkSt1oSaHOg==","poll_interval_ms":100,"poll_max_changes":100,"poll_max_record_bytes":1048576,"publication":"supabase_realtime","region":"us-west-1","slot_name":"supabase_realtime_replication_slot","ssl_enforced":false}}],"inserted_at":"2025-05-07T13:22:00","external_id":"myproject","max_joins_per_second":100,"max_events_per_second":100,"max_concurrent_users":200,"max_channels_per_client":100,"private_only":false}}
-
-
-No arquivo nginx_<PROJECT_ID> também precisa ser trocado, na linha 11 e 150, respectivamente coloque o <PROJECT_ID> em cada um:
+No arquivo nginx_<PROJECT_ID> também precisa ser trocado, na linha 11 coloque '-<PROJECT_ID>' na frente do nome:
 
     map "" $realtime_upstream { default "realtime-dev.supabase-realtime-<PROJECT_ID>:4000"; }
-
-    proxy_set_header Host "<PROJECT_ID>.localhost";
 
 No compose do studio comente essa parte 
 

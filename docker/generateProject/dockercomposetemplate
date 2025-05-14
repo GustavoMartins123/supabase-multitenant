@@ -334,19 +334,19 @@ services:
   #       && /app/bin/migrate \
   #       && /app/bin/supavisor eval "$$(cat /etc/pooler/pooler.exs)" \
   #       && /app/bin/server
-  # meta:
-  #   container_name: supabase-meta-{{project_id}}
-  #   image: supabase/postgres-meta:v0.88.7
-  #   restart: unless-stopped
-  #   networks:
-  #     - rede-supabase
-  #   environment:
-  #     PG_META_PORT: ${META_PORT}
-  #     PG_META_DB_HOST: ${POSTGRES_HOST}
-  #     PG_META_DB_PORT: ${POSTGRES_PORT}
-  #     PG_META_DB_NAME: ${POSTGRES_DATABASE}
-  #     PG_META_DB_USER: supabase_admin
-  #     PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+  meta:
+    container_name: supabase-meta-{{project_id}}
+    image: supabase/postgres-meta:v0.88.7
+    restart: unless-stopped
+    networks:
+      - rede-supabase
+    environment:
+      PG_META_PORT: ${META_PORT}
+      PG_META_DB_HOST: ${POSTGRES_HOST}
+      PG_META_DB_PORT: ${POSTGRES_PORT}
+      PG_META_DB_NAME: ${POSTGRES_DATABASE}
+      PG_META_DB_USER: supabase_admin
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
 
 networks:
   rede-supabase:
