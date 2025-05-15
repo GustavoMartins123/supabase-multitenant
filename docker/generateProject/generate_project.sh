@@ -117,7 +117,7 @@ template_to_file() {
     -e "s|{{service_role_key}}|$SERVICE_TOKEN|g" \
     -e "s|{{project_id}}|$PROJECT_ID|g" \
     -e "s|{{nginx_port}}|$NGINX_PORT|g" \
-    -e "s|{{meta_port}}|$META_PORT" \
+    -e "s|{{meta_port}}|$META_PORT|g" \
     "$template" > "$outfile"
 }
 
