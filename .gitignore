@@ -1,5 +1,5 @@
-docker/projects/**
-!docker/projects/**/.gitkeep
+servidor/projects/**
+!servidor/projects/**/.gitkeep
 
-docker/volumes/db/data/*
-# docker/secrets/*
+servidor/volumes/db/data/*
+#servidor/secrets/*
