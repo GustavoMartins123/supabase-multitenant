@@ -33,9 +33,7 @@ except ValueError:
     )
     
 JOB_STATUS: dict[str, str] = {}
-# ----------------------------
-# Utilitários
-# ----------------------------
+
 async def get_pool():
     return await asyncpg.create_pool(DB_DSN, min_size=1, max_size=5)
 

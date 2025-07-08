@@ -101,8 +101,6 @@ class _ProjectListPageState extends State<ProjectListPage> {
   }
 
 
-  /*──────────────────────────── UI ────────────────────────────*/
-
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
@@ -185,7 +183,6 @@ class _ProjectListPageState extends State<ProjectListPage> {
   }
 }
 
-/*────────────────────────── card do projeto ───────────────────────────*/
 
 class _ProjectCard extends StatefulWidget {
   const _ProjectCard(
