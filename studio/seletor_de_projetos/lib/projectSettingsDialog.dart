@@ -6,6 +6,9 @@ import 'package:intl/intl.dart';
 import 'package:seletor_de_projetos/services/projectService.dart';
 import 'package:seletor_de_projetos/session.dart';
 import 'package:jwt_decoder/jwt_decoder.dart';
+import 'dialogs/addMemberDialog.dart';
+import 'dialogs/transferProjectDialog.dart';
+import 'models/AllUsers.dart';
 import 'models/projectDockerStatus.dart';
 
 class ProjectSettingsDialog extends StatefulWidget {
@@ -23,7 +26,7 @@ class ProjectSettingsDialog extends StatefulWidget {
 
 class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> {
   List<ProjectMember> _currentMembers = [];
-  List<AvailableUser> _availableUsers = [];
+  List<AvailableUserShort> _availableUsers = [];
   bool _loadingMembers = true;
   bool _loadingAvailable = false;
   bool _addingMember = false;
@@ -100,7 +103,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> {
     }
   }
 
-  Future<void> _loadAvailableUsers() async {
+  Future<void> _loadAvailableUsersForProject() async {
     _safeSetState(() {
       _loadingAvailable = true;
       _error = null;
@@ -115,7 +118,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> {
         final List<dynamic> data = jsonDecode(response.body);
         _safeSetState(() {
           _availableUsers = data
-              .map((item) => AvailableUser.fromJson(item))
+              .map((item) => AvailableUserShort.fromJson(item))
               .toList();
           _loadingAvailable = false;
         });
@@ -149,7 +152,6 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> {
         );
         // Recarrega a lista de membros
         await _loadCurrentMembers();
-        // Remove o usuário da lista de disponíveis
         _safeSetState(() {
           _availableUsers.removeWhere((user) => user.userId == userId);
         });
@@ -186,54 +188,16 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> {
     }
   }
 
-  void _showAddMemberDialog() {
+  void _openAddMemberDialog() {
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          // dispara o load só uma vez, depois que o diálogo abriu
-          if (!_loadingAvailable && _availableUsers.isEmpty) {
-            _loadingAvailable = true;
-            // disparar sem await para não travar build
-            _loadAvailableUsers().then((_) => setDialogState(() {}));
-          }
-
-          return AlertDialog(
-            title: const Text('Adicionar Membro'),
-            content: SizedBox(
-              width: double.maxFinite,
-              height: 400,
-              child: _loadingAvailable
-                  ? const Center(child: CircularProgressIndicator())
-                  : _availableUsers.isEmpty
-                  ? const Text('Nenhum usuário disponível para adicionar')
-                  : ListView.builder(
-                itemCount: _availableUsers.length,
-                itemBuilder: (context, index) {
-                  final user = _availableUsers[index];
-                  return ListTile(
-                    title: Text(user.displayName),
-                    trailing: ElevatedButton(
-                      child: const Text('Membro'),
-                      onPressed: () {
-                        Navigator.pop(context);
-                        _addMember(user.userId, 'member');
-                      },
-                    ),
-                  );
-                },
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancelar'),
-              ),
-            ],
-          );
-        },
+      barrierDismissible: !_addingMember,
+      builder: (_) => AddMemberDialog(
+        loadUsers: _loadAvailableUsersForProject,
+        getUsers: () => _availableUsers,
+        onAdd: _addMember,
       ),
-    );
+    ).then((_) => _loadCurrentMembers());
   }
 
   Future<void> _loadStatus() async {
@@ -495,7 +459,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> {
                   ),
                 ),
                  _myProjectRole != 'admin'? SizedBox() : ElevatedButton.icon(
-                  onPressed: _loadingMembers ? null : _showAddMemberDialog,
+                  onPressed:  _loadingMembers ? null : _openAddMemberDialog,
                   icon: const Icon(Icons.person_add),
                   label: const Text('Adicionar'),
                 ) ,
@@ -518,6 +482,12 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> {
             style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('🗑️ Excluir Projeto'),
           ),
+        if (session.isSysAdmin)
+            TextButton(
+            style: TextButton.styleFrom(foregroundColor: Colors.blue),
+            onPressed: () => _showTransferDialog(widget.ref),
+            child: const Text('🔁 Transferir Projeto'),
+          ),
         TextButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('Fechar'),
@@ -525,7 +495,68 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> {
       ],
     );
   }
+  //Para transferir
+  Future<List<AvailableUser>> _loadAvailableUsers(String projectName) async {
+    try {
+      final response = await http.get(
+        Uri.parse('/api/admin/projects/$projectName/all-users'),
+      );
 
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = jsonDecode(response.body);
+
+        final List<dynamic> usersJson = data['users'];
+
+        return usersJson
+            .map((item) => AvailableUser.fromJson(item))
+            .where((user) => user.userId != widget)
+            .toList();
+      } else {
+        throw Exception('Erro ${response.statusCode}: ${response.body}');
+      }
+    } catch (e) {
+      throw Exception('Erro ao carregar usuários disponíveis: $e');
+    }
+  }
+
+
+  Future<void> _transferProject(String projectName, String newOwnerId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('/api/admin/projects/$projectName/transfer'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'new_owner_id': newOwnerId,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Projeto "$projectName" transferido com sucesso!')),
+        );
+      } else {
+        throw Exception('Erro ${response.statusCode}: ${response.body}');
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erro ao transferir projeto: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _showTransferDialog(String projectName) {
+    showDialog(
+      context: context,
+      builder: (context) => TransferProjectDialog(
+        projectName: projectName,
+        onTransfer: (newOwnerId) => _transferProject(projectName, newOwnerId),
+        loadAvailableUsers: _loadAvailableUsers
+      ),
+    );
+  }
   Widget _buildMembersList() {
     if (_loadingMembers) {
       return const Center(child: CircularProgressIndicator());
@@ -643,23 +674,6 @@ class ProjectMember {
       user_id: json['user_id'] as String,
       displayName: json['display_name'] as String?,
       role: json['role'] as String,
-    );
-  }
-}
-
-class AvailableUser {
-  final String userId;
-  final String displayName;
-
-  AvailableUser({
-    required this.userId,
-    required this.displayName,
-  });
-
-  factory AvailableUser.fromJson(Map<String, dynamic> json) {
-    return AvailableUser(
-      userId: json['user_id'] as String,
-      displayName: json['display_name'] as String
     );
   }
 }

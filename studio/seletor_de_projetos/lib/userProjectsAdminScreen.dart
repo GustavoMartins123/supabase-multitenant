@@ -3,9 +3,13 @@ import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:seletor_de_projetos/projectSettingsDialog.dart';
 import 'package:seletor_de_projetos/services/projectService.dart';
 import 'package:seletor_de_projetos/session.dart';
-
+import 'dart:html' as html;
+import 'dialogs/transferProjectDialog.dart';
+import 'models/AllUsers.dart';
+import 'models/ProjectInfo.dart';
 import 'models/projectDockerStatus.dart';
 
 class UserProjectsAdminScreen extends StatefulWidget {
@@ -54,6 +58,68 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> {
     if (mounted) {
       setState(fn);
     }
+  }
+  Future<List<AvailableUser>> _loadAvailableUsers(String projectName) async {
+    try {
+      final response = await http.get(
+        Uri.parse('/api/admin/projects/$projectName/all-users'),
+      );
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = jsonDecode(response.body);
+
+        final List<dynamic> usersJson = data['users'];
+
+        return usersJson
+            .map((item) => AvailableUser.fromJson(item))
+            .where((user) => user.isActive == true)
+            .toList();
+      } else {
+        throw Exception('Erro ${response.statusCode}: ${response.body}');
+      }
+    } catch (e) {
+      throw Exception('Erro ao carregar usuários disponíveis: $e');
+    }
+  }
+
+
+  Future<void> _transferProject(String projectName, String newOwnerId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('/api/admin/projects/$projectName/transfer'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'new_owner_id': newOwnerId,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Projeto "$projectName" transferido com sucesso!')),
+        );
+        await _fetchProjects();
+      } else {
+        throw Exception('Erro ${response.statusCode}: ${response.body}');
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erro ao transferir projeto: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _showTransferDialog(String projectName) {
+    showDialog(
+      context: context,
+      builder: (context) => TransferProjectDialog(
+        projectName: projectName,
+        onTransfer: (newOwnerId) => _transferProject(projectName, newOwnerId),
+        loadAvailableUsers: _loadAvailableUsers,
+      ),
+    );
   }
 
   Future<void> _fetchProjects() async {
@@ -148,6 +214,11 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> {
                 Row(
                   children: [
                     IconButton(
+                      tooltip: 'Abrir',
+                      icon: const Icon(Icons.open_in_new),
+                      onPressed: () => _openProject(project.name),
+                    ),
+                    IconButton(
                       tooltip: 'Start',
                       icon: const Icon(Icons.play_arrow),
                       onPressed: busy
@@ -167,6 +238,13 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> {
                       onPressed: busy
                           ? null
                           : () => _doAction(project.name, 'restart'),
+                    ),
+                    IconButton(
+                      tooltip: 'Transferir projeto',
+                      icon: const Icon(Icons.transfer_within_a_station, color: Colors.blue),
+                      onPressed: busy
+                          ? null
+                          : () => _showTransferDialog(project.name),
                     ),
                     IconButton(
                       tooltip: 'Excluir',
@@ -193,7 +271,10 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> {
       },
     );
   }
-
+  Future<void> _openProject(String ref) async {
+    await http.get(Uri.parse('/set-project?ref=$ref'));
+    html.window.open('${html.window.location.origin}/project/default', '_blank');
+  }
 
   void _doAction(String projectName, String action) async {
     _session.setBusy(projectName, true);
@@ -230,25 +311,4 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> {
       });
     }
   }
-}
-
-class ProjectInfo {
-  final String name;
-  final String status;
-  final int runningContainers;
-  final int totalContainers;
-  Future<ProjectDockerStatus>? statusFuture;
-  ProjectInfo({
-    required this.name,
-    required this.status,
-    required this.runningContainers,
-    required this.totalContainers,
-  });
-
-  factory ProjectInfo.fromJson(Map<String, dynamic> json) => ProjectInfo(
-    name: json['name'],
-    status: json['status'],
-    runningContainers: json['running_containers'],
-    totalContainers: json['total_containers'],
-  );
 }

@@ -25,3 +25,14 @@ local groups = ngx.var.authelia_groups or ""
                 if is_admin_str ~= "true" then
                     return ngx.exit(ngx.HTTP_FORBIDDEN)
                 end
+
+
+
+Para atualizar todos os usuarios que tiverem o atributos extras vazio, colocar antes do update do yml do activate, deactivate e signup:
+for _, user in pairs(yaml_data.users or {}) do
+                  if type(user.extra) ~= "table" or not user.extra.created_at then
+                    user.extra = {
+                      created_at = "ts:" .. os.date("!%Y-%m-%dT%H:%M:%SZ")
+                    }
+                  end
+                end

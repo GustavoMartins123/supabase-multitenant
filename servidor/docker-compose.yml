@@ -124,9 +124,12 @@ services:
       - autovacuum_naptime=20s
   #ver conexões no postgres = SELECT datname, count(*) FROM pg_stat_activity GROUP BY datname;
   realtime:
+    build:
+      context: .
+      dockerfile: volumes/realtime/Dockerfile
     # This container name looks inconsistent but is correct because realtime constructs tenant id by parsing the subdomain
     container_name: realtime-dev.supabase-realtime
-    image: supabase/realtime:v2.34.46
+    #image: supabase/realtime:v2.34.41
     restart: unless-stopped
     env_file:
       - secrets/.env
@@ -156,9 +159,7 @@ services:
     #   interval: 5s
     #   retries: 3
     environment:
-      MULTI_TENANT: true
       # SLOT_NAME_SUFFIX: "_repl"
-      # DATABASE_MULTITENANT_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@172.20.0.9:6745/postgres
       PORT: 4000
       DB_HOST: ${POSTGRES_HOST}
       #DB_PORT: 6543

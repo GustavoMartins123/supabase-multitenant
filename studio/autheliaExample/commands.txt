@@ -1,0 +1,20 @@
+Para trocar a 'encryption_key' do storage do authelia
+docker exec authelia \
+  authelia storage encryption change-key \
+    --encryption-key chave_atual \
+    --new-encryption-key nova_chave \
+    --sqlite.path /config/db.sqlite3
+
+#criar um senha em argon 2
+docker run --rm -it authelia/authelia:4.39 authelia crypto hash generate argon2
+
+
+#Gerar certificado auto-assinado pelo authelia de duração de 1 ano, gera a chave privada e o certificado:
+docker run --rm -u "$(id -u):$(id -g)" -v "$(pwd)":/keys authelia/authelia:4.39 authelia crypto certificate rsa generate --common-name example.com --directory /keys
+
+
+#criar chave privada:
+sudo openssl genrsa -out ca.key 4096
+
+#criar certificado:
+sudo openssl req -x509 -new -nodes -key ca.key -sha256 -days 3650 -out ca.pem -subj "/C=COUNTRY/ST=STATE/L=CITY/O=STATE/OU=STATE/CN=authelia"  -subj "/C=COUNTRY/ST=STATE/L=CITY/O=STATE/OU=STATE/CN=authelia"

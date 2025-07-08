@@ -1,14 +1,68 @@
 entryPoints:
   web:
     address: ":80"
-  # dashboard:
-  #   address: ":8082"  # Porta para o dashboard
-
+  #   http:
+  #     redirections:
+  #       entryPoint:
+  #         to: websecure
+  #         scheme: https
+  # websecure:
+  #   address: ":443"
 providers:
   docker:
-    exposedByDefault: false  # Só roteia containers com 'traefik.enable=true'
+    exposedByDefault: false
+  file:
+    filename: /etc/traefik/dynamic/middlewares.yml
+    watch: true
+
+experimental:
+  plugins:
+    fail2ban:
+      moduleName: "github.com/tomMoulard/fail2ban"
+      version: "v0.8.3"
+    geoblock:
+      moduleName: "github.com/PascalMinder/geoblock"
+      version: "v0.3.3"
+
+# certificatesResolvers:
+#   letsencrypt:
+#     acme:
+#       email: seuemail@email.com
+#       storage: /acme.json
+#       keyType: EC256
+#       httpChallenge:
+#         entryPoint: web
+global:
+  checknewversion: false
+  sendanonymoususage: false
+
+# tls:
+#   options:
+#     default:
+#       minVersion: "VersionTLS12"
+#       maxVersion: "VersionTLS13"
+#       cipherSuites:
+#         - "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384"
+#         - "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"
+#         - "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305"
+#         - "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305"
+#         - "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256"
+#         - "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"
+#       curvePreferences:
+#         - "secp521r1"
+#         - "secp384r1"
+
 log:
-  level: DEBUG
-# api:
-#   dashboard: true  # Habilita o dashboard
-#   insecure: true   # Permite acesso sem autenticação (apenas para testes locais)
+  level: INFO
+  format: json
+
+accessLog:
+  filePath: "/var/log/traefik/access.log"
+  bufferingSize: 100
+  fields:
+    defaultMode: keep
+    names:
+      ClientUsername: drop
+      StartUTC: drop
+  filters:
+    statusCodes: ["400-599"]

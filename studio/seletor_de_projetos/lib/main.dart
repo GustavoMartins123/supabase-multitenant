@@ -7,9 +7,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:seletor_de_projetos/projectSettingsDialog.dart';
+import 'package:seletor_de_projetos/services/projectService.dart';
 import 'package:seletor_de_projetos/session.dart';
 
 import 'adminUsersPage.dart';
+import 'models/job.dart';
 import 'newProjectDialog.dart';
 
 
@@ -27,34 +29,7 @@ Future<void> main() async {
   runApp(const ProjectPickerApp());
 }
 
-/*──────────────────────────────────── helpers ───────────────────────────*/
 
-class Job {
-  const Job(this.id);
-  final String id;
-  static Job? fromResponse(http.Response r) {
-    if (r.statusCode != 202) return null;
-    final js = jsonDecode(r.body);
-    return js is Map && js['job_id'] is String ? Job(js['job_id']) : null;
-  }
-}
-
-/// faz polling até status=="done" | "failed" | timeout
-Future<bool> waitUntilReady(String jobId,
-    {Duration every = const Duration(seconds: 3), int max = 100}) async {
-  for (var i = 0; i < max; i++) {
-    await Future.delayed(every);
-    final st = await http
-        .get(Uri.parse('/api/projects/status/$jobId'))
-        .then((r) => jsonDecode(r.body)['status'])
-        .catchError((_) => null);
-    if (st == 'done') return true;
-    if (st == 'failed') return false;
-  }
-  return false; // timeout
-}
-
-/*────────────────────────────── app root ───────────────────────────────*/
 
 class ProjectPickerApp extends StatelessWidget {
   const ProjectPickerApp({super.key});
@@ -66,9 +41,6 @@ class ProjectPickerApp extends StatelessWidget {
     home: const ProjectListPage(),
   );
 }
-
-/*──────────────────────── lista + criação ─────────────────────────────*/
-
 class ProjectListPage extends StatefulWidget {
   const ProjectListPage({super.key});
   @override
@@ -113,7 +85,7 @@ class _ProjectListPageState extends State<ProjectListPage> {
     }
 
     _snack('Gerando… aguarde');
-    final ok = await waitUntilReady(job.id);
+    final ok = await ProjectService.waitUntilReady(job.id);
     setState(() => _creating = false);
 
     _snack(ok ? 'Projeto criado!' : 'Falhou ao criar');
@@ -198,11 +170,12 @@ class _ProjectListPageState extends State<ProjectListPage> {
         ),
       ),
       floatingActionButton: Session().isSysAdmin? FloatingActionButton(
-          onPressed: (){
-            Navigator.push(
+          onPressed: () async{
+            await Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const AdminUsersPage()),
             );
+            await _fetchProjects();
           },
           child: const Icon(Icons.manage_accounts)
       )

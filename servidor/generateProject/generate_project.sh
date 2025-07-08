@@ -12,16 +12,11 @@ source "$PROJECT_ROOT/secrets/.env"
 source "$PROJECT_ROOT/.env"
 set +a
 
-
-#Caso queira gerar um JWT_SECRET para cada projeto
-#JWT_SECRET=$(openssl rand -base64 64 | tr -d '\n')
-#Comente a parte de baixo
 [[ -z "${JWT_SECRET:-}" ]] && { echo "JWT_SECRET ausente"; exit 1; }
 
 PROJECT_ID="${1:-}"
 [[ -z "$PROJECT_ID" ]] && { echo "Uso: $0 <project_id>"; exit 1; }
 
-# Converte para minúsculo (evita SELECT, Select, etc.)
 PROJECT_ID_LOWER=$(echo "$PROJECT_ID" | tr '[:upper:]' '[:lower:]')
 
 [[ "$PROJECT_ID_LOWER" =~ ^[a-z_][a-z0-9_]{2,39}$ ]] \
@@ -39,12 +34,9 @@ done
 
 [[ -d "$PROJECT_ROOT/projects/$PROJECT_ID_LOWER" ]] \
   && die "Projeto '$PROJECT_ID_LOWER' já existe em projects/"
-# Usa o ID já validado
+
 PROJECT_ID="$PROJECT_ID_LOWER"
 echo "✔️  Nome de projeto validado: $PROJECT_ID"
-
-#Caso for usar um analytics no projeto
-# LOGFLARE_API_KEY=$(head -c 32 /dev/urandom | base64 | tr -d '\n')
 
 
 is_port_in_use() {
@@ -91,14 +83,10 @@ generate_jwt() {
   echo "$header_b64.$payload_b64.$signature"
 }
 
-#Troque postgres pelo banco que vai gerar caso for usar um JWT_SECRET por projeto
 get_pg_version() {
   docker exec supabase-db \
     psql -U supabase_admin -d postgres -tAc "SELECT version();" \
     | awk '{print $2}'
-  # docker exec supabase-db \
-  #   psql -U supabase_admin -d _supabase_$PROJECT_ID -tAc "SELECT version();" \
-  #   | awk '{print $2}'
 }
 
 generate_db() {
@@ -115,17 +103,6 @@ generate_db() {
 NGINX_PORT=$(generate_unique_port)
 META_PORT=$(generate_unique_port)
 
-#Descomente caso for usar um JWT_SECRET diferente em cada projeto
-# POOLER_PROXY_PORT_TRANSACTION_PROJETO=$(generate_unique_port)
-# POOLER_PROXY_PORT_SESSION_PROJETO=$(generate_unique_port)
-
-#adicione se for usar o analytics com o projeto 
-#-e "s|{{logflare_api_key}}|$LOGFLARE_API_KEY|g" \
-
-#adicione se for usar um JWT_SECRET diferente do que é setado em 'secrets/.env'
-#-e "s|{{jwt_secret}}|$JWT_SECRET|g" \
-#-e "s|{{pooler_transaction}}|$POOLER_PROXY_PORT_TRANSACTION_PROJETO|g" \
-#-e "s|{{pooler_session}}|$POOLER_PROXY_PORT_SESSION_PROJETO|g" \
 template_to_file() {
   local template="$1" outfile="$2"
   sed \
@@ -137,8 +114,6 @@ template_to_file() {
     "$template" > "$outfile"
 }
 
-
-#Comente essa função caso for usar um JWT_SECRET por projeto, pois ele irá injetar no 'postgres'.
 realtime_tenant() {
   docker_must_exist realtime-dev.supabase-realtime
   docker exec realtime-dev.supabase-realtime sh -c "curl -s -X POST http://localhost:4000/api/tenants \
@@ -160,7 +135,8 @@ realtime_tenant() {
             \"region\":\"us-west-1\",
             \"poll_interval_ms\":100,
             \"poll_max_record_bytes\":1048576,
-            \"ssl_enforced\":false
+            \"ssl_enforced\":false,
+            \"slot_name\":\"supabase_realtime_replication_slot_$PROJECT_ID\"
           }}]}}'"
   echo "Realtime tenant criado"
 }
@@ -185,14 +161,14 @@ supavisor_tenant() {
          enforce_ssl:false,
          require_user:false,
          auth_query:"SELECT * FROM pgbouncer.get_auth($1)",
-         default_max_clients:200,
-         default_pool_size:20,
+         default_max_clients:600,
+         default_pool_size:30,
          default_parameter_status:{server_version:$pgver},
          users:[{
            db_user:"pgbouncer",
            db_password:$dbpass,
            mode_type:"transaction",
-           pool_size:20,
+           pool_size:30,
            is_manager:true
          }]
        }
@@ -222,7 +198,6 @@ template_to_file "$SCRIPT_DIR/Dockerfile" "$OUT_DIR/Dockerfile"
 echo "Arquivos de template gerados em $OUT_DIR"
 
 generate_db "$PROJECT_ID"
-#Comente a função abaixo quando comentar a função lá em cima
 realtime_tenant
 supavisor_tenant
 
@@ -237,3 +212,5 @@ docker compose -p "$PROJECT_ID" \
   up --build -d || die "Erro ao subir docker compose para $PROJECT_ID"
 
 echo "✅  Projeto $PROJECT_ID configurado com sucesso (porta $NGINX_PORT)"
+
+echo "NGINX_PORT=$NGINX_PORT"

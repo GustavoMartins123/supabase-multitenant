@@ -11,12 +11,32 @@ services:
     networks:
       - rede-supabase
     labels:
-      - "traefik.enable=true"                     
+      - "traefik.enable=true"
+      # - "traefik.http.routers.supabase-nginx-{{project_id}}.rule=Host(`seu_dominio`) && PathPrefix(`/{{project_id}}`)"
+      # - "traefik.http.routers.supabase-nginx-{{project_id}}.entrypoints=websecure"
+      # - "traefik.http.routers.supabase-nginx-{{project_id}}.tls=true"
+      # - "traefik.http.routers.supabase-nginx-{{project_id}}.tls.certresolver=letsencrypt"
       - "traefik.http.routers.supabase-nginx-{{project_id}}.rule=PathPrefix(`/{{project_id}}`)"
       - "traefik.http.routers.supabase-nginx-{{project_id}}.entrypoints=web"
       - "traefik.http.services.supabase-nginx-{{project_id}}.loadbalancer.server.port={{nginx_port}}"
-      - "traefik.http.middlewares.nginx-{{project_id}}-stripprefix.stripprefix.prefixes=/{{project_id}}" 
-      - "traefik.http.routers.supabase-nginx-{{project_id}}.middlewares=nginx-{{project_id}}-stripprefix@docker"
+      - "traefik.http.middlewares.nginx-{{project_id}}-stripprefix.stripprefix.prefixes=/{{project_id}}"
+
+
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.silentStartUp=true"
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.allowLocalRequests=true"
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.logLocalRequests=false"
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.logAllowedRequests=false"
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.logApiRequests=true"
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.api=https://get.geojs.io/v1/ip/country/{ip}"
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.apiTimeoutMs=200"
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.cacheSize=100"
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.forceMonthlyUpdate=true"
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.allowUnknownCountries=false"
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.unknownCountryApiResponse=nil"
+
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.countries=BR"
+
+      - "traefik.http.routers.supabase-nginx-{{project_id}}.middlewares=rate-limit@file,security-headers@file,geoblock-{{project_id}}@docker, nginx-{{project_id}}-stripprefix@docker"
   auth:
     container_name: supabase-auth-{{project_id}}
     image: supabase/gotrue:v2.170.0
@@ -105,7 +125,7 @@ services:
 
   rest:
     container_name: supabase-rest-{{project_id}}
-    image: postgrest/postgrest:v12.2.8
+    image: postgrest/postgrest:v12.2.0
     restart: unless-stopped
     env_file:
       - ../../secrets/.env
@@ -120,12 +140,12 @@ services:
     #   analytics:
     #     condition: service_healthy
     environment:
-      PGRST_DB_URI: postgres://authenticator.{{project_id}}:${POSTGRES_PASSWORD}@${POSTGRES_POOLER}:${POOLER_PROXY_PORT_TRANSACTION}/${POSTGRES_DATABASE}
+      PGRST_DB_URI: postgres://authenticator.{{project_id}}:${POSTGRES_PASSWORD}@${POSTGRES_POOLER}:${POOLER_PROXY_PORT_SESSION}/${POSTGRES_DATABASE}
+      PGRST_DB_SCHEMA_CACHE_DURATION: 20
       PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS}
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: ${JWT_SECRET}
       PGRST_DB_USE_LEGACY_GUCS: "false"
-      #Porque no modo de transaction pooling não garante que a mesma sessão do PostgreSQL será usada em requisições subsequentes — cada transação pode cair em um backend diferente
       PGRST_DB_PREPARED_STATEMENTS: false
       PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET}
       PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY}
@@ -133,7 +153,6 @@ services:
       [
         "postgrest"
       ]
-
   # To use S3 backed storage: docker compose -f docker-compose.yml -f docker-compose.s3.yml up
   storage:
     container_name: supabase-storage-{{project_id}}

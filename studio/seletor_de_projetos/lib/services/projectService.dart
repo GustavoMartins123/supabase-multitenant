@@ -166,4 +166,18 @@ class ProjectService {
       return false;
     }
   }
+
+  static Future<bool> waitUntilReady(String jobId,
+      {Duration every = const Duration(seconds: 3), int max = 100}) async {
+    for (var i = 0; i < max; i++) {
+      await Future.delayed(every);
+      final st = await http
+          .get(Uri.parse('/api/projects/status/$jobId'))
+          .then((r) => jsonDecode(r.body)['status'])
+          .catchError((_) => null);
+      if (st == 'done') return true;
+      if (st == 'failed') return false;
+    }
+    return false; // timeout
+  }
 }

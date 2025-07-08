@@ -1,5 +1,15 @@
-servidor/projects/**
-!servidor/projects/**/.gitkeep
+servidor/docker/projects/**
+!servidor/docker/projects/**/.gitkeep
+servidor/docker/.env
 
-servidor/volumes/db/data/*
-#servidor/secrets/*
+servidor/docker/volumes/db/data/*
+#servidor/docker/secrets/*
+
+studio/.env
+studio/authelia/*   
+
+studio-backup/*
+servidor-backup/* 
+
+studio-backup.zip
+supabase-backup.zip

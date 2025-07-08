@@ -5,22 +5,21 @@ import pathlib
 import asyncpg
 import hmac
 import asyncio, json, re
+import websockets, ssl
 from fastapi import FastAPI, BackgroundTasks, Depends, Header, HTTPException
 from pydantic import BaseModel
 from cryptography.fernet import Fernet
 from typing import Optional, List, Dict
-# ----------------------------
-# Configurações & Globals
-# ----------------------------
+
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
 SCRIPT = BASE_DIR / "scripts" / "generate_project.sh"
 DELETE_SCRIPT = BASE_DIR / "scripts" / "delete_project.sh"
 EXTRACTOR = BASE_DIR / "scripts" / "extract_token.sh"
 DB_DSN = os.getenv("DB_DSN")
-FERNET_SECRET = os.getenv("FERNET_SECRET")  # chave base64 de 32 bytes
-APP_TOKEN = os.getenv("NGINX_SHARED_TOKEN")  # token HMAC compartilhado
+FERNET_SECRET = os.getenv("FERNET_SECRET") 
+APP_TOKEN = os.getenv("NGINX_SHARED_TOKEN")
 DELETE_PASSWORD = os.getenv("PROJECT_DELETE_PASSWORD")
-JOB_STATUS: dict[str, str] = {}  # job_id -> queued|running|failed|done
+JOB_STATUS: dict[str, str] = {}
 
 
 if not FERNET_SECRET:
@@ -68,9 +67,6 @@ def validate_project_id(raw: str) -> str:
         raise HTTPException(400, "Nome inválido: palavra reservada SQL.")
     return name
 
-# ----------------------------
-# FastAPI & Modelos
-# ----------------------------
 app = FastAPI()
 
 class NewProject(BaseModel):
@@ -149,6 +145,62 @@ async def execute_delete_script(project_name: str):
     success = proc.returncode == 0
     return success, stdout.decode(), stderr.decode()
 
+async def drop_supabase_replication_slots(
+    conn: asyncpg.Connection, project_name: str
+) -> List[str]:
+    """
+    Remove os replication slots do Supabase Realtime de um projeto, na ordem EXATA:
+        1. Termina o backend do slot *messages*
+        2. Dropa o slot *messages*
+        3. Termina o backend do slot *replication*
+        4. Dropa o slot *replication*
+
+    Parameters
+    ----------
+    conn : asyncpg.Connection
+        Conexão já aberta (superuser) com o Postgres.
+    project_name : str
+        Slug do projeto, p.ex. "sistema_novo".
+
+    Returns
+    -------
+    List[str]
+        Lista de erros/avisos (vazia se tudo correu bem).
+    """
+    errors: List[str] = []
+
+    # Nomes padronizados dos slots
+    msg_slot  = f"supabase_realtime_messages_replication_slot_{project_name}"
+    repl_slot = f"supabase_realtime_replication_slot_{project_name}"
+
+    async def terminate_if_active(slot: str) -> None:
+        """Encerra o backend do slot se estiver ativo."""
+        pid = await conn.fetchval(
+            "SELECT active_pid FROM pg_replication_slots WHERE slot_name = $1",
+            slot,
+        )
+        if pid:
+            await conn.execute("SELECT pg_terminate_backend($1)", pid)
+            # pequeno intervalo para garantir liberação
+            await asyncio.sleep(1)
+
+    async def drop_slot(slot: str) -> None:
+        """Tenta dropar o slot; ignora erro de inexistência."""
+        try:
+            await conn.execute(f"SELECT pg_drop_replication_slot('{slot}')")
+        except Exception as exc:
+            if "does not exist" not in str(exc):
+                errors.append(f"{slot}: {exc}")
+
+    # ---------- 1) & 2)  SLOT *messages* ----------
+    await terminate_if_active(msg_slot)
+    await drop_slot(msg_slot)
+
+    # ---------- 3) & 4)  SLOT *replication* ----------
+    await terminate_if_active(repl_slot)
+    await drop_slot(repl_slot)
+
+    return errors
 
 @app.delete("/api/projects/{project_name}")
 async def delete_project(
@@ -160,89 +212,71 @@ async def delete_project(
     DELETE_PASSWORD = os.getenv("PROJECT_DELETE_PASSWORD")
     if not DELETE_PASSWORD:
         raise HTTPException(500, "Delete password not configured")
-    
+
     if not hmac.compare_digest(x_delete_password, DELETE_PASSWORD):
         raise HTTPException(403, "Invalid delete password")
-    
-    async with pool.acquire() as conn:
-        project_id = await conn.fetchval(
-            "SELECT id FROM projects WHERE name = $1", project_name
-        )
-        if not project_id:
-            raise HTTPException(404, "Project not found")
-        
-       # role = await conn.fetchval(
-       #     "SELECT role FROM project_members WHERE project_id = $1 AND user_id = $2",
-       #     project_id, user
-       # )
-       # if role != 'admin':
-       #     raise HTTPException(403, "Only admin can delete projects")
-    
-    errors = []
-    
-    # Executa o script bash para excluir os diretórios
-    success, stdout, stderr = await execute_delete_script(project_name)
-    if not success:
-        errors.append(f"Erro ao excluir diretórios: {stderr.strip()}")
 
-    # Remove containers (seguro caso o script não tenha removido)
+    errors = []
+    db_name = f"_supabase_{project_name}"
+
+    await asyncio.create_subprocess_exec("docker", "pause", "realtime-dev.supabase-realtime")
     try:
         containers = await get_project_containers(project_name)
         for container in containers:
             container_name = container.get("Names", "")
-            await asyncio.create_subprocess_exec(
-                "docker", "rm", "-f", container_name
-            )
+            if container_name:
+                await asyncio.create_subprocess_exec("docker", "rm", "-f", container_name)
     except Exception as e:
         errors.append(f"Erro ao remover containers: {str(e)}")
-
-    # Remove banco e registros
     try:
+        await asyncio.sleep(1)
+
         async with pool.acquire() as conn:
-          db_name = f"_supabase_{project_name}"
-        
-        # Mata conexões e dropa banco
-          await conn.execute("""
-            SELECT pg_terminate_backend(pid)
-            FROM pg_stat_activity
-            WHERE datname = $1 AND pid <> pg_backend_pid()
-        """, db_name)
-          await conn.execute(f'DROP DATABASE IF EXISTS "{db_name}"')
 
-        # Limpa tabelas relacionadas ao projeto
-          await conn.execute("DELETE FROM project_members WHERE project_id = $1", project_id)
-          await conn.execute("DELETE FROM jobs WHERE project = $1", project_name)
-          await conn.execute("DELETE FROM projects WHERE id = $1", project_id)
+            await conn.execute('DELETE FROM _realtime.tenants WHERE external_id = $1', project_name)
+            await conn.execute('DELETE FROM _realtime.extensions WHERE tenant_external_id = $1', project_name)
 
-        # Limpa tenants do Supavisor e Realtime
-          await conn.execute(
-            'DELETE FROM _supavisor.tenants WHERE external_id = $1',
-            project_name
-          )
-          await conn.execute(
-            'DELETE FROM _realtime.extensions WHERE tenant_external_id = $1',
-            project_name
-          )
-          await conn.execute(
-            'DELETE FROM _realtime.tenants WHERE external_id = $1',
-            project_name
-          )
+            await asyncio.sleep(10)
 
-    except Exception as e:
-         errors.append(f"Erro ao remover tenants ou limpar registros: {str(e)}")
+            await conn.execute("""
+                SELECT pg_terminate_backend(pid)
+                FROM pg_stat_activity
+                WHERE datname = $1 AND pid <> pg_backend_pid()
+            """, db_name)
+
+            slot_errors = await drop_supabase_replication_slots(conn, project_name)
 
 
-            
+            if slot_errors:
+                errors.append(f"Erro ao dropar os slots {slot_errors}")
+            try:
+                await conn.execute(f'DROP DATABASE IF EXISTS "{db_name}"')
+            except Exception as drop_error:
+                errors.append(f"Erro ao dropar banco {db_name}: {drop_error}")
+            project_id = await conn.fetchval("SELECT id FROM projects WHERE name = $1", project_name)
+            await conn.execute("DELETE FROM project_members WHERE project_id = $1", project_id)
+            await conn.execute("DELETE FROM jobs WHERE project = $1", project_name)
+            await conn.execute("DELETE FROM projects WHERE id = $1", project_id)
+            await conn.execute('DELETE FROM _supavisor.tenants WHERE external_id = $1', project_name)
 
-    status = "success" if not errors else "partial_success"
+    finally:
+        await asyncio.create_subprocess_exec("docker", "unpause", "realtime-dev.supabase-realtime")
+
+    success, stdout, stderr = await execute_delete_script(project_name)
+    if not success:
+        errors.append(f"Erro ao excluir diretórios: {stderr.strip()}")
+
+    async with pool.acquire() as conn:
+        db_exists = await conn.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", db_name)
+        if db_exists:
+            errors.append(f"Banco {db_name} ainda existe")
+
     return {
         "project": project_name,
-        "status": status,
-        "message": "Projeto excluído" if not errors else "Projeto excluído com erros",
+        "status": "success" if not errors else "partial_success",
+        "message": "Projeto excluído com sucesso" if not errors else "Projeto excluído com erros",
         "errors": errors
     }
-
-
 
 class AddMember(BaseModel):
     user_id: str
@@ -380,6 +414,66 @@ async def enc_key(
 
     return {"enc_service_key": row["service_role"]}
 
+
+async def _kickstart_realtime(tenant_slug: str, anon_key: str, nginx_port: int, duration: int = 10):
+    """
+    Força a criação do replication slot de forma fiel.
+    """
+
+    url = f"ws://supabase-nginx-{tenant_slug}:{nginx_port}/realtime/v1/websocket?apikey={anon_key}&vsn=1.0.0"
+
+    print(f"[*] Tentando iniciar Realtime para '{tenant_slug}'...")
+    print(f"URL: {url}")
+
+    try:
+        async with websockets.connect(url) as ws:
+            print("[✓] Conexão WS via gateway estabelecida com sucesso!")
+            ref_counter = 1
+            join_ref = str(ref_counter)
+            join_msg = {
+                "topic": f"realtime:public:{tenant_slug}",
+                "event": "phx_join",
+                "payload": {},
+                "ref": join_ref,
+                "join_ref": join_ref
+            }
+            await ws.send(json.dumps(join_msg))
+            print("[→] Mensagem JOIN enviada.")
+
+            try:
+                async with asyncio.timeout(duration):
+                    while True:
+                        response_str = await ws.recv()
+                        response = json.loads(response_str)
+                        print(f"[←] Recebido do gateway: {response}")
+
+                        if response.get("event") == "phx_heartbeat":
+                            heartbeat_reply = {
+                                "topic": "phoenix", "event": "phx_reply",
+                                "payload": {}, "ref": response.get("ref")
+                            }
+                            await ws.send(json.dumps(heartbeat_reply))
+                            print("[→] Resposta de Heartbeat enviada.")
+                        
+                        if response.get("event") == "phx_reply" and response.get("ref") == join_ref:
+                            if response.get("payload", {}).get("status") == "ok":
+                                print("[✓] Join no tópico confirmado. Slot de replicação sendo criado.")
+                            else:
+                                print("[⚠️ ERRO] Servidor recusou o join.")
+                                break
+            
+            except asyncio.TimeoutError:
+                print(f"[✓] Tempo de {duration}s concluído. Encerrando.")
+
+    except websockets.exceptions.InvalidStatusCode as e:
+        print(f"[⚠️ ERRO] Falha na conexão com status HTTP {e.status_code}. O gateway recusou a conexão.")
+    except Exception as e:
+        print(f"[⚠️ ERRO] Falha inesperada: {e}")
+
+    print(f"[*] Processo de kickstart para '{tenant_slug}' finalizado.")
+
+
+
 # ----------------------------
 # Worker: provisiona e extrai keys
 # ----------------------------
@@ -405,7 +499,17 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: str):
             await set_status("failed")
             print(stdout.decode())
             return
-
+        output_str = stdout.decode()
+        nginx_port = None
+        for line in output_str.splitlines():
+            if line.startswith("NGINX_PORT="):
+                nginx_port = int(line.split("=")[1])
+                break
+        
+        if not nginx_port:
+            await set_status("failed")
+            print("Erro: Não foi possível extrair a porta do Nginx da saída do script.")
+            return
         # extração de tokens
         proc2 = await asyncio.create_subprocess_exec(
             "bash", str(EXTRACTOR), project_name,
@@ -438,6 +542,8 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: str):
                    WHERE name=$3 AND owner_id=$4""",
                 anon_enc, svc_enc, project_name, user
             )
+
+        await _kickstart_realtime(project_name, anon, nginx_port)
 
         await set_status("done")
 
@@ -527,6 +633,7 @@ async def get_project_docker_status(
         )
         groups_list = [g.strip() for g in groups.split(",")]
         is_global_admin = "admin" in groups_list
+
         if not is_member and not is_global_admin:
             raise HTTPException(403, "Access denied")
     
@@ -836,6 +943,7 @@ async def get_projects_for_user(
             FROM projects p
             JOIN project_members m ON p.id = m.project_id
             WHERE m.user_id = $1
+            AND m.role = 'admin'
         """, uid)
 
         projects = []
@@ -849,5 +957,125 @@ async def get_projects_for_user(
             })
 
     return {"projects": projects}
+    
+    
+    
+@app.get("/api/admin/projects/{name}/all-users")
+async def list_all_users_for_admin(
+    name: str,
+    user: str = Header(..., alias="Remote-Email"),
+    groups: str = Header(default="", alias="Remote-Groups"),
+    pool=Depends(get_pool),
+):
+    """
+    Lista todos os usuários disponíveis para admins.
+    Como a API não tem acesso ao cache, retorna uma estrutura
+    que o Nginx pode completar ou usa proxy para Nginx.
+    """
+    
+    user_groups = [g.strip() for g in groups.split(",") if g.strip()]
+    is_admin = "admin" in user_groups
+    
+    if not is_admin:
+        raise HTTPException(403, "admin access required")
+    
+    async with pool.acquire() as conn:
+        # Verificar se projeto existe
+        project = await conn.fetchrow(
+            "SELECT id FROM projects WHERE lower(name) = lower($1)",
+            name,
+        )
+        if not project:
+            raise HTTPException(404, "project not found")
+        
+        # Buscar membros atuais (dados que a API tem)
+        current_members = await conn.fetch(
+            "SELECT user_id, role FROM project_members WHERE project_id=$1",
+            project["id"],
+        )
+    
+    # Como não temos acesso ao cache, retornamos o que sabemos
+    # e deixamos uma indicação de que o Nginx deve completar
+    return {
+        "project_name": name,
+        "project_id": project["id"],
+        "current_members": [
+            {
+                "user_id": m["user_id"],
+                "role": m["role"],
+                "status": "member"
+            } for m in current_members
+        ],
+        "cache_users_needed": True,  # Indica que precisa completar via Nginx
+        "nginx_route": f"/api/projects/{name}/all-users"  # Rota do Nginx
+    }
+    
+class TransferBody(BaseModel):
+    new_owner_id: str
+
+@app.post("/api/projects/{project_name}/transfer", status_code=200)
+async def transfer_project(
+    project_name: str,
+    body: TransferBody,
+    user_email: str        = Header(..., alias="Remote-Email"),
+    groups: str            = Header("", alias="Remote-Groups"),
+    pool                   = Depends(get_pool),
+):
+    # ── 1. Somente administradores globais (grupo 'admin') podem transferir
+    if "admin" not in [g.strip() for g in groups.split(",")]:
+        raise HTTPException(403, "Acesso negado – apenas administradores do sistema")
+
+    new_owner = body.new_owner_id.strip().lower()
+    if not new_owner:
+        raise HTTPException(400, "new_owner_id é obrigatório")
+
+    async with pool.acquire() as conn:
+        # ── 2. Verifica se projeto existe
+        proj_row = await conn.fetchrow(
+            "SELECT id, owner_id FROM projects WHERE name = $1",
+            project_name,
+        )
+        if not proj_row:
+            raise HTTPException(404, "Project not found")
+
+        project_id   = proj_row["id"]
+        current_owner = proj_row["owner_id"]
+
+        if new_owner == current_owner:
+            return {"status": "noop", "detail": "Já é o proprietário"}
+
+        # 5 ─── transfere
+        await conn.execute(
+            "UPDATE projects SET owner_id = $1 WHERE id = $2",
+            new_owner, project_id,
+        )
+
+        # 6 ─── garante admin para o novo owner
+        await conn.execute(
+            """
+            INSERT INTO project_members(project_id, user_id, role)
+            VALUES($1, $2, 'admin')
+            ON CONFLICT (project_id, user_id)
+            DO UPDATE SET role = 'admin'
+            """,
+            project_id, new_owner,
+        )
+
+        # 7 ─── demota o dono antigo **só se ele ainda for admin**
+        await conn.execute(
+            """
+            UPDATE project_members
+            SET role = 'member'
+            WHERE project_id = $1
+              AND user_id    = $2
+              AND role       = 'admin'
+            """,
+            project_id, current_owner,
+        )
 
 
+    return {
+        "project": project_name,
+        "new_owner_id": new_owner,
+        "status": "transferred"
+    }

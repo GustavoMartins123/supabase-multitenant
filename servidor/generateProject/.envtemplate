@@ -40,4 +40,3 @@ JWT_SECRET_PROJETO={{jwt_secret}}
 POOLER_PROXY_PORT_TRANSACTION_PROJETO={{pooler_transaction}}
 POOLER_PROXY_PORT_SESSION_PROJETO={{pooler_session}}
 META_PORT={{meta_port}}
-DOCKER_SOCKET_LOCATION=/var/run/docker.sock
