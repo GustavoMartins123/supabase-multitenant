@@ -84,3 +84,10 @@ docker ps
 ```
 Se tudo estiver com o status `Up`, acesse a interface no IP que você configurou no `setup.sh` (ex: `https://<seu_ip_local>:9091`). Você deverá ser redirecionado para a tela de login do Authelia.
 Use o usuario 'teste' com a senha 'teste' para logar
+
+## Manutenção e Observações Importantes
+
+### Rotação de Certificados SSL
+
+* O script `setup.sh` gera automaticamente um certificado SSL autoassinado para o Authelia e o Nginx do Studio, garantindo a comunicação HTTPS na sua rede local.
+* **Atenção:** Por padrão, este certificado tem uma validade de **1 ano**. Após esse período ele deixara de funcionar.
