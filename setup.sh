@@ -40,8 +40,8 @@ generate_logflare_api_key() {
     head -c 32 /dev/urandom | base64
 }
 
-generate_fernet_secret() {
-    openssl rand -base64 64 | tr -d '\n'
+generate_cookie_sign_secret() {
+    openssl rand -base64 32 | tr -d '\n'
 }
 
 generate_jwt_secret() {
@@ -50,10 +50,6 @@ generate_jwt_secret() {
 
 generate_postgres_password() {
   openssl rand -base64 32 | tr '/+' '_-' | tr -d '\n'
-}
-
-generate_cookie_sign_secret() {
-    openssl rand -base64 32 | tr -d '\n'
 }
 
 get_server_ip() {
@@ -73,10 +69,18 @@ main() {
         print_error "Pasta 'studio' não encontrada!"
         exit 1
     fi
+    print_status "Detectando IP local da máquina..."
+    LOCAL_IP=$(hostname -I | awk '{print $1}')
+    if [ -z "$LOCAL_IP" ]; then
+        print_error "Não foi possível detectar o IP local da máquina. Verifique a rede."
+        exit 1
+    fi
 
+    print_success "IP local detectado: $LOCAL_IP"
     print_status "Gerando chaves compartilhadas..."
-    SHARED_FERNET_SECRET=$(generate_fernet_secret)
-    SHARED_NGINX_TOKEN=$(generate_fernet_secret)
+
+    SHARED_FERNET_SECRET=$(generate_logflare_api_key)
+    SHARED_NGINX_TOKEN=$(generate_logflare_api_key)
 
     SERVER_IP=$(get_server_ip)
     SERVER_IP=$(echo "$SERVER_IP" | xargs)
@@ -92,7 +96,7 @@ main() {
     VAULT_ENC_KEY=$(generate_vault_enc_key)
     SECRET_KEY_BASE=$(generate_secret_key_base)
     LOGFLARE_API_KEY=$(generate_logflare_api_key)
-    PROJECT_DELETE_PASSWORD=$(generate_fernet_secret)
+    PROJECT_DELETE_PASSWORD=$(generate_jwt_secret)
 
     cp servidor/.env.example servidor/.env
 
@@ -165,6 +169,36 @@ main() {
     fi
     print_status "$IP_DOMAIN do servidor configurado: $SERVER_IP"
     echo ""
+
+    print_status "Configurando Nginx do Studio com o IP local detectado..."
+    sed -i "s|server_name pass|server_name $LOCAL_IP|" studio/nginx/nginx.conf
+    print_success "Nginx do Studio configurado para escutar em $LOCAL_IP."
+
+    print_status "Configurando Authelia com o IP local..."
+
+    local authelia_config="studio/authelia/configuration.yml"
+
+    if [[ -f "$authelia_config" ]]; then
+        print_status "Configurando Authelia com o IP local e segredos únicos..."
+        
+        sed -i "s|<SEU_IP>|$LOCAL_IP|g" "$authelia_config"
+
+        local jwt_secret=$(generate_logflare_api_key)
+        local session_secret=$(generate_logflare_api_key)
+        local storage_key=$(generate_logflare_api_key)
+
+        sed -i "s|JWT_SECRET|$jwt_secret|g" "$authelia_config"
+        sed -i "s|SESSION_SECRET|$session_secret|g" "$authelia_config"
+        sed -i "s|STORAGE_KEY|$storage_key|g" "$authelia_config"
+        
+        print_success "Arquivo de configuração do Authelia ($authelia_config) atualizado."
+    else
+        print_warning "Arquivo de configuração do Authelia ($authelia_config) não encontrado."
+    fi
+    print_status "Configurando a whitelist da api python "
+    sed -i "s|<SEU_IP>|$LOCAL_IP|g" servidor/docker-compose.yml
+    print_success "Api python configurada para permitir esse ip $LOCAL_IP a consultar ela."
+
 }
 
 if [[ $EUID -eq 0 ]]; then

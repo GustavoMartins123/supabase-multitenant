@@ -13,3 +13,5 @@ servidor-backup/*
 
 studio-backup.zip
 supabase-backup.zip
+
+studio copy/*
