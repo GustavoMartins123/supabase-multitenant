@@ -230,11 +230,6 @@ main() {
     print_success "Api python configurada para permitir esse ip $LOCAL_IP a consultar ela."
 
 }
-
-if [[ $EUID -eq 0 ]]; then
-    print_warning "Executando como root. Certifique-se de que isso é necessário."
-fi
-
 main
 
 print_success "Script finalizado com sucesso!"
