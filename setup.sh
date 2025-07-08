@@ -170,6 +170,36 @@ main() {
     print_status "$IP_DOMAIN do servidor configurado: $SERVER_IP"
     echo ""
 
+
+    print_status "Gerando certificados SSL autoassinados para o Studio/Authelia..."
+
+    local SSL_DIR="studio/authelia/ssl"
+    
+    local ABSOLUTE_SSL_DIR
+    ABSOLUTE_SSL_DIR="$(pwd)/$SSL_DIR"
+    
+    print_status "Diretório de destino dos certificados: $ABSOLUTE_SSL_DIR"
+
+    print_status "Executando o container do Authelia para criar os arquivos..."
+    if docker run --rm -u "$(id -u):$(id -g)" -v "$ABSOLUTE_SSL_DIR:/data/authelia/keys" authelia/authelia:latest authelia crypto certificate rsa generate --common-name "$LOCAL_IP" --directory /data/authelia/keys; then
+        print_success "Certificados gerados com sucesso pelo Authelia."
+    else
+        print_error "Falha ao executar o container do Authelia. Verifique se o Docker está em execução."
+        exit 1
+    fi
+
+    print_status "Renomeando arquivos para 'public.crt' e 'private.pem'..."
+    
+    if [[ -f "$SSL_DIR/private.pem" && -f "$SSL_DIR/public.crt" ]]; then
+        mv "$SSL_DIR/public.crt" "$SSL_DIR/ca.pem"
+        mv "$SSL_DIR/private.pem" "$SSL_DIR/ca.key"
+        print_success "Arquivos renomeados com sucesso."
+    else
+        print_error "Os arquivos de certificado (private.pem, public.crt) não foram encontrados após a geração."
+        exit 1
+    fi
+
+
     print_status "Configurando Nginx do Studio com o IP local detectado..."
     sed -i "s|server_name pass|server_name $LOCAL_IP|" studio/nginx/nginx.conf
     print_success "Nginx do Studio configurado para escutar em $LOCAL_IP."

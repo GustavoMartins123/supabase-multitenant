@@ -6,7 +6,6 @@ servidor/docker/volumes/db/data/*
 #servidor/docker/secrets/*
 
 studio/.env
-studio/authelia/*   
 
 studio-backup/*
 servidor-backup/* 
