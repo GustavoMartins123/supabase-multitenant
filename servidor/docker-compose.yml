@@ -20,7 +20,7 @@ services:
       - ./volumes/db/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql:Z
       # PGDATA directory is persisted between restarts
       - ./volumes/db/data:/var/lib/postgresql/data:Z
-      # For WSL
+      # For WSL uncomment
       # - postgres-data:/var/lib/postgresql/data:Z
       # Changes required for internal supabase data such as _analytics
       - ./volumes/db/_supabase.sql:/docker-entrypoint-initdb.d/migrations/97-_supabase.sql:Z
@@ -57,7 +57,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXP: ${JWT_EXPIRY}
-    mem_limit: 8g
+    # mem_limit: 8g
     memswap_limit: 8g
     # command:
     #   [
@@ -75,7 +75,6 @@ services:
       - config_file=/etc/postgresql/postgresql.conf
       - -c
       - log_min_messages=fatal
-      # Configurações de memória otimizadas para 8GB (multitenancy)
       - -c
       - max_connections=1000
       - -c
@@ -103,7 +102,6 @@ services:
       - max_wal_size=4GB
       - -c
       - min_wal_size=1GB
-      # Configurações de query planner
       - -c
       - default_statistics_target=100
       - -c
@@ -330,3 +328,4 @@ networks:
           gateway: 172.20.0.1
 volumes:
   db-config:
+  postgres-data:

@@ -224,7 +224,7 @@ BACKEND_PROTO=https
 
 Os comandos abaixo forçam a recriação dos contêineres, garantindo que eles usem os novos labels e arquivos .env que você modificou.
 
-    Reinicie os Serviços Base do Servidor:
+* Reinicie os Serviços Base do Servidor:
 
 ```bash
 # Inicia o PostgreSQL, a API de gerenciamento, etc.
@@ -246,6 +246,6 @@ docker compose -f studio/docker-compose.yml up -d --force-recreate
 
 Reinicie o Projeto Existente que foi Modificado:
 ```bash
-# Aplica os novos labels de HTTPS ao projeto. Substitua <seu_projeto> pelo nome real.
+# Aplica os novos labels de HTTPS ao projeto. Substitua nos dois <seu_projeto> pelo nome real.
 docker compose -f projects/<seu_projeto>/docker-compose.yml -p <seu_projeto> --env-file servidor/secrets/.env --env-file servidor/.env --env-file projects/<seu_projeto>/.env up -d --force-recreate
 ```

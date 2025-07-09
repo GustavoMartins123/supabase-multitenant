@@ -31,9 +31,9 @@ RUN apk add --no-cache build-base curl openssl-dev yaml-dev argon2 openssl
 RUN opm get xiaocang/lua-resty-openssl \
  && opm get jkeys089/lua-resty-hmac \
  && opm get ledgetech/lua-resty-http \
- && luarocks install lua-resty-fernet \
- && luarocks install luafilesystem \
- && luarocks install lyaml
+ && luarocks install https://luarocks.org/manifests/megalord/lua-resty-fernet-1.0-0.rockspec \
+ && luarocks install https://luarocks.org/manifests/hisham/luafilesystem-1.8.0-1.rockspec \
+ && luarocks install https://luarocks.org/manifests/gvvaughan/lyaml-6.2.8-1.rockspec
 
 
 FROM runtime
