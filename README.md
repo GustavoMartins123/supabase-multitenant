@@ -1,93 +1,213 @@
-# Documentação supabase-multitenant
+# supabase-multitenant Documentation
 
-## Visão geral
+[Read this setup in Brazilian Portuguese 🇧🇷](./LEIAME.md)
 
-A stack oficial de auto-hospedagem do Supabase é projetada para um único projeto. Este repositório resolve essa limitação, oferecendo uma arquitetura multi-tenant.
+## Overview
 
-A solução provisiona um banco de dados isolado para cada novo inquilino e utiliza uma API(fast-api) de orquestração para gerenciar o ciclo de vida dos projetos. O principal diferencial é um gateway OpenResty/Lua que permite o uso de uma **única instância do Supabase Studio** para administrar todos os inquilinos de forma centralizada e segura, contornando uma limitação fundamental da ferramenta.
+The official Supabase self-hosting stack is designed for a single project. This repository solves that limitation by offering a multi-tenant architecture.
 
----
+The solution provisions an isolated database for each new tenant and uses an orchestration API (FastAPI) to manage the project lifecycle. The key differentiator is a dynamic OpenResty/Lua gateway that allows a **single Supabase Studio instance** to securely and centrally manage all tenants, bypassing a fundamental limitation of the tool.
 
-## Sumário
+-----
 
-- [Visão geral](#visão-geral)  
-- [Propósito](#propósito)  
-- [Pré-requisitos](#pré-requisitos)  
+## Table of Contents
 
-### Como Usar  
-- [1. Clonar o repositório](#1-clonar-o-repositório)  
-- [2. Rodar o script de configuração](#2-rodar-o-script-de-configuração)  
-- [3. Ordem de execução](#3-ordem-de-execução)  
-- [4. Verificação](#4-verificação)  
+  - [Overview](#overview)
+  - [Purpose](#purpose)
+  - [Architecture](#architecture)
+  - [Prerequisites](#prerequisites)
+  
+### How to Use
 
-## Propósito
+  - [1. Clone the Repository](#clone-the-repository)
+  - [2. Run the Setup Script](#run-the-setup-script)
+  - [3. Execution Order](#execution-order)
+  - [4. Verification](#verification)
 
-Simplificar a criação e gerenciamento de novos projetos usando a arquitetura do supabase como base
+### Maintenance and Important Notes
 
----
+  - [SSL Certificate Rotation](#ssl-certificate-rotation)
 
-## Pré-requisitos
+## Purpose
 
-| Item | Descrição |
-|------|-----------|
-| Docker & Docker Compose | Instalados e funcionando. |
-| Usuario    |   Com permissão para rodar comandos docker. |
-| jq    |   Instalado na maquina. |
+To simplify the creation and management of new projects using the Supabase architecture as a foundation.
 
----
+-----
 
-## Como Usar
+## Architecture
 
-### 1. Clonar o repositório
+```mermaid
+flowchart TB
+ subgraph subGraph0["Local Studio - :4000"]
+        Authelia["🔐 Authelia :9091\nAuthentication"]
+        Lan["🛜 Internet/Users/LAN"]
+        Nginx["🌐 Nginx/OpenResty :443\nLocal Manager"]
+        Flutter["📱 Flutter Web\nProject Selector"]
+        Studio["📊 Supabase Studio\nFinal Interface"]
+  end
+ subgraph subGraph1["Local Server - Shared Services"]
+        DB["🗄️ PostgreSQL\nsupabase-db\nMain Database"]
+        Realtime["⚡ Realtime :4000\nGlobal"]
+        Pooler["🏊 Supavisor\nConnection Pooler\nGlobal"]
+        Functions["⚙️ Edge Functions\n/functions/main\nGlobal"]
+  end
+ subgraph subGraph2["Project A (project_id_a)"]
+        NginxA["🌐 Nginx A :port_a\n/project_id_a"]
+        AuthA["🔑 GoTrue A :9999"]
+        RestA["📡 PostgREST A :3000"]
+        StorageA["📦 Storage A :5000"]
+        MetaA["🔧 Meta A :meta_port_a"]
+        ImgA["🖼️ ImgProxy A :5001"]
+  end
+ subgraph subGraph3["Project B (project_id_b)"]
+        NginxB["🌐 Nginx B :port_b\n/project_id_b"]
+        AuthB["🔑 GoTrue B :9999"]
+        RestB["📡 PostgREST B :3000"]
+        StorageB["📦 Storage B :5000"]
+        MetaB["🔧 Meta B :meta_port_b"]
+        ImgB["🖼️ ImgProxy B :5001"]
+  end
+ subgraph subGraph4["Dynamic Projects"]
+    direction TB
+        subGraph2
+        subGraph3
+  end
+ subgraph subGraph5["Docker Network"]
+        Network["🔗 rede-supabase\n172.20.0.0/16"]
+  end
+    World["🌐 Internet/Users"] -- World --> Traefik["🚦 Traefik :80/:443\nMain Gateway"]
+    Lan -- :9091 --> Authelia
+    Authelia -- :4000 --> Nginx
+    Nginx --> Flutter
+    Flutter --> Studio
+    Nginx -. "LAN - Per-project requests via '/project_id'" .-> Traefik
+    Traefik -. LAN .-> API["🐍 Projects API :18000\nPython\nManages Projects"]
+    Pooler --> DB
+    NginxA --> AuthA & RestA & StorageA & Functions
+    NginxA -. via roleKey .-> MetaA
+    StorageA --> ImgA
+    NginxB --> AuthB & RestB & StorageB & Functions
+    NginxB -. via roleKey .-> MetaB
+    StorageB --> ImgB
+    Traefik --> NginxA
+    Traefik --> NginxB
+    AuthA -. via Pooler .-> Pooler
+    RestA -. via Pooler .-> Pooler
+    StorageA -. via Pooler .-> Pooler
+    MetaA -. Direct Connection .-> DB
+    AuthB -. via Pooler .-> Pooler
+    RestB -. via Pooler .-> Pooler
+    StorageB -. via Pooler .-> Pooler
+    MetaB -. Direct Connection .-> DB
+    NginxA -. WebSocket .-> Realtime
+    NginxB -. WebSocket .-> Realtime
+    API -. Creates/Manages .-> NginxA & NginxB
+    API -. Docker Socket .-> DockerSock["🐳 Docker Socket\nContainer Creation"]
+    Flutter -. "/set-project?ref=" .-> Nginx
+     Authelia:::studio
+     Nginx:::studio
+     Flutter:::studio
+     Studio:::studio
+     DB:::shared
+     Realtime:::shared
+     Pooler:::shared
+     Functions:::shared
+     NginxA:::project
+     AuthA:::project
+     RestA:::project
+     StorageA:::project
+     MetaA:::project
+     ImgA:::project
+     NginxB:::project
+     AuthB:::project
+     RestB:::project
+     StorageB:::project
+     MetaB:::project
+     ImgB:::project
+     World:::external
+     Traefik:::gateway
+     API:::api
+    classDef external fill:#e1f5fe
+    classDef gateway fill:#f3e5f5
+    classDef shared fill:#e8f5e8
+    classDef project fill:#fff3e0
+    classDef studio fill:#fce4ec
+    classDef api fill:#f1f8e9
+```
+
+-----
+
+## Prerequisites
+
+| Item | Description |
+|---|---|
+| Docker & Docker Compose | Installed and running. |
+| User    | With permission to run docker commands. |
+| jq    | Installed on the host machine. |
+
+-----
+
+## How to Use
+
+### 1\. Clone the Repository
 
 ```bash
 git clone git@github.com:GustavoMartins123/supabase-multitenant.git
 cd supabase-multitenant
 ```
-### 2. Rodar o script de configuração
- 
+
+### 2\. Run the Setup Script
+
 ```bash
 bash setup.sh
-#O IP do servidor ou Dominio que o script pedir é aonde o banco ficara hospedado com o traefik
+# The server IP or Domain requested by the script is where the database and Traefik will be hosted.
 ```
 
-### 3. Ordem de execução
+### 3\. Execution Order
 
-1.  **Subir os Serviços Base (Banco):**
+1.  **Start the Base Services (Database):**
+
     ```bash
-    # Inicia o PostgreSQL, a API de gerenciamento, etc.
+    # Starts PostgreSQL, the management API, etc.
     cd servidor/
     docker compose --env-file secrets/.env --env-file .env up -d
     cd .. 
     ```
-2.  **Subir o Gateway de Borda (Traefik):**
+
+2.  **Start the Edge Gateway (Traefik):**
+
     ```bash
-    # Inicia o proxy reverso que gerencia todo o tráfego externo.
+    # Starts the reverse proxy that manages all external traffic.
     cd traefik/
     docker compose up -d
     cd ..
     ```
 
-3.  **Subir a Interface de Gerenciamento (Studio):**
+3.  **Start the Management Interface (Studio):**
+
     ```bash
-    # Inicia o Nginx/Lua e a interface Flutter.
+    # Starts Nginx/Lua and the Flutter interface.
     cd studio/
     docker compose up -d
     cd ..
-    # Um adendo, o studio foi arquitetado para ser utilizado em uma maquina diferente do servidor, mas a principio funciona em uma só.
+    # Note: the studio was designed to be used on a different machine from the server, 
+    # but it should work on a single machine as well.
     ```
-### 4. Verificação
 
-Após alguns instantes, verifique se todos os contêineres estão rodando:
+### 4\. Verification
+
+After a few moments, check if all containers are running:
+
 ```bash
 docker ps
 ```
-Se tudo estiver com o status `Up`, acesse a interface no IP que você configurou no `setup.sh` (ex: `https://<seu_ip_local>:9091`). Você deverá ser redirecionado para a tela de login do Authelia.
-Use o usuario 'teste' com a senha 'teste' para logar
 
-## Manutenção e Observações Importantes
+If everything has the status `Up`, access the interface at the IP you configured in `setup.sh` (e.g., `https://<your_local_ip>:9091`). You should be redirected to the Authelia login screen.
+Use the user 'teste' with the password 'teste' to log in.
 
-### Rotação de Certificados SSL
+## Maintenance and Important Notes
 
-* O script `setup.sh` gera automaticamente um certificado SSL autoassinado para o Authelia e o Nginx do Studio, garantindo a comunicação HTTPS na sua rede local.
-* **Atenção:** Por padrão, este certificado tem uma validade de **1 ano**. Após esse período ele deixara de funcionar.
+### SSL Certificate Rotation
+
+  * The `setup.sh` script automatically generates a self-signed SSL certificate for Authelia and the Studio's Nginx, ensuring HTTPS communication on your local network.
+  * **Warning:** By default, this certificate is valid for **1 year**. After this period, it will stop working.
