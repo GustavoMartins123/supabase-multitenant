@@ -1,13 +1,6 @@
 entryPoints:
   web:
     address: ":80"
-  #   http:
-  #     redirections:
-  #       entryPoint:
-  #         to: websecure
-  #         scheme: https
-  # websecure:
-  #   address: ":443"
 providers:
   docker:
     exposedByDefault: false
@@ -24,33 +17,9 @@ experimental:
       moduleName: "github.com/PascalMinder/geoblock"
       version: "v0.3.3"
 
-# certificatesResolvers:
-#   letsencrypt:
-#     acme:
-#       email: seuemail@email.com
-#       storage: /acme.json
-#       keyType: EC256
-#       httpChallenge:
-#         entryPoint: web
 global:
   checknewversion: false
   sendanonymoususage: false
-
-# tls:
-#   options:
-#     default:
-#       minVersion: "VersionTLS12"
-#       maxVersion: "VersionTLS13"
-#       cipherSuites:
-#         - "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384"
-#         - "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"
-#         - "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305"
-#         - "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305"
-#         - "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256"
-#         - "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"
-#       curvePreferences:
-#         - "secp521r1"
-#         - "secp384r1"
 
 log:
   level: INFO

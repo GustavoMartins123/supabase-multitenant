@@ -26,7 +26,6 @@ services:
       # - "traefik.http.routers.malicious-paths.tls=true"
 
       # Router para User-Agents suspeitos
-      #- "traefik.http.routers.block-bad-useragents.rule=HeaderRegexp(`User-Agent`, `.*[Bb]ot.*|.*[Ss]canner.*|.*[Cc]rawler.*|.*[Ss]pider.*|.*[Cc]url.*|.*[Ww]get.*|.*python.*|.*ruby.*|.*perl.*|.*masscan.*|.*nmap.*|^-?$`)"
       - "traefik.http.routers.block-bad-useragents.rule=HeaderRegexp(`User-Agent`, `.*[Bb]ot.*|.*[Ss]canner.*|.*[Cc]rawler.*|.*[Ss]pider.*|.*[Cc]url.*|.*[Ww]get.*|.*ruby.*|.*perl.*|.*masscan.*|.*nmap.*|^-?$`)"
       # - "traefik.http.routers.block-bad-useragents.entrypoints=web,websecure"
       - "traefik.http.routers.block-bad-useragents.entrypoints=web"
@@ -41,14 +40,6 @@ services:
       - "traefik.http.routers.http-catchall.priority=100"
       - "traefik.http.routers.http-catchall.middlewares=security-chain-enhanced@file"
       - "traefik.http.routers.http-catchall.service=noop@internal"
-
-      #https
-      # - "traefik.http.routers.https-catchall.rule=HostRegexp(`{host:.+}`)"
-      # - "traefik.http.routers.https-catchall.entrypoints=websecure"
-      # - "traefik.http.routers.https-catchall.priority=100"
-      # - "traefik.http.routers.https-catchall.middlewares=security-chain-enhanced@file"
-      # - "traefik.http.routers.https-catchall.tls=true"
-      # - "traefik.http.routers.https-catchall.service=noop@internal"
     networks:
       - rede-supabase
     restart: unless-stopped

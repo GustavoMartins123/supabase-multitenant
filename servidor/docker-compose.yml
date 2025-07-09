@@ -20,6 +20,8 @@ services:
       - ./volumes/db/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql:Z
       # PGDATA directory is persisted between restarts
       - ./volumes/db/data:/var/lib/postgresql/data:Z
+      # For WSL
+      # - postgres-data:/var/lib/postgresql/data:Z
       # Changes required for internal supabase data such as _analytics
       - ./volumes/db/_supabase.sql:/docker-entrypoint-initdb.d/migrations/97-_supabase.sql:Z
       # Changes required for Analytics support
@@ -311,7 +313,7 @@ services:
     labels:
       - traefik.enable=true
       # Whitelist só LAN
-      - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=10.72.0.59/32   # :contentReference[oaicite:6]{index=6}
+      - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32   # :contentReference[oaicite:6]{index=6}
       # Router
       - traefik.http.routers.projects.rule=PathPrefix(`/api/projects`)
       - traefik.http.routers.projects.middlewares=lanonly

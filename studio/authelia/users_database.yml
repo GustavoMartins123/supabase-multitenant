@@ -21,5 +21,6 @@ users:
     phone_number: ''
     groups:
     - active
+    - admin
     picture: ''
 ...

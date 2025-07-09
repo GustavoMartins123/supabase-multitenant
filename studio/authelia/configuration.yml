@@ -32,6 +32,10 @@ storage:
 authentication_backend:
   file:
     path: /config/users_database.yml
+    extra_attributes:
+      created_at:
+        multi_valued: false
+        value_type: string
     watch: true
     search:
       email: true

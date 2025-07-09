@@ -53,8 +53,41 @@ generate_postgres_password() {
 }
 
 get_server_ip() {
-  read -rp "IP ou Dominio do servidor: " server_ip
-  echo "$server_ip"
+    local server_ip
+    local validation_result
+    
+    while true; do
+        read -rp "IP ou Dominio do servidor: " server_ip
+
+        server_ip=$(echo "$server_ip" | xargs)
+        
+        if [[ -z "$server_ip" ]]; then
+            print_error "Entrada não pode estar vazia. Tente novamente."
+            continue
+        fi
+        
+        if [[ $server_ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            if validate_ip "$server_ip"; then
+                print_success "✓ IP válido: $server_ip"
+                break
+            else
+                print_error "IP inválido. Cada octeto deve estar entre 0-255."
+                continue
+            fi
+        elif [[ $server_ip =~ ^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$ ]]; then
+            if [[ $server_ip =~ \.$$ ]]; then
+                print_error "Domínio não pode terminar com ponto."
+                continue
+            fi
+            print_success "✓ Domínio válido: $server_ip"
+            break
+        else
+            print_error "Formato inválido. Digite um IP válido (ex: 192.168.1.100) ou domínio (ex: meusite.com)"
+            continue
+        fi
+    done
+    
+    echo "$server_ip"
 }
 
 main() {
@@ -70,9 +103,18 @@ main() {
         exit 1
     fi
     print_status "Detectando IP local da máquina..."
-    LOCAL_IP=$(hostname -I | awk '{print $1}')
+    LOCAL_IP=$(ip route get 8.8.8.8 | awk '{print $7; exit}')
+
     if [ -z "$LOCAL_IP" ]; then
-        print_error "Não foi possível detectar o IP local da máquina. Verifique a rede."
+        LOCAL_IP=$(grep nameserver /etc/resolv.conf | awk '{print $2}') 
+    fi
+
+    if [ -z "$LOCAL_IP" ]; then
+        LOCAL_IP=$(hostname -I | awk '{print $1}')
+    fi
+    
+    if [ -z "$LOCAL_IP" ]; then
+        print_error "Não foi possível detectar o IP local da máquina automaticamente. Verifique a conexão de rede."
         exit 1
     fi
 
@@ -229,6 +271,7 @@ main() {
     sed -i "s|<SEU_IP>|$LOCAL_IP|g" servidor/docker-compose.yml
     print_success "Api python configurada para permitir esse ip $LOCAL_IP a consultar ela."
 
+    sed -i "s|<SEU_IP>|$LOCAL_IP|g" studio/docker-compose.yml
 }
 main
 

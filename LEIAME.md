@@ -186,7 +186,7 @@ bash setup.sh
    ```bash
    # Inicia o Nginx/Lua e a interface Flutter.
    cd studio/
-   docker compose up -d
+   sudo docker compose up -d
    cd ..
    # Nota: na arquitetura base o studio serve para ser usado em uma máquina diferente do servidor,
    #mas deve funciona também em uma única máquina, vai da sua escolha.
