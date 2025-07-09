@@ -188,8 +188,8 @@ bash setup.sh
    cd studio/
    docker compose up -d
    cd ..
-   # Nota: o studio foi projetado para ser usado em uma máquina diferente do servidor,
-   # mas deve funcionar também em uma única máquina.
+   # Nota: na arquitetura base o studio serve para ser usado em uma máquina diferente do servidor,
+   #mas deve funciona também em uma única máquina, vai da sua escolha.
    ```
 
 ### 4. Verificação
