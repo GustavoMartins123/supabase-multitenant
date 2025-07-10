@@ -19,6 +19,7 @@ services:
       # Initialize the database settings with JWT_SECRET and JWT_EXP
       - ./volumes/db/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql:Z
       # PGDATA directory is persisted between restarts
+      # For WSL comment
       - ./volumes/db/data:/var/lib/postgresql/data:Z
       # For WSL uncomment
       # - postgres-data:/var/lib/postgresql/data:Z
@@ -58,7 +59,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXP: ${JWT_EXPIRY}
     # mem_limit: 8g
-    memswap_limit: 8g
+    # memswap_limit: 8g
     # command:
     #   [
     #     "postgres",
@@ -89,7 +90,6 @@ services:
       - wal_buffers=32MB
       - -c
       - temp_buffers=32MB
-      # Configurações de checkpoint e WAL
       - -c
       - checkpoint_completion_target=0.9
       - -c
@@ -108,7 +108,6 @@ services:
       - random_page_cost=1.1
       - -c
       - effective_io_concurrency=200
-      # Configurações de logging para ambiente de teste
       - -c
       - log_statement=none
       - -c
@@ -117,12 +116,10 @@ services:
       - log_lock_waits=on
       - -c
       - log_temp_files=0
-      # Configurações de autovacuum
       - -c
       - autovacuum_max_workers=3
       - -c
       - autovacuum_naptime=20s
-  #ver conexões no postgres = SELECT datname, count(*) FROM pg_stat_activity GROUP BY datname;
   realtime:
     build:
       context: .
@@ -190,7 +187,7 @@ services:
     restart: unless-stopped
     networks:
        rede-supabase:
-          ipv4_address: 172.20.200.11
+          ipv4_address: 172.60.200.11
     # ports:
     #   - ${POSTGRES_PORT}:5432
     #   - ${POOLER_PROXY_PORT_TRANSACTION}:6543
@@ -297,22 +294,20 @@ services:
       context: .
       dockerfile: ./api-internal/Dockerfile
     restart: unless-stopped
-    networks: [rede-supabase]                # mesma bridge do restante
-    expose: ["18000"]                         # visível APENAS na rede Docker :contentReference[oaicite:4]{index=4}
+    networks: [rede-supabase]               
+    expose: ["18000"]                         
     environment:
       DB_DSN: postgres://supabase_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/postgres
       FERNET_SECRET: ${FERNET_SECRET}
       NGINX_SHARED_TOKEN: ${NGINX_SHARED_TOKEN}
       PROJECT_DELETE_PASSWORD: ${PROJECT_DELETE_PASSWORD}
     volumes:
-      - ./projects:/docker/projects:rw        # bind-mount relativo  :contentReference[oaicite:0]{index=0}
+      - ./projects:/docker/projects:rw 
       - ./.env:/docker/.env:ro
       - /var/run/docker.sock:/var/run/docker.sock
     labels:
       - traefik.enable=true
-      # Whitelist só LAN
-      - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32   # :contentReference[oaicite:6]{index=6}
-      # Router
+      - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.60.0.0/16
       - traefik.http.routers.projects.rule=PathPrefix(`/api/projects`)
       - traefik.http.routers.projects.middlewares=lanonly
       - traefik.http.services.projects.loadbalancer.server.port=18000  
@@ -323,9 +318,9 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.20.0.0/16
-          ip_range: 172.20.0.0/18
-          gateway: 172.20.0.1
+        - subnet: 172.60.0.0/16
+          ip_range: 172.60.0.0/18
+          gateway: 172.60.0.1
 volumes:
   db-config:
   postgres-data:

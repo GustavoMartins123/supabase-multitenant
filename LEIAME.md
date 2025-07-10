@@ -71,7 +71,7 @@ flowchart TB
         subGraph3
   end
  subgraph subGraph5["Rede Docker"]
-        Network["🔗 rede-supabase\n172.20.0.0/16"]
+        Network["🔗 rede-supabase\n172.60.0.0/16"]
   end
     World["🌐 Internet/Usuários"] -- World --> Traefik["🚦 Traefik :80/:443\nGateway Principal"]
     Lan -- :9091 --> Authelia

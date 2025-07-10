@@ -7,8 +7,8 @@ services:
               chown -R 65534:65534 /config &&
               echo 'usersdb preparado'"
     volumes:
-      - ./authelia:/seed:ro      # fonte (host)
-      - usersdb:/config          # destino (volume)
+      - ./authelia:/seed:ro 
+      - usersdb:/config 
     restart: "no"
   authelia:
     image: authelia/authelia:4.39
@@ -21,9 +21,6 @@ services:
       - 9091:9091
     restart: unless-stopped
 
-
-    #Gerar certificado auto-assinado:
-    #docker run --rm -u "$(id -u):$(id -g)" -v "$(pwd)":/keys authelia/authelia:4.39 authelia crypto certificate rsa generate --common-name example.com --directory /keys
   nginx:
     build:
       context: .

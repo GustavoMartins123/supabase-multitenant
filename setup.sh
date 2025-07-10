@@ -52,6 +52,33 @@ generate_postgres_password() {
   openssl rand -base64 32 | tr '/+' '_-' | tr -d '\n'
 }
 
+validate_input() {
+    local input="$1"
+    if [[ $input =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "ip"
+    elif [[ $input =~ ^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$ ]]; then
+        echo "domain"
+    else
+        echo "invalid"
+    fi
+}
+validate_ip() {
+    local ip="$1"
+    local IFS='.'
+    local -a octets=($ip)
+    
+    if [[ ${#octets[@]} -ne 4 ]]; then
+        return 1
+    fi
+
+    for octet in "${octets[@]}"; do
+        if ! [[ "$octet" =~ ^[0-9]+$ ]] || [ "$octet" -lt 0 ] || [ "$octet" -gt 255 ]; then
+            return 1
+        fi
+    done
+    
+    return 0
+}
 get_server_ip() {
     local server_ip
     local validation_result
@@ -62,27 +89,31 @@ get_server_ip() {
         server_ip=$(echo "$server_ip" | xargs)
         
         if [[ -z "$server_ip" ]]; then
-            print_error "Entrada não pode estar vazia. Tente novamente."
+            print_error "Entrada não pode estar vazia. Tente novamente." >&2
             continue
         fi
-        
+
+        if [[ "$server_ip" == "127.0.0.1" || "$server_ip" == "localhost" ]]; then
+            print_error "Uso de 'localhost' ou '127.0.0.1' não é permitido. Digite um IP da rede ou domínio válido." >&2
+            continue
+        fi
         if [[ $server_ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             if validate_ip "$server_ip"; then
-                print_success "✓ IP válido: $server_ip"
+                print_success "✓ IP válido: $server_ip" >&2
                 break
             else
-                print_error "IP inválido. Cada octeto deve estar entre 0-255."
+                print_error "IP inválido." >&2
                 continue
             fi
         elif [[ $server_ip =~ ^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$ ]]; then
             if [[ $server_ip =~ \.$$ ]]; then
-                print_error "Domínio não pode terminar com ponto."
+                print_error "Domínio não pode terminar com ponto." >&2
                 continue
             fi
-            print_success "✓ Domínio válido: $server_ip"
+            print_success "✓ Domínio válido: $server_ip" >&2
             break
         else
-            print_error "Formato inválido. Digite um IP válido (ex: 192.168.1.100) ou domínio (ex: meusite.com)"
+            print_error "Formato inválido. Digite um IP válido (ex: 192.168.1.100), domínio (ex: meusite.com)" >&2
             continue
         fi
     done
@@ -126,7 +157,7 @@ main() {
 
     SERVER_IP=$(get_server_ip)
     SERVER_IP=$(echo "$SERVER_IP" | xargs)
-
+    # LOCAL_IP=$SERVER_IP
     print_status "Configurando servidor principal..."
     
     if [[ ! -f "servidor/.env.example" ]]; then
@@ -183,11 +214,12 @@ main() {
     sed -i "s|FERNET_SECRET=pass|FERNET_SECRET=$SHARED_FERNET_SECRET|g" studio/.env
     sed -i "s|NGINX_SHARED_TOKEN=pass|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" studio/.env
     sed -i "s|COOKIE_SIGN_SECRET=pass|COOKIE_SIGN_SECRET=$COOKIE_SIGN_SECRET|g" studio/.env
-    if [[ "$SERVER_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ || "$SERVER_IP" =~ : ]]; then
-        PROTO="http"         # IPv4 ou IPv6 → HTTP    
+    if [[ "$SERVER_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
+    [[ "$SERVER_IP" =~ : ]]; then
+        PROTO="http"
     else
-        PROTO="https"        
-    fi  
+        PROTO="https"
+    fi 
     sed -i "s|^SERVER_DOMAIN=.*|SERVER_DOMAIN=${PROTO}://${SERVER_IP}|g" studio/.env
     sed -i "s|BACKEND_PROTO=pass|BACKEND_PROTO=$PROTO|g" studio/.env
     print_success "Arquivo studio/.env configurado com sucesso!"
@@ -223,7 +255,7 @@ main() {
     print_status "Diretório de destino dos certificados: $ABSOLUTE_SSL_DIR"
 
     print_status "Executando o container do Authelia para criar os arquivos..."
-    if docker run --rm -u "$(id -u):$(id -g)" -v "$ABSOLUTE_SSL_DIR:/data/authelia/keys" authelia/authelia:latest authelia crypto certificate rsa generate --common-name "$LOCAL_IP" --directory /data/authelia/keys; then
+    if docker run --rm -u "$(id -u):$(id -g)" -v "$ABSOLUTE_SSL_DIR:/data/authelia/keys" authelia/authelia:latest authelia crypto certificate rsa generate --common-name "authelia" --directory /data/authelia/keys; then
         print_success "Certificados gerados com sucesso pelo Authelia."
     else
         print_error "Falha ao executar o container do Authelia. Verifique se o Docker está em execução."
@@ -269,9 +301,8 @@ main() {
     fi
     print_status "Configurando a whitelist da api python "
     sed -i "s|<SEU_IP>|$LOCAL_IP|g" servidor/docker-compose.yml
-    print_success "Api python configurada para permitir esse ip $LOCAL_IP a consultar ela."
-
     sed -i "s|<SEU_IP>|$LOCAL_IP|g" studio/docker-compose.yml
+    print_success "Api python configurada para permitir esse ip $LOCAL_IP a consultar ela."
 }
 main
 

@@ -1,8 +1,8 @@
 server:
   address: tcp://0.0.0.0:9091/
   tls:
-    certificate: /config/ssl/public.crt
-    key:         /config/ssl/private.pem 
+    certificate: /config/ssl/ca.pem
+    key:         /config/ssl/ca.key 
 
 log:
   level: info
@@ -51,12 +51,16 @@ access_control:
       - ["group:active"]
 
 notifier:
-  smtp:
-    address: 'submission://smtp.gmail.com:587'
-    timeout: '10s'
-    username: 'exemplo'
-    password: 'exemplo'
-    sender: "Exemplo<exemplo@example.com>"
-    identifier: 'exemplo'
-    subject: "[Authelia] {title}"
-    startup_check_address: 'exemplo@example.com'
+  filesystem:
+    filename: /config/notifications.txt
+
+# notifier:
+#   smtp:
+#     address: 'submission://smtp.gmail.com:587'
+#     timeout: '10s'
+#     username: 'exemplo'
+#     password: 'exemplo'
+#     sender: "Exemplo<exemplo@example.com>"
+#     identifier: 'exemplo'
+#     subject: "[Authelia] {title}"
+#     startup_check_address: 'exemplo@example.com'

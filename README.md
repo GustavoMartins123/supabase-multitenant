@@ -73,7 +73,7 @@ flowchart TB
         subGraph3
   end
  subgraph subGraph5["Docker Network"]
-        Network["🔗 rede-supabase\n172.20.0.0/16"]
+        Network["🔗 rede-supabase\n172.60.0.0/16"]
   end
     World["🌐 Internet/Users"] -- World --> Traefik["🚦 Traefik :80/:443\nMain Gateway"]
     Lan -- :9091 --> Authelia
@@ -163,36 +163,48 @@ bash setup.sh
 # The server IP or Domain requested by the script is where the database and Traefik will be hosted.
 ```
 
-### 3\. Execution Order
+### 3\. Starting the containers
 
-1.  **Start the Base Services (Database):**
+* You have two options for running the platform. Choose the one that best fits your needs.
 
-    ```bash
-    # Starts PostgreSQL, the management API, etc.
-    cd servidor/
-    docker compose --env-file secrets/.env --env-file .env up -d
-    cd .. 
-    ```
+**Option 1: Automated Start (Recommended)**
 
-2.  **Start the Edge Gateway (Traefik):**
+* For most use cases, especially for a first run, the provided script handles starting all services in the correct order.
 
-    ```bash
-    # Starts the reverse proxy that manages all external traffic.
-    cd traefik/
-    docker compose up -d
-    cd ..
-    ```
+```bash
+# This will start the core services, the gateway, and the management UI
+bash start.sh
+```
+**Option 2: Manual Start (For Control or Debugging)**
 
-3.  **Start the Management Interface (Studio):**
+  1.  **Start the Base Services (Database):**
 
-    ```bash
-    # Starts Nginx/Lua and the Flutter interface.
-    cd studio/
-    sudo docker compose up -d
-    cd ..
-    # Note: In the base architecture, the studio is intended to be used on a machine other than the server,
-    # but it should also work on a single machine, it's up to you.
-    ```
+      ```bash
+      # Starts PostgreSQL, the management API, etc.
+      cd servidor/
+      docker compose --env-file secrets/.env --env-file .env up -d
+      cd .. 
+      ```
+
+  2.  **Start the Edge Gateway (Traefik):**
+
+      ```bash
+      # Starts the reverse proxy that manages all external traffic.
+      cd traefik/
+      docker compose up -d
+      cd ..
+      ```
+
+  3.  **Start the Management Interface (Studio):**
+
+      ```bash
+      # Starts Nginx/Lua and the Flutter interface.
+      cd studio/
+      sudo docker compose up -d
+      cd ..
+      # Note: In the base architecture, the studio is intended to be used on a machine other than the server,
+      # but it should also work on a single machine, it's up to you.
+      ```
 
 ### 4\. Verification
 
