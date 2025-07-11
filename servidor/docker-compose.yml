@@ -307,11 +307,12 @@ services:
       - ./.env:/docker/.env:ro
       - /var/run/docker.sock:/var/run/docker.sock
     labels:
-      - traefik.enable=true
-      - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.20.0.0/16
+            - traefik.enable=true
+      - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=172.20.0.0/16
       - traefik.http.routers.projects.rule=PathPrefix(`/api/projects`)
+      - traefik.http.routers.projects-api.entrypoints=web-internal
       - traefik.http.routers.projects.middlewares=lanonly
-      - traefik.http.services.projects.loadbalancer.server.port=18000  
+      - traefik.http.services.projects.loadbalancer.server.port=18000 
 
 networks:
   rede-supabase:

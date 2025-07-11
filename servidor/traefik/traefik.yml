@@ -1,6 +1,8 @@
 entryPoints:
   web:
     address: ":80"
+  web-internal:
+    address: ":8082"
 providers:
   docker:
     exposedByDefault: false
