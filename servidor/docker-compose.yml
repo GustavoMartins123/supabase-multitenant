@@ -2,7 +2,8 @@ services:
 #docker compose  --env-file secrets/.env   --env-file .env up --build -d
   db:
     container_name: supabase-db
-    image: supabase/postgres:15.8.1.071
+    build:
+      context: ./volumes/db
     restart: unless-stopped
     env_file:
       - secrets/.env
@@ -187,7 +188,7 @@ services:
     restart: unless-stopped
     networks:
        rede-supabase:
-          ipv4_address: 172.60.200.11
+          ipv4_address: 172.20.200.11
     # ports:
     #   - ${POSTGRES_PORT}:5432
     #   - ${POOLER_PROXY_PORT_TRANSACTION}:6543
@@ -307,7 +308,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     labels:
       - traefik.enable=true
-      - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.60.0.0/16
+      - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.20.0.0/16
       - traefik.http.routers.projects.rule=PathPrefix(`/api/projects`)
       - traefik.http.routers.projects.middlewares=lanonly
       - traefik.http.services.projects.loadbalancer.server.port=18000  
@@ -318,9 +319,9 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.60.0.0/16
-          ip_range: 172.60.0.0/18
-          gateway: 172.60.0.1
+        - subnet: 172.20.0.0/16
+          ip_range: 172.20.0.0/18
+          gateway: 172.20.0.1
 volumes:
   db-config:
   postgres-data:

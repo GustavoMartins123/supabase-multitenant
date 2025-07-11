@@ -42,16 +42,27 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
         throw Exception('Erro ${response.statusCode}: ${response.body}');
       }
 
+      if (response.body.isEmpty) {
+        throw Exception('Resposta vazia da API');
+      }
+
       final data = jsonDecode(response.body);
+    
+      if (data == null) {
+        throw Exception('Dados inválidos retornados pela API');
+      }
+
       final resp = UserListResponse.fromJson(data);
 
-      // coloca "eu" no início
-      final session = Session();
-      resp.users.sort((a, b) {
-        if (a.id == session.myId) return -1;
-        if (b.id == session.myId) return 1;
-        return 0;
-      });
+      if (resp.users.isNotEmpty) {
+        final session = Session();
+        resp.users.sort((a, b) {
+          if (a.id == session.myId) return -1;
+          if (b.id == session.myId) return 1;
+          return 0;
+        });
+      }
+    
       return resp;
     } catch (e) {
       throw Exception('Erro ao carregar usuários: $e');
@@ -61,7 +72,6 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   Future<void> _toggleUserStatus(UserInfo user) async {
     if (_isLoading) return;
 
-    // Confirmação
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -203,7 +213,6 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
 
           return Column(
             children: [
-              // Resumo
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
@@ -237,7 +246,6 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
                 ),
               ),
 
-              // Lista de usuários
               Expanded(
                 child: data.users.isEmpty
                     ? const Center(
@@ -272,7 +280,6 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   }
 }
 
-// Resto das classes permanecem iguais...
 class _SummaryItem extends StatelessWidget {
   const _SummaryItem({
     required this.icon,
@@ -324,8 +331,6 @@ class _UserCard extends StatelessWidget {
   final bool canToggle;
   @override
   Widget build(BuildContext context) {
-    // final theme = Theme.of(context);
-
     return Card(
       color: isMe ? Colors.green.shade50 : null,
       margin: const EdgeInsets.only(bottom: 8),
@@ -411,8 +416,6 @@ class _UserCard extends StatelessWidget {
     );
   }
 }
-
-// Models
 class UserListResponse {
   final List<UserInfo> users;
   final UserSummary summary;
@@ -425,11 +428,20 @@ class UserListResponse {
   });
 
   factory UserListResponse.fromJson(Map<String, dynamic> json) {
+    List<UserInfo> usersList = [];
+    if (json['users'] != null) {
+      if (json['users'] is List) {
+        usersList = (json['users'] as List)
+            .map((u) => UserInfo.fromJson(u))
+            .toList();
+      } else if (json['users'] is Map && (json['users'] as Map).isEmpty) {
+        usersList = [];
+      }
+    }
+  
     return UserListResponse(
-      users: (json['users'] as List)
-          .map((u) => UserInfo.fromJson(u))
-          .toList(),
-      summary: UserSummary.fromJson(json['summary']),
+      users: usersList,
+      summary: UserSummary.fromJson(json['summary'] ?? {}),
       timestamp: json['timestamp'] ?? 0,
     );
   }
@@ -454,11 +466,11 @@ class UserInfo {
 
   factory UserInfo.fromJson(Map<String, dynamic> json) {
     return UserInfo(
-      id: json['id'],
-      username: json['username'],
-      displayName: json['display_name'],
-      isActive: json['is_active'],
-      status: json['status'],
+      id: json['id'] ?? '',
+      username: json['username'] ?? '',
+      displayName: json['display_name'] ?? '',
+      isActive: json['is_active'] ?? false,
+      status: json['status'] ?? 'unknown',
       emailHint: json['email_hint'] ?? '',
     );
   }
@@ -477,9 +489,9 @@ class UserSummary {
 
   factory UserSummary.fromJson(Map<String, dynamic> json) {
     return UserSummary(
-      total: json['total'],
-      active: json['active'],
-      inactive: json['inactive'],
+      total: json['total'] ?? 0,
+      active: json['active'] ?? 0,
+      inactive: json['inactive'] ?? 0,
     );
   }
 }

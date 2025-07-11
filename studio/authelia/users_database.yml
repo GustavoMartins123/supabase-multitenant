@@ -9,7 +9,8 @@ users:
     middle_name: ''
     locale: ''
     phone_extension: ''
-    extra: ~
+    extra:
+      created_at: ts:2025-07-04T13:19:01Z
     family_name: ''
     given_name: ''
     nickname: ''

@@ -124,7 +124,7 @@ realtime_tenant() {
         \"name\":\"$PROJECT_ID\",
         \"external_id\":\"$PROJECT_ID\",
         \"jwt_secret\":\"$JWT_SECRET\",
-        \"max_concurrent_users\":\"1000\",
+        \"max_concurrent_users\":\"$MAX_CONCURRENT_USERS\",
         \"extensions\":[{
           \"type\":\"postgres_cdc_rls\",
           \"settings\":{

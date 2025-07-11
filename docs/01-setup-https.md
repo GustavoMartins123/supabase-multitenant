@@ -15,9 +15,20 @@ Antes de prosseguir, certifique-se de que:
 
 ### Passo 1: Habilitar TLS no `traefik.yml`
 
-Abra o arquivo `servidor/traefik/traefik.yml` e faça as seguintes alterações:
+Para que o Traefik possa gerar e armazenar os certificados SSL do Let's Encrypt, precisamos primeiro ajustar as permissões do arquivo de armazenamento e depois editar sua configuração principal.
 
-**1.1. Ativar Redirecionamento para HTTPS**
+**1.1. Ajustar Permissões do `acme.json` (Passo Crítico)**
+
+Execute o seguinte comando dentro da pasta `servidor/traefik/` para garantir que o Traefik tenha permissão para gerenciar os certificados de forma segura.
+
+```bash
+# Define as permissões restritivas (apenas o proprietário pode ler/escrever)
+chmod 600 acme.json
+```
+
+Agora, abra o arquivo `servidor/traefik/traefik.yml` e faça as seguintes alterações:
+
+**1.2. Ativar Redirecionamento para HTTPS**
 
 Esta configuração instrui o Traefik a redirecionar todo o tráfego da porta 80 (HTTP) para a porta 443 (HTTPS).
 
@@ -36,7 +47,7 @@ Esta configuração instrui o Traefik a redirecionar todo o tráfego da porta 80
         address: ":443"
     ```
 
-**1.2. Configurar o Provedor de Certificados (Let's Encrypt)**
+**1.3. Configurar o Provedor de Certificados (Let's Encrypt)**
 
 Isso informa ao Traefik como obter os certificados SSL.
 
@@ -53,7 +64,7 @@ Isso informa ao Traefik como obter os certificados SSL.
             entryPoint: web
     ```
 
-**1.3. Definir Padrões de Segurança TLS (Opcional, mas recomendado)**
+**1.4. Definir Padrões de Segurança TLS (Opcional, mas recomendado)**
 
 Este bloco garante que apenas cifras de criptografia modernas e seguras sejam utilizadas.
 
@@ -230,9 +241,10 @@ Os comandos abaixo forçam a recriação dos contêineres, garantindo que eles u
 # Inicia o PostgreSQL, a API de gerenciamento, etc.
 docker compose -f servidor/docker-compose.yml --env-file servidor/secrets/.env --env-file servidor/.env up -d --force-recreate
 ```
-Reinicie o Gateway de Borda (Traefik):
+Reinicie o Gateway de Borda (Traefik) e de permissão para escrita ao arquivo 'acme.json':
 
 ```bash
+chmod 600 servidor/traefik/acme.json
 # Aplica as novas configurações de HTTPS e resolvedores de certificado.
 docker compose -f servidor/traefik/docker-compose.yml up -d --force-recreate
 ```

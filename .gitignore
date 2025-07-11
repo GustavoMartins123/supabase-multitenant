@@ -3,14 +3,6 @@ servidor/docker/projects/**
 servidor/docker/.env
 
 servidor/docker/volumes/db/data/*
-#servidor/docker/secrets/*
+servidor/docker/secrets/*
 
 studio/.env
-
-studio-backup/*
-servidor-backup/* 
-
-studio-backup.zip
-supabase-backup.zip
-
-studio copy/*

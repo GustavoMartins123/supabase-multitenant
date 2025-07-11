@@ -71,7 +71,7 @@ flowchart TB
         subGraph3
   end
  subgraph subGraph5["Rede Docker"]
-        Network["🔗 rede-supabase\n172.60.0.0/16"]
+        Network["🔗 rede-supabase\n172.20.0.0/16"]
   end
     World["🌐 Internet/Usuários"] -- World --> Traefik["🚦 Traefik :80/:443\nGateway Principal"]
     Lan -- :9091 --> Authelia
@@ -161,36 +161,51 @@ bash setup.sh
 # O IP ou domínio do servidor solicitado pelo script é onde o banco de dados e o Traefik serão hospedados.
 ```
 
-### 3. Ordem de execução
+### 3. Iniciando os Contêineres
 
-1. **Inicie os Serviços Base (Banco de Dados):**
+Você tem duas opções para rodar a plataforma. Escolha a que melhor se adapta às suas necessidades.
 
-   ```bash
-   # Inicia o PostgreSQL, a API de gerenciamento, etc.
-   cd servidor/
-   docker compose --env-file secrets/.env --env-file .env up -d
-   cd ..
-   ```
+**Opção 1: Início Automatizado (Recomendado)**
 
-2. **Inicie o Gateway de Borda (Traefik):**
+Para a maioria dos casos de uso, especialmente para um primeiro teste, o script `start.sh` fornecido cuida de iniciar todos os serviços na ordem correta.
 
-   ```bash
-   # Inicia o proxy reverso que gerencia todo o tráfego externo.
-   cd traefik/
-   docker compose up -d
-   cd ..
-   ```
+```bash
+# Este comando irá iniciar os serviços principais, o gateway e a interface de gerenciamento
+bash start.sh
+```
+---
+**Opção 2: Início Manual (Para Controle ou Depuração)**
 
-3. **Inicie a Interface de Gerenciamento (Studio):**
+Se você prefere iniciar cada parte da plataforma individualmente para ter mais controle ou para depurar um serviço específico, execute os seguintes comandos **em vez de** usar o `start.sh`.
 
-   ```bash
-   # Inicia o Nginx/Lua e a interface Flutter.
-   cd studio/
-   sudo docker compose up -d
-   cd ..
-   # Nota: na arquitetura base o studio serve para ser usado em uma máquina diferente do servidor,
-   #mas deve funciona também em uma única máquina, vai da sua escolha.
-   ```
+1.  **Inicie os Serviços Base (Banco de Dados):**
+
+    ```bash
+    # Inicia o PostgreSQL, a API de gerenciamento, etc.
+    cd servidor/
+    docker compose --env-file secrets/.env --env-file .env up -d
+    cd .. 
+    ```
+
+2.  **Inicie o Gateway de Borda (Traefik):**
+
+    ```bash
+    # Inicia o proxy reverso que gerencia todo o tráfego externo.
+    cd traefik/
+    docker compose up -d
+    cd ..
+    ```
+
+3.  **Inicie a Interface de Gerenciamento (Studio):**
+
+    ```bash
+    # Inicia o Nginx/Lua e a interface Flutter.
+    cd studio/
+    sudo docker compose up -d
+    cd ..
+    # Nota: na arquitetura base o studio serve para ser usado em uma máquina diferente do servidor,
+    # mas deve funcionar também em uma única máquina, vai da sua escolha.
+    ```
 
 ### 4. Verificação
 
