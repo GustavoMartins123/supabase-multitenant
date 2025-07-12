@@ -307,7 +307,7 @@ services:
       - ./.env:/docker/.env:ro
       - /var/run/docker.sock:/var/run/docker.sock
     labels:
-            - traefik.enable=true
+      - traefik.enable=true
       - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=172.20.0.0/16
       - traefik.http.routers.projects.rule=PathPrefix(`/api/projects`)
       - traefik.http.routers.projects-api.entrypoints=web-internal
