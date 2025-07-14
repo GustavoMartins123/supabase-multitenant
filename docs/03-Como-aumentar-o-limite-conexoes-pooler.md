@@ -27,7 +27,7 @@ Depois de editar, recrie o Supavisor/pooler normalmente para que os novos projet
 docker compose -f servidor/docker-compose.yml \
   --env-file servidor/secrets/.env \
   --env-file servidor/.env \
-  up -d --force-recreate supavisor
+  up -d --force-recreate supabase-pooler
 ```
 
 ---
@@ -66,7 +66,7 @@ WHERE  tenant_external_id = 'meu_projeto'
 4. Reinicie o supavisor:
 
 ```bash
-docker restart supavisor
+docker restart supabase-pooler
 ```
 
 ---
