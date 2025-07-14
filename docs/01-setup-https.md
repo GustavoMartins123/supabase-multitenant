@@ -157,6 +157,38 @@ Este roteador funciona como uma "rede de segurança" para conexões HTTPS, captu
 ```
 Importante: Este roteador complementa o http-catchall existente, garantindo que tanto conexões HTTP quanto HTTPS não autorizadas sejam tratadas com as mesmas políticas de segurança.
 
+**3.2. Roteador da API de Projetos (projects-api)**
+
+Para garantir que a api que gerencia os projetos responda a partir do dominio faça o seguinte:
+ 
+* Edite o arquivo que fica em "servidor/docker-compose.yml"
+* Role até achar o "projects-api"
+* Edite as labels
+
+```yml
+labels:
+  - traefik.enable=true
+  - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.20.0.0/16
+  - traefik.http.routers.projects.rule=PathPrefix(`/api/projects`)
+  - traefik.http.routers.projects.middlewares=lanonly, api-security-chain@file
+  - traefik.http.services.projects.loadbalancer.server.port=18000  
+```
+
+DEPOIS:
+```yml
+labels:
+  - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.20.0.0/16
+  - traefik.http.routers.projects.rule=Host(`seu_dominio`) && PathPrefix(`/api/projects`)
+  - traefik.http.routers.projects.priority=100
+  - traefik.http.routers.projects.entrypoints=websecure
+  - traefik.http.routers.projects.tls=true
+  - traefik.http.routers.projects.tls.certresolver=letsencrypt
+  - traefik.http.routers.projects.middlewares=lanonly, api-security-chain@file
+  - traefik.http.services.projects.loadbalancer.server.port=18000
+```
+
+Nota: troque 'seu_dominio' pelo dominio real que será usado.
+
 ## Passo 4: Configurar os Roteadores dos Projetos para HTTPS
 
 * Esta é a etapa final para expor suas aplicações Supabase de forma segura.
@@ -170,7 +202,6 @@ Importante: Este roteador complementa o http-catchall existente, garantindo que 
     Edite os labels do serviço nginx para que fiquem como no exemplo "DEPOIS" abaixo.
 
 ```yml
-
 labels:
   - "traefik.enable=true"
   # - "traefik.http.routers.supabase-nginx-{{project_id}}.rule=Host(`seu_dominio`) && PathPrefix(`/{{project_id}}`)"
