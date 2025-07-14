@@ -275,7 +275,6 @@ docker compose -f servidor/docker-compose.yml --env-file servidor/secrets/.env -
 Reinicie o Gateway de Borda (Traefik) e de permissão para escrita ao arquivo 'acme.json':
 
 ```bash
-chmod 600 servidor/traefik/acme.json
 # Aplica as novas configurações de HTTPS e resolvedores de certificado.
 docker compose -f servidor/traefik/docker-compose.yml up -d --force-recreate
 ```
