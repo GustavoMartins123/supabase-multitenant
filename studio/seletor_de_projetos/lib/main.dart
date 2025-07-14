@@ -72,21 +72,34 @@ class _ProjectListPageState extends State<ProjectListPage> {
     }
   }
   Future<void> _createAndWait(String name) async {
-    setState(() => _creating = true);
+    setState(() {
+      _creating = true;
+      _projects.add({
+        'name': name,
+        'anon_token': '',
+        'is_loading': true,
+      });
+    });
+
 
     final res = await http.post(Uri.parse('/api/projects'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'name': name}));
     final job = Job.fromResponse(res);
     if (job == null) {
-      _snack('Erro ao enfileirar');
-      setState(() => _creating = false);
+      setState(() {
+        _creating = false;
+        _projects.removeWhere((p) => p['is_loading'] == true);
+      });
       return;
     }
 
     _snack('Gerando… aguarde');
     final ok = await ProjectService.waitUntilReady(job.id);
-    setState(() => _creating = false);
+    setState(() {
+      _creating = false;
+      _projects.removeWhere((p) => p['is_loading'] == true);
+    });
 
     _snack(ok ? 'Projeto criado!' : 'Falhou ao criar');
     if (ok) await _fetchProjects();
@@ -155,7 +168,8 @@ class _ProjectListPageState extends State<ProjectListPage> {
                 itemBuilder: (_, i) => _ProjectCard(
                   ref:  _projects[i]['name'] as String,
                   anonKey: _projects[i]['anon_token'] ?? '',
-                  onTap: () => _openProject( _projects[i]['name']),
+                  isLoading: _projects[i]['is_loading'] == true,
+                  onTap: _projects[i]['is_loading'] == true ? () {} : () => _openProject( _projects[i]['name']),
                   onDeleted: () {
                     setState(() {
                       _projects.removeAt(i);
@@ -186,17 +200,43 @@ class _ProjectListPageState extends State<ProjectListPage> {
 
 class _ProjectCard extends StatefulWidget {
   const _ProjectCard(
-      {required this.ref, required this.anonKey, required this.onTap, required this.onDeleted});
+      {required this.ref, required this.anonKey, required this.onTap, required this.onDeleted, this.isLoading = false});
   final String ref;
   final String anonKey;
   final VoidCallback onTap;
   final VoidCallback onDeleted;
+  final bool isLoading;
   @override
   State<_ProjectCard> createState() => _ProjectCardState();
 }
 
-class _ProjectCardState extends State<_ProjectCard> {
+class _ProjectCardState extends State<_ProjectCard> with TickerProviderStateMixin{
   bool _hover = false;
+  late AnimationController _loadingController;
+  late Animation<double> _loadingAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.isLoading) {
+      _loadingController = AnimationController(
+        duration: const Duration(milliseconds: 1500),
+        vsync: this,
+      );
+      _loadingAnimation = Tween<double>(begin: 0.3, end: 1.0).animate(
+        CurvedAnimation(parent: _loadingController, curve: Curves.easeInOut),
+      );
+      _loadingController.repeat(reverse: true);
+    }
+  }
+  
+  @override
+  void dispose() {
+    if (widget.isLoading) {
+      _loadingController.dispose();
+    }
+    super.dispose();
+  }
 
   Future<void> _openSettings() async {
     final deleted = await showDialog<String>(
@@ -210,9 +250,84 @@ class _ProjectCardState extends State<_ProjectCard> {
   }
 
   @override
-  @override
   Widget build(BuildContext ctx) {
     final t = Theme.of(ctx);
+    if (widget.isLoading) {
+      return AnimatedBuilder(
+        animation: _loadingAnimation,
+        builder: (context, child) {
+          return Opacity(
+            opacity: _loadingAnimation.value,
+            child: Card(
+              elevation: 2,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              child: AnimatedOpacity(
+                opacity: 0.5,
+                duration: const Duration(milliseconds: 1000),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 12),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Center(
+                              child: Container(
+                                height: 24,
+                                width: 120,
+                                decoration: BoxDecoration(
+                                  color: Colors.grey[300],
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                              ),
+                            ),
+                          ),
+                          Container(
+                            height: 24,
+                            width: 24,
+                            decoration: BoxDecoration(
+                              color: Colors.grey[300],
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ],
+                      ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Container(
+                              height: 16,
+                              width: 100,
+                              decoration: BoxDecoration(
+                                color: Colors.grey[300],
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            height: 18,
+                            width: 18,
+                            decoration: BoxDecoration(
+                              color: Colors.grey[300],
+                              borderRadius: BorderRadius.circular(9),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+      );
+    }
+
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
