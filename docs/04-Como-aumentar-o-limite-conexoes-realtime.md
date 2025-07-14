@@ -1,13 +1,13 @@
 # Aumentando numero de conexões do realtime
 
 
-### 1. Entendendo os Parâmetros de Limite
+### 1. Parâmetros que importam
 
-O Supabase Realtime utiliza dois parâmetros principais para controle de conexões:
+| Variável               | Pra que serve                                                                          |
+| ---------------------- | -------------------------------------------------------------------------------------- |
+| `NUM_ACCEPTORS`        | Limite global de conexões simultâneas aceitas pelo serviço Realtime (todos os tenants) |
+| `MAX_CONCURRENT_USERS` | Limite de conexões simultâneas por tenant/projeto registrado no Realtime               |
 
-* NUM_ACCEPTORS: Limite global de conexões simultâneas aceitas pelo serviço Realtime (engloba todos os tenants).
-
-* MAX_CONCURRENT_USERS: Limite de conexões simultâneas por tenant/projeto registrado no Realtime.
 
 ### 2. Ajustando Limites para Novos Projetos
 
