@@ -300,7 +300,7 @@ main() {
         print_warning "Arquivo de configuração do Authelia ($authelia_config) não encontrado."
     fi
     print_status "Configurando a whitelist da api python "
-    sed -i "s|<SEU_IP>|$LOCAL_IP|g" servidor/docker-compose.yml
+    sed -i "s|<SEU_IP>/32|$LOCAL_IP/32|g" servidor/docker-compose.yml
     sed -i "s|<SEU_IP>|$LOCAL_IP|g" studio/docker-compose.yml
     print_success "Api python configurada para permitir esse ip $LOCAL_IP a consultar ela."
 }
