@@ -146,38 +146,34 @@ supavisor_tenant() {
     docker_must_exist supabase-pooler
     
     local pg_version; pg_version="$(get_pg_version)"
-    local json
     
-    json=$(jq -n \
-        --arg id "$PROJECT_ID" \
-        --arg host "$POSTGRES_HOST" \
-        --arg port "$POSTGRES_PORT" \
-        --arg dbpass "$POSTGRES_PASSWORD" \
-        --arg pgver "$pg_version" \
-        --arg default_pool_size "$POOLER_DEFAULT_POOL_SIZE" \
-        --arg user_pool_size "$POOLER_DEFAULT_POOL_SIZE" \
-        '{
-            tenant: {
-                external_id: $id,
-                db_host: $host,
-                db_port: $port,
-                db_database: ("_supabase_" + $id),
-                ip_version: "auto",
-                enforce_ssl: false,
-                require_user: false,
-                auth_query: "SELECT * FROM pgbouncer.get_auth($1)",
-                default_max_clients: 600,
-                default_pool_size: ($default_pool_size | tonumber),
-                default_parameter_status: {server_version: $pgver},
-                users: [{
-                    db_user: "pgbouncer",
-                    db_password: $dbpass,
-                    mode_type: "transaction",
-                    pool_size: ($user_pool_size | tonumber),
-                    is_manager: true
-                }]
-            }
-        }')
+    # Construção manual do JSON
+    local json='{
+        "tenant": {
+            "external_id": "'"$PROJECT_ID"'",
+            "db_host": "'"$POSTGRES_HOST"'",
+            "db_port": "'"$POSTGRES_PORT"'",
+            "db_database": "_supabase_'"$PROJECT_ID"'",
+            "ip_version": "auto",
+            "enforce_ssl": false,
+            "require_user": false,
+            "auth_query": "SELECT * FROM pgbouncer.get_auth($1)",
+            "default_max_clients": 600,
+            "default_pool_size": '"$POOLER_DEFAULT_POOL_SIZE"',
+            "default_parameter_status": {
+                "server_version": "'"$pg_version"'"
+            },
+            "users": [
+                {
+                    "db_user": "pgbouncer",
+                    "db_password": "'"$POSTGRES_PASSWORD"'",
+                    "mode_type": "transaction",
+                    "pool_size": '"$POOLER_DEFAULT_POOL_SIZE"',
+                    "is_manager": true
+                }
+            ]
+        }
+    }'
     
     docker exec supabase-pooler curl -s -X PUT "http://localhost:4000/api/tenants/$PROJECT_ID" \
         -H 'Content-Type: application/json' \

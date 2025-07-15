@@ -143,7 +143,6 @@ flowchart TB
 |---|---|
 | Docker & Docker Compose | Installed and running. |
 | User    | With permission to run docker commands. |
-| jq    | Installed on the host machine. |
 
 -----
 

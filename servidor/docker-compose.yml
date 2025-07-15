@@ -324,4 +324,5 @@ networks:
           gateway: 172.20.0.1
 volumes:
   db-config:
-  postgres-data:
+  # For WSL uncomment
+  # postgres-data:
