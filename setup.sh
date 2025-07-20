@@ -255,7 +255,7 @@ main() {
     print_status "Diretório de destino dos certificados: $ABSOLUTE_SSL_DIR"
 
     print_status "Executando o container do Authelia para criar os arquivos..."
-    if docker run --rm -u "$(id -u):$(id -g)" -v "$ABSOLUTE_SSL_DIR:/data/authelia/keys" authelia/authelia:latest authelia crypto certificate rsa generate --common-name "authelia" --directory /data/authelia/keys; then
+    if docker run --rm -u "$(id -u):$(id -g)" -v "$ABSOLUTE_SSL_DIR:/data/authelia/keys" authelia/authelia:4.39 authelia crypto certificate rsa generate --common-name "authelia" --directory /data/authelia/keys; then
         print_success "Certificados gerados com sucesso pelo Authelia."
     else
         print_error "Falha ao executar o container do Authelia. Verifique se o Docker está em execução."
