@@ -1,0 +1,53 @@
+api:
+  enabled: true         # UI, /health, /topology
+  address: 0.0.0.0:8686 # porta da UI
+
+######################## 1. SOURCE ##########################################
+sources:
+  docker_logs:
+    type: docker_logs
+    exclude_containers:
+      - supabase-vector-global    # evita recursão
+    # - traefik
+
+######################## 2. TRANSFORMS ######################################
+transforms:
+  enrich_meta:
+    type: remap
+    inputs: [docker_logs]
+    source: |-
+      # Pega labels padrão do Docker Compose
+      .project = .docker.container_labels."com.docker.compose.project" ?? "unknown"
+      .service = .docker.container_labels."com.docker.compose.service" ?? "unknown"
+
+      # Se não vier de Compose, tenta regex nos nomes supabase-<svc>-<proj>
+      parsed, err = parse_regex(.container_name, r'supabase-(?P<svc>[^-]+)-(?P<proj>.+)')
+      if err == null {
+        .service = parsed.svc
+        .project = parsed.proj
+      }
+
+      # Mantém timestamp original
+      .timestamp = .timestamp
+      # Remove bloco docker inteiro para reduzir tamanho
+      del(.docker)
+
+######################## 3. SINKS ###########################################
+sinks:
+  # a) Debug local: printa no stdout do Vector
+  all_to_console:
+    type: console
+    inputs: [enrich_meta]
+    encoding:
+      codec: json
+
+  # b) enviar tudo a Logflare
+  #logflare_all:
+  #  type: http
+  #  inputs: [enrich_meta]
+  #  method: post
+  #  uri: "http://analytics:4000/api/logs?source_name=all&api_key=${LOGFLARE_API_KEY}"
+  #  encoding:
+  #    codec: json
+  #  request:
+  #    retry_max_duration_secs: 10

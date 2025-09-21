@@ -1,0 +1,328 @@
+services:
+#docker compose  --env-file secrets/.env   --env-file .env up --build -d
+  db:
+    container_name: supabase-db
+    build:
+      context: ./volumes/db
+    restart: unless-stopped
+    env_file:
+      - secrets/.env
+      - .env
+    networks:
+       rede-supabase:
+          ipv4_address: ${POSTGRES_HOST}
+    volumes:
+      - ./volumes/db/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql:Z
+      # Must be superuser to create event trigger
+      - ./volumes/db/webhooks.sql:/docker-entrypoint-initdb.d/init-scripts/98-webhooks.sql:Z
+      # Must be superuser to alter reserved role
+      - ./volumes/db/roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-roles.sql:Z
+      # Initialize the database settings with JWT_SECRET and JWT_EXP
+      - ./volumes/db/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql:Z
+      # PGDATA directory is persisted between restarts
+      # For WSL comment
+      - ./volumes/db/data:/var/lib/postgresql/data:Z
+      # For WSL uncomment
+      # - postgres-data:/var/lib/postgresql/data:Z
+      # Changes required for internal supabase data such as _analytics
+      - ./volumes/db/_supabase.sql:/docker-entrypoint-initdb.d/migrations/97-_supabase.sql:Z
+      # Changes required for Analytics support
+      - ./volumes/db/logs.sql:/docker-entrypoint-initdb.d/migrations/99-logs.sql:Z
+      # Changes required for Pooler support
+      - ./volumes/db/pooler.sql:/docker-entrypoint-initdb.d/migrations/99-pooler.sql:Z
+      #################################
+      # create database template
+      - ./volumes/db/create_template.sh://docker-entrypoint-initdb.d/zzz-create_template.sh:Z
+      #################################
+      # Use named volume to persist pgsodium decryption key between restarts
+      - db-config:/etc/postgresql-custom
+    healthcheck:
+      test:
+        [
+        "CMD",
+        "pg_isready",
+        "-U",
+        "postgres",
+        "-h",
+        "localhost"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      PGPORT: ${POSTGRES_PORT}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      POSTGRES_DB: ${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXP: ${JWT_EXPIRY}
+    # mem_limit: 8g
+    # memswap_limit: 8g
+    # command:
+    #   [
+    #     "postgres",
+    #     "-c",
+    #     "config_file=/etc/postgresql/postgresql.conf",
+    #     "-c",
+    #     "log_min_messages=fatal", # prevents Realtime polling queries from appearing in logs
+    #     "-c",
+    #     "max_connections=1000"
+    #   ]
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+      - -c
+      - log_min_messages=fatal
+      - -c
+      - max_connections=1000
+      - -c
+      - shared_buffers=2GB
+      - -c
+      - effective_cache_size=6GB
+      - -c
+      - maintenance_work_mem=512MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - wal_buffers=32MB
+      - -c
+      - temp_buffers=32MB
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - wal_sync_method=fdatasync
+      - -c
+      - synchronous_commit=on
+      - -c
+      - checkpoint_timeout=15min
+      - -c
+      - max_wal_size=4GB
+      - -c
+      - min_wal_size=1GB
+      - -c
+      - default_statistics_target=100
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - effective_io_concurrency=200
+      - -c
+      - log_statement=none
+      - -c
+      - log_duration=off
+      - -c
+      - log_lock_waits=on
+      - -c
+      - log_temp_files=0
+      - -c
+      - autovacuum_max_workers=3
+      - -c
+      - autovacuum_naptime=20s
+  realtime:
+    build:
+      context: .
+      dockerfile: volumes/realtime/Dockerfile
+    # This container name looks inconsistent but is correct because realtime constructs tenant id by parsing the subdomain
+    container_name: realtime-dev.supabase-realtime
+    #image: supabase/realtime:v2.34.41
+    restart: unless-stopped
+    env_file:
+      - secrets/.env
+      - .env
+    networks:
+      - rede-supabase
+    depends_on:
+      db:
+        # Disable this if you are using an external Postgres database
+        condition: service_healthy
+      # analytics:
+      #   condition: service_healthy
+    # healthcheck:
+    #   test:
+    #     [
+    #       "CMD",
+    #       "curl",
+    #       "-sSfL",
+    #       "--head",
+    #       "-o",
+    #       "/dev/null",
+    #       "-H",
+    #       "Authorization: Bearer ${ANON_KEY}",
+    #       "http://localhost:4000/api/tenants/realtime-dev/health"
+    #     ]
+    #   timeout: 5s
+    #   interval: 5s
+    #   retries: 3
+    environment:
+      # SLOT_NAME_SUFFIX: "_repl"
+      PORT: 4000
+      DB_HOST: ${POSTGRES_HOST}
+      #DB_PORT: 6543
+      DB_PORT: ${POSTGRES_PORT}
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB}
+      DB_AFTER_CONNECT_QUERY: 'SET search_path TO _realtime'
+      DB_ENC_KEY: ${DB_ENC_KEY}
+      API_JWT_SECRET: ${JWT_SECRET}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      #Set to either "-proto_dist inet_tcp" or "-proto_dist inet6_tcp" depending on whether or not your network uses IPv4 or IPv6, respectively.
+      ERL_AFLAGS: -proto_dist inet_tcp
+      DNS_NODES: "''"
+      RLIMIT_NOFILE: "10000"
+      APP_NAME: realtime
+      SEED_SELF_HOST: true
+      SELF_HOST_TENANT_NAME: realtime-dev
+      RUN_JANITOR: true
+      NUM_ACCEPTORS: ${NUM_ACCEPTORS}
+
+  supavisor:
+    container_name: supabase-pooler
+    image: supabase/supavisor:2.0.21
+    env_file:
+      - secrets/.env
+      - .env
+    restart: unless-stopped
+    networks:
+       rede-supabase:
+          ipv4_address: 172.20.200.11
+    # ports:
+    #   - ${POSTGRES_PORT}:5432
+    #   - ${POOLER_PROXY_PORT_TRANSACTION}:6543
+    volumes:
+      - ./volumes/pooler/pooler.exs:/etc/pooler/pooler.exs:ro
+    # healthcheck:
+    #   test:
+    #     [
+    #       "CMD",
+    #       "curl",
+    #       "-sSfL",
+    #       "--head",
+    #       "-o",
+    #       "/dev/null",
+    #       "http://localhost:4000/api/health"
+    #     ]
+    #   interval: 10s
+    #   timeout: 5s
+    #   retries: 5
+    depends_on:
+      db:
+        condition: service_healthy
+    ulimits:
+      nofile:
+        soft: 100000
+        hard: 100000
+    environment:
+      PORT: 4000
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE_URL: ecto://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      CLUSTER_POSTGRES: true
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      VAULT_ENC_KEY: ${VAULT_ENC_KEY}
+      API_JWT_SECRET: ${JWT_SECRET}
+      METRICS_JWT_SECRET: ${JWT_SECRET}
+      REGION: local
+      ERL_AFLAGS: -proto_dist inet_tcp
+      POOLER_TENANT_ID: ${POOLER_TENANT_ID}
+      POOLER_DEFAULT_POOL_SIZE: ${POOLER_DEFAULT_POOL_SIZE}
+      POOLER_MAX_CLIENT_CONN: ${POOLER_MAX_CLIENT_CONN}
+      POOLER_POOL_MODE: transaction
+    command:
+      - /bin/sh
+      - -c
+      - |
+        export PGPASSWORD="$POSTGRES_PASSWORD"
+        psql \
+          "host=$POSTGRES_HOST port=$POSTGRES_PORT user=$POSTGRES_USER dbname=$POSTGRES_DB sslmode=disable" \
+          -c "CREATE SCHEMA IF NOT EXISTS _supavisor;" \
+        && echo "Schema _supavisor OK" \
+        && /app/bin/migrate \
+        && /app/bin/supavisor eval "$$(cat /etc/pooler/pooler.exs)" \
+        && /app/bin/server
+  functions:
+    container_name: supabase-edge-functions
+    image: supabase/edge-runtime:v1.67.4
+    env_file:
+      - secrets/.env
+      - .env
+    restart: unless-stopped
+    networks:
+      - rede-supabase
+    volumes:
+      - ./volumes/functions:/home/deno/functions:Z
+    depends_on:
+      db:
+        condition: service_healthy  
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      SUPABASE_URL: http://studio.local
+      SUPABASE_ANON_KEY: ''
+      SUPABASE_SERVICE_ROLE_KEY: ''
+      SUPABASE_DB_URL: postgresql://postgres.postgres:${POSTGRES_PASSWORD}@${POSTGRES_POOLER}:6543/${POSTGRES_DB}
+      # TODO: Allow configuring VERIFY_JWT per function. This PR might help: https://github.com/supabase/cli/pull/786
+      VERIFY_JWT: "${FUNCTIONS_VERIFY_JWT}"
+    command:
+      [
+        "start",
+        "--main-service",
+        "/home/deno/functions/main"
+      ]
+  # vector:
+  #   image: timberio/vector:0.34.1-alpine   # ≥ 0.34 se for usar sink PostgreSQL
+  #   container_name: supabase-vector-global
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ./volumes/logs/vector.yml:/etc/vector/vector.yml:ro,z
+  #     - /var/run/docker.sock:/var/run/docker.sock:ro
+  #   networks:
+  #     - rede-supabase
+  #   environment:
+  #     LOGFLARE_API_KEY: ${LOGFLARE_API_KEY}
+  #     PG_URI: postgres://vector_writer:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/logs_db
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "wget -qO- http://localhost:8686/health | grep -q running"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 3
+  projects-api:
+    build: 
+      context: .
+      dockerfile: ./api-internal/Dockerfile
+    restart: unless-stopped
+    networks: [rede-supabase]               
+    expose: ["18000"]                         
+    environment:
+      DB_DSN: postgres://supabase_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/postgres
+      FERNET_SECRET: ${FERNET_SECRET}
+      NGINX_SHARED_TOKEN: ${NGINX_SHARED_TOKEN}
+      PROJECT_DELETE_PASSWORD: ${PROJECT_DELETE_PASSWORD}
+    volumes:
+      - ./projects:/docker/projects:rw 
+      - ./.env:/docker/.env:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+      - traefik.enable=true
+      - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.20.0.0/16
+      - traefik.http.routers.projects.rule=PathPrefix(`/api/projects`)
+      - traefik.http.routers.projects.middlewares=lanonly, api-security-chain@file
+      - traefik.http.services.projects.loadbalancer.server.port=18000  
+
+networks:
+  rede-supabase:
+    name: rede-supabase
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+          ip_range: 172.20.0.0/18
+          gateway: 172.20.0.1
+volumes:
+  db-config:
+  # For WSL uncomment
+  # postgres-data:

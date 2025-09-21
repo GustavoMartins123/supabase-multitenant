@@ -1,0 +1,6 @@
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+asyncpg==0.29.0
+python-dotenv==1.0.1
+cryptography==41.0.4
+websockets==12.0

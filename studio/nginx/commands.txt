@@ -1,0 +1,38 @@
+Para ver a url que está sendo montada antes de ir para o proxypass
+log_by_lua_block {
+                local target = ngx.var.server_path .. ngx.var.uri
+                if ngx.var.args then target = target .. "?" .. ngx.var.args end
+                ngx.log(ngx.NOTICE, "Proxying to: " .. target)
+            }
+
+
+
+Para proteger uma rota:
+local groups = ngx.var.authelia_groups or ""
+                -- procura a string 'admin' isolada por início/fim ou vírgulas/espaços
+                local groups_clean = groups:gsub("[%[%]]", "")
+                local is_admin = false
+                for group in groups_clean:gmatch("[^,]+") do
+                    if group:match("^%s*admin%s*$") then
+                        is_admin = true
+                        break
+                    end
+                end
+                local is_admin_str = is_admin and "true" or "false"
+                ngx.var.auth_is_admin = is_admin_str   -- deixa visível fora do Lua
+                ngx.log(ngx.ERR, "[DBG] is_admin=", is_admin_str, " groups=[", groups, "]")
+
+                if is_admin_str ~= "true" then
+                    return ngx.exit(ngx.HTTP_FORBIDDEN)
+                end
+
+
+
+Para atualizar todos os usuarios que tiverem o atributos extras vazio, colocar antes do update do yml do activate, deactivate e signup:
+for _, user in pairs(yaml_data.users or {}) do
+                  if type(user.extra) ~= "table" or not user.extra.created_at then
+                    user.extra = {
+                      created_at = "ts:" .. os.date("!%Y-%m-%dT%H:%M:%SZ")
+                    }
+                  end
+                end

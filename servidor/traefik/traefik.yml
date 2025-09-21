@@ -1,0 +1,37 @@
+entryPoints:
+  web:
+    address: ":80"
+providers:
+  docker:
+    exposedByDefault: false
+  file:
+    filename: /etc/traefik/dynamic/middlewares.yml
+    watch: true
+
+experimental:
+  plugins:
+    fail2ban:
+      moduleName: "github.com/tomMoulard/fail2ban"
+      version: "v0.8.3"
+    geoblock:
+      moduleName: "github.com/PascalMinder/geoblock"
+      version: "v0.3.3"
+
+global:
+  checknewversion: false
+  sendanonymoususage: false
+
+log:
+  level: INFO
+  format: json
+
+accessLog:
+  filePath: "/var/log/traefik/access.log"
+  bufferingSize: 100
+  fields:
+    defaultMode: keep
+    names:
+      ClientUsername: drop
+      StartUTC: drop
+  filters:
+    statusCodes: ["400-599"]

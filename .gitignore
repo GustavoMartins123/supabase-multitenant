@@ -1,0 +1,8 @@
+servidor/docker/projects/**
+!servidor/docker/projects/**/.gitkeep
+servidor/docker/.env
+
+servidor/docker/volumes/db/data/*
+servidor/docker/secrets/*
+
+studio/.env

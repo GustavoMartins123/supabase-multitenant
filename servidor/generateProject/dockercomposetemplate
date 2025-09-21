@@ -1,0 +1,372 @@
+#para subir estando no diretorio do projeto -> docker/projects/{{project_id}}
+#docker compose -p {{project_id}} --env-file ../../secrets/.env --env-file ../../.env  --env-file .env up --build -d
+name: supabase
+services:
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: supabase-nginx-{{project_id}}
+    restart: unless-stopped
+    networks:
+      - rede-supabase
+    labels:
+      - "traefik.enable=true"
+      # - "traefik.http.routers.supabase-nginx-{{project_id}}.rule=Host(`seu_dominio`) && PathPrefix(`/{{project_id}}`)"
+      # - "traefik.http.routers.supabase-nginx-{{project_id}}.entrypoints=websecure"
+      # - "traefik.http.routers.supabase-nginx-{{project_id}}.tls=true"
+      # - "traefik.http.routers.supabase-nginx-{{project_id}}.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.supabase-nginx-{{project_id}}.rule=PathPrefix(`/{{project_id}}`)"
+      - "traefik.http.routers.supabase-nginx-{{project_id}}.entrypoints=web"
+      - "traefik.http.services.supabase-nginx-{{project_id}}.loadbalancer.server.port={{nginx_port}}"
+      - "traefik.http.middlewares.nginx-{{project_id}}-stripprefix.stripprefix.prefixes=/{{project_id}}"
+
+
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.silentStartUp=true"
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.allowLocalRequests=true"
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.logLocalRequests=false"
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.logAllowedRequests=false"
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.logApiRequests=true"
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.api=https://get.geojs.io/v1/ip/country/{ip}"
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.apiTimeoutMs=2000"
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.cacheSize=100"
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.forceMonthlyUpdate=true"
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.allowUnknownCountries=false"
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.unknownCountryApiResponse=nil"
+
+      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.countries=BR"
+
+      - "traefik.http.routers.supabase-nginx-{{project_id}}.middlewares=rate-limit@file,security-headers@file,geoblock-{{project_id}}@docker, nginx-{{project_id}}-stripprefix@docker"
+  auth:
+    container_name: supabase-auth-{{project_id}}
+    image: supabase/gotrue:v2.170.0
+    restart: unless-stopped
+    env_file:
+      - ../../secrets/.env
+      - ../../.env
+      - .env
+    networks:
+      - rede-supabase
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:9999/health"
+        ]
+      timeout: 5s
+      interval: 5s
+      retries: 3
+    # depends_on:
+    #   analytics:
+    #     condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL}
+
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin.{{project_id}}:${POSTGRES_PASSWORD}@${POSTGRES_POOLER}:${POOLER_PROXY_PORT_SESSION}/${POSTGRES_DATABASE}
+
+      GOTRUE_SITE_URL: ${SITE_URL}
+      GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS}
+      GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP}
+
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: ${JWT_EXPIRY}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: ${ENABLE_EMAIL_SIGNUP}
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: ${ENABLE_ANONYMOUS_USERS}
+      GOTRUE_MAILER_AUTOCONFIRM: ${ENABLE_EMAIL_AUTOCONFIRM}
+
+      # Uncomment to bypass nonce check in ID Token flow. Commonly set to true when using Google Sign In on mobile.
+      # GOTRUE_EXTERNAL_SKIP_NONCE_CHECK: true
+
+      # GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED: true
+      # GOTRUE_SMTP_MAX_FREQUENCY: 1s
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL}
+      GOTRUE_SMTP_HOST: ${SMTP_HOST}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT}
+      GOTRUE_SMTP_USER: ${SMTP_USER}
+      GOTRUE_SMTP_PASS: ${SMTP_PASS}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME}
+      GOTRUE_MAILER_URLPATHS_INVITE: ${MAILER_URLPATHS_INVITE}
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: ${MAILER_URLPATHS_CONFIRMATION}
+      GOTRUE_MAILER_URLPATHS_RECOVERY: ${MAILER_URLPATHS_RECOVERY}
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: ${MAILER_URLPATHS_EMAIL_CHANGE}
+
+      GOTRUE_EXTERNAL_PHONE_ENABLED: ${ENABLE_PHONE_SIGNUP}
+      GOTRUE_SMS_AUTOCONFIRM: ${ENABLE_PHONE_AUTOCONFIRM}
+      # Uncomment to enable custom access token hook. Please see: https://supabase.com/docs/guides/auth/auth-hooks for full list of hooks and additional details about custom_access_token_hook
+
+      # GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED: "true"
+      # GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI: "pg-functions://postgres/public/custom_access_token_hook"
+      # GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_SECRETS: "<standard-base64-secret>"
+
+      # GOTRUE_HOOK_MFA_VERIFICATION_ATTEMPT_ENABLED: "true"
+      # GOTRUE_HOOK_MFA_VERIFICATION_ATTEMPT_URI: "pg-functions://postgres/public/mfa_verification_attempt"
+
+      # GOTRUE_HOOK_PASSWORD_VERIFICATION_ATTEMPT_ENABLED: "true"
+      # GOTRUE_HOOK_PASSWORD_VERIFICATION_ATTEMPT_URI: "pg-functions://postgres/public/password_verification_attempt"
+
+      # GOTRUE_HOOK_SEND_SMS_ENABLED: "false"
+      # GOTRUE_HOOK_SEND_SMS_URI: "pg-functions://postgres/public/custom_access_token_hook"
+      # GOTRUE_HOOK_SEND_SMS_SECRETS: "v1,whsec_VGhpcyBpcyBhbiBleGFtcGxlIG9mIGEgc2hvcnRlciBCYXNlNjQgc3RyaW5n"
+
+      # GOTRUE_HOOK_SEND_EMAIL_ENABLED: "false"
+      # GOTRUE_HOOK_SEND_EMAIL_URI: "http://host.docker.internal:54321/functions/v1/email_sender"
+      # GOTRUE_HOOK_SEND_EMAIL_SECRETS: "v1,whsec_VGhpcyBpcyBhbiBleGFtcGxlIG9mIGEgc2hvcnRlciBCYXNlNjQgc3RyaW5n"
+
+  rest:
+    container_name: supabase-rest-{{project_id}}
+    image: postgrest/postgrest:v12.2.0
+    restart: unless-stopped
+    env_file:
+      - ../../secrets/.env
+      - ../../.env
+      - .env
+    networks:
+      - rede-supabase
+    # depends_on:
+    #   db:
+    #     # Disable this if you are using an external Postgres database
+    #     condition: service_healthy
+    #   analytics:
+    #     condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://authenticator.{{project_id}}:${POSTGRES_PASSWORD}@${POSTGRES_POOLER}:${POOLER_PROXY_PORT_SESSION}/${POSTGRES_DATABASE}
+      PGRST_DB_SCHEMA_CACHE_DURATION: 20
+      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS}
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_DB_PREPARED_STATEMENTS: false
+      PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET}
+      PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY}
+    command:
+      [
+        "postgrest"
+      ]
+  # To use S3 backed storage: docker compose -f docker-compose.yml -f docker-compose.s3.yml up
+  storage:
+    container_name: supabase-storage-{{project_id}}
+    image: supabase/storage-api:v1.22.2
+    restart: unless-stopped
+    env_file:
+      - ../../secrets/.env
+      - ../../.env
+      - .env
+    networks:
+      - rede-supabase
+    volumes:
+      - ./storage:/var/lib/storage:z
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://storage:5000/status"
+        ]
+      timeout: 5s
+      interval: 5s
+      retries: 3
+    depends_on:
+      rest:
+        condition: service_started
+      imgproxy:
+        condition: service_started
+    environment:
+      ANON_KEY: ${ANON_KEY_PROJETO}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY_PROJETO}
+      POSTGREST_URL: http://rest:3000
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin.{{project_id}}:${POSTGRES_PASSWORD}@${POSTGRES_POOLER}:${POOLER_PROXY_PORT_TRANSACTION}/${POSTGRES_DATABASE}
+      FILE_SIZE_LIMIT: 524288000
+      STORAGE_BACKEND: file
+
+      #Permite usar o Tus
+      REQUEST_ALLOW_X_FORWARDED_PATH: "true"
+      TUS_URL_PATH: /storage/v1/upload/resumable
+
+
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: stub
+      # TODO: https://github.com/supabase/storage-api/issues/55
+      REGION: stub
+      GLOBAL_S3_BUCKET: stub
+      ENABLE_IMAGE_TRANSFORMATION: "true"
+      IMGPROXY_URL: http://imgproxy:5001
+
+  imgproxy:
+    container_name: supabase-imgproxy-{{project_id}}
+    image: darthsim/imgproxy:v3.8.0
+    restart: unless-stopped
+    networks:
+      - rede-supabase
+    volumes:
+      - ./storage:/var/lib/storage:z
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "imgproxy",
+          "health"
+        ]
+      timeout: 5s
+      interval: 5s
+      retries: 3
+    environment:
+      IMGPROXY_BIND: ":5001"
+      IMGPROXY_LOCAL_FILESYSTEM_ROOT: /
+      IMGPROXY_USE_ETAG: "true"
+      IMGPROXY_ENABLE_WEBP_DETECTION: ${IMGPROXY_ENABLE_WEBP_DETECTION}
+
+  # realtime:
+  #   # This container name looks inconsistent but is correct because realtime constructs tenant id by parsing the subdomain
+  #   container_name: realtime-dev.supabase-realtime-{{project_id}}
+  #   image: supabase/realtime:v2.34.46
+  #   restart: unless-stopped
+  #   env_file:
+  #     - ../../secrets/.env
+  #     - ../../.env
+  #     - .env
+  #   networks:
+  #     - rede-supabase
+  #   healthcheck:
+  #     test:
+  #       [
+  #         "CMD",
+  #         "curl",
+  #         "-sSfL",
+  #         "--head",
+  #         "-o",
+  #         "/dev/null",
+  #         "-H",
+  #         "Authorization: Bearer ${ANON_KEY_PROJETO}",
+  #         "http://localhost:4000/api/tenants/realtime-dev/health"
+  #       ]
+  #     timeout: 5s
+  #     interval: 5s
+  #     retries: 3
+  #   environment:
+  #     PORT: 4000
+  #     DB_HOST: ${POSTGRES_HOST}
+  #     #DB_PORT: 6543
+  #     DB_PORT: ${POSTGRES_PORT}
+  #     DB_USER: ${POSTGRES_USER}
+  #     DB_PASSWORD: ${POSTGRES_PASSWORD}
+  #     DB_NAME: ${POSTGRES_DATABASE}
+  #     DB_AFTER_CONNECT_QUERY: 'SET search_path TO _realtime'
+  #     DB_ENC_KEY: ${DB_ENC_KEY}
+  #     API_JWT_SECRET: ${JWT_SECRET_PROJETO}
+  #     SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+  #     #Set to either "-proto_dist inet_tcp" or "-proto_dist inet6_tcp" depending on whether or not your network uses IPv4 or IPv6, respectively.
+  #     ERL_AFLAGS: -proto_dist inet_tcp
+  #     DNS_NODES: "''"
+  #     RLIMIT_NOFILE: "10000"
+  #     APP_NAME: realtime
+  #     SEED_SELF_HOST: true
+  #     SELF_HOST_TENANT_NAME: realtime-dev
+  #     RUN_JANITOR: true
+  #     NUM_ACCEPTORS: ${NUM_ACCEPTORS}
+
+  # supavisor:
+  #   container_name: supabase-pooler-{{project_id}}
+  #   image: supabase/supavisor:2.0.21
+  #   env_file:
+  #     - ../../secrets/.env
+  #     - ../../.env
+  #     - .env
+  #   restart: unless-stopped
+  #   depends_on:
+  #     realtime:
+  #       condition: service_healthy
+  #   networks:
+  #     - rede-supabase
+  #   # ports:
+  #   #   - ${POSTGRES_PORT}:5432
+  #   #   - ${POOLER_PROXY_PORT_TRANSACTION}:6543
+  #   volumes:
+  #     - ./pooler/pooler.exs:/etc/pooler/pooler.exs:ro
+  #     - ../../volumes/pooler/init-tenant-realtime.sh:/etc/pooler/init-tenant.sh:ro
+  #   # healthcheck:
+  #   #   test:
+  #   #     [
+  #   #       "CMD",
+  #   #       "curl",
+  #   #       "-sSfL",
+  #   #       "--head",
+  #   #       "-o",
+  #   #       "/dev/null",
+  #   #       "http://localhost:4000/api/health"
+  #   #     ]
+  #   #   interval: 10s
+  #   #   timeout: 5s
+  #   #   retries: 5
+  #   ulimits:
+  #     nofile:
+  #       soft: 100000
+  #       hard: 100000
+  #   environment:
+  #     #realtime
+  #     PROJECT_ID: ${PROJECT_ID}
+  #     ANON_KEY_PROJETO: ${ANON_KEY_PROJETO}
+  #     #pooler
+  #     PORT: 4000
+  #     PROXY_PORT_SESSION: ${POOLER_PROXY_PORT_SESSION_PROJETO}    
+  #     PROXY_PORT_TRANSACTION: ${POOLER_PROXY_PORT_TRANSACTION_PROJETO}
+  #     POSTGRES_HOST: ${POSTGRES_HOST}
+  #     POSTGRES_PORT: ${POSTGRES_PORT}
+  #     POSTGRES_DB: ${POSTGRES_DATABASE}
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  #     DATABASE_URL: ecto://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DATABASE}
+  #     CLUSTER_POSTGRES: true
+  #     SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+  #     VAULT_ENC_KEY: ${VAULT_ENC_KEY}
+  #     API_JWT_SECRET: ${JWT_SECRET_PROJETO}
+  #     METRICS_JWT_SECRET: ${JWT_SECRET_PROJETO}
+  #     REGION: local
+  #     ERL_AFLAGS: -proto_dist inet_tcp
+  #     POOLER_TENANT_ID: ${POOLER_TENANT_ID}
+  #     POOLER_DEFAULT_POOL_SIZE: ${POOLER_DEFAULT_POOL_SIZE}
+  #     POOLER_MAX_CLIENT_CONN: ${POOLER_MAX_CLIENT_CONN}
+  #     POOLER_POOL_MODE: transaction
+  #   command:
+  #     - /bin/sh
+  #     - -c
+  #     - |
+  #       export PGPASSWORD="$POSTGRES_PASSWORD"
+  #       psql \
+  #         "host=$POSTGRES_HOST port=$POSTGRES_PORT user=$POSTGRES_USER dbname=$POSTGRES_DATABASE sslmode=disable" \
+  #         -c "CREATE SCHEMA IF NOT EXISTS _supavisor;" \
+  #       && echo "Schema _supavisor OK" \
+  #       && /bin/sh /etc/pooler/init-tenant.sh \
+  #       && /app/bin/migrate \
+  #       && /app/bin/supavisor eval "$$(cat /etc/pooler/pooler.exs)" \
+  #       && /app/bin/server
+  meta:
+    container_name: supabase-meta-{{project_id}}
+    image: supabase/postgres-meta:v0.88.7
+    restart: unless-stopped
+    networks:
+      - rede-supabase
+    environment:
+      PG_META_PORT: ${META_PORT}
+      PG_META_DB_HOST: ${POSTGRES_HOST}
+      PG_META_DB_PORT: ${POSTGRES_PORT}
+      PG_META_DB_NAME: ${POSTGRES_DATABASE}
+      PG_META_DB_USER: supabase_admin
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+
+networks:
+  rede-supabase:
+    external: true

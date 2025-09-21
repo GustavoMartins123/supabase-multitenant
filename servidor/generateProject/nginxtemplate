@@ -1,0 +1,288 @@
+worker_processes 1;
+worker_rlimit_nofile 16384;
+events {
+    worker_connections 4096;
+    use epoll;
+    multi_accept on;
+}
+
+http {
+    server_tokens off;
+    resolver 127.0.0.11 valid=30s ipv6=off;
+    map_hash_bucket_size 256;
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    keepalive_requests 1000;
+
+    map "" $auth_upstream     { default "supabase-auth-{{project_id}}:9999"; }
+    map "" $rest_upstream     { default "supabase-rest-{{project_id}}:3000"; }
+    map "" $storage_upstream  { default "supabase-storage-{{project_id}}:5000"; }
+    map "" $functions_upstream{ default "functions:9000"; }
+    map "" $realtime_upstream { default "realtime-dev.supabase-realtime:4000"; }
+    map "" $meta_upstream { default "supabase-meta-{{project_id}}:{{meta_port}}";}
+
+    map $http_upgrade $connection_upgrade {
+        default upgrade;
+        ''      close;
+    }
+    #$http_apikey Refere-se a cabeçalhos HTTP enviados na requisição.
+
+    #Para popular $http_apikey, o cliente precisa incluir um header apikey: XYZ no handshake.
+    map $http_apikey $is_valid_key {
+        default 0;
+        "{{anon_key}}" 1;  
+        "{{service_role_key}}" 1;  
+    }
+
+    map $http_apikey $is_admin_key {
+        default 0;
+        "{{service_role_key}}" 1; 
+    }
+    #$arg_apikey Refere-se a parâmetros de query string da URL.
+
+    #Ex.: em GET /realtime/v1/websocket?apikey=XYZ, $arg_apikey vale XYZ.
+    map $arg_apikey $is_valid_api_key {
+        default 0;
+        "{{anon_key}}" 1;  
+        "{{service_role_key}}" 1;  
+    }
+
+    map $http_x_forwarded_proto $real_scheme {
+        default $scheme;
+        "~.+"   $http_x_forwarded_proto;
+    }
+    server {
+        listen {{nginx_port}};
+        server_name _{{project_id}};
+
+        location /auth/v1/verify {
+            rewrite ^/auth/v1/(.*)$ /$1?$args break;
+            proxy_pass http://$auth_upstream;
+            proxy_http_version 1.1;
+
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $real_scheme;
+            proxy_set_header X-Forwarded-Host $host;
+
+            add_header 'Access-Control-Allow-Origin' '*';
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
+        }
+
+
+        location /auth/v1/callback {
+            rewrite ^/auth/v1/(.*)$ /$1?$args break;
+            proxy_pass http://$auth_upstream;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $real_scheme;
+            proxy_set_header X-Forwarded-Host $host;
+            add_header 'Access-Control-Allow-Origin' '*';
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
+        }
+
+        location /auth/v1/authorize {
+            proxy_pass http://$auth_upstream/authorize;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $real_scheme;
+            proxy_set_header X-Forwarded-Host $host;
+            add_header 'Access-Control-Allow-Origin' '*';
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
+        }
+
+        location /auth/v1/ {
+            if ($http_apikey = "") {
+                return 401;
+            }
+            if ($is_valid_key != 1) {
+                return 403;
+            }
+
+            rewrite ^/auth/v1/(.*)$ /$1?$args break;
+
+            proxy_pass http://$auth_upstream;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $real_scheme;
+            proxy_set_header X-Forwarded-Host $host;
+            add_header 'Access-Control-Allow-Origin' '*';
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
+        }
+
+
+        location /rest/v1/ {
+            if ($http_apikey = "") {
+                return 401;
+            }
+            if ($is_valid_key != 1) {
+                return 403;
+            }
+            rewrite ^/rest/v1/(.*)$ /$1 break;
+            proxy_pass http://$rest_upstream;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            add_header 'Access-Control-Allow-Origin' '*';
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
+        }
+        location /graphql/v1 {
+            if ($http_apikey = "") {
+                return 401;
+            }
+            if ($is_valid_key != 1) {
+                return 403;
+            }
+            proxy_pass http://$rest_upstream/rpc/graphql;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Content-Profile graphql_public;
+            add_header 'Access-Control-Allow-Origin' '*';
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
+        }
+
+
+        location ^~ /realtime/v1/websocket {
+            if ($arg_apikey = "") {
+                return 401;
+            }
+            if ($is_valid_api_key != 1) {
+                return 403;
+            }
+            rewrite ^/realtime/v1/websocket$ /socket/websocket break;
+
+            proxy_pass http://$realtime_upstream;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_set_header Host "{{project_id}}.localhost";
+            proxy_read_timeout 86400;
+
+            if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+                add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
+                return 204;
+            }
+
+            add_header 'Access-Control-Allow-Origin' '*';
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
+        }
+
+        location ~ ^/storage/v1/object/sign/ {
+            rewrite ^/storage/v1/(.*)$ /$1 break;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $real_scheme;
+            proxy_set_header X-Forwarded-Host $host;
+
+            proxy_pass http://$storage_upstream;
+
+            add_header 'Access-Control-Allow-Origin' '*';
+            add_header 'Access-Control-Allow-Methods' 'GET, HEAD, OPTIONS';
+    	    add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, X-Requested-With';
+	    }
+
+        location ~ ^/storage/v1/render/ {
+            rewrite ^/storage/v1/(.*)$ /$1 break;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $real_scheme;
+            proxy_set_header X-Forwarded-Host $host;
+
+            proxy_pass http://$storage_upstream;
+
+            add_header 'Access-Control-Allow-Origin' '*';
+            add_header 'Access-Control-Allow-Methods' 'GET';
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, X-Requested-With';
+        }
+
+
+
+        location /storage/v1/ {
+            if ($http_apikey = "") {
+                return 401;
+            }
+            if ($is_valid_key != 1) {
+                return 403;
+            }
+            client_max_body_size 500M;
+
+            rewrite ^/storage/v1/(.*)$ /$1 break;
+        
+
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $real_scheme;
+            proxy_set_header X-Forwarded-Host $host;
+
+            proxy_set_header Tus-Resumable $http_tus_resumable;
+    	    proxy_set_header Tus-Version $http_tus_version;
+            proxy_set_header Upload-Length $http_upload_length;
+            proxy_set_header Upload-Metadata $http_upload_metadata;
+            proxy_set_header Upload-Offset $http_upload_offset;
+            proxy_set_header Upload-Concat $http_upload_concat;
+            proxy_set_header Upload-Defer-Length $http_upload_defer_length;
+            proxy_set_header x-upsert $http_x_upsert;
+
+            proxy_pass http://$storage_upstream;
+
+            add_header 'Access-Control-Allow-Origin' '*';
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PATCH, HEAD, DELETE, PUT';
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, Tus-Resumable, Tus-Version, Tus-Max-Size, Tus-Extension, Upload-Length, Upload-Metadata, Upload-Offset, Upload-Concat, Upload-Defer-Length, x-upsert, X-Requested-With';
+        }
+        
+        location /functions/v1/ {
+            if ($http_apikey = "") {
+                return 401;
+            }
+            if ($is_valid_key != 1) {
+                return 403;
+            }
+            rewrite ^/functions/v1/(.*)$ /$1 break;
+            proxy_pass http://$functions_upstream;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            add_header 'Access-Control-Allow-Origin' '*';
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
+        }
+        
+        location /meta/ {
+           if ($is_admin_key = 0) {
+             return 401;
+           }
+           if ($is_valid_key != 1) {
+                return 403;
+            }
+           rewrite ^/meta/(.*)$ /$1 break;
+           proxy_pass http://$meta_upstream;
+           add_header 'Access-Control-Allow-Origin' '*';
+           add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+           add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
+        }
+    }
+}

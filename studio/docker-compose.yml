@@ -1,0 +1,48 @@
+#docker compose up --build -d
+services:
+  usersdb-init:
+    image: alpine
+    command: >
+        sh -c "cp -R /seed/* /config &&
+              chown -R 65534:65534 /config &&
+              echo 'usersdb preparado'"
+    volumes:
+      - ./authelia:/seed:ro 
+      - usersdb:/config 
+    restart: "no"
+  authelia:
+    image: authelia/authelia:4.39
+    container_name: authelia
+    volumes:
+      - ./authelia:/config
+    environment:
+      - TZ=America/Sao_Paulo
+    ports:
+      - 9091:9091
+    restart: unless-stopped
+
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile 
+    container_name: nginx
+    ports:
+      - 4000:443
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./nginx/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
+      - ./authelia:/config
+  studio:
+    container_name: supabase-studio
+    image: supabase/studio:20250324-13e75a5
+    restart: unless-stopped
+    environment:
+      STUDIO_PG_META_URL: https://nginx:443/api/platform/pg-meta
+      DEFAULT_ORGANIZATION_NAME: postgres
+      DEFAULT_PROJECT_NAME: postgres
+      SUPABASE_PUBLIC_URL: https://<SEU_IP>:4000
+      NEXT_PUBLIC_ENABLE_LOGS: false
+volumes:
+  usersdb:

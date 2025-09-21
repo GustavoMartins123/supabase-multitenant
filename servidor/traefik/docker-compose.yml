@@ -1,0 +1,49 @@
+services:
+  traefik:
+    image: traefik:v3.3.5
+    ports:
+      - "80:80"   
+      - "443:443"
+      # - "8082:8082"
+    environment:
+      - TZ=America/Sao_Paulo
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  
+      - ./traefik.yml:/etc/traefik/traefik.yml
+      - ./acme.json:/acme.json 
+      - ./access.log:/var/log/traefik/access.log
+      - ./middlewares.yml:/etc/traefik/dynamic/middlewares.yml
+    labels:  
+      - "traefik.enable=true"
+
+      # Router para paths maliciosos
+      - "traefik.http.routers.malicious-paths.rule=PathPrefix(`/admin`) || PathPrefix(`/wp-admin`) || PathPrefix(`/phpmyadmin`) || PathPrefix(`/cgi-bin`) || PathPrefix(`/.env`) || PathPrefix(`/.git`) || PathPrefix(`/xmlrpc`) || PathPrefix(`/server-status`) || PathPrefix(`/phpinfo.php`) || PathPrefix(`/actuator`) || PathPrefix(`/global-protect`) || PathPrefix(`/ssl-vpn`) || PathPrefix(`/+CSCOE+`) || PathPrefix(`/login.htm`) || PathPrefix(`/login.html`) || PathPrefix(`/login.jsp`) || PathPrefix(`/remote/login`) || PathPrefix(`/manage/account`) || PathPrefix(`/webpages/login`) || PathPrefix(`/doc/index.html`) || PathPrefix(`/owa/auth`) || PathPrefix(`/getcfg.php`) || PathPrefix(`/aws.sh`) || PathPrefix(`/vb.env`) || PathPrefix(`/env.py`)"
+      # - "traefik.http.routers.malicious-paths.entrypoints=web,websecure"
+      - "traefik.http.routers.malicious-paths.entrypoints=web"
+      - "traefik.http.routers.malicious-paths.priority=2000"
+      - "traefik.http.routers.malicious-paths.middlewares=malicious-paths-chain@file"
+      - "traefik.http.routers.malicious-paths.service=forbidden-service@file"
+      # - "traefik.http.routers.malicious-paths.tls=true"
+
+      # Router para User-Agents suspeitos
+      - "traefik.http.routers.block-bad-useragents.rule=HeaderRegexp(`User-Agent`, `.*[Bb]ot.*|.*[Ss]canner.*|.*[Cc]rawler.*|.*[Ss]pider.*|.*[Cc]url.*|.*[Ww]get.*|.*ruby.*|.*perl.*|.*masscan.*|.*nmap.*|^-?$`)"
+      # - "traefik.http.routers.block-bad-useragents.entrypoints=web,websecure"
+      - "traefik.http.routers.block-bad-useragents.entrypoints=web"
+      - "traefik.http.routers.block-bad-useragents.priority=1900"
+      - "traefik.http.routers.block-bad-useragents.middlewares=suspicious-paths-chain@file"
+      - "traefik.http.routers.block-bad-useragents.service=forbidden-service@file"
+      # - "traefik.http.routers.block-bad-useragents.tls=true"
+
+      #http
+      - "traefik.http.routers.http-catchall.rule=HostRegexp(`{host:.+}`)"
+      - "traefik.http.routers.http-catchall.entrypoints=web"
+      - "traefik.http.routers.http-catchall.priority=100"
+      - "traefik.http.routers.http-catchall.middlewares=security-chain-enhanced@file"
+      - "traefik.http.routers.http-catchall.service=noop@internal"
+    networks:
+      - rede-supabase
+    restart: unless-stopped
+
+networks:
+  rede-supabase:
+    external: true

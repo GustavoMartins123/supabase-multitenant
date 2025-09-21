@@ -1,0 +1,27 @@
+---
+users:
+  teste:
+    disabled: false
+    password: $argon2id$v=19$m=65536,t=3,p=4$W4CGddhkzRo9cARHsxdoPA$ly9FEn7cp3lzPsDtCz6JqTIm9XvVpTwVoHKyV4jTjTs
+    address: ~
+    email: teste@example.com
+    displayname: Teste
+    middle_name: ''
+    locale: ''
+    phone_extension: ''
+    extra:
+      created_at: ts:2025-07-04T13:19:01Z
+    family_name: ''
+    given_name: ''
+    nickname: ''
+    gender: ''
+    birthdate: ''
+    website: ''
+    profile: ''
+    zoneinfo: ''
+    phone_number: ''
+    groups:
+    - active
+    - admin
+    picture: ''
+...

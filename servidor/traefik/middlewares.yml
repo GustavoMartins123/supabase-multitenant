@@ -1,0 +1,110 @@
+http:
+  middlewares:
+    security-headers:
+      headers:
+        customResponseHeaders:
+          X-Frame-Options: "DENY"
+          X-Content-Type-Options: "nosniff"
+          X-XSS-Protection: "1; mode=block"
+          Content-Security-Policy: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'" # <-- 'https:' removido
+          Referrer-Policy: "strict-origin-when-cross-origin"
+    rate-limit:
+       rateLimit:
+         burst: 160
+         average: 80
+         period: "1s"
+    rate-limit-global:
+      rateLimit:
+        burst: 10
+        average: 5
+        period: "1m"
+        sourceCriterion:
+          ipStrategy:
+            depth: 1
+    rate-limit-malicious:
+      rateLimit:
+        burst: 2
+        average: 1
+        period: "1m"
+        sourceCriterion:
+          ipStrategy:
+            depth: 1
+    rate-limit-suspicious:
+      rateLimit:
+        burst: 1
+        average: 1
+        period: "5m"
+        sourceCriterion:
+          ipStrategy:
+            depth: 1
+    geoblock-global:
+      plugin:
+        geoblock:
+          cachesize: 2000
+          silentStartUp: false
+          allowLocalRequests: true
+          logApiRequests: true
+          api: https://get.geojs.io/v1/ip/country/{ip}
+          apiTimeoutMs: 1000
+          allowUnknownCountries: false
+          countries: BR
+    block-bad-agents:
+      headers:
+        customRequestHeaders:
+          X-Block-Bad-Agents: "true"
+        forceSTSHeader: true
+
+    block-paths:
+      replacePathRegex:
+        regex: '^/(\.git|\.svn|\.hg|\.bzr|\.env|\.htaccess|\.htpasswd|config\.json|config\.yml|config\.php|\.vscode|\.idea|\.DS_Store|Thumbs\.db|admin|administrator|login|wp-admin|wp-login\.php|phpmyadmin|pma|mysql|setup|install|server-status|debug|debug/pprof|xmlrpc|cgi-bin|global-protect|ssl-vpn|phpinfo\.php|actuator|metrics|\.well-known/security\.txt|owa/auth|getcfg\.php|aws\.sh|vb\.env|env\.py).*'
+        replacement: "/blocked"
+
+    fail2ban-malicious:
+      plugin:
+        fail2ban:
+          rules:
+            maxretry: 2
+            findtime: "120s"
+            bantime: "3600s"
+            monitoredStatusCodes: ["400-599"]
+    fail2ban-global:
+      plugin:
+        fail2ban:
+          rules:
+            maxretry: 3
+            findtime: "300s"
+            bantime: "7200s"
+            monitoredStatusCodes: ["400-599"]
+
+    api-security-chain:
+      chain:
+        middlewares:
+          - geoblock-global
+          - security-headers
+    malicious-paths-chain:
+      chain:
+        middlewares:
+          - geoblock-global
+          - rate-limit-malicious
+          - fail2ban-malicious
+          - block-bad-agents
+    suspicious-paths-chain:
+      chain:
+        middlewares:
+          - geoblock-global
+          - rate-limit-suspicious
+          - fail2ban-global
+          - block-bad-agents
+    security-chain-enhanced:
+      chain:
+        middlewares:
+          - geoblock-global
+          - fail2ban-global
+          - rate-limit-global
+          - block-paths
+          - security-headers
+  services:
+    forbidden-service:
+      loadBalancer:
+        servers:  
+          - url: "http://127.0.0.1:1" 
