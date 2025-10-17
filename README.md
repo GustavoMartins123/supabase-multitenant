@@ -23,12 +23,10 @@ The solution provisions an isolated database for each new tenant and uses an orc
   - [2. Run the Setup Script](#run-the-setup-script)
   - [3. Execution Order](#execution-order)
   - [4. Verification](#verification)
-  - [5. Duplicating Projects](#duplicating-projects)
 
 ### Maintenance and Important Notes
 
   - [SSL Certificate Rotation](#ssl-certificate-rotation)
-  - [Troubleshooting](#troubleshooting)
 
 ## Purpose
 
@@ -144,8 +142,7 @@ flowchart TB
 | Item | Description |
 |---|---|
 | Docker & Docker Compose | Installed and running. |
-| User    | With permission to run docker commands. |
-| rsync (for project duplication) | Required for duplicating projects with data. Install with `apt-get install rsync` (Debian/Ubuntu). |
+| User    | With permission to run docker commands. 
 -----
 
 ## How to Use
@@ -224,74 +221,3 @@ Use the user 'teste' with the password 'teste' to log in.
 
   * The `setup.sh` script automatically generates a self-signed SSL certificate for Authelia and the Studio's Nginx, ensuring HTTPS communication on your local network.
   * **Warning:** By default, this certificate is valid for **1 year**. After this period, it will stop working.
-
-### 5. Duplicating Projects
-
-You can duplicate an existing project to create a new one with the same structure (and optionally data).
-```bash
-# Duplicate project structure only (no data)
-bash generateProject/duplicate_project.sh <original_project> <new_project> schema-only
-
-# Duplicate project with all data (including storage files)
-bash generateProject/duplicate_project.sh <original_project> <new_project> with-data
-```
-
-**Important Notes:**
-- ⚠️ **`rsync` is required** for duplicating projects with data (`with-data` mode)
-- The duplication script uses `rsync -aX` to preserve extended attributes (xattrs)
-- Supabase Storage stores metadata in xattrs - using regular `cp` will break file access
-- Install rsync if not available: `apt install rsync` (Debian/Ubuntu) or `yum install rsync` (RHEL/CentOS)
-
-**What gets copied:**
-- **Schema-only**: Database structure (tables, functions, policies), empty storage structure
-- **With-data**: Everything from schema-only + all data in tables + all files in storage buckets
-
----
-
-## Troubleshooting
-
-### Storage files return 500 errors after duplication
-
-**Symptom:** Files appear in Supabase Studio but return `ENODATA: The extended attribute does not exist` when accessed.
-
-**Cause:** Files were copied without preserving extended attributes (xattrs).
-
-**Solution:**
-```bash
-# Stop the project containers
-cd projects/<project_name>
-docker compose -p <project_name> --env-file ../../secrets/.env --env-file ../../.env  --env-file .env down
-
-# Remove incorrectly copied storage
-rm -rf storage
-
-# Re-copy with rsync preserving xattrs
-rsync -aX ../original_project/storage/ ./storage/
-
-# Restart containers
-docker compose -p <project_name> --env-file ../../secrets/.env --env-file ../../.env  --env-file .env up -d
-```
-
-### Auth service fails to start after duplication
-
-**Symptom:** GoTrue container constantly restarts with migration errors.
-
-**Cause:** The database dump includes auth schema but migrations try to run again.
-
-**Solution:** The duplication script automatically marks migrations as executed. If this fails:
-```bash
-docker exec supabase-db psql -U supabase_admin -d _supabase_<project_name> -c \
-  "UPDATE auth.schema_migrations SET dirty = false WHERE dirty = true;"
-```
-
-### Container can't see storage files
-
-**Symptom:** Files exist on host but container returns `ENOENT` (file not found).
-
-**Cause:** Files were copied after container was already running.
-
-**Solution:**
-```bash
-# Restart the storage container
-docker restart supabase-storage-<project_name>
-``` 
