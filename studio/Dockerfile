@@ -1,21 +1,13 @@
-FROM debian:latest AS builder
-
-RUN apt-get update && apt-get install -y \
-        curl git wget unzip libgconf-2-4 gdb libstdc++6 libglu1-mesa fonts-droid-fallback python3 \
-        && apt-get clean
-    
-RUN git clone https://github.com/flutter/flutter.git /usr/local/flutter
-    
-ENV PATH="${PATH}:/usr/local/flutter/bin:/usr/local/flutter/bin/cache/dart-sdk/bin"
-    
-RUN flutter doctor && \
-    flutter channel stable && \
-    flutter upgrade && \
-    flutter config --enable-web
+FROM ghcr.io/cirruslabs/flutter:3.35.1 AS builder
 
 WORKDIR /app
-COPY ["seletor_de_projetos", "."]
+
+COPY seletor_de_projetos/pubspec.* ./
+
 RUN flutter pub get
+
+COPY seletor_de_projetos/ .
+
 RUN flutter build web --release
 
 FROM openresty/openresty:1.27.1.2-1-alpine-fat
@@ -23,8 +15,10 @@ FROM openresty/openresty:1.27.1.2-1-alpine-fat
 
 RUN apk add --no-cache build-base curl openssl-dev yaml-dev argon2 openssl git
 
-RUN luarocks install https://luarocks.org/manifests/hisham/luafilesystem-1.8.0-1.rockspec \
-&& luarocks install https://luarocks.org/manifests/gvvaughan/lyaml-6.2.8-1.rockspec 
+RUN luarocks install https://luarocks.org/manifests/hisham/luafilesystem-1.8.0-1.rockspec
+COPY lyaml-6.2.8-1.src /tmp/lyaml-6.2.8-1.src
+RUN cd /tmp/lyaml-6.2.8-1.src && \
+    luarocks install lyaml-6.2.8-1.rockspec
 
 RUN opm get xiaocang/lua-resty-openssl \
 && opm get jkeys089/lua-resty-hmac \
