@@ -313,7 +313,7 @@ services:
     container_name: supabase-vector-global
     restart: unless-stopped
     volumes:
-      - ./volumes/logs/vector.yaml:/etc/vector/vector.yaml:ro,z
+      - ./volumes/logs/vector.yml:/etc/vector/vector.yaml:ro,z
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - rede-supabase

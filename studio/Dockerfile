@@ -10,7 +10,7 @@ COPY seletor_de_projetos/ .
 
 RUN flutter build web --release
 
-FROM openresty/openresty:1.27.1.2-1-alpine-fat
+FROM openresty/openresty:1.27.1.2-5-alpine-fat
 
 
 RUN apk add --no-cache build-base curl openssl-dev yaml-dev argon2 openssl git
@@ -27,8 +27,9 @@ RUN opm get xiaocang/lua-resty-openssl \
 RUN luarocks install https://luarocks.org/manifests/rsander/lua-resty-string-0.09-0.rockspec \
     && luarocks install https://luarocks.org/manifests/erento/lua-erento-hmac-1.0-0.rockspec \
     && luarocks install https://luarocks.org/manifests/megalord/lua-resty-fernet-1.0-0.rockspec \
-    && luarocks install https://luarocks.org/manifests/moorefu/lua-resty-crypto-master-0.rockspec
-
+    && luarocks install https://luarocks.org/manifests/moorefu/lua-resty-crypto-master-0.rockspec \
+    && luarocks install https://luarocks.org/manifests/daurnimator/luaossl-20250929-0.rockspec \
+    && luarocks install https://luarocks.org/manifests/leafo/pgmoon-1.16.0-1.rockspec
 
 COPY nginx/nginx.conf /etc/nginx/nginx.conf
 COPY nginx/lua/get_service_key.lua /usr/local/openresty/lualib/ 
@@ -40,4 +41,3 @@ RUN which argon2 && argon2 -h || echo "argon2 installation check failed"
 
 EXPOSE 4000
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-    
