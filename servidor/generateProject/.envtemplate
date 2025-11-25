@@ -1,6 +1,5 @@
 PROJECT_ID={{project_id}}
 POSTGRES_DATABASE=_supabase_{{project_id}}
-PGRST_DB_SCHEMAS=public,storage,graphql_public
 
 
 
@@ -18,18 +17,8 @@ MAILER_URLPATHS_EMAIL_CHANGE="/auth/v1/verify"
 ENABLE_EMAIL_SIGNUP=true
 #important -> default is false
 ENABLE_EMAIL_AUTOCONFIRM=true
-SMTP_ADMIN_EMAIL=admin@example.com
-SMTP_HOST=supabase-mail
-SMTP_PORT=2500
-SMTP_USER=fake_mail_user
-SMTP_PASS=fake_mail_password
-SMTP_SENDER_NAME=fake_sender
 #important -> default is false
-ENABLE_ANONYMOUS_USERS=true
-
-ENABLE_PHONE_SIGNUP=true
-ENABLE_PHONE_AUTOCONFIRM=true
-
+ENABLE_ANONYMOUS_USERS=false
 
 IMGPROXY_ENABLE_WEBP_DETECTION=true
 

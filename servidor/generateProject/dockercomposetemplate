@@ -8,6 +8,8 @@ services:
       dockerfile: Dockerfile
     container_name: supabase-nginx-{{project_id}}
     restart: unless-stopped
+    volumes:
+      - ../../auth_template/recovery.html:/usr/share/nginx/html/recovery.html:ro
     networks:
       - rede-supabase
     labels:
@@ -22,21 +24,21 @@ services:
       - "traefik.http.middlewares.nginx-{{project_id}}-stripprefix.stripprefix.prefixes=/{{project_id}}"
 
 
-      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.silentStartUp=true"
-      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.allowLocalRequests=true"
-      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.logLocalRequests=false"
-      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.logAllowedRequests=false"
-      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.logApiRequests=true"
-      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.api=https://get.geojs.io/v1/ip/country/{ip}"
-      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.apiTimeoutMs=2000"
-      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.cacheSize=100"
-      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.forceMonthlyUpdate=true"
-      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.allowUnknownCountries=false"
-      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.unknownCountryApiResponse=nil"
+      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.silentStartUp=true"
+      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.allowLocalRequests=true"
+      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.logLocalRequests=false"
+      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.logAllowedRequests=false"
+      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.logApiRequests=true"
+      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.api=https://get.geojs.io/v1/ip/country/{ip}"
+      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.apiTimeoutMs=2000"
+      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.cacheSize=100"
+      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.forceMonthlyUpdate=true"
+      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.allowUnknownCountries=false"
+      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.unknownCountryApiResponse=nil"
 
-      - "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.countries=BR"
-
-      - "traefik.http.routers.supabase-nginx-{{project_id}}.middlewares=rate-limit@file,security-headers@file,geoblock-{{project_id}}@docker, nginx-{{project_id}}-stripprefix@docker"
+      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.countries=BR"
+      - "traefik.http.routers.supabase-nginx-{{project_id}}.middlewares=rate-limit@file,security-headers@file, nginx-{{project_id}}-stripprefix@docker"
+      #- "traefik.http.routers.supabase-nginx-{{project_id}}.middlewares=rate-limit@file,security-headers@file,geoblock-{{project_id}}@docker, nginx-{{project_id}}-stripprefix@docker"
   auth:
     container_name: supabase-auth-{{project_id}}
     image: supabase/gotrue:v2.170.0
@@ -90,6 +92,7 @@ services:
 
       # GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED: true
       # GOTRUE_SMTP_MAX_FREQUENCY: 1s
+      GOTRUE_MAILER_TEMPLATES_RECOVERY: http://supabase-nginx-{{project_id}}:{{nginx_port}}/recovery.html
       GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL}
       GOTRUE_SMTP_HOST: ${SMTP_HOST}
       GOTRUE_SMTP_PORT: ${SMTP_PORT}
@@ -146,9 +149,13 @@ services:
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: ${JWT_SECRET}
       PGRST_DB_USE_LEGACY_GUCS: "false"
-      PGRST_DB_PREPARED_STATEMENTS: false
+      PGRST_DB_PREPARED_STATEMENTS: true
       PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET}
       PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY}
+      PGRST_DB_MAX_ROWS: 200000
+      PGRST_DB_POOL: 100
+      PGRST_DB_POOL_TIMEOUT: 60
+      PGRST_DB_POOL_ACQUISITION_TIMEOUT: 60
     command:
       [
         "postgrest"

@@ -15,7 +15,27 @@ http {
     tcp_nodelay on;
     keepalive_timeout 65;
     keepalive_requests 1000;
+    proxy_connect_timeout  60s;
+    proxy_read_timeout     600s;
+    proxy_send_timeout     600s;
+    send_timeout           600s;
 
+    client_body_timeout    120s;
+    client_header_timeout  60s;
+    client_max_body_size   50m;
+    large_client_header_buffers 4 32k;
+    client_header_buffer_size 16k;
+    proxy_buffer_size 256k;
+    proxy_buffers 4 256k;
+    proxy_busy_buffers_size 256k;
+    
+    server_names_hash_bucket_size 128;
+
+    gzip on;
+    gzip_types application/json application/javascript text/plain text/css application/xml;
+    gzip_min_length 1024;
+
+    include /etc/nginx/mime.types;
     map "" $auth_upstream     { default "supabase-auth-{{project_id}}:9999"; }
     map "" $rest_upstream     { default "supabase-rest-{{project_id}}:3000"; }
     map "" $storage_upstream  { default "supabase-storage-{{project_id}}:5000"; }
@@ -56,6 +76,13 @@ http {
     server {
         listen {{nginx_port}};
         server_name _{{project_id}};
+       
+        location /recovery.html {
+            root /usr/share/nginx/html;
+            add_header Content-Type text/html;
+            add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
+            expires off;
+        }
 
         location /auth/v1/verify {
             rewrite ^/auth/v1/(.*)$ /$1?$args break;
@@ -67,12 +94,10 @@ http {
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $real_scheme;
             proxy_set_header X-Forwarded-Host $host;
-
             add_header 'Access-Control-Allow-Origin' '*';
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
         }
-
 
         location /auth/v1/callback {
             rewrite ^/auth/v1/(.*)$ /$1?$args break;
@@ -89,6 +114,7 @@ http {
         }
 
         location /auth/v1/authorize {
+            rewrite ^/auth/v1/(.*)$ /$1?$args break;
             proxy_pass http://$auth_upstream/authorize;
             proxy_http_version 1.1;
             proxy_set_header Host $host;
@@ -121,7 +147,6 @@ http {
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
         }
-
 
         location /rest/v1/ {
             if ($http_apikey = "") {

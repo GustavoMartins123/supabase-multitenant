@@ -1,53 +1,46 @@
-api:
-  enabled: true         # UI, /health, /topology
-  address: 0.0.0.0:8686 # porta da UI
+# Caminho: ./volumes/logs/vector.yaml
 
-######################## 1. SOURCE ##########################################
+# --- Fontes (Inputs) ---
 sources:
   docker_logs:
-    type: docker_logs
+    type: "docker_logs"
     exclude_containers:
-      - supabase-vector-global    # evita recursão
-    # - traefik
+      - "supabase-vector-global"
 
-######################## 2. TRANSFORMS ######################################
+# --- Transformações ---
 transforms:
-  enrich_meta:
-    type: remap
-    inputs: [docker_logs]
-    source: |-
-      # Pega labels padrão do Docker Compose
-      .project = .docker.container_labels."com.docker.compose.project" ?? "unknown"
-      .service = .docker.container_labels."com.docker.compose.service" ?? "unknown"
+  filter_global_services:
+    type: "filter"
+    inputs:
+      - "docker_logs"
+    # Filtra e permite passar APENAS os logs dos seus serviços globais
+    condition: >-
+      includes([
+        "supabase-db",
+        "supabase-pooler",
+        "realtime-dev.supabase-realtime",
+        "supabase-edge-functions",
+        "docker-projects-api-1",
+        "traefik-traefik-1"
+      ], .container_name)
 
-      # Se não vier de Compose, tenta regex nos nomes supabase-<svc>-<proj>
-      parsed, err = parse_regex(.container_name, r'supabase-(?P<svc>[^-]+)-(?P<proj>.+)')
-      if err == null {
-        .service = parsed.svc
-        .project = parsed.proj
-      }
-
-      # Mantém timestamp original
-      .timestamp = .timestamp
-      # Remove bloco docker inteiro para reduzir tamanho
-      del(.docker)
-
-######################## 3. SINKS ###########################################
+# --- Saídas ---
 sinks:
-  # a) Debug local: printa no stdout do Vector
-  all_to_console:
-    type: console
-    inputs: [enrich_meta]
-    encoding:
-      codec: json
-
-  # b) enviar tudo a Logflare
-  #logflare_all:
-  #  type: http
-  #  inputs: [enrich_meta]
-  #  method: post
-  #  uri: "http://analytics:4000/api/logs?source_name=all&api_key=${LOGFLARE_API_KEY}"
-  #  encoding:
-  #    codec: json
-  #  request:
-  #    retry_max_duration_secs: 10
+  postgresql_logs:
+    type: "postgres"
+    # Recebe os logs JÁ FILTRADOS
+    inputs:
+      - "filter_global_services"
+    # Pega a URI do banco do seu docker-compose.yml
+    endpoint: "${PG_URI}"
+    # Nome da tabela no banco 'logs_db'
+    table: "public.logs"
+    batch:
+      max_events: 100
+      timeout_secs: 1
+    # encoding:
+    #   # Salva o log inteiro como um objeto JSON
+    #   codec: "json"
+    #   # Remove campos desnecessários
+    #   except_fields:
+    #     - "source_type"

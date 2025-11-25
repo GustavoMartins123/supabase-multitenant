@@ -5,21 +5,23 @@ import pathlib
 import asyncpg
 import hmac
 import asyncio, json, re
-import websockets, ssl
 from fastapi import FastAPI, BackgroundTasks, Depends, Header, HTTPException
 from pydantic import BaseModel
 from cryptography.fernet import Fernet
 from typing import Optional, List, Dict
-
+# ----------------------------
+# Configurações & Globals
+# ----------------------------
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
 SCRIPT = BASE_DIR / "scripts" / "generate_project.sh"
+DUPLICATE_SCRIPT = BASE_DIR / "scripts" / "duplicate_project.sh"
 DELETE_SCRIPT = BASE_DIR / "scripts" / "delete_project.sh"
 EXTRACTOR = BASE_DIR / "scripts" / "extract_token.sh"
 DB_DSN = os.getenv("DB_DSN")
-FERNET_SECRET = os.getenv("FERNET_SECRET") 
-APP_TOKEN = os.getenv("NGINX_SHARED_TOKEN")
+FERNET_SECRET = os.getenv("FERNET_SECRET")  # chave base64 de 32 bytes
+APP_TOKEN = os.getenv("NGINX_SHARED_TOKEN")  # token HMAC compartilhado
 DELETE_PASSWORD = os.getenv("PROJECT_DELETE_PASSWORD")
-JOB_STATUS: dict[str, str] = {}
+JOB_STATUS: dict[str, str] = {}  # job_id -> queued|running|failed|done
 
 
 if not FERNET_SECRET:
@@ -33,7 +35,9 @@ except ValueError:
     )
     
 JOB_STATUS: dict[str, str] = {}
-
+# ----------------------------
+# Utilitários
+# ----------------------------
 async def get_pool():
     return await asyncpg.create_pool(DB_DSN, min_size=1, max_size=5)
 
@@ -65,10 +69,19 @@ def validate_project_id(raw: str) -> str:
         raise HTTPException(400, "Nome inválido: palavra reservada SQL.")
     return name
 
+# ----------------------------
+# FastAPI & Modelos
+# ----------------------------
 app = FastAPI()
 
 class NewProject(BaseModel):
     name: str
+
+
+class DuplicateProject(BaseModel):
+    original_name: str
+    new_name: str
+    copy_data: bool = False
 
 @app.get("/api/projects")
 async def list_projects(
@@ -100,6 +113,7 @@ async def create_project(
     if not name:
         raise HTTPException(400, "name required")
 
+    # Insere registro em projects + job em jobs
     job_id = str(uuid.uuid4())
     async with pool.acquire() as conn:
         existing = await conn.fetchval(
@@ -127,6 +141,138 @@ async def create_project(
 
     tasks.add_task(_provision_and_store_keys, job_id, name, user)
     return {"job_id": job_id, "status": "queued"}
+
+
+@app.post("/api/projects/duplicate", status_code=202)
+async def duplicate_project(
+    body: DuplicateProject,
+    tasks: BackgroundTasks,
+    user: str = Header(..., alias="Remote-Email"),
+    pool=Depends(get_pool),
+):
+    """
+    Duplica um projeto existente.
+    - Valida acesso do usuário ao projeto original
+    - Cria registro no banco
+    - Dispara job em background para executar script de duplicação
+    """
+    original = validate_project_id(body.original_name)
+    new_name = validate_project_id(body.new_name)
+    
+    async with pool.acquire() as conn:
+        # Verifica se usuário tem acesso ao projeto original
+        has_access = await conn.fetchval("""
+            SELECT EXISTS(
+                SELECT 1 FROM projects p
+                JOIN project_members m ON p.id = m.project_id
+                WHERE p.name = $1 AND m.user_id = $2
+            )
+        """, original, user)
+        
+        if not has_access:
+            raise HTTPException(403, "Acesso negado ao projeto original")
+        
+        # Verifica se novo nome já existe
+        exists = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM projects WHERE name = $1)",
+            new_name
+        )
+        if exists:
+            raise HTTPException(409, "Nome de projeto já existe")
+        
+        # Cria registro em projects
+        project_id = await conn.fetchval("""
+            INSERT INTO projects(name, owner_id)
+            VALUES($1, $2) RETURNING id
+        """, new_name, user)
+        
+        # Adiciona usuário como admin
+        await conn.execute("""
+            INSERT INTO project_members(project_id, user_id, role)
+            VALUES($1, $2, 'admin')
+        """, project_id, user)
+
+        # Cria job (EXATAMENTE como no create_project)
+        job_id = str(uuid.uuid4())
+        await conn.execute(
+            """INSERT INTO jobs(job_id, project, owner_id, status)
+               VALUES($1, $2, $3, 'queued')""",
+            job_id, new_name, user
+        )
+
+    # Dispara background task
+    tasks.add_task(_duplicate_and_store_keys, job_id, original, new_name, user, body.copy_data)
+    
+    return {"job_id": job_id, "status": "queued"}
+
+
+async def _duplicate_and_store_keys(job_id: str, original_name: str, new_name: str, owner_id: str, copy_data: bool):
+    pool = await get_pool()
+    async def set_status(st: str):
+        await pool.execute(
+          "UPDATE jobs SET status=$1, updated_at=now() WHERE job_id=$2",
+          st, job_id
+        )
+
+    await set_status("running")
+
+    try:
+        # Define modo de cópia
+        copy_mode = "with-data" if copy_data else "schema-only"
+        
+        # Executa script de duplicação
+        proc = await asyncio.create_subprocess_exec(
+            "bash", str(DUPLICATE_SCRIPT), original_name, new_name, copy_mode,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            await set_status("failed")
+            print(stdout.decode())
+            return
+
+        # Extração de tokens
+        proc2 = await asyncio.create_subprocess_exec(
+            "bash", str(EXTRACTOR), new_name,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out2, err2 = await proc2.communicate()
+        if proc2.returncode != 0:
+            await set_status("failed")
+            print(err2.decode())
+            return
+
+        # Parse das variáveis
+        lines = out2.decode().splitlines()
+        kv = {k: v for k, v in (line.split("=", 1) for line in lines if "=" in line)}
+        anon = kv.get("ANON_KEY_PROJETO")
+        service = kv.get("SERVICE_ROLE_KEY_PROJETO")
+        if not anon or not service:
+            await set_status("failed")
+            print("Missing tokens")
+            return
+
+        # Cipher + update projetos
+        anon_enc = fernet.encrypt(anon.encode()).decode()
+        svc_enc  = fernet.encrypt(service.encode()).decode()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE projects
+                   SET anon_key=$1, service_role=$2
+                   WHERE name=$3 AND owner_id=$4""",
+                anon_enc, svc_enc, new_name, owner_id
+            )
+
+        await set_status("done")
+
+    except Exception as e:
+        await set_status("failed")
+        print(f"Worker error: {e}")
+
+
+
 
 
 async def execute_delete_script(project_name: str):
@@ -166,18 +312,23 @@ async def drop_supabase_replication_slots(
     """
     errors: List[str] = []
 
-    msg_slot  = f"supabase_realtime_messages_replication_slot_{project_name}"
-    repl_slot = f"supabase_realtime_replication_slot_{project_name}"
+    # Nomes padronizados dos slots
+    msg_slot  = f"supabase_realtime_messages_replication_slot_{project_name}"[:63]
+    repl_slot = f"supabase_realtime_replication_slot_{project_name}"[:63]
 
     async def terminate_if_active(slot: str) -> None:
         """Encerra o backend do slot se estiver ativo."""
-        pid = await conn.fetchval(
-            "SELECT active_pid FROM pg_replication_slots WHERE slot_name = $1",
-            slot,
-        )
-        if pid:
-            await conn.execute("SELECT pg_terminate_backend($1)", pid)
-            await asyncio.sleep(1)
+        try:
+            pid = await conn.fetchval(
+                "SELECT active_pid FROM pg_replication_slots WHERE slot_name = $1",
+                slot,
+            )
+            if pid:
+                await conn.execute("SELECT pg_terminate_backend($1)", pid)
+                await asyncio.sleep(1)
+        except Exception as exc:
+            if "does not exist" not in str(exc):
+                errors.append(f"terminate {slot}: {exc}")
 
     async def drop_slot(slot: str) -> None:
         """Tenta dropar o slot; ignora erro de inexistência."""
@@ -185,7 +336,7 @@ async def drop_supabase_replication_slots(
             await conn.execute("SELECT pg_drop_replication_slot($1)", slot)
         except Exception as exc:
             if "does not exist" not in str(exc):
-                errors.append(f"{slot}: {exc}")
+                errors.append(f"drop {slot}: {exc}")
 
     # ---------- 1) & 2)  SLOT *messages* ----------
     await terminate_if_active(msg_slot)
@@ -229,8 +380,10 @@ async def delete_project(
 
         async with pool.acquire() as conn:
 
-            await conn.execute('DELETE FROM _realtime.tenants WHERE external_id = $1', project_name)
+            #await conn.execute('DELETE FROM _realtime.extensions WHERE tenant_external_id = $1', project_name)
+            
             await conn.execute('DELETE FROM _realtime.extensions WHERE tenant_external_id = $1', project_name)
+            await conn.execute('DELETE FROM _realtime.tenants WHERE external_id = $1', project_name)
 
             await asyncio.sleep(10)
 
@@ -253,6 +406,7 @@ async def delete_project(
             await conn.execute("DELETE FROM project_members WHERE project_id = $1", project_id)
             await conn.execute("DELETE FROM jobs WHERE project = $1", project_name)
             await conn.execute("DELETE FROM projects WHERE id = $1", project_id)
+            await conn.execute('DELETE FROM _supavisor.users WHERE tenant_external_id = $1',project_name)
             await conn.execute('DELETE FROM _supavisor.tenants WHERE external_id = $1', project_name)
 
     finally:
@@ -274,18 +428,20 @@ async def delete_project(
         "errors": errors
     }
 
+
 class AddMember(BaseModel):
     user_id: str
     role: str = 'member'
 
 @app.post("/api/projects/{project_name}/members")
 async def add_member(
-    project_name: str,
+    project_name: str,  # vem da URL
     member: AddMember,
     user: str = Header(..., alias="Remote-Email"),
     pool=Depends(get_pool),
 ):
     async with pool.acquire() as conn:
+        # Busca o project_id pelo nome
         project_id = await conn.fetchval(
             """SELECT id FROM projects
                WHERE name = $1""", 
@@ -294,6 +450,7 @@ async def add_member(
         if not project_id:
             raise HTTPException(404, "Project not found")
         
+        # Verifica se o usuário é admin
         role = await conn.fetchval(
             """SELECT role FROM project_members
                WHERE project_id = $1 AND user_id = $2""",
@@ -302,6 +459,7 @@ async def add_member(
         if role != 'admin':
             raise HTTPException(403, "Only admin can add members")
             
+        # Adiciona o membro
         await conn.execute(
             """INSERT INTO project_members(project_id, user_id, role)
                VALUES($1, $2, $3)
@@ -354,6 +512,7 @@ async def remove_member_by_ref(
     pool=Depends(get_pool),
 ):
     async with pool.acquire() as conn:
+        # 1) busca project_id pelo nome (case-insensitive)
         project_row = await conn.fetchrow(
             "SELECT id FROM projects WHERE lower(name) = lower($1)",
             name
@@ -363,6 +522,7 @@ async def remove_member_by_ref(
 
         project_id = project_row["id"]
 
+        # 2) verifica se quem está chamando é admin no projeto
         caller_role = await conn.fetchval(
             "SELECT role FROM project_members WHERE project_id = $1 AND user_id = $2",
             project_id, user
@@ -370,6 +530,7 @@ async def remove_member_by_ref(
         if caller_role != "admin":
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Only admin can remove members")
 
+        # 3) realiza o delete
         result = await conn.execute(
             "DELETE FROM project_members WHERE project_id = $1 AND user_id = $2",
             project_id, member_id
@@ -391,6 +552,7 @@ async def enc_key(
     token: str = Header(None, alias="X-Shared-Token"),
     pool=Depends(get_pool)
 ):
+    # Valida token HMAC
     if not APP_TOKEN or not hmac.compare_digest(token or "", APP_TOKEN):
         raise HTTPException(status_code=403, detail="Forbidden")
 
@@ -403,64 +565,9 @@ async def enc_key(
 
     return {"enc_service_key": row["service_role"]}
 
-
-async def _kickstart_realtime(tenant_slug: str, anon_key: str, nginx_port: int, duration: int = 10):
-    """
-    Força a criação do replication slot de forma fiel.
-    """
-
-    url = f"ws://supabase-nginx-{tenant_slug}:{nginx_port}/realtime/v1/websocket?apikey={anon_key}&vsn=1.0.0"
-
-    print(f"[*] Tentando iniciar Realtime para '{tenant_slug}'...")
-    print(f"URL: {url}")
-
-    try:
-        async with websockets.connect(url) as ws:
-            print("[✓] Conexão WS via gateway estabelecida com sucesso!")
-            ref_counter = 1
-            join_ref = str(ref_counter)
-            join_msg = {
-                "topic": f"realtime:public:{tenant_slug}",
-                "event": "phx_join",
-                "payload": {},
-                "ref": join_ref,
-                "join_ref": join_ref
-            }
-            await ws.send(json.dumps(join_msg))
-            print("[→] Mensagem JOIN enviada.")
-
-            try:
-                async with asyncio.timeout(duration):
-                    while True:
-                        response_str = await ws.recv()
-                        response = json.loads(response_str)
-                        print(f"[←] Recebido do gateway: {response}")
-
-                        if response.get("event") == "phx_heartbeat":
-                            heartbeat_reply = {
-                                "topic": "phoenix", "event": "phx_reply",
-                                "payload": {}, "ref": response.get("ref")
-                            }
-                            await ws.send(json.dumps(heartbeat_reply))
-                            print("[→] Resposta de Heartbeat enviada.")
-                        
-                        if response.get("event") == "phx_reply" and response.get("ref") == join_ref:
-                            if response.get("payload", {}).get("status") == "ok":
-                                print("[✓] Join no tópico confirmado. Slot de replicação sendo criado.")
-                            else:
-                                print("[⚠️ ERRO] Servidor recusou o join.")
-                                break
-            
-            except asyncio.TimeoutError:
-                print(f"[✓] Tempo de {duration}s concluído. Encerrando.")
-
-    except websockets.exceptions.InvalidStatusCode as e:
-        print(f"[⚠️ ERRO] Falha na conexão com status HTTP {e.status_code}. O gateway recusou a conexão.")
-    except Exception as e:
-        print(f"[⚠️ ERRO] Falha inesperada: {e}")
-
-    print(f"[*] Processo de kickstart para '{tenant_slug}' finalizado.")
-
+# ----------------------------
+# Worker: provisiona e extrai keys
+# ----------------------------
 async def _provision_and_store_keys(job_id: str, project_name: str, user: str):
     pool = await get_pool()
     async def set_status(st: str):
@@ -472,6 +579,7 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: str):
     await set_status("running")
 
     try:
+        # provisionamento
         proc = await asyncio.create_subprocess_exec(
             "bash", str(SCRIPT), project_name,
             stdout=asyncio.subprocess.PIPE,
@@ -482,17 +590,8 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: str):
             await set_status("failed")
             print(stdout.decode())
             return
-        output_str = stdout.decode()
-        nginx_port = None
-        for line in output_str.splitlines():
-            if line.startswith("NGINX_PORT="):
-                nginx_port = int(line.split("=")[1])
-                break
-        
-        if not nginx_port:
-            await set_status("failed") 
-            print("Erro: Não foi possível extrair a porta do Nginx da saída do script.")
-            return
+
+        # extração de tokens
         proc2 = await asyncio.create_subprocess_exec(
             "bash", str(EXTRACTOR), project_name,
             stdout=asyncio.subprocess.PIPE,
@@ -504,6 +603,7 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: str):
             print(err2.decode())
             return
 
+        # parse das variáveis
         lines = out2.decode().splitlines()
         kv = {k: v for k, v in (line.split("=", 1) for line in lines if "=" in line)}
         anon = kv.get("ANON_KEY_PROJETO")
@@ -513,6 +613,7 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: str):
             print("Missing tokens")
             return
 
+        # cipher + update projetos
         anon_enc = fernet.encrypt(anon.encode()).decode()
         svc_enc  = fernet.encrypt(service.encode()).decode()
         async with pool.acquire() as conn:
@@ -523,8 +624,6 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: str):
                 anon_enc, svc_enc, project_name, user
             )
 
-        await _kickstart_realtime(project_name, anon, nginx_port)
-
         await set_status("done")
 
     except Exception as e:
@@ -533,6 +632,7 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: str):
 
 def _name_matches(cont_json: dict, project: str) -> bool:
     patt = re.compile(rf"-{re.escape(project)}$")
+    # Names pode vir como string "nginx,rest" ou lista — trate os dois
     names = cont_json.get("Names", "")
     if isinstance(names, str):
         return any(patt.search(n) for n in names.split(","))
@@ -572,6 +672,7 @@ async def get_project_status(project_name: str) -> dict:
             "ports": container.get("Ports", "")
         })
     
+    # Determina o status geral do projeto
     total_containers = len(containers)
     if running_count == 0:
         overall_status = "stopped"
@@ -597,6 +698,7 @@ async def get_project_docker_status(
     pool=Depends(get_pool)
 ):
     """Retorna o status dos containers do projeto"""
+    # Verifica se o usuário tem acesso ao projeto
     async with pool.acquire() as conn:
         project_id = await conn.fetchval(
             "SELECT id FROM projects WHERE name = $1", project_name
@@ -625,6 +727,7 @@ async def stop_project(
     pool=Depends(get_pool)
 ):
     """Para todos os containers do projeto"""
+    # Verifica se o usuário é admin do projeto
     async with pool.acquire() as conn:
         project_id = await conn.fetchval(
             "SELECT id FROM projects WHERE name = $1", project_name
@@ -686,6 +789,7 @@ async def start_project(
     pool=Depends(get_pool)
 ):
     """Inicia todos os containers do projeto"""
+    # Verifica se o usuário é admin do projeto
     async with pool.acquire() as conn:
         project_id = await conn.fetchval(
             "SELECT id FROM projects WHERE name = $1", project_name
@@ -710,13 +814,15 @@ async def start_project(
     started_containers = []
     errors = []
     
+    # Ordem recomendada para iniciar containers Supabase
     service_order = ["meta", "auth", "rest", "imgproxy", "storage" ,"nginx"]
     
+    # Ordena containers por prioridade
     def get_service_priority(container_name: str) -> int:
         for i, service in enumerate(service_order):
             if service in container_name.lower():
                 return i
-        return 999
+        return 999  # containers não reconhecidos vão por último
     
     sorted_containers = sorted(containers, key=lambda c: get_service_priority(c.get("Names", "")))
     
@@ -735,7 +841,7 @@ async def start_project(
                 
                 if proc.returncode == 0:
                     started_containers.append(container_name)
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(2)  # Pausa entre inicializações
                 else:
                     errors.append(f"Error starting {container_name}: {stderr.decode()}")
             else:
@@ -758,6 +864,7 @@ async def restart_project(
     pool=Depends(get_pool)
 ):
     """Reinicia (docker restart) todos os containers do projeto."""
+    # ──────────────── 1. autorização ────────────────
     async with pool.acquire() as conn:
         project_id = await conn.fetchval(
             "SELECT id FROM projects WHERE name = $1", project_name
@@ -779,10 +886,12 @@ async def restart_project(
         if role != "admin" and not is_global_admin:
             raise HTTPException(403, "Access denied: Admin do projeto ou administrador do sistema obrigatório")
 
-    containers = await get_project_containers(project_name)
+    # ──────────────── 2. coleta dos containers ────────────────
+    containers = await get_project_containers(project_name)  # ↖ mesma helper dos outros
     if not containers:
         raise HTTPException(404, "No containers found for this project")
 
+    # ──────────────── 3. ordem de reinício (mesma do start) ────────────────
     service_order = ["meta", "auth", "rest", "imgproxy", "storage", "nginx"]
 
     def get_service_priority(name: str) -> int:
@@ -795,6 +904,7 @@ async def restart_project(
         containers, key=lambda c: get_service_priority(c.get("Names", ""))
     )
 
+    # ──────────────── 4. loop de restart ────────────────
     restarted_containers: list[str] = []
     errors: list[str] = []
 
@@ -805,7 +915,7 @@ async def restart_project(
                 "docker",
                 "restart",
                 "-t",
-                "30",           
+                "30",           # timeout para stop graceful antes de kill
                 name,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -814,7 +924,7 @@ async def restart_project(
 
             if proc.returncode == 0:
                 restarted_containers.append(name)
-                await asyncio.sleep(2) 
+                await asyncio.sleep(2)  # pequena pausa entre reinícios
             else:
                 errors.append(f"Error restarting {name}: {stderr.decode().strip()}")
         except Exception as exc:
@@ -836,6 +946,7 @@ async def get_container_logs(
     lines: int = 100
 ):
     """Retorna os logs de um serviço específico do projeto"""
+    # Verifica se o usuário tem acesso ao projeto
     async with pool.acquire() as conn:
         project_id = await conn.fetchval(
             "SELECT id FROM projects WHERE name = $1", project_name
@@ -850,9 +961,11 @@ async def get_container_logs(
         if not is_member:
             raise HTTPException(403, "Access denied")
     
+    # Procura o container específico
     container_name = f"supabase-{service}-{project_name}"
     
     try:
+        # Verifica se o container existe
         proc_check = await asyncio.create_subprocess_exec(
             "docker", "inspect", container_name,
             stdout=asyncio.subprocess.PIPE,
@@ -863,6 +976,7 @@ async def get_container_logs(
         if proc_check.returncode != 0:
             raise HTTPException(404, f"Container {container_name} not found")
         
+        # Pega os logs
         proc_logs = await asyncio.create_subprocess_exec(
             "docker", "logs", "--tail", str(lines), "--timestamps", container_name,
             stdout=asyncio.subprocess.PIPE,
@@ -873,6 +987,7 @@ async def get_container_logs(
         if proc_logs.returncode != 0:
             raise HTTPException(500, f"Error getting logs: {stderr_logs.decode()}")
         
+        # Pega o status do container
         container_info = json.loads(stdout_check.decode())[0]
         status = container_info.get("State", {}).get("Status", "unknown")
         
@@ -889,7 +1004,7 @@ async def get_container_logs(
 
 @app.post("/api/projects/admin/projects-info")
 async def get_projects_for_user(
-    body: Dict[str, str],
+    body: Dict[str, str],  # {"user_id": "<hash>"}
     user: str = Header(..., alias="Remote-Email"),
     groups: str = Header("", alias="Remote-Groups"),
     pool=Depends(get_pool)
@@ -944,6 +1059,7 @@ async def list_all_users_for_admin(
         raise HTTPException(403, "admin access required")
     
     async with pool.acquire() as conn:
+        # Verificar se projeto existe
         project = await conn.fetchrow(
             "SELECT id FROM projects WHERE lower(name) = lower($1)",
             name,
@@ -951,11 +1067,14 @@ async def list_all_users_for_admin(
         if not project:
             raise HTTPException(404, "project not found")
         
+        # Buscar membros atuais (dados que a API tem)
         current_members = await conn.fetch(
             "SELECT user_id, role FROM project_members WHERE project_id=$1",
             project["id"],
         )
     
+    # Como não temos acesso ao cache, retornamos o que sabemos
+    # e deixamos uma indicação de que o Nginx deve completar
     return {
         "project_name": name,
         "project_id": project["id"],
@@ -966,8 +1085,8 @@ async def list_all_users_for_admin(
                 "status": "member"
             } for m in current_members
         ],
-        "cache_users_needed": True, 
-        "nginx_route": f"/api/projects/{name}/all-users"
+        "cache_users_needed": True,  # Indica que precisa completar via Nginx
+        "nginx_route": f"/api/projects/{name}/all-users"  # Rota do Nginx
     }
     
 class TransferBody(BaseModel):
@@ -981,6 +1100,7 @@ async def transfer_project(
     groups: str            = Header("", alias="Remote-Groups"),
     pool                   = Depends(get_pool),
 ):
+    # ── 1. Somente administradores globais (grupo 'admin') podem transferir
     if "admin" not in [g.strip() for g in groups.split(",")]:
         raise HTTPException(403, "Acesso negado – apenas administradores do sistema")
 
@@ -989,6 +1109,7 @@ async def transfer_project(
         raise HTTPException(400, "new_owner_id é obrigatório")
 
     async with pool.acquire() as conn:
+        # ── 2. Verifica se projeto existe
         proj_row = await conn.fetchrow(
             "SELECT id, owner_id FROM projects WHERE name = $1",
             project_name,
@@ -1002,10 +1123,13 @@ async def transfer_project(
         if new_owner == current_owner:
             return {"status": "noop", "detail": "Já é o proprietário"}
 
+        # 5 ─── transfere
         await conn.execute(
             "UPDATE projects SET owner_id = $1 WHERE id = $2",
             new_owner, project_id,
         )
+
+        # 6 ─── garante admin para o novo owner
         await conn.execute(
             """
             INSERT INTO project_members(project_id, user_id, role)
@@ -1016,6 +1140,7 @@ async def transfer_project(
             project_id, new_owner,
         )
 
+        # 7 ─── demota o dono antigo **só se ele ainda for admin**
         await conn.execute(
             """
             UPDATE project_members

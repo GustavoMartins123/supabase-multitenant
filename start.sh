@@ -7,6 +7,11 @@ cd servidor
 docker compose -f docker-compose.yml --env-file .env --env-file secrets/.env up --build -d
 echo "✅ Serviços Supabase iniciados. Aguardando o banco de dados ficar pronto..."
 
+echo "▶️  Iniciando a api do Studio..."
+docker compose  -f docker-compose-api.yml --env-file secrets/.env   --env-file .env up --build -d
+echo "✅ Api do Studio iniciado."
+cd .. 
+
 
 COUNTER=0
 until [ "`docker inspect -f {{.State.Health.Status}} supabase-db`" == "healthy" ]; do

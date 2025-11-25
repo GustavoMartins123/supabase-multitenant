@@ -1,0 +1,73 @@
+-- Ver logs em tempo real (execute no psql)
+SELECT 
+    to_char(timestamp, 'HH24:MI:SS') as hora,
+    container_name,
+    LEFT(message, 80) as mensagem
+FROM public.logs 
+ORDER BY timestamp DESC 
+LIMIT 20;
+
+-- Top containers mais verbosos (últimas 24h)
+SELECT 
+    container_name,
+    COUNT(*) as total_logs,
+    COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as percentual
+FROM public.logs
+WHERE timestamp > NOW() - INTERVAL '24 hours'
+GROUP BY container_name
+ORDER BY total_logs DESC;
+
+-- Buscar erros
+SELECT timestamp, container_name, message
+FROM public.logs
+WHERE message ILIKE '%error%' OR message ILIKE '%fail%'
+ORDER BY timestamp DESC
+LIMIT 50;
+
+-- Logs por período do dia
+SELECT 
+    EXTRACT(HOUR FROM timestamp) as hora,
+    COUNT(*) as total
+FROM public.logs
+GROUP BY hora
+ORDER BY hora;
+
+
+
+-----------------------------------------------------------------
+
+
+
+-- Criar função de limpeza
+CREATE OR REPLACE FUNCTION cleanup_old_logs()
+RETURNS void AS $$
+BEGIN
+    DELETE FROM public.logs
+    WHERE timestamp < NOW() - INTERVAL '7 days';
+END;
+$$ LANGUAGE plpgsql;
+
+-- Executar manualmente ou via cron
+SELECT cleanup_old_logs();
+
+
+
+-----------------------------------------------------------------
+
+
+-- Criar uma partição por dia (PostgreSQL 10+)
+CREATE TABLE public.logs_partitioned (
+    timestamp TIMESTAMPTZ NOT NULL,
+    container_id TEXT,
+    container_name TEXT,
+    image TEXT,
+    stream TEXT,
+    message TEXT,
+    host TEXT
+) PARTITION BY RANGE (timestamp);
+
+-- Criar partições para cada dia
+CREATE TABLE logs_2025_10_28 PARTITION OF logs_partitioned
+FOR VALUES FROM ('2025-10-28') TO ('2025-10-29');
+
+-- Automatizar com pg_cron ou script

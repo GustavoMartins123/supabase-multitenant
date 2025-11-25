@@ -1,0 +1,28 @@
+#docker compose  -f docker-compose-api.yml --env-file secrets/.env   --env-file .env up --build -d
+services:
+  projects-api:
+    build: 
+      context: .
+      dockerfile: ./api-internal/Dockerfile
+    restart: unless-stopped
+    networks: [rede-supabase]                # mesma bridge do restante
+    expose: ["18000"]                         # visível APENAS na rede Docker :contentReference[oaicite:4]{index=4}
+    environment:
+      DB_DSN: postgres://supabase_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/postgres
+      FERNET_SECRET: ${FERNET_SECRET}
+      NGINX_SHARED_TOKEN: ${NGINX_SHARED_TOKEN}
+      PROJECT_DELETE_PASSWORD: ${PROJECT_DELETE_PASSWORD}
+    volumes:
+      - ./projects:/docker/projects:rw        # bind-mount relativo  :contentReference[oaicite:0]{index=0}
+      - ./.env:/docker/.env:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+      - traefik.enable=true
+      - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.20.0.0/16
+      - traefik.http.routers.projects.rule=PathPrefix(`/api/projects`)
+      - traefik.http.routers.projects.middlewares=lanonly, api-security-chain@file
+      - traefik.http.services.projects.loadbalancer.server.port=18000  
+
+networks:
+  rede-supabase:
+    external: true

@@ -26,21 +26,34 @@ class UserProjectsAdminScreen extends StatefulWidget {
   State<UserProjectsAdminScreen> createState() => _UserProjectsAdminScreenState();
 }
 
-class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> {
+class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> with SingleTickerProviderStateMixin {
   List<ProjectInfo> _projects = [];
   bool _loading = true;
   final Session _session = Session();
+  late AnimationController _fadeController;
+  late Animation<double> _fadeAnimation;
 
   @override
   void initState() {
     super.initState();
     _session.busyListenable.addListener(_onBusyChanged);
     _fetchProjects();
+    
+    _fadeController = AnimationController(
+      duration: const Duration(milliseconds: 500),
+      vsync: this,
+    );
+    _fadeAnimation = CurvedAnimation(
+      parent: _fadeController,
+      curve: Curves.easeOut,
+    );
+    _fadeController.forward();
   }
 
   @override
   void dispose() {
     _session.busyListenable.removeListener(_onBusyChanged);
+    _fadeController.dispose();
     super.dispose();
   }
 
@@ -53,12 +66,12 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> {
     _safeSetState(() {});
   }
 
-
   void _safeSetState(VoidCallback fn) {
     if (mounted) {
       setState(fn);
     }
   }
+
   Future<List<AvailableUser>> _loadAvailableUsers(String projectName) async {
     try {
       final response = await http.get(
@@ -67,7 +80,6 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> {
 
       if (response.statusCode == 200) {
         final Map<String, dynamic> data = jsonDecode(response.body);
-
         final List<dynamic> usersJson = data['users'];
 
         return usersJson
@@ -82,7 +94,6 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> {
     }
   }
 
-
   Future<void> _transferProject(String projectName, String newOwnerId) async {
     try {
       final response = await http.post(
@@ -95,7 +106,12 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> {
 
       if (response.statusCode == 200) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Projeto "$projectName" transferido com sucesso!')),
+          SnackBar(
+            content: Text('Projeto "$projectName" transferido com sucesso!'),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            margin: const EdgeInsets.all(16),
+          ),
         );
         await _fetchProjects();
       } else {
@@ -106,6 +122,9 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> {
         SnackBar(
           content: Text('Erro ao transferir projeto: $e'),
           backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          margin: const EdgeInsets.all(16),
         ),
       );
     }
@@ -149,22 +168,184 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    final isDark = t.brightness == Brightness.dark;
+
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Projetos de ${widget.userName}'),
+      backgroundColor: isDark ? const Color(0xFF0A0E1A) : const Color(0xFFF5F7FA),
+      body: CustomScrollView(
+        slivers: [
+          SliverAppBar.large(
+            floating: true,
+            pinned: true,
+            backgroundColor: isDark ? const Color(0xFF0F1419) : Colors.white,
+            surfaceTintColor: Colors.transparent,
+            elevation: 0,
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back_rounded),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            flexibleSpace: FlexibleSpaceBar(
+              titlePadding: const EdgeInsets.only(left: 60, bottom: 16),
+              title: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Projetos',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
+                      letterSpacing: -0.5,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              t.colorScheme.primary.withOpacity(0.2),
+                              t.colorScheme.secondary.withOpacity(0.2),
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          widget.userName,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: t.colorScheme.primary,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '• ${_projects.length} ${_projects.length == 1 ? 'projeto' : 'projetos'}',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.normal,
+                          color: isDark ? Colors.white54 : Colors.black45,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: FadeTransition(
+              opacity: _fadeAnimation,
+              child: _buildContent(context),
+            ),
+          ),
+        ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _projects.isEmpty
-          ? const Center(child: Text('Nenhum projeto encontrado'))
-          : ListView(
-        padding: const EdgeInsets.all(16),
-        children: _projects.map(_buildProjectCard).toList(),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
+    final t = Theme.of(context);
+    final isDark = t.brightness == Brightness.dark;
+
+    if (_loading) {
+      return Padding(
+        padding: const EdgeInsets.all(80),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 50,
+                height: 50,
+                child: CircularProgressIndicator(
+                  strokeWidth: 3,
+                  color: t.colorScheme.primary,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'Carregando projetos...',
+                style: TextStyle(
+                  color: isDark ? Colors.white70 : Colors.black54,
+                  fontSize: 15,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_projects.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(80),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 120,
+                height: 120,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      t.colorScheme.primary.withOpacity(0.2),
+                      t.colorScheme.secondary.withOpacity(0.1),
+                    ],
+                  ),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.folder_open_rounded,
+                  size: 56,
+                  color: t.colorScheme.primary,
+                ),
+              ),
+              const SizedBox(height: 32),
+              Text(
+                'Nenhum projeto encontrado',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Este usuário ainda não possui projetos',
+                style: TextStyle(
+                  fontSize: 15,
+                  color: isDark ? Colors.white60 : Colors.black54,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1200),
+          child: Column(
+            children: _projects.map(_buildProjectCard).toList(),
+          ),
+        ),
       ),
     );
   }
 
   Widget _buildProjectCard(ProjectInfo project) {
+    final t = Theme.of(context);
+    final isDark = t.brightness == Brightness.dark;
     final busy = _session.isBusy(project.name);
 
     if (project.statusFuture == null && !busy) {
@@ -177,91 +358,185 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> {
       future: project.statusFuture,
       builder: (context, snap) {
         final effectiveStatus = snap.data?.status ?? project.status;
-        final running        = snap.data?.running  ?? project.runningContainers;
-        final total          = snap.data?.total    ?? project.totalContainers;
+        final running = snap.data?.running ?? project.runningContainers;
+        final total = snap.data?.total ?? project.totalContainers;
+        final isRunning = effectiveStatus == 'running';
 
-        return Card(
-          margin: const EdgeInsets.only(bottom: 12),
+        return Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: isDark
+                  ? [const Color(0xFF1A1F2E), const Color(0xFF12161F)]
+                  : [Colors.white, Colors.grey[50]!],
+            ),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: isRunning
+                  ? Colors.green.withOpacity(0.3)
+                  : Colors.orange.withOpacity(0.3),
+              width: 1.5,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: isDark ? Colors.black.withOpacity(0.3) : Colors.black.withOpacity(0.08),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
           child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
+            padding: const EdgeInsets.all(20),
+            child: Column(
               children: [
-                Icon(
-                  effectiveStatus == 'running'
-                      ? Icons.check_circle
-                      : Icons.warning,
-                  color: effectiveStatus == 'running'
-                      ? Colors.green
-                      : Colors.orange,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(project.name,
-                          style: const TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Containers: $running/$total',
-                        style:
-                        TextStyle(color: Colors.grey[700], fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
                 Row(
                   children: [
-                    IconButton(
-                      tooltip: 'Abrir',
-                      icon: const Icon(Icons.open_in_new),
-                      onPressed: () => _openProject(project.name),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: isRunning
+                            ? Colors.green.withOpacity(0.15)
+                            : Colors.orange.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        isRunning ? Icons.check_circle_rounded : Icons.warning_rounded,
+                        color: isRunning ? Colors.green : Colors.orange,
+                        size: 24,
+                      ),
                     ),
-                    IconButton(
-                      tooltip: 'Start',
-                      icon: const Icon(Icons.play_arrow),
-                      onPressed: busy
-                          ? null
-                          : () => _doAction(project.name, 'start'),
-                    ),
-                    IconButton(
-                      tooltip: 'Stop',
-                      icon: const Icon(Icons.stop),
-                      onPressed: busy
-                          ? null
-                          : () => _doAction(project.name, 'stop'),
-                    ),
-                    IconButton(
-                      tooltip: 'Restart',
-                      icon: const Icon(Icons.restart_alt),
-                      onPressed: busy
-                          ? null
-                          : () => _doAction(project.name, 'restart'),
-                    ),
-                    IconButton(
-                      tooltip: 'Transferir projeto',
-                      icon: const Icon(Icons.transfer_within_a_station, color: Colors.blue),
-                      onPressed: busy
-                          ? null
-                          : () => _showTransferDialog(project.name),
-                    ),
-                    IconButton(
-                      tooltip: 'Excluir',
-                      icon: const Icon(Icons.delete, color: Colors.red),
-                      onPressed: busy
-                          ? null
-                          : () => _confirmAndDelete(project.name),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            project.name,
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? Colors.white : Colors.black87,
+                              letterSpacing: -0.3,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: isRunning
+                                      ? Colors.green.withOpacity(0.15)
+                                      : Colors.orange.withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  effectiveStatus.toUpperCase(),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: isRunning ? Colors.green : Colors.orange,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Icon(
+                                Icons.widgets_rounded,
+                                size: 14,
+                                color: isDark ? Colors.white38 : Colors.black38,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                '$running/$total containers',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: isDark ? Colors.white60 : Colors.black54,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                     if (busy)
-                      const Padding(
-                        padding: EdgeInsets.only(left: 8),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: t.colorScheme.primary.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                         child: SizedBox(
                           width: 20,
                           height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(t.colorScheme.primary),
+                          ),
                         ),
                       ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Divider(color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08)),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildActionButton(
+                        icon: Icons.open_in_new_rounded,
+                        label: 'Abrir',
+                        color: t.colorScheme.primary,
+                        onPressed: busy ? null : () => _openProject(project.name),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _buildActionButton(
+                        icon: Icons.play_arrow_rounded,
+                        label: 'Start',
+                        color: Colors.green,
+                        onPressed: busy ? null : () => _doAction(project.name, 'start'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _buildActionButton(
+                        icon: Icons.stop_rounded,
+                        label: 'Stop',
+                        color: Colors.red,
+                        onPressed: busy ? null : () => _doAction(project.name, 'stop'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _buildActionButton(
+                        icon: Icons.restart_alt_rounded,
+                        label: 'Restart',
+                        color: Colors.blue,
+                        onPressed: busy ? null : () => _doAction(project.name, 'restart'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _buildActionButton(
+                        icon: Icons.swap_horiz_rounded,
+                        label: 'Transferir',
+                        color: Colors.purple,
+                        onPressed: busy ? null : () => _showTransferDialog(project.name),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _buildActionButton(
+                        icon: Icons.delete_outline_rounded,
+                        label: 'Excluir',
+                        color: Colors.red.shade700,
+                        onPressed: busy ? null : () => _confirmAndDelete(project.name),
+                      ),
+                    ),
                   ],
                 ),
               ],
@@ -271,6 +546,59 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> {
       },
     );
   }
+
+  Widget _buildActionButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback? onPressed,
+  }) {
+    final t = Theme.of(context);
+    final isDark = t.brightness == Brightness.dark;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+          decoration: BoxDecoration(
+            color: onPressed == null
+                ? (isDark ? Colors.white.withOpacity(0.03) : Colors.grey[200])
+                : color.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: onPressed == null
+                  ? (isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.08))
+                  : color.withOpacity(0.3),
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                color: onPressed == null ? Colors.grey : color,
+                size: 20,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: onPressed == null ? Colors.grey : color,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _openProject(String ref) async {
     await http.get(Uri.parse('/set-project?ref=$ref'));
     html.window.open('${html.window.location.origin}/project/default', '_blank');
@@ -285,7 +613,12 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> {
 
       if (resp.statusCode == 200) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ação "$action" executada no projeto "$projectName".')),
+          SnackBar(
+            content: Text('Ação "$action" executada no projeto "$projectName".'),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            margin: const EdgeInsets.all(16),
+          ),
         );
         await _fetchProjects();
       } else {
@@ -293,7 +626,13 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> {
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString()), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text(e.toString()),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          margin: const EdgeInsets.all(16),
+        ),
       );
     } finally {
       final proj = _projects.firstWhereOrNull((p) => p.name == projectName);
