@@ -157,7 +157,7 @@ cd supabase-multitenant
 ### 2\. Run the Setup Script
 
 ```bash
-bash setup.sh
+sudo bash setup.sh
 # The server IP or Domain requested by the script is where the database and Traefik will be hosted.
 ```
 
@@ -171,7 +171,7 @@ bash setup.sh
 
 ```bash
 # This will start the core services, the gateway, and the management UI
-bash start.sh
+sudo bash start.sh
 ```
 **Option 2: Manual Start (For Control or Debugging)**
 
