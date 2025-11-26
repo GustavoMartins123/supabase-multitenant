@@ -1,73 +1,192 @@
--- Ver logs em tempo real (execute no psql)
+-- 1️⃣ Ver logs em tempo real (últimos 20)
 SELECT 
-    to_char(timestamp, 'HH24:MI:SS') as hora,
+    to_char(timestamp, 'YYYY-MM-DD HH24:MI:SS') as quando,
     container_name,
-    LEFT(message, 80) as mensagem
+    stream,
+    LEFT(message, 100) as mensagem
 FROM public.logs 
 ORDER BY timestamp DESC 
 LIMIT 20;
 
--- Top containers mais verbosos (últimas 24h)
+-- 2️⃣ Top containers mais tagarelas (últimas 24h)
 SELECT 
     container_name,
     COUNT(*) as total_logs,
-    COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as percentual
+    ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER(), 2) as percentual
 FROM public.logs
 WHERE timestamp > NOW() - INTERVAL '24 hours'
 GROUP BY container_name
 ORDER BY total_logs DESC;
 
--- Buscar erros
-SELECT timestamp, container_name, message
+-- 3️⃣ Buscar erros recentes (última hora)
+SELECT 
+    to_char(timestamp, 'HH24:MI:SS') as hora,
+    container_name,
+    message
 FROM public.logs
-WHERE message ILIKE '%error%' OR message ILIKE '%fail%'
+WHERE (message ILIKE '%error%' OR message ILIKE '%fail%' OR message ILIKE '%exception%')
+  AND timestamp > NOW() - INTERVAL '1 hour'
 ORDER BY timestamp DESC
 LIMIT 50;
 
--- Logs por período do dia
+-- 4️⃣ Distribuição de logs por hora do dia (últimas 24h)
 SELECT 
     EXTRACT(HOUR FROM timestamp) as hora,
-    COUNT(*) as total
+    COUNT(*) as total,
+    LPAD('█', (COUNT(*) * 50 / MAX(COUNT(*)) OVER())::int, '█') as grafico
 FROM public.logs
+WHERE timestamp > NOW() - INTERVAL '24 hours'
 GROUP BY hora
 ORDER BY hora;
 
+-- 5️⃣ Ver todas as partições existentes
+SELECT 
+    schemaname,
+    tablename,
+    pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as tamanho
+FROM pg_tables
+WHERE tablename LIKE 'logs_%'
+  AND schemaname = 'public'
+ORDER BY tablename DESC;
 
+-- 6️⃣ Logs por container em tempo real (streaming)
+-- Execute com \watch 1 no psql para atualizar a cada segundo
+SELECT 
+    container_name,
+    COUNT(*) as logs_last_minute
+FROM public.logs
+WHERE timestamp > NOW() - INTERVAL '1 minute'
+GROUP BY container_name
+ORDER BY logs_last_minute DESC;
+-- No psql: \watch 1
 
------------------------------------------------------------------
+-- 7️⃣ Procurar por container específico (últimas 100 linhas)
+SELECT 
+    to_char(timestamp, 'HH24:MI:SS.MS') as hora,
+    stream,
+    message
+FROM public.logs
+WHERE container_name = 'nome-do-container'  -- ← TROQUE AQUI
+ORDER BY timestamp DESC
+LIMIT 100;
 
+-- 8️⃣ Estatísticas gerais do banco
+SELECT 
+    (SELECT COUNT(*) FROM public.logs) as total_logs,
+    (SELECT COUNT(DISTINCT container_name) FROM public.logs) as containers_unicos,
+    (SELECT MIN(timestamp) FROM public.logs) as log_mais_antigo,
+    (SELECT MAX(timestamp) FROM public.logs) as log_mais_recente,
+    pg_size_pretty(pg_database_size('logs_db')) as tamanho_total_db;
 
+-- ============================================
+-- 🔧 COMANDOS DE MANUTENÇÃO E MONITORAMENTO
+-- ============================================
 
--- Criar função de limpeza
-CREATE OR REPLACE FUNCTION cleanup_old_logs()
-RETURNS void AS $$
-BEGIN
-    DELETE FROM public.logs
-    WHERE timestamp < NOW() - INTERVAL '7 days';
-END;
-$$ LANGUAGE plpgsql;
+-- 9️⃣ Ver status do cron job de manutenção
+\c postgres
+SELECT 
+    jobname,
+    schedule,
+    active,
+    database
+FROM cron.job
+WHERE jobname = 'maintain_logs_partitions_job';
 
--- Executar manualmente ou via cron
-SELECT cleanup_old_logs();
+-- 🔟 Ver histórico de execuções do cron (últimas 10)
+SELECT 
+    jobid,
+    runid,
+    status,
+    return_message,
+    start_time,
+    end_time
+FROM cron.job_run_details
+WHERE jobname = 'maintain_logs_partitions_job'
+ORDER BY start_time DESC
+LIMIT 10;
 
+-- 1️⃣1️⃣ Forçar execução manual da manutenção de partições
+\c logs_db
+SELECT maintain_log_partitions();
 
+-- 1️⃣2️⃣ Ver quantos logs tem em cada partição
+SELECT 
+    tableoid::regclass as particao,
+    COUNT(*) as total_logs,
+    MIN(timestamp) as primeiro_log,
+    MAX(timestamp) as ultimo_log,
+    pg_size_pretty(pg_total_relation_size(tableoid)) as tamanho
+FROM public.logs
+GROUP BY tableoid
+ORDER BY particao DESC;
 
------------------------------------------------------------------
+-- 1️⃣3️⃣ Testar inserção de log (pra ver se tá funcionando)
+\c logs_db
+INSERT INTO public.logs (
+    timestamp, 
+    container_name, 
+    message, 
+    stream
+) VALUES (
+    NOW(), 
+    'teste-container', 
+    'Mensagem de teste - deletar depois!', 
+    'stdout'
+);
 
+-- 1️⃣4️⃣ Limpar logs de teste
+DELETE FROM public.logs 
+WHERE container_name = 'teste-container' 
+  AND message LIKE '%teste%';
 
--- Criar uma partição por dia (PostgreSQL 10+)
-CREATE TABLE public.logs_partitioned (
-    timestamp TIMESTAMPTZ NOT NULL,
-    container_id TEXT,
-    container_name TEXT,
-    image TEXT,
-    stream TEXT,
-    message TEXT,
-    host TEXT
-) PARTITION BY RANGE (timestamp);
+-- ============================================
+-- 📈 QUERIES AVANÇADAS (pra mostrar pra chefia)
+-- ============================================
 
--- Criar partições para cada dia
-CREATE TABLE logs_2025_10_28 PARTITION OF logs_partitioned
-FOR VALUES FROM ('2025-10-28') TO ('2025-10-29');
+-- 1️⃣5️⃣ Taxa de logs por minuto (últimas 2 horas)
+SELECT 
+    date_trunc('minute', timestamp) as minuto,
+    COUNT(*) as logs_por_minuto
+FROM public.logs
+WHERE timestamp > NOW() - INTERVAL '2 hours'
+GROUP BY minuto
+ORDER BY minuto DESC
+LIMIT 20;
 
--- Automatizar com pg_cron ou script
+-- 1️⃣6️⃣ Containers que mais logam erros (últimas 24h)
+SELECT 
+    container_name,
+    COUNT(*) as total_erros,
+    ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM public.logs 
+                                WHERE timestamp > NOW() - INTERVAL '24 hours'), 2) as percentual
+FROM public.logs
+WHERE (message ILIKE '%error%' OR message ILIKE '%fail%')
+  AND timestamp > NOW() - INTERVAL '24 hours'
+GROUP BY container_name
+ORDER BY total_erros DESC;
+
+-- 1️⃣7️⃣ Comparar volume de logs por período
+WITH stats AS (
+    SELECT 
+        'Última Hora' as periodo,
+        COUNT(*) as total
+    FROM public.logs 
+    WHERE timestamp > NOW() - INTERVAL '1 hour'
+    UNION ALL
+    SELECT 
+        'Últimas 24h',
+        COUNT(*)
+    FROM public.logs 
+    WHERE timestamp > NOW() - INTERVAL '24 hours'
+    UNION ALL
+    SELECT 
+        'Última Semana',
+        COUNT(*)
+    FROM public.logs 
+    WHERE timestamp > NOW() - INTERVAL '7 days'
+)
+SELECT 
+    periodo,
+    total,
+    pg_size_pretty(total * 500) as tamanho_estimado  -- ~500 bytes por log
+FROM stats;
