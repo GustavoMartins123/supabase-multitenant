@@ -47,9 +47,7 @@ http {
         default upgrade;
         ''      close;
     }
-    #$http_apikey Refere-se a cabeçalhos HTTP enviados na requisição.
 
-    #Para popular $http_apikey, o cliente precisa incluir um header apikey: XYZ no handshake.
     map $http_apikey $is_valid_key {
         default 0;
         "{{anon_key}}" 1;  
@@ -60,9 +58,7 @@ http {
         default 0;
         "{{service_role_key}}" 1; 
     }
-    #$arg_apikey Refere-se a parâmetros de query string da URL.
 
-    #Ex.: em GET /realtime/v1/websocket?apikey=XYZ, $arg_apikey vale XYZ.
     map $arg_apikey $is_valid_api_key {
         default 0;
         "{{anon_key}}" 1;  
@@ -73,9 +69,15 @@ http {
         default $scheme;
         "~.+"   $http_x_forwarded_proto;
     }
+
     server {
         listen {{nginx_port}};
         server_name _{{project_id}};
+
+        set $cors_origin "";
+        if ($http_origin ~* "^https?://.*$") {
+            set $cors_origin $http_origin;
+        }
        
         location /recovery.html {
             root /usr/share/nginx/html;
@@ -84,186 +86,155 @@ http {
             expires off;
         }
 
-        location /auth/v1/verify {
-            rewrite ^/auth/v1/(.*)$ /$1?$args break;
-            proxy_pass http://$auth_upstream;
-            proxy_http_version 1.1;
+        
+        location /auth/v1/ {
+            if ($http_apikey = "") { return 401; }
+            if ($is_valid_key != 1) { return 403; }
 
+            rewrite ^/auth/v1/(.*)$ /$1?$args break;
+            
+            proxy_hide_header Access-Control-Allow-Origin;
+            proxy_hide_header Access-Control-Allow-Methods;
+            proxy_hide_header Access-Control-Allow-Headers;
+
+            proxy_pass http://$auth_upstream;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $real_scheme;
             proxy_set_header X-Forwarded-Host $host;
-            add_header 'Access-Control-Allow-Origin' '*';
-            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+            
+            add_header 'Access-Control-Allow-Origin' $cors_origin always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, PATCH, DELETE' always;
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, X-Client-Info, X-Supabase-Auth, x-supabase-api-version' always;
+            add_header 'Access-Control-Max-Age' 86400 always;
+
+            if ($request_method = 'OPTIONS') { return 204; }
+        }
+        
+        location /auth/v1/verify {
+            rewrite ^/auth/v1/(.*)$ /$1?$args break;
+            proxy_hide_header Access-Control-Allow-Origin;
+            proxy_pass http://$auth_upstream;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $real_scheme;
+            add_header 'Access-Control-Allow-Origin' $cors_origin always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
+             if ($request_method = 'OPTIONS') { return 204; }
         }
 
         location /auth/v1/callback {
             rewrite ^/auth/v1/(.*)$ /$1?$args break;
+            proxy_hide_header Access-Control-Allow-Origin;
             proxy_pass http://$auth_upstream;
-            proxy_http_version 1.1;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $real_scheme;
-            proxy_set_header X-Forwarded-Host $host;
-            add_header 'Access-Control-Allow-Origin' '*';
-            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+            add_header 'Access-Control-Allow-Origin' $cors_origin always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
+             if ($request_method = 'OPTIONS') { return 204; }
         }
 
         location /auth/v1/authorize {
             rewrite ^/auth/v1/(.*)$ /$1?$args break;
+            proxy_hide_header Access-Control-Allow-Origin;
             proxy_pass http://$auth_upstream/authorize;
-            proxy_http_version 1.1;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $real_scheme;
-            proxy_set_header X-Forwarded-Host $host;
-            add_header 'Access-Control-Allow-Origin' '*';
-            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+            add_header 'Access-Control-Allow-Origin' $cors_origin always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
+             if ($request_method = 'OPTIONS') { return 204; }
         }
 
-        location /auth/v1/ {
-            if ($http_apikey = "") {
-                return 401;
-            }
-            if ($is_valid_key != 1) {
-                return 403;
-            }
-
-            rewrite ^/auth/v1/(.*)$ /$1?$args break;
-
-            proxy_pass http://$auth_upstream;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $real_scheme;
-            proxy_set_header X-Forwarded-Host $host;
-            add_header 'Access-Control-Allow-Origin' '*';
-            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
-            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
-        }
 
         location /rest/v1/ {
-            if ($http_apikey = "") {
-                return 401;
-            }
-            if ($is_valid_key != 1) {
-                return 403;
-            }
+            if ($http_apikey = "") { return 401; }
+            if ($is_valid_key != 1) { return 403; }
+            
             rewrite ^/rest/v1/(.*)$ /$1 break;
+            
+            proxy_hide_header Access-Control-Allow-Origin;
+            
             proxy_pass http://$rest_upstream;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
-            add_header 'Access-Control-Allow-Origin' '*';
-            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
-            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
+            
+            add_header 'Access-Control-Allow-Origin' $cors_origin always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, PATCH, DELETE' always;
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version, Prefer, Range' always;
+            add_header 'Access-Control-Expose-Headers' 'Content-Range, X-Total-Count';
+            
+            if ($request_method = 'OPTIONS') { return 204; }
         }
+
         location /graphql/v1 {
-            if ($http_apikey = "") {
-                return 401;
-            }
-            if ($is_valid_key != 1) {
-                return 403;
-            }
+            if ($http_apikey = "") { return 401; }
+            if ($is_valid_key != 1) { return 403; }
+            
+            proxy_hide_header Access-Control-Allow-Origin;
+            
             proxy_pass http://$rest_upstream/rpc/graphql;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
             proxy_set_header Content-Profile graphql_public;
-            add_header 'Access-Control-Allow-Origin' '*';
-            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
-            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
+            
+            add_header 'Access-Control-Allow-Origin' $cors_origin always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version';
+            
+            if ($request_method = 'OPTIONS') { return 204; }
         }
 
-
         location ^~ /realtime/v1/websocket {
-            if ($arg_apikey = "") {
-                return 401;
-            }
-            if ($is_valid_api_key != 1) {
-                return 403;
-            }
+            if ($arg_apikey = "") { return 401; }
+            if ($is_valid_api_key != 1) { return 403; }
+            
             rewrite ^/realtime/v1/websocket$ /socket/websocket break;
 
             proxy_pass http://$realtime_upstream;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection $connection_upgrade;
-            proxy_set_header Host "{{project_id}}.localhost";
+            proxy_set_header Host "{{project_id}}.localhost"; 
             proxy_read_timeout 86400;
 
-            if ($request_method = 'OPTIONS') {
-                add_header 'Access-Control-Allow-Origin' '*';
-                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
-                add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
-                return 204;
-            }
-
-            add_header 'Access-Control-Allow-Origin' '*';
-            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+            add_header 'Access-Control-Allow-Origin' $cors_origin always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
+            
+            if ($request_method = 'OPTIONS') { return 204; }
         }
-
-        location ~ ^/storage/v1/object/sign/ {
-            rewrite ^/storage/v1/(.*)$ /$1 break;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $real_scheme;
-            proxy_set_header X-Forwarded-Host $host;
-
-            proxy_pass http://$storage_upstream;
-
-            add_header 'Access-Control-Allow-Origin' '*';
-            add_header 'Access-Control-Allow-Methods' 'GET, HEAD, OPTIONS';
-    	    add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, X-Requested-With';
-	    }
-
-        location ~ ^/storage/v1/render/ {
-            rewrite ^/storage/v1/(.*)$ /$1 break;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $real_scheme;
-            proxy_set_header X-Forwarded-Host $host;
-
-            proxy_pass http://$storage_upstream;
-
-            add_header 'Access-Control-Allow-Origin' '*';
-            add_header 'Access-Control-Allow-Methods' 'GET';
-            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, X-Requested-With';
-        }
-
 
 
         location /storage/v1/ {
-            if ($http_apikey = "") {
-                return 401;
-            }
-            if ($is_valid_key != 1) {
-                return 403;
-            }
+            if ($http_apikey = "") { return 401; }
+            if ($is_valid_key != 1) { return 403; }
             client_max_body_size 500M;
 
             rewrite ^/storage/v1/(.*)$ /$1 break;
-        
+            
+            proxy_hide_header Access-Control-Allow-Origin;
 
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $real_scheme;
             proxy_set_header X-Forwarded-Host $host;
-
+            
             proxy_set_header Tus-Resumable $http_tus_resumable;
-    	    proxy_set_header Tus-Version $http_tus_version;
+            proxy_set_header Tus-Version $http_tus_version;
             proxy_set_header Upload-Length $http_upload_length;
             proxy_set_header Upload-Metadata $http_upload_metadata;
             proxy_set_header Upload-Offset $http_upload_offset;
@@ -273,41 +244,75 @@ http {
 
             proxy_pass http://$storage_upstream;
 
-            add_header 'Access-Control-Allow-Origin' '*';
-            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PATCH, HEAD, DELETE, PUT';
-            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, Tus-Resumable, Tus-Version, Tus-Max-Size, Tus-Extension, Upload-Length, Upload-Metadata, Upload-Offset, Upload-Concat, Upload-Defer-Length, x-upsert, X-Requested-With';
+            add_header 'Access-Control-Allow-Origin' $cors_origin always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PATCH, HEAD, DELETE, PUT' always;
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, Tus-Resumable, Tus-Version, Tus-Max-Size, Tus-Extension, Upload-Length, Upload-Metadata, Upload-Offset, Upload-Concat, Upload-Defer-Length, x-upsert, X-Requested-With, x-supabase-api-version' always;
+
+            if ($request_method = 'OPTIONS') { return 204; }
         }
         
+        location ~ ^/storage/v1/object/sign/ {
+            rewrite ^/storage/v1/(.*)$ /$1 break;
+            proxy_hide_header Access-Control-Allow-Origin;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $real_scheme;
+            proxy_pass http://$storage_upstream;
+            add_header 'Access-Control-Allow-Origin' $cors_origin always;
+            add_header 'Access-Control-Allow-Methods' 'GET, HEAD, OPTIONS';
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, X-Requested-With';
+             if ($request_method = 'OPTIONS') { return 204; }
+        }
+
+        location ~ ^/storage/v1/render/ {
+            rewrite ^/storage/v1/(.*)$ /$1 break;
+            proxy_hide_header Access-Control-Allow-Origin;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $real_scheme;
+            proxy_pass http://$storage_upstream;
+            add_header 'Access-Control-Allow-Origin' $cors_origin always;
+            add_header 'Access-Control-Allow-Methods' 'GET, OPTIONS';
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, X-Requested-With';
+             if ($request_method = 'OPTIONS') { return 204; }
+        }
+
         location /functions/v1/ {
-            if ($http_apikey = "") {
-                return 401;
-            }
-            if ($is_valid_key != 1) {
-                return 403;
-            }
+            if ($http_apikey = "") { return 401; }
+            if ($is_valid_key != 1) { return 403; }
+            
             rewrite ^/functions/v1/(.*)$ /$1 break;
+            proxy_hide_header Access-Control-Allow-Origin;
+            
             proxy_pass http://$functions_upstream;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
-            add_header 'Access-Control-Allow-Origin' '*';
-            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
+            
+            add_header 'Access-Control-Allow-Origin' $cors_origin always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
+            
+            if ($request_method = 'OPTIONS') { return 204; }
         }
         
         location /meta/ {
-           if ($is_admin_key = 0) {
-             return 401;
-           }
-           if ($is_valid_key != 1) {
-                return 403;
-            }
+           if ($is_admin_key = 0) { return 401; }
+           if ($is_valid_key != 1) { return 403; }
+           
            rewrite ^/meta/(.*)$ /$1 break;
+           proxy_hide_header Access-Control-Allow-Origin;
+           
            proxy_pass http://$meta_upstream;
-           add_header 'Access-Control-Allow-Origin' '*';
+           
+           add_header 'Access-Control-Allow-Origin' $cors_origin always;
            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
+           
+           if ($request_method = 'OPTIONS') { return 204; }
         }
     }
 }
