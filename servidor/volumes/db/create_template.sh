@@ -12,7 +12,11 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
 EOSQL
 
 echo "Fazendo pg_dump do DB principal e restaurando em _supabase_template..."
-pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" | psql -U "$POSTGRES_USER" -d _supabase_template
+pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  --exclude-schema=cron \
+  | grep -v "CREATE EXTENSION.*pg_cron" \
+  | grep -v "COMMENT ON EXTENSION pg_cron" \
+  | psql -U "$POSTGRES_USER" -d _supabase_template
 
 echo "Criando tabela Projetos..."
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
