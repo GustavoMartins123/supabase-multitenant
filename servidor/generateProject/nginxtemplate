@@ -88,6 +88,14 @@ http {
 
         
         location /auth/v1/ {
+            if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Allow-Origin' $cors_origin always;
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, PATCH, DELETE' always;
+                add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, X-Client-Info, X-Supabase-Auth, x-supabase-api-version' always;
+                add_header 'Access-Control-Max-Age' 86400 always;
+                return 204;
+            }
+
             if ($http_apikey = "") { return 401; }
             if ($is_valid_key != 1) { return 403; }
 
@@ -107,9 +115,6 @@ http {
             add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, PATCH, DELETE' always;
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, X-Client-Info, X-Supabase-Auth, x-supabase-api-version' always;
-            add_header 'Access-Control-Max-Age' 86400 always;
-
-            if ($request_method = 'OPTIONS') { return 204; }
         }
         
         location /auth/v1/verify {
@@ -156,6 +161,13 @@ http {
 
 
         location /rest/v1/ {
+            if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Allow-Origin' $cors_origin always;
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, PATCH, DELETE' always;
+                add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version, Prefer, Range, Content-Profile, X-Client-Info, accept-profile' always;
+                add_header 'Access-Control-Max-Age' 86400 always;
+                return 204;
+            }
             if ($http_apikey = "") { return 401; }
             if ($is_valid_key != 1) { return 403; }
             
@@ -171,13 +183,18 @@ http {
             
             add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, PATCH, DELETE' always;
-            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version, Prefer, Range' always;
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version, Prefer, Range, Content-Profile, X-Client-Info, accept-profile' always;
             add_header 'Access-Control-Expose-Headers' 'Content-Range, X-Total-Count';
-            
-            if ($request_method = 'OPTIONS') { return 204; }
         }
 
         location /graphql/v1 {
+            if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Allow-Origin' $cors_origin always;
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
+                add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version, Content-Profile' always;
+                add_header 'Access-Control-Max-Age' 86400 always;
+                return 204;
+            }
             if ($http_apikey = "") { return 401; }
             if ($is_valid_key != 1) { return 403; }
             
@@ -192,9 +209,7 @@ http {
             
             add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
-            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version';
-            
-            if ($request_method = 'OPTIONS') { return 204; }
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version, Content-Profile' always;
         }
 
         location ^~ /realtime/v1/websocket {
@@ -214,25 +229,48 @@ http {
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
             
-            if ($request_method = 'OPTIONS') { return 204; }
+            if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Allow-Origin' $allowed_origin always;
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
+                add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version' always;
+                return 204;
+            }
+
+            add_header 'Access-Control-Allow-Origin' $allowed_origin always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version' always;
         }
 
 
         location /storage/v1/ {
-            if ($http_apikey = "") { return 401; }
-            if ($is_valid_key != 1) { return 403; }
+            if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Allow-Origin' $allowed_origin always;
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PATCH, HEAD, DELETE, PUT' always;
+                add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, Tus-Resumable, Tus-Version, Tus-Max-Size, Tus-Extension, Upload-Length, Upload-Metadata, Upload-Offset, Upload-Concat, Upload-Defer-Length, x-upsert, X-Requested-With, x-supabase-api-version' always;
+                add_header 'Access-Control-Max-Age' 86400 always;
+                return 204;
+            }
+
+            if ($http_apikey = "") {
+                return 401;
+            }
+            if ($is_valid_key != 1) {
+                return 403;
+            }
             client_max_body_size 500M;
 
             rewrite ^/storage/v1/(.*)$ /$1 break;
             
             proxy_hide_header Access-Control-Allow-Origin;
+            proxy_hide_header Access-Control-Allow-Methods;
+            proxy_hide_header Access-Control-Allow-Headers;
 
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $real_scheme;
             proxy_set_header X-Forwarded-Host $host;
-            
+
             proxy_set_header Tus-Resumable $http_tus_resumable;
             proxy_set_header Tus-Version $http_tus_version;
             proxy_set_header Upload-Length $http_upload_length;
@@ -244,11 +282,9 @@ http {
 
             proxy_pass http://$storage_upstream;
 
-            add_header 'Access-Control-Allow-Origin' $cors_origin always;
+            add_header 'Access-Control-Allow-Origin' $allowed_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PATCH, HEAD, DELETE, PUT' always;
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, Tus-Resumable, Tus-Version, Tus-Max-Size, Tus-Extension, Upload-Length, Upload-Metadata, Upload-Offset, Upload-Concat, Upload-Defer-Length, x-upsert, X-Requested-With, x-supabase-api-version' always;
-
-            if ($request_method = 'OPTIONS') { return 204; }
         }
         
         location ~ ^/storage/v1/object/sign/ {
@@ -280,39 +316,60 @@ http {
         }
 
         location /functions/v1/ {
-            if ($http_apikey = "") { return 401; }
-            if ($is_valid_key != 1) { return 403; }
+            if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Allow-Origin' $allowed_origin always;
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, PATCH, DELETE' always;
+                add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version' always;
+                add_header 'Access-Control-Max-Age' 86400 always;
+                return 204;
+            }
+
+            if ($http_apikey = "") {
+                return 401;
+            }
+            if ($is_valid_key != 1) {
+                return 403;
+            }
             
-            rewrite ^/functions/v1/(.*)$ /$1 break;
             proxy_hide_header Access-Control-Allow-Origin;
-            
+            proxy_hide_header Access-Control-Allow-Methods;
+            proxy_hide_header Access-Control-Allow-Headers;
+
+            rewrite ^/functions/v1/(.*)$ /$1 break;
             proxy_pass http://$functions_upstream;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
-            
-            add_header 'Access-Control-Allow-Origin' $cors_origin always;
-            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
-            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
-            
-            if ($request_method = 'OPTIONS') { return 204; }
+
+            add_header 'Access-Control-Allow-Origin' $allowed_origin always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, PATCH, DELETE' always;
+            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version' always;
         }
         
         location /meta/ {
-           if ($is_admin_key = 0) { return 401; }
-           if ($is_valid_key != 1) { return 403; }
+           if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Allow-Origin' $allowed_origin always;
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
+                add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version' always;
+                add_header 'Access-Control-Max-Age' 86400 always;
+                return 204;
+            }
+           if ($is_admin_key = 0) {
+             return 401;
+           }
+           if ($is_valid_key != 1) {
+                return 403;
+            }
            
-           rewrite ^/meta/(.*)$ /$1 break;
            proxy_hide_header Access-Control-Allow-Origin;
            
+           rewrite ^/meta/(.*)$ /$1 break;
            proxy_pass http://$meta_upstream;
-           
-           add_header 'Access-Control-Allow-Origin' $cors_origin always;
-           add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS';
-           add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
-           
-           if ($request_method = 'OPTIONS') { return 204; }
+
+           add_header 'Access-Control-Allow-Origin' $allowed_origin always;
+           add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
+           add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version' always;
         }
     }
 }
