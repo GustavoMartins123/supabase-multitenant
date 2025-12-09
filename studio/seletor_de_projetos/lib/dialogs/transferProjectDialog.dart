@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-
-import '../models/AllUsers.dart';
+import 'package:seletor_de_projetos/models/AllUsers.dart';
+import 'package:seletor_de_projetos/supabase_colors.dart';
 
 class TransferProjectDialog extends StatefulWidget {
   final String projectName;
@@ -8,17 +8,18 @@ class TransferProjectDialog extends StatefulWidget {
   final Future<List<AvailableUser>> Function(String projectName) loadAvailableUsers;
 
   const TransferProjectDialog({
-    Key? key,
+    super.key,
     required this.projectName,
     required this.onTransfer,
     required this.loadAvailableUsers,
-  }) : super(key: key);
+  });
 
   @override
   State<TransferProjectDialog> createState() => TransferProjectDialogState();
 }
 
-class TransferProjectDialogState extends State<TransferProjectDialog> with SingleTickerProviderStateMixin {
+class TransferProjectDialogState extends State<TransferProjectDialog>
+    with SingleTickerProviderStateMixin {
   List<AvailableUser> _availableUsers = [];
   bool _loading = true;
   String? _error;
@@ -32,12 +33,12 @@ class TransferProjectDialogState extends State<TransferProjectDialog> with Singl
     _loadUsers();
 
     _animController = AnimationController(
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 250),
       vsync: this,
     );
     _scaleAnimation = CurvedAnimation(
       parent: _animController,
-      curve: Curves.easeOutBack,
+      curve: Curves.easeOut,
     );
     _animController.forward();
   }
@@ -63,116 +64,91 @@ class TransferProjectDialogState extends State<TransferProjectDialog> with Singl
     }
   }
 
+  void _showSnack(String message, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message, style: const TextStyle(color: Colors.white)),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        margin: const EdgeInsets.all(16),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
     return ScaleTransition(
       scale: _scaleAnimation,
       child: Dialog(
         backgroundColor: Colors.transparent,
         child: Container(
-          constraints: const BoxConstraints(maxWidth: 650, maxHeight: 700),
+          constraints: const BoxConstraints(maxWidth: 520, maxHeight: 600),
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: isDark
-                  ? [const Color(0xFF1A1F2E), const Color(0xFF12161F)]
-                  : [Colors.white, Colors.grey[50]!],
-            ),
-            borderRadius: BorderRadius.circular(32),
-            border: Border.all(
-              color: isDark ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.08),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: isDark ? Colors.black.withOpacity(0.5) : Colors.black.withOpacity(0.15),
-                blurRadius: 40,
-                offset: const Offset(0, 20),
-              ),
-            ],
+            color: SupabaseColors.bg200,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: SupabaseColors.border),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                padding: const EdgeInsets.all(32),
-                decoration: BoxDecoration(
-                  border: Border(
-                    bottom: BorderSide(
-                      color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08),
-                    ),
-                  ),
+                padding: const EdgeInsets.all(20),
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: SupabaseColors.border)),
                 ),
                 child: Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [Colors.purple.shade400, Colors.purple.shade600],
-                        ),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.purple.withOpacity(0.3),
-                            blurRadius: 16,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
+                        color: SupabaseColors.warning.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                      child: const Icon(Icons.swap_horiz_rounded, color: Colors.white, size: 28),
+                      child: const Icon(
+                        Icons.swap_horiz_rounded,
+                        color: SupabaseColors.warning,
+                        size: 20,
+                      ),
                     ),
-                    const SizedBox(width: 16),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
+                          const Text(
                             'Transferir Projeto',
                             style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                              color: isDark ? Colors.white : Colors.black87,
-                              letterSpacing: -0.5,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: SupabaseColors.textPrimary,
                             ),
                           ),
                           const SizedBox(height: 4),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [
-                                  t.colorScheme.primary.withOpacity(0.2),
-                                  t.colorScheme.secondary.withOpacity(0.2),
-                                ],
-                              ),
-                              borderRadius: BorderRadius.circular(8),
+                              color: SupabaseColors.brand.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
                               widget.projectName,
-                              style: TextStyle(
-                                fontSize: 13,
+                              style: const TextStyle(
+                                fontSize: 11,
                                 fontWeight: FontWeight.w600,
-                                color: t.colorScheme.primary,
+                                fontFamily: 'monospace',
+                                color: SupabaseColors.brand,
                               ),
                             ),
                           ),
                         ],
                       ),
                     ),
-                    IconButton(
-                      onPressed: () => Navigator.pop(context),
-                      icon: Icon(
-                        Icons.close_rounded,
-                        color: isDark ? Colors.white70 : Colors.black54,
-                      ),
-                    ),
+                    _CloseBtn(onPressed: () => Navigator.pop(context)),
                   ],
                 ),
               ),
+
               Expanded(
                 child: _loading
                     ? _buildLoading()
@@ -180,14 +156,11 @@ class TransferProjectDialogState extends State<TransferProjectDialog> with Singl
                     ? _buildError()
                     : _buildContent(),
               ),
+
               Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  border: Border(
-                    top: BorderSide(
-                      color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08),
-                    ),
-                  ),
+                padding: const EdgeInsets.all(16),
+                decoration: const BoxDecoration(
+                  border: Border(top: BorderSide(color: SupabaseColors.border)),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
@@ -195,68 +168,28 @@ class TransferProjectDialogState extends State<TransferProjectDialog> with Singl
                     TextButton(
                       onPressed: () => Navigator.pop(context),
                       style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        foregroundColor: SupabaseColors.textSecondary,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                       ),
-                      child: const Text('Cancelar'),
+                      child: const Text('Cancelar', style: TextStyle(fontSize: 13)),
                     ),
-                    const SizedBox(width: 12),
-                    Container(
-                      decoration: BoxDecoration(
-                        gradient: _selectedUser == null
-                            ? null
-                            : LinearGradient(
-                          colors: [Colors.purple.shade400, Colors.purple.shade600],
-                        ),
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: _selectedUser == null
-                            ? null
-                            : [
-                          BoxShadow(
-                            color: Colors.purple.withOpacity(0.4),
-                            blurRadius: 16,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
-                      ),
-                      child: ElevatedButton.icon(
-                        onPressed: _selectedUser == null
-                            ? null
-                            : () async {
-                          final userId = _selectedUser!.userId;
-                          try {
-                            await widget.onTransfer(userId);
-                            if (mounted) Navigator.pop(context);
-                          } catch (e) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Erro ao transferir: $e'),
-                                backgroundColor: Colors.red,
-                                behavior: SnackBarBehavior.floating,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                margin: const EdgeInsets.all(16),
-                              ),
-                            );
-                          }
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _selectedUser == null ? null : Colors.transparent,
-                          shadowColor: Colors.transparent,
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        icon: const Icon(Icons.check_rounded, size: 20),
-                        label: const Text(
-                          'Transferir',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
+                    const SizedBox(width: 8),
+                    _ActionButton(
+                      label: 'Transferir',
+                      icon: Icons.check_rounded,
+                      color: SupabaseColors.warning,
+                      enabled: _selectedUser != null,
+                      onPressed: _selectedUser == null
+                          ? null
+                          : () async {
+                        final userId = _selectedUser!.userId;
+                        try {
+                          await widget.onTransfer(userId);
+                          if (mounted) Navigator.pop(context);
+                        } catch (e) {
+                          _showSnack('Erro ao transferir: $e', SupabaseColors.error);
+                        }
+                      },
                     ),
                   ],
                 ),
@@ -269,27 +202,19 @@ class TransferProjectDialogState extends State<TransferProjectDialog> with Singl
   }
 
   Widget _buildLoading() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return Center(
+    return const Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           SizedBox(
-            width: 40,
-            height: 40,
-            child: CircularProgressIndicator(
-              strokeWidth: 3,
-              color: Colors.purple.shade400,
-            ),
+            width: 32,
+            height: 32,
+            child: CircularProgressIndicator(strokeWidth: 2, color: SupabaseColors.warning),
           ),
-          const SizedBox(height: 20),
+          SizedBox(height: 16),
           Text(
             'Carregando usuários disponíveis...',
-            style: TextStyle(
-              color: isDark ? Colors.white70 : Colors.black54,
-              fontSize: 15,
-            ),
+            style: TextStyle(color: SupabaseColors.textMuted, fontSize: 13),
           ),
         ],
       ),
@@ -297,40 +222,37 @@ class TransferProjectDialogState extends State<TransferProjectDialog> with Singl
   }
 
   Widget _buildError() {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(40),
+        padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.1),
-                shape: BoxShape.circle,
+                color: SupabaseColors.error.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(Icons.error_outline_rounded, size: 48, color: Colors.red),
+              child: const Icon(Icons.error_outline_rounded, size: 32, color: SupabaseColors.error),
             ),
-            const SizedBox(height: 20),
-            Text(
+            const SizedBox(height: 16),
+            const Text(
               'Erro ao carregar usuários',
               style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white : Colors.black87,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: SupabaseColors.textPrimary,
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Text(
               _error!,
-              style: const TextStyle(color: Colors.red),
+              style: const TextStyle(color: SupabaseColors.error, fontSize: 12),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 24),
-            FilledButton.icon(
+            const SizedBox(height: 16),
+            TextButton.icon(
               onPressed: () {
                 setState(() {
                   _loading = true;
@@ -338,14 +260,12 @@ class TransferProjectDialogState extends State<TransferProjectDialog> with Singl
                 });
                 _loadUsers();
               },
-              icon: const Icon(Icons.refresh_rounded),
+              icon: const Icon(Icons.refresh_rounded, size: 16),
               label: const Text('Tentar Novamente'),
-              style: FilledButton.styleFrom(
-                backgroundColor: Colors.red,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+              style: TextButton.styleFrom(
+                backgroundColor: SupabaseColors.error,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               ),
             ),
           ],
@@ -355,228 +275,191 @@ class TransferProjectDialogState extends State<TransferProjectDialog> with Singl
   }
 
   Widget _buildContent() {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
     return Padding(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(10),
+                padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  color: Colors.purple.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(12),
+                  color: SupabaseColors.warning.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(6),
                 ),
-                child: Icon(
+                child: const Icon(
                   Icons.person_search_rounded,
-                  size: 20,
-                  color: Colors.purple.shade700,
+                  size: 16,
+                  color: SupabaseColors.warning,
                 ),
               ),
-              const SizedBox(width: 12),
-              Text(
-                'Selecione o novo proprietário:',
+              const SizedBox(width: 10),
+              const Text(
+                'Selecione o novo proprietário',
                 style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  color: isDark ? Colors.white : Colors.black87,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: SupabaseColors.textPrimary,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
+
           Expanded(
-            child: _availableUsers.isEmpty
-                ? _buildEmptyState()
-                : Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: isDark
-                      ? [const Color(0xFF1A1F2E), const Color(0xFF12161F)]
-                      : [Colors.white, Colors.grey[50]!],
+            child: _availableUsers.isEmpty ? _buildEmptyState() : _buildUserList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUserList() {
+    return Container(
+      decoration: BoxDecoration(
+        color: SupabaseColors.surface100,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: SupabaseColors.border),
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: SupabaseColors.border)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.people_rounded, size: 14, color: SupabaseColors.textMuted),
+                const SizedBox(width: 6),
+                Text(
+                  '${_availableUsers.length} ${_availableUsers.length == 1 ? 'usuário disponível' : 'usuários disponíveis'}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: SupabaseColors.textMuted,
+                  ),
                 ),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08),
-                ),
-              ),
-              child: Column(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      border: Border(
-                        bottom: BorderSide(
-                          color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08),
+              ],
+            ),
+          ),
+
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(4),
+              itemCount: _availableUsers.length,
+              itemBuilder: (context, index) {
+                final user = _availableUsers[index];
+                final isSelected = _selectedUser == user;
+
+                return Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => setState(() => _selectedUser = user),
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 2),
+                      decoration: BoxDecoration(
+                        color: isSelected ? SupabaseColors.warning.withOpacity(0.1) : null,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: isSelected
+                              ? SupabaseColors.warning.withOpacity(0.3)
+                              : Colors.transparent,
                         ),
                       ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.people_rounded,
-                          size: 18,
-                          color: isDark ? Colors.white54 : Colors.black54,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '${_availableUsers.length} ${_availableUsers.length == 1 ? 'usuário disponível' : 'usuários disponíveis'}',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: isDark ? Colors.white70 : Colors.black87,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: ListView.separated(
-                      padding: const EdgeInsets.all(8),
-                      itemCount: _availableUsers.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 4),
-                      itemBuilder: (context, index) {
-                        final user = _availableUsers[index];
-                        final isSelected = _selectedUser == user;
-
-                        return Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            onTap: () {
-                              setState(() {
-                                _selectedUser = user;
-                              });
-                            },
-                            borderRadius: BorderRadius.circular(12),
-                            child: Container(
-                              padding: const EdgeInsets.all(16),
-                              decoration: BoxDecoration(
-                                gradient: isSelected
-                                    ? LinearGradient(
-                                  colors: [
-                                    Colors.purple.withOpacity(0.15),
-                                    Colors.purple.withOpacity(0.1),
-                                  ],
-                                )
-                                    : null,
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? SupabaseColors.warning.withOpacity(0.2)
+                                  : SupabaseColors.surface200,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Center(
+                              child: Text(
+                                user.displayName.isNotEmpty
+                                    ? user.displayName[0].toUpperCase()
+                                    : '?',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
                                   color: isSelected
-                                      ? Colors.purple.withOpacity(0.3)
-                                      : Colors.transparent,
+                                      ? SupabaseColors.warning
+                                      : SupabaseColors.textSecondary,
                                 ),
-                              ),
-                              child: Row(
-                                children: [
-                                  Container(
-                                    width: 48,
-                                    height: 48,
-                                    decoration: BoxDecoration(
-                                      gradient: LinearGradient(
-                                        colors: isSelected
-                                            ? [Colors.purple.shade400, Colors.purple.shade600]
-                                            : [Colors.grey.shade400, Colors.grey.shade600],
-                                      ),
-                                      borderRadius: BorderRadius.circular(14),
-                                      boxShadow: isSelected
-                                          ? [
-                                        BoxShadow(
-                                          color: Colors.purple.withOpacity(0.3),
-                                          blurRadius: 8,
-                                          offset: const Offset(0, 4),
-                                        ),
-                                      ]
-                                          : null,
-                                    ),
-                                    child: Center(
-                                      child: Text(
-                                        user.displayName.isNotEmpty
-                                            ? user.displayName[0].toUpperCase()
-                                            : '?',
-                                        style: const TextStyle(
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 16),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          user.displayName,
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w600,
-                                            fontSize: 15,
-                                            color: isDark ? Colors.white : Colors.black87,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          '@${user.username}',
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            color: isDark ? Colors.white54 : Colors.black54,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  Column(
-                                    crossAxisAlignment: CrossAxisAlignment.end,
-                                    children: [
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                        decoration: BoxDecoration(
-                                          color: user.isActive
-                                              ? Colors.green.withOpacity(0.15)
-                                              : Colors.grey.withOpacity(0.15),
-                                          borderRadius: BorderRadius.circular(8),
-                                          border: Border.all(
-                                            color: user.isActive
-                                                ? Colors.green.withOpacity(0.3)
-                                                : Colors.grey.withOpacity(0.3),
-                                          ),
-                                        ),
-                                        child: Text(
-                                          user.isActive ? 'Ativo' : 'Inativo',
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w600,
-                                            color: user.isActive ? Colors.green : Colors.grey,
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Radio<AvailableUser>(
-                                        value: user,
-                                        groupValue: _selectedUser,
-                                        onChanged: (value) {
-                                          setState(() {
-                                            _selectedUser = value;
-                                          });
-                                        },
-                                        activeColor: Colors.purple.shade600,
-                                      ),
-                                    ],
-                                  ),
-                                ],
                               ),
                             ),
                           ),
-                        );
-                      },
+                          const SizedBox(width: 12),
+
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  user.displayName,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13,
+                                    color: SupabaseColors.textPrimary,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '@${user.username}',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: SupabaseColors.textMuted,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: user.isActive
+                                  ? SupabaseColors.success.withOpacity(0.15)
+                                  : SupabaseColors.surface300,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              user.isActive ? 'Ativo' : 'Inativo',
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w600,
+                                color: user.isActive
+                                    ? SupabaseColors.success
+                                    : SupabaseColors.textMuted,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+
+                          SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: Radio<AvailableUser>(
+                              value: user,
+                              groupValue: _selectedUser,
+                              onChanged: (value) => setState(() => _selectedUser = value),
+                              activeColor: SupabaseColors.warning,
+                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ],
-              ),
+                );
+              },
             ),
           ),
         ],
@@ -585,45 +468,129 @@ class TransferProjectDialogState extends State<TransferProjectDialog> with Singl
   }
 
   Widget _buildEmptyState() {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            width: 100,
-            height: 100,
+            width: 64,
+            height: 64,
             decoration: BoxDecoration(
-              color: isDark ? Colors.white.withOpacity(0.05) : Colors.grey[100],
-              shape: BoxShape.circle,
+              color: SupabaseColors.surface200,
+              borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(
+            child: const Icon(
               Icons.person_off_rounded,
-              size: 48,
-              color: isDark ? Colors.white38 : Colors.black38,
+              size: 28,
+              color: SupabaseColors.textMuted,
             ),
           ),
-          const SizedBox(height: 20),
-          Text(
+          const SizedBox(height: 16),
+          const Text(
             'Nenhum usuário disponível',
             style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: isDark ? Colors.white : Colors.black87,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: SupabaseColors.textPrimary,
             ),
           ),
-          const SizedBox(height: 8),
-          Text(
+          const SizedBox(height: 4),
+          const Text(
             'Não há usuários disponíveis\npara receber este projeto.',
             textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 14,
-              color: isDark ? Colors.white54 : Colors.black54,
-            ),
+            style: TextStyle(fontSize: 12, color: SupabaseColors.textMuted),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _CloseBtn extends StatelessWidget {
+  const _CloseBtn({required this.onPressed});
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(4),
+        child: const Padding(
+          padding: EdgeInsets.all(4),
+          child: Icon(Icons.close_rounded, size: 18, color: SupabaseColors.textMuted),
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionButton extends StatefulWidget {
+  const _ActionButton({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.enabled,
+    required this.onPressed,
+  });
+  final String label;
+  final IconData icon;
+  final Color color;
+  final bool enabled;
+  final VoidCallback? onPressed;
+
+  @override
+  State<_ActionButton> createState() => _ActionButtonState();
+}
+
+class _ActionButtonState extends State<_ActionButton> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.enabled;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        decoration: BoxDecoration(
+          color: enabled
+              ? (_hover ? widget.color.withOpacity(0.9) : widget.color)
+              : SupabaseColors.surface300,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onPressed,
+            borderRadius: BorderRadius.circular(6),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    widget.icon,
+                    size: 16,
+                    color: enabled ? Colors.white : SupabaseColors.textMuted,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    widget.label,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: enabled ? Colors.white : SupabaseColors.textMuted,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

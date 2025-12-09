@@ -1,6 +1,6 @@
 services:
   traefik:
-    image: traefik:v3.3.5
+    image: traefik:v3.6.4
     ports:
       - "80:80"   
       - "443:443"
@@ -13,6 +13,7 @@ services:
       - ./acme.json:/acme.json 
       - ./access.log:/var/log/traefik/access.log
       - ./middlewares.yml:/etc/traefik/dynamic/middlewares.yml
+      - traefik-plugins:/plugins-local
     labels:  
       - "traefik.enable=true"
 
@@ -47,3 +48,6 @@ services:
 networks:
   rede-supabase:
     external: true
+
+volumes:
+  traefik-plugins:

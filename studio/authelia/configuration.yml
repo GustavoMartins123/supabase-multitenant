@@ -21,8 +21,10 @@ session:
       default_redirection_url: https://<SEU_IP>:4000
       same_site: lax
   secret: "SESSION_SECRET"
-  expiration: '24h'
-  inactivity: '3h'
+  expiration: '7d'
+  inactivity: '24h'
+  remember_me_duration: '30d'
+
 #openssl rand -hex 96
 storage:
   local:

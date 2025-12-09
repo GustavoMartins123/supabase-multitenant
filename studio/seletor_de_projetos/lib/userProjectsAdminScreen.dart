@@ -2,10 +2,11 @@ import 'dart:convert';
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
-import 'package:seletor_de_projetos/projectSettingsDialog.dart';
 import 'package:seletor_de_projetos/services/projectService.dart';
 import 'package:seletor_de_projetos/session.dart';
+import 'package:seletor_de_projetos/supabase_colors.dart';
 import 'dart:html' as html;
 import 'dialogs/transferProjectDialog.dart';
 import 'models/AllUsers.dart';
@@ -26,9 +27,11 @@ class UserProjectsAdminScreen extends StatefulWidget {
   State<UserProjectsAdminScreen> createState() => _UserProjectsAdminScreenState();
 }
 
-class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> with SingleTickerProviderStateMixin {
+class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
+    with SingleTickerProviderStateMixin {
   List<ProjectInfo> _projects = [];
   bool _loading = true;
+  String? _serverDomain;
   final Session _session = Session();
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
@@ -38,9 +41,10 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> with 
     super.initState();
     _session.busyListenable.addListener(_onBusyChanged);
     _fetchProjects();
-    
+    _fetchConfig();
+
     _fadeController = AnimationController(
-      duration: const Duration(milliseconds: 500),
+      duration: const Duration(milliseconds: 400),
       vsync: this,
     );
     _fadeAnimation = CurvedAnimation(
@@ -67,9 +71,17 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> with 
   }
 
   void _safeSetState(VoidCallback fn) {
-    if (mounted) {
-      setState(fn);
-    }
+    if (mounted) setState(fn);
+  }
+
+  Future<void> _fetchConfig() async {
+    try {
+      final r = await http.get(Uri.parse('/api/config'));
+      if (r.statusCode == 200) {
+        final data = jsonDecode(r.body);
+        _safeSetState(() => _serverDomain = data['server_domain']);
+      }
+    } catch (_) {}
   }
 
   Future<List<AvailableUser>> _loadAvailableUsers(String projectName) async {
@@ -99,34 +111,17 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> with 
       final response = await http.post(
         Uri.parse('/api/admin/projects/$projectName/transfer'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'new_owner_id': newOwnerId,
-        }),
+        body: jsonEncode({'new_owner_id': newOwnerId}),
       );
 
       if (response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Projeto "$projectName" transferido com sucesso!'),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            margin: const EdgeInsets.all(16),
-          ),
-        );
+        _showSnack('Projeto "$projectName" transferido!', SupabaseColors.success);
         await _fetchProjects();
       } else {
         throw Exception('Erro ${response.statusCode}: ${response.body}');
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erro ao transferir projeto: $e'),
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          margin: const EdgeInsets.all(16),
-        ),
-      );
+      _showSnack('Erro ao transferir projeto: $e', SupabaseColors.error);
     }
   }
 
@@ -158,78 +153,85 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> with 
         throw Exception('Erro ao carregar projetos: ${response.body}');
       }
     } catch (e) {
-      if (kDebugMode) {
-        print(e);
-      }
+      if (kDebugMode) print(e);
     } finally {
       _safeSetState(() => _loading = false);
     }
   }
 
+  void _showSnack(String message, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message, style: const TextStyle(color: Colors.white)),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        margin: const EdgeInsets.all(16),
+      ),
+    );
+  }
+
+  String _getProjectUrl(String projectName) {
+    if (_serverDomain == null || _serverDomain!.isEmpty) return projectName;
+    return '$_serverDomain/$projectName';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0A0E1A) : const Color(0xFFF5F7FA),
+      backgroundColor: SupabaseColors.bg100,
       body: CustomScrollView(
         slivers: [
-          SliverAppBar.large(
+          SliverAppBar(
             floating: true,
             pinned: true,
-            backgroundColor: isDark ? const Color(0xFF0F1419) : Colors.white,
+            expandedHeight: 100,
+            backgroundColor: SupabaseColors.bg100,
             surfaceTintColor: Colors.transparent,
             elevation: 0,
             leading: IconButton(
-              icon: const Icon(Icons.arrow_back_rounded),
+              icon: const Icon(Icons.arrow_back_rounded, color: SupabaseColors.textSecondary),
               onPressed: () => Navigator.of(context).pop(),
             ),
             flexibleSpace: FlexibleSpaceBar(
-              titlePadding: const EdgeInsets.only(left: 60, bottom: 16),
+              titlePadding: const EdgeInsets.only(left: 56, bottom: 16),
               title: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  const Text(
                     'Projetos',
                     style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      color: isDark ? Colors.white : Colors.black87,
-                      letterSpacing: -0.5,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w600,
+                      color: SupabaseColors.textPrimary,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              t.colorScheme.primary.withOpacity(0.2),
-                              t.colorScheme.secondary.withOpacity(0.2),
-                            ],
-                          ),
-                          borderRadius: BorderRadius.circular(8),
+                          color: SupabaseColors.brand.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
                           widget.userName,
-                          style: TextStyle(
-                            fontSize: 13,
+                          style: const TextStyle(
+                            fontSize: 11,
                             fontWeight: FontWeight.w600,
-                            color: t.colorScheme.primary,
+                            color: SupabaseColors.brand,
                           ),
                         ),
                       ),
                       const SizedBox(width: 8),
                       Text(
                         '• ${_projects.length} ${_projects.length == 1 ? 'projeto' : 'projetos'}',
-                        style: TextStyle(
-                          fontSize: 13,
+                        style: const TextStyle(
+                          fontSize: 11,
                           fontWeight: FontWeight.normal,
-                          color: isDark ? Colors.white54 : Colors.black45,
+                          color: SupabaseColors.textMuted,
                         ),
                       ),
                     ],
@@ -250,31 +252,22 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> with 
   }
 
   Widget _buildContent(BuildContext context) {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
     if (_loading) {
-      return Padding(
-        padding: const EdgeInsets.all(80),
+      return const Padding(
+        padding: EdgeInsets.all(80),
         child: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               SizedBox(
-                width: 50,
-                height: 50,
-                child: CircularProgressIndicator(
-                  strokeWidth: 3,
-                  color: t.colorScheme.primary,
-                ),
+                width: 32,
+                height: 32,
+                child: CircularProgressIndicator(strokeWidth: 2, color: SupabaseColors.brand),
               ),
-              const SizedBox(height: 24),
+              SizedBox(height: 16),
               Text(
                 'Carregando projetos...',
-                style: TextStyle(
-                  color: isDark ? Colors.white70 : Colors.black54,
-                  fontSize: 15,
-                ),
+                style: TextStyle(color: SupabaseColors.textMuted, fontSize: 13),
               ),
             ],
           ),
@@ -290,39 +283,31 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> with 
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 120,
-                height: 120,
+                width: 80,
+                height: 80,
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      t.colorScheme.primary.withOpacity(0.2),
-                      t.colorScheme.secondary.withOpacity(0.1),
-                    ],
-                  ),
-                  shape: BoxShape.circle,
+                  color: SupabaseColors.surface200,
+                  borderRadius: BorderRadius.circular(16),
                 ),
-                child: Icon(
+                child: const Icon(
                   Icons.folder_open_rounded,
-                  size: 56,
-                  color: t.colorScheme.primary,
+                  size: 36,
+                  color: SupabaseColors.textMuted,
                 ),
               ),
-              const SizedBox(height: 32),
-              Text(
+              const SizedBox(height: 20),
+              const Text(
                 'Nenhum projeto encontrado',
                 style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: isDark ? Colors.white : Colors.black87,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: SupabaseColors.textPrimary,
                 ),
               ),
-              const SizedBox(height: 12),
-              Text(
+              const SizedBox(height: 8),
+              const Text(
                 'Este usuário ainda não possui projetos',
-                style: TextStyle(
-                  fontSize: 15,
-                  color: isDark ? Colors.white60 : Colors.black54,
-                ),
+                style: TextStyle(fontSize: 13, color: SupabaseColors.textMuted),
               ),
             ],
           ),
@@ -334,9 +319,9 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> with 
       padding: const EdgeInsets.all(24),
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1200),
+          constraints: const BoxConstraints(maxWidth: 1000),
           child: Column(
-            children: _projects.map(_buildProjectCard).toList(),
+            children: _projects.map((p) => _buildProjectCard(p)).toList(),
           ),
         ),
       ),
@@ -344,9 +329,8 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> with 
   }
 
   Widget _buildProjectCard(ProjectInfo project) {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
     final busy = _session.isBusy(project.name);
+    final projectUrl = _getProjectUrl(project.name);
 
     if (project.statusFuture == null && !busy) {
       project.statusFuture = http
@@ -363,180 +347,172 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> with 
         final isRunning = effectiveStatus == 'running';
 
         return Container(
-          margin: const EdgeInsets.only(bottom: 16),
+          margin: const EdgeInsets.only(bottom: 12),
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: isDark
-                  ? [const Color(0xFF1A1F2E), const Color(0xFF12161F)]
-                  : [Colors.white, Colors.grey[50]!],
-            ),
-            borderRadius: BorderRadius.circular(20),
+            color: SupabaseColors.surface100,
+            borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: isRunning
-                  ? Colors.green.withOpacity(0.3)
-                  : Colors.orange.withOpacity(0.3),
-              width: 1.5,
+                  ? SupabaseColors.success.withOpacity(0.3)
+                  : SupabaseColors.warning.withOpacity(0.3),
             ),
-            boxShadow: [
-              BoxShadow(
-                color: isDark ? Colors.black.withOpacity(0.3) : Colors.black.withOpacity(0.08),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
           ),
           child: Padding(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(16),
             child: Column(
               children: [
                 Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(12),
+                      width: 10,
+                      height: 10,
                       decoration: BoxDecoration(
-                        color: isRunning
-                            ? Colors.green.withOpacity(0.15)
-                            : Colors.orange.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(
-                        isRunning ? Icons.check_circle_rounded : Icons.warning_rounded,
-                        color: isRunning ? Colors.green : Colors.orange,
-                        size: 24,
+                        shape: BoxShape.circle,
+                        color: isRunning ? SupabaseColors.success : SupabaseColors.warning,
+                        boxShadow: [
+                          BoxShadow(
+                            color: (isRunning ? SupabaseColors.success : SupabaseColors.warning)
+                                .withOpacity(0.5),
+                            blurRadius: 6,
+                            spreadRadius: 1,
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(width: 16),
+                    const SizedBox(width: 12),
+
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
                             project.name,
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: isDark ? Colors.white : Colors.black87,
-                              letterSpacing: -0.3,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: SupabaseColors.textPrimary,
                             ),
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  projectUrl,
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontFamily: 'monospace',
+                                    color: SupabaseColors.textMuted,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              _MiniIconBtn(
+                                icon: Icons.link_rounded,
+                                tooltip: 'Copiar URL',
+                                onPressed: () {
+                                  Clipboard.setData(ClipboardData(text: projectUrl));
+                                  _showSnack('URL copiada!', SupabaseColors.success);
+                                },
+                              ),
+                            ],
                           ),
                           const SizedBox(height: 6),
                           Row(
                             children: [
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                 decoration: BoxDecoration(
                                   color: isRunning
-                                      ? Colors.green.withOpacity(0.15)
-                                      : Colors.orange.withOpacity(0.15),
-                                  borderRadius: BorderRadius.circular(8),
+                                      ? SupabaseColors.success.withOpacity(0.15)
+                                      : SupabaseColors.warning.withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: Text(
                                   effectiveStatus.toUpperCase(),
                                   style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
-                                    color: isRunning ? Colors.green : Colors.orange,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w600,
                                     letterSpacing: 0.5,
+                                    color: isRunning ? SupabaseColors.success : SupabaseColors.warning,
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 12),
-                              Icon(
-                                Icons.widgets_rounded,
-                                size: 14,
-                                color: isDark ? Colors.white38 : Colors.black38,
-                              ),
-                              const SizedBox(width: 6),
+                              const SizedBox(width: 8),
                               Text(
                                 '$running/$total containers',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: isDark ? Colors.white60 : Colors.black54,
-                                ),
+                                style: const TextStyle(fontSize: 11, color: SupabaseColors.textMuted),
                               ),
                             ],
                           ),
                         ],
                       ),
                     ),
+
                     if (busy)
                       Container(
-                        padding: const EdgeInsets.all(12),
+                        padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: t.colorScheme.primary.withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(12),
+                          color: SupabaseColors.brand.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(6),
                         ),
-                        child: SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(t.colorScheme.primary),
-                          ),
+                        child: const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: SupabaseColors.brand),
                         ),
                       ),
                   ],
                 ),
-                const SizedBox(height: 16),
-                Divider(color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08)),
+
                 const SizedBox(height: 12),
+                const Divider(color: SupabaseColors.border, height: 1),
+                const SizedBox(height: 12),
+
                 Row(
                   children: [
-                    Expanded(
-                      child: _buildActionButton(
-                        icon: Icons.open_in_new_rounded,
-                        label: 'Abrir',
-                        color: t.colorScheme.primary,
-                        onPressed: busy ? null : () => _openProject(project.name),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _buildActionButton(
-                        icon: Icons.play_arrow_rounded,
-                        label: 'Start',
-                        color: Colors.green,
-                        onPressed: busy ? null : () => _doAction(project.name, 'start'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _buildActionButton(
-                        icon: Icons.stop_rounded,
-                        label: 'Stop',
-                        color: Colors.red,
-                        onPressed: busy ? null : () => _doAction(project.name, 'stop'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _buildActionButton(
-                        icon: Icons.restart_alt_rounded,
-                        label: 'Restart',
-                        color: Colors.blue,
-                        onPressed: busy ? null : () => _doAction(project.name, 'restart'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _buildActionButton(
-                        icon: Icons.swap_horiz_rounded,
-                        label: 'Transferir',
-                        color: Colors.purple,
-                        onPressed: busy ? null : () => _showTransferDialog(project.name),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _buildActionButton(
-                        icon: Icons.delete_outline_rounded,
-                        label: 'Excluir',
-                        color: Colors.red.shade700,
-                        onPressed: busy ? null : () => _confirmAndDelete(project.name),
-                      ),
-                    ),
+                    Expanded(child: _buildActionButton(
+                      icon: Icons.open_in_new_rounded,
+                      label: 'Abrir',
+                      color: SupabaseColors.brand,
+                      onPressed: busy ? null : () => _openProject(project.name),
+                    )),
+                    const SizedBox(width: 6),
+                    Expanded(child: _buildActionButton(
+                      icon: Icons.play_arrow_rounded,
+                      label: 'Start',
+                      color: SupabaseColors.success,
+                      onPressed: busy ? null : () => _doAction(project.name, 'start'),
+                    )),
+                    const SizedBox(width: 6),
+                    Expanded(child: _buildActionButton(
+                      icon: Icons.stop_rounded,
+                      label: 'Stop',
+                      color: SupabaseColors.error,
+                      onPressed: busy ? null : () => _doAction(project.name, 'stop'),
+                    )),
+                    const SizedBox(width: 6),
+                    Expanded(child: _buildActionButton(
+                      icon: Icons.restart_alt_rounded,
+                      label: 'Restart',
+                      color: SupabaseColors.info,
+                      onPressed: busy ? null : () => _doAction(project.name, 'restart'),
+                    )),
+                    const SizedBox(width: 6),
+                    Expanded(child: _buildActionButton(
+                      icon: Icons.swap_horiz_rounded,
+                      label: 'Transferir',
+                      color: Colors.purple,
+                      onPressed: busy ? null : () => _showTransferDialog(project.name),
+                    )),
+                    const SizedBox(width: 6),
+                    Expanded(child: _buildActionButton(
+                      icon: Icons.delete_outline_rounded,
+                      label: 'Excluir',
+                      color: SupabaseColors.error,
+                      onPressed: busy ? null : () => _confirmAndDelete(project.name),
+                    )),
                   ],
                 ),
               ],
@@ -553,25 +529,18 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> with 
     required Color color,
     required VoidCallback? onPressed,
   }) {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onPressed,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(6),
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+          padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
-            color: onPressed == null
-                ? (isDark ? Colors.white.withOpacity(0.03) : Colors.grey[200])
-                : color.withOpacity(0.15),
-            borderRadius: BorderRadius.circular(12),
+            color: onPressed == null ? SupabaseColors.bg300 : color.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(6),
             border: Border.all(
-              color: onPressed == null
-                  ? (isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.08))
-                  : color.withOpacity(0.3),
+              color: onPressed == null ? SupabaseColors.border : color.withOpacity(0.3),
             ),
           ),
           child: Column(
@@ -579,16 +548,16 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> with 
             children: [
               Icon(
                 icon,
-                color: onPressed == null ? Colors.grey : color,
-                size: 20,
+                color: onPressed == null ? SupabaseColors.textMuted : color,
+                size: 16,
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 2),
               Text(
                 label,
                 style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: onPressed == null ? Colors.grey : color,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w500,
+                  color: onPressed == null ? SupabaseColors.textMuted : color,
                 ),
                 textAlign: TextAlign.center,
               ),
@@ -612,28 +581,13 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> with 
       );
 
       if (resp.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Ação "$action" executada no projeto "$projectName".'),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            margin: const EdgeInsets.all(16),
-          ),
-        );
+        _showSnack('Ação "$action" executada em "$projectName"', SupabaseColors.success);
         await _fetchProjects();
       } else {
         throw Exception('Erro: ${resp.body}');
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.toString()),
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          margin: const EdgeInsets.all(16),
-        ),
-      );
+      _showSnack(e.toString(), SupabaseColors.error);
     } finally {
       final proj = _projects.firstWhereOrNull((p) => p.name == projectName);
       if (proj != null) proj.statusFuture = null;
@@ -649,5 +603,35 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen> with 
         _projects.removeWhere((project) => project.name == projectName);
       });
     }
+  }
+}
+
+class _MiniIconBtn extends StatelessWidget {
+  const _MiniIconBtn({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(4),
+          child: Padding(
+            padding: const EdgeInsets.all(4),
+            child: Icon(icon, size: 14, color: SupabaseColors.textMuted),
+          ),
+        ),
+      ),
+    );
   }
 }

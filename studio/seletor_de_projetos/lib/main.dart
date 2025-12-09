@@ -1,4 +1,3 @@
-// project_picker.dart
 import 'dart:convert';
 import 'dart:html' as html;
 
@@ -9,12 +8,13 @@ import 'package:http/http.dart' as http;
 import 'package:seletor_de_projetos/projectSettingsDialog.dart';
 import 'package:seletor_de_projetos/services/projectService.dart';
 import 'package:seletor_de_projetos/session.dart';
+import 'package:seletor_de_projetos/supabase_colors.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'adminUsersPage.dart';
 import 'models/job.dart';
 import 'newProjectDialog.dart';
 import 'duplicateProjectDialog.dart';
-
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,45 +22,54 @@ Future<void> main() async {
   if (r.statusCode == 200) {
     final data = jsonDecode(r.body);
     final s = Session();
-    s.myId          = data['user_id'];
-    s.myUsername    = data['username'];
+    s.myId = data['user_id'];
+    s.myUsername = data['username'];
     s.myDisplayName = data['display_name'];
-    s.isSysAdmin    = data['is_admin'];
+    s.isSysAdmin = data['is_admin'];
   }
   runApp(const ProjectPickerApp());
 }
 
-
-
 class ProjectPickerApp extends StatelessWidget {
   const ProjectPickerApp({super.key});
+
   @override
   Widget build(BuildContext ctx) => MaterialApp(
     title: 'Escolha o projeto',
     debugShowCheckedModeBanner: false,
     theme: ThemeData(
-      colorSchemeSeed: const Color(0xFF00D9B8),
-      brightness: Brightness.light,
-      useMaterial3: true,
-    ),
-    darkTheme: ThemeData(
-      colorSchemeSeed: const Color(0xFF00D9B8),
+      colorSchemeSeed: SupabaseColors.brand,
       brightness: Brightness.dark,
       useMaterial3: true,
+      scaffoldBackgroundColor: SupabaseColors.bg100,
+      cardColor: SupabaseColors.surface100,
+      dividerColor: SupabaseColors.border,
     ),
-    themeMode: ThemeMode.system,
+    darkTheme: ThemeData(
+      colorSchemeSeed: SupabaseColors.brand,
+      brightness: Brightness.dark,
+      useMaterial3: true,
+      scaffoldBackgroundColor: SupabaseColors.bg100,
+      cardColor: SupabaseColors.surface100,
+      dividerColor: SupabaseColors.border,
+    ),
+    themeMode: ThemeMode.dark,
     home: const ProjectListPage(),
   );
 }
 
 class ProjectListPage extends StatefulWidget {
   const ProjectListPage({super.key});
+
   @override
   State<ProjectListPage> createState() => _ProjectListPageState();
 }
 
-class _ProjectListPageState extends State<ProjectListPage> with SingleTickerProviderStateMixin {
+class _ProjectListPageState extends State<ProjectListPage>
+    with SingleTickerProviderStateMixin {
   List<Map<String, dynamic>> _projects = [];
+  Set<String> _favorites = {};
+  String? _serverDomain;
   Future<void>? _loadingFuture;
   bool _creating = false;
   late AnimationController _fadeController;
@@ -69,7 +78,7 @@ class _ProjectListPageState extends State<ProjectListPage> with SingleTickerProv
   @override
   void initState() {
     super.initState();
-    _loadingFuture = _fetchProjects();
+    _loadingFuture = _initializeData();
     _fadeController = AnimationController(
       duration: const Duration(milliseconds: 600),
       vsync: this,
@@ -87,6 +96,54 @@ class _ProjectListPageState extends State<ProjectListPage> with SingleTickerProv
     super.dispose();
   }
 
+  Future<void> _initializeData() async {
+    await Future.wait([
+      _fetchProjects(),
+      _fetchConfig(),
+      _loadFavorites(),
+    ]);
+  }
+
+  Future<void> _fetchConfig() async {
+    try {
+      final r = await http.get(Uri.parse('/api/config'));
+      if (r.statusCode == 200) {
+        final data = jsonDecode(r.body);
+        setState(() {
+          _serverDomain = data['server_domain'];
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _loadFavorites() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final favList = prefs.getStringList('project_favorites') ?? [];
+      setState(() {
+        _favorites = favList.toSet();
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _saveFavorites() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList('project_favorites', _favorites.toList());
+    } catch (_) {}
+  }
+
+  void _toggleFavorite(String projectName) {
+    setState(() {
+      if (_favorites.contains(projectName)) {
+        _favorites.remove(projectName);
+      } else {
+        _favorites.add(projectName);
+      }
+    });
+    _saveFavorites();
+  }
+
   Future<void> _fetchProjects() async {
     try {
       final r = await http.get(Uri.parse('/api/projects'));
@@ -101,6 +158,12 @@ class _ProjectListPageState extends State<ProjectListPage> with SingleTickerProv
     }
   }
 
+  List<Map<String, dynamic>> get _sortedProjects {
+    final favs = _projects.where((p) => _favorites.contains(p['name'])).toList();
+    final others = _projects.where((p) => !_favorites.contains(p['name'])).toList();
+    return [...favs, ...others];
+  }
+
   Future<void> _createAndWait(String name) async {
     setState(() {
       _creating = true;
@@ -111,9 +174,11 @@ class _ProjectListPageState extends State<ProjectListPage> with SingleTickerProv
       });
     });
 
-    final res = await http.post(Uri.parse('/api/projects'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'name': name}));
+    final res = await http.post(
+      Uri.parse('/api/projects'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'name': name}),
+    );
     final job = Job.fromResponse(res);
     if (job == null) {
       setState(() {
@@ -123,26 +188,29 @@ class _ProjectListPageState extends State<ProjectListPage> with SingleTickerProv
       return;
     }
 
-    _snack('Gerando… aguarde');
+    _snack('Gerando… aguarde', SupabaseColors.info);
     final ok = await ProjectService.waitUntilReady(job.id);
     setState(() {
       _creating = false;
       _projects.removeWhere((p) => p['is_loading'] == true);
     });
 
-    _snack(ok ? 'Projeto criado!' : 'Falhou ao criar');
+    _snack(
+      ok ? 'Projeto criado!' : 'Falhou ao criar',
+      ok ? SupabaseColors.success : SupabaseColors.error,
+    );
     if (ok) await _fetchProjects();
   }
 
-  void _snack(String msg) =>
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(msg),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          margin: const EdgeInsets.all(16),
-        ),
-      );
+  void _snack(String msg, [Color? color]) => ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(msg, style: const TextStyle(color: Colors.white)),
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: color ?? SupabaseColors.surface300,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      margin: const EdgeInsets.all(16),
+    ),
+  );
 
   Future<void> _openProject(String ref) async {
     await http.get(Uri.parse('/set-project?ref=$ref'));
@@ -156,7 +224,11 @@ class _ProjectListPageState extends State<ProjectListPage> with SingleTickerProv
     );
 
     if (newProject?['name'] != null && newProject?['name'].trim().isNotEmpty) {
-      await _duplicateAndWait(originalProjectName, newProject?['name'].trim(), newProject?['copy_data'] ?? false);
+      await _duplicateAndWait(
+        originalProjectName,
+        newProject?['name'].trim(),
+        newProject?['copy_data'] ?? false,
+      );
     }
   }
 
@@ -176,7 +248,7 @@ class _ProjectListPageState extends State<ProjectListPage> with SingleTickerProv
       body: jsonEncode({
         'original_name': originalName,
         'new_name': newName,
-        'copy_data' : copyData
+        'copy_data': copyData,
       }),
     );
 
@@ -186,59 +258,108 @@ class _ProjectListPageState extends State<ProjectListPage> with SingleTickerProv
         _creating = false;
         _projects.removeWhere((p) => p['is_loading'] == true);
       });
-      _snack('Erro ao duplicar projeto');
+      _snack('Erro ao duplicar projeto', SupabaseColors.error);
       return;
     }
 
-    _snack('Duplicando projeto… aguarde');
+    _snack('Duplicando projeto… aguarde', SupabaseColors.info);
     final ok = await ProjectService.waitUntilReady(job.id);
     setState(() {
       _creating = false;
       _projects.removeWhere((p) => p['is_loading'] == true);
     });
 
-    _snack(ok ? 'Projeto duplicado com sucesso!' : 'Falhou ao duplicar');
+    _snack(
+      ok ? 'Projeto duplicado com sucesso!' : 'Falhou ao duplicar',
+      ok ? SupabaseColors.success : SupabaseColors.error,
+    );
     if (ok) await _fetchProjects();
+  }
+
+  Future<void> _confirmLogout() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: SupabaseColors.surface200,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: SupabaseColors.border),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.logout_rounded, color: SupabaseColors.textSecondary, size: 22),
+            SizedBox(width: 12),
+            Text('Sair', style: TextStyle(fontSize: 18, color: SupabaseColors.textPrimary)),
+          ],
+        ),
+        content: const Text(
+          'Tem certeza que deseja sair?',
+          style: TextStyle(color: SupabaseColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar', style: TextStyle(color: SupabaseColors.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: SupabaseColors.error,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Sair'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      html.window.location.href = '/logout';
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0A0E1A) : const Color(0xFFF5F7FA),
+      backgroundColor: SupabaseColors.bg100,
       body: CustomScrollView(
         slivers: [
-          SliverAppBar.large(
+          SliverAppBar(
             floating: true,
             pinned: true,
-            backgroundColor: isDark ? const Color(0xFF0F1419) : Colors.white,
+            expandedHeight: 120,
+            backgroundColor: SupabaseColors.bg100,
             surfaceTintColor: Colors.transparent,
             elevation: 0,
             flexibleSpace: FlexibleSpaceBar(
               titlePadding: const EdgeInsets.only(left: 24, bottom: 16),
-              title: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+              title: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(
-                    'Meus Projetos',
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      color: isDark ? Colors.white : Colors.black87,
-                      letterSpacing: -0.5,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${_projects.length} ${_projects.length == 1 ? 'projeto' : 'projetos'}',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.normal,
-                      color: isDark ? Colors.white54 : Colors.black45,
-                    ),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Meus Projetos',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w600,
+                          color: SupabaseColors.textPrimary,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${_projects.length} ${_projects.length == 1 ? 'projeto' : 'projetos'}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.normal,
+                          color: SupabaseColors.textMuted,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -246,30 +367,36 @@ class _ProjectListPageState extends State<ProjectListPage> with SingleTickerProv
             actions: [
               Padding(
                 padding: const EdgeInsets.only(right: 16, top: 8),
-                child: FilledButton.tonalIcon(
-                  onPressed: _creating
-                      ? null
-                      : () async {
-                    final name = await showDialog<String>(
-                      context: context,
-                      builder: (_) => const NewProjectDialog(),
-                    );
-                    if (name != null && name.trim().isNotEmpty) {
-                      await _createAndWait(name.trim());
-                    }
-                  },
-                  icon: const Icon(Icons.add_rounded, size: 20),
-                  label: const Text('Novo Projeto'),
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
+                child: Row(
+                  children: [
+                    _SupabaseButton(
+                      onPressed: _creating
+                          ? null
+                          : () async {
+                        final name = await showDialog<String>(
+                          context: context,
+                          builder: (_) => const NewProjectDialog(),
+                        );
+                        if (name != null && name.trim().isNotEmpty) {
+                          await _createAndWait(name.trim());
+                        }
+                      },
+                      icon: Icons.add,
+                      label: 'Novo Projeto',
                     ),
-                  ),
+                    SizedBox(width: 12,),
+                    _IconBtn(
+                      icon: Icons.logout_rounded,
+                      tooltip: 'Sair',
+                      color: SupabaseColors.textSecondary,
+                      onPressed: () => _confirmLogout(),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
+
           SliverToBoxAdapter(
             child: FadeTransition(
               opacity: _fadeAnimation,
@@ -280,108 +407,14 @@ class _ProjectListPageState extends State<ProjectListPage> with SingleTickerProv
                     future: _loadingFuture,
                     builder: (_, snap) {
                       if (snap.connectionState != ConnectionState.done) {
-                        return Padding(
-                          padding: const EdgeInsets.all(80),
-                          child: Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                SizedBox(
-                                  width: 50,
-                                  height: 50,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 3,
-                                    color: t.colorScheme.primary,
-                                  ),
-                                ),
-                                const SizedBox(height: 24),
-                                Text(
-                                  'Carregando projetos...',
-                                  style: TextStyle(
-                                    color: isDark ? Colors.white70 : Colors.black54,
-                                    fontSize: 15,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
+                        return _buildLoadingState();
                       }
 
                       if (_projects.isEmpty) {
-                        return Padding(
-                          padding: const EdgeInsets.all(80),
-                          child: Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  width: 120,
-                                  height: 120,
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      colors: [
-                                        t.colorScheme.primary.withOpacity(0.2),
-                                        t.colorScheme.secondary.withOpacity(0.1),
-                                      ],
-                                    ),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: Icon(
-                                    Icons.folder_open_rounded,
-                                    size: 56,
-                                    color: t.colorScheme.primary,
-                                  ),
-                                ),
-                                const SizedBox(height: 32),
-                                Text(
-                                  'Nenhum projeto ainda',
-                                  style: TextStyle(
-                                    fontSize: 24,
-                                    fontWeight: FontWeight.bold,
-                                    color: isDark ? Colors.white : Colors.black87,
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  'Crie seu primeiro projeto para começar',
-                                  style: TextStyle(
-                                    fontSize: 15,
-                                    color: isDark ? Colors.white60 : Colors.black54,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
+                        return _buildEmptyState();
                       }
 
-                      return GridView.builder(
-                        padding: const EdgeInsets.all(24),
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-                          maxCrossAxisExtent: 420,
-                          crossAxisSpacing: 20,
-                          mainAxisSpacing: 20,
-                          childAspectRatio: 1.35,
-                        ),
-                        itemCount: _projects.length,
-                        itemBuilder: (_, i) => _ProjectCard(
-                          ref: _projects[i]['name'] as String,
-                          anonKey: _projects[i]['anon_token'] ?? '',
-                          isLoading: _projects[i]['is_loading'] == true,
-                          onTap: _projects[i]['is_loading'] == true
-                              ? () {}
-                              : () => _openProject(_projects[i]['name']),
-                          onDuplicate: ()=> _showDuplicateDialog(_projects[i]['name']),
-                          onDeleted: () {
-                            setState(() {
-                              _projects.removeAt(i);
-                            });
-                          },
-                        ),
-                      );
+                      return _buildProjectGrid();
                     },
                   ),
                 ),
@@ -390,43 +423,201 @@ class _ProjectListPageState extends State<ProjectListPage> with SingleTickerProv
           ),
         ],
       ),
-      floatingActionButton: Session().isSysAdmin
-          ? Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              t.colorScheme.primary,
-              t.colorScheme.secondary,
-            ],
-          ),
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: t.colorScheme.primary.withOpacity(0.4),
-              blurRadius: 20,
-              offset: const Offset(0, 10),
+      floatingActionButton: Session().isSysAdmin ? _buildAdminFab() : null,
+    );
+  }
+
+  Widget _buildLoadingState() {
+    return Padding(
+      padding: const EdgeInsets.all(80),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 40,
+              height: 40,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: SupabaseColors.brand,
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Carregando projetos...',
+              style: TextStyle(
+                color: SupabaseColors.textSecondary,
+                fontSize: 14,
+              ),
             ),
           ],
         ),
-        child: FloatingActionButton.extended(
-          onPressed: () async {
-            await Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const AdminUsersPage()),
-            );
-            await _fetchProjects();
-          },
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          icon: const Icon(Icons.admin_panel_settings_rounded),
-          label: const Text('Admin'),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Padding(
+      padding: const EdgeInsets.all(80),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: SupabaseColors.surface200,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: SupabaseColors.border),
+              ),
+              child: const Icon(
+                Icons.folder_open_rounded,
+                size: 36,
+                color: SupabaseColors.textMuted,
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Nenhum projeto ainda',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: SupabaseColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Crie seu primeiro projeto para começar',
+              style: TextStyle(
+                fontSize: 14,
+                color: SupabaseColors.textMuted,
+              ),
+            ),
+          ],
         ),
-      )
-          : null,
+      ),
+    );
+  }
+
+  Widget _buildProjectGrid() {
+    final sorted = _sortedProjects;
+
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (_favorites.isNotEmpty && sorted.any((p) => _favorites.contains(p['name']))) ...[
+            Padding(
+              padding: const EdgeInsets.only(left: 4, bottom: 12),
+              child: Row(
+                children: [
+                  Icon(Icons.star_rounded, size: 16, color: SupabaseColors.favorite),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'FAVORITOS',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.2,
+                      color: SupabaseColors.textMuted,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 380,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: 1.6,
+              ),
+              itemCount: sorted.where((p) => _favorites.contains(p['name'])).length,
+              itemBuilder: (_, i) {
+                final favProjects = sorted.where((p) => _favorites.contains(p['name'])).toList();
+                return _buildCard(favProjects[i], true);
+              },
+            ),
+            const SizedBox(height: 32),
+            const Divider(color: SupabaseColors.border, height: 1),
+            const SizedBox(height: 24),
+          ],
+
+          if (sorted.any((p) => !_favorites.contains(p['name']))) ...[
+            Padding(
+              padding: const EdgeInsets.only(left: 4, bottom: 12),
+              child: const Text(
+                'TODOS OS PROJETOS',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.2,
+                  color: SupabaseColors.textMuted,
+                ),
+              ),
+            ),
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 380,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: 1.6,
+              ),
+              itemCount: sorted.where((p) => !_favorites.contains(p['name'])).length,
+              itemBuilder: (_, i) {
+                final otherProjects = sorted.where((p) => !_favorites.contains(p['name'])).toList();
+                return _buildCard(otherProjects[i], false);
+              },
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCard(Map<String, dynamic> project, bool isFavorite) {
+    return _ProjectCard(
+      ref: project['name'] as String,
+      anonKey: project['anon_token'] ?? '',
+      isLoading: project['is_loading'] == true,
+      isFavorite: isFavorite,
+      serverDomain: _serverDomain,
+      onTap: project['is_loading'] == true ? () {} : () => _openProject(project['name']),
+      onDuplicate: () => _showDuplicateDialog(project['name']),
+      onToggleFavorite: () => _toggleFavorite(project['name']),
+      onDeleted: () {
+        setState(() {
+          _projects.removeWhere((p) => p['name'] == project['name']);
+          _favorites.remove(project['name']);
+        });
+        _saveFavorites();
+      },
+    );
+  }
+
+  Widget _buildAdminFab() {
+    return FloatingActionButton.extended(
+      onPressed: () async {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const AdminUsersPage()),
+        );
+        await _fetchProjects();
+      },
+      backgroundColor: SupabaseColors.surface300,
+      foregroundColor: SupabaseColors.textPrimary,
+      elevation: 0,
+      icon: const Icon(Icons.admin_panel_settings_rounded, size: 20),
+      label: const Text('Admin'),
     );
   }
 }
-
 
 class _ProjectCard extends StatefulWidget {
   const _ProjectCard({
@@ -435,15 +626,21 @@ class _ProjectCard extends StatefulWidget {
     required this.onTap,
     required this.onDeleted,
     required this.onDuplicate,
+    required this.onToggleFavorite,
+    required this.isFavorite,
+    this.serverDomain,
     this.isLoading = false,
   });
 
   final String ref;
   final String anonKey;
+  final String? serverDomain;
   final VoidCallback onTap;
   final VoidCallback onDeleted;
   final VoidCallback onDuplicate;
+  final VoidCallback onToggleFavorite;
   final bool isLoading;
+  final bool isFavorite;
 
   @override
   State<_ProjectCard> createState() => _ProjectCardState();
@@ -451,37 +648,33 @@ class _ProjectCard extends StatefulWidget {
 
 class _ProjectCardState extends State<_ProjectCard> with TickerProviderStateMixin {
   bool _hover = false;
-  late AnimationController _loadingController;
-  late Animation<double> _loadingAnimation;
-  late AnimationController _shimmerController;
+  bool _keyVisible = false;
+  String? _status;
+  bool _statusLoading = true;
 
   @override
   void initState() {
     super.initState();
-    if (widget.isLoading) {
-      _loadingController = AnimationController(
-        duration: const Duration(milliseconds: 1500),
-        vsync: this,
-      );
-      _loadingAnimation = Tween<double>(begin: 0.4, end: 1.0).animate(
-        CurvedAnimation(parent: _loadingController, curve: Curves.easeInOut),
-      );
-      _loadingController.repeat(reverse: true);
-
-      _shimmerController = AnimationController(
-        duration: const Duration(milliseconds: 2000),
-        vsync: this,
-      )..repeat();
+    if (!widget.isLoading) {
+      _fetchStatus();
     }
   }
 
-  @override
-  void dispose() {
-    if (widget.isLoading) {
-      _loadingController.dispose();
-      _shimmerController.dispose();
+  Future<void> _fetchStatus() async {
+    try {
+      final resp = await http.get(Uri.parse('/api/projects/${widget.ref}/status'));
+      if (resp.statusCode == 200 && mounted) {
+        final data = jsonDecode(resp.body);
+        setState(() {
+          _status = data['status'];
+          _statusLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _statusLoading = false);
+      }
     }
-    super.dispose();
   }
 
   Future<void> _openSettings() async {
@@ -495,343 +688,437 @@ class _ProjectCardState extends State<_ProjectCard> with TickerProviderStateMixi
     }
   }
 
+  String get _projectUrl {
+    if (widget.serverDomain == null || widget.serverDomain!.isEmpty) {
+      return widget.ref;
+    }
+    return '${widget.serverDomain}/${widget.ref}';
+  }
+
   @override
   Widget build(BuildContext ctx) {
-    final t = Theme.of(ctx);
-    final isDark = t.brightness == Brightness.dark;
-
     if (widget.isLoading) {
-      return AnimatedBuilder(
-        animation: _loadingAnimation,
-        builder: (context, child) {
-          return Opacity(
-            opacity: _loadingAnimation.value,
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(24),
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: isDark
-                      ? [
-                    const Color(0xFF1A1F2E),
-                    const Color(0xFF12161F),
-                  ]
-                      : [
-                    Colors.white,
-                    Colors.grey[50]!,
-                  ],
-                ),
-                border: Border.all(
-                  color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08),
-                  width: 1,
-                ),
-              ),
-              child: Stack(
-                children: [
-                  AnimatedBuilder(
-                    animation: _shimmerController,
-                    builder: (_, __) {
-                      return Container(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(24),
-                          gradient: LinearGradient(
-                            begin: Alignment(-1.0 + (_shimmerController.value * 2), 0),
-                            end: Alignment(1.0 + (_shimmerController.value * 2), 0),
-                            colors: [
-                              Colors.transparent,
-                              Colors.white.withOpacity(isDark ? 0.05 : 0.2),
-                              Colors.transparent,
-                            ],
-                            stops: const [0.0, 0.5, 1.0],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              width: 150,
-                              height: 28,
-                              decoration: BoxDecoration(
-                                color: isDark ? Colors.white.withOpacity(0.1) : Colors.grey[300],
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                            const Spacer(),
-                            Container(
-                              width: 32,
-                              height: 32,
-                              decoration: BoxDecoration(
-                                color: isDark ? Colors.white.withOpacity(0.1) : Colors.grey[300],
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                          ],
-                        ),
-                        Container(
-                          width: 120,
-                          height: 16,
-                          decoration: BoxDecoration(
-                            color: isDark ? Colors.white.withOpacity(0.06) : Colors.grey[200],
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      );
+      return _buildLoadingCard();
     }
+
+    final isRunning = _status == 'running';
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
+      cursor: SystemMouseCursors.click,
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 250),
+          duration: const Duration(milliseconds: 200),
           curve: Curves.easeOut,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(24),
-            gradient: _hover
-                ? LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                t.colorScheme.primary.withOpacity(0.15),
-                t.colorScheme.secondary.withOpacity(0.1),
-              ],
-            )
-                : LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: isDark
-                  ? [
-                const Color(0xFF1A1F2E),
-                const Color(0xFF12161F),
-              ]
-                  : [
-                Colors.white,
-                Colors.grey[50]!,
-              ],
-            ),
+            color: _hover ? SupabaseColors.surface200 : SupabaseColors.surface100,
+            borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: _hover
-                  ? t.colorScheme.primary.withOpacity(0.4)
-                  : (isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08)),
-              width: 1.5,
+              color: _hover ? SupabaseColors.borderHover : SupabaseColors.border,
+              width: 1,
             ),
-            boxShadow: _hover
-                ? [
-              BoxShadow(
-                color: t.colorScheme.primary.withOpacity(0.2),
-                blurRadius: 24,
-                offset: const Offset(0, 12),
-              ),
-            ]
-                : [
-              BoxShadow(
-                color: isDark ? Colors.black.withOpacity(0.3) : Colors.black.withOpacity(0.08),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
           ),
-          child: AnimatedScale(
-            scale: _hover ? 1.02 : 1.0,
-            duration: const Duration(milliseconds: 250),
-            curve: Curves.easeOut,
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              t.colorScheme.primary.withOpacity(0.2),
-                              t.colorScheme.secondary.withOpacity(0.2),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: SupabaseColors.bg300,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(
+                        Icons.storage_rounded,
+                        color: SupabaseColors.brand,
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  widget.ref,
+                                  style: const TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                    color: SupabaseColors.textPrimary,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              _buildStatusIndicator(isRunning),
                             ],
                           ),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          Icons.folder_rounded,
-                          color: t.colorScheme.primary,
-                          size: 24,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          widget.ref,
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: isDark ? Colors.white : Colors.black87,
-                            letterSpacing: -0.3,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Container(
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? Colors.white.withOpacity(0.05)
-                              : Colors.black.withOpacity(0.03),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: PopupMenuButton<String>(
-                          icon: Icon(
-                            Icons.more_vert_rounded,
-                            color: isDark ? Colors.white70 : Colors.black54,
-                            size: 20,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          itemBuilder: (context) => [
-                            PopupMenuItem(
-                              value: 'settings',
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.settings_rounded,
-                                    size: 18,
-                                    color: isDark ? Colors.white70 : Colors.black54,
+                          const SizedBox(height: 2),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  _projectUrl,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: SupabaseColors.textMuted,
+                                    fontFamily: 'monospace',
                                   ),
-                                  const SizedBox(width: 12),
-                                  const Text('Configurações'),
-                                ],
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: 'duplicate',
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.content_copy_rounded,
-                                    size: 18,
-                                    color: t.colorScheme.primary,
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Text(
-                                    'Duplicar projeto',
-                                    style: TextStyle(color: t.colorScheme.primary),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                          onSelected: (value) {
-                            if (value == 'settings') {
-                              _openSettings();
-                            } else if (value == 'duplicate') {
-                              widget.onDuplicate();
-                            }
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'CHAVE ANÔNIMA',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 1.2,
-                          color: isDark ? Colors.white38 : Colors.black38,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: isDark
-                                    ? Colors.black.withOpacity(0.3)
-                                    : Colors.grey[200],
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: isDark
-                                      ? Colors.white.withOpacity(0.05)
-                                      : Colors.black.withOpacity(0.05),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                              child: SelectableText(
-                                widget.anonKey.isEmpty
-                                    ? '—'
-                                    : '${widget.anonKey.substring(0, 20)}…',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontFamily: 'monospace',
-                                  color: isDark ? Colors.white60 : Colors.black54,
-                                ),
-                                maxLines: 1,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Container(
-                            decoration: BoxDecoration(
-                              color: widget.anonKey.isEmpty
-                                  ? (isDark ? Colors.white.withOpacity(0.05) : Colors.grey[200])
-                                  : t.colorScheme.primary.withOpacity(0.15),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: IconButton(
-                              tooltip: 'Copiar chave',
-                              icon: Icon(
-                                Icons.copy_all_rounded,
-                                size: 18,
-                                color: widget.anonKey.isEmpty
-                                    ? (isDark ? Colors.white24 : Colors.black26)
-                                    : t.colorScheme.primary,
-                              ),
-                              onPressed: widget.anonKey.isEmpty
-                                  ? null
-                                  : () {
-                                Clipboard.setData(ClipboardData(text: widget.anonKey));
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: const Text('Chave copiada'),
-                                    behavior: SnackBarBehavior.floating,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
+                              const SizedBox(width: 4),
+                              _IconBtn(
+                                icon: Icons.link_rounded,
+                                tooltip: 'Copiar URL',
+                                onPressed: () {
+                                  Clipboard.setData(ClipboardData(text: _projectUrl));
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: const Text('URL copiada!'),
+                                      backgroundColor: SupabaseColors.success,
+                                      behavior: SnackBarBehavior.floating,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      margin: const EdgeInsets.all(16),
                                     ),
-                                    margin: const EdgeInsets.all(16),
-                                  ),
-                                );
-                              },
-                            ),
+                                  );
+                                },
+                              ),
+                            ],
                           ),
                         ],
                       ),
+                    ),
+
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _IconBtn(
+                          icon: widget.isFavorite ? Icons.star_rounded : Icons.star_border_rounded,
+                          color: widget.isFavorite ? SupabaseColors.favorite : SupabaseColors.textMuted,
+                          tooltip: widget.isFavorite ? 'Remover favorito' : 'Favoritar',
+                          onPressed: widget.onToggleFavorite,
+                        ),
+                        PopupMenuButton<String>(
+                          icon: const Icon(
+                            Icons.more_vert_rounded,
+                            color: SupabaseColors.textMuted,
+                            size: 18,
+                          ),
+                          color: SupabaseColors.surface300,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            side: const BorderSide(color: SupabaseColors.border),
+                          ),
+                          itemBuilder: (context) => [
+                            _buildMenuItem('settings', Icons.settings_rounded, 'Configurações'),
+                            _buildMenuItem('duplicate', Icons.copy_rounded, 'Duplicar'),
+                          ],
+                          onSelected: (value) {
+                            if (value == 'settings') _openSettings();
+                            if (value == 'duplicate') widget.onDuplicate();
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+
+                const Spacer(),
+
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'ANON KEY',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 1,
+                        color: SupabaseColors.textMuted,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: SupabaseColors.bg300,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: SupabaseColors.border),
+                            ),
+                            child: Text(
+                              widget.anonKey.isEmpty
+                                  ? '—'
+                                  : _keyVisible
+                                  ? widget.anonKey
+                                  : '••••••••••••••••••••••••',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontFamily: 'monospace',
+                                color: SupabaseColors.textSecondary,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        _IconBtn(
+                          icon: _keyVisible ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                          tooltip: _keyVisible ? 'Ocultar' : 'Mostrar',
+                          onPressed: widget.anonKey.isEmpty
+                              ? null
+                              : () => setState(() => _keyVisible = !_keyVisible),
+                        ),
+                        _IconBtn(
+                          icon: Icons.copy_rounded,
+                          tooltip: 'Copiar',
+                          onPressed: widget.anonKey.isEmpty
+                              ? null
+                              : () {
+                            Clipboard.setData(ClipboardData(text: widget.anonKey));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: const Text('Chave copiada!'),
+                                backgroundColor: SupabaseColors.success,
+                                behavior: SnackBarBehavior.floating,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                margin: const EdgeInsets.all(16),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusIndicator(bool isRunning) {
+    if (_statusLoading) {
+      return const SizedBox(
+        width: 12,
+        height: 12,
+        child: CircularProgressIndicator(
+          strokeWidth: 1.5,
+          color: SupabaseColors.textMuted,
+        ),
+      );
+    }
+
+    return Tooltip(
+      message: isRunning ? 'Running' : 'Stopped',
+      child: Container(
+        width: 8,
+        height: 8,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: isRunning ? SupabaseColors.success : SupabaseColors.error,
+          boxShadow: [
+            BoxShadow(
+              color: (isRunning ? SupabaseColors.success : SupabaseColors.error).withOpacity(0.5),
+              blurRadius: 6,
+              spreadRadius: 1,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoadingCard() {
+    return Container(
+      decoration: BoxDecoration(
+        color: SupabaseColors.surface100,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: SupabaseColors.border),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                _buildShimmer(40, 40, borderRadius: 8),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildShimmer(120, 16),
+                      const SizedBox(height: 6),
+                      _buildShimmer(80, 12),
                     ],
+                  ),
+                ),
+              ],
+            ),
+            const Spacer(),
+            _buildShimmer(60, 10),
+            const SizedBox(height: 8),
+            _buildShimmer(double.infinity, 32),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildShimmer(double width, double height, {double borderRadius = 4}) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.3, end: 0.6),
+      duration: const Duration(milliseconds: 800),
+      builder: (_, value, __) {
+        return Container(
+          width: width,
+          height: height,
+          decoration: BoxDecoration(
+            color: SupabaseColors.surface300.withOpacity(value),
+            borderRadius: BorderRadius.circular(borderRadius),
+          ),
+        );
+      },
+    );
+  }
+
+  PopupMenuItem<String> _buildMenuItem(String value, IconData icon, String label) {
+    return PopupMenuItem(
+      value: value,
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: SupabaseColors.textSecondary),
+          const SizedBox(width: 12),
+          Text(label, style: const TextStyle(color: SupabaseColors.textPrimary, fontSize: 13)),
+        ],
+      ),
+    );
+  }
+}
+
+
+class _IconBtn extends StatelessWidget {
+  const _IconBtn({
+    required this.icon,
+    required this.tooltip,
+    this.onPressed,
+    this.color,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onPressed;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(6),
+          child: Padding(
+            padding: const EdgeInsets.all(6),
+            child: Icon(
+              icon,
+              size: 16,
+              color: onPressed == null
+                  ? SupabaseColors.textMuted.withOpacity(0.5)
+                  : (color ?? SupabaseColors.textMuted),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SupabaseButton extends StatefulWidget {
+  const _SupabaseButton({
+    required this.label,
+    required this.icon,
+    this.onPressed,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  @override
+  State<_SupabaseButton> createState() => _SupabaseButtonState();
+}
+
+class _SupabaseButtonState extends State<_SupabaseButton> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        decoration: BoxDecoration(
+          color: widget.onPressed == null
+              ? SupabaseColors.surface200
+              : _hover
+              ? SupabaseColors.brandLight
+              : SupabaseColors.brand,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onPressed,
+            borderRadius: BorderRadius.circular(6),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    widget.icon,
+                    size: 16,
+                    color: widget.onPressed == null
+                        ? SupabaseColors.textMuted
+                        : SupabaseColors.bg100,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    widget.label,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: widget.onPressed == null
+                          ? SupabaseColors.textMuted
+                          : SupabaseColors.bg100,
+                    ),
                   ),
                 ],
               ),

@@ -1,21 +1,19 @@
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:seletor_de_projetos/supabase_colors.dart';
 
 class CreateUserDialog extends StatefulWidget {
   final VoidCallback onUserCreated;
 
-  const CreateUserDialog({
-    super.key,
-    required this.onUserCreated,
-  });
+  const CreateUserDialog({super.key, required this.onUserCreated});
 
   @override
   State<CreateUserDialog> createState() => _CreateUserDialogState();
 }
 
-class _CreateUserDialogState extends State<CreateUserDialog> with SingleTickerProviderStateMixin {
+class _CreateUserDialogState extends State<CreateUserDialog>
+    with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _usernameController = TextEditingController();
   final _displayNameController = TextEditingController();
@@ -33,12 +31,12 @@ class _CreateUserDialogState extends State<CreateUserDialog> with SingleTickerPr
   void initState() {
     super.initState();
     _animController = AnimationController(
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 250),
       vsync: this,
     );
     _scaleAnimation = CurvedAnimation(
       parent: _animController,
-      curve: Curves.easeOutBack,
+      curve: Curves.easeOut,
     );
     _animController.forward();
   }
@@ -76,68 +74,43 @@ class _CreateUserDialogState extends State<CreateUserDialog> with SingleTickerPr
         widget.onUserCreated();
       } else {
         final error = jsonDecode(response.body)['error'] ?? 'Erro desconhecido';
-        _showError(error);
+        _showSnack('Erro: $error', SupabaseColors.error);
       }
     } catch (e) {
-      _showError('Erro ao criar usuário: $e');
+      _showSnack('Erro ao criar usuário: $e', SupabaseColors.error);
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  void _showError(String message) {
-    _showSnackBar(message, Colors.red);
-  }
-
-  void _showSnackBar(String message, Color color) {
+  void _showSnack(String message, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
+        content: Text(message, style: const TextStyle(color: Colors.white)),
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         margin: const EdgeInsets.all(16),
-        duration: const Duration(seconds: 3),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
     return ScaleTransition(
       scale: _scaleAnimation,
       child: Dialog(
         backgroundColor: Colors.transparent,
         child: Container(
-          constraints: const BoxConstraints(maxWidth: 600),
+          constraints: const BoxConstraints(maxWidth: 480),
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: isDark
-                  ? [const Color(0xFF1A1F2E), const Color(0xFF12161F)]
-                  : [Colors.white, Colors.grey[50]!],
-            ),
-            borderRadius: BorderRadius.circular(32),
-            border: Border.all(
-              color: isDark ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.08),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: isDark ? Colors.black.withOpacity(0.5) : Colors.black.withOpacity(0.15),
-                blurRadius: 40,
-                offset: const Offset(0, 20),
-              ),
-            ],
+            color: SupabaseColors.bg200,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: SupabaseColors.border),
           ),
           child: SingleChildScrollView(
             child: Padding(
-              padding: const EdgeInsets.all(32),
+              padding: const EdgeInsets.all(24),
               child: Form(
                 key: _formKey,
                 child: Column(
@@ -147,251 +120,181 @@ class _CreateUserDialogState extends State<CreateUserDialog> with SingleTickerPr
                     Row(
                       children: [
                         Container(
-                          padding: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [t.colorScheme.primary, t.colorScheme.secondary],
-                            ),
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [
-                              BoxShadow(
-                                color: t.colorScheme.primary.withOpacity(0.3),
-                                blurRadius: 16,
-                                offset: const Offset(0, 8),
-                              ),
-                            ],
+                            color: SupabaseColors.brand.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(8),
                           ),
                           child: const Icon(
                             Icons.person_add_rounded,
-                            color: Colors.white,
-                            size: 28,
+                            color: SupabaseColors.brand,
+                            size: 20,
                           ),
                         ),
-                        const SizedBox(width: 16),
-                        Expanded(
+                        const SizedBox(width: 12),
+                        const Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
                                 'Novo Usuário',
                                 style: TextStyle(
-                                  fontSize: 26,
-                                  fontWeight: FontWeight.bold,
-                                  color: isDark ? Colors.white : Colors.black87,
-                                  letterSpacing: -0.5,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: SupabaseColors.textPrimary,
                                 ),
                               ),
-                              const SizedBox(height: 4),
+                              SizedBox(height: 2),
                               Text(
                                 'Preencha os dados do usuário',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: isDark ? Colors.white54 : Colors.black54,
-                                ),
+                                style: TextStyle(fontSize: 12, color: SupabaseColors.textMuted),
                               ),
                             ],
                           ),
                         ),
-                        IconButton(
-                          onPressed: () => Navigator.of(context).pop(),
-                          icon: Icon(
-                            Icons.close_rounded,
-                            color: isDark ? Colors.white70 : Colors.black54,
-                          ),
-                        ),
+                        _CloseBtn(onPressed: () => Navigator.of(context).pop()),
                       ],
                     ),
-                    const SizedBox(height: 32),
 
-                    // Username
-                    _buildTextField(
+                    const SizedBox(height: 24),
+                    const Divider(color: SupabaseColors.border, height: 1),
+                    const SizedBox(height: 20),
+
+                    _buildField(
                       controller: _usernameController,
                       label: 'Nome de usuário',
                       hint: 'Ex: joao_silva',
                       icon: Icons.account_circle_rounded,
-                      helperText: 'Mínimo 3 caracteres',
                       validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'Nome de usuário é obrigatório';
-                        }
-                        if (value.trim().length < 3) {
-                          return 'Mínimo 3 caracteres';
-                        }
+                        if (value == null || value.trim().isEmpty) return 'Obrigatório';
+                        if (value.trim().length < 3) return 'Mínimo 3 caracteres';
                         return null;
                       },
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 16),
 
-                    // Display Name
-                    _buildTextField(
+                    _buildField(
                       controller: _displayNameController,
                       label: 'Nome de exibição',
                       hint: 'Ex: João Silva',
                       icon: Icons.badge_rounded,
-                      helperText: 'Nome que aparecerá na interface',
                       validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'Nome de exibição é obrigatório';
-                        }
+                        if (value == null || value.trim().isEmpty) return 'Obrigatório';
                         return null;
                       },
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 16),
 
-                    // Email
-                    _buildTextField(
+                    _buildField(
                       controller: _emailController,
                       label: 'Email',
                       hint: 'usuario@exemplo.com',
                       icon: Icons.email_rounded,
-                      helperText: 'Deve ser um email válido',
                       keyboardType: TextInputType.emailAddress,
                       validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'Email é obrigatório';
-                        }
+                        if (value == null || value.trim().isEmpty) return 'Obrigatório';
                         if (!RegExp(r'^[\w\.\+\-]+@[\w\.\-]+\.\w+$').hasMatch(value)) {
                           return 'Email inválido';
                         }
                         return null;
                       },
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 16),
 
-                    // Password
-                    _buildTextField(
+                    _buildField(
                       controller: _passwordController,
                       label: 'Senha',
                       hint: '••••••••',
                       icon: Icons.lock_rounded,
-                      helperText: 'Mínimo 8 caracteres',
                       obscureText: !_showPassword,
                       suffixIcon: IconButton(
                         onPressed: () => setState(() => _showPassword = !_showPassword),
                         icon: Icon(
                           _showPassword ? Icons.visibility_off_rounded : Icons.visibility_rounded,
-                          size: 20,
+                          size: 18,
+                          color: SupabaseColors.textMuted,
                         ),
                       ),
                       validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Senha é obrigatória';
-                        }
-                        if (value.length < 8) {
-                          return 'Mínimo 8 caracteres';
-                        }
+                        if (value == null || value.isEmpty) return 'Obrigatório';
+                        if (value.length < 8) return 'Mínimo 8 caracteres';
                         return null;
                       },
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 16),
 
-                    // Confirm Password
-                    _buildTextField(
+                    _buildField(
                       controller: _confirmPasswordController,
                       label: 'Confirmar senha',
                       hint: '••••••••',
                       icon: Icons.lock_outline_rounded,
-                      helperText: 'Repita a senha acima',
                       obscureText: !_showConfirmPassword,
                       suffixIcon: IconButton(
                         onPressed: () => setState(() => _showConfirmPassword = !_showConfirmPassword),
                         icon: Icon(
                           _showConfirmPassword ? Icons.visibility_off_rounded : Icons.visibility_rounded,
-                          size: 20,
+                          size: 18,
+                          color: SupabaseColors.textMuted,
                         ),
                       ),
                       validator: (value) {
-                        if (value != _passwordController.text) {
-                          return 'As senhas não coincidem';
-                        }
+                        if (value != _passwordController.text) return 'Senhas não coincidem';
                         return null;
                       },
                     ),
 
-                    const SizedBox(height: 32),
+                    const SizedBox(height: 24),
+                    const Divider(color: SupabaseColors.border, height: 1),
+                    const SizedBox(height: 16),
 
-                    // Create Button
-                    Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [t.colorScheme.primary, t.colorScheme.secondary],
-                        ),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: t.colorScheme.primary.withOpacity(0.4),
-                            blurRadius: 16,
-                            offset: const Offset(0, 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
+                          style: TextButton.styleFrom(
+                            foregroundColor: SupabaseColors.textSecondary,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                           ),
-                        ],
-                      ),
-                      child: ElevatedButton(
-                        onPressed: _isLoading ? null : _createUser,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.transparent,
-                          shadowColor: Colors.transparent,
-                          padding: const EdgeInsets.symmetric(vertical: 18),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
+                          child: const Text('Cancelar', style: TextStyle(fontSize: 13)),
                         ),
-                        child: _isLoading
-                            ? const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        const SizedBox(width: 8),
+                        _isLoading
+                            ? Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: SupabaseColors.brand.withOpacity(0.5),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
                               ),
-                            ),
-                            SizedBox(width: 12),
-                            Text(
-                              'Criando usuário...',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
+                              SizedBox(width: 10),
+                              Text(
+                                'Criando...',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.white,
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         )
-                            : const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.check_circle_rounded, size: 20),
-                            SizedBox(width: 8),
-                            Text(
-                              'Criar Usuário',
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.black87,
-                              ),
-                            ),
-                          ],
+                            : _PrimaryButton(
+                          label: 'Criar Usuário',
+                          icon: Icons.check_rounded,
+                          onPressed: _createUser,
                         ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    // Cancel Button
-                    TextButton(
-                      onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                      ),
-                      child: Text(
-                        'Cancelar',
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: isDark ? Colors.white60 : Colors.black54,
-                        ),
-                      ),
+                      ],
                     ),
                   ],
                 ),
@@ -403,97 +306,139 @@ class _CreateUserDialogState extends State<CreateUserDialog> with SingleTickerPr
     );
   }
 
-  Widget _buildTextField({
+  Widget _buildField({
     required TextEditingController controller,
     required String label,
     required String hint,
     required IconData icon,
-    required String helperText,
     required String? Function(String?) validator,
     bool obscureText = false,
     Widget? suffixIcon,
     TextInputType? keyboardType,
   }) {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           label,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.5,
-            color: isDark ? Colors.white70 : Colors.black87,
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+            color: SupabaseColors.textSecondary,
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
         TextFormField(
           controller: controller,
           obscureText: obscureText,
           keyboardType: keyboardType,
-          style: TextStyle(
-            fontSize: 15,
+          style: const TextStyle(
+            fontSize: 13,
             fontWeight: FontWeight.w500,
-            color: isDark ? Colors.white : Colors.black87,
+            color: SupabaseColors.textPrimary,
           ),
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: TextStyle(
-              color: isDark ? Colors.white24 : Colors.black26,
-            ),
-            prefixIcon: Icon(
-              icon,
-              color: isDark ? Colors.white54 : Colors.black54,
-              size: 20,
-            ),
+            hintStyle: const TextStyle(color: SupabaseColors.textMuted, fontSize: 13),
+            prefixIcon: Icon(icon, color: SupabaseColors.textMuted, size: 18),
             suffixIcon: suffixIcon,
-            helperText: helperText,
-            helperStyle: TextStyle(
-              fontSize: 12,
-              color: isDark ? Colors.white38 : Colors.black38,
-            ),
             filled: true,
-            fillColor: isDark ? Colors.white.withOpacity(0.05) : Colors.grey[100],
+            fillColor: SupabaseColors.bg300,
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide.none,
+              borderRadius: BorderRadius.circular(6),
+              borderSide: const BorderSide(color: SupabaseColors.border),
             ),
             enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(
-                color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08),
-                width: 1,
-              ),
+              borderRadius: BorderRadius.circular(6),
+              borderSide: const BorderSide(color: SupabaseColors.border),
             ),
             focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(
-                color: t.colorScheme.primary,
-                width: 2,
-              ),
+              borderRadius: BorderRadius.circular(6),
+              borderSide: const BorderSide(color: SupabaseColors.brand, width: 2),
             ),
             errorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(
-                color: t.colorScheme.error,
-                width: 1,
-              ),
+              borderRadius: BorderRadius.circular(6),
+              borderSide: const BorderSide(color: SupabaseColors.error),
             ),
-            focusedErrorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(
-                color: t.colorScheme.error,
-                width: 2,
-              ),
-            ),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           ),
           validator: validator,
         ),
       ],
+    );
+  }
+}
+
+class _CloseBtn extends StatelessWidget {
+  const _CloseBtn({required this.onPressed});
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(4),
+        child: const Padding(
+          padding: EdgeInsets.all(4),
+          child: Icon(Icons.close_rounded, size: 18, color: SupabaseColors.textMuted),
+        ),
+      ),
+    );
+  }
+}
+
+class _PrimaryButton extends StatefulWidget {
+  const _PrimaryButton({required this.label, required this.icon, required this.onPressed});
+  final String label;
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  @override
+  State<_PrimaryButton> createState() => _PrimaryButtonState();
+}
+
+class _PrimaryButtonState extends State<_PrimaryButton> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        decoration: BoxDecoration(
+          color: _hover ? SupabaseColors.brandLight : SupabaseColors.brand,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onPressed,
+            borderRadius: BorderRadius.circular(6),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(widget.icon, size: 16, color: SupabaseColors.bg100),
+                  const SizedBox(width: 8),
+                  Text(
+                    widget.label,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: SupabaseColors.bg100,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

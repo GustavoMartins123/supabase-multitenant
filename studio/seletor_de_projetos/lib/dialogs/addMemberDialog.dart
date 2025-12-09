@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:seletor_de_projetos/models/AllUsers.dart';
+import 'package:seletor_de_projetos/supabase_colors.dart';
 
 class AddMemberDialog extends StatefulWidget {
   final Future<void> Function() loadUsers;
@@ -17,7 +18,8 @@ class AddMemberDialog extends StatefulWidget {
   State<AddMemberDialog> createState() => _AddMemberDialogState();
 }
 
-class _AddMemberDialogState extends State<AddMemberDialog> with SingleTickerProviderStateMixin {
+class _AddMemberDialogState extends State<AddMemberDialog>
+    with SingleTickerProviderStateMixin {
   List<AvailableUserShort> _users = [];
   List<AvailableUserShort> _shown = [];
   AvailableUserShort? _sel;
@@ -34,12 +36,12 @@ class _AddMemberDialogState extends State<AddMemberDialog> with SingleTickerProv
     _searchCtl.addListener(_filter);
 
     _animController = AnimationController(
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 250),
       vsync: this,
     );
     _scaleAnimation = CurvedAnimation(
       parent: _animController,
-      curve: Curves.easeOutBack,
+      curve: Curves.easeOut,
     );
     _animController.forward();
   }
@@ -76,101 +78,65 @@ class _AddMemberDialogState extends State<AddMemberDialog> with SingleTickerProv
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
     return ScaleTransition(
       scale: _scaleAnimation,
       child: Dialog(
         backgroundColor: Colors.transparent,
         child: Container(
-          constraints: const BoxConstraints(maxWidth: 600, maxHeight: 700),
+          constraints: const BoxConstraints(maxWidth: 480, maxHeight: 600),
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: isDark
-                  ? [const Color(0xFF1A1F2E), const Color(0xFF12161F)]
-                  : [Colors.white, Colors.grey[50]!],
-            ),
-            borderRadius: BorderRadius.circular(32),
-            border: Border.all(
-              color: isDark ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.08),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: isDark ? Colors.black.withOpacity(0.5) : Colors.black.withOpacity(0.15),
-                blurRadius: 40,
-                offset: const Offset(0, 20),
-              ),
-            ],
+            color: SupabaseColors.bg200,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: SupabaseColors.border),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                padding: const EdgeInsets.all(32),
-                decoration: BoxDecoration(
-                  border: Border(
-                    bottom: BorderSide(
-                      color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08),
-                    ),
-                  ),
+                padding: const EdgeInsets.all(20),
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: SupabaseColors.border)),
                 ),
                 child: Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [t.colorScheme.primary, t.colorScheme.secondary],
-                        ),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: t.colorScheme.primary.withOpacity(0.3),
-                            blurRadius: 16,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
+                        color: SupabaseColors.brand.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                      child: const Icon(Icons.person_add_alt_1_rounded, color: Colors.white, size: 28),
+                      child: const Icon(
+                        Icons.person_add_alt_1_rounded,
+                        color: SupabaseColors.brand,
+                        size: 20,
+                      ),
                     ),
-                    const SizedBox(width: 16),
-                    Expanded(
+                    const SizedBox(width: 12),
+                    const Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
                             'Adicionar Membro',
                             style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                              color: isDark ? Colors.white : Colors.black87,
-                              letterSpacing: -0.5,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: SupabaseColors.textPrimary,
                             ),
                           ),
-                          const SizedBox(height: 4),
+                          SizedBox(height: 2),
                           Text(
                             'Selecione um usuário da lista',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: isDark ? Colors.white54 : Colors.black54,
-                            ),
+                            style: TextStyle(fontSize: 12, color: SupabaseColors.textMuted),
                           ),
                         ],
                       ),
                     ),
-                    IconButton(
-                      onPressed: () => Navigator.pop(context),
-                      icon: Icon(
-                        Icons.close_rounded,
-                        color: isDark ? Colors.white70 : Colors.black54,
-                      ),
-                    ),
+                    _CloseBtn(onPressed: () => Navigator.pop(context)),
                   ],
                 ),
               ),
+
               Expanded(
                 child: _loading
                     ? _buildLoading()
@@ -178,14 +144,11 @@ class _AddMemberDialogState extends State<AddMemberDialog> with SingleTickerProv
                     ? _buildError()
                     : _buildContent(),
               ),
+
               Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  border: Border(
-                    top: BorderSide(
-                      color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08),
-                    ),
-                  ),
+                padding: const EdgeInsets.all(16),
+                decoration: const BoxDecoration(
+                  border: Border(top: BorderSide(color: SupabaseColors.border)),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
@@ -193,53 +156,22 @@ class _AddMemberDialogState extends State<AddMemberDialog> with SingleTickerProv
                     TextButton(
                       onPressed: () => Navigator.pop(context),
                       style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        foregroundColor: SupabaseColors.textSecondary,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                       ),
-                      child: const Text('Cancelar'),
+                      child: const Text('Cancelar', style: TextStyle(fontSize: 13)),
                     ),
-                    const SizedBox(width: 12),
-                    Container(
-                      decoration: BoxDecoration(
-                        gradient: _sel == null
-                            ? null
-                            : LinearGradient(
-                          colors: [t.colorScheme.primary, t.colorScheme.secondary],
-                        ),
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: _sel == null
-                            ? null
-                            : [
-                          BoxShadow(
-                            color: t.colorScheme.primary.withOpacity(0.4),
-                            blurRadius: 16,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
-                      ),
-                      child: ElevatedButton.icon(
-                        onPressed: _sel == null
-                            ? null
-                            : () async {
-                          await widget.onAdd(_sel!.userId, 'member');
-                          if (context.mounted) Navigator.pop(context);
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _sel == null ? null : Colors.transparent,
-                          shadowColor: Colors.transparent,
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        icon: const Icon(Icons.check_rounded, size: 20),
-                        label: const Text(
-                          'Adicionar',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
+                    const SizedBox(width: 8),
+                    _PrimaryButton(
+                      label: 'Adicionar',
+                      icon: Icons.check_rounded,
+                      enabled: _sel != null,
+                      onPressed: _sel == null
+                          ? null
+                          : () async {
+                        await widget.onAdd(_sel!.userId, 'member');
+                        if (context.mounted) Navigator.pop(context);
+                      },
                     ),
                   ],
                 ),
@@ -252,28 +184,19 @@ class _AddMemberDialogState extends State<AddMemberDialog> with SingleTickerProv
   }
 
   Widget _buildLoading() {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
-    return Center(
+    return const Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           SizedBox(
-            width: 40,
-            height: 40,
-            child: CircularProgressIndicator(
-              strokeWidth: 3,
-              color: t.colorScheme.primary,
-            ),
+            width: 32,
+            height: 32,
+            child: CircularProgressIndicator(strokeWidth: 2, color: SupabaseColors.brand),
           ),
-          const SizedBox(height: 20),
+          SizedBox(height: 16),
           Text(
             'Carregando usuários...',
-            style: TextStyle(
-              color: isDark ? Colors.white70 : Colors.black54,
-              fontSize: 15,
-            ),
+            style: TextStyle(color: SupabaseColors.textMuted, fontSize: 13),
           ),
         ],
       ),
@@ -281,26 +204,24 @@ class _AddMemberDialogState extends State<AddMemberDialog> with SingleTickerProv
   }
 
   Widget _buildError() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(40),
+        padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.1),
-                shape: BoxShape.circle,
+                color: SupabaseColors.error.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(Icons.error_outline_rounded, size: 48, color: Colors.red),
+              child: const Icon(Icons.error_outline_rounded, size: 32, color: SupabaseColors.error),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
             Text(
               _error!,
-              style: const TextStyle(color: Colors.red),
+              style: const TextStyle(color: SupabaseColors.error, fontSize: 13),
               textAlign: TextAlign.center,
             ),
           ],
@@ -310,238 +231,142 @@ class _AddMemberDialogState extends State<AddMemberDialog> with SingleTickerProv
   }
 
   Widget _buildContent() {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
     return Padding(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(16),
       child: Column(
         children: [
           TextFormField(
             controller: _searchCtl,
-            style: TextStyle(
-              fontSize: 15,
-              color: isDark ? Colors.white : Colors.black87,
-            ),
+            style: const TextStyle(fontSize: 13, color: SupabaseColors.textPrimary),
             decoration: InputDecoration(
               hintText: 'Buscar usuário…',
-              hintStyle: TextStyle(
-                color: isDark ? Colors.white24 : Colors.black26,
-              ),
-              prefixIcon: Icon(
-                Icons.search_rounded,
-                color: isDark ? Colors.white54 : Colors.black54,
-              ),
+              hintStyle: const TextStyle(color: SupabaseColors.textMuted, fontSize: 13),
+              prefixIcon: const Icon(Icons.search_rounded, color: SupabaseColors.textMuted, size: 18),
               filled: true,
-              fillColor: isDark ? Colors.white.withOpacity(0.05) : Colors.grey[100],
+              fillColor: SupabaseColors.bg300,
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: BorderSide.none,
+                borderRadius: BorderRadius.circular(6),
+                borderSide: const BorderSide(color: SupabaseColors.border),
               ),
               enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: BorderSide(
-                  color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08),
-                ),
+                borderRadius: BorderRadius.circular(6),
+                borderSide: const BorderSide(color: SupabaseColors.border),
               ),
               focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: BorderSide(
-                  color: t.colorScheme.primary,
-                  width: 2,
-                ),
+                borderRadius: BorderRadius.circular(6),
+                borderSide: const BorderSide(color: SupabaseColors.brand, width: 2),
               ),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
+
           Expanded(
-            child: _shown.isEmpty
-                ? _buildEmptyState()
-                : _UserList(
-              users: _shown,
-              selected: _sel,
-              onSelect: (u) => setState(() => _sel = u),
-            ),
+            child: _shown.isEmpty ? _buildEmptyState() : _buildUserList(),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildEmptyState() {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: isDark ? Colors.white.withOpacity(0.05) : Colors.grey[100],
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              Icons.people_outline_rounded,
-              size: 48,
-              color: isDark ? Colors.white38 : Colors.black38,
-            ),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'Nenhum usuário disponível',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: isDark ? Colors.white70 : Colors.black54,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _UserList extends StatelessWidget {
-  final List<AvailableUserShort> users;
-  final AvailableUserShort? selected;
-  final ValueChanged<AvailableUserShort> onSelect;
-
-  const _UserList({
-    required this.users,
-    required this.selected,
-    required this.onSelect,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
+  Widget _buildUserList() {
     return Container(
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: isDark
-              ? [const Color(0xFF1A1F2E), const Color(0xFF12161F)]
-              : [Colors.white, Colors.grey[50]!],
-        ),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08),
-        ),
+        color: SupabaseColors.surface100,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: SupabaseColors.border),
       ),
       child: Column(
         children: [
           Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(
-                  color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08),
-                ),
-              ),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: SupabaseColors.border)),
             ),
             child: Row(
               children: [
-                Icon(
-                  Icons.people_rounded,
-                  size: 18,
-                  color: isDark ? Colors.white54 : Colors.black54,
-                ),
-                const SizedBox(width: 8),
+                const Icon(Icons.people_rounded, size: 14, color: SupabaseColors.textMuted),
+                const SizedBox(width: 6),
                 Text(
-                  '${users.length} ${users.length == 1 ? 'usuário disponível' : 'usuários disponíveis'}',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: isDark ? Colors.white70 : Colors.black87,
+                  '${_shown.length} ${_shown.length == 1 ? 'usuário disponível' : 'usuários disponíveis'}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: SupabaseColors.textMuted,
                   ),
                 ),
               ],
             ),
           ),
+
           Expanded(
-            child: ListView.separated(
-              padding: const EdgeInsets.all(8),
-              itemCount: users.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 4),
+            child: ListView.builder(
+              padding: const EdgeInsets.all(4),
+              itemCount: _shown.length,
               itemBuilder: (_, i) {
-                final u = users[i];
-                final sel = u == selected;
+                final u = _shown[i];
+                final sel = u == _sel;
 
                 return Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    onTap: () => onSelect(u),
-                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => setState(() => _sel = u),
+                    borderRadius: BorderRadius.circular(6),
                     child: Container(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(10),
+                      margin: const EdgeInsets.only(bottom: 2),
                       decoration: BoxDecoration(
-                        gradient: sel
-                            ? LinearGradient(
-                          colors: [
-                            t.colorScheme.primary.withOpacity(0.15),
-                            t.colorScheme.secondary.withOpacity(0.1),
-                          ],
-                        )
-                            : null,
-                        borderRadius: BorderRadius.circular(12),
+                        color: sel ? SupabaseColors.brand.withOpacity(0.1) : null,
+                        borderRadius: BorderRadius.circular(6),
                         border: Border.all(
-                          color: sel
-                              ? t.colorScheme.primary.withOpacity(0.3)
-                              : Colors.transparent,
+                          color: sel ? SupabaseColors.brand.withOpacity(0.3) : Colors.transparent,
                         ),
                       ),
                       child: Row(
                         children: [
                           Container(
-                            width: 40,
-                            height: 40,
+                            width: 36,
+                            height: 36,
                             decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: sel
-                                    ? [t.colorScheme.primary, t.colorScheme.secondary]
-                                    : [Colors.grey.shade400, Colors.grey.shade600],
-                              ),
-                              borderRadius: BorderRadius.circular(12),
-                              boxShadow: sel
-                                  ? [
-                                BoxShadow(
-                                  color: t.colorScheme.primary.withOpacity(0.3),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 4),
-                                ),
-                              ]
-                                  : null,
+                              color: sel
+                                  ? SupabaseColors.brand.withOpacity(0.2)
+                                  : SupabaseColors.surface200,
+                              borderRadius: BorderRadius.circular(6),
                             ),
                             child: Center(
                               child: Text(
                                 u.displayName[0].toUpperCase(),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
+                                style: TextStyle(
+                                  color: sel ? SupabaseColors.brand : SupabaseColors.textSecondary,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14,
                                 ),
                               ),
                             ),
                           ),
-                          const SizedBox(width: 12),
+                          const SizedBox(width: 10),
+
                           Expanded(
                             child: Text(
                               u.displayName,
                               style: TextStyle(
                                 fontWeight: sel ? FontWeight.w600 : FontWeight.w500,
-                                color: isDark ? Colors.white : Colors.black87,
+                                fontSize: 13,
+                                color: SupabaseColors.textPrimary,
                               ),
                             ),
                           ),
-                          Radio<AvailableUserShort>(
-                            value: u,
-                            groupValue: selected,
-                            onChanged: (_) => onSelect(u),
-                            activeColor: t.colorScheme.primary,
+
+                          SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: Radio<AvailableUserShort>(
+                              value: u,
+                              groupValue: _sel,
+                              onChanged: (_) => setState(() => _sel = u),
+                              activeColor: SupabaseColors.brand,
+                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
                           ),
                         ],
                       ),
@@ -552,6 +377,125 @@ class _UserList extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: SupabaseColors.surface200,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.people_outline_rounded,
+              size: 32,
+              color: SupabaseColors.textMuted,
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Nenhum usuário disponível',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: SupabaseColors.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CloseBtn extends StatelessWidget {
+  const _CloseBtn({required this.onPressed});
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(4),
+        child: const Padding(
+          padding: EdgeInsets.all(4),
+          child: Icon(Icons.close_rounded, size: 18, color: SupabaseColors.textMuted),
+        ),
+      ),
+    );
+  }
+}
+
+class _PrimaryButton extends StatefulWidget {
+  const _PrimaryButton({
+    required this.label,
+    required this.icon,
+    required this.enabled,
+    required this.onPressed,
+  });
+  final String label;
+  final IconData icon;
+  final bool enabled;
+  final VoidCallback? onPressed;
+
+  @override
+  State<_PrimaryButton> createState() => _PrimaryButtonState();
+}
+
+class _PrimaryButtonState extends State<_PrimaryButton> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.enabled;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        decoration: BoxDecoration(
+          color: enabled
+              ? (_hover ? SupabaseColors.brandLight : SupabaseColors.brand)
+              : SupabaseColors.surface300,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onPressed,
+            borderRadius: BorderRadius.circular(6),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    widget.icon,
+                    size: 16,
+                    color: enabled ? SupabaseColors.bg100 : SupabaseColors.textMuted,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    widget.label,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: enabled ? SupabaseColors.bg100 : SupabaseColors.textMuted,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

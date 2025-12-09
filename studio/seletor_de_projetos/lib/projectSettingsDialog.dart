@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:seletor_de_projetos/services/projectService.dart';
 import 'package:seletor_de_projetos/session.dart';
 import 'package:jwt_decoder/jwt_decoder.dart';
+import 'package:seletor_de_projetos/supabase_colors.dart';
 import 'dialogs/addMemberDialog.dart';
 import 'dialogs/transferProjectDialog.dart';
 import 'models/AllUsers.dart';
@@ -25,7 +26,8 @@ class ProjectSettingsDialog extends StatefulWidget {
   State<ProjectSettingsDialog> createState() => _ProjectSettingsDialogState();
 }
 
-class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> with SingleTickerProviderStateMixin {
+class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
+    with SingleTickerProviderStateMixin {
   List<ProjectMember> _currentMembers = [];
   List<AvailableUserShort> _availableUsers = [];
   bool _loadingMembers = true;
@@ -39,14 +41,14 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> with Sing
   late bool _busy;
   late AnimationController _animController;
   late Animation<double> _fadeAnimation;
+  String _projectUrl = '';
 
   @override
   void initState() {
     super.initState();
 
-    // Inicializa animações primeiro
     _animController = AnimationController(
-      duration: const Duration(milliseconds: 400),
+      duration: const Duration(milliseconds: 300),
       vsync: this,
     );
     _fadeAnimation = CurvedAnimation(
@@ -54,15 +56,13 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> with Sing
       curve: Curves.easeOut,
     );
 
-    // Inicializa busy
     _busy = Session().isBusy(widget.ref);
     Session().busyListenable.addListener(_onBusyChanged);
 
-    // Carrega dados (async)
     _loadCurrentMembers();
     _loadStatus();
+    _loadProjectUrl();
 
-    // Inicia animação
     _animController.forward();
   }
 
@@ -78,16 +78,12 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> with Sing
     final b = Session().isBusy(widget.ref);
     if (b != _busy) {
       setState(() => _busy = b);
-      if (!b) {
-        _loadStatus();
-      }
+      if (!b) _loadStatus();
     }
   }
 
   void _safeSetState(VoidCallback fn) {
-    if (mounted) {
-      setState(fn);
-    }
+    if (mounted) setState(fn);
   }
 
   Future<void> _loadCurrentMembers() async {
@@ -104,14 +100,12 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> with Sing
       if (response.statusCode == 200) {
         final List<dynamic> data = jsonDecode(response.body);
         _safeSetState(() {
-          _currentMembers = data
-              .map((item) => ProjectMember.fromJson(item))
-              .toList();
+          _currentMembers = data.map((item) => ProjectMember.fromJson(item)).toList();
           final session = Session();
           final me = _currentMembers.firstWhere(
-                  (m) => m.user_id == session.myId,
-              orElse: () => ProjectMember(user_id: '', role: 'member'));
-
+                (m) => m.user_id == session.myId,
+            orElse: () => ProjectMember(user_id: '', role: 'member'),
+          );
           _myProjectRole = me.role;
           _loadingMembers = false;
         });
@@ -140,9 +134,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> with Sing
       if (response.statusCode == 200) {
         final List<dynamic> data = jsonDecode(response.body);
         _safeSetState(() {
-          _availableUsers = data
-              .map((item) => AvailableUserShort.fromJson(item))
-              .toList();
+          _availableUsers = data.map((item) => AvailableUserShort.fromJson(item)).toList();
           _loadingAvailable = false;
         });
       } else {
@@ -150,7 +142,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> with Sing
       }
     } catch (e) {
       _safeSetState(() {
-        _error = 'Erro ao carregar usuários disponíveis: $e';
+        // _error = 'Erro ao carregar usuários disponíveis: $e';
         _loadingAvailable = false;
       });
     }
@@ -163,21 +155,11 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> with Sing
       final response = await http.post(
         Uri.parse('/api/projects/${widget.ref}/members'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'user_id': userId,
-          'role': role,
-        }),
+        body: jsonEncode({'user_id': userId, 'role': role}),
       );
 
       if (response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Membro adicionado com sucesso!'),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            margin: const EdgeInsets.all(16),
-          ),
-        );
+        _showSnack('Membro adicionado com sucesso!', SupabaseColors.success);
         await _loadCurrentMembers();
         _safeSetState(() {
           _availableUsers.removeWhere((user) => user.userId == userId);
@@ -186,15 +168,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> with Sing
         throw Exception('Erro ${response.statusCode}: ${response.body}');
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erro ao adicionar membro: $e'),
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: Colors.red,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          margin: const EdgeInsets.all(16),
-        ),
-      );
+      _showSnack('Erro ao adicionar membro: $e', SupabaseColors.error);
     } finally {
       _safeSetState(() => _addingMember = false);
     }
@@ -207,29 +181,26 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> with Sing
       );
 
       if (response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Membro removido com sucesso!'),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            margin: const EdgeInsets.all(16),
-          ),
-        );
+        _showSnack('Membro removido com sucesso!', SupabaseColors.success);
         await _loadCurrentMembers();
       } else {
         throw Exception('Erro ${response.statusCode}: ${response.body}');
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erro ao remover membro: $e'),
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: Colors.red,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          margin: const EdgeInsets.all(16),
-        ),
-      );
+      _showSnack('Erro ao remover membro: $e', SupabaseColors.error);
     }
+  }
+
+  void _showSnack(String msg, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg, style: const TextStyle(color: Colors.white)),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        margin: const EdgeInsets.all(16),
+      ),
+    );
   }
 
   void _openAddMemberDialog() {
@@ -272,250 +243,21 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> with Sing
     }
   }
 
-  Widget _buildStatusCard() {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
-    if (_statusLoading) {
-      return Container(
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: isDark
-                ? [const Color(0xFF1A1F2E), const Color(0xFF12161F)]
-                : [Colors.white, Colors.grey[50]!],
-          ),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08),
-          ),
-        ),
-        child: const Center(
-          child: SizedBox(
-            width: 24,
-            height: 24,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
-        ),
-      );
+  Future<void> _loadProjectUrl() async {
+    try {
+      final resp = await http.get(Uri.parse('/api/config'));
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body);
+        final serverDomain = data['server_domain'] ?? '';
+        _safeSetState(() {
+          _projectUrl = serverDomain.isNotEmpty
+              ? '$serverDomain/${widget.ref}'
+              : widget.ref;
+        });
+      }
+    } catch (_) {
+      _safeSetState(() => _projectUrl = widget.ref);
     }
-
-    if (_statusError != null) {
-      return Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Colors.red.shade50, Colors.red.shade100],
-          ),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.red.shade200),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.error_outline, color: Colors.red.shade700),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                _statusError!,
-                style: TextStyle(color: Colors.red.shade900),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    if (_status == null) {
-      return const SizedBox.shrink();
-    }
-
-    final st = _status!;
-    final isRunning = st.status == 'running';
-    final busy = Session().isBusy(widget.ref);
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: isDark
-              ? [const Color(0xFF1A1F2E), const Color(0xFF12161F)]
-              : [Colors.white, Colors.grey[50]!],
-        ),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isRunning
-              ? Colors.green.withOpacity(0.3)
-              : Colors.orange.withOpacity(0.3),
-          width: 1.5,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: isRunning
-                      ? Colors.green.withOpacity(0.15)
-                      : Colors.orange.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  isRunning ? Icons.check_circle_rounded : Icons.warning_rounded,
-                  color: isRunning ? Colors.green : Colors.orange,
-                  size: 24,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Status do Projeto',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 1.2,
-                        color: isDark ? Colors.white38 : Colors.black38,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      st.status.toUpperCase(),
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: isRunning ? Colors.green : Colors.orange,
-                        letterSpacing: -0.5,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? Colors.white.withOpacity(0.05)
-                      : Colors.black.withOpacity(0.03),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  '${st.running}/${st.total}',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white70 : Colors.black87,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          if (_myProjectRole == 'admin') ...[
-            const SizedBox(height: 16),
-            Divider(color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08)),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildActionButton(
-                    icon: Icons.play_arrow_rounded,
-                    label: 'Start',
-                    color: Colors.green,
-                    onPressed: busy ? null : () => _doAction('start'),
-                    busy: busy,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildActionButton(
-                    icon: Icons.stop_rounded,
-                    label: 'Stop',
-                    color: Colors.red,
-                    onPressed: busy ? null : () => _doAction('stop'),
-                    busy: busy,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildActionButton(
-                    icon: Icons.restart_alt_rounded,
-                    label: 'Restart',
-                    color: Colors.blue,
-                    onPressed: busy ? null : () => _doAction('restart'),
-                    busy: busy,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActionButton({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback? onPressed,
-    bool busy = false,
-  }) {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(
-            color: onPressed == null
-                ? (isDark ? Colors.white.withOpacity(0.03) : Colors.grey[200])
-                : color.withOpacity(0.15),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: onPressed == null
-                  ? (isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.08))
-                  : color.withOpacity(0.3),
-            ),
-          ),
-          child: Column(
-            children: [
-              if (busy)
-                SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(color),
-                  ),
-                )
-              else
-                Icon(icon, color: onPressed == null ? Colors.grey : color, size: 20),
-              const SizedBox(height: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: onPressed == null ? Colors.grey : color,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   Future<void> _doAction(String action) async {
@@ -530,34 +272,14 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> with Sing
       if (!mounted) return;
 
       if (resp.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Ação $action executada'),
-          backgroundColor: Colors.green,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          margin: const EdgeInsets.all(16),
-        ));
+        _showSnack('Ação $action executada', SupabaseColors.success);
         await _loadStatus();
       } else {
         final err = jsonDecode(resp.body)['detail'] ?? resp.body;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Falha: $err'),
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          margin: const EdgeInsets.all(16),
-        ));
+        _showSnack('Falha: $err', SupabaseColors.error);
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Erro: $e'),
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          margin: const EdgeInsets.all(16),
-        ));
-      }
+      if (mounted) _showSnack('Erro: $e', SupabaseColors.error);
     } finally {
       tracker.setBusy(widget.ref, false);
     }
@@ -565,63 +287,15 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> with Sing
 
   Future<void> _deleteProject() async {
     bool sucesso = await ProjectService.confirmAndDeleteProject(context, widget.ref);
-
-    if (sucesso) {
-      Navigator.of(context).pop(widget.ref);
-    }
+    if (sucesso) Navigator.of(context).pop(widget.ref);
   }
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
     final session = Session();
 
-    // Aguarda inicialização antes de mostrar conteúdo
     if (_myProjectRole == null) {
-      return Dialog(
-        backgroundColor: Colors.transparent,
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 800),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: isDark
-                  ? [const Color(0xFF1A1F2E), const Color(0xFF12161F)]
-                  : [Colors.white, Colors.grey[50]!],
-            ),
-            borderRadius: BorderRadius.circular(32),
-            border: Border.all(
-              color: isDark ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.08),
-            ),
-          ),
-          padding: const EdgeInsets.all(80),
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(
-                  width: 40,
-                  height: 40,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 3,
-                    color: t.colorScheme.primary,
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Text(
-                  'Carregando configurações...',
-                  style: TextStyle(
-                    color: isDark ? Colors.white70 : Colors.black54,
-                    fontSize: 15,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
+      return _buildLoadingDialog();
     }
 
     return Dialog(
@@ -630,119 +304,91 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> with Sing
         opacity: _fadeAnimation,
         child: Container(
           constraints: BoxConstraints(
-            maxWidth: 800,
+            maxWidth: 720,
             maxHeight: MediaQuery.of(context).size.height * 0.9,
           ),
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: isDark
-                  ? [const Color(0xFF1A1F2E), const Color(0xFF12161F)]
-                  : [Colors.white, Colors.grey[50]!],
-            ),
-            borderRadius: BorderRadius.circular(32),
-            border: Border.all(
-              color: isDark ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.08),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: isDark ? Colors.black.withOpacity(0.5) : Colors.black.withOpacity(0.15),
-                blurRadius: 40,
-                offset: const Offset(0, 20),
-              ),
-            ],
+            color: SupabaseColors.bg200,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: SupabaseColors.border),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                padding: const EdgeInsets.all(32),
-                decoration: BoxDecoration(
+                padding: const EdgeInsets.all(20),
+                decoration: const BoxDecoration(
                   border: Border(
-                    bottom: BorderSide(
-                      color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08),
-                    ),
+                    bottom: BorderSide(color: SupabaseColors.border),
                   ),
                 ),
                 child: Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [t.colorScheme.primary, t.colorScheme.secondary],
-                        ),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: t.colorScheme.primary.withOpacity(0.3),
-                            blurRadius: 16,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
+                        color: SupabaseColors.brand.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                      child: const Icon(Icons.settings_rounded, color: Colors.white, size: 28),
+                      child: const Icon(
+                        Icons.settings_rounded,
+                        color: SupabaseColors.brand,
+                        size: 20,
+                      ),
                     ),
-                    const SizedBox(width: 16),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
+                          const Text(
                             'Configurações',
                             style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 1.2,
-                              color: isDark ? Colors.white38 : Colors.black38,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              letterSpacing: 0.5,
+                              color: SupabaseColors.textMuted,
                             ),
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 2),
                           Text(
                             widget.ref,
-                            style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                              color: isDark ? Colors.white : Colors.black87,
-                              letterSpacing: -0.5,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: SupabaseColors.textPrimary,
                             ),
                           ),
                         ],
                       ),
                     ),
-                    IconButton(
-                      onPressed: () => Navigator.pop(context),
-                      icon: Icon(
-                        Icons.close_rounded,
-                        color: isDark ? Colors.white70 : Colors.black54,
-                      ),
-                    ),
+                    _CloseButton(onPressed: () => Navigator.pop(context)),
                   ],
                 ),
               ),
+
               Expanded(
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(32),
+                  padding: const EdgeInsets.all(20),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildStatusCard(),
-                      const SizedBox(height: 24),
-                      _buildAnonKeyCard(),
-                      const SizedBox(height: 24),
+                      _buildStatusSection(),
+                      const SizedBox(height: 20),
+                      _buildProjectUrlSection(),
+                      const SizedBox(height: 20),
+                      _buildAnonKeySection(),
+                      const SizedBox(height: 20),
                       _buildMembersSection(),
                     ],
                   ),
                 ),
               ),
               Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
+                padding: const EdgeInsets.all(16),
+                decoration: const BoxDecoration(
                   border: Border(
-                    top: BorderSide(
-                      color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08),
-                    ),
+                    top: BorderSide(color: SupabaseColors.border),
                   ),
                 ),
                 child: Row(
@@ -751,37 +397,23 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> with Sing
                     Row(
                       children: [
                         if (session.isSysAdmin) ...[
-                          TextButton.icon(
-                            onPressed: () => _deleteProject(),
-                            icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                            label: const Text('Excluir'),
-                            style: TextButton.styleFrom(
-                              foregroundColor: Colors.red,
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            ),
+                          _DangerButton(
+                            label: 'Excluir',
+                            icon: Icons.delete_outline_rounded,
+                            onPressed: _deleteProject,
                           ),
                           const SizedBox(width: 8),
-                          TextButton.icon(
+                          _SecondaryButton(
+                            label: 'Transferir',
+                            icon: Icons.swap_horiz_rounded,
                             onPressed: () => _showTransferDialog(widget.ref),
-                            icon: const Icon(Icons.swap_horiz_rounded, size: 18),
-                            label: const Text('Transferir'),
-                            style: TextButton.styleFrom(
-                              foregroundColor: Colors.blue,
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            ),
                           ),
                         ],
                       ],
                     ),
-                    FilledButton(
+                    _PrimaryButton(
+                      label: 'Fechar',
                       onPressed: () => Navigator.pop(context),
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: const Text('Fechar'),
                     ),
                   ],
                 ),
@@ -793,105 +425,235 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> with Sing
     );
   }
 
-  Widget _buildAnonKeyCard() {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-    final hasKey = widget.anonKey.isNotEmpty;
-
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: isDark
-              ? [const Color(0xFF1A1F2E), const Color(0xFF12161F)]
-              : [Colors.white, Colors.grey[50]!],
+  Widget _buildLoadingDialog() {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 400),
+        padding: const EdgeInsets.all(40),
+        decoration: BoxDecoration(
+          color: SupabaseColors.bg200,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: SupabaseColors.border),
         ),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 32,
+              height: 32,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: SupabaseColors.brand,
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Carregando configurações...',
+              style: TextStyle(
+                color: SupabaseColors.textSecondary,
+                fontSize: 13,
+              ),
+            ),
+          ],
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      t.colorScheme.primary.withOpacity(0.2),
-                      t.colorScheme.secondary.withOpacity(0.2),
-                    ],
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  Icons.key_rounded,
-                  color: t.colorScheme.primary,
-                  size: 20,
+    );
+  }
+
+  Widget _buildProjectUrlSection() {
+    return _Section(
+      title: 'URL DO PROJETO',
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: SupabaseColors.bg300,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: SupabaseColors.border),
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.link_rounded,
+              size: 16,
+              color: SupabaseColors.textMuted,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: SelectableText(
+                _projectUrl.isNotEmpty ? _projectUrl : 'Carregando...',
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontFamily: 'monospace',
+                  color: SupabaseColors.textSecondary,
                 ),
               ),
-              const SizedBox(width: 12),
-              Text(
-                'CHAVE ANÔNIMA',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 1.2,
-                  color: isDark ? Colors.white38 : Colors.black38,
+            ),
+            const SizedBox(width: 8),
+            _IconBtn(
+              icon: Icons.copy_rounded,
+              tooltip: 'Copiar URL',
+              onPressed: _projectUrl.isNotEmpty
+                  ? () {
+                Clipboard.setData(ClipboardData(text: _projectUrl));
+                _showSnack('URL copiada!', SupabaseColors.success);
+              }
+                  : null,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusSection() {
+    return _Section(
+      title: 'STATUS',
+      child: _statusLoading
+          ? const Center(
+        child: Padding(
+          padding: EdgeInsets.all(20),
+          child: SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(strokeWidth: 2, color: SupabaseColors.brand),
+          ),
+        ),
+      )
+          : _statusError != null
+          ? _ErrorBox(message: _statusError!)
+          : _status == null
+          ? const SizedBox.shrink()
+          : _buildStatusContent(),
+    );
+  }
+
+  Widget _buildStatusContent() {
+    final st = _status!;
+    final isRunning = st.status == 'running';
+    final busy = Session().isBusy(widget.ref);
+
+    return Column(
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isRunning ? SupabaseColors.success : SupabaseColors.error,
+                boxShadow: [
+                  BoxShadow(
+                    color: (isRunning ? SupabaseColors.success : SupabaseColors.error)
+                        .withOpacity(0.5),
+                    blurRadius: 8,
+                    spreadRadius: 2,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    st.status.toUpperCase(),
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: isRunning ? SupabaseColors.success : SupabaseColors.error,
+                    ),
+                  ),
+                  Text(
+                    '${st.running}/${st.total} containers ativos',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: SupabaseColors.textMuted,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        if (_myProjectRole == 'admin') ...[
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _ActionButton(
+                  icon: Icons.play_arrow_rounded,
+                  label: 'Start',
+                  color: SupabaseColors.success,
+                  onPressed: busy ? null : () => _doAction('start'),
+                  busy: busy,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _ActionButton(
+                  icon: Icons.stop_rounded,
+                  label: 'Stop',
+                  color: SupabaseColors.error,
+                  onPressed: busy ? null : () => _doAction('stop'),
+                  busy: busy,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _ActionButton(
+                  icon: Icons.restart_alt_rounded,
+                  label: 'Restart',
+                  color: SupabaseColors.info,
+                  onPressed: busy ? null : () => _doAction('restart'),
+                  busy: busy,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 16),
+        ],
+      ],
+    );
+  }
+
+
+  Widget _buildAnonKeySection() {
+    final hasKey = widget.anonKey.isNotEmpty;
+
+    return _Section(
+      title: 'CHAVE ANÔNIMA',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: isDark ? Colors.black.withOpacity(0.3) : Colors.grey[100],
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.05),
-              ),
+              color: SupabaseColors.bg300,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: SupabaseColors.border),
             ),
             child: Row(
               children: [
                 Expanded(
                   child: SelectableText(
                     hasKey ? widget.anonKey : 'Não disponível',
-                    style: TextStyle(
-                      fontSize: 13,
+                    style: const TextStyle(
+                      fontSize: 12,
                       fontFamily: 'monospace',
-                      color: isDark ? Colors.white70 : Colors.black87,
+                      color: SupabaseColors.textSecondary,
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
-                IconButton(
-                  tooltip: 'Copiar chave',
-                  icon: Icon(
-                    Icons.copy_all_rounded,
-                    size: 18,
-                    color: hasKey
-                        ? t.colorScheme.primary
-                        : (isDark ? Colors.white24 : Colors.black26),
-                  ),
+                const SizedBox(width: 8),
+                _IconBtn(
+                  icon: Icons.copy_rounded,
+                  tooltip: 'Copiar',
                   onPressed: hasKey
                       ? () {
                     Clipboard.setData(ClipboardData(text: widget.anonKey));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: const Text('Chave copiada'),
-                        behavior: SnackBarBehavior.floating,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        margin: const EdgeInsets.all(16),
-                      ),
-                    );
+                    _showSnack('Chave copiada!', SupabaseColors.success);
                   }
                       : null,
                 ),
@@ -899,37 +661,24 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> with Sing
             ),
           ),
           if (hasKey) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Row(
               children: [
-                Icon(
-                  Icons.access_time_rounded,
-                  size: 16,
-                  color: isDark ? Colors.white38 : Colors.black38,
-                ),
-                const SizedBox(width: 8),
+                const Icon(Icons.schedule_rounded, size: 14, color: SupabaseColors.textMuted),
+                const SizedBox(width: 6),
                 Text(
                   'Expira em: ${DateFormat('dd/MM/yyyy HH:mm').format(JwtDecoder.getExpirationDate(widget.anonKey))}',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isDark ? Colors.white54 : Colors.black54,
-                  ),
+                  style: const TextStyle(fontSize: 11, color: SupabaseColors.textMuted),
                 ),
               ],
             ),
           ],
           if (_myProjectRole == 'admin') ...[
-            const SizedBox(height: 16),
-            FilledButton.tonalIcon(
-              onPressed: null,
-              icon: const Icon(Icons.refresh_rounded, size: 18),
-              label: const Text('Gerar nova chave'),
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
+            const SizedBox(height: 12),
+            _SecondaryButton(
+              label: 'Gerar nova chave',
+              icon: Icons.refresh_rounded,
+              onPressed: null, // TODO: implement
             ),
           ],
         ],
@@ -938,285 +687,150 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> with Sing
   }
 
   Widget _buildMembersSection() {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        t.colorScheme.primary.withOpacity(0.2),
-                        t.colorScheme.secondary.withOpacity(0.2),
-                      ],
-                    ),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    Icons.people_rounded,
-                    color: t.colorScheme.primary,
-                    size: 20,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'MEMBROS DO PROJETO',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 1.2,
-                        color: isDark ? Colors.white38 : Colors.black38,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${_currentMembers.length} ${_currentMembers.length == 1 ? 'membro' : 'membros'}',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.white : Colors.black87,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            if (_myProjectRole == 'admin')
-              FilledButton.tonalIcon(
-                onPressed: _loadingMembers ? null : _openAddMemberDialog,
-                icon: const Icon(Icons.person_add_rounded, size: 18),
-                label: const Text('Adicionar'),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
-          ],
+    return _Section(
+      title: 'MEMBROS',
+      trailing: _myProjectRole == 'admin'
+          ? _SecondaryButton(
+        label: 'Adicionar',
+        icon: Icons.person_add_rounded,
+        onPressed: _loadingMembers ? null : _openAddMemberDialog,
+      )
+          : null,
+      child: _loadingMembers
+          ? const Center(
+        child: Padding(
+          padding: EdgeInsets.all(20),
+          child: SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(strokeWidth: 2, color: SupabaseColors.brand),
+          ),
         ),
-        const SizedBox(height: 16),
-        Container(
-          constraints: const BoxConstraints(maxHeight: 300),
-          child: _buildMembersList(),
+      )
+          : _error != null
+          ? _ErrorBox(message: _error!, onRetry: _loadCurrentMembers)
+          : _currentMembers.isEmpty
+          ? const Center(
+        child: Padding(
+          padding: EdgeInsets.all(20),
+          child: Text(
+            'Nenhum membro encontrado',
+            style: TextStyle(color: SupabaseColors.textMuted, fontSize: 13),
+          ),
         ),
-      ],
+      )
+          : _buildMembersList(),
     );
   }
 
   Widget _buildMembersList() {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
-    if (_loadingMembers) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const SizedBox(
-              width: 32,
-              height: 32,
-              child: CircularProgressIndicator(strokeWidth: 3),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Carregando membros...',
-              style: TextStyle(
-                color: isDark ? Colors.white54 : Colors.black54,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.error_outline, size: 48, color: Colors.red.shade400),
-            const SizedBox(height: 16),
-            Text(
-              _error!,
-              style: const TextStyle(color: Colors.red),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            FilledButton(
-              onPressed: _loadCurrentMembers,
-              child: const Text('Tentar Novamente'),
-            ),
-          ],
-        ),
-      );
-    }
-
-    if (_currentMembers.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: isDark ? Colors.white.withOpacity(0.05) : Colors.grey[100],
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.people_outline_rounded,
-                size: 48,
-                color: isDark ? Colors.white38 : Colors.black38,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Nenhum membro encontrado',
-              style: TextStyle(
-                color: isDark ? Colors.white54 : Colors.black54,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return ListView.separated(
-      itemCount: _currentMembers.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 8),
-      itemBuilder: (context, index) {
-        final member = _currentMembers[index];
+    return Column(
+      children: _currentMembers.map((member) {
         final session = Session();
         final isMe = member.user_id == session.myId;
         final canRemove = _myProjectRole == 'admin' && member.role != 'admin' && !isMe;
 
         return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            gradient: isMe
-                ? LinearGradient(
-              colors: [
-                t.colorScheme.primary.withOpacity(0.15),
-                t.colorScheme.secondary.withOpacity(0.1),
-              ],
-            )
-                : LinearGradient(
-              colors: isDark
-                  ? [const Color(0xFF1A1F2E), const Color(0xFF12161F)]
-                  : [Colors.white, Colors.grey[50]!],
-            ),
-            borderRadius: BorderRadius.circular(16),
+            color: isMe ? SupabaseColors.brand.withOpacity(0.1) : SupabaseColors.bg300,
+            borderRadius: BorderRadius.circular(6),
             border: Border.all(
-              color: isMe
-                  ? t.colorScheme.primary.withOpacity(0.3)
-                  : (isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08)),
+              color: isMe ? SupabaseColors.brand.withOpacity(0.3) : SupabaseColors.border,
             ),
           ),
-          child: ListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            leading: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: member.role == 'admin'
-                      ? [Colors.orange.shade400, Colors.orange.shade600]
-                      : [Colors.blue.shade400, Colors.blue.shade600],
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: member.role == 'admin'
+                      ? SupabaseColors.warning.withOpacity(0.2)
+                      : SupabaseColors.info.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(6),
                 ),
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: (member.role == 'admin' ? Colors.orange : Colors.blue).withOpacity(0.3),
-                    blurRadius: 8,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
+                child: Icon(
+                  member.role == 'admin'
+                      ? Icons.admin_panel_settings_rounded
+                      : Icons.person_rounded,
+                  color: member.role == 'admin' ? SupabaseColors.warning : SupabaseColors.info,
+                  size: 18,
+                ),
               ),
-              child: Icon(
-                member.role == 'admin' ? Icons.admin_panel_settings_rounded : Icons.person_rounded,
-                color: Colors.white,
-                size: 20,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isMe ? '${member.displayName ?? 'Você'} (você)' : member.displayName ?? 'Sem nome',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: isMe ? FontWeight.w600 : FontWeight.w500,
+                        color: SupabaseColors.textPrimary,
+                      ),
+                    ),
+                    Text(
+                      member.role == 'admin' ? 'Administrador' : 'Membro',
+                      style: const TextStyle(fontSize: 11, color: SupabaseColors.textMuted),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            title: Text(
-              isMe ? '${member.displayName ?? 'Você'} (você)' : member.displayName ?? 'Sem nome',
-              style: TextStyle(
-                fontWeight: isMe ? FontWeight.bold : FontWeight.w500,
-                color: isDark ? Colors.white : Colors.black87,
-              ),
-            ),
-            subtitle: Text(
-              member.role == 'admin' ? 'Administrador' : 'Membro',
-              style: TextStyle(
-                fontSize: 12,
-                color: isDark ? Colors.white54 : Colors.black54,
-              ),
-            ),
-            trailing: canRemove
-                ? IconButton(
-              icon: const Icon(Icons.remove_circle_outline_rounded, color: Colors.red),
-              onPressed: () => _showRemoveConfirmation(member),
-              tooltip: 'Remover membro',
-            )
-                : null,
+              if (canRemove)
+                _IconBtn(
+                  icon: Icons.remove_circle_outline_rounded,
+                  tooltip: 'Remover',
+                  color: SupabaseColors.error,
+                  onPressed: () => _showRemoveConfirmation(member),
+                ),
+            ],
           ),
         );
-      },
+      }).toList(),
     );
   }
 
   void _showRemoveConfirmation(ProjectMember member) {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        backgroundColor: isDark ? const Color(0xFF1A1F2E) : Colors.white,
+        backgroundColor: SupabaseColors.bg200,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: const BorderSide(color: SupabaseColors.border),
+        ),
         title: Row(
           children: [
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(12),
+                color: SupabaseColors.error.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(6),
               ),
-              child: const Icon(Icons.warning_rounded, color: Colors.red, size: 24),
+              child: const Icon(Icons.warning_rounded, color: SupabaseColors.error, size: 20),
             ),
             const SizedBox(width: 12),
-            const Text('Confirmar Remoção'),
+            const Text('Confirmar Remoção', style: TextStyle(color: SupabaseColors.textPrimary)),
           ],
         ),
         content: Text(
           'Tem certeza que deseja remover ${member.displayName ?? 'este usuário'} do projeto?',
+          style: const TextStyle(color: SupabaseColors.textSecondary),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancelar'),
           ),
-          FilledButton(
+          _DangerButton(
+            label: 'Remover',
             onPressed: () {
               Navigator.pop(context);
               _removeMember(member.user_id);
             },
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.red,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: const Text('Remover'),
           ),
         ],
       ),
@@ -1232,9 +846,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> with Sing
       if (response.statusCode == 200) {
         final Map<String, dynamic> data = jsonDecode(response.body);
         final dynamic usersData = data['users'];
-        if (usersData == null || usersData is! List) {
-          return <AvailableUser>[];
-        }
+        if (usersData == null || usersData is! List) return <AvailableUser>[];
         final List<dynamic> usersJson = usersData;
         return usersJson
             .map((item) => AvailableUser.fromJson(item))
@@ -1253,33 +865,16 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> with Sing
       final response = await http.post(
         Uri.parse('/api/admin/projects/$projectName/transfer'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'new_owner_id': newOwnerId,
-        }),
+        body: jsonEncode({'new_owner_id': newOwnerId}),
       );
 
       if (response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Projeto "$projectName" transferido com sucesso!'),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            margin: const EdgeInsets.all(16),
-          ),
-        );
+        _showSnack('Projeto "$projectName" transferido com sucesso!', SupabaseColors.success);
       } else {
         throw Exception('Erro ${response.statusCode}: ${response.body}');
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erro ao transferir projeto: $e'),
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          margin: const EdgeInsets.all(16),
-        ),
-      );
+      _showSnack('Erro ao transferir projeto: $e', SupabaseColors.error);
     }
   }
 
@@ -1295,16 +890,287 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog> with Sing
   }
 }
 
+
+class _Section extends StatelessWidget {
+  const _Section({required this.title, required this.child, this.trailing});
+
+  final String title;
+  final Widget child;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: SupabaseColors.surface100,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: SupabaseColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1,
+                    color: SupabaseColors.textMuted,
+                  ),
+                ),
+                if (trailing != null) trailing!,
+              ],
+            ),
+          ),
+          const Divider(color: SupabaseColors.border, height: 1),
+          Padding(padding: const EdgeInsets.all(16), child: child),
+        ],
+      ),
+    );
+  }
+}
+
+class _ErrorBox extends StatelessWidget {
+  const _ErrorBox({required this.message, this.onRetry});
+
+  final String message;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: SupabaseColors.error.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: SupabaseColors.error.withOpacity(0.3)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline, color: SupabaseColors.error, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(message, style: const TextStyle(color: SupabaseColors.error, fontSize: 12)),
+          ),
+          if (onRetry != null)
+            TextButton(
+              onPressed: onRetry,
+              child: const Text('Tentar novamente', style: TextStyle(fontSize: 12)),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _IconBtn extends StatelessWidget {
+  const _IconBtn({required this.icon, required this.tooltip, this.onPressed, this.color});
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onPressed;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(4),
+          child: Padding(
+            padding: const EdgeInsets.all(6),
+            child: Icon(
+              icon,
+              size: 16,
+              color: onPressed == null
+                  ? SupabaseColors.textMuted.withOpacity(0.5)
+                  : (color ?? SupabaseColors.textSecondary),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CloseButton extends StatelessWidget {
+  const _CloseButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(4),
+        child: const Padding(
+          padding: EdgeInsets.all(6),
+          child: Icon(Icons.close_rounded, size: 18, color: SupabaseColors.textMuted),
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionButton extends StatelessWidget {
+  const _ActionButton({
+    required this.icon,
+    required this.label,
+    required this.color,
+    this.onPressed,
+    this.busy = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback? onPressed;
+  final bool busy;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: onPressed == null ? SupabaseColors.bg300 : color.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: onPressed == null ? SupabaseColors.border : color.withOpacity(0.3),
+            ),
+          ),
+          child: Column(
+            children: [
+              if (busy)
+                SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(color)),
+                )
+              else
+                Icon(icon, color: onPressed == null ? SupabaseColors.textMuted : color, size: 18),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  color: onPressed == null ? SupabaseColors.textMuted : color,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PrimaryButton extends StatelessWidget {
+  const _PrimaryButton({required this.label, required this.onPressed});
+
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton(
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        backgroundColor: SupabaseColors.brand,
+        foregroundColor: SupabaseColors.bg100,
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+      ),
+      child: Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
+    );
+  }
+}
+
+class _SecondaryButton extends StatelessWidget {
+  const _SecondaryButton({required this.label, this.icon, this.onPressed});
+
+  final String label;
+  final IconData? icon;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton(
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        backgroundColor: SupabaseColors.surface200,
+        foregroundColor: SupabaseColors.textPrimary,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(6),
+          side: const BorderSide(color: SupabaseColors.border),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 14),
+            const SizedBox(width: 6),
+          ],
+          Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+        ],
+      ),
+    );
+  }
+}
+
+class _DangerButton extends StatelessWidget {
+  const _DangerButton({required this.label, this.icon, required this.onPressed});
+
+  final String label;
+  final IconData? icon;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton(
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        foregroundColor: SupabaseColors.error,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 14),
+            const SizedBox(width: 6),
+          ],
+          Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+        ],
+      ),
+    );
+  }
+}
+
 class ProjectMember {
   final String user_id;
   final String role;
   final String? displayName;
 
-  ProjectMember({
-    required this.user_id,
-    required this.role,
-    this.displayName,
-  });
+  ProjectMember({required this.user_id, required this.role, this.displayName});
 
   factory ProjectMember.fromJson(Map<String, dynamic> json) {
     return ProjectMember(

@@ -238,13 +238,13 @@ http {
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
             
             if ($request_method = 'OPTIONS') {
-                add_header 'Access-Control-Allow-Origin' $allowed_origin always;
+                add_header 'Access-Control-Allow-Origin' $cors_origin always;
                 add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
                 add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version' always;
                 return 204;
             }
 
-            add_header 'Access-Control-Allow-Origin' $allowed_origin always;
+            add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version' always;
         }
@@ -252,7 +252,7 @@ http {
 
         location /storage/v1/ {
             if ($request_method = 'OPTIONS') {
-                add_header 'Access-Control-Allow-Origin' $allowed_origin always;
+                add_header 'Access-Control-Allow-Origin' $cors_origin always;
                 add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PATCH, HEAD, DELETE, PUT' always;
                 add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, Tus-Resumable, Tus-Version, Tus-Max-Size, Tus-Extension, Upload-Length, Upload-Metadata, Upload-Offset, Upload-Concat, Upload-Defer-Length, x-upsert, X-Requested-With, x-supabase-api-version' always;
                 add_header 'Access-Control-Max-Age' 86400 always;
@@ -290,7 +290,7 @@ http {
 
             proxy_pass http://$storage_upstream;
 
-            add_header 'Access-Control-Allow-Origin' $allowed_origin always;
+            add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PATCH, HEAD, DELETE, PUT' always;
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, Tus-Resumable, Tus-Version, Tus-Max-Size, Tus-Extension, Upload-Length, Upload-Metadata, Upload-Offset, Upload-Concat, Upload-Defer-Length, x-upsert, X-Requested-With, x-supabase-api-version' always;
         }
@@ -325,7 +325,7 @@ http {
 
         location /functions/v1/ {
             if ($request_method = 'OPTIONS') {
-                add_header 'Access-Control-Allow-Origin' $allowed_origin always;
+                add_header 'Access-Control-Allow-Origin' $cors_origin always;
                 add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, PATCH, DELETE' always;
                 add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version' always;
                 add_header 'Access-Control-Max-Age' 86400 always;
@@ -350,14 +350,14 @@ http {
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
 
-            add_header 'Access-Control-Allow-Origin' $allowed_origin always;
+            add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, PATCH, DELETE' always;
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version' always;
         }
         
         location /meta/ {
            if ($request_method = 'OPTIONS') {
-                add_header 'Access-Control-Allow-Origin' $allowed_origin always;
+                add_header 'Access-Control-Allow-Origin' $cors_origin always;
                 add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
                 add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version' always;
                 add_header 'Access-Control-Max-Age' 86400 always;
@@ -375,7 +375,7 @@ http {
            rewrite ^/meta/(.*)$ /$1 break;
            proxy_pass http://$meta_upstream;
 
-           add_header 'Access-Control-Allow-Origin' $allowed_origin always;
+           add_header 'Access-Control-Allow-Origin' $cors_origin always;
            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version' always;
         }

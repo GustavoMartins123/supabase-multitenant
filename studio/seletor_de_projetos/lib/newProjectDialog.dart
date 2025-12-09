@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:seletor_de_projetos/supabase_colors.dart';
 
 class NewProjectDialog extends StatefulWidget {
   const NewProjectDialog({super.key});
@@ -9,27 +10,27 @@ class NewProjectDialog extends StatefulWidget {
   State<NewProjectDialog> createState() => _NewProjectDialogState();
 }
 
-class _NewProjectDialogState extends State<NewProjectDialog> with SingleTickerProviderStateMixin {
+class _NewProjectDialogState extends State<NewProjectDialog>
+    with SingleTickerProviderStateMixin {
   final _ctrl = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   final _rand = Random.secure();
   late AnimationController _animController;
   late Animation<double> _scaleAnimation;
 
-  /* Regras base (3–40 chars) */
   static final _regex = RegExp(r'^[a-z_][a-z0-9_]{2,40}$');
   String _crop(String s) => s.length > 40 ? s.substring(0, 40) : s;
+
   static const _reserved = <String>{
-    'select','from','where','insert','update','delete','table',
-    'create','drop','join','group','order','limit','into','index',
-    'view','trigger','procedure','function','database','schema',
-    'primary','foreign','key','constraint','unique','null','not',
-    'and','or','in','like','between','exists','having','union',
-    'inner','left','right','outer','cross','on','as','case','when',
-    'then','else','end','if','while','for','begin','commit','rollback'
+    'select', 'from', 'where', 'insert', 'update', 'delete', 'table',
+    'create', 'drop', 'join', 'group', 'order', 'limit', 'into', 'index',
+    'view', 'trigger', 'procedure', 'function', 'database', 'schema',
+    'primary', 'foreign', 'key', 'constraint', 'unique', 'null', 'not',
+    'and', 'or', 'in', 'like', 'between', 'exists', 'having', 'union',
+    'inner', 'left', 'right', 'outer', 'cross', 'on', 'as', 'case', 'when',
+    'then', 'else', 'end', 'if', 'while', 'for', 'begin', 'commit', 'rollback'
   };
 
-  /* Lista de prefixos e sufixos comuns para projetos */
   static const _prefixes = <String>[
     'app', 'web', 'api', 'mobile', 'desktop', 'backend', 'frontend',
     'system', 'tool', 'lib', 'framework', 'service', 'micro', 'mini'
@@ -44,12 +45,12 @@ class _NewProjectDialogState extends State<NewProjectDialog> with SingleTickerPr
   void initState() {
     super.initState();
     _animController = AnimationController(
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 250),
       vsync: this,
     );
     _scaleAnimation = CurvedAnimation(
       parent: _animController,
-      curve: Curves.easeOutBack,
+      curve: Curves.easeOut,
     );
     _animController.forward();
   }
@@ -61,13 +62,11 @@ class _NewProjectDialogState extends State<NewProjectDialog> with SingleTickerPr
     super.dispose();
   }
 
-  /* gera string aleatória abc123 de 4-6 chars */
   String _randString([int length = 6]) {
     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
     return List.generate(length, (_) => chars[_rand.nextInt(chars.length)]).join();
   }
 
-  /* normaliza texto de entrada */
   String _normalize(String input) {
     return input
         .trim()
@@ -77,7 +76,6 @@ class _NewProjectDialogState extends State<NewProjectDialog> with SingleTickerPr
         .replaceAll(RegExp(r'^_+|_+$'), '');
   }
 
-  /* gera sugestões melhoradas */
   List<String> _suggestions(String raw) {
     final base = _normalize(raw);
     if (base.isEmpty) return _getDefaultSuggestions();
@@ -125,7 +123,6 @@ class _NewProjectDialogState extends State<NewProjectDialog> with SingleTickerPr
     return suggestions.take(10).toList();
   }
 
-  /* sugestões padrão quando input está vazio */
   List<String> _getDefaultSuggestions() {
     final suggestions = <String>[];
     final today = DateFormat('ddMMyy').format(DateTime.now());
@@ -168,9 +165,6 @@ class _NewProjectDialogState extends State<NewProjectDialog> with SingleTickerPr
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
     return ScaleTransition(
       scale: _scaleAnimation,
       child: Dialog(
@@ -178,39 +172,17 @@ class _NewProjectDialogState extends State<NewProjectDialog> with SingleTickerPr
         elevation: 0,
         child: Container(
           constraints: BoxConstraints(
-            maxWidth: 600,
+            maxWidth: 520,
             maxHeight: MediaQuery.of(context).size.height * 0.85,
           ),
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: isDark
-                  ? [
-                const Color(0xFF1A1F2E),
-                const Color(0xFF12161F),
-              ]
-                  : [
-                Colors.white,
-                Colors.grey[50]!,
-              ],
-            ),
-            borderRadius: BorderRadius.circular(32),
-            border: Border.all(
-              color: isDark ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.08),
-              width: 1,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: isDark ? Colors.black.withOpacity(0.5) : Colors.black.withOpacity(0.15),
-                blurRadius: 40,
-                offset: const Offset(0, 20),
-              ),
-            ],
+            color: SupabaseColors.bg200,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: SupabaseColors.border),
           ),
           child: SingleChildScrollView(
             child: Padding(
-              padding: const EdgeInsets.all(32),
+              padding: const EdgeInsets.all(24),
               child: Form(
                 key: _formKey,
                 child: Column(
@@ -220,57 +192,59 @@ class _NewProjectDialogState extends State<NewProjectDialog> with SingleTickerPr
                     Row(
                       children: [
                         Container(
-                          padding: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                t.colorScheme.primary,
-                                t.colorScheme.secondary,
-                              ],
-                            ),
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [
-                              BoxShadow(
-                                color: t.colorScheme.primary.withOpacity(0.3),
-                                blurRadius: 16,
-                                offset: const Offset(0, 8),
-                              ),
-                            ],
+                            color: SupabaseColors.brand.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(8),
                           ),
-                          child: Icon(
-                            Icons.create_new_folder_rounded,
-                            color: Colors.white,
-                            size: 28,
+                          child: const Icon(
+                            Icons.add_rounded,
+                            color: SupabaseColors.brand,
+                            size: 20,
                           ),
                         ),
-                        const SizedBox(width: 16),
-                        Expanded(
+                        const SizedBox(width: 12),
+                        const Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
                                 'Novo Projeto',
                                 style: TextStyle(
-                                  fontSize: 26,
-                                  fontWeight: FontWeight.bold,
-                                  color: isDark ? Colors.white : Colors.black87,
-                                  letterSpacing: -0.5,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: SupabaseColors.textPrimary,
                                 ),
                               ),
-                              const SizedBox(height: 4),
+                              SizedBox(height: 2),
                               Text(
                                 'Configure seu novo projeto',
                                 style: TextStyle(
-                                  fontSize: 14,
-                                  color: isDark ? Colors.white54 : Colors.black54,
+                                  fontSize: 12,
+                                  color: SupabaseColors.textMuted,
                                 ),
                               ),
                             ],
                           ),
                         ),
+                        _CloseBtn(onPressed: () => Navigator.pop(context)),
                       ],
                     ),
-                    const SizedBox(height: 32),
+
+                    const SizedBox(height: 24),
+                    const Divider(color: SupabaseColors.border, height: 1),
+                    const SizedBox(height: 24),
+
+                    const Text(
+                      'Nome do Projeto',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: SupabaseColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
                     Autocomplete<String>(
                       optionsBuilder: (textEditingValue) {
                         return _suggestions(textEditingValue.text);
@@ -281,85 +255,51 @@ class _NewProjectDialogState extends State<NewProjectDialog> with SingleTickerPr
                           controller.selection = _ctrl.selection;
                         }
 
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Nome do Projeto',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                letterSpacing: 0.5,
-                                color: isDark ? Colors.white70 : Colors.black87,
-                              ),
+                        return TextFormField(
+                          controller: controller,
+                          focusNode: focusNode,
+                          decoration: InputDecoration(
+                            hintText: 'ex.: meu_projeto_incrivel',
+                            hintStyle: const TextStyle(
+                              color: SupabaseColors.textMuted,
+                              fontSize: 13,
                             ),
-                            const SizedBox(height: 12),
-                            TextFormField(
-                              controller: controller,
-                              focusNode: focusNode,
-                              decoration: InputDecoration(
-                                hintText: 'ex.: meu_projeto_incrivel',
-                                hintStyle: TextStyle(
-                                  color: isDark ? Colors.white24 : Colors.black26,
-                                ),
-                                prefixIcon: Icon(
-                                  Icons.edit_rounded,
-                                  color: isDark ? Colors.white54 : Colors.black54,
-                                  size: 20,
-                                ),
-                                filled: true,
-                                fillColor: isDark
-                                    ? Colors.white.withOpacity(0.05)
-                                    : Colors.grey[100],
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                  borderSide: BorderSide.none,
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                  borderSide: BorderSide(
-                                    color: isDark
-                                        ? Colors.white.withOpacity(0.08)
-                                        : Colors.black.withOpacity(0.08),
-                                    width: 1,
-                                  ),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                  borderSide: BorderSide(
-                                    color: t.colorScheme.primary,
-                                    width: 2,
-                                  ),
-                                ),
-                                errorBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                  borderSide: BorderSide(
-                                    color: t.colorScheme.error,
-                                    width: 1,
-                                  ),
-                                ),
-                                focusedErrorBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                  borderSide: BorderSide(
-                                    color: t.colorScheme.error,
-                                    width: 2,
-                                  ),
-                                ),
-                                contentPadding: const EdgeInsets.all(20),
-                              ),
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w500,
-                                color: isDark ? Colors.white : Colors.black87,
-                              ),
-                              validator: _validate,
-                              onChanged: (value) {
-                                _ctrl.text = value;
-                                _ctrl.selection = controller.selection;
-                              },
-                              onFieldSubmitted: (_) => _submit(),
+                            prefixIcon: const Icon(
+                              Icons.folder_rounded,
+                              color: SupabaseColors.textMuted,
+                              size: 18,
                             ),
-                          ],
+                            filled: true,
+                            fillColor: SupabaseColors.bg300,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(6),
+                              borderSide: const BorderSide(color: SupabaseColors.border),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(6),
+                              borderSide: const BorderSide(color: SupabaseColors.border),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(6),
+                              borderSide: const BorderSide(color: SupabaseColors.brand, width: 2),
+                            ),
+                            errorBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(6),
+                              borderSide: const BorderSide(color: SupabaseColors.error),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                          ),
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: SupabaseColors.textPrimary,
+                          ),
+                          validator: _validate,
+                          onChanged: (value) {
+                            _ctrl.text = value;
+                            _ctrl.selection = controller.selection;
+                          },
+                          onFieldSubmitted: (_) => _submit(),
                         );
                       },
                       onSelected: (String selection) {
@@ -369,73 +309,42 @@ class _NewProjectDialogState extends State<NewProjectDialog> with SingleTickerPr
                         return Align(
                           alignment: Alignment.topLeft,
                           child: Material(
-                            elevation: 16,
-                            borderRadius: BorderRadius.circular(20),
-                            color: isDark ? const Color(0xFF1E2330) : Colors.white,
+                            elevation: 8,
+                            borderRadius: BorderRadius.circular(6),
+                            color: SupabaseColors.surface300,
                             child: Container(
-                              constraints: BoxConstraints(
-                                maxHeight: 280,
-                                maxWidth: MediaQuery.of(context).size.width * 0.8,
-                              ),
+                              constraints: const BoxConstraints(maxHeight: 240, maxWidth: 400),
                               decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                  color: isDark
-                                      ? Colors.white.withOpacity(0.1)
-                                      : Colors.black.withOpacity(0.08),
-                                ),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: SupabaseColors.border),
                               ),
                               child: ListView.builder(
-                                padding: const EdgeInsets.symmetric(vertical: 8),
+                                padding: const EdgeInsets.symmetric(vertical: 4),
                                 shrinkWrap: true,
                                 itemCount: options.length,
                                 itemBuilder: (context, index) {
                                   final option = options.elementAt(index);
                                   return InkWell(
                                     onTap: () => onSelected(option),
-                                    borderRadius: BorderRadius.circular(12),
                                     child: Container(
-                                      margin: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 2,
-                                      ),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 16,
-                                        vertical: 14,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                                       child: Row(
                                         children: [
-                                          Container(
-                                            padding: const EdgeInsets.all(8),
-                                            decoration: BoxDecoration(
-                                              color: t.colorScheme.primary.withOpacity(0.15),
-                                              borderRadius: BorderRadius.circular(8),
-                                            ),
-                                            child: Icon(
-                                              Icons.lightbulb_outline_rounded,
-                                              size: 16,
-                                              color: t.colorScheme.primary,
-                                            ),
+                                          const Icon(
+                                            Icons.lightbulb_outline_rounded,
+                                            size: 14,
+                                            color: SupabaseColors.brand,
                                           ),
-                                          const SizedBox(width: 12),
+                                          const SizedBox(width: 10),
                                           Expanded(
                                             child: Text(
                                               option,
-                                              style: TextStyle(
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.w500,
+                                              style: const TextStyle(
+                                                fontSize: 12,
                                                 fontFamily: 'monospace',
-                                                color: isDark ? Colors.white60 : Colors.black87,
+                                                color: SupabaseColors.textSecondary,
                                               ),
                                             ),
-                                          ),
-                                          Icon(
-                                            Icons.arrow_forward_rounded,
-                                            size: 16,
-                                            color: isDark ? Colors.white38 : Colors.black38,
                                           ),
                                         ],
                                       ),
@@ -448,48 +357,46 @@ class _NewProjectDialogState extends State<NewProjectDialog> with SingleTickerPr
                         );
                       },
                     ),
+
                     const SizedBox(height: 16),
+
                     Container(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: t.colorScheme.primary.withOpacity(0.08),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: t.colorScheme.primary.withOpacity(0.2),
-                          width: 1,
-                        ),
+                        color: SupabaseColors.info.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: SupabaseColors.info.withOpacity(0.2)),
                       ),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(
+                          const Icon(
                             Icons.info_outline_rounded,
-                            color: t.colorScheme.primary,
-                            size: 20,
+                            color: SupabaseColors.info,
+                            size: 16,
                           ),
-                          const SizedBox(width: 12),
+                          const SizedBox(width: 10),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
+                              children: const [
                                 Text(
                                   'Regras de nomenclatura',
                                   style: TextStyle(
-                                    fontSize: 13,
+                                    fontSize: 11,
                                     fontWeight: FontWeight.w600,
-                                    color: isDark ? Colors.white60 : Colors.black87,
+                                    color: SupabaseColors.textPrimary,
                                   ),
                                 ),
-                                const SizedBox(height: 6),
+                                SizedBox(height: 4),
                                 Text(
-                                  '• Apenas letras minúsculas, números e underscore (_)\n'
+                                  '• Apenas letras minúsculas, números e underscore\n'
                                       '• Deve começar com letra ou underscore\n'
-                                      '• Entre 3 e 40 caracteres\n'
-                                      '• Palavras reservadas não são permitidas',
+                                      '• Entre 3 e 40 caracteres',
                                   style: TextStyle(
-                                    fontSize: 12,
-                                    height: 1.5,
-                                    color: isDark ? Colors.white60 : Colors.black54,
+                                    fontSize: 11,
+                                    height: 1.4,
+                                    color: SupabaseColors.textMuted,
                                   ),
                                 ),
                               ],
@@ -498,82 +405,106 @@ class _NewProjectDialogState extends State<NewProjectDialog> with SingleTickerPr
                         ],
                       ),
                     ),
-                    const SizedBox(height: 32),
+
+                    const SizedBox(height: 24),
+                    const Divider(color: SupabaseColors.border, height: 1),
+                    const SizedBox(height: 16),
+
                     Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
                         TextButton(
                           onPressed: () => Navigator.pop(context),
                           style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 24,
-                              vertical: 16,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
+                            foregroundColor: SupabaseColors.textSecondary,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                           ),
-                          child: Text(
-                            'Cancelar',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              color: isDark ? Colors.white60 : Colors.black54,
-                            ),
-                          ),
+                          child: const Text('Cancelar', style: TextStyle(fontSize: 13)),
                         ),
-                        const SizedBox(width: 12),
-                        Container(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                t.colorScheme.primary,
-                                t.colorScheme.secondary,
-                              ],
-                            ),
-                            borderRadius: BorderRadius.circular(12),
-                            boxShadow: [
-                              BoxShadow(
-                                color: t.colorScheme.primary.withOpacity(0.4),
-                                blurRadius: 16,
-                                offset: const Offset(0, 8),
-                              ),
-                            ],
-                          ),
-                          child: ElevatedButton(
-                            onPressed: _submit,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.transparent,
-                              shadowColor: Colors.transparent,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 32,
-                                vertical: 16,
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.rocket_launch_rounded, size: 20),
-                                SizedBox(width: 8),
-                                Text(
-                                  'Criar Projeto',
-                                  style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.black87,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
+                        const SizedBox(width: 8),
+                        _PrimaryButton(
+                          label: 'Criar Projeto',
+                          icon: Icons.rocket_launch_rounded,
+                          onPressed: _submit,
                         ),
                       ],
                     ),
                   ],
                 ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CloseBtn extends StatelessWidget {
+  const _CloseBtn({required this.onPressed});
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(4),
+        child: const Padding(
+          padding: EdgeInsets.all(4),
+          child: Icon(Icons.close_rounded, size: 18, color: SupabaseColors.textMuted),
+        ),
+      ),
+    );
+  }
+}
+
+class _PrimaryButton extends StatefulWidget {
+  const _PrimaryButton({required this.label, required this.icon, required this.onPressed});
+  final String label;
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  @override
+  State<_PrimaryButton> createState() => _PrimaryButtonState();
+}
+
+class _PrimaryButtonState extends State<_PrimaryButton> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        decoration: BoxDecoration(
+          color: _hover ? SupabaseColors.brandLight : SupabaseColors.brand,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onPressed,
+            borderRadius: BorderRadius.circular(6),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(widget.icon, size: 16, color: SupabaseColors.bg100),
+                  const SizedBox(width: 8),
+                  Text(
+                    widget.label,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: SupabaseColors.bg100,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),

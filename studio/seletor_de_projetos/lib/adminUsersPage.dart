@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:seletor_de_projetos/main.dart';
 import 'package:seletor_de_projetos/session.dart';
+import 'package:seletor_de_projetos/supabase_colors.dart';
 import 'package:seletor_de_projetos/userProjectsAdminScreen.dart';
 import 'createUserDialog.dart';
 
@@ -13,7 +13,8 @@ class AdminUsersPage extends StatefulWidget {
   State<AdminUsersPage> createState() => _AdminUsersPageState();
 }
 
-class _AdminUsersPageState extends State<AdminUsersPage> with SingleTickerProviderStateMixin {
+class _AdminUsersPageState extends State<AdminUsersPage>
+    with SingleTickerProviderStateMixin {
   late Future<UserListResponse> _usersFuture;
   bool _isLoading = false;
   late AnimationController _fadeController;
@@ -25,7 +26,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> with SingleTickerProvid
     _refreshUsers();
 
     _fadeController = AnimationController(
-      duration: const Duration(milliseconds: 500),
+      duration: const Duration(milliseconds: 400),
       vsync: this,
     );
     _fadeAnimation = CurvedAnimation(
@@ -64,7 +65,6 @@ class _AdminUsersPageState extends State<AdminUsersPage> with SingleTickerProvid
       }
 
       final data = jsonDecode(response.body);
-
       if (data == null) {
         throw Exception('Dados inválidos retornados pela API');
       }
@@ -89,78 +89,45 @@ class _AdminUsersPageState extends State<AdminUsersPage> with SingleTickerProvid
   Future<void> _toggleUserStatus(UserInfo user) async {
     if (_isLoading) return;
 
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        backgroundColor: isDark ? const Color(0xFF1A1F2E) : Colors.white,
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: user.isActive ? Colors.red.withOpacity(0.15) : Colors.green.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(
-                user.isActive ? Icons.block_rounded : Icons.check_circle_rounded,
-                color: user.isActive ? Colors.red : Colors.green,
-                size: 24,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                user.isActive ? 'Desativar usuário?' : 'Ativar usuário?',
-                style: const TextStyle(fontSize: 18),
-              ),
-            ),
-          ],
-        ),
+      builder: (ctx) => _ConfirmDialog(
+        title: user.isActive ? 'Desativar usuário?' : 'Ativar usuário?',
+        icon: user.isActive ? Icons.block_rounded : Icons.check_circle_rounded,
+        iconColor: user.isActive ? SupabaseColors.error : SupabaseColors.success,
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildInfoRow(Icons.person_rounded, 'Usuário', user.displayName, isDark),
-            const SizedBox(height: 8),
-            _buildInfoRow(Icons.account_circle_rounded, 'Login', user.username, isDark),
-            const SizedBox(height: 8),
-            _buildInfoRow(Icons.email_rounded, 'Email', user.emailHint, isDark),
+            _InfoRow(icon: Icons.person_rounded, label: 'Usuário', value: user.displayName),
+            const SizedBox(height: 6),
+            _InfoRow(icon: Icons.account_circle_rounded, label: 'Login', value: user.username),
+            const SizedBox(height: 6),
+            _InfoRow(icon: Icons.email_rounded, label: 'Email', value: user.emailHint),
             const SizedBox(height: 16),
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: user.isActive
-                    ? Colors.red.withOpacity(0.1)
-                    : Colors.green.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
+                color: (user.isActive ? SupabaseColors.error : SupabaseColors.success).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(6),
                 border: Border.all(
-                  color: user.isActive
-                      ? Colors.red.withOpacity(0.3)
-                      : Colors.green.withOpacity(0.3),
+                  color: (user.isActive ? SupabaseColors.error : SupabaseColors.success).withOpacity(0.2),
                 ),
               ),
               child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Icon(
                     Icons.info_outline_rounded,
-                    color: user.isActive ? Colors.red : Colors.green,
-                    size: 20,
+                    color: user.isActive ? SupabaseColors.error : SupabaseColors.success,
+                    size: 16,
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       user.isActive
                           ? 'Desativar removerá o acesso e pode afetar projetos existentes.'
                           : 'Ativar restaurará o acesso do usuário.',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: isDark ? Colors.white70 : Colors.black87,
-                      ),
+                      style: const TextStyle(fontSize: 12, color: SupabaseColors.textSecondary),
                     ),
                   ),
                 ],
@@ -168,22 +135,8 @@ class _AdminUsersPageState extends State<AdminUsersPage> with SingleTickerProvid
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(
-              backgroundColor: user.isActive ? Colors.red : Colors.green,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: Text(user.isActive ? 'Desativar' : 'Ativar'),
-          ),
-        ],
+        confirmLabel: user.isActive ? 'Desativar' : 'Ativar',
+        confirmColor: user.isActive ? SupabaseColors.error : SupabaseColors.success,
       ),
     );
 
@@ -199,48 +152,22 @@ class _AdminUsersPageState extends State<AdminUsersPage> with SingleTickerProvid
       );
 
       if (response.statusCode == 200) {
-        _showSnackBar(
+        _showSnack(
           user.isActive
-              ? 'Usuário ${user.username} desativado com sucesso'
-              : 'Usuário ${user.username} ativado com sucesso',
-          Colors.green,
+              ? 'Usuário ${user.username} desativado'
+              : 'Usuário ${user.username} ativado',
+          SupabaseColors.success,
         );
         _refreshUsers();
       } else {
         final error = jsonDecode(response.body)['error'] ?? 'Erro desconhecido';
-        _showSnackBar('Erro: $error', Colors.red);
+        _showSnack('Erro: $error', SupabaseColors.error);
       }
     } catch (e) {
-      _showSnackBar('Erro: $e', Colors.red);
+      _showSnack('Erro: $e', SupabaseColors.error);
     } finally {
       setState(() => _isLoading = false);
     }
-  }
-
-  Widget _buildInfoRow(IconData icon, String label, String value, bool isDark) {
-    return Row(
-      children: [
-        Icon(icon, size: 16, color: isDark ? Colors.white54 : Colors.black54),
-        const SizedBox(width: 8),
-        Text(
-          '$label: ',
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: isDark ? Colors.white70 : Colors.black87,
-          ),
-        ),
-        Expanded(
-          child: Text(
-            value,
-            style: TextStyle(
-              fontSize: 13,
-              color: isDark ? Colors.white60 : Colors.black54,
-            ),
-          ),
-        ),
-      ],
-    );
   }
 
   Future<void> _showCreateUserDialog() async {
@@ -249,62 +176,58 @@ class _AdminUsersPageState extends State<AdminUsersPage> with SingleTickerProvid
       builder: (context) => CreateUserDialog(
         onUserCreated: () {
           _refreshUsers();
-          _showSnackBar('Usuário criado com sucesso!', Colors.green);
+          _showSnack('Usuário criado com sucesso!', SupabaseColors.success);
         },
       ),
     );
   }
 
-  void _showSnackBar(String message, Color color) {
+  void _showSnack(String message, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
+        content: Text(message, style: const TextStyle(color: Colors.white)),
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         margin: const EdgeInsets.all(16),
-        duration: const Duration(seconds: 4),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0A0E1A) : const Color(0xFFF5F7FA),
+      backgroundColor: SupabaseColors.bg100,
       body: CustomScrollView(
         slivers: [
-          SliverAppBar.large(
+          SliverAppBar(
             floating: true,
             pinned: true,
-            backgroundColor: isDark ? const Color(0xFF0F1419) : Colors.white,
+            expandedHeight: 100,
+            backgroundColor: SupabaseColors.bg100,
             surfaceTintColor: Colors.transparent,
             elevation: 0,
             flexibleSpace: FlexibleSpaceBar(
-              titlePadding: const EdgeInsets.only(left: 60, bottom: 16),
-              title: Column(
+              titlePadding: const EdgeInsets.only(left: 56, bottom: 16),
+              title: const Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     'Gerenciar Usuários',
                     style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      color: isDark ? Colors.white : Colors.black87,
-                      letterSpacing: -0.5,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w600,
+                      color: SupabaseColors.textPrimary,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  SizedBox(height: 2),
                   Text(
                     'Administração de contas',
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: 11,
                       fontWeight: FontWeight.normal,
-                      color: isDark ? Colors.white54 : Colors.black45,
+                      color: SupabaseColors.textMuted,
                     ),
                   ),
                 ],
@@ -315,12 +238,10 @@ class _AdminUsersPageState extends State<AdminUsersPage> with SingleTickerProvid
                 padding: const EdgeInsets.only(right: 16, top: 8),
                 child: IconButton(
                   onPressed: _refreshUsers,
-                  icon: const Icon(Icons.refresh_rounded),
+                  icon: const Icon(Icons.refresh_rounded, size: 20),
                   tooltip: 'Atualizar lista',
                   style: IconButton.styleFrom(
-                    backgroundColor: isDark
-                        ? Colors.white.withOpacity(0.08)
-                        : Colors.black.withOpacity(0.05),
+                    backgroundColor: SupabaseColors.surface200,
                   ),
                 ),
               ),
@@ -348,56 +269,33 @@ class _AdminUsersPageState extends State<AdminUsersPage> with SingleTickerProvid
           ),
         ],
       ),
-      floatingActionButton: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [t.colorScheme.primary, t.colorScheme.secondary],
-          ),
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: t.colorScheme.primary.withOpacity(0.4),
-              blurRadius: 20,
-              offset: const Offset(0, 10),
-            ),
-          ],
-        ),
-        child: FloatingActionButton.extended(
-          onPressed: _showCreateUserDialog,
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          icon: const Icon(Icons.person_add_rounded),
-          label: const Text('Novo Usuário'),
-        ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _showCreateUserDialog,
+        backgroundColor: SupabaseColors.brand,
+        foregroundColor: SupabaseColors.bg100,
+        elevation: 0,
+        icon: const Icon(Icons.person_add_rounded, size: 20),
+        label: const Text('Novo Usuário', style: TextStyle(fontWeight: FontWeight.w500)),
       ),
     );
   }
 
   Widget _buildLoading() {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
-    return Padding(
-      padding: const EdgeInsets.all(80),
+    return const Padding(
+      padding: EdgeInsets.all(80),
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             SizedBox(
-              width: 50,
-              height: 50,
-              child: CircularProgressIndicator(
-                strokeWidth: 3,
-                color: t.colorScheme.primary,
-              ),
+              width: 32,
+              height: 32,
+              child: CircularProgressIndicator(strokeWidth: 2, color: SupabaseColors.brand),
             ),
-            const SizedBox(height: 24),
+            SizedBox(height: 16),
             Text(
               'Carregando usuários...',
-              style: TextStyle(
-                color: isDark ? Colors.white70 : Colors.black54,
-                fontSize: 15,
-              ),
+              style: TextStyle(color: SupabaseColors.textMuted, fontSize: 13),
             ),
           ],
         ),
@@ -406,9 +304,6 @@ class _AdminUsersPageState extends State<AdminUsersPage> with SingleTickerProvid
   }
 
   Widget _buildError(String error) {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
     return Padding(
       padding: const EdgeInsets.all(40),
       child: Center(
@@ -416,40 +311,37 @@ class _AdminUsersPageState extends State<AdminUsersPage> with SingleTickerProvid
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.1),
-                shape: BoxShape.circle,
+                color: SupabaseColors.error.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(Icons.error_outline_rounded, size: 64, color: Colors.red),
+              child: const Icon(Icons.error_outline_rounded, size: 40, color: SupabaseColors.error),
             ),
-            const SizedBox(height: 24),
-            Text(
+            const SizedBox(height: 20),
+            const Text(
               'Erro ao carregar usuários',
               style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white : Colors.black87,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: SupabaseColors.textPrimary,
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Text(
               error,
               textAlign: TextAlign.center,
-              style: TextStyle(
-                color: isDark ? Colors.white60 : Colors.black54,
-              ),
+              style: const TextStyle(color: SupabaseColors.textMuted, fontSize: 13),
             ),
-            const SizedBox(height: 24),
-            FilledButton.icon(
+            const SizedBox(height: 20),
+            TextButton.icon(
               onPressed: _refreshUsers,
-              icon: const Icon(Icons.refresh_rounded),
+              icon: const Icon(Icons.refresh_rounded, size: 18),
               label: const Text('Tentar novamente'),
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+              style: TextButton.styleFrom(
+                backgroundColor: SupabaseColors.brand,
+                foregroundColor: SupabaseColors.bg100,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               ),
             ),
           ],
@@ -463,7 +355,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> with SingleTickerProvid
       padding: const EdgeInsets.all(24),
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1200),
+          constraints: const BoxConstraints(maxWidth: 1000),
           child: Column(
             children: [
               _buildSummaryCards(data.summary),
@@ -471,13 +363,15 @@ class _AdminUsersPageState extends State<AdminUsersPage> with SingleTickerProvid
               data.users.isEmpty
                   ? _buildEmptyState()
                   : Column(
-                children: data.users.map((user) => _UserCard(
+                children: data.users
+                    .map((user) => _UserCard(
                   user: user,
                   onToggle: () => _toggleUserStatus(user),
                   isLoading: _isLoading,
                   isMe: user.id == Session().myId,
                   canToggle: Session().isSysAdmin && user.id != Session().myId,
-                )).toList(),
+                ))
+                    .toList(),
               ),
             ],
           ),
@@ -487,9 +381,6 @@ class _AdminUsersPageState extends State<AdminUsersPage> with SingleTickerProvid
   }
 
   Widget _buildSummaryCards(UserSummary summary) {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
     return Row(
       children: [
         Expanded(
@@ -497,28 +388,25 @@ class _AdminUsersPageState extends State<AdminUsersPage> with SingleTickerProvid
             icon: Icons.people_rounded,
             label: 'Total',
             value: summary.total.toString(),
-            color: t.colorScheme.primary,
-            isDark: isDark,
+            color: SupabaseColors.brand,
           ),
         ),
-        const SizedBox(width: 16),
+        const SizedBox(width: 12),
         Expanded(
           child: _SummaryCard(
             icon: Icons.check_circle_rounded,
             label: 'Ativos',
             value: summary.active.toString(),
-            color: Colors.green,
-            isDark: isDark,
+            color: SupabaseColors.success,
           ),
         ),
-        const SizedBox(width: 16),
+        const SizedBox(width: 12),
         Expanded(
           child: _SummaryCard(
             icon: Icons.block_rounded,
             label: 'Inativos',
             value: summary.inactive.toString(),
-            color: Colors.red,
-            isDark: isDark,
+            color: SupabaseColors.error,
           ),
         ),
       ],
@@ -526,38 +414,30 @@ class _AdminUsersPageState extends State<AdminUsersPage> with SingleTickerProvid
   }
 
   Widget _buildEmptyState() {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
     return Padding(
       padding: const EdgeInsets.all(40),
       child: Column(
         children: [
           Container(
-            width: 120,
-            height: 120,
+            width: 80,
+            height: 80,
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  t.colorScheme.primary.withOpacity(0.2),
-                  t.colorScheme.secondary.withOpacity(0.1),
-                ],
-              ),
-              shape: BoxShape.circle,
+              color: SupabaseColors.surface200,
+              borderRadius: BorderRadius.circular(16),
             ),
-            child: Icon(
+            child: const Icon(
               Icons.people_outline_rounded,
-              size: 56,
-              color: t.colorScheme.primary,
+              size: 36,
+              color: SupabaseColors.textMuted,
             ),
           ),
-          const SizedBox(height: 24),
-          Text(
+          const SizedBox(height: 20),
+          const Text(
             'Nenhum usuário encontrado',
             style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: isDark ? Colors.white : Colors.black87,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: SupabaseColors.textPrimary,
             ),
           ),
         ],
@@ -572,68 +452,48 @@ class _SummaryCard extends StatelessWidget {
     required this.label,
     required this.value,
     required this.color,
-    required this.isDark,
   });
 
   final IconData icon;
   final String label;
   final String value;
   final Color color;
-  final bool isDark;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: isDark
-              ? [const Color(0xFF1A1F2E), const Color(0xFF12161F)]
-              : [Colors.white, Colors.grey[50]!],
-        ),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: color.withOpacity(0.3),
-          width: 1.5,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: isDark ? Colors.black.withOpacity(0.3) : Colors.black.withOpacity(0.08),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        color: SupabaseColors.surface100,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.3)),
       ),
       child: Column(
         children: [
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
               color: color.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(icon, color: color, size: 32),
+            child: Icon(icon, color: color, size: 24),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           Text(
             value,
             style: TextStyle(
-              fontSize: 32,
+              fontSize: 28,
               fontWeight: FontWeight.bold,
               color: color,
-              letterSpacing: -1,
             ),
           ),
           const SizedBox(height: 4),
           Text(
             label,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.5,
-              color: isDark ? Colors.white54 : Colors.black54,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              color: SupabaseColors.textMuted,
             ),
           ),
         ],
@@ -659,73 +519,40 @@ class _UserCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context);
-    final isDark = t.brightness == Brightness.dark;
-
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        gradient: isMe
-            ? LinearGradient(
-          colors: [
-            t.colorScheme.primary.withOpacity(0.15),
-            t.colorScheme.secondary.withOpacity(0.1),
-          ],
-        )
-            : LinearGradient(
-          colors: isDark
-              ? [const Color(0xFF1A1F2E), const Color(0xFF12161F)]
-              : [Colors.white, Colors.grey[50]!],
-        ),
-        borderRadius: BorderRadius.circular(20),
+        color: isMe ? SupabaseColors.brand.withOpacity(0.1) : SupabaseColors.surface100,
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: isMe
-              ? t.colorScheme.primary.withOpacity(0.3)
-              : (isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08)),
-          width: 1.5,
+          color: isMe ? SupabaseColors.brand.withOpacity(0.3) : SupabaseColors.border,
         ),
-        boxShadow: [
-          BoxShadow(
-            color: isDark ? Colors.black.withOpacity(0.3) : Colors.black.withOpacity(0.08),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
       ),
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(16),
         child: Row(
           children: [
             Container(
-              width: 56,
-              height: 56,
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: user.isActive
-                      ? [Colors.green.shade400, Colors.green.shade600]
-                      : [Colors.red.shade400, Colors.red.shade600],
-                ),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: (user.isActive ? Colors.green : Colors.red).withOpacity(0.3),
-                    blurRadius: 8,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
+                color: user.isActive
+                    ? SupabaseColors.success.withOpacity(0.2)
+                    : SupabaseColors.error.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(8),
               ),
               child: Center(
                 child: Text(
                   isMe ? 'EU' : user.displayName.substring(0, 1).toUpperCase(),
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: user.isActive ? SupabaseColors.success : SupabaseColors.error,
                     fontWeight: FontWeight.bold,
-                    fontSize: 20,
+                    fontSize: 16,
                   ),
                 ),
               ),
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -733,69 +560,57 @@ class _UserCard extends StatelessWidget {
                   Text(
                     isMe ? '${user.displayName} (você)' : user.displayName,
                     style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
                       decoration: user.isActive ? null : TextDecoration.lineThrough,
-                      color: isDark ? Colors.white : Colors.black87,
+                      color: SupabaseColors.textPrimary,
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Icon(Icons.account_circle_rounded, size: 14, color: isDark ? Colors.white54 : Colors.black54),
-                      const SizedBox(width: 6),
-                      Text(
-                        user.username,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: isDark ? Colors.white60 : Colors.black54,
-                        ),
-                      ),
-                    ],
                   ),
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      Icon(Icons.email_rounded, size: 14, color: isDark ? Colors.white54 : Colors.black54),
-                      const SizedBox(width: 6),
+                      const Icon(Icons.account_circle_rounded, size: 12, color: SupabaseColors.textMuted),
+                      const SizedBox(width: 4),
                       Text(
-                        user.emailHint,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: isDark ? Colors.white60 : Colors.black54,
+                        user.username,
+                        style: const TextStyle(fontSize: 12, color: SupabaseColors.textMuted),
+                      ),
+                      const SizedBox(width: 12),
+                      const Icon(Icons.email_rounded, size: 12, color: SupabaseColors.textMuted),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          user.emailHint,
+                          style: const TextStyle(fontSize: 12, color: SupabaseColors.textMuted),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
                       color: user.isActive
-                          ? Colors.green.withOpacity(0.15)
-                          : Colors.red.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: user.isActive
-                            ? Colors.green.withOpacity(0.3)
-                            : Colors.red.withOpacity(0.3),
-                      ),
+                          ? SupabaseColors.success.withOpacity(0.15)
+                          : SupabaseColors.error.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(4),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
                           user.isActive ? Icons.check_circle_rounded : Icons.block_rounded,
-                          size: 14,
-                          color: user.isActive ? Colors.green : Colors.red,
+                          size: 12,
+                          color: user.isActive ? SupabaseColors.success : SupabaseColors.error,
                         ),
-                        const SizedBox(width: 6),
+                        const SizedBox(width: 4),
                         Text(
                           user.status.toUpperCase(),
                           style: TextStyle(
-                            color: user.isActive ? Colors.green : Colors.red,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 11,
+                            color: user.isActive ? SupabaseColors.success : SupabaseColors.error,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 10,
                             letterSpacing: 0.5,
                           ),
                         ),
@@ -805,66 +620,46 @@ class _UserCard extends StatelessWidget {
                 ],
               ),
             ),
+
             if (isLoading)
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: t.colorScheme.primary.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(12),
+                  color: SupabaseColors.brand.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(6),
                 ),
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(t.colorScheme.primary),
-                  ),
+                child: const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: SupabaseColors.brand),
                 ),
               )
             else if (canToggle)
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Container(
-                    decoration: BoxDecoration(
-                      color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.03),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: IconButton(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => UserProjectsAdminScreen(
-                              userIdHash: user.id,
-                              userName: user.username,
-                            ),
+                  _IconBtn(
+                    icon: Icons.folder_rounded,
+                    tooltip: 'Ver projetos',
+                    color: SupabaseColors.brand,
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => UserProjectsAdminScreen(
+                            userIdHash: user.id,
+                            userName: user.username,
                           ),
-                        );
-                      },
-                      icon: Icon(
-                        Icons.folder_rounded,
-                        color: t.colorScheme.primary,
-                      ),
-                      tooltip: 'Ver projetos',
-                    ),
+                        ),
+                      );
+                    },
                   ),
-                  const SizedBox(width: 8),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: user.isActive
-                          ? Colors.red.withOpacity(0.15)
-                          : Colors.green.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: IconButton(
-                      onPressed: onToggle,
-                      icon: Icon(
-                        user.isActive ? Icons.block_rounded : Icons.check_circle_rounded,
-                        color: user.isActive ? Colors.red : Colors.green,
-                      ),
-                      tooltip: user.isActive ? 'Desativar usuário' : 'Ativar usuário',
-                    ),
+                  const SizedBox(width: 6),
+                  _IconBtn(
+                    icon: user.isActive ? Icons.block_rounded : Icons.check_circle_rounded,
+                    tooltip: user.isActive ? 'Desativar' : 'Ativar',
+                    color: user.isActive ? SupabaseColors.error : SupabaseColors.success,
+                    onPressed: onToggle,
                   ),
                 ],
               ),
@@ -875,26 +670,137 @@ class _UserCard extends StatelessWidget {
   }
 }
 
+class _IconBtn extends StatelessWidget {
+  const _IconBtn({
+    required this.icon,
+    required this.tooltip,
+    required this.color,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final Color color;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: color.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(6),
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(6),
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Icon(icon, color: color, size: 18),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InfoRow extends StatelessWidget {
+  const _InfoRow({required this.icon, required this.label, required this.value});
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 14, color: SupabaseColors.textMuted),
+        const SizedBox(width: 8),
+        Text(
+          '$label: ',
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: SupabaseColors.textSecondary),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(fontSize: 12, color: SupabaseColors.textMuted),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ConfirmDialog extends StatelessWidget {
+  const _ConfirmDialog({
+    required this.title,
+    required this.icon,
+    required this.iconColor,
+    required this.content,
+    required this.confirmLabel,
+    required this.confirmColor,
+  });
+
+  final String title;
+  final IconData icon;
+  final Color iconColor;
+  final Widget content;
+  final String confirmLabel;
+  final Color confirmColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: SupabaseColors.bg200,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: const BorderSide(color: SupabaseColors.border),
+      ),
+      title: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: iconColor.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Icon(icon, color: iconColor, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Text(title, style: const TextStyle(fontSize: 16, color: SupabaseColors.textPrimary)),
+        ],
+      ),
+      content: content,
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Cancelar', style: TextStyle(color: SupabaseColors.textMuted)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, true),
+          style: TextButton.styleFrom(
+            backgroundColor: confirmColor,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          ),
+          child: Text(confirmLabel),
+        ),
+      ],
+    );
+  }
+}
+
 class UserListResponse {
   final List<UserInfo> users;
   final UserSummary summary;
   final int timestamp;
 
-  UserListResponse({
-    required this.users,
-    required this.summary,
-    required this.timestamp,
-  });
+  UserListResponse({required this.users, required this.summary, required this.timestamp});
 
   factory UserListResponse.fromJson(Map<String, dynamic> json) {
     List<UserInfo> usersList = [];
     if (json['users'] != null) {
       if (json['users'] is List) {
-        usersList = (json['users'] as List)
-            .map((u) => UserInfo.fromJson(u))
-            .toList();
-      } else if (json['users'] is Map && (json['users'] as Map).isEmpty) {
-        usersList = [];
+        usersList = (json['users'] as List).map((u) => UserInfo.fromJson(u)).toList();
       }
     }
 
@@ -940,11 +846,7 @@ class UserSummary {
   final int active;
   final int inactive;
 
-  UserSummary({
-    required this.total,
-    required this.active,
-    required this.inactive,
-  });
+  UserSummary({required this.total, required this.active, required this.inactive});
 
   factory UserSummary.fromJson(Map<String, dynamic> json) {
     return UserSummary(
