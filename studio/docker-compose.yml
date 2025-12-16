@@ -36,7 +36,7 @@ services:
       - ./authelia:/config
   studio:
     container_name: supabase-studio
-    image: supabase/studio:20250324-13e75a5
+    image: supabase/studio:2025.11.03-sha-ddedae5
     restart: unless-stopped
     environment:
       STUDIO_PG_META_URL: https://nginx:443/api/platform/pg-meta

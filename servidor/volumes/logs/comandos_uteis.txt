@@ -78,9 +78,6 @@ SELECT
     (SELECT MAX(timestamp) FROM public.logs) as log_mais_recente,
     pg_size_pretty(pg_database_size('logs_db')) as tamanho_total_db;
 
--- ============================================
--- 🔧 COMANDOS DE MANUTENÇÃO E MONITORAMENTO
--- ============================================
 
 -- 9️⃣ Ver status do cron job de manutenção
 \c postgres
@@ -139,9 +136,6 @@ DELETE FROM public.logs
 WHERE container_name = 'teste-container' 
   AND message LIKE '%teste%';
 
--- ============================================
--- 📈 QUERIES AVANÇADAS (pra mostrar pra chefia)
--- ============================================
 
 -- 1️⃣5️⃣ Taxa de logs por minuto (últimas 2 horas)
 SELECT 
