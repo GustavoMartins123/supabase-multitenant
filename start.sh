@@ -5,6 +5,7 @@ set -e
 echo "▶️  Iniciando a base de dados e serviços Supabase..."
 cd servidor
 docker compose -f docker-compose.yml --env-file .env --env-file secrets/.env up --build -d
+docker compose  -f docker-compose-api.yml --env-file secrets/.env   --env-file .env up --build -d
 echo "✅ Serviços Supabase iniciados. Aguardando o banco de dados ficar pronto..."
 
 
