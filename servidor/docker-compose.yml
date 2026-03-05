@@ -12,7 +12,6 @@ services:
     build:
       context: ./volumes/db
     restart: unless-stopped
-    user: "105:106"
     env_file:
       - secrets/.env
       - .env
@@ -20,8 +19,6 @@ services:
       rede-supabase:
         ipv4_address: ${POSTGRES_HOST}
     volumes:
-      # wal files
-      - ./volumes/db/wal_archives:/wal-archive
       - ./volumes/db/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql:Z
       # Must be superuser to create event trigger
       - ./volumes/db/webhooks.sql:/docker-entrypoint-initdb.d/init-scripts/98-webhooks.sql:Z
@@ -232,6 +229,8 @@ services:
       TENANT_MAX_CONCURRENT_USERS: "1000"
       TENANT_MAX_EVENTS_PER_SECOND: "500"
       TENANT_MAX_JOINS_PER_SECOND: "30"
+      LOG_LEVEL: "warning"
+      METRICS_ENABLED: "false"
 
   supavisor:
     container_name: supabase-pooler

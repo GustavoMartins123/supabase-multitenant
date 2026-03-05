@@ -13,7 +13,7 @@ services:
       - ./acme.json:/acme.json 
       - ./access.log:/var/log/traefik/access.log
       - ./middlewares.yml:/etc/traefik/dynamic/middlewares.yml
-      - traefik-plugins:/plugins-local
+      - ./plugins-storage:/plugins-storage
     labels:  
       - "traefik.enable=true"
 
@@ -48,6 +48,3 @@ services:
 networks:
   rede-supabase:
     external: true
-
-volumes:
-  traefik-plugins:
