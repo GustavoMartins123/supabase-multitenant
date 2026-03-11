@@ -20,7 +20,7 @@ COPY lyaml-6.2.8-1.src /tmp/lyaml-6.2.8-1.src
 RUN cd /tmp/lyaml-6.2.8-1.src && \
     luarocks install lyaml-6.2.8-1.rockspec
 
-RUN opm get xiaocang/lua-resty-openssl \
+RUN luarocks install https://luarocks.org/manifests/fffonion/lua-resty-openssl-1.7.1-1.rockspec \
 && opm get jkeys089/lua-resty-hmac \
  && opm get ledgetech/lua-resty-http
 
@@ -32,7 +32,7 @@ RUN luarocks install https://luarocks.org/manifests/rsander/lua-resty-string-0.0
     && luarocks install https://luarocks.org/manifests/leafo/pgmoon-1.16.0-1.rockspec
 
 COPY nginx/nginx.conf /etc/nginx/nginx.conf
-COPY nginx/lua/get_service_key.lua /usr/local/openresty/lualib/ 
+COPY nginx/lua/ /usr/local/openresty/lualib/
 COPY --from=builder /app/build/web /usr/share/nginx/html
 COPY nginx/docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
