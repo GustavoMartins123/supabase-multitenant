@@ -2,6 +2,9 @@
 
 Por padrão, a plataforma utiliza uma arquitetura descentralizada para o envio de notificações push via Firebase Cloud Messaging (FCM). O roteamento e a assinatura de segurança (OAuth2) acontecem na borda (Gateway Nginx), enquanto um *Worker* assíncrono em Python gerencia as filas usando um padrão híbrido de escuta ativa (LISTEN/NOTIFY) no PostgreSQL.
 
+> [!NOTE]
+> A infraestrutura do **Gateway (Nginx + Lua)** já vem **100% configurada**. O endpoint `/api/internal/push` e a lógica de autenticação JWT com o Google já estão prontos para uso, bastando apenas o arquivo de credenciais.
+
 Os passos a seguir configuram as credenciais do Google e preparam o banco de dados dos projetos para se integrarem a esse fluxo.
 
 ### ⚠️ Pré-requisitos
@@ -14,15 +17,15 @@ Antes de prosseguir, certifique-se de que:
 
 ---
 
-### Passo 1: Configurar a Chave do Firebase no Gateway
+### Passo 1: Fornecer a Chave do Firebase ao Gateway
 
-O script Lua executado pelo Nginx precisa da chave de serviço do Google para assinar o JWT de autenticação e disparar o push. O Nginx possui um volume mapeado para a pasta `./authelia` no host, correspondendo ao diretório `/config` internamente.
+Como o script Lua (`send_push.lua`) já está configurado no Nginx para assinar o JWT e disparar o push, você só precisa fornecer a chave de serviço. O Nginx possui um volume mapeado para a pasta `./authelia` no host, correspondendo ao diretório `/config` internamente.
 
 **1.1. Renomear e Posicionar o Arquivo**
 
-Pegue o arquivo JSON baixado do Firebase Console, renomeie-o para `firebase.json` e mova-o para dentro da pasta `authelia` do seu servidor Gateway.
+Pegue o arquivo JSON baixado do Firebase Console, renomeie-o para `firebase.json` e mova-o para dentro da pasta `authelia` do seu servidor Gateway. A rota `/api/internal/push` utilizará este arquivo automaticamente.
 
-Execute o comando a partir da raiz do seu servidor de borda (Máquina 59):
+Execute o comando a partir da raiz do seu servidor de borda:
 
 ```bash
 # Move o arquivo para a pasta que o Nginx lê como /config
@@ -179,4 +182,4 @@ Acesse o contêiner do Nginx no servidor do Studio e leia o arquivo de log de er
 ```bash
 docker exec -it nginx bash
 cat /var/log/studio_error.log
-``
+```
