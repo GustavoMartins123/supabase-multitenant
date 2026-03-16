@@ -6,3 +6,4 @@ servidor/docker/volumes/db/data/*
 servidor/docker/secrets/*
 
 studio/.env
+tarefas.md
