@@ -1,5 +1,8 @@
 #docker compose  --env-file secrets/.env     --env-file .env up --build -d
 
+#Caso for usar wal arquives descomente essa linha:
+#- archive_command=/bin/cp %p /wal-archive/%f
+#Erro possivel
 #/bin/cp: cannot create regular file '/wal-archive/0000000100000004000000E2': Permission denied
 # Descubra o UID do processo postgres dentro do container
 # docker exec supabase-db id postgres
@@ -166,8 +169,8 @@ services:
       - -c
       - archive_mode=on
       #- archive_command='test ! -f /wal-archive/%f && cp %p /wal-archive/%f'
-      - -c
-      - archive_command=/bin/cp %p /wal-archive/%f
+      # - -c
+      # - archive_command=/bin/cp %p /wal-archive/%f
       - -c
       - archive_timeout=3600
       # Parâmetros pgBackRest

@@ -309,6 +309,145 @@ Cada projeto tem:
 
 ---
 
+## Setup Inicial
+
+### Primeira Inicialização do PostgreSQL
+
+Na primeira vez que o PostgreSQL sobe, um script de inicialização cria a estrutura base do sistema.
+
+**Script:** `servidor/volumes/db/create_template.sh`
+
+**Montado em:** `/docker-entrypoint-initdb.d/zzz-create_template.sh`
+
+⚠️ O prefixo `zzz-` garante que este script execute por último, após todos os outros scripts de inicialização do Supabase (roles.sql, jwt.sql, webhooks.sql, etc.).
+
+### O Que o Script Faz
+
+```
+1. Cria schema _analytics
+   CREATE SCHEMA IF NOT EXISTS _analytics;
+   
+   Usado para armazenar métricas e logs do sistema.
+
+2. Cria database _supabase_template (vazio)
+   CREATE DATABASE _supabase_template;
+
+3. Faz dump do database postgres
+   pg_dump -U postgres -d postgres \
+     --exclude-schema=cron \
+     | grep -v "CREATE EXTENSION.*pg_cron" \
+     | grep -v "COMMENT ON EXTENSION pg_cron"
+   
+   Captura toda a estrutura criada pelos scripts de inicialização:
+   - roles.sql (anon, service_role, authenticator, etc.)
+   - jwt.sql (validação JWT)
+   - webhooks.sql, logs.sql, realtime.sql
+   - storage.sql (schemas e functions)
+   - Todas as extensions (pg_net, pgjwt, etc.)
+
+4. Restaura dump em _supabase_template
+   psql -U postgres -d _supabase_template
+   
+   Agora _supabase_template tem toda a estrutura base do Supabase.
+
+5. Cria tabelas do sistema no database postgres
+   
+   A) Tabela projects:
+      CREATE TABLE projects (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        name TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        anon_key TEXT,
+        service_role TEXT
+      );
+   
+   B) Tabela project_members:
+      CREATE TABLE project_members (
+        project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL,
+        role TEXT DEFAULT 'member',
+        PRIMARY KEY (project_id, user_id)
+      );
+   
+   C) Tabela jobs:
+      CREATE TABLE jobs (
+        job_id UUID PRIMARY KEY,
+        project TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT now()
+      );
+
+6. Transforma _supabase_template em template
+   ALTER DATABASE _supabase_template WITH is_template = true;
+   UPDATE pg_database SET datallowconn = false 
+   WHERE datname = '_supabase_template';
+   
+   - is_template = true: Permite usar como template no CREATE DATABASE
+   - datallowconn = false: Impede conexões diretas (proteção)
+```
+
+### Por Que Usar Template?
+
+**Sem template:**
+```sql
+CREATE DATABASE projeto_novo;
+-- Precisa rodar todos os scripts manualmente
+-- Demora ~30 segundos por projeto
+```
+
+**Com template:**
+```sql
+CREATE DATABASE projeto_novo TEMPLATE _supabase_template;
+-- Clona estrutura completa em ~2 segundos
+```
+
+**Vantagens:**
+- Criação de projeto 15x mais rápida
+- Garante que todos os projetos têm estrutura idêntica
+- Não precisa reexecutar migrations
+- Reduz chance de erros
+
+### O Que Está no Template
+
+**Schemas:**
+- `auth` (GoTrue - autenticação)
+- `storage` (Storage - arquivos)
+- `realtime` (Realtime - subscriptions)
+- `extensions` (Extensions instaladas)
+- `public` (Schema padrão do usuário)
+
+**Roles:**
+- `anon` (acesso público)
+- `authenticated` (usuários autenticados)
+- `service_role` (acesso total)
+- `authenticator` (role de conexão)
+- `supabase_auth_admin` (GoTrue)
+- `supabase_storage_admin` (Storage)
+- `pgbouncer` (Supavisor)
+
+**Extensions:**
+- `pg_net` (HTTP requests)
+- `pgjwt` (JWT validation)
+- `uuid-ossp` (UUID generation)
+- `pgcrypto` (Encryption)
+- E outras extensions do Supabase
+
+**Functions e Triggers:**
+- Validação JWT
+- Webhooks
+- Storage policies
+- Realtime triggers
+
+### Quando o Template é Usado
+
+**Criação de projeto:**
+```bash
+CREATE DATABASE _supabase_projeto_novo TEMPLATE _supabase_template;
+```
+
+---
+
 ## Criação de Projeto
 
 ### Fluxo Completo
@@ -359,10 +498,8 @@ Cada projeto tem:
 8. Script cria database no PostgreSQL
    CREATE DATABASE _supabase_meu_projeto TEMPLATE _supabase_template;
    
-   Usa template pré-configurado com:
-   - roles.sql (anon, service_role, authenticator, etc.)
-   - jwt.sql (validação JWT)
-   - webhooks.sql, logs.sql, realtime.sql, etc.
+   Clona estrutura completa do template (ver seção "Setup Inicial").
+   Inclui todos os schemas, roles, extensions, functions e triggers.
 
 9. Script registra tenant no Realtime
    Ver seção "Conceitos Base" para detalhes sobre replication slots.
@@ -404,11 +541,6 @@ Cada projeto tem:
     - Aparece na lista do Flutter
     - Usuário pode acessar via Studio
 ```
-
-**Template _supabase_template:**
-- Criado uma vez no setup inicial
-- Contém todos os schemas e configurações base
-- Cada projeto é clonado desse template
 
 ---
 
@@ -524,8 +656,9 @@ functions/
 ├── projeto_a/     # Functions do projeto A
 └── projeto_b/     # Functions do projeto B
 ```
+---
 
-## Por projeto
+## Por Projeto
 
 ### Postgres-Meta
 
@@ -562,7 +695,6 @@ Retorna JSON com lista de tabelas
 - Cada projeto tem seu próprio container Meta
 
 ---
-
 
 ## Isolamento e Segurança
 
@@ -654,17 +786,234 @@ Gateway: 172.20.0.1
 
 ---
 
+## Observabilidade e Logs
+
+### Vector - Agregação de Logs
+
+O sistema usa **Vector** para coletar e armazenar logs de containers Docker no PostgreSQL.
+
+**Container:** `supabase-vector-global`
+
+**Configuração:** `servidor/volumes/logs/vector.yml`
+
+### Estrutura de Logs
+
+**Database:** `logs_db` (separado do database `postgres`)
+
+**Tabela:** `public.logs` (particionada por mês)
+
+**Schema:**
+```sql
+CREATE TABLE public.logs (
+  timestamp TIMESTAMPTZ NOT NULL,
+  container_id TEXT,
+  container_name TEXT,
+  image TEXT,
+  stream TEXT,              -- stdout ou stderr
+  message TEXT,             -- Conteúdo do log
+  host TEXT,
+  container_created_at TIMESTAMPTZ,
+  label JSONB,
+  source_type TEXT
+) PARTITION BY RANGE (timestamp);
+```
+
+**Índices:**
+- `idx_logs_timestamp` (timestamp DESC)
+- `idx_logs_container_name` (container_name)
+- `idx_logs_stream` (stream)
+
+### Particionamento Automático
+
+**Partições por mês:**
+```
+logs_2025_01  -- Janeiro 2025
+logs_2025_02  -- Fevereiro 2025
+logs_2025_03  -- Março 2025
+logs_default  -- Fallback
+```
+
+**Manutenção automática via pg_cron:**
+- Executa diariamente às 04:00
+- Cria partição para próximos 2 meses
+- Remove partições com mais de 3 meses
+
+```sql
+-- Job agendado
+SELECT cron.schedule(
+  'maintain_logs_partitions_job',
+  '0 4 * * *',
+  $$SELECT maintain_log_partitions()$$
+);
+```
+
+### Serviços Monitorados
+
+Vector coleta logs apenas dos **serviços globais:**
+
+```yaml
+# vector.yml - filtro
+filter_global_services:
+  type: "filter"
+  condition: >-
+    includes([
+      "supabase-db",
+      "supabase-pooler",
+      "realtime-dev.supabase-realtime",
+      "supabase-edge-functions",
+      "docker-projects-api-1",
+      "traefik-traefik-1"
+    ], .container_name)
+```
+
+**Logs de projetos individuais não são coletados** (nginx-projeto-x, gotrue-projeto-x, etc.)
+
+### Como Consultar Logs
+
+**Conectar no database logs_db:**
+```bash
+docker exec -it supabase-db psql -U supabase_admin -d logs_db
+```
+
+**Logs recentes de todos os serviços:**
+```sql
+SELECT timestamp, container_name, stream, message
+FROM public.logs
+ORDER BY timestamp DESC
+LIMIT 100;
+```
+
+**Logs de um serviço específico:**
+```sql
+SELECT timestamp, stream, message
+FROM public.logs
+WHERE container_name = 'supabase-db'
+ORDER BY timestamp DESC
+LIMIT 50;
+```
+
+**Logs de erro (stderr):**
+```sql
+SELECT timestamp, container_name, message
+FROM public.logs
+WHERE stream = 'stderr'
+ORDER BY timestamp DESC
+LIMIT 50;
+```
+
+**Logs de um período específico:**
+```sql
+SELECT timestamp, container_name, message
+FROM public.logs
+WHERE timestamp >= NOW() - INTERVAL '1 hour'
+  AND container_name = 'realtime-dev.supabase-realtime'
+ORDER BY timestamp DESC;
+```
+
+**Buscar por palavra-chave:**
+```sql
+SELECT timestamp, container_name, message
+FROM public.logs
+WHERE message ILIKE '%error%'
+  OR message ILIKE '%exception%'
+ORDER BY timestamp DESC
+LIMIT 100;
+```
+
+**Estatísticas por container:**
+```sql
+SELECT 
+  container_name,
+  COUNT(*) as total_logs,
+  COUNT(*) FILTER (WHERE stream = 'stderr') as errors,
+  MIN(timestamp) as first_log,
+  MAX(timestamp) as last_log
+FROM public.logs
+WHERE timestamp >= NOW() - INTERVAL '24 hours'
+GROUP BY container_name
+ORDER BY total_logs DESC;
+```
+
+### Configuração do Vector
+
+**Variáveis de ambiente:**
+```yaml
+environment:
+  LOGFLARE_API_KEY: ${LOGFLARE_API_KEY}  # Não usado atualmente
+  PG_URI: postgres://vector_writer:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/logs_db
+```
+
+**User dedicado:**
+- Username: `vector_writer`
+- Password: Mesma do `POSTGRES_PASSWORD`
+- Permissões: ALL ON DATABASE logs_db
+
+**Batch de inserção:**
+```yaml
+batch:
+  max_events: 100      # Insere até 100 logs por vez
+  timeout_secs: 1      # Ou a cada 1 segundo
+```
+
+### Retenção de Logs
+
+**Padrão:** 3 meses
+
+**Modificar retenção:**
+
+Editar função `maintain_log_partitions()` em `servidor/volumes/db/vector_logs.sql`:
+
+```sql
+-- Alterar de 3 para 6 meses
+old_month_end date := date_trunc('month', now() - interval '6 months');
+```
+
+Recriar o database logs_db ou executar a função manualmente.
+
+### Limitações
+
+**Logs não coletados:**
+- Containers de projetos individuais
+- Containers excluídos do filtro
+- Logs antes da inicialização do Vector
+
+**Performance:**
+- Partições antigas devem ser dropadas regularmente
+- Índices podem crescer significativamente
+- Considerar archive/backup de partições antigas
+
+### Troubleshooting
+
+**Vector não está coletando logs:**
+```bash
+# Verificar status do Vector
+docker logs supabase-vector-global
+
+# Verificar health
+docker exec supabase-vector-global wget -qO- http://localhost:8686/health
+```
+
+**Tabela logs vazia:**
+```sql
+-- Verificar se user vector_writer existe
+\du vector_writer
+
+-- Verificar permissões
+\dp public.logs
+```
+
+**Partições não sendo criadas:**
+```sql
+-- Verificar job do pg_cron
+SELECT * FROM cron.job WHERE jobname = 'maintain_logs_partitions_job';
+
+-- Executar manualmente
+SELECT maintain_log_partitions();
+```
+
+---
+
 ## Duplicação de Projeto
-
-### Modos de Duplicação
-
-**Schema-Only (padrão):**
-- Copia apenas estrutura (schemas, tabelas, functions, policies)
-- Copia histórico de migrations (auth.schema_migrations, storage.migrations)
-- Não copia dados das tabelas
-- Não copia arquivos do storage
-- Uso: Criar projeto novo com mesma estrutura
-
 **With-Data:**
 - Copia estrutura completa
 - Copia todos os dados das tabelas
@@ -803,6 +1152,171 @@ Se não copiar:
 
 ---
 
+## Deleção de Projeto
+
+### Segurança
+
+A deleção de projeto requer autenticação em múltiplos níveis:
+
+**Senha de Deleção:**
+- Gerada automaticamente no `setup.sh`
+- Armazenada em: `servidor/.env` como `PROJECT_DELETE_PASSWORD`
+- Única para toda a instalação
+- Deve ser enviada no header `X-Delete-Password`
+
+**Permissões:**
+- Apenas usuários do grupo `admin` podem deletar projetos
+- Validado pelo Nginx/Lua (`check_admin.lua`)
+- API Python valida novamente
+
+### Fluxo Completo
+
+**Executado pela API Python, que chama `delete_project.sh`:**
+
+```
+1. Usuário clica em "Deletar Projeto" no Flutter
+   DELETE /api/projects/meu_projeto
+   Headers:
+     Remote-Email: (SHA256 hash)
+     Remote-Groups: admin
+     X-Delete-Password: senha_gerada_no_setup
+
+2. Nginx Studio valida permissões
+   - Verifica se método é DELETE
+   - Verifica se X-Delete-Password está presente
+   - Executa check_admin.lua (valida grupo admin)
+   - Executa admin_projects_delete_check.lua
+
+3. API Python valida credenciais
+   - Verifica se usuário está no grupo admin
+   - Valida senha com hmac.compare_digest()
+   - Verifica se PROJECT_DELETE_PASSWORD está configurado
+
+4. API Python pausa serviços críticos
+   docker pause realtime-dev.supabase-realtime
+   docker pause supabase-pooler
+   
+   Motivo: Evitar conexões ativas durante deleção
+
+5. API Python remove containers do projeto
+   - Lista containers com get_project_containers()
+   - Remove cada container: docker rm -f <container>
+
+6. API Python limpa registros do Realtime
+   DELETE FROM _realtime.extensions WHERE tenant_external_id = 'meu_projeto'
+   DELETE FROM _realtime.tenants WHERE external_id = 'meu_projeto'
+
+7. API Python aguarda 10 segundos
+   Garante que conexões sejam finalizadas
+
+8. API Python termina conexões ativas
+   SELECT pg_terminate_backend(pid)
+   FROM pg_stat_activity
+   WHERE datname = '_supabase_meu_projeto'
+     AND pid <> pg_backend_pid()
+
+9. API Python aguarda 2 segundos
+   Garante que conexões foram terminadas
+
+10. API Python dropa replication slots
+    Chama drop_supabase_replication_slots()
+    Remove slots: supabase_realtime_*_replication_slot_meu_projeto
+
+11. API Python dropa database
+    DROP DATABASE IF EXISTS "_supabase_meu_projeto"
+
+12. API Python limpa tabelas do sistema (database postgres)
+    DELETE FROM project_members WHERE project_id = <id>
+    DELETE FROM jobs WHERE project = 'meu_projeto'
+    DELETE FROM projects WHERE id = <id>
+
+13. API Python limpa registros do Supavisor
+    DELETE FROM _supavisor.users WHERE tenant_external_id = 'meu_projeto'
+    DELETE FROM _supavisor.tenants WHERE external_id = 'meu_projeto'
+
+14. API Python despausa serviços críticos
+    docker unpause realtime-dev.supabase-realtime
+    docker unpause supabase-pooler
+
+15. API Python chama delete_project.sh
+    bash delete_project.sh meu_projeto
+    
+    Script remove diretório físico:
+    rm -rf servidor/projects/meu_projeto/
+
+16. API Python valida deleção
+    - Verifica se database ainda existe
+    - Retorna erros se houver falhas parciais
+
+17. Resposta final
+    {
+      "project": "meu_projeto",
+      "status": "success" | "partial_success",
+      "message": "...",
+      "errors": [...]  // Se houver
+    }
+```
+
+### O Que é Removido
+
+**Containers Docker:**
+- nginx-meu_projeto
+- gotrue-meu_projeto
+- rest-meu_projeto
+- storage-meu_projeto
+- meta-meu_projeto
+- imgproxy-meu_projeto
+
+**Database PostgreSQL:**
+- _supabase_meu_projeto (database completo)
+
+**Registros do Sistema:**
+- Tabela `projects`
+- Tabela `project_members`
+- Tabela `jobs`
+- Tabela `_realtime.tenants`
+- Tabela `_realtime.extensions`
+- Tabela `_supavisor.tenants`
+- Tabela `_supavisor.users`
+
+**Replication Slots:**
+- supabase_realtime_*_replication_slot_meu_projeto
+
+**Arquivos Físicos:**
+- servidor/projects/meu_projeto/ (pasta completa)
+  - docker-compose.yml
+  - .env
+  - nginx/
+  - pooler/
+  - storage/ (todos os arquivos armazenados)
+
+**Roteamento Traefik:**
+- Removido automaticamente quando containers são deletados
+
+### Por Que Pausar Realtime e Supavisor?
+
+Durante a deleção, conexões ativas podem causar:
+- Locks no database impedindo DROP DATABASE
+- Tentativas de reconexão durante a deleção
+- Erros de replication slot em uso
+
+Pausar os containers garante que:
+- Nenhuma nova conexão é criada
+- Conexões existentes podem ser terminadas
+- Deleção ocorre de forma limpa
+
+### Tratamento de Erros
+
+A API retorna `partial_success` se:
+- Containers não foram removidos completamente
+- Replication slots não foram dropados
+- Database ainda existe após DROP DATABASE
+- Script delete_project.sh falhou
+
+Todos os erros são retornados no array `errors` da resposta.
+
+---
+
 ## Limitações e Escalabilidade
 
 ### Limitações Atuais
@@ -824,7 +1338,7 @@ Se não copiar:
 - Facilita backups centralizados
 - Supavisor gerencia pools eficientemente
 
-
+---
 
 ## Diagramas de Fluxo
 
