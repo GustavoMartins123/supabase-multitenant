@@ -40,7 +40,6 @@ Para criar usuários manualmente ou fazer a configuração inicial, você precis
 Primeiro, gere o hash da senha usando argon2:
 
 ```bash
-# Substitua "senha_do_usuario" pela senha desejada
 echo -n "senha_do_usuario" | argon2 $(openssl rand -base64 32) -id -t 3 -m 16 -p 4 -l 32 -e
 ```
 
@@ -121,15 +120,15 @@ groups:
 ```
 
 **Permissões:**
-- ✅ Visualizar seus próprios projetos
-- ✅ Criar novos projetos
-- ✅ Duplicar seus projetos
-- ✅ Gerenciar membros dos seus projetos
-- ✅ Start/Stop/Restart dos seus projetos
-- ❌ Não pode acessar projetos de outros usuários (exceto se for adicionado como membro)
-- ❌ Não pode deletar projetos
-- ❌ Não pode gerenciar usuários do sistema
-- ❌ Não pode transferir projetos
+- Visualizar seus próprios projetos
+- Criar novos projetos
+- Duplicar seus projetos
+- Gerenciar membros dos seus projetos
+- Start/Stop/Restart dos seus projetos
+- Não pode acessar projetos de outros usuários (exceto se for adicionado como membro)
+- Não pode deletar projetos
+- Não pode gerenciar usuários do sistema
+- Não pode transferir projetos
 
 #### 2. Administrador (Grupos: `active` + `admin`)
 
@@ -140,13 +139,13 @@ groups:
 ```
 
 **Permissões:**
-- ✅ Todas as permissões de usuário comum
-- ✅ **Criar e desativar usuários do sistema**
-- ✅ **Gerenciar TODOS os projetos** (de qualquer usuário)
-- ✅ **Parar/Iniciar/Reiniciar qualquer projeto**
-- ✅ **Transferir projetos entre usuários**
-- ✅ **Deletar qualquer projeto**
-- ✅ Acessar painel administrativo
+- Todas as permissões de usuário comum
+- Criar e desativar usuários do sistema
+- Gerenciar TODOS os projetos (de qualquer usuário)
+- Parar/Iniciar/Reiniciar qualquer projeto
+- Transferir projetos entre usuários
+- Deletar qualquer projeto
+- Acessar painel administrativo
 
 ### Exemplo de Usuário Admin
 
@@ -233,8 +232,7 @@ Edite o arquivo `studio/authelia/users_database.yml` e altere o campo `disabled`
 
 ```yaml
 usuario:
-  disabled: true  # true = desativado, false = ativo
-  # ... resto dos campos
+  disabled: true
 ```
 
 Usuários desativados não conseguem fazer login, mas seus dados são preservados.
@@ -343,7 +341,7 @@ maria:
   locale: ''
   phone_number: ''
   password: $argon2id$v=19$m=65536,t=3,p=4$HASH_AQUI
-  disabled: true  # Usuário desativado
+  disabled: true
   extra:
     created_at: ts:2025-08-15T10:00:00Z
   given_name: ''
@@ -423,27 +421,25 @@ maria:
 
 ### Segurança
 
-- ✅ Use senhas fortes (mínimo 12 caracteres)
-- ✅ Limite o número de admins (apenas quem realmente precisa)
-- ✅ Desative usuários inativos ao invés de deletar (preserva histórico)
-- ✅ Configure SMTP para permitir reset de senha
-- ✅ Faça backup regular do `users_database.yml`
-- ✅ Não compartilhe o arquivo `users_database.yml` (contém hashes de senha)
+- Use senhas fortes (mínimo 12 caracteres)
+- Limite o número de admins (apenas quem realmente precisa)
+- Desative usuários inativos ao invés de deletar (preserva histórico)
+- Configure SMTP para permitir reset de senha
+- Faça backup regular do `users_database.yml`
+- Não compartilhe o arquivo `users_database.yml` (contém hashes de senha)
 
 ### Organização
 
-- ✅ Use emails reais para facilitar comunicação
-- ✅ Use displaynames descritivos
+- Use emails reais para facilitar comunicação
+- Use displaynames descritivos
 
 ### Backup
 
 Faça backup regular do arquivo de usuários:
 
 ```bash
-# Backup manual
 cp studio/authelia/users_database.yml studio/authelia/users_database.yml.backup
 
-# Backup com data
 cp studio/authelia/users_database.yml studio/authelia/users_database.yml.$(date +%Y%m%d)
 ```
 

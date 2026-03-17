@@ -146,6 +146,13 @@ EOSQL
     docker exec supabase-db pg_dump -U supabase_admin -d "$original_db" \
         --exclude-schema=auth --exclude-schema=storage --schema-only \
         >> "$dump_file" || die "Falha ao fazer dump public schema"
+
+    echo "   Copiando histórico de migrations (Essencial para o Auth/Storage não quebrar)..."
+    docker exec supabase-db pg_dump -U supabase_admin -d "$original_db" \
+        --data-only \
+        -t 'auth.schema_migrations' \
+        -t 'storage.migrations' \
+        >> "$dump_file" || echo "Aviso: Falha ao copiar dados de migrations"
   fi
   
   echo "✔️  Dump criado: $dump_file ($(du -h "$dump_file" | cut -f1))"
