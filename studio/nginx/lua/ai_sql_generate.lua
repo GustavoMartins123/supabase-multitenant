@@ -5,6 +5,11 @@ local ai_client = require("ai_client")
 
 local _M = {}
 
+local function strip_think(s)
+    if not s then return s end
+    return s:gsub("<think>.-</think>", ""):match("^%s*(.-)%s*$")
+end
+
 local function execute_tool(project_ref, tool_name, arguments)
     local args = arguments or {}
     
@@ -423,16 +428,27 @@ function _M.generate(studio_request, user_email, project_ref, openai_api_key, op
             
             for idx, tc in pairs(final_tool_calls_array) do
                 local tool_name = tc["function"].name
-                local tool_args_str = tc["function"].arguments
+                local tool_args_str = tc["function"].arguments or ""
+                
+                tool_args_str = tool_args_str:gsub("<think>[%s%S]-</think>", "")
+                tool_args_str = tool_args_str:match("^%s*(.-)%s*$")
                 
                 local tool_args = {}
-                if tool_args_str and tool_args_str ~= "" then
+                if tool_args_str ~= "" then
                     local success, parsed = pcall(cjson.decode, tool_args_str)
                     if success then
                         tool_args = parsed
+                        if type(tool_args) == "table" and not next(tool_args) then
+                            tc["function"].arguments = "{}"
+                        else
+                            tc["function"].arguments = cjson.encode(tool_args)
+                        end
                     else
-                        ngx.log(ngx.WARN, "[TOOL-CALL] Failed to parse args: ", tool_args_str)
+                        ngx.log(ngx.WARN, "[TOOL-CALL] Failed to parse args after strip: '", tool_args_str, "'")
+                        tc["function"].arguments = "{}"
                     end
+                else
+                    tc["function"].arguments = "{}"
                 end
                 
                 local tool_result, tool_err = execute_tool(project_ref, tool_name, tool_args)

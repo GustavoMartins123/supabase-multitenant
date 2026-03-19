@@ -42,7 +42,6 @@ if messages and #messages > 0 then
                 end
             end
         end
-        db_helper.save_message(db_session_id, "user", content, studio_request.model)
     end
 end
 
