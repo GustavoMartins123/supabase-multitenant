@@ -1115,3 +1115,100 @@ async def transfer_project(
         "new_owner_id": new_owner,
         "status": "transferred"
     }
+
+async def get_project_conn(project_ref: str):
+    """Creates a direct asyncpg connection to _supabase_{ref} using same credentials as main pool."""
+    import urllib.parse
+    dsn = urllib.parse.urlparse(DB_DSN)
+    db_name = f"_supabase_{project_ref}"
+    return await asyncpg.connect(
+        host=dsn.hostname,
+        port=dsn.port,
+        user=dsn.username,
+        password=dsn.password,
+        database=db_name
+    )
+
+@app.get("/api/projects/{ref}/functions")
+async def get_project_ai_functions(
+    ref: str,
+    user: str = Header(..., alias="Remote-Email"),
+    pool=Depends(get_pool)
+):
+    ref = validate_project_id(ref)
+    user_id = user.lower().strip()
+    
+    async with pool.acquire() as conn:
+        has_access = await conn.fetchval(
+            """SELECT 1 FROM projects p 
+               JOIN project_members m ON p.id = m.project_id 
+               WHERE p.name = $1 AND m.user_id = $2""",
+            ref, user_id
+        )
+    if not has_access:
+        raise HTTPException(404, "Project not found or access denied")
+
+    try:
+        proj_conn = await get_project_conn(ref)
+        rows = await proj_conn.fetch("""
+            SELECT
+                p.proname AS name,
+                pg_get_function_identity_arguments(p.oid) AS argument_types,
+                pg_get_function_result(p.oid) AS return_type,
+                obj_description(p.oid, 'pg_proc') AS comment
+            FROM pg_proc p
+            JOIN pg_namespace n ON n.oid = p.pronamespace
+            WHERE n.nspname = 'public'
+              AND p.prokind IN ('f', 'p')
+              AND obj_description(p.oid, 'pg_proc') ILIKE '%[AI]%'
+            ORDER BY p.proname
+        """)
+        await proj_conn.close()
+    except Exception as e:
+        raise HTTPException(503, f"Cannot connect to project database: {str(e)}")
+
+    functions = []
+    for r in rows:
+        comment = r["comment"] or ""
+        clean_desc = comment.replace("[AI]", "").strip()
+        functions.append({
+            "name": r["name"],
+            "argument_types": r["argument_types"] or "",
+            "return_type": r["return_type"] or "void",
+            "comment": comment,
+            "schema": "public",
+        })
+    return functions
+
+@app.post("/api/projects/{ref}/query")
+async def execute_project_query(
+    ref: str,
+    body: Dict[str, str],
+    user: str = Header(..., alias="Remote-Email"),
+    pool=Depends(get_pool)
+):
+    ref = validate_project_id(ref)
+    query = body.get("query")
+    
+    if not query:
+        raise HTTPException(400, "query is required")
+
+    user_id = user.lower().strip()
+    async with pool.acquire() as conn:
+        has_access = await conn.fetchval(
+            """SELECT 1 FROM projects p 
+               JOIN project_members m ON p.id = m.project_id 
+               WHERE p.name = $1 AND m.user_id = $2""",
+            ref, user_id
+        )
+    if not has_access:
+        raise HTTPException(404, "Project not found or access denied")
+
+    try:
+        proj_conn = await get_project_conn(ref)
+        rows = await proj_conn.fetch(query)
+        await proj_conn.close()
+    except Exception as e:
+        raise HTTPException(400, f"Query error: {str(e)}")
+
+    return [dict(r) for r in rows]
