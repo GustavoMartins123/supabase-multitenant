@@ -65,6 +65,11 @@ http {
         "{{service_role_key}}" 1;  
     }
 
+    map $http_x_config_token $is_valid_config_token {
+        default 0;
+        "{{config_token}}" 1;
+    }
+
     map $http_x_forwarded_proto $real_scheme {
         default $scheme;
         "~.+"   $http_x_forwarded_proto;
@@ -353,6 +358,15 @@ http {
             add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, PATCH, DELETE' always;
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version' always;
+        }
+
+        location = /config {
+            if ($is_valid_config_token = 0) {
+                return 401;
+            }
+            default_type application/json;
+            add_header Cache-Control "no-store";
+            return 200 '{"supabase_url":"https://{{server_url}}/{{project_id}}","anon_key":"{{anon_key}}"}';
         }
         
         location /meta/ {

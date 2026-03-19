@@ -42,6 +42,8 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
   late AnimationController _animController;
   late Animation<double> _fadeAnimation;
   String _projectUrl = '';
+  late String _currentAnonKey;
+  bool _rotatingKey = false;
 
   @override
   void initState() {
@@ -64,6 +66,8 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
     _loadProjectUrl();
 
     _animController.forward();
+
+     _currentAnonKey = widget.anonKey;
   }
 
   @override
@@ -84,6 +88,59 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
 
   void _safeSetState(VoidCallback fn) {
     if (mounted) setState(fn);
+  }
+
+  Future<void> _rotateKey() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: SupabaseColors.bg200,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: const BorderSide(color: SupabaseColors.border),
+        ),
+        title: const Row(children: [
+          Icon(Icons.warning_rounded, color: SupabaseColors.warning),
+          SizedBox(width: 8),
+          Text('Gerar nova chave?', style: TextStyle(color: SupabaseColors.textPrimary)),
+        ]),
+        content: const Text(
+          'A chave atual será invalidada. Apps usando ela vão parar de funcionar até serem atualizados.',
+          style: TextStyle(color: SupabaseColors.textSecondary),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: SupabaseColors.warning),
+            child: const Text('Gerar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    _safeSetState(() => _rotatingKey = true);
+    try {
+      final resp = await http.post(
+        Uri.parse('/api/projects/${widget.ref}/rotate-key'),
+      );
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body);
+        _safeSetState(() => _currentAnonKey = data['anon_key']);
+
+        await http.get(Uri.parse('/api/internal/cache-bust?ref=${widget.ref}'));
+
+        _showSnack('Nova chave gerada!', SupabaseColors.success);
+      } else {
+        throw Exception('Erro ${resp.statusCode}: ${resp.body}');
+      }
+    } catch (e) {
+      _showSnack('Erro ao gerar chave: $e', SupabaseColors.error);
+    } finally {
+      _safeSetState(() => _rotatingKey = false);
+    }
   }
 
   Future<void> _loadCurrentMembers() async {
@@ -678,7 +735,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
             _SecondaryButton(
               label: 'Gerar nova chave',
               icon: Icons.refresh_rounded,
-              onPressed: null, // TODO: implement
+              onPressed: _rotatingKey ? null : _rotateKey,
             ),
           ],
         ],

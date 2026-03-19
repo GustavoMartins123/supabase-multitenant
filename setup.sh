@@ -179,6 +179,7 @@ main() {
     sed -i "s|FERNET_SECRET=pass|FERNET_SECRET=$SHARED_FERNET_SECRET|g" servidor/.env
     sed -i "s|NGINX_SHARED_TOKEN=pass|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" servidor/.env
     sed -i "s|PROJECT_DELETE_PASSWORD=pass|PROJECT_DELETE_PASSWORD=$PROJECT_DELETE_PASSWORD|g" servidor/.env
+    sed -i "s|SERVER_URL=pass|SERVER_URL=${PROTO}://${SERVER_IP}|g" servidor/.env
     print_success "Arquivo servidor/.env configurado com sucesso!"
 
     print_status "Configurando servidor/secrets..."

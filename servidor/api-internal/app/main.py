@@ -13,6 +13,7 @@ from typing import Optional, List, Dict
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
 SCRIPT = BASE_DIR / "scripts" / "generate_project.sh"
 DUPLICATE_SCRIPT = BASE_DIR / "scripts" / "duplicate_project.sh"
+ROTATE_SCRIPT = BASE_DIR / "scripts" / "rotate_key.sh"
 DELETE_SCRIPT = BASE_DIR / "scripts" / "delete_project.sh"
 EXTRACTOR = BASE_DIR / "scripts" / "extract_token.sh"
 DB_DSN = os.getenv("DB_DSN")
@@ -415,6 +416,60 @@ async def delete_project(
 class AddMember(BaseModel):
     user_id: str
     role: str = 'member'
+
+
+@app.post("/api/projects/{project_name}/rotate-key")
+async def rotate_project_key(
+    project_name: str,
+    user: str = Header(..., alias="Remote-Email"),
+    pool=Depends(get_pool),
+):
+    project_name = validate_project_id(project_name)
+
+    async with pool.acquire() as conn:
+        project_id = await conn.fetchval(
+            "SELECT id FROM projects WHERE name = $1", project_name
+        )
+        if not project_id:
+            raise HTTPException(404, "Project not found")
+
+        role = await conn.fetchval(
+            "SELECT role FROM project_members WHERE project_id = $1 AND user_id = $2",
+            project_id, user
+        )
+        if role != "admin":
+            raise HTTPException(403, "Only project admin can rotate keys")
+
+    proc = await asyncio.create_subprocess_exec(
+        "bash", str(ROTATE_SCRIPT), project_name,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise HTTPException(500, f"Rotate failed: {stderr.decode()}")
+
+    lines = stdout.decode().splitlines()
+    kv = {k: v for k, v in (line.split("=", 1) for line in lines if "=" in line)}
+    anon = kv.get("ANON_KEY_PROJETO")
+    service = kv.get("SERVICE_ROLE_KEY_PROJETO")
+    if not anon or not service:
+        raise HTTPException(500, "Keys not returned from script")
+
+    anon_enc = fernet.encrypt(anon.encode()).decode()
+    svc_enc  = fernet.encrypt(service.encode()).decode()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE projects SET anon_key=$1, service_role=$2 WHERE name=$3",
+            anon_enc, svc_enc, project_name
+        )
+
+    return {
+        "project": project_name,
+        "anon_key": anon,
+        "status": "rotated"
+    }
+
 
 @app.post("/api/projects/{project_name}/members")
 async def add_member(
