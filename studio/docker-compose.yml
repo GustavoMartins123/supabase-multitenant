@@ -44,5 +44,22 @@ services:
       DEFAULT_PROJECT_NAME: postgres
       SUPABASE_PUBLIC_URL: https://<SEU_IP>:4000
       NEXT_PUBLIC_ENABLE_LOGS: false
+  postgres:
+    build:
+      context: ./postgres
+      dockerfile: Dockerfile
+    container_name: nginx-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_NGINX_PASSWORD}
+    volumes:
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./postgres/entrypoint.sh:/docker-entrypoint-initdb.d/entrypoint.sh:ro
+      - ./postgres/logs:/var/log/postgresql
+      - ./postgres/data:/var/lib/postgresql/data:Z
+    expose:
+      - "8999" 
 volumes:
   usersdb:

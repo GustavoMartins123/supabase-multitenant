@@ -1,7 +1,8 @@
--- get_service_key.lua
--- Módulo para recuperar chaves de serviço de forma segura
-
 local http = require "resty.http"
+local fernet = require "resty.fernet"
+local cjson = require "cjson"
+
+local DSN = os.getenv("SERVER_DOMAIN")
 local fernet = require "resty.fernet"
 local cjson = require "cjson"
 

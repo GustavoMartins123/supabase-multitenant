@@ -170,7 +170,6 @@ main() {
     SECRET_KEY_BASE=$(generate_secret_key_base)
     LOGFLARE_API_KEY=$(generate_logflare_api_key)
     PROJECT_DELETE_PASSWORD=$(generate_jwt_secret)
-
     cp servidor/.env.example servidor/.env
 
     sed -i "s|DB_ENC_KEY=pass|DB_ENC_KEY=$DB_ENC_KEY|g" servidor/.env
@@ -180,7 +179,6 @@ main() {
     sed -i "s|FERNET_SECRET=pass|FERNET_SECRET=$SHARED_FERNET_SECRET|g" servidor/.env
     sed -i "s|NGINX_SHARED_TOKEN=pass|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" servidor/.env
     sed -i "s|PROJECT_DELETE_PASSWORD=pass|PROJECT_DELETE_PASSWORD=$PROJECT_DELETE_PASSWORD|g" servidor/.env
-    
     print_success "Arquivo servidor/.env configurado com sucesso!"
 
     print_status "Configurando servidor/secrets..."
@@ -208,12 +206,13 @@ main() {
     fi
     
     COOKIE_SIGN_SECRET=$(generate_cookie_sign_secret)
+    POSTGRES_NGINX_PASSWORD=$(generate_postgres_password)
 
     cp studio/.env.example studio/.env
-    
     sed -i "s|FERNET_SECRET=pass|FERNET_SECRET=$SHARED_FERNET_SECRET|g" studio/.env
     sed -i "s|NGINX_SHARED_TOKEN=pass|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" studio/.env
     sed -i "s|COOKIE_SIGN_SECRET=pass|COOKIE_SIGN_SECRET=$COOKIE_SIGN_SECRET|g" studio/.env
+    sed -i "s|POSTGRES_NGINX_PASSWORD=pass|POSTGRES_NGINX_PASSWORD=$POSTGRES_NGINX_PASSWORD|g" studio/.env
     if [[ "$SERVER_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
     [[ "$SERVER_IP" =~ : ]]; then
         PROTO="http"
