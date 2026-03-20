@@ -11,7 +11,7 @@ services:
       - usersdb:/config 
     restart: "no"
   authelia:
-    image: authelia/authelia:4.39
+    image: authelia/authelia:fix-healthcheck-order
     container_name: authelia
     volumes:
       - ./authelia:/config
@@ -36,7 +36,7 @@ services:
       - ./authelia:/config
   studio:
     container_name: supabase-studio
-    image: supabase/studio:2026.03.04-sha-0043607
+    image: supabase/studio:2026.03.16-sha-5528817
     restart: unless-stopped
     environment:
       STUDIO_PG_META_URL: https://nginx:443/api/platform/pg-meta

@@ -52,6 +52,14 @@ generate_postgres_password() {
   openssl rand -base64 32 | tr '/+' '_-' | tr -d '\n'
 }
 
+generate_user_realtime() {
+  echo "user_$(openssl rand -hex 4)"
+}
+
+generate_realtime_dashboard_pass(){
+  openssl rand -base64 32 | tr -d '\n'
+}
+
 validate_input() {
     local input="$1"
     if [[ $input =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -170,6 +178,8 @@ main() {
     SECRET_KEY_BASE=$(generate_secret_key_base)
     LOGFLARE_API_KEY=$(generate_logflare_api_key)
     PROJECT_DELETE_PASSWORD=$(generate_jwt_secret)
+    DASHBOARD_USER=$(generate_user_realtime)
+    DASHBOARD_PASSWORD=$(generate_realtime_dashboard_pass)
     cp servidor/.env.example servidor/.env
 
     sed -i "s|DB_ENC_KEY=pass|DB_ENC_KEY=$DB_ENC_KEY|g" servidor/.env
@@ -180,6 +190,8 @@ main() {
     sed -i "s|NGINX_SHARED_TOKEN=pass|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" servidor/.env
     sed -i "s|PROJECT_DELETE_PASSWORD=pass|PROJECT_DELETE_PASSWORD=$PROJECT_DELETE_PASSWORD|g" servidor/.env
     sed -i "s|SERVER_URL=pass|SERVER_URL=${PROTO}://${SERVER_IP}|g" servidor/.env
+    sed -i "s|DASHBOARD_USER=pass|DASHBOARD_USER=${DASHBOARD_USER}|g" servidor/.env
+    sed -i "s|DASHBOARD_PASSWORD=pass|DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD}|g" servidor/.env
     print_success "Arquivo servidor/.env configurado com sucesso!"
 
     print_status "Configurando servidor/secrets..."

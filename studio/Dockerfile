@@ -1,4 +1,4 @@
-FROM ghcr.io/cirruslabs/flutter:3.35.1 AS builder
+FROM ghcr.io/cirruslabs/flutter:3.41.5 AS builder
 
 WORKDIR /app
 
@@ -10,7 +10,7 @@ COPY seletor_de_projetos/ .
 
 RUN flutter build web --release
 
-FROM openresty/openresty:1.27.1.2-5-alpine-fat
+FROM openresty/openresty:1.29.2.1-alpine-fat
 
 
 RUN apk add --no-cache build-base curl openssl-dev yaml-dev argon2 openssl git

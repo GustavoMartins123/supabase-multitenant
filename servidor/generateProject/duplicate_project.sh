@@ -131,6 +131,10 @@ duplicate_db() {
     END \$\$;
 EOSQL
   
+  echo "   Garantindo permissões básicas no novo banco..."
+  docker exec supabase-db psql -U supabase_admin -d postgres -c \
+    "GRANT CREATE ON DATABASE $new_db TO supabase_storage_admin; GRANT CREATE ON DATABASE $new_db TO supabase_auth_admin;" || die "Falha ao garantir permissões do banco"
+  
   local dump_file="/tmp/dump_${ORIGINAL_PROJECT}_$(date +%s).sql"
   
   if [[ "$mode" == "with-data" ]]; then

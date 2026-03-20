@@ -41,7 +41,7 @@ services:
       #- "traefik.http.routers.supabase-nginx-{{project_id}}.middlewares=rate-limit@file,security-headers@file,geoblock-{{project_id}}@docker, nginx-{{project_id}}-stripprefix@docker"
   auth:
     container_name: supabase-auth-{{project_id}}
-    image: supabase/gotrue:v2.170.0
+    image: supabase/gotrue:v2.188.1
     restart: unless-stopped
     env_file:
       - ../../secrets/.env
@@ -128,7 +128,7 @@ services:
 
   rest:
     container_name: supabase-rest-{{project_id}}
-    image: postgrest/postgrest:v12.2.0
+    image: postgrest/postgrest:v14.6
     restart: unless-stopped
     env_file:
       - ../../secrets/.env
@@ -163,7 +163,7 @@ services:
   # To use S3 backed storage: docker compose -f docker-compose.yml -f docker-compose.s3.yml up
   storage:
     container_name: supabase-storage-{{project_id}}
-    image: supabase/storage-api:v1.22.2
+    image: supabase/storage-api:v1.44.9
     restart: unless-stopped
     env_file:
       - ../../secrets/.env
@@ -215,7 +215,7 @@ services:
 
   imgproxy:
     container_name: supabase-imgproxy-{{project_id}}
-    image: darthsim/imgproxy:v3.8.0
+    image: darthsim/imgproxy:v3.31.1
     restart: unless-stopped
     networks:
       - rede-supabase
@@ -362,7 +362,7 @@ services:
   #       && /app/bin/server
   meta:
     container_name: supabase-meta-{{project_id}}
-    image: supabase/postgres-meta:v0.88.7
+    image: supabase/postgres-meta:v0.96.1
     restart: unless-stopped
     networks:
       - rede-supabase

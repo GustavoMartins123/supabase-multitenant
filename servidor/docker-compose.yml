@@ -94,7 +94,6 @@ services:
       - temp_buffers=64MB
       - -c
       - max_stack_depth=7MB
-      # Configurações de checkpoint e WAL
       - -c
       - checkpoint_completion_target=0.9
       - -c
@@ -109,7 +108,6 @@ services:
       - min_wal_size=2GB
       - -c
       - wal_level=logical
-      # Configurações de query planner
       - -c
       - default_statistics_target=500
       - -c
@@ -132,16 +130,12 @@ services:
       - max_parallel_workers_per_gather=2
       - -c
       - max_parallel_maintenance_workers=2
-
-      # CONFIGURAÇÕES DE TIMEOUT
       - -c
-      - statement_timeout=300000  # 5 minutos timeout para queries
+      - statement_timeout=300000
       - -c
-      - lock_timeout=30000  # 30 segundos para locks
+      - lock_timeout=30000
       - -c
       - idle_in_transaction_session_timeout=600000
-
-      # Configurações de logging para ambiente de teste
       - -c
       - log_statement=none
       - -c
@@ -154,8 +148,6 @@ services:
       - log_min_duration_statement=1000
       - -c
       - 'log_line_prefix=%t [%p]: user=%u,db=%d,app=%a,client=%h'
-
-      # Configurações de autovacuum
       - -c
       - autovacuum_max_workers=4
       - -c
@@ -164,23 +156,14 @@ services:
       - autovacuum_vacuum_scale_factor=0.1
       - -c
       - autovacuum_analyze_scale_factor=0.05
-
-      # Configurações extra do WAL
       - -c
       - archive_mode=on
-      #- archive_command='test ! -f /wal-archive/%f && cp %p /wal-archive/%f'
-      # - -c
-      # - archive_command=/bin/cp %p /wal-archive/%f
       - -c
       - archive_timeout=3600
-      # Parâmetros pgBackRest
       - -c
       - wal_keep_size=1GB
       - -c
       - max_wal_senders=3
-
-      # ===== CONFIGURAÇÕES DE REDE =====
-      #Evita conexões mortas
       - -c
       - tcp_keepalives_idle=60
       - -c
@@ -217,6 +200,7 @@ services:
       DB_AFTER_CONNECT_QUERY: 'SET search_path TO _realtime'
       DB_ENC_KEY: ${DB_ENC_KEY}
       API_JWT_SECRET: ${JWT_SECRET}
+      METRICS_JWT_SECRET: ${JWT_SECRET}
       SECRET_KEY_BASE: ${SECRET_KEY_BASE}
       #Set to either "-proto_dist inet_tcp" or "-proto_dist inet6_tcp" depending on whether or not your network uses IPv4 or IPv6 respectively.
       ERL_AFLAGS: -proto_dist inet_tcp
@@ -234,10 +218,13 @@ services:
       TENANT_MAX_JOINS_PER_SECOND: "30"
       LOG_LEVEL: "warning"
       METRICS_ENABLED: "false"
+      DASHBOARD_AUTH: basic_auth
+      DASHBOARD_USER: ${DASHBOARD_USER}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
 
   supavisor:
     container_name: supabase-pooler
-    image: supabase/supavisor:2.0.21
+    image: supabase/supavisor:2.7.4
     env_file:
       - secrets/.env
       - .env
@@ -285,7 +272,7 @@ services:
         && /app/bin/server
   functions:
     container_name: supabase-edge-functions
-    image: supabase/edge-runtime:v1.67.4
+    image: supabase/edge-runtime:v1.73.0
     env_file:
       - secrets/.env
       - .env
@@ -311,7 +298,7 @@ services:
       "/home/deno/functions/main"
       ]
   vector:
-    image: timberio/vector:nightly-2025-10-25-debian
+    image: timberio/vector:nightly-2026-03-20-debian
     container_name: supabase-vector-global
     restart: unless-stopped
     volumes:

@@ -96,6 +96,11 @@ generate_db() {
       echo "Banco $db já existe"; return; }
   docker exec supabase-db \
     psql -U supabase_admin -d postgres -c "CREATE DATABASE $db TEMPLATE _supabase_template;"
+  
+  echo "Garantindo permissões básicas no banco $db..."
+  docker exec supabase-db \
+    psql -U supabase_admin -d postgres -c "GRANT CREATE ON DATABASE $db TO supabase_storage_admin; GRANT CREATE ON DATABASE $db TO supabase_auth_admin;"
+  
   echo "Banco $db criado com sucesso"
 }
 
