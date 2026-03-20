@@ -677,7 +677,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
 
 
   Widget _buildAnonKeySection() {
-    final hasKey = widget.anonKey.isNotEmpty;
+    final hasKey = _currentAnonKey.isNotEmpty;
 
     return _Section(
       title: 'CHAVE ANÔNIMA',
@@ -695,7 +695,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
               children: [
                 Expanded(
                   child: SelectableText(
-                    hasKey ? widget.anonKey : 'Não disponível',
+                    hasKey ? _currentAnonKey : 'Não disponível',
                     style: const TextStyle(
                       fontSize: 12,
                       fontFamily: 'monospace',
@@ -709,7 +709,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
                   tooltip: 'Copiar',
                   onPressed: hasKey
                       ? () {
-                    Clipboard.setData(ClipboardData(text: widget.anonKey));
+                    Clipboard.setData(ClipboardData(text: _currentAnonKey));
                     _showSnack('Chave copiada!', SupabaseColors.success);
                   }
                       : null,
@@ -724,7 +724,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
                 const Icon(Icons.schedule_rounded, size: 14, color: SupabaseColors.textMuted),
                 const SizedBox(width: 6),
                 Text(
-                  'Expira em: ${DateFormat('dd/MM/yyyy HH:mm').format(JwtDecoder.getExpirationDate(widget.anonKey))}',
+                  'Expira em: ${DateFormat('dd/MM/yyyy HH:mm').format(JwtDecoder.getExpirationDate(_currentAnonKey))}',
                   style: const TextStyle(fontSize: 11, color: SupabaseColors.textMuted),
                 ),
               ],
