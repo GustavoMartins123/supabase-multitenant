@@ -29,7 +29,9 @@ class DangerButton extends StatelessWidget {
             Icon(icon, size: 14),
             const SizedBox(width: 6),
           ],
-          Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+          Text(label,
+              style:
+                  const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
         ],
       ),
     );

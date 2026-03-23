@@ -94,31 +94,49 @@ class _AdminUsersPageState extends State<AdminUsersPage>
       builder: (ctx) => _ConfirmDialog(
         title: user.isActive ? 'Desativar usuário?' : 'Ativar usuário?',
         icon: user.isActive ? Icons.block_rounded : Icons.check_circle_rounded,
-        iconColor: user.isActive ? SupabaseColors.error : SupabaseColors.success,
+        iconColor:
+            user.isActive ? SupabaseColors.error : SupabaseColors.success,
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _InfoRow(icon: Icons.person_rounded, label: 'Usuário', value: user.displayName),
+            _InfoRow(
+                icon: Icons.person_rounded,
+                label: 'Usuário',
+                value: user.displayName),
             const SizedBox(height: 6),
-            _InfoRow(icon: Icons.account_circle_rounded, label: 'Login', value: user.username),
+            _InfoRow(
+                icon: Icons.account_circle_rounded,
+                label: 'Login',
+                value: user.username),
             const SizedBox(height: 6),
-            _InfoRow(icon: Icons.email_rounded, label: 'Email', value: user.emailHint),
+            _InfoRow(
+                icon: Icons.email_rounded,
+                label: 'Email',
+                value: user.emailHint),
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: (user.isActive ? SupabaseColors.error : SupabaseColors.success).withOpacity(0.1),
+                color: (user.isActive
+                        ? SupabaseColors.error
+                        : SupabaseColors.success)
+                    .withValues(alpha:0.1),
                 borderRadius: BorderRadius.circular(6),
                 border: Border.all(
-                  color: (user.isActive ? SupabaseColors.error : SupabaseColors.success).withOpacity(0.2),
+                  color: (user.isActive
+                          ? SupabaseColors.error
+                          : SupabaseColors.success)
+                      .withValues(alpha:0.2),
                 ),
               ),
               child: Row(
                 children: [
                   Icon(
                     Icons.info_outline_rounded,
-                    color: user.isActive ? SupabaseColors.error : SupabaseColors.success,
+                    color: user.isActive
+                        ? SupabaseColors.error
+                        : SupabaseColors.success,
                     size: 16,
                   ),
                   const SizedBox(width: 10),
@@ -127,7 +145,8 @@ class _AdminUsersPageState extends State<AdminUsersPage>
                       user.isActive
                           ? 'Desativar removerá o acesso e pode afetar projetos existentes.'
                           : 'Ativar restaurará o acesso do usuário.',
-                      style: const TextStyle(fontSize: 12, color: SupabaseColors.textSecondary),
+                      style: const TextStyle(
+                          fontSize: 12, color: SupabaseColors.textSecondary),
                     ),
                   ),
                 ],
@@ -136,7 +155,8 @@ class _AdminUsersPageState extends State<AdminUsersPage>
           ],
         ),
         confirmLabel: user.isActive ? 'Desativar' : 'Ativar',
-        confirmColor: user.isActive ? SupabaseColors.error : SupabaseColors.success,
+        confirmColor:
+            user.isActive ? SupabaseColors.error : SupabaseColors.success,
       ),
     );
 
@@ -275,7 +295,8 @@ class _AdminUsersPageState extends State<AdminUsersPage>
         foregroundColor: SupabaseColors.bg100,
         elevation: 0,
         icon: const Icon(Icons.person_add_rounded, size: 20),
-        label: const Text('Novo Usuário', style: TextStyle(fontWeight: FontWeight.w500)),
+        label: const Text('Novo Usuário',
+            style: TextStyle(fontWeight: FontWeight.w500)),
       ),
     );
   }
@@ -290,7 +311,8 @@ class _AdminUsersPageState extends State<AdminUsersPage>
             SizedBox(
               width: 32,
               height: 32,
-              child: CircularProgressIndicator(strokeWidth: 2, color: SupabaseColors.brand),
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: SupabaseColors.brand),
             ),
             SizedBox(height: 16),
             Text(
@@ -313,10 +335,11 @@ class _AdminUsersPageState extends State<AdminUsersPage>
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: SupabaseColors.error.withOpacity(0.1),
+                color: SupabaseColors.error.withValues(alpha:0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(Icons.error_outline_rounded, size: 40, color: SupabaseColors.error),
+              child: const Icon(Icons.error_outline_rounded,
+                  size: 40, color: SupabaseColors.error),
             ),
             const SizedBox(height: 20),
             const Text(
@@ -331,7 +354,8 @@ class _AdminUsersPageState extends State<AdminUsersPage>
             Text(
               error,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: SupabaseColors.textMuted, fontSize: 13),
+              style: const TextStyle(
+                  color: SupabaseColors.textMuted, fontSize: 13),
             ),
             const SizedBox(height: 20),
             TextButton.icon(
@@ -341,7 +365,8 @@ class _AdminUsersPageState extends State<AdminUsersPage>
               style: TextButton.styleFrom(
                 backgroundColor: SupabaseColors.brand,
                 foregroundColor: SupabaseColors.bg100,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               ),
             ),
           ],
@@ -363,16 +388,17 @@ class _AdminUsersPageState extends State<AdminUsersPage>
               data.users.isEmpty
                   ? _buildEmptyState()
                   : Column(
-                children: data.users
-                    .map((user) => _UserCard(
-                  user: user,
-                  onToggle: () => _toggleUserStatus(user),
-                  isLoading: _isLoading,
-                  isMe: user.id == Session().myId,
-                  canToggle: Session().isSysAdmin && user.id != Session().myId,
-                ))
-                    .toList(),
-              ),
+                      children: data.users
+                          .map((user) => _UserCard(
+                                user: user,
+                                onToggle: () => _toggleUserStatus(user),
+                                isLoading: _isLoading,
+                                isMe: user.id == Session().myId,
+                                canToggle: Session().isSysAdmin &&
+                                    user.id != Session().myId,
+                              ))
+                          .toList(),
+                    ),
             ],
           ),
         ),
@@ -466,14 +492,14 @@ class _SummaryCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: SupabaseColors.surface100,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withValues(alpha:0.3)),
       ),
       child: Column(
         children: [
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: color.withOpacity(0.15),
+              color: color.withValues(alpha:0.15),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Icon(icon, color: color, size: 24),
@@ -522,10 +548,14 @@ class _UserCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: isMe ? SupabaseColors.brand.withOpacity(0.1) : SupabaseColors.surface100,
+        color: isMe
+            ? SupabaseColors.brand.withValues(alpha:0.1)
+            : SupabaseColors.surface100,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: isMe ? SupabaseColors.brand.withOpacity(0.3) : SupabaseColors.border,
+          color: isMe
+              ? SupabaseColors.brand.withValues(alpha:0.3)
+              : SupabaseColors.border,
         ),
       ),
       child: Padding(
@@ -537,15 +567,17 @@ class _UserCard extends StatelessWidget {
               height: 44,
               decoration: BoxDecoration(
                 color: user.isActive
-                    ? SupabaseColors.success.withOpacity(0.2)
-                    : SupabaseColors.error.withOpacity(0.2),
+                    ? SupabaseColors.success.withValues(alpha:0.2)
+                    : SupabaseColors.error.withValues(alpha:0.2),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Center(
                 child: Text(
                   isMe ? 'EU' : user.displayName.substring(0, 1).toUpperCase(),
                   style: TextStyle(
-                    color: user.isActive ? SupabaseColors.success : SupabaseColors.error,
+                    color: user.isActive
+                        ? SupabaseColors.success
+                        : SupabaseColors.error,
                     fontWeight: FontWeight.bold,
                     fontSize: 16,
                   ),
@@ -562,26 +594,31 @@ class _UserCard extends StatelessWidget {
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
                       fontSize: 14,
-                      decoration: user.isActive ? null : TextDecoration.lineThrough,
+                      decoration:
+                          user.isActive ? null : TextDecoration.lineThrough,
                       color: SupabaseColors.textPrimary,
                     ),
                   ),
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      const Icon(Icons.account_circle_rounded, size: 12, color: SupabaseColors.textMuted),
+                      const Icon(Icons.account_circle_rounded,
+                          size: 12, color: SupabaseColors.textMuted),
                       const SizedBox(width: 4),
                       Text(
                         user.username,
-                        style: const TextStyle(fontSize: 12, color: SupabaseColors.textMuted),
+                        style: const TextStyle(
+                            fontSize: 12, color: SupabaseColors.textMuted),
                       ),
                       const SizedBox(width: 12),
-                      const Icon(Icons.email_rounded, size: 12, color: SupabaseColors.textMuted),
+                      const Icon(Icons.email_rounded,
+                          size: 12, color: SupabaseColors.textMuted),
                       const SizedBox(width: 4),
                       Expanded(
                         child: Text(
                           user.emailHint,
-                          style: const TextStyle(fontSize: 12, color: SupabaseColors.textMuted),
+                          style: const TextStyle(
+                              fontSize: 12, color: SupabaseColors.textMuted),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -589,26 +626,33 @@ class _UserCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
                       color: user.isActive
-                          ? SupabaseColors.success.withOpacity(0.15)
-                          : SupabaseColors.error.withOpacity(0.15),
+                          ? SupabaseColors.success.withValues(alpha:0.15)
+                          : SupabaseColors.error.withValues(alpha:0.15),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
-                          user.isActive ? Icons.check_circle_rounded : Icons.block_rounded,
+                          user.isActive
+                              ? Icons.check_circle_rounded
+                              : Icons.block_rounded,
                           size: 12,
-                          color: user.isActive ? SupabaseColors.success : SupabaseColors.error,
+                          color: user.isActive
+                              ? SupabaseColors.success
+                              : SupabaseColors.error,
                         ),
                         const SizedBox(width: 4),
                         Text(
                           user.status.toUpperCase(),
                           style: TextStyle(
-                            color: user.isActive ? SupabaseColors.success : SupabaseColors.error,
+                            color: user.isActive
+                                ? SupabaseColors.success
+                                : SupabaseColors.error,
                             fontWeight: FontWeight.w600,
                             fontSize: 10,
                             letterSpacing: 0.5,
@@ -620,18 +664,18 @@ class _UserCard extends StatelessWidget {
                 ],
               ),
             ),
-
             if (isLoading)
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: SupabaseColors.brand.withOpacity(0.1),
+                  color: SupabaseColors.brand.withValues(alpha:0.1),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: const SizedBox(
                   width: 18,
                   height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: SupabaseColors.brand),
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: SupabaseColors.brand),
                 ),
               )
             else if (canToggle)
@@ -656,9 +700,13 @@ class _UserCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 6),
                   _IconBtn(
-                    icon: user.isActive ? Icons.block_rounded : Icons.check_circle_rounded,
+                    icon: user.isActive
+                        ? Icons.block_rounded
+                        : Icons.check_circle_rounded,
                     tooltip: user.isActive ? 'Desativar' : 'Ativar',
-                    color: user.isActive ? SupabaseColors.error : SupabaseColors.success,
+                    color: user.isActive
+                        ? SupabaseColors.error
+                        : SupabaseColors.success,
                     onPressed: onToggle,
                   ),
                 ],
@@ -688,7 +736,7 @@ class _IconBtn extends StatelessWidget {
     return Tooltip(
       message: tooltip,
       child: Material(
-        color: color.withOpacity(0.15),
+        color: color.withValues(alpha:0.15),
         borderRadius: BorderRadius.circular(6),
         child: InkWell(
           onTap: onPressed,
@@ -704,7 +752,8 @@ class _IconBtn extends StatelessWidget {
 }
 
 class _InfoRow extends StatelessWidget {
-  const _InfoRow({required this.icon, required this.label, required this.value});
+  const _InfoRow(
+      {required this.icon, required this.label, required this.value});
   final IconData icon;
   final String label;
   final String value;
@@ -717,12 +766,16 @@ class _InfoRow extends StatelessWidget {
         const SizedBox(width: 8),
         Text(
           '$label: ',
-          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: SupabaseColors.textSecondary),
+          style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: SupabaseColors.textSecondary),
         ),
         Expanded(
           child: Text(
             value,
-            style: const TextStyle(fontSize: 12, color: SupabaseColors.textMuted),
+            style:
+                const TextStyle(fontSize: 12, color: SupabaseColors.textMuted),
           ),
         ),
       ],
@@ -760,20 +813,23 @@ class _ConfirmDialog extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: iconColor.withOpacity(0.15),
+              color: iconColor.withValues(alpha:0.15),
               borderRadius: BorderRadius.circular(6),
             ),
             child: Icon(icon, color: iconColor, size: 20),
           ),
           const SizedBox(width: 12),
-          Text(title, style: const TextStyle(fontSize: 16, color: SupabaseColors.textPrimary)),
+          Text(title,
+              style: const TextStyle(
+                  fontSize: 16, color: SupabaseColors.textPrimary)),
         ],
       ),
       content: content,
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context, false),
-          child: const Text('Cancelar', style: TextStyle(color: SupabaseColors.textMuted)),
+          child: const Text('Cancelar',
+              style: TextStyle(color: SupabaseColors.textMuted)),
         ),
         TextButton(
           onPressed: () => Navigator.pop(context, true),
@@ -794,13 +850,15 @@ class UserListResponse {
   final UserSummary summary;
   final int timestamp;
 
-  UserListResponse({required this.users, required this.summary, required this.timestamp});
+  UserListResponse(
+      {required this.users, required this.summary, required this.timestamp});
 
   factory UserListResponse.fromJson(Map<String, dynamic> json) {
     List<UserInfo> usersList = [];
     if (json['users'] != null) {
       if (json['users'] is List) {
-        usersList = (json['users'] as List).map((u) => UserInfo.fromJson(u)).toList();
+        usersList =
+            (json['users'] as List).map((u) => UserInfo.fromJson(u)).toList();
       }
     }
 
@@ -846,7 +904,8 @@ class UserSummary {
   final int active;
   final int inactive;
 
-  UserSummary({required this.total, required this.active, required this.inactive});
+  UserSummary(
+      {required this.total, required this.active, required this.inactive});
 
   factory UserSummary.fromJson(Map<String, dynamic> json) {
     return UserSummary(

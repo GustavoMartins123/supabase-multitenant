@@ -27,10 +27,14 @@ class ActionButton extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            color: onPressed == null ? SupabaseColors.bg300 : color.withOpacity(0.15),
+            color: onPressed == null
+                ? SupabaseColors.bg300
+                : color.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(6),
             border: Border.all(
-              color: onPressed == null ? SupabaseColors.border : color.withOpacity(0.3),
+              color: onPressed == null
+                  ? SupabaseColors.border
+                  : color.withValues(alpha:0.3),
             ),
           ),
           child: Column(
@@ -39,10 +43,14 @@ class ActionButton extends StatelessWidget {
                 SizedBox(
                   width: 16,
                   height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(color)),
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation(color)),
                 )
               else
-                Icon(icon, color: onPressed == null ? SupabaseColors.textMuted : color, size: 18),
+                Icon(icon,
+                    color: onPressed == null ? SupabaseColors.textMuted : color,
+                    size: 18),
               const SizedBox(height: 4),
               Text(
                 label,

@@ -8,7 +8,7 @@ class Session {
   late String myId;
   late String myUsername;
   late String myDisplayName;
-  late bool   isSysAdmin;
+  late bool isSysAdmin;
   final ValueNotifier<Map<String, bool>> _busy = ValueNotifier({});
 
   bool isBusy(String ref) => _busy.value[ref] ?? false;

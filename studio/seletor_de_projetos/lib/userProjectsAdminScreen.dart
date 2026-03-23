@@ -24,7 +24,8 @@ class UserProjectsAdminScreen extends StatefulWidget {
   });
 
   @override
-  State<UserProjectsAdminScreen> createState() => _UserProjectsAdminScreenState();
+  State<UserProjectsAdminScreen> createState() =>
+      _UserProjectsAdminScreenState();
 }
 
 class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
@@ -115,7 +116,8 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
       );
 
       if (response.statusCode == 200) {
-        _showSnack('Projeto "$projectName" transferido!', SupabaseColors.success);
+        _showSnack(
+            'Projeto "$projectName" transferido!', SupabaseColors.success);
         await _fetchProjects();
       } else {
         throw Exception('Erro ${response.statusCode}: ${response.body}');
@@ -190,7 +192,8 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
             surfaceTintColor: Colors.transparent,
             elevation: 0,
             leading: IconButton(
-              icon: const Icon(Icons.arrow_back_rounded, color: SupabaseColors.textSecondary),
+              icon: const Icon(Icons.arrow_back_rounded,
+                  color: SupabaseColors.textSecondary),
               onPressed: () => Navigator.of(context).pop(),
             ),
             flexibleSpace: FlexibleSpaceBar(
@@ -211,9 +214,10 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
                   Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: SupabaseColors.brand.withOpacity(0.15),
+                          color: SupabaseColors.brand.withValues(alpha:0.15),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
@@ -262,7 +266,8 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
               SizedBox(
                 width: 32,
                 height: 32,
-                child: CircularProgressIndicator(strokeWidth: 2, color: SupabaseColors.brand),
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: SupabaseColors.brand),
               ),
               SizedBox(height: 16),
               Text(
@@ -353,8 +358,8 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: isRunning
-                  ? SupabaseColors.success.withOpacity(0.3)
-                  : SupabaseColors.warning.withOpacity(0.3),
+                  ? SupabaseColors.success.withValues(alpha:0.3)
+                  : SupabaseColors.warning.withValues(alpha:0.3),
             ),
           ),
           child: Padding(
@@ -368,11 +373,15 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
                       height: 10,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: isRunning ? SupabaseColors.success : SupabaseColors.warning,
+                        color: isRunning
+                            ? SupabaseColors.success
+                            : SupabaseColors.warning,
                         boxShadow: [
                           BoxShadow(
-                            color: (isRunning ? SupabaseColors.success : SupabaseColors.warning)
-                                .withOpacity(0.5),
+                            color: (isRunning
+                                    ? SupabaseColors.success
+                                    : SupabaseColors.warning)
+                                .withValues(alpha:0.5),
                             blurRadius: 6,
                             spreadRadius: 1,
                           ),
@@ -380,7 +389,6 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
                       ),
                     ),
                     const SizedBox(width: 12),
-
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -412,8 +420,10 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
                                 icon: Icons.link_rounded,
                                 tooltip: 'Copiar URL',
                                 onPressed: () {
-                                  Clipboard.setData(ClipboardData(text: projectUrl));
-                                  _showSnack('URL copiada!', SupabaseColors.success);
+                                  Clipboard.setData(
+                                      ClipboardData(text: projectUrl));
+                                  _showSnack(
+                                      'URL copiada!', SupabaseColors.success);
                                 },
                               ),
                             ],
@@ -422,11 +432,13 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
                           Row(
                             children: [
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
                                 decoration: BoxDecoration(
                                   color: isRunning
-                                      ? SupabaseColors.success.withOpacity(0.15)
-                                      : SupabaseColors.warning.withOpacity(0.15),
+                                      ? SupabaseColors.success.withValues(alpha:0.15)
+                                      : SupabaseColors.warning
+                                          .withValues(alpha:0.15),
                                   borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: Text(
@@ -435,83 +447,97 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
                                     fontSize: 9,
                                     fontWeight: FontWeight.w600,
                                     letterSpacing: 0.5,
-                                    color: isRunning ? SupabaseColors.success : SupabaseColors.warning,
+                                    color: isRunning
+                                        ? SupabaseColors.success
+                                        : SupabaseColors.warning,
                                   ),
                                 ),
                               ),
                               const SizedBox(width: 8),
                               Text(
                                 '$running/$total containers',
-                                style: const TextStyle(fontSize: 11, color: SupabaseColors.textMuted),
+                                style: const TextStyle(
+                                    fontSize: 11,
+                                    color: SupabaseColors.textMuted),
                               ),
                             ],
                           ),
                         ],
                       ),
                     ),
-
                     if (busy)
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: SupabaseColors.brand.withOpacity(0.15),
+                          color: SupabaseColors.brand.withValues(alpha:0.15),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: const SizedBox(
                           width: 16,
                           height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: SupabaseColors.brand),
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: SupabaseColors.brand),
                         ),
                       ),
                   ],
                 ),
-
                 const SizedBox(height: 12),
                 const Divider(color: SupabaseColors.border, height: 1),
                 const SizedBox(height: 12),
-
                 Row(
                   children: [
-                    Expanded(child: _buildActionButton(
+                    Expanded(
+                        child: _buildActionButton(
                       icon: Icons.open_in_new_rounded,
                       label: 'Abrir',
                       color: SupabaseColors.brand,
                       onPressed: busy ? null : () => _openProject(project.name),
                     )),
                     const SizedBox(width: 6),
-                    Expanded(child: _buildActionButton(
+                    Expanded(
+                        child: _buildActionButton(
                       icon: Icons.play_arrow_rounded,
                       label: 'Start',
                       color: SupabaseColors.success,
-                      onPressed: busy ? null : () => _doAction(project.name, 'start'),
+                      onPressed:
+                          busy ? null : () => _doAction(project.name, 'start'),
                     )),
                     const SizedBox(width: 6),
-                    Expanded(child: _buildActionButton(
+                    Expanded(
+                        child: _buildActionButton(
                       icon: Icons.stop_rounded,
                       label: 'Stop',
                       color: SupabaseColors.error,
-                      onPressed: busy ? null : () => _doAction(project.name, 'stop'),
+                      onPressed:
+                          busy ? null : () => _doAction(project.name, 'stop'),
                     )),
                     const SizedBox(width: 6),
-                    Expanded(child: _buildActionButton(
+                    Expanded(
+                        child: _buildActionButton(
                       icon: Icons.restart_alt_rounded,
                       label: 'Restart',
                       color: SupabaseColors.info,
-                      onPressed: busy ? null : () => _doAction(project.name, 'restart'),
+                      onPressed: busy
+                          ? null
+                          : () => _doAction(project.name, 'restart'),
                     )),
                     const SizedBox(width: 6),
-                    Expanded(child: _buildActionButton(
+                    Expanded(
+                        child: _buildActionButton(
                       icon: Icons.swap_horiz_rounded,
                       label: 'Transferir',
                       color: Colors.purple,
-                      onPressed: busy ? null : () => _showTransferDialog(project.name),
+                      onPressed:
+                          busy ? null : () => _showTransferDialog(project.name),
                     )),
                     const SizedBox(width: 6),
-                    Expanded(child: _buildActionButton(
+                    Expanded(
+                        child: _buildActionButton(
                       icon: Icons.delete_outline_rounded,
                       label: 'Excluir',
                       color: SupabaseColors.error,
-                      onPressed: busy ? null : () => _confirmAndDelete(project.name),
+                      onPressed:
+                          busy ? null : () => _confirmAndDelete(project.name),
                     )),
                   ],
                 ),
@@ -537,10 +563,14 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
-            color: onPressed == null ? SupabaseColors.bg300 : color.withOpacity(0.15),
+            color: onPressed == null
+                ? SupabaseColors.bg300
+                : color.withValues(alpha:0.15),
             borderRadius: BorderRadius.circular(6),
             border: Border.all(
-              color: onPressed == null ? SupabaseColors.border : color.withOpacity(0.3),
+              color: onPressed == null
+                  ? SupabaseColors.border
+                  : color.withValues(alpha:0.3),
             ),
           ),
           child: Column(
@@ -570,7 +600,8 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
 
   Future<void> _openProject(String ref) async {
     await http.get(Uri.parse('/set-project?ref=$ref'));
-    html.window.open('${html.window.location.origin}/project/default', '_blank');
+    html.window
+        .open('${html.window.location.origin}/project/default', '_blank');
   }
 
   void _doAction(String projectName, String action) async {
@@ -581,7 +612,8 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
       );
 
       if (resp.statusCode == 200) {
-        _showSnack('Ação "$action" executada em "$projectName"', SupabaseColors.success);
+        _showSnack('Ação "$action" executada em "$projectName"',
+            SupabaseColors.success);
         await _fetchProjects();
       } else {
         throw Exception('Erro: ${resp.body}');
@@ -596,7 +628,8 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
   }
 
   void _confirmAndDelete(String projectName) async {
-    bool sucesso = await ProjectService.confirmAndDeleteProject(context, projectName);
+    bool sucesso =
+        await ProjectService.confirmAndDeleteProject(context, projectName);
 
     if (sucesso) {
       _safeSetState(() {

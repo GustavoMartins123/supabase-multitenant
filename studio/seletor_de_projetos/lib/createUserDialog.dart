@@ -122,7 +122,7 @@ class _CreateUserDialogState extends State<CreateUserDialog>
                         Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: SupabaseColors.brand.withOpacity(0.15),
+                            color: SupabaseColors.brand.withValues(alpha:0.15),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: const Icon(
@@ -147,7 +147,9 @@ class _CreateUserDialogState extends State<CreateUserDialog>
                               SizedBox(height: 2),
                               Text(
                                 'Preencha os dados do usuário',
-                                style: TextStyle(fontSize: 12, color: SupabaseColors.textMuted),
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: SupabaseColors.textMuted),
                               ),
                             ],
                           ),
@@ -155,36 +157,35 @@ class _CreateUserDialogState extends State<CreateUserDialog>
                         _CloseBtn(onPressed: () => Navigator.of(context).pop()),
                       ],
                     ),
-
                     const SizedBox(height: 24),
                     const Divider(color: SupabaseColors.border, height: 1),
                     const SizedBox(height: 20),
-
                     _buildField(
                       controller: _usernameController,
                       label: 'Nome de usuário',
                       hint: 'Ex: joao_silva',
                       icon: Icons.account_circle_rounded,
                       validator: (value) {
-                        if (value == null || value.trim().isEmpty) return 'Obrigatório';
-                        if (value.trim().length < 3) return 'Mínimo 3 caracteres';
+                        if (value == null || value.trim().isEmpty)
+                          return 'Obrigatório';
+                        if (value.trim().length < 3)
+                          return 'Mínimo 3 caracteres';
                         return null;
                       },
                     ),
                     const SizedBox(height: 16),
-
                     _buildField(
                       controller: _displayNameController,
                       label: 'Nome de exibição',
                       hint: 'Ex: João Silva',
                       icon: Icons.badge_rounded,
                       validator: (value) {
-                        if (value == null || value.trim().isEmpty) return 'Obrigatório';
+                        if (value == null || value.trim().isEmpty)
+                          return 'Obrigatório';
                         return null;
                       },
                     ),
                     const SizedBox(height: 16),
-
                     _buildField(
                       controller: _emailController,
                       label: 'Email',
@@ -192,15 +193,16 @@ class _CreateUserDialogState extends State<CreateUserDialog>
                       icon: Icons.email_rounded,
                       keyboardType: TextInputType.emailAddress,
                       validator: (value) {
-                        if (value == null || value.trim().isEmpty) return 'Obrigatório';
-                        if (!RegExp(r'^[\w\.\+\-]+@[\w\.\-]+\.\w+$').hasMatch(value)) {
+                        if (value == null || value.trim().isEmpty)
+                          return 'Obrigatório';
+                        if (!RegExp(r'^[\w\.\+\-]+@[\w\.\-]+\.\w+$')
+                            .hasMatch(value)) {
                           return 'Email inválido';
                         }
                         return null;
                       },
                     ),
                     const SizedBox(height: 16),
-
                     _buildField(
                       controller: _passwordController,
                       label: 'Senha',
@@ -208,21 +210,24 @@ class _CreateUserDialogState extends State<CreateUserDialog>
                       icon: Icons.lock_rounded,
                       obscureText: !_showPassword,
                       suffixIcon: IconButton(
-                        onPressed: () => setState(() => _showPassword = !_showPassword),
+                        onPressed: () =>
+                            setState(() => _showPassword = !_showPassword),
                         icon: Icon(
-                          _showPassword ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                          _showPassword
+                              ? Icons.visibility_off_rounded
+                              : Icons.visibility_rounded,
                           size: 18,
                           color: SupabaseColors.textMuted,
                         ),
                       ),
                       validator: (value) {
-                        if (value == null || value.isEmpty) return 'Obrigatório';
+                        if (value == null || value.isEmpty)
+                          return 'Obrigatório';
                         if (value.length < 8) return 'Mínimo 8 caracteres';
                         return null;
                       },
                     ),
                     const SizedBox(height: 16),
-
                     _buildField(
                       controller: _confirmPasswordController,
                       label: 'Confirmar senha',
@@ -230,70 +235,77 @@ class _CreateUserDialogState extends State<CreateUserDialog>
                       icon: Icons.lock_outline_rounded,
                       obscureText: !_showConfirmPassword,
                       suffixIcon: IconButton(
-                        onPressed: () => setState(() => _showConfirmPassword = !_showConfirmPassword),
+                        onPressed: () => setState(
+                            () => _showConfirmPassword = !_showConfirmPassword),
                         icon: Icon(
-                          _showConfirmPassword ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                          _showConfirmPassword
+                              ? Icons.visibility_off_rounded
+                              : Icons.visibility_rounded,
                           size: 18,
                           color: SupabaseColors.textMuted,
                         ),
                       ),
                       validator: (value) {
-                        if (value != _passwordController.text) return 'Senhas não coincidem';
+                        if (value != _passwordController.text)
+                          return 'Senhas não coincidem';
                         return null;
                       },
                     ),
-
                     const SizedBox(height: 24),
                     const Divider(color: SupabaseColors.border, height: 1),
                     const SizedBox(height: 16),
-
                     Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
                         TextButton(
-                          onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
+                          onPressed: _isLoading
+                              ? null
+                              : () => Navigator.of(context).pop(),
                           style: TextButton.styleFrom(
                             foregroundColor: SupabaseColors.textSecondary,
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 10),
                           ),
-                          child: const Text('Cancelar', style: TextStyle(fontSize: 13)),
+                          child: const Text('Cancelar',
+                              style: TextStyle(fontSize: 13)),
                         ),
                         const SizedBox(width: 8),
                         _isLoading
                             ? Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: SupabaseColors.brand.withOpacity(0.5),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 24, vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: SupabaseColors.brand.withValues(alpha:0.5),
+                                  borderRadius: BorderRadius.circular(6),
                                 ),
-                              ),
-                              SizedBox(width: 10),
-                              Text(
-                                'Criando...',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                  color: Colors.white,
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    SizedBox(
+                                      width: 14,
+                                      height: 14,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    SizedBox(width: 10),
+                                    Text(
+                                      'Criando...',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ),
-                            ],
-                          ),
-                        )
+                              )
                             : _PrimaryButton(
-                          label: 'Criar Usuário',
-                          icon: Icons.check_rounded,
-                          onPressed: _createUser,
-                        ),
+                                label: 'Criar Usuário',
+                                icon: Icons.check_rounded,
+                                onPressed: _createUser,
+                              ),
                       ],
                     ),
                   ],
@@ -339,7 +351,8 @@ class _CreateUserDialogState extends State<CreateUserDialog>
           ),
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: const TextStyle(color: SupabaseColors.textMuted, fontSize: 13),
+            hintStyle:
+                const TextStyle(color: SupabaseColors.textMuted, fontSize: 13),
             prefixIcon: Icon(icon, color: SupabaseColors.textMuted, size: 18),
             suffixIcon: suffixIcon,
             filled: true,
@@ -354,13 +367,15 @@ class _CreateUserDialogState extends State<CreateUserDialog>
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(6),
-              borderSide: const BorderSide(color: SupabaseColors.brand, width: 2),
+              borderSide:
+                  const BorderSide(color: SupabaseColors.brand, width: 2),
             ),
             errorBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(6),
               borderSide: const BorderSide(color: SupabaseColors.error),
             ),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           ),
           validator: validator,
         ),
@@ -382,7 +397,8 @@ class _CloseBtn extends StatelessWidget {
         borderRadius: BorderRadius.circular(4),
         child: const Padding(
           padding: EdgeInsets.all(4),
-          child: Icon(Icons.close_rounded, size: 18, color: SupabaseColors.textMuted),
+          child: Icon(Icons.close_rounded,
+              size: 18, color: SupabaseColors.textMuted),
         ),
       ),
     );
@@ -390,7 +406,8 @@ class _CloseBtn extends StatelessWidget {
 }
 
 class _PrimaryButton extends StatefulWidget {
-  const _PrimaryButton({required this.label, required this.icon, required this.onPressed});
+  const _PrimaryButton(
+      {required this.label, required this.icon, required this.onPressed});
   final String label;
   final IconData icon;
   final VoidCallback onPressed;

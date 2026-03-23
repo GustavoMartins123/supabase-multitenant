@@ -22,23 +22,94 @@ class _NewProjectDialogState extends State<NewProjectDialog>
   String _crop(String s) => s.length > 40 ? s.substring(0, 40) : s;
 
   static const _reserved = <String>{
-    'select', 'from', 'where', 'insert', 'update', 'delete', 'table',
-    'create', 'drop', 'join', 'group', 'order', 'limit', 'into', 'index',
-    'view', 'trigger', 'procedure', 'function', 'database', 'schema',
-    'primary', 'foreign', 'key', 'constraint', 'unique', 'null', 'not',
-    'and', 'or', 'in', 'like', 'between', 'exists', 'having', 'union',
-    'inner', 'left', 'right', 'outer', 'cross', 'on', 'as', 'case', 'when',
-    'then', 'else', 'end', 'if', 'while', 'for', 'begin', 'commit', 'rollback'
+    'select',
+    'from',
+    'where',
+    'insert',
+    'update',
+    'delete',
+    'table',
+    'create',
+    'drop',
+    'join',
+    'group',
+    'order',
+    'limit',
+    'into',
+    'index',
+    'view',
+    'trigger',
+    'procedure',
+    'function',
+    'database',
+    'schema',
+    'primary',
+    'foreign',
+    'key',
+    'constraint',
+    'unique',
+    'null',
+    'not',
+    'and',
+    'or',
+    'in',
+    'like',
+    'between',
+    'exists',
+    'having',
+    'union',
+    'inner',
+    'left',
+    'right',
+    'outer',
+    'cross',
+    'on',
+    'as',
+    'case',
+    'when',
+    'then',
+    'else',
+    'end',
+    'if',
+    'while',
+    'for',
+    'begin',
+    'commit',
+    'rollback'
   };
 
   static const _prefixes = <String>[
-    'app', 'web', 'api', 'mobile', 'desktop', 'backend', 'frontend',
-    'system', 'tool', 'lib', 'framework', 'service', 'micro', 'mini'
+    'app',
+    'web',
+    'api',
+    'mobile',
+    'desktop',
+    'backend',
+    'frontend',
+    'system',
+    'tool',
+    'lib',
+    'framework',
+    'service',
+    'micro',
+    'mini'
   ];
 
   static const _suffixes = <String>[
-    'app', 'tool', 'system', 'service', 'api', 'web', 'mobile',
-    'client', 'server', 'core', 'lib', 'kit', 'hub', 'pro'
+    'app',
+    'tool',
+    'system',
+    'service',
+    'api',
+    'web',
+    'mobile',
+    'client',
+    'server',
+    'core',
+    'lib',
+    'kit',
+    'hub',
+    'pro'
   ];
 
   @override
@@ -64,7 +135,8 @@ class _NewProjectDialogState extends State<NewProjectDialog>
 
   String _randString([int length = 6]) {
     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    return List.generate(length, (_) => chars[_rand.nextInt(chars.length)]).join();
+    return List.generate(length, (_) => chars[_rand.nextInt(chars.length)])
+        .join();
   }
 
   String _normalize(String input) {
@@ -142,7 +214,8 @@ class _NewProjectDialogState extends State<NewProjectDialog>
     if (v == null || v.trim().isEmpty) return 'Informe um nome';
     final txt = _normalize(v);
     if (txt.isEmpty) return 'Nome inválido';
-    if (!_regex.hasMatch(txt)) return 'Use minúsculas, números ou "_" (3-40 caracteres)';
+    if (!_regex.hasMatch(txt))
+      return 'Use minúsculas, números ou "_" (3-40 caracteres)';
     if (_reserved.contains(txt)) return 'Nome reservado — escolha outro.';
     return null;
   }
@@ -194,7 +267,7 @@ class _NewProjectDialogState extends State<NewProjectDialog>
                         Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: SupabaseColors.brand.withOpacity(0.15),
+                            color: SupabaseColors.brand.withValues(alpha:0.15),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: const Icon(
@@ -230,11 +303,9 @@ class _NewProjectDialogState extends State<NewProjectDialog>
                         _CloseBtn(onPressed: () => Navigator.pop(context)),
                       ],
                     ),
-
                     const SizedBox(height: 24),
                     const Divider(color: SupabaseColors.border, height: 1),
                     const SizedBox(height: 24),
-
                     const Text(
                       'Nome do Projeto',
                       style: TextStyle(
@@ -244,12 +315,12 @@ class _NewProjectDialogState extends State<NewProjectDialog>
                       ),
                     ),
                     const SizedBox(height: 8),
-
                     Autocomplete<String>(
                       optionsBuilder: (textEditingValue) {
                         return _suggestions(textEditingValue.text);
                       },
-                      fieldViewBuilder: (context, controller, focusNode, onSubmitted) {
+                      fieldViewBuilder:
+                          (context, controller, focusNode, onSubmitted) {
                         if (controller.text != _ctrl.text) {
                           controller.text = _ctrl.text;
                           controller.selection = _ctrl.selection;
@@ -273,21 +344,26 @@ class _NewProjectDialogState extends State<NewProjectDialog>
                             fillColor: SupabaseColors.bg300,
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(6),
-                              borderSide: const BorderSide(color: SupabaseColors.border),
+                              borderSide: const BorderSide(
+                                  color: SupabaseColors.border),
                             ),
                             enabledBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(6),
-                              borderSide: const BorderSide(color: SupabaseColors.border),
+                              borderSide: const BorderSide(
+                                  color: SupabaseColors.border),
                             ),
                             focusedBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(6),
-                              borderSide: const BorderSide(color: SupabaseColors.brand, width: 2),
+                              borderSide: const BorderSide(
+                                  color: SupabaseColors.brand, width: 2),
                             ),
                             errorBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(6),
-                              borderSide: const BorderSide(color: SupabaseColors.error),
+                              borderSide:
+                                  const BorderSide(color: SupabaseColors.error),
                             ),
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 14),
                           ),
                           style: const TextStyle(
                             fontSize: 13,
@@ -313,13 +389,16 @@ class _NewProjectDialogState extends State<NewProjectDialog>
                             borderRadius: BorderRadius.circular(6),
                             color: SupabaseColors.surface300,
                             child: Container(
-                              constraints: const BoxConstraints(maxHeight: 240, maxWidth: 400),
+                              constraints: const BoxConstraints(
+                                  maxHeight: 240, maxWidth: 400),
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: SupabaseColors.border),
+                                border:
+                                    Border.all(color: SupabaseColors.border),
                               ),
                               child: ListView.builder(
-                                padding: const EdgeInsets.symmetric(vertical: 4),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 4),
                                 shrinkWrap: true,
                                 itemCount: options.length,
                                 itemBuilder: (context, index) {
@@ -327,7 +406,8 @@ class _NewProjectDialogState extends State<NewProjectDialog>
                                   return InkWell(
                                     onTap: () => onSelected(option),
                                     child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 12, vertical: 10),
                                       child: Row(
                                         children: [
                                           const Icon(
@@ -342,7 +422,8 @@ class _NewProjectDialogState extends State<NewProjectDialog>
                                               style: const TextStyle(
                                                 fontSize: 12,
                                                 fontFamily: 'monospace',
-                                                color: SupabaseColors.textSecondary,
+                                                color: SupabaseColors
+                                                    .textSecondary,
                                               ),
                                             ),
                                           ),
@@ -357,15 +438,14 @@ class _NewProjectDialogState extends State<NewProjectDialog>
                         );
                       },
                     ),
-
                     const SizedBox(height: 16),
-
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: SupabaseColors.info.withOpacity(0.1),
+                        color: SupabaseColors.info.withValues(alpha:0.1),
                         borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: SupabaseColors.info.withOpacity(0.2)),
+                        border: Border.all(
+                            color: SupabaseColors.info.withValues(alpha:0.2)),
                       ),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -391,8 +471,8 @@ class _NewProjectDialogState extends State<NewProjectDialog>
                                 SizedBox(height: 4),
                                 Text(
                                   '• Apenas letras minúsculas, números e underscore\n'
-                                      '• Deve começar com letra ou underscore\n'
-                                      '• Entre 3 e 40 caracteres',
+                                  '• Deve começar com letra ou underscore\n'
+                                  '• Entre 3 e 40 caracteres',
                                   style: TextStyle(
                                     fontSize: 11,
                                     height: 1.4,
@@ -405,11 +485,9 @@ class _NewProjectDialogState extends State<NewProjectDialog>
                         ],
                       ),
                     ),
-
                     const SizedBox(height: 24),
                     const Divider(color: SupabaseColors.border, height: 1),
                     const SizedBox(height: 16),
-
                     Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
@@ -417,9 +495,11 @@ class _NewProjectDialogState extends State<NewProjectDialog>
                           onPressed: () => Navigator.pop(context),
                           style: TextButton.styleFrom(
                             foregroundColor: SupabaseColors.textSecondary,
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 10),
                           ),
-                          child: const Text('Cancelar', style: TextStyle(fontSize: 13)),
+                          child: const Text('Cancelar',
+                              style: TextStyle(fontSize: 13)),
                         ),
                         const SizedBox(width: 8),
                         _PrimaryButton(
@@ -453,7 +533,8 @@ class _CloseBtn extends StatelessWidget {
         borderRadius: BorderRadius.circular(4),
         child: const Padding(
           padding: EdgeInsets.all(4),
-          child: Icon(Icons.close_rounded, size: 18, color: SupabaseColors.textMuted),
+          child: Icon(Icons.close_rounded,
+              size: 18, color: SupabaseColors.textMuted),
         ),
       ),
     );
@@ -461,7 +542,8 @@ class _CloseBtn extends StatelessWidget {
 }
 
 class _PrimaryButton extends StatefulWidget {
-  const _PrimaryButton({required this.label, required this.icon, required this.onPressed});
+  const _PrimaryButton(
+      {required this.label, required this.icon, required this.onPressed});
   final String label;
   final IconData icon;
   final VoidCallback onPressed;

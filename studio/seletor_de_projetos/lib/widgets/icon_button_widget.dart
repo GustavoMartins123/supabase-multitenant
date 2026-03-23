@@ -30,7 +30,7 @@ class IconButtonWidget extends StatelessWidget {
               icon,
               size: 16,
               color: onPressed == null
-                  ? SupabaseColors.textMuted.withOpacity(0.5)
+                  ? SupabaseColors.textMuted.withValues(alpha:0.5)
                   : (color ?? SupabaseColors.textSecondary),
             ),
           ),

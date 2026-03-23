@@ -39,8 +39,11 @@ dependencies:
   intl: ^0.20.2
   collection: ^1.18.0
   shared_preferences: ^2.5.3
+  flutter_riverpod: ^3.3.1
+  flutter_launcher_icons: ^0.14.4
 
 dev_dependencies:
+  flutter_launcher_icons: ^0.14.4
   flutter_test:
     sdk: flutter
 
@@ -53,6 +56,12 @@ dev_dependencies:
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
+
+flutter_launcher_icons:
+  web:
+    generate: true
+    image_path: "web/favicon.png"
+
 
 # The following section is specific to Flutter packages.
 flutter:

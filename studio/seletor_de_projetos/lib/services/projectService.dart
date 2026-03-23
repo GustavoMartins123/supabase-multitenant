@@ -3,7 +3,8 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 
 class ProjectService {
-  static Future<bool> confirmAndDeleteProject(BuildContext context, String projectRef) async {
+  static Future<bool> confirmAndDeleteProject(
+      BuildContext context, String projectRef) async {
     final confirmed = await _showConfirmationDialog(context, projectRef);
     if (!confirmed) return false;
 
@@ -13,7 +14,8 @@ class ProjectService {
     return await _executeProjectDeletion(context, projectRef, password);
   }
 
-  static Future<bool> _showConfirmationDialog(BuildContext context, String projectRef) async {
+  static Future<bool> _showConfirmationDialog(
+      BuildContext context, String projectRef) async {
     return showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -41,7 +43,9 @@ class ProjectService {
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar')),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
@@ -76,14 +80,17 @@ class ProjectService {
                   border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.lock),
                 ),
-                validator: (value) => value == null || value.isEmpty ? 'Senha obrigatória' : null,
+                validator: (value) =>
+                    value == null || value.isEmpty ? 'Senha obrigatória' : null,
                 autofocus: true,
               ),
             ],
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar')),
           ElevatedButton(
             onPressed: () {
               if (formKey.currentState!.validate()) {
@@ -97,7 +104,8 @@ class ProjectService {
     );
   }
 
-  static Future<bool> _executeProjectDeletion(BuildContext context, String projectRef, String password) async {
+  static Future<bool> _executeProjectDeletion(
+      BuildContext context, String projectRef, String password) async {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -131,15 +139,20 @@ class ProjectService {
           context: context,
           builder: (context) => AlertDialog(
             title: Icon(
-              result['status'] == 'success' ? Icons.check_circle : Icons.warning,
-              color: result['status'] == 'success' ? Colors.green : Colors.orange,
+              result['status'] == 'success'
+                  ? Icons.check_circle
+                  : Icons.warning,
+              color:
+                  result['status'] == 'success' ? Colors.green : Colors.orange,
               size: 48,
             ),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(result['message'] ?? 'Projeto excluído', style: const TextStyle(fontWeight: FontWeight.bold)),
-                if (result['errors'] != null && result['errors'].isNotEmpty) ...[
+                Text(result['message'] ?? 'Projeto excluído',
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                if (result['errors'] != null &&
+                    result['errors'].isNotEmpty) ...[
                   const SizedBox(height: 16),
                   const Text('Erros encontrados:'),
                   ...result['errors'].map<Widget>((e) => Text('• $e')),
@@ -161,7 +174,8 @@ class ProjectService {
     } catch (e) {
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro na exclusão: $e'), backgroundColor: Colors.red),
+        SnackBar(
+            content: Text('Erro na exclusão: $e'), backgroundColor: Colors.red),
       );
       return false;
     }

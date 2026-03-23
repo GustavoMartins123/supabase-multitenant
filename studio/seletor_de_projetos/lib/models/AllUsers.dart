@@ -119,7 +119,7 @@ class AvailableUserShort {
 
   factory AvailableUserShort.fromJson(Map<String, dynamic> j) =>
       AvailableUserShort(
-        userId:       j['user_id'] as String,
-        displayName:  j['display_name'] as String,
+        userId: j['user_id'] as String,
+        displayName: j['display_name'] as String,
       );
 }

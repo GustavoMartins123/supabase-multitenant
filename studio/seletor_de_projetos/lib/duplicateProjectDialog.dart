@@ -1,4 +1,3 @@
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:seletor_de_projetos/supabase_colors.dart';
@@ -27,13 +26,60 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
   String _crop(String s) => s.length > 40 ? s.substring(0, 40) : s;
 
   static const _reserved = <String>{
-    'select', 'from', 'where', 'insert', 'update', 'delete', 'table',
-    'create', 'drop', 'join', 'group', 'order', 'limit', 'into', 'index',
-    'view', 'trigger', 'procedure', 'function', 'database', 'schema',
-    'primary', 'foreign', 'key', 'constraint', 'unique', 'null', 'not',
-    'and', 'or', 'in', 'like', 'between', 'exists', 'having', 'union',
-    'inner', 'left', 'right', 'outer', 'cross', 'on', 'as', 'case', 'when',
-    'then', 'else', 'end', 'if', 'while', 'for', 'begin', 'commit', 'rollback'
+    'select',
+    'from',
+    'where',
+    'insert',
+    'update',
+    'delete',
+    'table',
+    'create',
+    'drop',
+    'join',
+    'group',
+    'order',
+    'limit',
+    'into',
+    'index',
+    'view',
+    'trigger',
+    'procedure',
+    'function',
+    'database',
+    'schema',
+    'primary',
+    'foreign',
+    'key',
+    'constraint',
+    'unique',
+    'null',
+    'not',
+    'and',
+    'or',
+    'in',
+    'like',
+    'between',
+    'exists',
+    'having',
+    'union',
+    'inner',
+    'left',
+    'right',
+    'outer',
+    'cross',
+    'on',
+    'as',
+    'case',
+    'when',
+    'then',
+    'else',
+    'end',
+    'if',
+    'while',
+    'for',
+    'begin',
+    'commit',
+    'rollback'
   };
 
   @override
@@ -72,9 +118,11 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
     if (v == null || v.trim().isEmpty) return 'Informe um nome';
     final txt = _normalize(v);
     if (txt.isEmpty) return 'Nome inválido';
-    if (!_regex.hasMatch(txt)) return 'Use minúsculas, números ou "_" (3-40 caracteres)';
+    if (!_regex.hasMatch(txt))
+      return 'Use minúsculas, números ou "_" (3-40 caracteres)';
     if (_reserved.contains(txt)) return 'Nome reservado — escolha outro.';
-    if (txt == widget.originalProjectName) return 'O nome deve ser diferente do original';
+    if (txt == widget.originalProjectName)
+      return 'O nome deve ser diferente do original';
     return null;
   }
 
@@ -101,7 +149,8 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
     ]);
 
     return suggestions
-        .where((s) => s.isNotEmpty && _regex.hasMatch(s) && !_reserved.contains(s))
+        .where(
+            (s) => s.isNotEmpty && _regex.hasMatch(s) && !_reserved.contains(s))
         .toList();
   }
 
@@ -143,7 +192,7 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
                         Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: SupabaseColors.info.withOpacity(0.15),
+                            color: SupabaseColors.info.withValues(alpha:0.15),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: const Icon(
@@ -179,11 +228,9 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
                         _CloseBtn(onPressed: () => Navigator.pop(context)),
                       ],
                     ),
-
                     const SizedBox(height: 24),
                     const Divider(color: SupabaseColors.border, height: 1),
                     const SizedBox(height: 20),
-
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
@@ -196,7 +243,7 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
                           Container(
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              color: SupabaseColors.brand.withOpacity(0.15),
+                              color: SupabaseColors.brand.withValues(alpha:0.15),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: const Icon(
@@ -235,9 +282,7 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
                         ],
                       ),
                     ),
-
                     const SizedBox(height: 20),
-
                     const Text(
                       'Nome do Novo Projeto',
                       style: TextStyle(
@@ -247,7 +292,6 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
                       ),
                     ),
                     const SizedBox(height: 8),
-
                     TextFormField(
                       controller: _ctrl,
                       decoration: InputDecoration(
@@ -265,21 +309,26 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
                         fillColor: SupabaseColors.bg300,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(6),
-                          borderSide: const BorderSide(color: SupabaseColors.border),
+                          borderSide:
+                              const BorderSide(color: SupabaseColors.border),
                         ),
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(6),
-                          borderSide: const BorderSide(color: SupabaseColors.border),
+                          borderSide:
+                              const BorderSide(color: SupabaseColors.border),
                         ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(6),
-                          borderSide: const BorderSide(color: SupabaseColors.brand, width: 2),
+                          borderSide: const BorderSide(
+                              color: SupabaseColors.brand, width: 2),
                         ),
                         errorBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(6),
-                          borderSide: const BorderSide(color: SupabaseColors.error),
+                          borderSide:
+                              const BorderSide(color: SupabaseColors.error),
                         ),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 14),
                       ),
                       style: const TextStyle(
                         fontSize: 13,
@@ -290,16 +339,18 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
                       validator: _validate,
                       onFieldSubmitted: (_) => _submit(),
                     ),
-
                     const SizedBox(height: 16),
-
                     Row(
                       children: const [
-                        Icon(Icons.lightbulb_outline_rounded, size: 14, color: SupabaseColors.textMuted),
+                        Icon(Icons.lightbulb_outline_rounded,
+                            size: 14, color: SupabaseColors.textMuted),
                         SizedBox(width: 6),
                         Text(
                           'Sugestões',
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: SupabaseColors.textMuted),
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: SupabaseColors.textMuted),
                         ),
                       ],
                     ),
@@ -313,15 +364,16 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
                           onTap: () => _selectSuggestion(suggestion),
                           borderRadius: BorderRadius.circular(6),
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 6),
                             decoration: BoxDecoration(
                               color: isSelected
-                                  ? SupabaseColors.brand.withOpacity(0.15)
+                                  ? SupabaseColors.brand.withValues(alpha:0.15)
                                   : SupabaseColors.bg300,
                               borderRadius: BorderRadius.circular(6),
                               border: Border.all(
                                 color: isSelected
-                                    ? SupabaseColors.brand.withOpacity(0.4)
+                                    ? SupabaseColors.brand.withValues(alpha:0.4)
                                     : SupabaseColors.border,
                               ),
                             ),
@@ -330,17 +382,19 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
                               style: TextStyle(
                                 fontSize: 11,
                                 fontFamily: 'monospace',
-                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                                color: isSelected ? SupabaseColors.brand : SupabaseColors.textSecondary,
+                                fontWeight: isSelected
+                                    ? FontWeight.w600
+                                    : FontWeight.w500,
+                                color: isSelected
+                                    ? SupabaseColors.brand
+                                    : SupabaseColors.textSecondary,
                               ),
                             ),
                           ),
                         );
                       }).toList(),
                     ),
-
                     const SizedBox(height: 20),
-
                     InkWell(
                       onTap: () => setState(() => _copyData = !_copyData),
                       borderRadius: BorderRadius.circular(6),
@@ -351,7 +405,7 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
                           borderRadius: BorderRadius.circular(6),
                           border: Border.all(
                             color: _copyData
-                                ? SupabaseColors.brand.withOpacity(0.4)
+                                ? SupabaseColors.brand.withValues(alpha:0.4)
                                 : SupabaseColors.border,
                           ),
                         ),
@@ -362,10 +416,13 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
                               height: 20,
                               child: Checkbox(
                                 value: _copyData,
-                                onChanged: (val) => setState(() => _copyData = val ?? false),
+                                onChanged: (val) =>
+                                    setState(() => _copyData = val ?? false),
                                 activeColor: SupabaseColors.brand,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                                side: const BorderSide(color: SupabaseColors.border),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(4)),
+                                side: const BorderSide(
+                                    color: SupabaseColors.border),
                               ),
                             ),
                             const SizedBox(width: 12),
@@ -384,7 +441,9 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
                                   SizedBox(height: 2),
                                   Text(
                                     'Incluir todos os registros existentes',
-                                    style: TextStyle(fontSize: 11, color: SupabaseColors.textMuted),
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        color: SupabaseColors.textMuted),
                                   ),
                                 ],
                               ),
@@ -393,20 +452,20 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
                         ),
                       ),
                     ),
-
                     const SizedBox(height: 16),
-
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: SupabaseColors.info.withOpacity(0.1),
+                        color: SupabaseColors.info.withValues(alpha:0.1),
                         borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: SupabaseColors.info.withOpacity(0.2)),
+                        border: Border.all(
+                            color: SupabaseColors.info.withValues(alpha:0.2)),
                       ),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Icon(Icons.info_outline_rounded, color: SupabaseColors.info, size: 16),
+                          const Icon(Icons.info_outline_rounded,
+                              color: SupabaseColors.info, size: 16),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Column(
@@ -437,11 +496,9 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
                         ],
                       ),
                     ),
-
                     const SizedBox(height: 24),
                     const Divider(color: SupabaseColors.border, height: 1),
                     const SizedBox(height: 16),
-
                     Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
@@ -449,9 +506,11 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
                           onPressed: () => Navigator.pop(context),
                           style: TextButton.styleFrom(
                             foregroundColor: SupabaseColors.textSecondary,
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 10),
                           ),
-                          child: const Text('Cancelar', style: TextStyle(fontSize: 13)),
+                          child: const Text('Cancelar',
+                              style: TextStyle(fontSize: 13)),
                         ),
                         const SizedBox(width: 8),
                         _ActionButton(
@@ -486,7 +545,8 @@ class _CloseBtn extends StatelessWidget {
         borderRadius: BorderRadius.circular(4),
         child: const Padding(
           padding: EdgeInsets.all(4),
-          child: Icon(Icons.close_rounded, size: 18, color: SupabaseColors.textMuted),
+          child: Icon(Icons.close_rounded,
+              size: 18, color: SupabaseColors.textMuted),
         ),
       ),
     );
@@ -520,7 +580,7 @@ class _ActionButtonState extends State<_ActionButton> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         decoration: BoxDecoration(
-          color: _hover ? widget.color.withOpacity(0.9) : widget.color,
+          color: _hover ? widget.color.withValues(alpha:0.9) : widget.color,
           borderRadius: BorderRadius.circular(6),
         ),
         child: Material(
