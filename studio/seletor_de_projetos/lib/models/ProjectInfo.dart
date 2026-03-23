@@ -14,9 +14,9 @@ class ProjectInfo {
   });
 
   factory ProjectInfo.fromJson(Map<String, dynamic> json) => ProjectInfo(
-        name: json['name'],
-        status: json['status'],
-        runningContainers: json['running_containers'],
-        totalContainers: json['total_containers'],
-      );
+    name: json['name'],
+    status: json['status'],
+    runningContainers: json['running_containers'],
+    totalContainers: json['total_containers'],
+  );
 }

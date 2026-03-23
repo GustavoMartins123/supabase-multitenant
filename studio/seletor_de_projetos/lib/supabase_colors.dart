@@ -48,73 +48,71 @@ class SupabaseColors {
 
   /// Get theme data with Supabase colors
   static ThemeData get darkTheme => ThemeData(
-        colorSchemeSeed: brand,
-        brightness: Brightness.dark,
-        useMaterial3: true,
-        scaffoldBackgroundColor: bg100,
-        cardColor: surface100,
-        dividerColor: border,
-        dialogBackgroundColor: bg200,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: bg100,
-          surfaceTintColor: Colors.transparent,
-          elevation: 0,
-        ),
-        snackBarTheme: SnackBarThemeData(
-          backgroundColor: surface300,
-          contentTextStyle: const TextStyle(color: textPrimary),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: bg300,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(6),
-            borderSide: const BorderSide(color: border),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(6),
-            borderSide: const BorderSide(color: border),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(6),
-            borderSide: const BorderSide(color: borderFocus, width: 2),
-          ),
-          labelStyle: const TextStyle(color: textSecondary),
-          hintStyle: const TextStyle(color: textMuted),
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: brand,
-            foregroundColor: bg100,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-          ),
-        ),
-        textButtonTheme: TextButtonThemeData(
-          style: TextButton.styleFrom(
-            foregroundColor: textSecondary,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-          ),
-        ),
-        popupMenuTheme: PopupMenuThemeData(
-          color: surface300,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: const BorderSide(color: border),
-          ),
-        ),
-        tooltipTheme: TooltipThemeData(
-          decoration: BoxDecoration(
-            color: surface300,
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: border),
-          ),
-          textStyle: const TextStyle(color: textPrimary, fontSize: 12),
-        ),
-      );
+    colorSchemeSeed: brand,
+    brightness: Brightness.dark,
+    useMaterial3: true,
+    scaffoldBackgroundColor: bg100,
+    cardColor: surface100,
+    dividerColor: border,
+    dialogBackgroundColor: bg200,
+    appBarTheme: const AppBarTheme(
+      backgroundColor: bg100,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+    ),
+    snackBarTheme: SnackBarThemeData(
+      backgroundColor: surface300,
+      contentTextStyle: const TextStyle(color: textPrimary),
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: bg300,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(6),
+        borderSide: const BorderSide(color: border),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(6),
+        borderSide: const BorderSide(color: border),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(6),
+        borderSide: const BorderSide(color: borderFocus, width: 2),
+      ),
+      labelStyle: const TextStyle(color: textSecondary),
+      hintStyle: const TextStyle(color: textMuted),
+    ),
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: brand,
+        foregroundColor: bg100,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        foregroundColor: textSecondary,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+      ),
+    ),
+    popupMenuTheme: PopupMenuThemeData(
+      color: surface300,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: const BorderSide(color: border),
+      ),
+    ),
+    tooltipTheme: TooltipThemeData(
+      decoration: BoxDecoration(
+        color: surface300,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: border),
+      ),
+      textStyle: const TextStyle(color: textPrimary, fontSize: 12),
+    ),
+  );
 }

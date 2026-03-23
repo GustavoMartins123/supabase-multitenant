@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/job.dart';
+import '../models/user_models.dart';
+import '../session.dart';
 
 final projectRepositoryProvider = Provider((ref) => ProjectRepository());
 
@@ -40,7 +42,10 @@ class ProjectRepository {
   }
 
   Future<Job?> duplicateProject(
-      String originalName, String newName, bool copyData) async {
+    String originalName,
+    String newName,
+    bool copyData,
+  ) async {
     try {
       final res = await http.post(
         Uri.parse('/api/projects/duplicate'),
@@ -78,7 +83,14 @@ class ProjectRepository {
   Future<List<dynamic>> getMembers(String ref) async {
     final resp = await http.get(Uri.parse('/api/projects/$ref/members'));
     if (resp.statusCode == 200) {
-      return jsonDecode(resp.body);
+      if (resp.body.isEmpty) return [];
+      final dynamic data = jsonDecode(resp.body);
+      if (data is List) return data;
+      if (data is Map) {
+        if (data.containsKey('members')) return data['members'] as List<dynamic>;
+        if (data.containsKey('users')) return data['users'] as List<dynamic>;
+      }
+      return [];
     }
     throw Exception('Erro ao carregar membros: ${resp.body}');
   }
@@ -95,18 +107,26 @@ class ProjectRepository {
   }
 
   Future<void> removeMember(String ref, String userId) async {
-    final resp =
-        await http.delete(Uri.parse('/api/projects/$ref/members/$userId'));
+    final resp = await http.delete(
+      Uri.parse('/api/projects/$ref/members/$userId'),
+    );
     if (resp.statusCode != 200) {
       throw Exception('Erro ao remover membro: ${resp.body}');
     }
   }
 
   Future<List<dynamic>> getAvailableUsers(String ref) async {
-    final resp =
-        await http.get(Uri.parse('/api/projects/$ref/available-users'));
+    final resp = await http.get(
+      Uri.parse('/api/projects/$ref/available-users'),
+    );
     if (resp.statusCode == 200) {
-      return jsonDecode(resp.body);
+      if (resp.body.isEmpty) return [];
+      final dynamic data = jsonDecode(resp.body);
+      if (data is List) return data;
+      if (data is Map && data.containsKey('users')) {
+        return data['users'] as List<dynamic>;
+      }
+      return [];
     }
     throw Exception('Erro ao carregar usuários: ${resp.body}');
   }
@@ -144,6 +164,53 @@ class ProjectRepository {
       } catch (_) {
         throw Exception(resp.body);
       }
+    }
+  }
+
+  Future<UserListResponse> fetchAdminUsers() async {
+    final response = await http.get(Uri.parse('/api/admin/users'));
+
+    if (response.statusCode == 403) {
+      throw Exception('Acesso negado - apenas administradores');
+    }
+
+    if (response.statusCode != 200) {
+      throw Exception('Erro ${response.statusCode}: ${response.body}');
+    }
+
+    if (response.body.isEmpty) {
+      throw Exception('Resposta vazia da API');
+    }
+
+    final data = jsonDecode(response.body);
+    if (data == null) {
+      throw Exception('Dados inválidos retornados pela API');
+    }
+
+    final resp = UserListResponse.fromJson(data);
+
+    if (resp.users.isNotEmpty) {
+      final session = Session();
+      resp.users.sort((a, b) {
+        if (a.id == session.myId) return -1;
+        if (b.id == session.myId) return 1;
+        return 0;
+      });
+    }
+
+    return resp;
+  }
+
+  Future<void> toggleUserStatus(String userId, bool isCurrentlyActive) async {
+    final endpoint = isCurrentlyActive ? 'deactivate' : 'activate';
+    final response = await http.post(
+      Uri.parse('/api/admin/users/$userId/$endpoint'),
+      headers: {'Content-Type': 'application/json'},
+    );
+
+    if (response.statusCode != 200) {
+      final error = jsonDecode(response.body)['error'] ?? 'Erro desconhecido';
+      throw Exception(error);
     }
   }
 }

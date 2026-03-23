@@ -122,7 +122,7 @@ class _CreateUserDialogState extends State<CreateUserDialog>
                         Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: SupabaseColors.brand.withValues(alpha:0.15),
+                            color: SupabaseColors.brand.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: const Icon(
@@ -148,8 +148,9 @@ class _CreateUserDialogState extends State<CreateUserDialog>
                               Text(
                                 'Preencha os dados do usuário',
                                 style: TextStyle(
-                                    fontSize: 12,
-                                    color: SupabaseColors.textMuted),
+                                  fontSize: 12,
+                                  color: SupabaseColors.textMuted,
+                                ),
                               ),
                             ],
                           ),
@@ -195,8 +196,9 @@ class _CreateUserDialogState extends State<CreateUserDialog>
                       validator: (value) {
                         if (value == null || value.trim().isEmpty)
                           return 'Obrigatório';
-                        if (!RegExp(r'^[\w\.\+\-]+@[\w\.\-]+\.\w+$')
-                            .hasMatch(value)) {
+                        if (!RegExp(
+                          r'^[\w\.\+\-]+@[\w\.\-]+\.\w+$',
+                        ).hasMatch(value)) {
                           return 'Email inválido';
                         }
                         return null;
@@ -236,7 +238,8 @@ class _CreateUserDialogState extends State<CreateUserDialog>
                       obscureText: !_showConfirmPassword,
                       suffixIcon: IconButton(
                         onPressed: () => setState(
-                            () => _showConfirmPassword = !_showConfirmPassword),
+                          () => _showConfirmPassword = !_showConfirmPassword,
+                        ),
                         icon: Icon(
                           _showConfirmPassword
                               ? Icons.visibility_off_rounded
@@ -264,18 +267,26 @@ class _CreateUserDialogState extends State<CreateUserDialog>
                           style: TextButton.styleFrom(
                             foregroundColor: SupabaseColors.textSecondary,
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 10),
+                              horizontal: 16,
+                              vertical: 10,
+                            ),
                           ),
-                          child: const Text('Cancelar',
-                              style: TextStyle(fontSize: 13)),
+                          child: const Text(
+                            'Cancelar',
+                            style: TextStyle(fontSize: 13),
+                          ),
                         ),
                         const SizedBox(width: 8),
                         _isLoading
                             ? Container(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 24, vertical: 10),
+                                  horizontal: 24,
+                                  vertical: 10,
+                                ),
                                 decoration: BoxDecoration(
-                                  color: SupabaseColors.brand.withValues(alpha:0.5),
+                                  color: SupabaseColors.brand.withValues(
+                                    alpha: 0.5,
+                                  ),
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: const Row(
@@ -351,8 +362,10 @@ class _CreateUserDialogState extends State<CreateUserDialog>
           ),
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle:
-                const TextStyle(color: SupabaseColors.textMuted, fontSize: 13),
+            hintStyle: const TextStyle(
+              color: SupabaseColors.textMuted,
+              fontSize: 13,
+            ),
             prefixIcon: Icon(icon, color: SupabaseColors.textMuted, size: 18),
             suffixIcon: suffixIcon,
             filled: true,
@@ -367,15 +380,19 @@ class _CreateUserDialogState extends State<CreateUserDialog>
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(6),
-              borderSide:
-                  const BorderSide(color: SupabaseColors.brand, width: 2),
+              borderSide: const BorderSide(
+                color: SupabaseColors.brand,
+                width: 2,
+              ),
             ),
             errorBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(6),
               borderSide: const BorderSide(color: SupabaseColors.error),
             ),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 12,
+            ),
           ),
           validator: validator,
         ),
@@ -397,8 +414,11 @@ class _CloseBtn extends StatelessWidget {
         borderRadius: BorderRadius.circular(4),
         child: const Padding(
           padding: EdgeInsets.all(4),
-          child: Icon(Icons.close_rounded,
-              size: 18, color: SupabaseColors.textMuted),
+          child: Icon(
+            Icons.close_rounded,
+            size: 18,
+            color: SupabaseColors.textMuted,
+          ),
         ),
       ),
     );
@@ -406,8 +426,11 @@ class _CloseBtn extends StatelessWidget {
 }
 
 class _PrimaryButton extends StatefulWidget {
-  const _PrimaryButton(
-      {required this.label, required this.icon, required this.onPressed});
+  const _PrimaryButton({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+  });
   final String label;
   final IconData icon;
   final VoidCallback onPressed;

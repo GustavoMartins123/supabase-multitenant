@@ -3,7 +3,8 @@ import '../data/project_repository.dart';
 
 final configProvider =
     AsyncNotifierProvider<ConfigNotifier, Map<String, dynamic>?>(
-        ConfigNotifier.new);
+      ConfigNotifier.new,
+    );
 
 class ConfigNotifier extends AsyncNotifier<Map<String, dynamic>?> {
   @override

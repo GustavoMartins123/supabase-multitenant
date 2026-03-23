@@ -4,7 +4,9 @@ import 'dart:convert';
 
 class ProjectService {
   static Future<bool> confirmAndDeleteProject(
-      BuildContext context, String projectRef) async {
+    BuildContext context,
+    String projectRef,
+  ) async {
     final confirmed = await _showConfirmationDialog(context, projectRef);
     if (!confirmed) return false;
 
@@ -15,7 +17,9 @@ class ProjectService {
   }
 
   static Future<bool> _showConfirmationDialog(
-      BuildContext context, String projectRef) async {
+    BuildContext context,
+    String projectRef,
+  ) async {
     return showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -44,8 +48,9 @@ class ProjectService {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancelar')),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
@@ -89,8 +94,9 @@ class ProjectService {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancelar')),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
           ElevatedButton(
             onPressed: () {
               if (formKey.currentState!.validate()) {
@@ -105,7 +111,10 @@ class ProjectService {
   }
 
   static Future<bool> _executeProjectDeletion(
-      BuildContext context, String projectRef, String password) async {
+    BuildContext context,
+    String projectRef,
+    String password,
+  ) async {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -142,15 +151,18 @@ class ProjectService {
               result['status'] == 'success'
                   ? Icons.check_circle
                   : Icons.warning,
-              color:
-                  result['status'] == 'success' ? Colors.green : Colors.orange,
+              color: result['status'] == 'success'
+                  ? Colors.green
+                  : Colors.orange,
               size: 48,
             ),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(result['message'] ?? 'Projeto excluído',
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                Text(
+                  result['message'] ?? 'Projeto excluído',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
                 if (result['errors'] != null &&
                     result['errors'].isNotEmpty) ...[
                   const SizedBox(height: 16),
@@ -175,14 +187,19 @@ class ProjectService {
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text('Erro na exclusão: $e'), backgroundColor: Colors.red),
+          content: Text('Erro na exclusão: $e'),
+          backgroundColor: Colors.red,
+        ),
       );
       return false;
     }
   }
 
-  static Future<bool> waitUntilReady(String jobId,
-      {Duration every = const Duration(seconds: 3), int max = 100}) async {
+  static Future<bool> waitUntilReady(
+    String jobId, {
+    Duration every = const Duration(seconds: 3),
+    int max = 100,
+  }) async {
     for (var i = 0; i < max; i++) {
       await Future.delayed(every);
       final st = await http

@@ -117,7 +117,9 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
 
       if (response.statusCode == 200) {
         _showSnack(
-            'Projeto "$projectName" transferido!', SupabaseColors.success);
+          'Projeto "$projectName" transferido!',
+          SupabaseColors.success,
+        );
         await _fetchProjects();
       } else {
         throw Exception('Erro ${response.statusCode}: ${response.body}');
@@ -192,8 +194,10 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
             surfaceTintColor: Colors.transparent,
             elevation: 0,
             leading: IconButton(
-              icon: const Icon(Icons.arrow_back_rounded,
-                  color: SupabaseColors.textSecondary),
+              icon: const Icon(
+                Icons.arrow_back_rounded,
+                color: SupabaseColors.textSecondary,
+              ),
               onPressed: () => Navigator.of(context).pop(),
             ),
             flexibleSpace: FlexibleSpaceBar(
@@ -215,9 +219,11 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
                     children: [
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
-                          color: SupabaseColors.brand.withValues(alpha:0.15),
+                          color: SupabaseColors.brand.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
@@ -267,7 +273,9 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
                 width: 32,
                 height: 32,
                 child: CircularProgressIndicator(
-                    strokeWidth: 2, color: SupabaseColors.brand),
+                  strokeWidth: 2,
+                  color: SupabaseColors.brand,
+                ),
               ),
               SizedBox(height: 16),
               Text(
@@ -358,8 +366,8 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: isRunning
-                  ? SupabaseColors.success.withValues(alpha:0.3)
-                  : SupabaseColors.warning.withValues(alpha:0.3),
+                  ? SupabaseColors.success.withValues(alpha: 0.3)
+                  : SupabaseColors.warning.withValues(alpha: 0.3),
             ),
           ),
           child: Padding(
@@ -378,10 +386,11 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
                             : SupabaseColors.warning,
                         boxShadow: [
                           BoxShadow(
-                            color: (isRunning
-                                    ? SupabaseColors.success
-                                    : SupabaseColors.warning)
-                                .withValues(alpha:0.5),
+                            color:
+                                (isRunning
+                                        ? SupabaseColors.success
+                                        : SupabaseColors.warning)
+                                    .withValues(alpha: 0.5),
                             blurRadius: 6,
                             spreadRadius: 1,
                           ),
@@ -421,9 +430,12 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
                                 tooltip: 'Copiar URL',
                                 onPressed: () {
                                   Clipboard.setData(
-                                      ClipboardData(text: projectUrl));
+                                    ClipboardData(text: projectUrl),
+                                  );
                                   _showSnack(
-                                      'URL copiada!', SupabaseColors.success);
+                                    'URL copiada!',
+                                    SupabaseColors.success,
+                                  );
                                 },
                               ),
                             ],
@@ -433,12 +445,17 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
                             children: [
                               Container(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 2),
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
                                 decoration: BoxDecoration(
                                   color: isRunning
-                                      ? SupabaseColors.success.withValues(alpha:0.15)
-                                      : SupabaseColors.warning
-                                          .withValues(alpha:0.15),
+                                      ? SupabaseColors.success.withValues(
+                                          alpha: 0.15,
+                                        )
+                                      : SupabaseColors.warning.withValues(
+                                          alpha: 0.15,
+                                        ),
                                   borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: Text(
@@ -457,8 +474,9 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
                               Text(
                                 '$running/$total containers',
                                 style: const TextStyle(
-                                    fontSize: 11,
-                                    color: SupabaseColors.textMuted),
+                                  fontSize: 11,
+                                  color: SupabaseColors.textMuted,
+                                ),
                               ),
                             ],
                           ),
@@ -469,14 +487,16 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: SupabaseColors.brand.withValues(alpha:0.15),
+                          color: SupabaseColors.brand.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: const SizedBox(
                           width: 16,
                           height: 16,
                           child: CircularProgressIndicator(
-                              strokeWidth: 2, color: SupabaseColors.brand),
+                            strokeWidth: 2,
+                            color: SupabaseColors.brand,
+                          ),
                         ),
                       ),
                   ],
@@ -487,58 +507,70 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
                 Row(
                   children: [
                     Expanded(
-                        child: _buildActionButton(
-                      icon: Icons.open_in_new_rounded,
-                      label: 'Abrir',
-                      color: SupabaseColors.brand,
-                      onPressed: busy ? null : () => _openProject(project.name),
-                    )),
+                      child: _buildActionButton(
+                        icon: Icons.open_in_new_rounded,
+                        label: 'Abrir',
+                        color: SupabaseColors.brand,
+                        onPressed: busy
+                            ? null
+                            : () => _openProject(project.name),
+                      ),
+                    ),
                     const SizedBox(width: 6),
                     Expanded(
-                        child: _buildActionButton(
-                      icon: Icons.play_arrow_rounded,
-                      label: 'Start',
-                      color: SupabaseColors.success,
-                      onPressed:
-                          busy ? null : () => _doAction(project.name, 'start'),
-                    )),
+                      child: _buildActionButton(
+                        icon: Icons.play_arrow_rounded,
+                        label: 'Start',
+                        color: SupabaseColors.success,
+                        onPressed: busy
+                            ? null
+                            : () => _doAction(project.name, 'start'),
+                      ),
+                    ),
                     const SizedBox(width: 6),
                     Expanded(
-                        child: _buildActionButton(
-                      icon: Icons.stop_rounded,
-                      label: 'Stop',
-                      color: SupabaseColors.error,
-                      onPressed:
-                          busy ? null : () => _doAction(project.name, 'stop'),
-                    )),
+                      child: _buildActionButton(
+                        icon: Icons.stop_rounded,
+                        label: 'Stop',
+                        color: SupabaseColors.error,
+                        onPressed: busy
+                            ? null
+                            : () => _doAction(project.name, 'stop'),
+                      ),
+                    ),
                     const SizedBox(width: 6),
                     Expanded(
-                        child: _buildActionButton(
-                      icon: Icons.restart_alt_rounded,
-                      label: 'Restart',
-                      color: SupabaseColors.info,
-                      onPressed: busy
-                          ? null
-                          : () => _doAction(project.name, 'restart'),
-                    )),
+                      child: _buildActionButton(
+                        icon: Icons.restart_alt_rounded,
+                        label: 'Restart',
+                        color: SupabaseColors.info,
+                        onPressed: busy
+                            ? null
+                            : () => _doAction(project.name, 'restart'),
+                      ),
+                    ),
                     const SizedBox(width: 6),
                     Expanded(
-                        child: _buildActionButton(
-                      icon: Icons.swap_horiz_rounded,
-                      label: 'Transferir',
-                      color: Colors.purple,
-                      onPressed:
-                          busy ? null : () => _showTransferDialog(project.name),
-                    )),
+                      child: _buildActionButton(
+                        icon: Icons.swap_horiz_rounded,
+                        label: 'Transferir',
+                        color: Colors.purple,
+                        onPressed: busy
+                            ? null
+                            : () => _showTransferDialog(project.name),
+                      ),
+                    ),
                     const SizedBox(width: 6),
                     Expanded(
-                        child: _buildActionButton(
-                      icon: Icons.delete_outline_rounded,
-                      label: 'Excluir',
-                      color: SupabaseColors.error,
-                      onPressed:
-                          busy ? null : () => _confirmAndDelete(project.name),
-                    )),
+                      child: _buildActionButton(
+                        icon: Icons.delete_outline_rounded,
+                        label: 'Excluir',
+                        color: SupabaseColors.error,
+                        onPressed: busy
+                            ? null
+                            : () => _confirmAndDelete(project.name),
+                      ),
+                    ),
                   ],
                 ),
               ],
@@ -565,12 +597,12 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
           decoration: BoxDecoration(
             color: onPressed == null
                 ? SupabaseColors.bg300
-                : color.withValues(alpha:0.15),
+                : color.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(6),
             border: Border.all(
               color: onPressed == null
                   ? SupabaseColors.border
-                  : color.withValues(alpha:0.3),
+                  : color.withValues(alpha: 0.3),
             ),
           ),
           child: Column(
@@ -600,8 +632,10 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
 
   Future<void> _openProject(String ref) async {
     await http.get(Uri.parse('/set-project?ref=$ref'));
-    html.window
-        .open('${html.window.location.origin}/project/default', '_blank');
+    html.window.open(
+      '${html.window.location.origin}/project/default',
+      '_blank',
+    );
   }
 
   void _doAction(String projectName, String action) async {
@@ -612,8 +646,10 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
       );
 
       if (resp.statusCode == 200) {
-        _showSnack('Ação "$action" executada em "$projectName"',
-            SupabaseColors.success);
+        _showSnack(
+          'Ação "$action" executada em "$projectName"',
+          SupabaseColors.success,
+        );
         await _fetchProjects();
       } else {
         throw Exception('Erro: ${resp.body}');
@@ -628,8 +664,10 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
   }
 
   void _confirmAndDelete(String projectName) async {
-    bool sucesso =
-        await ProjectService.confirmAndDeleteProject(context, projectName);
+    bool sucesso = await ProjectService.confirmAndDeleteProject(
+      context,
+      projectName,
+    );
 
     if (sucesso) {
       _safeSetState(() {

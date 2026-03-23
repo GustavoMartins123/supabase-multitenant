@@ -2,11 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:seletor_de_projetos/supabase_colors.dart';
 
 class ErrorBox extends StatelessWidget {
-  const ErrorBox({
-    super.key,
-    required this.message,
-    this.onRetry,
-  });
+  const ErrorBox({super.key, required this.message, this.onRetry});
 
   final String message;
   final VoidCallback? onRetry;
@@ -16,25 +12,31 @@ class ErrorBox extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: SupabaseColors.error.withValues(alpha:0.1),
+        color: SupabaseColors.error.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: SupabaseColors.error.withValues(alpha:0.3)),
+        border: Border.all(color: SupabaseColors.error.withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.error_outline,
-              color: SupabaseColors.error, size: 18),
+          const Icon(
+            Icons.error_outline,
+            color: SupabaseColors.error,
+            size: 18,
+          ),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(message,
-                style:
-                    const TextStyle(color: SupabaseColors.error, fontSize: 12)),
+            child: Text(
+              message,
+              style: const TextStyle(color: SupabaseColors.error, fontSize: 12),
+            ),
           ),
           if (onRetry != null)
             TextButton(
               onPressed: onRetry,
-              child: const Text('Tentar novamente',
-                  style: TextStyle(fontSize: 12)),
+              child: const Text(
+                'Tentar novamente',
+                style: TextStyle(fontSize: 12),
+              ),
             ),
         ],
       ),

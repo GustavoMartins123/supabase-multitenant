@@ -6,11 +6,12 @@ class SupabaseButton extends StatelessWidget {
   final IconData icon;
   final String label;
 
-  const SupabaseButton(
-      {super.key,
-      required this.onPressed,
-      required this.icon,
-      required this.label});
+  const SupabaseButton({
+    super.key,
+    required this.onPressed,
+    required this.icon,
+    required this.label,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -54,8 +55,11 @@ class IconBtn extends StatelessWidget {
           hoverColor: SupabaseColors.surface200,
           child: Padding(
             padding: const EdgeInsets.all(6),
-            child: Icon(icon,
-                size: 18, color: color ?? SupabaseColors.textSecondary),
+            child: Icon(
+              icon,
+              size: 18,
+              color: color ?? SupabaseColors.textSecondary,
+            ),
           ),
         ),
       ),

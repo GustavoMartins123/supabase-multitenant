@@ -19,11 +19,7 @@ Future<void> main() async {
     s.isSysAdmin = data['is_admin'];
   }
 
-  runApp(
-    const ProviderScope(
-      child: ProjectInitApp(),
-    ),
-  );
+  runApp(const ProviderScope(child: ProjectInitApp()));
 }
 
 class ProjectInitApp extends StatelessWidget {
@@ -31,25 +27,25 @@ class ProjectInitApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext ctx) => MaterialApp(
-        title: 'Escolha o projeto',
-        debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          colorSchemeSeed: SupabaseColors.brand,
-          brightness: Brightness.dark,
-          useMaterial3: true,
-          scaffoldBackgroundColor: SupabaseColors.bg100,
-          cardColor: SupabaseColors.surface100,
-          dividerColor: SupabaseColors.border,
-        ),
-        darkTheme: ThemeData(
-          colorSchemeSeed: SupabaseColors.brand,
-          brightness: Brightness.dark,
-          useMaterial3: true,
-          scaffoldBackgroundColor: SupabaseColors.bg100,
-          cardColor: SupabaseColors.surface100,
-          dividerColor: SupabaseColors.border,
-        ),
-        themeMode: ThemeMode.dark,
-        home: const ProjectListPage(),
-      );
+    title: 'Escolha o projeto',
+    debugShowCheckedModeBanner: false,
+    theme: ThemeData(
+      colorSchemeSeed: SupabaseColors.brand,
+      brightness: Brightness.dark,
+      useMaterial3: true,
+      scaffoldBackgroundColor: SupabaseColors.bg100,
+      cardColor: SupabaseColors.surface100,
+      dividerColor: SupabaseColors.border,
+    ),
+    darkTheme: ThemeData(
+      colorSchemeSeed: SupabaseColors.brand,
+      brightness: Brightness.dark,
+      useMaterial3: true,
+      scaffoldBackgroundColor: SupabaseColors.bg100,
+      cardColor: SupabaseColors.surface100,
+      dividerColor: SupabaseColors.border,
+    ),
+    themeMode: ThemeMode.dark,
+    home: const ProjectListPage(),
+  );
 }

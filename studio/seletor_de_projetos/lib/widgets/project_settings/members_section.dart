@@ -22,9 +22,12 @@ class MembersSection extends ConsumerWidget {
     final membersAsync = ref.watch(projectMembersProvider(projectRef));
 
     final myId = Session().myId;
-    final myRole = membersAsync.value
-            ?.firstWhere((m) => m.user_id == myId,
-                orElse: () => ProjectMember(user_id: '', role: 'member'))
+    final myRole =
+        membersAsync.value
+            ?.firstWhere(
+              (m) => m.user_id == myId,
+              orElse: () => ProjectMember(user_id: '', role: 'member'),
+            )
             .role ??
         'member';
 
@@ -44,27 +47,37 @@ class MembersSection extends ConsumerWidget {
           child: Padding(
             padding: EdgeInsets.all(20),
             child: SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: SupabaseColors.brand)),
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: SupabaseColors.brand,
+              ),
+            ),
           ),
         ),
         error: (err, _) => ErrorBox(
-            message: 'Erro ao carregar membros: $err',
-            onRetry: () => ref.invalidate(projectMembersProvider(projectRef))),
+          message: 'Erro ao carregar membros: $err',
+          onRetry: () => ref.invalidate(projectMembersProvider(projectRef)),
+        ),
         data: (members) {
           if (members.isEmpty) {
             return const Center(
-                child: Padding(
-                    padding: EdgeInsets.all(20),
-                    child: Text('Nenhum membro',
-                        style: TextStyle(color: SupabaseColors.textMuted))));
+              child: Padding(
+                padding: EdgeInsets.all(20),
+                child: Text(
+                  'Nenhum membro',
+                  style: TextStyle(color: SupabaseColors.textMuted),
+                ),
+              ),
+            );
           }
           return Column(
             children: members
-                .map((member) =>
-                    _buildMemberItem(context, ref, member, myRole, myId))
+                .map(
+                  (member) =>
+                      _buildMemberItem(context, ref, member, myRole, myId),
+                )
                 .toList(),
           );
         },
@@ -72,8 +85,13 @@ class MembersSection extends ConsumerWidget {
     );
   }
 
-  Widget _buildMemberItem(BuildContext context, WidgetRef ref,
-      ProjectMember member, String myRole, String myId) {
+  Widget _buildMemberItem(
+    BuildContext context,
+    WidgetRef ref,
+    ProjectMember member,
+    String myRole,
+    String myId,
+  ) {
     final isMe = member.user_id == myId;
     final canRemove = myRole == 'admin' && member.role != 'admin' && !isMe;
 
@@ -81,13 +99,15 @@ class MembersSection extends ConsumerWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color:
-            isMe ? SupabaseColors.brand.withValues(alpha:0.1) : SupabaseColors.bg300,
+        color: isMe
+            ? SupabaseColors.brand.withValues(alpha: 0.1)
+            : SupabaseColors.bg300,
         borderRadius: BorderRadius.circular(6),
         border: Border.all(
-            color: isMe
-                ? SupabaseColors.brand.withValues(alpha:0.3)
-                : SupabaseColors.border),
+          color: isMe
+              ? SupabaseColors.brand.withValues(alpha: 0.3)
+              : SupabaseColors.border,
+        ),
       ),
       child: Row(
         children: [
@@ -96,8 +116,8 @@ class MembersSection extends ConsumerWidget {
             height: 36,
             decoration: BoxDecoration(
               color: member.role == 'admin'
-                  ? SupabaseColors.warning.withValues(alpha:0.2)
-                  : SupabaseColors.info.withValues(alpha:0.2),
+                  ? SupabaseColors.warning.withValues(alpha: 0.2)
+                  : SupabaseColors.info.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(6),
             ),
             child: Icon(
@@ -120,13 +140,18 @@ class MembersSection extends ConsumerWidget {
                       ? '${member.displayName ?? 'Você'} (você)'
                       : member.displayName ?? 'Sem nome',
                   style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: isMe ? FontWeight.w600 : FontWeight.w500,
-                      color: SupabaseColors.textPrimary),
+                    fontSize: 13,
+                    fontWeight: isMe ? FontWeight.w600 : FontWeight.w500,
+                    color: SupabaseColors.textPrimary,
+                  ),
                 ),
-                Text(member.role == 'admin' ? 'Administrador' : 'Membro',
-                    style: const TextStyle(
-                        fontSize: 11, color: SupabaseColors.textMuted)),
+                Text(
+                  member.role == 'admin' ? 'Administrador' : 'Membro',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: SupabaseColors.textMuted,
+                  ),
+                ),
               ],
             ),
           ),
@@ -143,20 +168,27 @@ class MembersSection extends ConsumerWidget {
   }
 
   void _showRemoveConfirmation(
-      BuildContext context, WidgetRef ref, ProjectMember member) {
+    BuildContext context,
+    WidgetRef ref,
+    ProjectMember member,
+  ) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: SupabaseColors.bg200,
-        title: const Text('Confirmar Remoção',
-            style: TextStyle(color: SupabaseColors.textPrimary)),
+        title: const Text(
+          'Confirmar Remoção',
+          style: TextStyle(color: SupabaseColors.textPrimary),
+        ),
         content: Text(
-            'Remover ${member.displayName ?? 'este usuário'} do projeto?',
-            style: const TextStyle(color: SupabaseColors.textSecondary)),
+          'Remover ${member.displayName ?? 'este usuário'} do projeto?',
+          style: const TextStyle(color: SupabaseColors.textSecondary),
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancelar')),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
+          ),
           DangerButton(
             label: 'Remover',
             onPressed: () async {
@@ -167,15 +199,21 @@ class MembersSection extends ConsumerWidget {
                     .removeMember(projectRef, member.user_id);
                 ref.invalidate(projectMembersProvider(projectRef));
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
                       content: Text('Membro removido!'),
-                      backgroundColor: SupabaseColors.success));
+                      backgroundColor: SupabaseColors.success,
+                    ),
+                  );
                 }
               } catch (e) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
                       content: Text('Erro: $e'),
-                      backgroundColor: SupabaseColors.error));
+                      backgroundColor: SupabaseColors.error,
+                    ),
+                  );
                 }
               }
             },
@@ -203,15 +241,21 @@ class MembersSection extends ConsumerWidget {
             ref.invalidate(projectMembersProvider(projectRef));
             ref.invalidate(availableUsersProvider(projectRef));
             if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
                   content: Text('Membro adicionado!'),
-                  backgroundColor: SupabaseColors.success));
+                  backgroundColor: SupabaseColors.success,
+                ),
+              );
             }
           } catch (e) {
             if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
                   content: Text('Erro: $e'),
-                  backgroundColor: SupabaseColors.error));
+                  backgroundColor: SupabaseColors.error,
+                ),
+              );
             }
           }
         },

@@ -3,11 +3,7 @@ class ProjectMember {
   final String role;
   final String? displayName;
 
-  ProjectMember({
-    required this.user_id,
-    required this.role,
-    this.displayName,
-  });
+  ProjectMember({required this.user_id, required this.role, this.displayName});
 
   factory ProjectMember.fromJson(Map<String, dynamic> json) {
     return ProjectMember(

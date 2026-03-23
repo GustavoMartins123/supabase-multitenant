@@ -6,7 +6,7 @@ class TransferProjectDialog extends StatefulWidget {
   final String projectName;
   final Function(String) onTransfer;
   final Future<List<AvailableUser>> Function(String projectName)
-      loadAvailableUsers;
+  loadAvailableUsers;
 
   const TransferProjectDialog({
     super.key,
@@ -96,15 +96,16 @@ class TransferProjectDialogState extends State<TransferProjectDialog>
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: const BoxDecoration(
-                  border:
-                      Border(bottom: BorderSide(color: SupabaseColors.border)),
+                  border: Border(
+                    bottom: BorderSide(color: SupabaseColors.border),
+                  ),
                 ),
                 child: Row(
                   children: [
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: SupabaseColors.warning.withValues(alpha:0.15),
+                        color: SupabaseColors.warning.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: const Icon(
@@ -129,9 +130,13 @@ class TransferProjectDialogState extends State<TransferProjectDialog>
                           const SizedBox(height: 4),
                           Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 3),
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
                             decoration: BoxDecoration(
-                              color: SupabaseColors.brand.withValues(alpha:0.15),
+                              color: SupabaseColors.brand.withValues(
+                                alpha: 0.15,
+                              ),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
@@ -155,8 +160,8 @@ class TransferProjectDialogState extends State<TransferProjectDialog>
                 child: _loading
                     ? _buildLoading()
                     : _error != null
-                        ? _buildError()
-                        : _buildContent(),
+                    ? _buildError()
+                    : _buildContent(),
               ),
               Container(
                 padding: const EdgeInsets.all(16),
@@ -171,10 +176,14 @@ class TransferProjectDialogState extends State<TransferProjectDialog>
                       style: TextButton.styleFrom(
                         foregroundColor: SupabaseColors.textSecondary,
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 10),
+                          horizontal: 16,
+                          vertical: 10,
+                        ),
                       ),
-                      child: const Text('Cancelar',
-                          style: TextStyle(fontSize: 13)),
+                      child: const Text(
+                        'Cancelar',
+                        style: TextStyle(fontSize: 13),
+                      ),
                     ),
                     const SizedBox(width: 8),
                     _ActionButton(
@@ -190,8 +199,10 @@ class TransferProjectDialogState extends State<TransferProjectDialog>
                                 await widget.onTransfer(userId);
                                 if (mounted) Navigator.pop(context);
                               } catch (e) {
-                                _showSnack('Erro ao transferir: $e',
-                                    SupabaseColors.error);
+                                _showSnack(
+                                  'Erro ao transferir: $e',
+                                  SupabaseColors.error,
+                                );
                               }
                             },
                     ),
@@ -214,7 +225,9 @@ class TransferProjectDialogState extends State<TransferProjectDialog>
             width: 32,
             height: 32,
             child: CircularProgressIndicator(
-                strokeWidth: 2, color: SupabaseColors.warning),
+              strokeWidth: 2,
+              color: SupabaseColors.warning,
+            ),
           ),
           SizedBox(height: 16),
           Text(
@@ -236,11 +249,14 @@ class TransferProjectDialogState extends State<TransferProjectDialog>
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: SupabaseColors.error.withValues(alpha:0.1),
+                color: SupabaseColors.error.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(Icons.error_outline_rounded,
-                  size: 32, color: SupabaseColors.error),
+              child: const Icon(
+                Icons.error_outline_rounded,
+                size: 32,
+                color: SupabaseColors.error,
+              ),
             ),
             const SizedBox(height: 16),
             const Text(
@@ -271,8 +287,10 @@ class TransferProjectDialogState extends State<TransferProjectDialog>
               style: TextButton.styleFrom(
                 backgroundColor: SupabaseColors.error,
                 foregroundColor: Colors.white,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
               ),
             ),
           ],
@@ -292,7 +310,7 @@ class TransferProjectDialogState extends State<TransferProjectDialog>
               Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  color: SupabaseColors.warning.withValues(alpha:0.15),
+                  color: SupabaseColors.warning.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: const Icon(
@@ -314,8 +332,9 @@ class TransferProjectDialogState extends State<TransferProjectDialog>
           ),
           const SizedBox(height: 16),
           Expanded(
-            child:
-                _availableUsers.isEmpty ? _buildEmptyState() : _buildUserList(),
+            child: _availableUsers.isEmpty
+                ? _buildEmptyState()
+                : _buildUserList(),
           ),
         ],
       ),
@@ -338,8 +357,11 @@ class TransferProjectDialogState extends State<TransferProjectDialog>
             ),
             child: Row(
               children: [
-                const Icon(Icons.people_rounded,
-                    size: 14, color: SupabaseColors.textMuted),
+                const Icon(
+                  Icons.people_rounded,
+                  size: 14,
+                  color: SupabaseColors.textMuted,
+                ),
                 const SizedBox(width: 6),
                 Text(
                   '${_availableUsers.length} ${_availableUsers.length == 1 ? 'usuário disponível' : 'usuários disponíveis'}',
@@ -370,12 +392,12 @@ class TransferProjectDialogState extends State<TransferProjectDialog>
                       margin: const EdgeInsets.only(bottom: 2),
                       decoration: BoxDecoration(
                         color: isSelected
-                            ? SupabaseColors.warning.withValues(alpha:0.1)
+                            ? SupabaseColors.warning.withValues(alpha: 0.1)
                             : null,
                         borderRadius: BorderRadius.circular(6),
                         border: Border.all(
                           color: isSelected
-                              ? SupabaseColors.warning.withValues(alpha:0.3)
+                              ? SupabaseColors.warning.withValues(alpha: 0.3)
                               : Colors.transparent,
                         ),
                       ),
@@ -386,7 +408,9 @@ class TransferProjectDialogState extends State<TransferProjectDialog>
                             height: 40,
                             decoration: BoxDecoration(
                               color: isSelected
-                                  ? SupabaseColors.warning.withValues(alpha:0.2)
+                                  ? SupabaseColors.warning.withValues(
+                                      alpha: 0.2,
+                                    )
                                   : SupabaseColors.surface200,
                               borderRadius: BorderRadius.circular(8),
                             ),
@@ -431,10 +455,14 @@ class TransferProjectDialogState extends State<TransferProjectDialog>
                           ),
                           Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 2),
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
                             decoration: BoxDecoration(
                               color: user.isActive
-                                  ? SupabaseColors.success.withValues(alpha:0.15)
+                                  ? SupabaseColors.success.withValues(
+                                      alpha: 0.15,
+                                    )
                                   : SupabaseColors.surface300,
                               borderRadius: BorderRadius.circular(4),
                             ),
@@ -528,8 +556,11 @@ class _CloseBtn extends StatelessWidget {
         borderRadius: BorderRadius.circular(4),
         child: const Padding(
           padding: EdgeInsets.all(4),
-          child: Icon(Icons.close_rounded,
-              size: 18, color: SupabaseColors.textMuted),
+          child: Icon(
+            Icons.close_rounded,
+            size: 18,
+            color: SupabaseColors.textMuted,
+          ),
         ),
       ),
     );
@@ -568,7 +599,7 @@ class _ActionButtonState extends State<_ActionButton> {
         duration: const Duration(milliseconds: 150),
         decoration: BoxDecoration(
           color: enabled
-              ? (_hover ? widget.color.withValues(alpha:0.9) : widget.color)
+              ? (_hover ? widget.color.withValues(alpha: 0.9) : widget.color)
               : SupabaseColors.surface300,
           borderRadius: BorderRadius.circular(6),
         ),

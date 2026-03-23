@@ -53,9 +53,13 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
   void initState() {
     super.initState();
     _animController = AnimationController(
-        duration: const Duration(milliseconds: 300), vsync: this);
-    _fadeAnimation =
-        CurvedAnimation(parent: _animController, curve: Curves.easeOut);
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+    _fadeAnimation = CurvedAnimation(
+      parent: _animController,
+      curve: Curves.easeOut,
+    );
     _animController.forward();
 
     _currentAnonKey = widget.anonKey;
@@ -87,26 +91,33 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
       builder: (_) => AlertDialog(
         backgroundColor: SupabaseColors.bg200,
         shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: const BorderSide(color: SupabaseColors.border)),
-        title: const Row(children: [
-          Icon(Icons.warning_rounded, color: SupabaseColors.warning),
-          SizedBox(width: 8),
-          Text('Gerar nova chave?',
-              style: TextStyle(color: SupabaseColors.textPrimary)),
-        ]),
+          borderRadius: BorderRadius.circular(8),
+          side: const BorderSide(color: SupabaseColors.border),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_rounded, color: SupabaseColors.warning),
+            SizedBox(width: 8),
+            Text(
+              'Gerar nova chave?',
+              style: TextStyle(color: SupabaseColors.textPrimary),
+            ),
+          ],
+        ),
         content: const Text(
           'A chave atual será invalidada. Apps usando ela vão parar de funcionar até serem atualizados.',
           style: TextStyle(color: SupabaseColors.textSecondary),
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancelar')),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            style:
-                TextButton.styleFrom(foregroundColor: SupabaseColors.warning),
+            style: TextButton.styleFrom(
+              foregroundColor: SupabaseColors.warning,
+            ),
             child: const Text('Gerar'),
           ),
         ],
@@ -130,11 +141,12 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
   }
 
   Future<void> _deleteProject() async {
-    bool sucesso =
-        await ProjectService.confirmAndDeleteProject(context, widget.ref);
+    bool sucesso = await ProjectService.confirmAndDeleteProject(
+      context,
+      widget.ref,
+    );
     if (sucesso && mounted) Navigator.of(context).pop(widget.ref);
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -146,8 +158,10 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     final membersAsync = ref.watch(projectMembersProvider(widget.ref));
     final myId = Session().myId;
     final myRole = membersAsync.value
-        ?.firstWhere((m) => m.user_id == myId,
-            orElse: () => ProjectMember(user_id: '', role: 'member'))
+        ?.firstWhere(
+          (m) => m.user_id == myId,
+          orElse: () => ProjectMember(user_id: '', role: 'member'),
+        )
         .role;
 
     if (myRole == null && membersAsync.isLoading) {
@@ -210,29 +224,38 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: SupabaseColors.brand.withValues(alpha:0.15),
+              color: SupabaseColors.brand.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: const Icon(Icons.settings_rounded,
-                color: SupabaseColors.brand, size: 20),
+            child: const Icon(
+              Icons.settings_rounded,
+              color: SupabaseColors.brand,
+              size: 20,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Configurações',
-                    style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                        letterSpacing: 0.5,
-                        color: SupabaseColors.textMuted)),
+                const Text(
+                  'Configurações',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: 0.5,
+                    color: SupabaseColors.textMuted,
+                  ),
+                ),
                 const SizedBox(height: 2),
-                Text(widget.ref,
-                    style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: SupabaseColors.textPrimary)),
+                Text(
+                  widget.ref,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: SupabaseColors.textPrimary,
+                  ),
+                ),
               ],
             ),
           ),
@@ -246,7 +269,8 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: const BoxDecoration(
-          border: Border(top: BorderSide(color: SupabaseColors.border))),
+        border: Border(top: BorderSide(color: SupabaseColors.border)),
+      ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -254,9 +278,10 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
             children: [
               if (Session().isSysAdmin) ...[
                 DangerButton(
-                    label: 'Excluir',
-                    icon: Icons.delete_outline_rounded,
-                    onPressed: _deleteProject),
+                  label: 'Excluir',
+                  icon: Icons.delete_outline_rounded,
+                  onPressed: _deleteProject,
+                ),
                 const SizedBox(width: 8),
                 SecondaryButton(
                   label: 'Transferir',
@@ -267,7 +292,9 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
             ],
           ),
           PrimaryButton(
-              label: 'Fechar', onPressed: () => Navigator.pop(context)),
+            label: 'Fechar',
+            onPressed: () => Navigator.pop(context),
+          ),
         ],
       ),
     );
@@ -280,21 +307,29 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
         constraints: const BoxConstraints(maxWidth: 400),
         padding: const EdgeInsets.all(40),
         decoration: BoxDecoration(
-            color: SupabaseColors.bg200,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: SupabaseColors.border)),
+          color: SupabaseColors.bg200,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: SupabaseColors.border),
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const SizedBox(
-                width: 32,
-                height: 32,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: SupabaseColors.brand)),
+              width: 32,
+              height: 32,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: SupabaseColors.brand,
+              ),
+            ),
             const SizedBox(height: 16),
-            const Text('Carregando configurações...',
-                style: TextStyle(
-                    color: SupabaseColors.textSecondary, fontSize: 13)),
+            const Text(
+              'Carregando configurações...',
+              style: TextStyle(
+                color: SupabaseColors.textSecondary,
+                fontSize: 13,
+              ),
+            ),
           ],
         ),
       ),
@@ -307,21 +342,28 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-            color: SupabaseColors.bg300,
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: SupabaseColors.border)),
+          color: SupabaseColors.bg300,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: SupabaseColors.border),
+        ),
         child: Row(
           children: [
-            const Icon(Icons.link_rounded,
-                size: 16, color: SupabaseColors.textMuted),
+            const Icon(
+              Icons.link_rounded,
+              size: 16,
+              color: SupabaseColors.textMuted,
+            ),
             const SizedBox(width: 10),
             Expanded(
-                child: SelectableText(
-                    projectUrl.isNotEmpty ? projectUrl : 'Carregando...',
-                    style: const TextStyle(
-                        fontSize: 13,
-                        fontFamily: 'monospace',
-                        color: SupabaseColors.textSecondary))),
+              child: SelectableText(
+                projectUrl.isNotEmpty ? projectUrl : 'Carregando...',
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontFamily: 'monospace',
+                  color: SupabaseColors.textSecondary,
+                ),
+              ),
+            ),
             const SizedBox(width: 8),
             IconButtonWidget(
               icon: Icons.copy_rounded,
@@ -349,18 +391,22 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-                color: SupabaseColors.bg300,
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: SupabaseColors.border)),
+              color: SupabaseColors.bg300,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: SupabaseColors.border),
+            ),
             child: Row(
               children: [
                 Expanded(
-                    child: SelectableText(
-                        hasKey ? _currentAnonKey : 'Não disponível',
-                        style: const TextStyle(
-                            fontSize: 12,
-                            fontFamily: 'monospace',
-                            color: SupabaseColors.textSecondary))),
+                  child: SelectableText(
+                    hasKey ? _currentAnonKey : 'Não disponível',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                      color: SupabaseColors.textSecondary,
+                    ),
+                  ),
+                ),
                 const SizedBox(width: 8),
                 IconButtonWidget(
                   icon: Icons.copy_rounded,
@@ -368,7 +414,8 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
                   onPressed: hasKey
                       ? () {
                           Clipboard.setData(
-                              ClipboardData(text: _currentAnonKey));
+                            ClipboardData(text: _currentAnonKey),
+                          );
                           _showSnack('Chave copiada!', SupabaseColors.success);
                         }
                       : null,
@@ -380,22 +427,29 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
             const SizedBox(height: 8),
             Row(
               children: [
-                const Icon(Icons.schedule_rounded,
-                    size: 14, color: SupabaseColors.textMuted),
+                const Icon(
+                  Icons.schedule_rounded,
+                  size: 14,
+                  color: SupabaseColors.textMuted,
+                ),
                 const SizedBox(width: 6),
                 Text(
-                    'Expira em: ${DateFormat('dd/MM/yyyy HH:mm').format(JwtDecoder.getExpirationDate(_currentAnonKey))}',
-                    style: const TextStyle(
-                        fontSize: 11, color: SupabaseColors.textMuted)),
+                  'Expira em: ${DateFormat('dd/MM/yyyy HH:mm').format(JwtDecoder.getExpirationDate(_currentAnonKey))}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: SupabaseColors.textMuted,
+                  ),
+                ),
               ],
             ),
           ],
           if (myRole == 'admin') ...[
             const SizedBox(height: 12),
             SecondaryButton(
-                label: 'Gerar nova chave',
-                icon: Icons.refresh_rounded,
-                onPressed: _rotatingKey ? null : _rotateKey),
+              label: 'Gerar nova chave',
+              icon: Icons.refresh_rounded,
+              onPressed: _rotatingKey ? null : _rotateKey,
+            ),
           ],
         ],
       ),
@@ -412,18 +466,22 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-                color: SupabaseColors.bg300,
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: SupabaseColors.border)),
+              color: SupabaseColors.bg300,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: SupabaseColors.border),
+            ),
             child: Row(
               children: [
                 Expanded(
-                    child: SelectableText(
-                        hasToken ? _currentConfigToken : 'Não disponível',
-                        style: const TextStyle(
-                            fontSize: 12,
-                            fontFamily: 'monospace',
-                            color: SupabaseColors.textSecondary))),
+                  child: SelectableText(
+                    hasToken ? _currentConfigToken : 'Não disponível',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                      color: SupabaseColors.textSecondary,
+                    ),
+                  ),
+                ),
                 const SizedBox(width: 8),
                 IconButtonWidget(
                   icon: Icons.copy_rounded,
@@ -431,7 +489,8 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
                   onPressed: hasToken
                       ? () {
                           Clipboard.setData(
-                              ClipboardData(text: _currentConfigToken));
+                            ClipboardData(text: _currentConfigToken),
+                          );
                           _showSnack('Token copiado!', SupabaseColors.success);
                         }
                       : null,
@@ -443,14 +502,21 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
             const SizedBox(height: 8),
             Row(
               children: [
-                const Icon(Icons.info_outline,
-                    size: 14, color: SupabaseColors.textMuted),
+                const Icon(
+                  Icons.info_outline,
+                  size: 14,
+                  color: SupabaseColors.textMuted,
+                ),
                 const SizedBox(width: 6),
                 const Expanded(
-                    child: Text(
-                        'Use este token no header X-Config-Token para acessar o endpoint /config',
-                        style: TextStyle(
-                            fontSize: 11, color: SupabaseColors.textMuted))),
+                  child: Text(
+                    'Use este token no header X-Config-Token para acessar o endpoint /config',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: SupabaseColors.textMuted,
+                    ),
+                  ),
+                ),
               ],
             ),
           ],
@@ -466,11 +532,26 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
         projectName: widget.ref,
         onTransfer: (newOwnerId) async {
           try {
-            await ref.read(projectRepositoryProvider).transferProject(widget.ref, newOwnerId);
-            if (mounted) _showSnack('Projeto "${widget.ref}" transferido com sucesso!', SupabaseColors.success);
-          } catch(e) {
+            await ref
+                .read(projectRepositoryProvider)
+                .transferProject(widget.ref, newOwnerId);
+
+            ref.invalidate(projectMembersProvider(widget.ref));
+            ref.invalidate(availableUsersProvider(widget.ref));
+
+            if (mounted) {
+              _showSnack(
+                'Projeto "${widget.ref}" transferido com sucesso!',
+                SupabaseColors.success,
+              );
+            }
+          } catch (e) {
             final msg = e.toString().replaceFirst('Exception: ', '');
-            if (mounted) _showSnack('Erro ao transferir projeto: $msg', SupabaseColors.error);
+            if (mounted)
+              _showSnack(
+                'Erro ao transferir projeto: $msg',
+                SupabaseColors.error,
+              );
           }
         },
         loadAvailableUsers: (projectName) async {

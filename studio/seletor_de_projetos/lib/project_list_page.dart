@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
-import 'adminUsersPage.dart';
+import 'admin_users_page.dart';
 import 'duplicateProjectDialog.dart';
 import 'newProjectDialog.dart';
 import 'session.dart';
@@ -74,13 +74,19 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
   }
 
   Future<void> _duplicateAndWait(
-      String originalName, String newName, bool copyData) async {
+    String originalName,
+    String newName,
+    bool copyData,
+  ) async {
     setState(() => _creating = true);
     _snack('Duplicando projeto… aguarde', SupabaseColors.info);
 
     final notifier = ref.read(projectListProvider.notifier);
-    final ok =
-        await notifier.duplicateProjectAndWait(originalName, newName, copyData);
+    final ok = await notifier.duplicateProjectAndWait(
+      originalName,
+      newName,
+      copyData,
+    );
 
     setState(() => _creating = false);
     _snack(
@@ -92,10 +98,10 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
   Future<void> _showDuplicateDialog(String originalProjectName) async {
     final Map<String, dynamic>? newProject =
         await showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (_) =>
-          DuplicateProjectDialog(originalProjectName: originalProjectName),
-    );
+          context: context,
+          builder: (_) =>
+              DuplicateProjectDialog(originalProjectName: originalProjectName),
+        );
 
     if (newProject?['name'] != null && newProject?['name'].trim().isNotEmpty) {
       await _duplicateAndWait(
@@ -117,12 +123,16 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
         ),
         title: const Row(
           children: [
-            Icon(Icons.logout_rounded,
-                color: SupabaseColors.textSecondary, size: 22),
+            Icon(
+              Icons.logout_rounded,
+              color: SupabaseColors.textSecondary,
+              size: 22,
+            ),
             SizedBox(width: 12),
-            Text('Sair',
-                style:
-                    TextStyle(fontSize: 18, color: SupabaseColors.textPrimary)),
+            Text(
+              'Sair',
+              style: TextStyle(fontSize: 18, color: SupabaseColors.textPrimary),
+            ),
           ],
         ),
         content: const Text(
@@ -132,15 +142,18 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar',
-                style: TextStyle(color: SupabaseColors.textMuted)),
+            child: const Text(
+              'Cancelar',
+              style: TextStyle(color: SupabaseColors.textMuted),
+            ),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: SupabaseColors.error,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(6)),
+                borderRadius: BorderRadius.circular(6),
+              ),
             ),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Sair'),
@@ -156,8 +169,10 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
 
   Future<void> _openProject(String refKey) async {
     await http.get(Uri.parse('/set-project?ref=$refKey'));
-    html.window
-        .open('${html.window.location.origin}/project/default', '_blank');
+    html.window.open(
+      '${html.window.location.origin}/project/default',
+      '_blank',
+    );
   }
 
   @override
@@ -259,7 +274,10 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
                       if (projects.isEmpty) return _buildEmptyState();
 
                       return _buildProjectGrid(
-                          projects, favorites, serverDomain);
+                        projects,
+                        favorites,
+                        serverDomain,
+                      );
                     },
                   ),
                 ),
@@ -334,10 +352,7 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
             const SizedBox(height: 8),
             const Text(
               'Crie seu primeiro projeto para começar',
-              style: TextStyle(
-                fontSize: 14,
-                color: SupabaseColors.textMuted,
-              ),
+              style: TextStyle(fontSize: 14, color: SupabaseColors.textMuted),
             ),
           ],
         ),
@@ -345,12 +360,17 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
     );
   }
 
-  Widget _buildProjectGrid(List<Map<String, dynamic>> projects,
-      Set<String> favorites, String? serverDomain) {
-    final favProjects =
-        projects.where((p) => favorites.contains(p['name'])).toList();
-    final otherProjects =
-        projects.where((p) => !favorites.contains(p['name'])).toList();
+  Widget _buildProjectGrid(
+    List<Map<String, dynamic>> projects,
+    Set<String> favorites,
+    String? serverDomain,
+  ) {
+    final favProjects = projects
+        .where((p) => favorites.contains(p['name']))
+        .toList();
+    final otherProjects = projects
+        .where((p) => !favorites.contains(p['name']))
+        .toList();
 
     return Padding(
       padding: const EdgeInsets.all(24),
@@ -362,8 +382,11 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
               padding: EdgeInsets.only(left: 4, bottom: 12),
               child: Row(
                 children: [
-                  Icon(Icons.star_rounded,
-                      size: 16, color: SupabaseColors.favorite),
+                  Icon(
+                    Icons.star_rounded,
+                    size: 16,
+                    color: SupabaseColors.favorite,
+                  ),
                   SizedBox(width: 8),
                   Text(
                     'FAVORITOS',
@@ -427,7 +450,10 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
   }
 
   Widget _buildCard(
-      Map<String, dynamic> project, bool isFavorite, String? serverDomain) {
+    Map<String, dynamic> project,
+    bool isFavorite,
+    String? serverDomain,
+  ) {
     return ProjectCard(
       refKey: project['name'] as String,
       anonKey: project['anon_token'] ?? '',

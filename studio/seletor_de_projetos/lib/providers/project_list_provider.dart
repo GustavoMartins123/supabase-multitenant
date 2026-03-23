@@ -4,7 +4,8 @@ import '../services/projectService.dart';
 
 final projectListProvider =
     AsyncNotifierProvider<ProjectListNotifier, List<Map<String, dynamic>>>(
-        ProjectListNotifier.new);
+      ProjectListNotifier.new,
+    );
 
 class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
   @override
@@ -18,12 +19,7 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
 
     state = AsyncData([
       ...current,
-      {
-        'name': name,
-        'anon_token': '',
-        'config_token': '',
-        'is_loading': true,
-      }
+      {'name': name, 'anon_token': '', 'config_token': '', 'is_loading': true},
     ]);
 
     final job = await rep.createProject(name);
@@ -41,7 +37,10 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
   }
 
   Future<bool> duplicateProjectAndWait(
-      String originalName, String newName, bool copyData) async {
+    String originalName,
+    String newName,
+    bool copyData,
+  ) async {
     final rep = ref.read(projectRepositoryProvider);
     final current = state.value ?? [];
 
@@ -52,7 +51,7 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
         'anon_token': '',
         'config_token': '',
         'is_loading': true,
-      }
+      },
     ]);
 
     final job = await rep.duplicateProject(originalName, newName, copyData);
@@ -71,9 +70,11 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
 
   void _removeLoading(String name) {
     final current = state.value ?? [];
-    state = AsyncData(current
-        .where((p) => p['name'] != name || p['is_loading'] != true)
-        .toList());
+    state = AsyncData(
+      current
+          .where((p) => p['name'] != name || p['is_loading'] != true)
+          .toList(),
+    );
   }
 
   void removeProjectLocal(String name) {

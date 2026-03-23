@@ -21,9 +21,12 @@ class StatusSection extends ConsumerWidget {
     final busy = Session().isBusy(projectRef);
 
     final myId = Session().myId;
-    final myRole = membersAsync.value
-            ?.firstWhere((m) => m.user_id == myId,
-                orElse: () => ProjectMember(user_id: '', role: 'member'))
+    final myRole =
+        membersAsync.value
+            ?.firstWhere(
+              (m) => m.user_id == myId,
+              orElse: () => ProjectMember(user_id: '', role: 'member'),
+            )
             .role ??
         'member';
 
@@ -37,7 +40,9 @@ class StatusSection extends ConsumerWidget {
               width: 24,
               height: 24,
               child: CircularProgressIndicator(
-                  strokeWidth: 2, color: SupabaseColors.brand),
+                strokeWidth: 2,
+                color: SupabaseColors.brand,
+              ),
             ),
           ),
         ),
@@ -58,10 +63,11 @@ class StatusSection extends ConsumerWidget {
                           : SupabaseColors.error,
                       boxShadow: [
                         BoxShadow(
-                          color: (isRunning
-                                  ? SupabaseColors.success
-                                  : SupabaseColors.error)
-                              .withValues(alpha:0.5),
+                          color:
+                              (isRunning
+                                      ? SupabaseColors.success
+                                      : SupabaseColors.error)
+                                  .withValues(alpha: 0.5),
                           blurRadius: 8,
                           spreadRadius: 2,
                         ),
@@ -86,7 +92,9 @@ class StatusSection extends ConsumerWidget {
                         Text(
                           '${st.running}/${st.total} containers ativos',
                           style: const TextStyle(
-                              fontSize: 12, color: SupabaseColors.textMuted),
+                            fontSize: 12,
+                            color: SupabaseColors.textMuted,
+                          ),
                         ),
                       ],
                     ),
@@ -114,8 +122,9 @@ class StatusSection extends ConsumerWidget {
                         icon: Icons.stop_rounded,
                         label: 'Stop',
                         color: SupabaseColors.error,
-                        onPressed:
-                            busy ? null : () => _doAction(context, ref, 'stop'),
+                        onPressed: busy
+                            ? null
+                            : () => _doAction(context, ref, 'stop'),
                         busy: busy,
                       ),
                     ),
@@ -149,15 +158,22 @@ class StatusSection extends ConsumerWidget {
     try {
       await ref.read(projectRepositoryProvider).doAction(projectRef, action);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
             content: Text('Ação $action executada'),
-            backgroundColor: SupabaseColors.success));
+            backgroundColor: SupabaseColors.success,
+          ),
+        );
       }
       ref.invalidate(projectStatusProvider(projectRef));
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Erro: $e'), backgroundColor: SupabaseColors.error));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro: $e'),
+            backgroundColor: SupabaseColors.error,
+          ),
+        );
       }
     } finally {
       tracker.setBusy(projectRef, false);

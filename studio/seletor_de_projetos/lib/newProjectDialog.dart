@@ -75,7 +75,7 @@ class _NewProjectDialogState extends State<NewProjectDialog>
     'for',
     'begin',
     'commit',
-    'rollback'
+    'rollback',
   };
 
   static const _prefixes = <String>[
@@ -92,7 +92,7 @@ class _NewProjectDialogState extends State<NewProjectDialog>
     'framework',
     'service',
     'micro',
-    'mini'
+    'mini',
   ];
 
   static const _suffixes = <String>[
@@ -109,7 +109,7 @@ class _NewProjectDialogState extends State<NewProjectDialog>
     'lib',
     'kit',
     'hub',
-    'pro'
+    'pro',
   ];
 
   @override
@@ -135,8 +135,10 @@ class _NewProjectDialogState extends State<NewProjectDialog>
 
   String _randString([int length = 6]) {
     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    return List.generate(length, (_) => chars[_rand.nextInt(chars.length)])
-        .join();
+    return List.generate(
+      length,
+      (_) => chars[_rand.nextInt(chars.length)],
+    ).join();
   }
 
   String _normalize(String input) {
@@ -267,7 +269,7 @@ class _NewProjectDialogState extends State<NewProjectDialog>
                         Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: SupabaseColors.brand.withValues(alpha:0.15),
+                            color: SupabaseColors.brand.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: const Icon(
@@ -321,63 +323,70 @@ class _NewProjectDialogState extends State<NewProjectDialog>
                       },
                       fieldViewBuilder:
                           (context, controller, focusNode, onSubmitted) {
-                        if (controller.text != _ctrl.text) {
-                          controller.text = _ctrl.text;
-                          controller.selection = _ctrl.selection;
-                        }
+                            if (controller.text != _ctrl.text) {
+                              controller.text = _ctrl.text;
+                              controller.selection = _ctrl.selection;
+                            }
 
-                        return TextFormField(
-                          controller: controller,
-                          focusNode: focusNode,
-                          decoration: InputDecoration(
-                            hintText: 'ex.: meu_projeto_incrivel',
-                            hintStyle: const TextStyle(
-                              color: SupabaseColors.textMuted,
-                              fontSize: 13,
-                            ),
-                            prefixIcon: const Icon(
-                              Icons.folder_rounded,
-                              color: SupabaseColors.textMuted,
-                              size: 18,
-                            ),
-                            filled: true,
-                            fillColor: SupabaseColors.bg300,
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(6),
-                              borderSide: const BorderSide(
-                                  color: SupabaseColors.border),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(6),
-                              borderSide: const BorderSide(
-                                  color: SupabaseColors.border),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(6),
-                              borderSide: const BorderSide(
-                                  color: SupabaseColors.brand, width: 2),
-                            ),
-                            errorBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(6),
-                              borderSide:
-                                  const BorderSide(color: SupabaseColors.error),
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 14),
-                          ),
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            color: SupabaseColors.textPrimary,
-                          ),
-                          validator: _validate,
-                          onChanged: (value) {
-                            _ctrl.text = value;
-                            _ctrl.selection = controller.selection;
+                            return TextFormField(
+                              controller: controller,
+                              focusNode: focusNode,
+                              decoration: InputDecoration(
+                                hintText: 'ex.: meu_projeto_incrivel',
+                                hintStyle: const TextStyle(
+                                  color: SupabaseColors.textMuted,
+                                  fontSize: 13,
+                                ),
+                                prefixIcon: const Icon(
+                                  Icons.folder_rounded,
+                                  color: SupabaseColors.textMuted,
+                                  size: 18,
+                                ),
+                                filled: true,
+                                fillColor: SupabaseColors.bg300,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(6),
+                                  borderSide: const BorderSide(
+                                    color: SupabaseColors.border,
+                                  ),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(6),
+                                  borderSide: const BorderSide(
+                                    color: SupabaseColors.border,
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(6),
+                                  borderSide: const BorderSide(
+                                    color: SupabaseColors.brand,
+                                    width: 2,
+                                  ),
+                                ),
+                                errorBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(6),
+                                  borderSide: const BorderSide(
+                                    color: SupabaseColors.error,
+                                  ),
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 14,
+                                ),
+                              ),
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: SupabaseColors.textPrimary,
+                              ),
+                              validator: _validate,
+                              onChanged: (value) {
+                                _ctrl.text = value;
+                                _ctrl.selection = controller.selection;
+                              },
+                              onFieldSubmitted: (_) => _submit(),
+                            );
                           },
-                          onFieldSubmitted: (_) => _submit(),
-                        );
-                      },
                       onSelected: (String selection) {
                         _selectSuggestion(selection);
                       },
@@ -390,15 +399,19 @@ class _NewProjectDialogState extends State<NewProjectDialog>
                             color: SupabaseColors.surface300,
                             child: Container(
                               constraints: const BoxConstraints(
-                                  maxHeight: 240, maxWidth: 400),
+                                maxHeight: 240,
+                                maxWidth: 400,
+                              ),
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(6),
-                                border:
-                                    Border.all(color: SupabaseColors.border),
+                                border: Border.all(
+                                  color: SupabaseColors.border,
+                                ),
                               ),
                               child: ListView.builder(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 4),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 4,
+                                ),
                                 shrinkWrap: true,
                                 itemCount: options.length,
                                 itemBuilder: (context, index) {
@@ -407,7 +420,9 @@ class _NewProjectDialogState extends State<NewProjectDialog>
                                     onTap: () => onSelected(option),
                                     child: Container(
                                       padding: const EdgeInsets.symmetric(
-                                          horizontal: 12, vertical: 10),
+                                        horizontal: 12,
+                                        vertical: 10,
+                                      ),
                                       child: Row(
                                         children: [
                                           const Icon(
@@ -442,10 +457,11 @@ class _NewProjectDialogState extends State<NewProjectDialog>
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: SupabaseColors.info.withValues(alpha:0.1),
+                        color: SupabaseColors.info.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(6),
                         border: Border.all(
-                            color: SupabaseColors.info.withValues(alpha:0.2)),
+                          color: SupabaseColors.info.withValues(alpha: 0.2),
+                        ),
                       ),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -496,10 +512,14 @@ class _NewProjectDialogState extends State<NewProjectDialog>
                           style: TextButton.styleFrom(
                             foregroundColor: SupabaseColors.textSecondary,
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 10),
+                              horizontal: 16,
+                              vertical: 10,
+                            ),
                           ),
-                          child: const Text('Cancelar',
-                              style: TextStyle(fontSize: 13)),
+                          child: const Text(
+                            'Cancelar',
+                            style: TextStyle(fontSize: 13),
+                          ),
                         ),
                         const SizedBox(width: 8),
                         _PrimaryButton(
@@ -533,8 +553,11 @@ class _CloseBtn extends StatelessWidget {
         borderRadius: BorderRadius.circular(4),
         child: const Padding(
           padding: EdgeInsets.all(4),
-          child: Icon(Icons.close_rounded,
-              size: 18, color: SupabaseColors.textMuted),
+          child: Icon(
+            Icons.close_rounded,
+            size: 18,
+            color: SupabaseColors.textMuted,
+          ),
         ),
       ),
     );
@@ -542,8 +565,11 @@ class _CloseBtn extends StatelessWidget {
 }
 
 class _PrimaryButton extends StatefulWidget {
-  const _PrimaryButton(
-      {required this.label, required this.icon, required this.onPressed});
+  const _PrimaryButton({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+  });
   final String label;
   final IconData icon;
   final VoidCallback onPressed;

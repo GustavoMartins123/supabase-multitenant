@@ -66,8 +66,8 @@ class _AddMemberDialogState extends State<AddMemberDialog>
       _shown = q.isEmpty
           ? _users
           : _users
-              .where((u) => u.displayName.toLowerCase().contains(q))
-              .toList();
+                .where((u) => u.displayName.toLowerCase().contains(q))
+                .toList();
     });
   }
 
@@ -97,15 +97,16 @@ class _AddMemberDialogState extends State<AddMemberDialog>
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: const BoxDecoration(
-                  border:
-                      Border(bottom: BorderSide(color: SupabaseColors.border)),
+                  border: Border(
+                    bottom: BorderSide(color: SupabaseColors.border),
+                  ),
                 ),
                 child: Row(
                   children: [
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: SupabaseColors.brand.withValues(alpha:0.15),
+                        color: SupabaseColors.brand.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: const Icon(
@@ -131,7 +132,9 @@ class _AddMemberDialogState extends State<AddMemberDialog>
                           Text(
                             'Selecione um usuário da lista',
                             style: TextStyle(
-                                fontSize: 12, color: SupabaseColors.textMuted),
+                              fontSize: 12,
+                              color: SupabaseColors.textMuted,
+                            ),
                           ),
                         ],
                       ),
@@ -144,8 +147,8 @@ class _AddMemberDialogState extends State<AddMemberDialog>
                 child: _loading
                     ? _buildLoading()
                     : _error != null
-                        ? _buildError()
-                        : _buildContent(),
+                    ? _buildError()
+                    : _buildContent(),
               ),
               Container(
                 padding: const EdgeInsets.all(16),
@@ -160,10 +163,14 @@ class _AddMemberDialogState extends State<AddMemberDialog>
                       style: TextButton.styleFrom(
                         foregroundColor: SupabaseColors.textSecondary,
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 10),
+                          horizontal: 16,
+                          vertical: 10,
+                        ),
                       ),
-                      child: const Text('Cancelar',
-                          style: TextStyle(fontSize: 13)),
+                      child: const Text(
+                        'Cancelar',
+                        style: TextStyle(fontSize: 13),
+                      ),
                     ),
                     const SizedBox(width: 8),
                     _PrimaryButton(
@@ -196,7 +203,9 @@ class _AddMemberDialogState extends State<AddMemberDialog>
             width: 32,
             height: 32,
             child: CircularProgressIndicator(
-                strokeWidth: 2, color: SupabaseColors.brand),
+              strokeWidth: 2,
+              color: SupabaseColors.brand,
+            ),
           ),
           SizedBox(height: 16),
           Text(
@@ -218,11 +227,14 @@ class _AddMemberDialogState extends State<AddMemberDialog>
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: SupabaseColors.error.withValues(alpha:0.1),
+                color: SupabaseColors.error.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(Icons.error_outline_rounded,
-                  size: 32, color: SupabaseColors.error),
+              child: const Icon(
+                Icons.error_outline_rounded,
+                size: 32,
+                color: SupabaseColors.error,
+              ),
             ),
             const SizedBox(height: 16),
             Text(
@@ -244,13 +256,20 @@ class _AddMemberDialogState extends State<AddMemberDialog>
           TextFormField(
             controller: _searchCtl,
             style: const TextStyle(
-                fontSize: 13, color: SupabaseColors.textPrimary),
+              fontSize: 13,
+              color: SupabaseColors.textPrimary,
+            ),
             decoration: InputDecoration(
               hintText: 'Buscar usuário…',
               hintStyle: const TextStyle(
-                  color: SupabaseColors.textMuted, fontSize: 13),
-              prefixIcon: const Icon(Icons.search_rounded,
-                  color: SupabaseColors.textMuted, size: 18),
+                color: SupabaseColors.textMuted,
+                fontSize: 13,
+              ),
+              prefixIcon: const Icon(
+                Icons.search_rounded,
+                color: SupabaseColors.textMuted,
+                size: 18,
+              ),
               filled: true,
               fillColor: SupabaseColors.bg300,
               border: OutlineInputBorder(
@@ -263,11 +282,15 @@ class _AddMemberDialogState extends State<AddMemberDialog>
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
-                borderSide:
-                    const BorderSide(color: SupabaseColors.brand, width: 2),
+                borderSide: const BorderSide(
+                  color: SupabaseColors.brand,
+                  width: 2,
+                ),
               ),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 12,
+              ),
             ),
           ),
           const SizedBox(height: 16),
@@ -295,8 +318,11 @@ class _AddMemberDialogState extends State<AddMemberDialog>
             ),
             child: Row(
               children: [
-                const Icon(Icons.people_rounded,
-                    size: 14, color: SupabaseColors.textMuted),
+                const Icon(
+                  Icons.people_rounded,
+                  size: 14,
+                  color: SupabaseColors.textMuted,
+                ),
                 const SizedBox(width: 6),
                 Text(
                   '${_shown.length} ${_shown.length == 1 ? 'usuário disponível' : 'usuários disponíveis'}',
@@ -326,12 +352,13 @@ class _AddMemberDialogState extends State<AddMemberDialog>
                       padding: const EdgeInsets.all(10),
                       margin: const EdgeInsets.only(bottom: 2),
                       decoration: BoxDecoration(
-                        color:
-                            sel ? SupabaseColors.brand.withValues(alpha:0.1) : null,
+                        color: sel
+                            ? SupabaseColors.brand.withValues(alpha: 0.1)
+                            : null,
                         borderRadius: BorderRadius.circular(6),
                         border: Border.all(
                           color: sel
-                              ? SupabaseColors.brand.withValues(alpha:0.3)
+                              ? SupabaseColors.brand.withValues(alpha: 0.3)
                               : Colors.transparent,
                         ),
                       ),
@@ -342,7 +369,7 @@ class _AddMemberDialogState extends State<AddMemberDialog>
                             height: 36,
                             decoration: BoxDecoration(
                               color: sel
-                                  ? SupabaseColors.brand.withValues(alpha:0.2)
+                                  ? SupabaseColors.brand.withValues(alpha: 0.2)
                                   : SupabaseColors.surface200,
                               borderRadius: BorderRadius.circular(6),
                             ),
@@ -364,8 +391,9 @@ class _AddMemberDialogState extends State<AddMemberDialog>
                             child: Text(
                               u.displayName,
                               style: TextStyle(
-                                fontWeight:
-                                    sel ? FontWeight.w600 : FontWeight.w500,
+                                fontWeight: sel
+                                    ? FontWeight.w600
+                                    : FontWeight.w500,
                                 fontSize: 13,
                                 color: SupabaseColors.textPrimary,
                               ),
@@ -441,8 +469,11 @@ class _CloseBtn extends StatelessWidget {
         borderRadius: BorderRadius.circular(4),
         child: const Padding(
           padding: EdgeInsets.all(4),
-          child: Icon(Icons.close_rounded,
-              size: 18, color: SupabaseColors.textMuted),
+          child: Icon(
+            Icons.close_rounded,
+            size: 18,
+            color: SupabaseColors.textMuted,
+          ),
         ),
       ),
     );
