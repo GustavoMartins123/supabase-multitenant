@@ -26,7 +26,8 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     name TEXT NOT NULL,
     owner_id TEXT NOT NULL,
     anon_key TEXT,
-    service_role TEXT
+    service_role TEXT,
+    config_token TEXT
   );
 EOSQL
 

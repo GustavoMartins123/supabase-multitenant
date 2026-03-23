@@ -87,7 +87,7 @@ async def list_projects(
 ):
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT p.name, p.anon_key
+            SELECT p.name, p.anon_key, p.config_token
             FROM projects p
             JOIN project_members m ON p.id = m.project_id
             WHERE m.user_id = $1 AND p.anon_key IS NOT NULL
@@ -95,7 +95,12 @@ async def list_projects(
     result = []
     for r in rows:
         anon_token = fernet.decrypt(r["anon_key"].encode()).decode()
-        result.append({"name": r["name"], "anon_token": anon_token})
+        config_token = fernet.decrypt(r["config_token"].encode()).decode() if r["config_token"] else None
+        result.append({
+            "name": r["name"], 
+            "anon_token": anon_token,
+            "config_token": config_token
+        })
     return result
 
 @app.post("/api/projects", status_code=202)
@@ -236,19 +241,21 @@ async def _duplicate_and_store_keys(job_id: str, original_name: str, new_name: s
         kv = {k: v for k, v in (line.split("=", 1) for line in lines if "=" in line)}
         anon = kv.get("ANON_KEY_PROJETO")
         service = kv.get("SERVICE_ROLE_KEY_PROJETO")
-        if not anon or not service:
+        config_token = kv.get("CONFIG_TOKEN_PROJETO")
+        if not anon or not service or not config_token:
             await set_status("failed")
             print("Missing tokens")
             return
 
         anon_enc = fernet.encrypt(anon.encode()).decode()
         svc_enc  = fernet.encrypt(service.encode()).decode()
+        config_enc = fernet.encrypt(config_token.encode()).decode()
         async with pool.acquire() as conn:
             await conn.execute(
                 """UPDATE projects
-                   SET anon_key=$1, service_role=$2
-                   WHERE name=$3 AND owner_id=$4""",
-                anon_enc, svc_enc, new_name, owner_id
+                   SET anon_key=$1, service_role=$2, config_token=$3
+                   WHERE name=$4 AND owner_id=$5""",
+                anon_enc, svc_enc, config_enc, new_name, owner_id
             )
 
         await set_status("done")
@@ -641,19 +648,21 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: str):
         kv = {k: v for k, v in (line.split("=", 1) for line in lines if "=" in line)}
         anon = kv.get("ANON_KEY_PROJETO")
         service = kv.get("SERVICE_ROLE_KEY_PROJETO")
-        if not anon or not service:
+        config_token = kv.get("CONFIG_TOKEN_PROJETO")
+        if not anon or not service or not config_token:
             await set_status("failed")
             print("Missing tokens")
             return
 
         anon_enc = fernet.encrypt(anon.encode()).decode()
         svc_enc  = fernet.encrypt(service.encode()).decode()
+        config_enc = fernet.encrypt(config_token.encode()).decode()
         async with pool.acquire() as conn:
             await conn.execute(
                 """UPDATE projects
-                   SET anon_key=$1, service_role=$2
-                   WHERE name=$3 AND owner_id=$4""",
-                anon_enc, svc_enc, project_name, user
+                   SET anon_key=$1, service_role=$2, config_token=$3
+                   WHERE name=$4 AND owner_id=$5""",
+                anon_enc, svc_enc, config_enc, project_name, user
             )
 
         await set_status("done")

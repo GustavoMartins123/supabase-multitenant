@@ -11,16 +11,27 @@ import 'dialogs/addMemberDialog.dart';
 import 'dialogs/transferProjectDialog.dart';
 import 'models/AllUsers.dart';
 import 'models/projectDockerStatus.dart';
+import 'models/project_member.dart';
+import 'widgets/section_widget.dart';
+import 'widgets/error_box.dart';
+import 'widgets/icon_button_widget.dart';
+import 'widgets/close_button_widget.dart';
+import 'widgets/action_button.dart';
+import 'widgets/primary_button.dart';
+import 'widgets/secondary_button.dart';
+import 'widgets/danger_button.dart';
 
 class ProjectSettingsDialog extends StatefulWidget {
   const ProjectSettingsDialog({
     super.key,
     required this.ref,
     required this.anonKey,
+    required this.configToken,
   });
 
   final String ref;
   final String anonKey;
+  final String configToken;
 
   @override
   State<ProjectSettingsDialog> createState() => _ProjectSettingsDialogState();
@@ -43,6 +54,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
   late Animation<double> _fadeAnimation;
   String _projectUrl = '';
   late String _currentAnonKey;
+  late String _currentConfigToken;
   bool _rotatingKey = false;
 
   @override
@@ -68,6 +80,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
     _animController.forward();
 
      _currentAnonKey = widget.anonKey;
+     _currentConfigToken = widget.configToken;
   }
 
   @override
@@ -419,7 +432,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
                         ],
                       ),
                     ),
-                    _CloseButton(onPressed: () => Navigator.pop(context)),
+                    CloseButtonWidget(onPressed: () => Navigator.pop(context)),
                   ],
                 ),
               ),
@@ -435,6 +448,8 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
                       _buildProjectUrlSection(),
                       const SizedBox(height: 20),
                       _buildAnonKeySection(),
+                      const SizedBox(height: 20),
+                      _buildConfigTokenSection(),
                       const SizedBox(height: 20),
                       _buildMembersSection(),
                     ],
@@ -454,13 +469,13 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
                     Row(
                       children: [
                         if (session.isSysAdmin) ...[
-                          _DangerButton(
+                          DangerButton(
                             label: 'Excluir',
                             icon: Icons.delete_outline_rounded,
                             onPressed: _deleteProject,
                           ),
                           const SizedBox(width: 8),
-                          _SecondaryButton(
+                          SecondaryButton(
                             label: 'Transferir',
                             icon: Icons.swap_horiz_rounded,
                             onPressed: () => _showTransferDialog(widget.ref),
@@ -468,7 +483,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
                         ],
                       ],
                     ),
-                    _PrimaryButton(
+                    PrimaryButton(
                       label: 'Fechar',
                       onPressed: () => Navigator.pop(context),
                     ),
@@ -519,7 +534,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
   }
 
   Widget _buildProjectUrlSection() {
-    return _Section(
+    return SectionWidget(
       title: 'URL DO PROJETO',
       child: Container(
         padding: const EdgeInsets.all(12),
@@ -547,7 +562,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
               ),
             ),
             const SizedBox(width: 8),
-            _IconBtn(
+            IconButtonWidget(
               icon: Icons.copy_rounded,
               tooltip: 'Copiar URL',
               onPressed: _projectUrl.isNotEmpty
@@ -564,7 +579,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
   }
 
   Widget _buildStatusSection() {
-    return _Section(
+    return SectionWidget(
       title: 'STATUS',
       child: _statusLoading
           ? const Center(
@@ -578,7 +593,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
         ),
       )
           : _statusError != null
-          ? _ErrorBox(message: _statusError!)
+          ? ErrorBox(message: _statusError!)
           : _status == null
           ? const SizedBox.shrink()
           : _buildStatusContent(),
@@ -640,7 +655,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
           Row(
             children: [
               Expanded(
-                child: _ActionButton(
+                child: ActionButton(
                   icon: Icons.play_arrow_rounded,
                   label: 'Start',
                   color: SupabaseColors.success,
@@ -650,7 +665,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: _ActionButton(
+                child: ActionButton(
                   icon: Icons.stop_rounded,
                   label: 'Stop',
                   color: SupabaseColors.error,
@@ -660,7 +675,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: _ActionButton(
+                child: ActionButton(
                   icon: Icons.restart_alt_rounded,
                   label: 'Restart',
                   color: SupabaseColors.info,
@@ -679,7 +694,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
   Widget _buildAnonKeySection() {
     final hasKey = _currentAnonKey.isNotEmpty;
 
-    return _Section(
+    return SectionWidget(
       title: 'CHAVE ANÔNIMA',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -704,7 +719,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
                   ),
                 ),
                 const SizedBox(width: 8),
-                _IconBtn(
+                IconButtonWidget(
                   icon: Icons.copy_rounded,
                   tooltip: 'Copiar',
                   onPressed: hasKey
@@ -732,7 +747,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
           ],
           if (_myProjectRole == 'admin') ...[
             const SizedBox(height: 12),
-            _SecondaryButton(
+            SecondaryButton(
               label: 'Gerar nova chave',
               icon: Icons.refresh_rounded,
               onPressed: _rotatingKey ? null : _rotateKey,
@@ -743,11 +758,72 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
     );
   }
 
+  Widget _buildConfigTokenSection() {
+    final hasToken = _currentConfigToken.isNotEmpty;
+
+    return SectionWidget(
+      title: 'TOKEN DE CONFIGURAÇÃO',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: SupabaseColors.bg300,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: SupabaseColors.border),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: SelectableText(
+                    hasToken ? _currentConfigToken : 'Não disponível',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                      color: SupabaseColors.textSecondary,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButtonWidget(
+                  icon: Icons.copy_rounded,
+                  tooltip: 'Copiar',
+                  onPressed: hasToken
+                      ? () {
+                    Clipboard.setData(ClipboardData(text: _currentConfigToken));
+                    _showSnack('Token copiado!', SupabaseColors.success);
+                  }
+                      : null,
+                ),
+              ],
+            ),
+          ),
+          if (hasToken) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(Icons.info_outline, size: 14, color: SupabaseColors.textMuted),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Use este token no header X-Config-Token para acessar o endpoint /config',
+                    style: const TextStyle(fontSize: 11, color: SupabaseColors.textMuted),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildMembersSection() {
-    return _Section(
+    return SectionWidget(
       title: 'MEMBROS',
       trailing: _myProjectRole == 'admin'
-          ? _SecondaryButton(
+          ? SecondaryButton(
         label: 'Adicionar',
         icon: Icons.person_add_rounded,
         onPressed: _loadingMembers ? null : _openAddMemberDialog,
@@ -765,7 +841,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
         ),
       )
           : _error != null
-          ? _ErrorBox(message: _error!, onRetry: _loadCurrentMembers)
+          ? ErrorBox(message: _error!, onRetry: _loadCurrentMembers)
           : _currentMembers.isEmpty
           ? const Center(
         child: Padding(
@@ -837,7 +913,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
                 ),
               ),
               if (canRemove)
-                _IconBtn(
+                IconButtonWidget(
                   icon: Icons.remove_circle_outline_rounded,
                   tooltip: 'Remover',
                   color: SupabaseColors.error,
@@ -882,7 +958,7 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancelar'),
           ),
-          _DangerButton(
+          DangerButton(
             label: 'Remover',
             onPressed: () {
               Navigator.pop(context);
@@ -943,297 +1019,6 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
         onTransfer: (newOwnerId) => _transferProject(projectName, newOwnerId),
         loadAvailableUsers: _loadAvailableUsers,
       ),
-    );
-  }
-}
-
-
-class _Section extends StatelessWidget {
-  const _Section({required this.title, required this.child, this.trailing});
-
-  final String title;
-  final Widget child;
-  final Widget? trailing;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: SupabaseColors.surface100,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: SupabaseColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 1,
-                    color: SupabaseColors.textMuted,
-                  ),
-                ),
-                if (trailing != null) trailing!,
-              ],
-            ),
-          ),
-          const Divider(color: SupabaseColors.border, height: 1),
-          Padding(padding: const EdgeInsets.all(16), child: child),
-        ],
-      ),
-    );
-  }
-}
-
-class _ErrorBox extends StatelessWidget {
-  const _ErrorBox({required this.message, this.onRetry});
-
-  final String message;
-  final VoidCallback? onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: SupabaseColors.error.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: SupabaseColors.error.withOpacity(0.3)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.error_outline, color: SupabaseColors.error, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(message, style: const TextStyle(color: SupabaseColors.error, fontSize: 12)),
-          ),
-          if (onRetry != null)
-            TextButton(
-              onPressed: onRetry,
-              child: const Text('Tentar novamente', style: TextStyle(fontSize: 12)),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _IconBtn extends StatelessWidget {
-  const _IconBtn({required this.icon, required this.tooltip, this.onPressed, this.color});
-
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback? onPressed;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onPressed,
-          borderRadius: BorderRadius.circular(4),
-          child: Padding(
-            padding: const EdgeInsets.all(6),
-            child: Icon(
-              icon,
-              size: 16,
-              color: onPressed == null
-                  ? SupabaseColors.textMuted.withOpacity(0.5)
-                  : (color ?? SupabaseColors.textSecondary),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _CloseButton extends StatelessWidget {
-  const _CloseButton({required this.onPressed});
-
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(4),
-        child: const Padding(
-          padding: EdgeInsets.all(6),
-          child: Icon(Icons.close_rounded, size: 18, color: SupabaseColors.textMuted),
-        ),
-      ),
-    );
-  }
-}
-
-class _ActionButton extends StatelessWidget {
-  const _ActionButton({
-    required this.icon,
-    required this.label,
-    required this.color,
-    this.onPressed,
-    this.busy = false,
-  });
-
-  final IconData icon;
-  final String label;
-  final Color color;
-  final VoidCallback? onPressed;
-  final bool busy;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(6),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            color: onPressed == null ? SupabaseColors.bg300 : color.withOpacity(0.15),
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(
-              color: onPressed == null ? SupabaseColors.border : color.withOpacity(0.3),
-            ),
-          ),
-          child: Column(
-            children: [
-              if (busy)
-                SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(color)),
-                )
-              else
-                Icon(icon, color: onPressed == null ? SupabaseColors.textMuted : color, size: 18),
-              const SizedBox(height: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
-                  color: onPressed == null ? SupabaseColors.textMuted : color,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PrimaryButton extends StatelessWidget {
-  const _PrimaryButton({required this.label, required this.onPressed});
-
-  final String label;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return TextButton(
-      onPressed: onPressed,
-      style: TextButton.styleFrom(
-        backgroundColor: SupabaseColors.brand,
-        foregroundColor: SupabaseColors.bg100,
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-      ),
-      child: Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
-    );
-  }
-}
-
-class _SecondaryButton extends StatelessWidget {
-  const _SecondaryButton({required this.label, this.icon, this.onPressed});
-
-  final String label;
-  final IconData? icon;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return TextButton(
-      onPressed: onPressed,
-      style: TextButton.styleFrom(
-        backgroundColor: SupabaseColors.surface200,
-        foregroundColor: SupabaseColors.textPrimary,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(6),
-          side: const BorderSide(color: SupabaseColors.border),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 14),
-            const SizedBox(width: 6),
-          ],
-          Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
-        ],
-      ),
-    );
-  }
-}
-
-class _DangerButton extends StatelessWidget {
-  const _DangerButton({required this.label, this.icon, required this.onPressed});
-
-  final String label;
-  final IconData? icon;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return TextButton(
-      onPressed: onPressed,
-      style: TextButton.styleFrom(
-        foregroundColor: SupabaseColors.error,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 14),
-            const SizedBox(width: 6),
-          ],
-          Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
-        ],
-      ),
-    );
-  }
-}
-
-class ProjectMember {
-  final String user_id;
-  final String role;
-  final String? displayName;
-
-  ProjectMember({required this.user_id, required this.role, this.displayName});
-
-  factory ProjectMember.fromJson(Map<String, dynamic> json) {
-    return ProjectMember(
-      user_id: json['user_id'] as String,
-      displayName: json['display_name'] as String?,
-      role: json['role'] as String,
     );
   }
 }

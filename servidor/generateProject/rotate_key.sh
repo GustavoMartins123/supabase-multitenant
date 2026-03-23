@@ -20,9 +20,10 @@ PROJECT_DIR="$PROJECT_ROOT/projects/$PROJECT_ID"
 source "$PROJECT_DIR/.env"
 NGINX_PORT="${NGINX_PORT:-}"
 META_PORT="${META_PORT:-}"
-CONFIG_TOKEN="${CONFIG_TOKEN:-}"
+CONFIG_TOKEN_PROJETO="${CONFIG_TOKEN_PROJETO:-}"
 [[ -z "$NGINX_PORT" ]] && die "NGINX_PORT não encontrado no .env do projeto"
 [[ -z "$META_PORT" ]]  && die "META_PORT não encontrado no .env do projeto"
+[[ -z "$CONFIG_TOKEN_PROJETO" ]] && die "CONFIG_TOKEN_PROJETO não encontrado no .env do projeto"
 
 generate_jwt() {
   local payload="$1" secret="$2"
@@ -46,7 +47,7 @@ sed \
   -e "s|{{project_id}}|$PROJECT_ID|g" \
   -e "s|{{nginx_port}}|$NGINX_PORT|g" \
   -e "s|{{meta_port}}|$META_PORT|g" \
-  -e "s|{{config_token}}|$CONFIG_TOKEN|g" \
+  -e "s|{{config_token}}|$CONFIG_TOKEN_PROJETO|g" \
   -e "s|{{server_url}}|$SERVER_URL|g" \
   "$SCRIPT_DIR/nginxtemplate" > "$PROJECT_DIR/nginx/nginx_${PROJECT_ID}.conf"
 

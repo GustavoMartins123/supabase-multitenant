@@ -170,6 +170,7 @@ class _ProjectListPageState extends State<ProjectListPage>
       _projects.add({
         'name': name,
         'anon_token': '',
+        'config_token': '',
         'is_loading': true,
       });
     });
@@ -238,6 +239,7 @@ class _ProjectListPageState extends State<ProjectListPage>
       _projects.add({
         'name': newName,
         'anon_token': '',
+        'config_token': '',
         'is_loading': true,
       });
     });
@@ -585,6 +587,7 @@ class _ProjectListPageState extends State<ProjectListPage>
     return _ProjectCard(
       ref: project['name'] as String,
       anonKey: project['anon_token'] ?? '',
+      configToken: project['config_token'] ?? '',
       isLoading: project['is_loading'] == true,
       isFavorite: isFavorite,
       serverDomain: _serverDomain,
@@ -623,6 +626,7 @@ class _ProjectCard extends StatefulWidget {
   const _ProjectCard({
     required this.ref,
     required this.anonKey,
+    required this.configToken,
     required this.onTap,
     required this.onDeleted,
     required this.onDuplicate,
@@ -634,6 +638,7 @@ class _ProjectCard extends StatefulWidget {
 
   final String ref;
   final String anonKey;
+  final String configToken;
   final String? serverDomain;
   final VoidCallback onTap;
   final VoidCallback onDeleted;
@@ -680,7 +685,11 @@ class _ProjectCardState extends State<_ProjectCard> with TickerProviderStateMixi
   Future<void> _openSettings() async {
     final deleted = await showDialog<String>(
       context: context,
-      builder: (_) => ProjectSettingsDialog(ref: widget.ref, anonKey: widget.anonKey),
+      builder: (_) => ProjectSettingsDialog(
+        ref: widget.ref, 
+        anonKey: widget.anonKey,
+        configToken: widget.configToken,
+      ),
     );
 
     if (deleted == widget.ref) {
@@ -844,7 +853,7 @@ class _ProjectCardState extends State<_ProjectCard> with TickerProviderStateMixi
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'ANON KEY',
+                      'CHAVE ANÔNIMA',
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w600,

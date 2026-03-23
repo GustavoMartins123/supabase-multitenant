@@ -364,9 +364,12 @@ http {
             if ($is_valid_config_token = 0) {
                 return 401;
             }
+            
+            set $config_url "$real_scheme://{{server_url}}/{{project_id}}";
+            
             default_type application/json;
             add_header Cache-Control "no-store";
-            return 200 '{"supabase_url":"https://{{server_url}}/{{project_id}}","anon_key":"{{anon_key}}"}';
+            return 200 '{"supabase_url":"$config_url","anon_key":"{{anon_key}}"}';
         }
         
         location /meta/ {

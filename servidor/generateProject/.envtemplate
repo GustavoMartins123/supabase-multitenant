@@ -25,6 +25,7 @@ IMGPROXY_ENABLE_WEBP_DETECTION=true
 LOGFLARE_API_KEY={{logflare_api_key}}
 ANON_KEY_PROJETO={{anon_key}}
 SERVICE_ROLE_KEY_PROJETO={{service_role_key}}
+CONFIG_TOKEN_PROJETO={{config_token}}
 JWT_SECRET_PROJETO={{jwt_secret}}
 POOLER_PROXY_PORT_TRANSACTION_PROJETO={{pooler_transaction}}
 POOLER_PROXY_PORT_SESSION_PROJETO={{pooler_session}}

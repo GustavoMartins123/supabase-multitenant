@@ -187,7 +187,7 @@ template_to_file() {
     -e "s|{{project_id}}|$NEW_PROJECT|g" \
     -e "s|{{nginx_port}}|$NGINX_PORT|g" \
     -e "s|{{meta_port}}|$META_PORT|g" \
-    -e "s|{{config_token}}|$CONFIG_TOKEN|g" \
+    -e "s|{{config_token}}|$CONFIG_TOKEN_PROJETO|g" \
     -e "s|{{server_url}}|$SERVER_URL|g" \
     "$template" > "$outfile"
 }
@@ -298,7 +298,7 @@ exp=$((now_epoch + (8 * 365 * 24 * 3600)))
 
 ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$NEW_PROJECT\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET")
 SERVICE_TOKEN=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$NEW_PROJECT\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET")
-CONFIG_TOKEN=$(openssl rand -hex 32)
+CONFIG_TOKEN_PROJETO=$(openssl rand -hex 32)
 
 OUT_DIR="$PROJECT_ROOT/projects/$NEW_PROJECT"
 mkdir -p "$OUT_DIR/nginx" "$OUT_DIR/pooler"
