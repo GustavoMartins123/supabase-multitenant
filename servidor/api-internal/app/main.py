@@ -5,7 +5,8 @@ import pathlib
 import asyncpg
 import hmac
 import asyncio, json, re
-from fastapi import FastAPI, BackgroundTasks, Depends, Header, HTTPException, Query, status
+from fastapi import FastAPI, BackgroundTasks, Depends, Header, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from cryptography.fernet import Fernet
 from typing import Optional, List, Dict
@@ -18,11 +19,14 @@ DELETE_SCRIPT = BASE_DIR / "scripts" / "delete_project.sh"
 EXTRACTOR = BASE_DIR / "scripts" / "extract_token.sh"
 DB_DSN = os.getenv("DB_DSN")
 FERNET_SECRET = os.getenv("FERNET_SECRET")
-APP_TOKEN = os.getenv("NGINX_SHARED_TOKEN")
 DELETE_PASSWORD = os.getenv("PROJECT_DELETE_PASSWORD")
+NGINX_SHARED_TOKEN = os.getenv("NGINX_SHARED_TOKEN")
 
 if not FERNET_SECRET:
     raise RuntimeError("Missing FERNET_SECRET environment variable")
+if not NGINX_SHARED_TOKEN:
+    raise RuntimeError("Missing NGINX_SHARED_TOKEN environment variable")
+    
 try:
     fernet = Fernet(FERNET_SECRET.encode())
 except ValueError:
@@ -71,6 +75,30 @@ def validate_service_name(raw: str) -> str:
     return name
 
 app = FastAPI()
+
+@app.middleware("http")
+async def validate_shared_token(request: Request, call_next):
+    """
+    Valida que a requisição vem do Nginx através do token compartilhado.
+    Esta é uma camada adicional de segurança.
+    O Traefik já valida o header, mas validamos novamente aqui.
+    """
+    token = request.headers.get("X-Shared-Token")
+    
+    if not token:
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Unauthorized: Missing X-Shared-Token"}
+        )
+    
+    if not hmac.compare_digest(token, NGINX_SHARED_TOKEN):
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "Forbidden: Invalid X-Shared-Token"}
+        )
+    
+    response = await call_next(request)
+    return response
 
 class NewProject(BaseModel):
     name: str
@@ -594,12 +622,8 @@ async def project_status(job_id: str, pool=Depends(get_pool)):
 @app.get("/api/projects/internal/enc-key/{ref}")
 async def enc_key(
     ref: str,
-    token: str = Header(None, alias="X-Shared-Token"),
     pool=Depends(get_pool)
 ):
-    if not APP_TOKEN or not hmac.compare_digest(token or "", APP_TOKEN):
-        raise HTTPException(status_code=403, detail="Forbidden")
-
     ref = validate_project_id(ref)
 
     async with pool.acquire() as conn:

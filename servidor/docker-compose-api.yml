@@ -10,8 +10,8 @@ services:
     environment:
       DB_DSN: postgres://supabase_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/postgres
       FERNET_SECRET: ${FERNET_SECRET}
-      NGINX_SHARED_TOKEN: ${NGINX_SHARED_TOKEN}
       PROJECT_DELETE_PASSWORD: ${PROJECT_DELETE_PASSWORD}
+      NGINX_SHARED_TOKEN: ${NGINX_SHARED_TOKEN}
     volumes:
       - ./projects:/docker/projects:rw        # bind-mount relativo  :contentReference[oaicite:0]{index=0}
       - ./.env:/docker/.env:ro
@@ -19,7 +19,7 @@ services:
     labels:
       - traefik.enable=true
       - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.20.0.0/16
-      - traefik.http.routers.projects.rule=PathPrefix(`/api/projects`)
+      - traefik.http.routers.projects.rule=PathPrefix(`/api/projects`) && Header(`X-Shared-Token`, `{{nginx_shared_token}}`)
       - traefik.http.routers.projects.middlewares=lanonly, api-security-chain@file
       - traefik.http.services.projects.loadbalancer.server.port=18000  
   # push-worker:

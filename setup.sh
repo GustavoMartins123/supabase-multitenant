@@ -287,6 +287,7 @@ main() {
     fi
     print_status "Configurando a whitelist da api python "
     sed -i "s|<SEU_IP>/32|$LOCAL_IP/32|g" servidor/docker-compose-api.yml
+    sed -i "s|{{nginx_shared_token}}|$SHARED_NGINX_TOKEN|g" servidor/docker-compose-api.yml
     sed -i "s|API_URL=https://<SEU_IP>/api/internal/push|API_URL=https://$LOCAL_IP/api/internal/push|g" servidor/api-internal/app/push_worker.py
 
 

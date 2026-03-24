@@ -37,6 +37,14 @@ http:
         sourceCriterion:
           ipStrategy:
             depth: 1
+    rate-limit-api-internal:
+      rateLimit:
+        burst: 50
+        average: 20
+        period: "1s"
+        sourceCriterion:
+          ipStrategy:
+            depth: 1        
     geoblock-global:
       plugin:
         geoblock:
@@ -79,7 +87,7 @@ http:
     api-security-chain:
       chain:
         middlewares:
-          - geoblock-global
+          - rate-limit-api-internal
           - security-headers
     malicious-paths-chain:
       chain:

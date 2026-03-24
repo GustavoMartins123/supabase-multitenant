@@ -42,8 +42,10 @@ local function get_service_key(ref)
     local res, err = httpc:request_uri(
         DSN .. "/api/projects/internal/enc-key/" .. ref,
         { 
-            headers = {["X-Shared-Token"] = TOKEN,
-                       ["Host"] = hostname,},
+            headers = {
+                ["X-Shared-Token"] = TOKEN,
+                ["Host"] = hostname,
+            },
             ssl_verify = false, 
             method = "GET",
             keepalive = true 

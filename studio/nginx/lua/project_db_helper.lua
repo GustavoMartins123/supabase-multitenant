@@ -10,6 +10,7 @@ local _M = {}
 local functions_cache = ngx.shared.service_keys
 
 local SERVER_DOMAIN = os.getenv("SERVER_DOMAIN") or "http://localhost"
+local NGINX_SHARED_TOKEN = os.getenv("NGINX_SHARED_TOKEN")
 local get_service_key = require "get_service_key"
 
 function _M.get_available_functions(project_ref)
@@ -47,7 +48,8 @@ function _M.get_available_functions(project_ref)
         method = "GET",
         headers = {
             ["Remote-Email"] = user_id,
-            ["Content-Type"] = "application/json"
+            ["Content-Type"] = "application/json",
+            ["X-Shared-Token"] = NGINX_SHARED_TOKEN
         },
         ssl_verify = false
     })
@@ -267,7 +269,8 @@ function _M.execute_function(project_ref, func_name, arguments)
         method = "POST",
         headers = {
             ["Remote-Email"] = exec_user_id,
-            ["Content-Type"] = "application/json"
+            ["Content-Type"] = "application/json",
+            ["X-Shared-Token"] = NGINX_SHARED_TOKEN
         },
         body = cjson.encode({ query = query }),
         ssl_verify = false
