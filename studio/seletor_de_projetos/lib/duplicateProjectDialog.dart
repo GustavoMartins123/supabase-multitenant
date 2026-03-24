@@ -448,7 +448,7 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: const [
                                   Text(
-                                    'Copiar dados das tabelas',
+                                    'Copiar dados das tabelas e arquivos do storage',
                                     style: TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.w500,
@@ -504,7 +504,7 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
                                 const SizedBox(height: 4),
                                 Text(
                                   _copyData
-                                      ? '• Estrutura do banco\n• Schemas e tabelas\n• Políticas de segurança\n• Dados das tabelas ✓'
+                                      ? '• Estrutura do banco\n• Schemas e tabelas\n• Políticas de segurança\n• Dados das tabelas ✓\n• Arquivos do storage ✓'
                                       : '• Estrutura do banco\n• Schemas e tabelas\n• Políticas de segurança',
                                   style: const TextStyle(
                                     fontSize: 11,

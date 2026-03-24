@@ -25,7 +25,6 @@ class AdminUsersNotifier extends AsyncNotifier<UserListResponse> {
       await ref
           .read(projectRepositoryProvider)
           .toggleUserStatus(userId, isCurrentlyActive);
-      // Wait for it to apply, then refresh the list
       await refresh();
     } catch (e) {
       rethrow;

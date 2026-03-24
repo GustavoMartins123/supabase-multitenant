@@ -13,7 +13,7 @@ RUN flutter build web --release
 FROM openresty/openresty:1.29.2.1-alpine-fat
 
 
-RUN apk add --no-cache build-base curl openssl-dev yaml-dev argon2 openssl git
+RUN apk add --no-cache build-base curl openssl-dev yaml-dev argon2 openssl git inotify-tools
 
 RUN luarocks install https://luarocks.org/manifests/hisham/luafilesystem-1.8.0-1.rockspec
 COPY lyaml-6.2.8-1.src /tmp/lyaml-6.2.8-1.src

@@ -16,7 +16,6 @@
                 local is_active = false
                 local is_admin = false
                 
-                -- Verificar se é ativo e se é admin
                 for _, group in ipairs(groups) do
                     if group == "active" then
                         is_active = true
@@ -63,7 +62,7 @@
             cache:set("__mtime", lfs.attributes(yaml, "modification"))
             ngx.log(ngx.INFO, "[CACHE] Cache atualizado em mtime=", cache:get("__mtime"))
         end
-        
+
         load_users()
         
         local keys, err = cache:get_keys(0)
@@ -73,11 +72,48 @@
             ngx.log(ngx.INFO, "[CACHE] get_keys error: ", err)
         end
         
-        ngx.timer.every(10, function()
-            local m = lfs.attributes(yaml, "modification")
-            if cache:get("__mtime") ~= m then
-                ngx.log(ngx.INFO, "[CACHE] Detected YAML change (old=", cache:get("__mtime"),
-                    " new=", m, "), recarregando…")
-                load_users()
+        local function watch_yaml_dir(premature)
+        if premature then return end
+        local pipe = require("ngx.pipe")
+        
+        local watch_dir = "/config/"
+        local target_file = "users_database.yml"
+        
+        local proc, err = pipe.spawn({"inotifywait", "-q", "-m", "-e", "close_write,moved_to", watch_dir})
+        
+        if not proc then
+            ngx.log(ngx.ERR, "[INOTIFY-PIPE] Falha ao iniciar inotifywait: ", err)
+            return
+        end
+
+        ngx.log(ngx.INFO, "[INOTIFY-PIPE] Monitoramento iniciado no diretório: ", watch_dir)
+
+        local function read_events()
+            while true do
+                local line, err = proc:stdout_read_line()
+                
+                if line then
+                    if line:match(target_file) then
+                        ngx.log(ngx.INFO, "[INOTIFY-PIPE] Arquivo modificado: ", line)
+                        ngx.sleep(0.1)
+                        
+                        local ok, lerr = pcall(load_users)
+                        if not ok then
+                            ngx.log(ngx.ERR, "[INOTIFY-PIPE] Erro ao recarregar usuários: ", lerr)
+                        end
+                    end
+                elseif err == "closed" then
+                    ngx.log(ngx.INFO, "[INOTIFY-PIPE] Processo inotifywait finalizado.")
+                    break
+                elseif err ~= "timeout" and err ~= nil then
+                    ngx.log(ngx.ERR, "[INOTIFY-PIPE] Erro na leitura do pipe: ", err)
+                    break
+                end
             end
-        end)
+        end
+
+        ngx.thread.spawn(read_events)
+    end
+    if ngx.worker.id() == 0 then
+        ngx.timer.at(0, watch_yaml_dir)
+    end

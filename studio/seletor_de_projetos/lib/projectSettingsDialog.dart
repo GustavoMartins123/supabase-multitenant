@@ -973,17 +973,15 @@ class _ProjectSettingsDialogState extends State<ProjectSettingsDialog>
   Future<List<AvailableUser>> _loadAvailableUsers(String projectName) async {
     try {
       final response = await http.get(
-        Uri.parse('/api/admin/projects/$projectName/all-users'),
+        Uri.parse('/api/projects/$projectName/available-users?include_members=true'),
       );
 
       if (response.statusCode == 200) {
-        final Map<String, dynamic> data = jsonDecode(response.body);
-        final dynamic usersData = data['users'];
-        if (usersData == null || usersData is! List) return <AvailableUser>[];
-        final List<dynamic> usersJson = usersData;
+        final dynamic data = jsonDecode(response.body);
+        if (data == null || data is! List) return <AvailableUser>[];
+        final List<dynamic> usersJson = data;
         return usersJson
             .map((item) => AvailableUser.fromJson(item))
-            .where((user) => user.userId != widget.ref)
             .toList();
       } else {
         throw Exception('Erro ${response.statusCode}: ${response.body}');

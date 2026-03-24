@@ -131,6 +131,22 @@ class ProjectRepository {
     throw Exception('Erro ao carregar usuários: ${resp.body}');
   }
 
+  Future<List<dynamic>> getTransferAvailableUsers(String ref) async {
+    final resp = await http.get(
+      Uri.parse('/api/projects/$ref/available-users?include_members=true'),
+    );
+    if (resp.statusCode == 200) {
+      if (resp.body.isEmpty) return [];
+      final dynamic data = jsonDecode(resp.body);
+      if (data is List) return data;
+      if (data is Map && data.containsKey('users')) {
+        return data['users'] as List<dynamic>;
+      }
+      return [];
+    }
+    throw Exception('Erro ao carregar usuários para transferência: ${resp.body}');
+  }
+
   Future<Map<String, dynamic>> rotateKey(String ref) async {
     final resp = await http.post(Uri.parse('/api/projects/$ref/rotate-key'));
     if (resp.statusCode == 200) {

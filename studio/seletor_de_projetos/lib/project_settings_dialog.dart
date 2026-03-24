@@ -557,7 +557,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
         loadAvailableUsers: (projectName) async {
           final users = await ref
               .read(projectRepositoryProvider)
-              .getAvailableUsers(projectName);
+              .getTransferAvailableUsers(projectName);
           return users.map((u) => AvailableUser.fromJson(u)).toList();
         },
       ),
