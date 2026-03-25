@@ -206,14 +206,17 @@ Esses headers são usados pela API Python para validar permissões.
 
 5. Traefik roteia baseado em labels Docker
    - Lê label: traefik.http.routers.projeto-x.rule=PathPrefix(`/projeto_x`)
-   - Roteia para container nginx-projeto-x
+   - Aplica middleware: strip-projeto_x (remove /projeto_x do path)
+   - Roteia para container nginx-projeto-x:PORTA
 
-6. Nginx do Projeto valida apikey
-   - Verifica se Authorization header é válido
-   - Remove prefixo /projeto_x do path
+6. Nginx do Projeto recebe requisição limpa
+   GET /rest/v1/tabela
+   - Valida apikey no header Authorization
+   - Verifica se é anon_key ou service_role válida
 
 7. Nginx do Projeto faz proxy para PostgREST
-   GET http://rest:3000/tabela
+   - Remove prefixo /rest/v1/ do path
+   - Proxy para: http://rest:3000/tabela
    
 8. PostgREST consulta database projeto_x
    - Conecta via Supavisor (pooler)
@@ -221,6 +224,315 @@ Esses headers são usados pela API Python para validar permissões.
 
 9. Resposta retorna pelo caminho inverso
    PostgREST → Nginx Projeto → Traefik → Nginx Studio → Usuário
+```
+
+---
+
+## Nginx do Projeto - Roteamento Interno
+
+Cada projeto tem seu próprio container Nginx que funciona como gateway interno, roteando requisições para os serviços corretos.
+
+### Estrutura do Nginx do Projeto
+
+**Container:** `supabase-nginx-{{project_id}}`
+
+**Porta interna:** Gerada aleatoriamente (4000-14000) durante criação do projeto
+
+**Arquivo de configuração:** `servidor/projects/{{project_id}}/nginx/nginx_{{project_id}}.conf`
+
+### Validação de API Keys
+
+O Nginx do projeto valida todas as requisições usando maps do Nginx:
+
+```nginx
+map $http_apikey $is_valid_key {
+    default 0;
+    "{{anon_key}}" 1;  
+    "{{service_role_key}}" 1;  
+}
+
+map $http_apikey $is_admin_key {
+    default 0;
+    "{{service_role_key}}" 1; 
+}
+```
+
+**Fluxo de validação:**
+
+1. Extrai header `apikey` da requisição
+2. Compara com anon_key e service_role_key do projeto
+3. Se não for válida: retorna 403 Forbidden
+4. Se válida: permite acesso ao serviço
+
+### Mapeamento de Serviços
+
+O Nginx usa variáveis para resolver os upstreams dinamicamente:
+
+```nginx
+map "" $auth_upstream     { default "supabase-auth-{{project_id}}:9999"; }
+map "" $rest_upstream     { default "supabase-rest-{{project_id}}:3000"; }
+map "" $storage_upstream  { default "supabase-storage-{{project_id}}:5000"; }
+map "" $functions_upstream{ default "functions:9000"; }
+map "" $realtime_upstream { default "realtime-dev.supabase-realtime:4000"; }
+map "" $meta_upstream     { default "supabase-meta-{{project_id}}:{{meta_port}}"; }
+```
+
+### Rotas e Reescrita de Paths
+
+**1. Auth (GoTrue)**
+
+```nginx
+location /auth/v1/ {
+    # Validação
+    if ($http_apikey = "") { return 401; }
+    if ($is_valid_key != 1) { return 403; }
+    
+    # Reescreve: /auth/v1/signup → /signup
+    rewrite ^/auth/v1/(.*)$ /$1?$args break;
+    
+    # Proxy para GoTrue
+    proxy_pass http://$auth_upstream;
+}
+```
+
+**Fluxo:**
+- Requisição: `GET /auth/v1/user`
+- Validação: Verifica apikey
+- Reescrita: `/auth/v1/user` → `/user`
+- Proxy: `http://supabase-auth-projeto_x:9999/user`
+
+**2. REST (PostgREST)**
+
+```nginx
+location /rest/v1/ {
+    # Validação
+    if ($http_apikey = "") { return 401; }
+    if ($is_valid_key != 1) { return 403; }
+    
+    # Reescreve: /rest/v1/tabela → /tabela
+    rewrite ^/rest/v1/(.*)$ /$1 break;
+    
+    # Proxy para PostgREST
+    proxy_pass http://$rest_upstream;
+}
+```
+
+**Fluxo:**
+- Requisição: `GET /rest/v1/users?select=*`
+- Validação: Verifica apikey
+- Reescrita: `/rest/v1/users` → `/users`
+- Proxy: `http://supabase-rest-projeto_x:3000/users?select=*`
+
+**3. Storage**
+
+```nginx
+location /storage/v1/ {
+    # Validação
+    if ($http_apikey = "") { return 401; }
+    if ($is_valid_key != 1) { return 403; }
+    
+    # Aumenta limite para uploads
+    client_max_body_size 500M;
+    
+    # Reescreve: /storage/v1/object/public/bucket/file → /object/public/bucket/file
+    rewrite ^/storage/v1/(.*)$ /$1 break;
+    
+    # Preserva headers do protocolo Tus (resumable uploads)
+    proxy_set_header Tus-Resumable $http_tus_resumable;
+    proxy_set_header Upload-Length $http_upload_length;
+    
+    # Proxy para Storage
+    proxy_pass http://$storage_upstream;
+}
+```
+
+**Fluxo:**
+- Requisição: `POST /storage/v1/object/avatars/user.jpg`
+- Validação: Verifica apikey
+- Reescrita: `/storage/v1/object/avatars/user.jpg` → `/object/avatars/user.jpg`
+- Proxy: `http://supabase-storage-projeto_x:5000/object/avatars/user.jpg`
+
+**4. Realtime (WebSocket)**
+
+```nginx
+location ^~ /realtime/v1/websocket {
+    # Validação via query param
+    if ($arg_apikey = "") { return 401; }
+    if ($is_valid_api_key != 1) { return 403; }
+    
+    # Reescreve: /realtime/v1/websocket → /socket/websocket
+    rewrite ^/realtime/v1/websocket$ /socket/websocket break;
+
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    
+    # CRÍTICO: Injeta tenant_id via Host header
+    proxy_set_header Host "{{project_id}}.localhost";
+
+    proxy_read_timeout 86400;
+    
+    proxy_pass http://$realtime_upstream;
+}
+```
+
+**Fluxo:**
+- Requisição: `WS /realtime/v1/websocket?apikey=xxx`
+- Validação: Verifica apikey no query param
+- Reescrita: `/realtime/v1/websocket` → `/socket/websocket`
+- Injeta: `Host: projeto_x.localhost`
+- Proxy: `ws://realtime-dev.supabase-realtime:4000/socket/websocket`
+- Realtime extrai tenant_id do Host header
+
+**5. Meta (Postgres-Meta)**
+
+```nginx
+location /meta/ {
+    # Apenas service_role pode acessar
+    if ($is_admin_key = 0) { return 401; }
+    if ($is_valid_key != 1) { return 403; }
+    
+    # Reescreve: /meta/tables → /tables
+    rewrite ^/meta/(.*)$ /$1 break;
+    
+    proxy_pass http://$meta_upstream;
+}
+```
+
+**Fluxo:**
+- Requisição: `GET /meta/tables`
+- Validação: Verifica se é service_role
+- Reescrita: `/meta/tables` → `/tables`
+- Proxy: `http://supabase-meta-projeto_x:8080/tables`
+
+**6. Functions (Edge Functions)**
+
+```nginx
+location /functions/v1/ {
+    # Validação
+    if ($http_apikey = "") { return 401; }
+    if ($is_valid_key != 1) { return 403; }
+    
+    # Reescreve: /functions/v1/hello → /hello
+    rewrite ^/functions/v1/(.*)$ /$1 break;
+    
+    # Proxy para Functions global
+    proxy_pass http://$functions_upstream;
+}
+```
+
+**Fluxo:**
+- Requisição: `POST /functions/v1/send-email`
+- Validação: Verifica apikey
+- Reescrita: `/functions/v1/send-email` → `/send-email`
+- Proxy: `http://functions:9000/send-email`
+
+### CORS (Cross-Origin Resource Sharing)
+
+O Nginx do projeto gerencia CORS automaticamente:
+
+```nginx
+# Captura origin do request
+set $cors_origin "";
+if ($http_origin ~* "^https?://.*$") {
+    set $cors_origin $http_origin;
+}
+
+# Responde OPTIONS (preflight)
+if ($request_method = 'OPTIONS') {
+    add_header 'Access-Control-Allow-Origin' $cors_origin always;
+    add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, PATCH, DELETE' always;
+    add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey' always;
+    add_header 'Access-Control-Max-Age' 86400 always;
+    return 204;
+}
+
+# Adiciona headers CORS em todas as respostas
+add_header 'Access-Control-Allow-Origin' $cors_origin always;
+```
+
+### Endpoint de Configuração
+
+O Nginx expõe um endpoint especial para o Studio obter configurações do projeto:
+
+### Endpoint de Configuração
+
+O Nginx expõe um endpoint especial para aplicações obterem configurações do projeto de forma segura:
+
+```nginx
+location = /config {
+    # Validação via token especial
+    if ($is_valid_config_token = 0) {
+        return 401;
+    }
+    
+    # Retorna JSON com URL e anon_key
+    set $config_url "$real_scheme://{{server_url}}/{{project_id}}";
+    
+    default_type application/json;
+    return 200 '{"supabase_url":"$config_url","anon_key":"{{anon_key}}"}';
+}
+```
+
+**Propósito:**
+
+Este endpoint permite que aplicações obtenham a `anon_key` dinamicamente sem hardcoding, facilitando a rotação de chaves sem quebrar aplicações em produção.
+
+**Como funciona:**
+
+1. Aplicação chama: `GET https://servidor/projeto_x/config`
+2. Envia header: `X-Config-Token: token_secreto`
+3. Recebe: `{"supabase_url":"https://servidor/projeto_x","anon_key":"eyJ..."}`
+4. Usa para configurar SDK do Supabase
+
+**Vantagens:**
+
+- **Rotação de chaves sem downtime:** Quando a `anon_key` é rotacionada, aplicações pegam a nova chave automaticamente
+- **Segurança:** Token de configuração é diferente da anon_key, permitindo controle de acesso separado
+
+**Exemplo de uso em aplicação:**
+
+```javascript
+// Busca configuração do projeto
+const response = await fetch('https://servidor/projeto_x/config', {
+  headers: {
+    'X-Config-Token': 'meu_token_secreto'
+  }
+});
+
+const config = await response.json();
+// { "supabase_url": "https://servidor/projeto_x", "anon_key": "eyJ..." }
+
+// Inicializa Supabase com configuração dinâmica
+const supabase = createClient(config.supabase_url, config.anon_key);
+```
+
+Usuário → Traefik → Nginx Projeto → Serviço
+
+Exemplo detalhado (POST /rest/v1/users):
+
+1. Traefik recebe:
+   - Lê label: PathPrefix(`/projeto_x`)
+   - Aplica middleware: strip-projeto_x
+   - Remove /projeto_x do path
+   - Roteia para: nginx-projeto_x:9999
+
+2. Nginx Projeto recebe:
+   POST /rest/v1/users
+   - Valida: anon_key_xxx é válida? ✓
+   - Reescreve: /rest/v1/users → /users
+   - Adiciona headers CORS
+   - Proxy para: rest:3000
+
+3. PostgREST recebe:
+   POST http://rest:3000/users
+   - Valida JWT
+   - Conecta no banco via pooler
+   - Executa: INSERT INTO users (name) VALUES ('João')
+   - Retorna: {"id": 1, "name": "João"}
+
+4. Resposta volta:
+   PostgREST → Nginx Projeto → Traefik → Usuário
 ```
 
 ---
@@ -236,10 +548,11 @@ Buscar a service_role do banco a cada requisição seria lento.
 **Cache em memória compartilhada (Lua shared dict):**
 
 ```lua
--- Configuração
+-- Configuração no nginx.conf
 lua_shared_dict service_keys 10m;  -- 10MB de cache
-TTL: 600 segundos (10 minutos)
 ```
+
+**TTL:** 600 segundos (10 minutos)
 
 **Fluxo:**
 
@@ -255,10 +568,10 @@ TTL: 600 segundos (10 minutos)
    Header: X-Shared-Token: NGINX_SHARED_TOKEN
 
 4. API Python retorna key criptografada (Fernet)
-   {"encrypted_key": "gAAAAA..."}
+   {"enc_service_key": "gAAAAA..."}
 
 5. Lua descriptografa com Fernet
-   service_role = fernet.decrypt(encrypted_key)
+   service_role = fernet.decrypt(enc_service_key)
 
 6. Armazena em cache por 10 minutos
    cache:set("projeto_x", service_role, 600)
@@ -266,9 +579,43 @@ TTL: 600 segundos (10 minutos)
 7. Usa a key descriptografada
 ```
 
-**Por que criptografar?**
-- Keys não ficam em texto plano no banco
-- Mesmo com acesso ao banco, precisa do FERNET_SECRET
+**Código relevante (studio/nginx/lua/get_service_key.lua):**
+
+```lua
+local cache = ngx.shared.service_keys
+
+local function get_service_key(ref)
+    -- Tenta buscar do cache
+    local k = cache:get(ref)
+    if k then 
+        return k  -- Cache hit
+    end
+    
+    -- Cache miss: busca da API
+    local res = httpc:request_uri(
+        DSN .. "/api/projects/internal/enc-key/" .. ref,
+        { headers = { ["X-Shared-Token"] = TOKEN } }
+    )
+    
+    -- Descriptografa
+    local f = fernet:new(SEC)
+    local plain = f:decrypt(data.enc_service_key)
+    
+    -- Armazena no cache por 600 segundos (10 minutos)
+    cache:set(ref, plain, 600)
+    
+    return plain
+end
+```
+
+**Limpeza do cache:**
+
+Para forçar atualização das keys:
+
+```bash
+# Reinicia o Nginx (limpa todo o cache)
+docker restart nginx
+```
 
 ---
 
