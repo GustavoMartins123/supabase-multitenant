@@ -1,30 +1,27 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:seletor_de_projetos/models/AllUsers.dart';
+import 'package:seletor_de_projetos/providers/project_settings_provider.dart';
 import 'package:seletor_de_projetos/supabase_colors.dart';
 
-class AddMemberDialog extends StatefulWidget {
-  final Future<void> Function() loadUsers;
-  final List<AvailableUserShort> Function() getUsers;
+class AddMemberDialog extends ConsumerStatefulWidget {
+  final String projectRef;
   final Future<void> Function(String userId, String role) onAdd;
 
   const AddMemberDialog({
     super.key,
-    required this.loadUsers,
-    required this.getUsers,
+    required this.projectRef,
     required this.onAdd,
   });
 
   @override
-  State<AddMemberDialog> createState() => _AddMemberDialogState();
+  ConsumerState<AddMemberDialog> createState() => _AddMemberDialogState();
 }
 
-class _AddMemberDialogState extends State<AddMemberDialog>
+class _AddMemberDialogState extends ConsumerState<AddMemberDialog>
     with SingleTickerProviderStateMixin {
-  List<AvailableUserShort> _users = [];
   List<AvailableUserShort> _shown = [];
   AvailableUserShort? _sel;
-  bool _loading = true;
-  String? _error;
   final _searchCtl = TextEditingController();
   late AnimationController _animController;
   late Animation<double> _scaleAnimation;
@@ -32,7 +29,6 @@ class _AddMemberDialogState extends State<AddMemberDialog>
   @override
   void initState() {
     super.initState();
-    _fetch();
     _searchCtl.addListener(_filter);
 
     _animController = AnimationController(
@@ -46,26 +42,15 @@ class _AddMemberDialogState extends State<AddMemberDialog>
     _animController.forward();
   }
 
-  Future<void> _fetch() async {
-    try {
-      await widget.loadUsers();
-      _users = widget.getUsers();
-      _shown = _users;
-      setState(() => _loading = false);
-    } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
-    }
-  }
-
   void _filter() {
+    final availableUsersAsync = ref.read(availableUsersProvider(widget.projectRef));
+    final users = availableUsersAsync.value ?? [];
+    
     final q = _searchCtl.text.toLowerCase();
     setState(() {
       _shown = q.isEmpty
-          ? _users
-          : _users
+          ? users
+          : users
                 .where((u) => u.displayName.toLowerCase().contains(q))
                 .toList();
     });
@@ -80,6 +65,8 @@ class _AddMemberDialogState extends State<AddMemberDialog>
 
   @override
   Widget build(BuildContext context) {
+    final availableUsersAsync = ref.watch(availableUsersProvider(widget.projectRef));
+    
     return ScaleTransition(
       scale: _scaleAnimation,
       child: Dialog(
@@ -144,11 +131,18 @@ class _AddMemberDialogState extends State<AddMemberDialog>
                 ),
               ),
               Expanded(
-                child: _loading
-                    ? _buildLoading()
-                    : _error != null
-                    ? _buildError()
-                    : _buildContent(),
+                child: availableUsersAsync.when(
+                  data: (users) {
+                    if (_searchCtl.text.isEmpty && _shown.isEmpty && users.isNotEmpty) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        setState(() => _shown = users);
+                      });
+                    }
+                    return _buildContent(users);
+                  },
+                  loading: () => _buildLoading(),
+                  error: (error, _) => _buildError(error.toString()),
+                ),
               ),
               Container(
                 padding: const EdgeInsets.all(16),
@@ -217,7 +211,7 @@ class _AddMemberDialogState extends State<AddMemberDialog>
     );
   }
 
-  Widget _buildError() {
+  Widget _buildError(String error) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -238,7 +232,7 @@ class _AddMemberDialogState extends State<AddMemberDialog>
             ),
             const SizedBox(height: 16),
             Text(
-              _error!,
+              error,
               style: const TextStyle(color: SupabaseColors.error, fontSize: 13),
               textAlign: TextAlign.center,
             ),
@@ -248,7 +242,7 @@ class _AddMemberDialogState extends State<AddMemberDialog>
     );
   }
 
-  Widget _buildContent() {
+  Widget _buildContent(List<AvailableUserShort> users) {
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(

@@ -3,7 +3,9 @@ import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:seletor_de_projetos/data/project_repository.dart';
 import 'package:seletor_de_projetos/services/projectService.dart';
 import 'package:seletor_de_projetos/session.dart';
 import 'package:seletor_de_projetos/supabase_colors.dart';
@@ -13,7 +15,7 @@ import 'models/AllUsers.dart';
 import 'models/ProjectInfo.dart';
 import 'models/projectDockerStatus.dart';
 
-class UserProjectsAdminScreen extends StatefulWidget {
+class UserProjectsAdminScreen extends ConsumerStatefulWidget {
   final String userIdHash;
   final String userName;
 
@@ -24,11 +26,11 @@ class UserProjectsAdminScreen extends StatefulWidget {
   });
 
   @override
-  State<UserProjectsAdminScreen> createState() =>
+  ConsumerState<UserProjectsAdminScreen> createState() =>
       _UserProjectsAdminScreenState();
 }
 
-class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
+class _UserProjectsAdminScreenState extends ConsumerState<UserProjectsAdminScreen>
     with SingleTickerProviderStateMixin {
   List<ProjectInfo> _projects = [];
   bool _loading = true;
@@ -87,22 +89,13 @@ class _UserProjectsAdminScreenState extends State<UserProjectsAdminScreen>
 
   Future<List<AvailableUser>> _loadAvailableUsers(String projectName) async {
     try {
-      final response = await http.get(
-        Uri.parse('/api/projects/$projectName/available-users?include_members=true'),
-      );
-
-      if (response.statusCode == 200) {
-        final dynamic data = jsonDecode(response.body);
-        if (data == null || data is! List) return <AvailableUser>[];
-        final List<dynamic> usersJson = data;
-
-        return usersJson
-            .map((item) => AvailableUser.fromJson(item))
-            .where((user) => user.isActive == true)
-            .toList();
-      } else {
-        throw Exception('Erro ${response.statusCode}: ${response.body}');
-      }
+      final repository = ref.read(projectRepositoryProvider);
+      final data = await repository.getTransferAvailableUsers(projectName, mode: 'admin');
+      
+      return data
+          .map((item) => AvailableUser.fromJson(item))
+          .where((user) => user.isActive == true)
+          .toList();
     } catch (e) {
       throw Exception('Erro ao carregar usuários disponíveis: $e');
     }

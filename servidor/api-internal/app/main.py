@@ -545,6 +545,7 @@ async def add_member(
 async def list_members_by_ref(
     name: str,
     user: str = Header(..., alias="Remote-Email"),
+    groups: str = Header("", alias="Remote-Groups"),
     pool=Depends(get_pool),
 ):
     name = validate_project_id(name)
@@ -558,12 +559,17 @@ async def list_members_by_ref(
             raise HTTPException(404, "project not found")
 
         pid = row["id"]
+        
+        groups_list = [g.strip() for g in (groups or "").split(",") if g.strip()]
+        is_global_admin = "admin" in groups_list
+        
         in_project = await conn.fetchval(
             "SELECT 1 FROM project_members "
             "WHERE project_id=$1 AND user_id=$2",
             pid, user,
         )
-        if not in_project:
+        
+        if not in_project and not is_global_admin:
             raise HTTPException(403, "not a member")
 
         rows = await conn.fetch(

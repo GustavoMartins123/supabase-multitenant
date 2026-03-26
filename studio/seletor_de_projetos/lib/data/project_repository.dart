@@ -131,9 +131,9 @@ class ProjectRepository {
     throw Exception('Erro ao carregar usuários: ${resp.body}');
   }
 
-  Future<List<dynamic>> getTransferAvailableUsers(String ref) async {
+  Future<List<dynamic>> getTransferAvailableUsers(String ref, {String mode = 'owner'}) async {
     final resp = await http.get(
-      Uri.parse('/api/projects/$ref/available-users?include_members=true'),
+      Uri.parse('/api/projects/$ref/available-users?include_members=true&mode=$mode'),
     );
     if (resp.statusCode == 200) {
       if (resp.body.isEmpty) return [];

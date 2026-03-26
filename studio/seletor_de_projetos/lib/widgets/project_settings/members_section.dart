@@ -227,12 +227,7 @@ class MembersSection extends ConsumerWidget {
     showDialog(
       context: context,
       builder: (_) => AddMemberDialog(
-        loadUsers: () async {
-          ref.invalidate(availableUsersProvider(projectRef));
-        },
-        getUsers: () {
-          return ref.read(availableUsersProvider(projectRef)).value ?? [];
-        },
+        projectRef: projectRef,
         onAdd: (userId, role) async {
           try {
             await ref
