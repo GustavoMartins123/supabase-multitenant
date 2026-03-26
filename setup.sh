@@ -293,6 +293,11 @@ main() {
 
     sed -i "s|<SEU_IP>|$LOCAL_IP|g" studio/docker-compose.yml
     print_success "Api python configurada para permitir esse ip $LOCAL_IP a consultar ela."
+
+    print_status "Configurando update_geoip.sh com o caminho real..."
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    sed -i "s|seucaminho|$SCRIPT_DIR|g" servidor/traefik/update_geoip.sh
+    print_success "Script update_geoip.sh configurado com o caminho: $SCRIPT_DIR"
 }
 main
 
