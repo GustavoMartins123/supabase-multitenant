@@ -29,7 +29,7 @@ services:
       #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.logLocalRequests=false"
       #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.logAllowedRequests=false"
       #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.logApiRequests=true"
-      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.api=https://get.geojs.io/v1/ip/country/{ip}"
+      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.api=http://geoip-api:8000/v1/ip/country/{ip}"
       #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.apiTimeoutMs=2000"
       #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.cacheSize=100"
       #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.forceMonthlyUpdate=true"

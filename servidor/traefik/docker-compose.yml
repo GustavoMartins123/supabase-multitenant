@@ -44,6 +44,13 @@ services:
     networks:
       - rede-supabase
     restart: unless-stopped
+  geoip-api:
+    build: ./geoip
+    volumes:
+      - ./geoip/GeoLite2-Country.mmdb:/data/GeoLite2-Country.mmdb:ro
+    networks:
+      - rede-supabase
+    restart: unless-stopped  
 
 networks:
   rede-supabase:

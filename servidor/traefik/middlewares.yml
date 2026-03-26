@@ -52,7 +52,7 @@ http:
           silentStartUp: false
           allowLocalRequests: true
           logApiRequests: true
-          api: https://get.geojs.io/v1/ip/country/{ip}
+          api: http://geoip-api:8000/v1/ip/country/{ip}
           apiTimeoutMs: 1000
           allowUnknownCountries: false
           countries: BR
@@ -92,24 +92,24 @@ http:
     malicious-paths-chain:
       chain:
         middlewares:
+          - block-bad-agents
           - geoblock-global
           - rate-limit-malicious
           - fail2ban-malicious
-          - block-bad-agents
     suspicious-paths-chain:
       chain:
         middlewares:
+          - block-bad-agents
           - geoblock-global
           - rate-limit-suspicious
           - fail2ban-global
-          - block-bad-agents
     security-chain-enhanced:
       chain:
         middlewares:
-          - geoblock-global
-          - fail2ban-global
-          - rate-limit-global
           - block-paths
+          - geoblock-global
+          - rate-limit-global
+          - fail2ban-global
           - security-headers
   services:
     forbidden-service:
