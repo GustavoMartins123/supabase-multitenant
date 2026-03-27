@@ -1,0 +1,282 @@
+defmodule RealtimeWeb.Router do
+  use RealtimeWeb, :router
+
+  require Logger
+  require OpenTelemetry.Tracer, as: Tracer
+
+  alias Realtime.Api
+  alias Realtime.Api.Tenant
+  alias Realtime.Crypto
+
+  import RealtimeWeb.ChannelsAuthorization, only: [authorize: 3]
+
+  pipeline :browser do
+    plug(:accepts, ["html"])
+    plug(:fetch_session)
+    plug(:fetch_live_flash)
+    plug(:put_root_layout, {RealtimeWeb.LayoutView, :root})
+    plug(:protect_from_forgery)
+    plug(:put_secure_browser_headers)
+  end
+
+  pipeline :api do
+    plug(:accepts, ["json"])
+    plug(:check_auth, [:api_jwt_secret, :api_blocklist])
+    plug(:set_span_request_id)
+  end
+
+  pipeline :open_cors do
+    plug(Corsica, origins: "*")
+  end
+
+  pipeline :tenant_api do
+    plug(:accepts, ["json"])
+    plug(RealtimeWeb.Plugs.AssignTenant)
+    plug(RealtimeWeb.Plugs.RateLimiter)
+    plug(:set_span_request_id)
+  end
+
+  pipeline :secure_tenant_api do
+    plug(RealtimeWeb.AuthTenant)
+    plug(:set_span_request_id)
+  end
+
+  pipeline :dashboard_admin do
+    plug(:dashboard_auth)
+  end
+
+  pipeline :metrics do
+    plug(:check_auth, [:metrics_jwt_secret, :metrics_blocklist])
+    plug(RealtimeWeb.Plugs.MetricsMode)
+  end
+
+  pipeline :openapi do
+    plug(OpenApiSpex.Plug.PutApiSpec, module: RealtimeWeb.ApiSpec)
+  end
+
+  scope "/", RealtimeWeb do
+    get("/healthcheck", PageController, :healthcheck)
+  end
+
+  scope "/", RealtimeWeb do
+    pipe_through(:browser)
+
+    live("/", PageLive.Index, :index)
+    live("/inspector", InspectorLive.Index, :index)
+    live("/inspector/new", InspectorLive.Index, :new)
+    live("/status", StatusLive.Index, :index)
+  end
+
+  scope "/swaggerui" do
+    pipe_through(:browser)
+    get("/", OpenApiSpex.Plug.SwaggerUI, path: "/api/openapi")
+  end
+
+  scope "/admin", RealtimeWeb do
+    pipe_through [:browser, :dashboard_admin]
+    live("/tenants", TenantsLive.Index, :index)
+  end
+
+  scope "/metrics", RealtimeWeb do
+    pipe_through(:metrics)
+
+    get("/", MetricsController, :index)
+    get("/:region", MetricsController, :region)
+  end
+
+  scope "/tenant-metrics", RealtimeWeb do
+    pipe_through(:metrics)
+
+    get("/", MetricsController, :tenant)
+    get("/:region", MetricsController, :region_tenant)
+  end
+
+  scope "/api" do
+    pipe_through(:openapi)
+
+    get("/openapi", OpenApiSpex.Plug.RenderSpec, [])
+  end
+
+  scope "/api", RealtimeWeb do
+    pipe_through(:api)
+
+    resources("/tenants", TenantController, param: "tenant_id", except: [:edit, :new])
+    post("/tenants/:tenant_id/reload", TenantController, :reload)
+    post("/tenants/:tenant_id/shutdown", TenantController, :shutdown)
+    get("/tenants/:tenant_id/health", TenantController, :health)
+  end
+
+  scope "/api", RealtimeWeb do
+    pipe_through(:tenant_api)
+
+    get("/ping", PingController, :ping)
+  end
+
+  scope "/api", RealtimeWeb do
+    pipe_through([:open_cors, :tenant_api, :secure_tenant_api])
+
+    post("/broadcast", BroadcastController, :broadcast)
+  end
+
+  # Enables LiveDashboard only for development
+  #
+  # If you want to use the LiveDashboard in production, you should put
+  # it behind authentication and allow only admins to access it.
+  # If your application does not have an admins-only section yet,
+  # you can use Plug.BasicAuth to set up some basic authentication
+  # as long as you are also using SSL (which you should anyway).
+  scope "/admin" do
+    pipe_through [:browser, :dashboard_admin]
+
+    live_dashboard("/dashboard",
+      ecto_repos: [
+        Realtime.Repo,
+        Realtime.Repo.Replica.FRA,
+        Realtime.Repo.Replica.IAD,
+        Realtime.Repo.Replica.SIN,
+        Realtime.Repo.Replica.SJC
+      ],
+      ecto_psql_extras_options: [long_running_queries: [threshold: "200 milliseconds"]],
+      metrics: RealtimeWeb.Telemetry,
+      additional_pages: [
+        route_name: Realtime.Dashboard.ProcessDump,
+        tenant_info: Realtime.Dashboard.TenantInfo
+      ]
+    )
+  end
+
+  defp check_auth(conn, [secret_key, blocklist_key]) do
+    secret = Application.fetch_env!(:realtime, secret_key)
+    blocklist = Application.get_env(:realtime, blocklist_key, [])
+
+    with {:ok, token} <- bearer_token(conn),
+         false <- token in blocklist,
+         :ok <- authorize_request(conn, token, secret_key, secret) do
+      conn
+    else
+      _ ->
+        conn
+        |> send_resp(403, "")
+        |> halt()
+    end
+  end
+
+  defp bearer_token(conn) do
+    with ["Bearer " <> token] <- get_req_header(conn, "authorization") do
+      {:ok, Regex.replace(~r/\s|\n/, URI.decode(token), "")}
+    else
+      _ -> {:error, :missing_token}
+    end
+  end
+
+  defp authorize_request(conn, token, :api_jwt_secret, global_secret) do
+    case tenant_auth_context(conn) do
+      nil ->
+        authorize_with_secret(token, global_secret)
+
+      context ->
+        case authorize_with_tenant_context(token, context) do
+          :ok -> :ok
+          {:error, _reason} -> authorize_with_secret(token, global_secret)
+        end
+    end
+  end
+
+  defp authorize_request(_conn, token, _secret_key, global_secret), do: authorize_with_secret(token, global_secret)
+
+  defp authorize_with_secret(token, secret) do
+    case authorize(token, secret, nil) do
+      {:ok, _claims} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp authorize_with_tenant_context(token, %{secret: secret, tenant_id: tenant_id, source: source}) do
+    case authorize(token, secret, nil) do
+      {:ok, claims} -> validate_tenant_claims(claims, tenant_id, source)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp validate_tenant_claims(claims, tenant_id, :payload) do
+    case Map.get(claims, "iss") do
+      ^tenant_id -> :ok
+      _ -> {:error, :tenant_claim_mismatch}
+    end
+  end
+
+  defp validate_tenant_claims(claims, tenant_id, :tenant) do
+    case Map.get(claims, "iss") do
+      nil -> :ok
+      ^tenant_id -> :ok
+      _ -> {:error, :tenant_claim_mismatch}
+    end
+  end
+
+  defp tenant_auth_context(conn) do
+    tenant_context_from_existing_tenant(conn) || tenant_context_from_payload(conn)
+  end
+
+  defp tenant_context_from_existing_tenant(conn) do
+    external_id = tenant_id_from_request(conn)
+
+    with external_id when is_binary(external_id) <- external_id,
+         %Tenant{jwt_secret: jwt_secret} <- Api.get_tenant_by_external_id(external_id, use_replica?: false) do
+      %{
+        tenant_id: external_id,
+        secret: Crypto.decrypt!(jwt_secret),
+        source: :tenant
+      }
+    else
+      _ -> nil
+    end
+  end
+
+  defp tenant_context_from_payload(conn) do
+    tenant_params = Map.get(conn.body_params, "tenant", %{})
+    external_id = tenant_id_from_request(conn)
+
+    with jwt_secret when is_binary(jwt_secret) <- Map.get(tenant_params, "jwt_secret"),
+         tenant_id when is_binary(tenant_id) <- external_id do
+      %{
+        tenant_id: tenant_id,
+        secret: jwt_secret,
+        source: :payload
+      }
+    else
+      _ -> nil
+    end
+  end
+
+  defp tenant_id_from_request(conn) do
+    conn.path_params["tenant_id"] ||
+      get_in(conn.body_params, ["tenant", "external_id"]) ||
+      get_in(conn.params, ["tenant", "external_id"])
+  end
+
+  defp dashboard_auth(conn, _opts) do
+    case Application.fetch_env!(:realtime, :dashboard_auth) do
+      :zta ->
+        {conn, user} = NimbleZTA.Cloudflare.authenticate(Realtime.ZTA, conn)
+        if user, do: conn, else: conn |> send_resp(403, "") |> halt()
+
+      :basic_auth ->
+        {user, password} = Application.fetch_env!(:realtime, :dashboard_credentials)
+        Plug.BasicAuth.basic_auth(conn, username: user, password: password)
+    end
+  catch
+    :exit, reason ->
+      Logger.error("ZTA authentication failed: #{inspect(reason)}")
+      conn |> send_resp(503, "") |> halt()
+  end
+
+  defp set_span_request_id(conn, _) do
+    # Must have been set by BaggageRequestId
+    # We can't set the span attribute there because the phoenix span only starts after it reaches the Router
+    if request_id = Logger.metadata()[:request_id] do
+      Tracer.set_attribute(:request_id, request_id)
+    end
+
+    conn
+  end
+end

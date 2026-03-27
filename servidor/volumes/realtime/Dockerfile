@@ -43,6 +43,10 @@ COPY --from=rust-builder \
 
 COPY volumes/realtime/replication_connection.ex \
      lib/realtime/tenants/replication_connection.ex
+COPY volumes/realtime/router.ex \
+     lib/realtime_web/router.ex
+COPY volumes/realtime/tenant_controller_test.exs \
+     test/realtime_web/controllers/tenant_controller_test.exs
 
 RUN mix local.hex --force && \
     mix local.rebar --force

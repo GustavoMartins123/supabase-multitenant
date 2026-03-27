@@ -37,8 +37,8 @@ generate_jwt() {
 now=$(date +%s)
 exp=$((now + (8 * 365 * 24 * 3600)))
 
-NEW_ANON=$(generate_jwt    "{\"role\":\"anon\",\"iss\":\"$PROJECT_ID\",\"iat\":$now,\"exp\":$exp}"         "$JWT_SECRET")
-NEW_SERVICE=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$PROJECT_ID\",\"iat\":$now,\"exp\":$exp}" "$JWT_SECRET")
+NEW_ANON=$(generate_jwt    "{\"role\":\"anon\",\"iss\":\"$PROJECT_ID\",\"iat\":$now,\"exp\":$exp}"         "$JWT_SECRET_PROJETO")
+NEW_SERVICE=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$PROJECT_ID\",\"iat\":$now,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
 
 sed \
   -e "s|{{anon_key}}|$NEW_ANON|g" \

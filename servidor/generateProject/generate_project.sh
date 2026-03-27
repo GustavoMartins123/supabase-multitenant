@@ -117,21 +117,23 @@ template_to_file() {
     -e "s|{{nginx_port}}|$NGINX_PORT|g" \
     -e "s|{{meta_port}}|$META_PORT|g" \
     -e "s|{{config_token}}|$CONFIG_TOKEN_PROJETO|g" \
+    -e "s|{{jwt_secret}}|$JWT_SECRET_PROJETO|g" \
     -e "s|{{server_url}}|$SERVER_URL|g" \
     "$template" > "$outfile"
 }
 
 realtime_tenant() {
   docker_must_exist realtime-dev.supabase-realtime
-  docker exec realtime-dev.supabase-realtime sh -c "curl -s -X POST http://localhost:4000/api/tenants \
+  local response
+  response=$(docker exec realtime-dev.supabase-realtime sh -c "curl -s -w '\n%{http_code}' -X POST http://localhost:4000/api/tenants \
     -H 'Content-Type: application/json' \
     -H 'Authorization: Bearer $ANON_TOKEN' \
     -d '{
       \"tenant\":{
         \"name\":\"$PROJECT_ID\",
         \"external_id\":\"$PROJECT_ID\",
-        \"jwt_secret\":\"$JWT_SECRET\",
-        \"max_concurrent_users\":\"$MAX_CONCURRENT_USERS\",
+        \"jwt_secret\":\"$JWT_SECRET_PROJETO\",
+        \"max_concurrent_users\":${MAX_CONCURRENT_USERS:-200},
         \"extensions\":[{
           \"type\":\"postgres_cdc_rls\",
           \"settings\":{
@@ -145,8 +147,19 @@ realtime_tenant() {
             \"poll_max_record_bytes\":1048576,
             \"ssl_enforced\":false,
             \"slot_name\":\"supabase_realtime_replication_slot_$PROJECT_ID\"
-          }}]}}'"
-  echo "Realtime tenant criado"
+          }}]}}'" 2>&1)
+
+  local http_code
+  http_code=$(echo "$response" | tail -n1)
+  local body
+  body=$(echo "$response" | head -n-1)
+
+  if [[ "$http_code" != "200" && "$http_code" != "201" ]]; then
+    echo "⚠️  AVISO: Falha ao criar tenant Realtime (HTTP $http_code)"
+    echo "   Body: $body"
+  else
+    echo "✔️  Realtime tenant criado"
+  fi
 }
 
 supavisor_tenant() {
@@ -188,15 +201,22 @@ supavisor_tenant() {
   echo "Supavisor tenant criado"
 }
 
+  OUT_DIR="$PROJECT_ROOT/projects/$PROJECT_ID"
+  if [[ -f "$OUT_DIR/.env" ]]; then
+      source "$OUT_DIR/.env"
+  fi
+
+  if [[ -z "${JWT_SECRET_PROJETO:-}" ]]; then
+      JWT_SECRET_PROJETO=$(openssl rand -hex 32)
+  fi
 now_epoch=$(date +%s)
 iat=$now_epoch
 exp=$((now_epoch + (8 * 365 * 24 * 3600)))
 
-ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_ID\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET")
-SERVICE_TOKEN=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$PROJECT_ID\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET")
+ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_ID\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
+SERVICE_TOKEN=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$PROJECT_ID\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
 CONFIG_TOKEN_PROJETO=$(openssl rand -hex 32)
 
-OUT_DIR="$PROJECT_ROOT/projects/$PROJECT_ID"
 mkdir -p "$OUT_DIR/storage/stub/stub" "$OUT_DIR/nginx"  "$OUT_DIR/pooler"
 
 template_to_file "$SCRIPT_DIR/nginxtemplate"      "$OUT_DIR/nginx/nginx_${PROJECT_ID}.conf"

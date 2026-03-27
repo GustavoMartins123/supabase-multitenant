@@ -188,6 +188,7 @@ template_to_file() {
     -e "s|{{nginx_port}}|$NGINX_PORT|g" \
     -e "s|{{meta_port}}|$META_PORT|g" \
     -e "s|{{config_token}}|$CONFIG_TOKEN_PROJETO|g" \
+    -e "s|{{jwt_secret}}|$JWT_SECRET_PROJETO|g" \
     -e "s|{{server_url}}|$SERVER_URL|g" \
     "$template" > "$outfile"
 }
@@ -204,8 +205,8 @@ realtime_tenant() {
       \"tenant\":{
         \"name\":\"$NEW_PROJECT\",
         \"external_id\":\"$NEW_PROJECT\",
-        \"jwt_secret\":\"$JWT_SECRET\",
-        \"max_concurrent_users\":\"$MAX_CONCURRENT_USERS\",
+        \"jwt_secret\":\"$JWT_SECRET_PROJETO\",
+        \"max_concurrent_users\":${MAX_CONCURRENT_USERS:-200},
         \"extensions\":[{
           \"type\":\"postgres_cdc_rls\",
           \"settings\":{
@@ -292,15 +293,22 @@ supavisor_tenant() {
   echo "✔️  Supavisor tenant criado"
 }
 
+OUT_DIR="$PROJECT_ROOT/projects/$NEW_PROJECT"
+if [[ -f "$OUT_DIR/.env" ]]; then
+    source "$OUT_DIR/.env"
+fi
+
+if [[ -z "${JWT_SECRET_PROJETO:-}" ]]; then
+    JWT_SECRET_PROJETO=$(openssl rand -hex 32)
+fi
 now_epoch=$(date +%s)
 iat=$now_epoch
 exp=$((now_epoch + (8 * 365 * 24 * 3600)))
 
-ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$NEW_PROJECT\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET")
-SERVICE_TOKEN=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$NEW_PROJECT\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET")
+ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$NEW_PROJECT\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
+SERVICE_TOKEN=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$NEW_PROJECT\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
 CONFIG_TOKEN_PROJETO=$(openssl rand -hex 32)
 
-OUT_DIR="$PROJECT_ROOT/projects/$NEW_PROJECT"
 mkdir -p "$OUT_DIR/nginx" "$OUT_DIR/pooler"
 
 echo "📝 Gerando templates..."

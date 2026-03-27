@@ -81,7 +81,7 @@ services:
       GOTRUE_JWT_AUD: authenticated
       GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
       GOTRUE_JWT_EXP: ${JWT_EXPIRY}
-      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET_PROJETO}
 
       GOTRUE_EXTERNAL_EMAIL_ENABLED: ${ENABLE_EMAIL_SIGNUP}
       GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: ${ENABLE_ANONYMOUS_USERS}
@@ -147,10 +147,10 @@ services:
       PGRST_DB_SCHEMA_CACHE_DURATION: 20
       PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS}
       PGRST_DB_ANON_ROLE: anon
-      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_JWT_SECRET: ${JWT_SECRET_PROJETO}
       PGRST_DB_USE_LEGACY_GUCS: "false"
       PGRST_DB_PREPARED_STATEMENTS: true
-      PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET}
+      PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET_PROJETO}
       PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY}
       PGRST_DB_MAX_ROWS: 200000
       PGRST_DB_POOL: 100
@@ -195,7 +195,7 @@ services:
       ANON_KEY: ${ANON_KEY_PROJETO}
       SERVICE_KEY: ${SERVICE_ROLE_KEY_PROJETO}
       POSTGREST_URL: http://rest:3000
-      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_JWT_SECRET: ${JWT_SECRET_PROJETO}
       DATABASE_URL: postgres://supabase_storage_admin.{{project_id}}:${POSTGRES_PASSWORD}@${POSTGRES_POOLER}:${POOLER_PROXY_PORT_TRANSACTION}/${POSTGRES_DATABASE}
       FILE_SIZE_LIMIT: 524288000
       STORAGE_BACKEND: file
@@ -236,130 +236,6 @@ services:
       IMGPROXY_LOCAL_FILESYSTEM_ROOT: /
       IMGPROXY_USE_ETAG: "true"
       IMGPROXY_ENABLE_WEBP_DETECTION: ${IMGPROXY_ENABLE_WEBP_DETECTION}
-
-  # realtime:
-  #   # This container name looks inconsistent but is correct because realtime constructs tenant id by parsing the subdomain
-  #   container_name: realtime-dev.supabase-realtime-{{project_id}}
-  #   image: supabase/realtime:v2.34.46
-  #   restart: unless-stopped
-  #   env_file:
-  #     - ../../secrets/.env
-  #     - ../../.env
-  #     - .env
-  #   networks:
-  #     - rede-supabase
-  #   healthcheck:
-  #     test:
-  #       [
-  #         "CMD",
-  #         "curl",
-  #         "-sSfL",
-  #         "--head",
-  #         "-o",
-  #         "/dev/null",
-  #         "-H",
-  #         "Authorization: Bearer ${ANON_KEY_PROJETO}",
-  #         "http://localhost:4000/api/tenants/realtime-dev/health"
-  #       ]
-  #     timeout: 5s
-  #     interval: 5s
-  #     retries: 3
-  #   environment:
-  #     PORT: 4000
-  #     DB_HOST: ${POSTGRES_HOST}
-  #     #DB_PORT: 6543
-  #     DB_PORT: ${POSTGRES_PORT}
-  #     DB_USER: ${POSTGRES_USER}
-  #     DB_PASSWORD: ${POSTGRES_PASSWORD}
-  #     DB_NAME: ${POSTGRES_DATABASE}
-  #     DB_AFTER_CONNECT_QUERY: 'SET search_path TO _realtime'
-  #     DB_ENC_KEY: ${DB_ENC_KEY}
-  #     API_JWT_SECRET: ${JWT_SECRET_PROJETO}
-  #     SECRET_KEY_BASE: ${SECRET_KEY_BASE}
-  #     #Set to either "-proto_dist inet_tcp" or "-proto_dist inet6_tcp" depending on whether or not your network uses IPv4 or IPv6, respectively.
-  #     ERL_AFLAGS: -proto_dist inet_tcp
-  #     DNS_NODES: "''"
-  #     RLIMIT_NOFILE: "10000"
-  #     APP_NAME: realtime
-  #     SEED_SELF_HOST: true
-  #     SELF_HOST_TENANT_NAME: realtime-dev
-  #     RUN_JANITOR: true
-  #     NUM_ACCEPTORS: ${NUM_ACCEPTORS}
-
-  # supavisor:
-  #   container_name: supabase-pooler-{{project_id}}
-  #   image: supabase/supavisor:2.0.21
-  #   env_file:
-  #     - ../../secrets/.env
-  #     - ../../.env
-  #     - .env
-  #   restart: unless-stopped
-  #   depends_on:
-  #     realtime:
-  #       condition: service_healthy
-  #   networks:
-  #     - rede-supabase
-  #   # ports:
-  #   #   - ${POSTGRES_PORT}:5432
-  #   #   - ${POOLER_PROXY_PORT_TRANSACTION}:6543
-  #   volumes:
-  #     - ./pooler/pooler.exs:/etc/pooler/pooler.exs:ro
-  #     - ../../volumes/pooler/init-tenant-realtime.sh:/etc/pooler/init-tenant.sh:ro
-  #   # healthcheck:
-  #   #   test:
-  #   #     [
-  #   #       "CMD",
-  #   #       "curl",
-  #   #       "-sSfL",
-  #   #       "--head",
-  #   #       "-o",
-  #   #       "/dev/null",
-  #   #       "http://localhost:4000/api/health"
-  #   #     ]
-  #   #   interval: 10s
-  #   #   timeout: 5s
-  #   #   retries: 5
-  #   ulimits:
-  #     nofile:
-  #       soft: 100000
-  #       hard: 100000
-  #   environment:
-  #     #realtime
-  #     PROJECT_ID: ${PROJECT_ID}
-  #     ANON_KEY_PROJETO: ${ANON_KEY_PROJETO}
-  #     #pooler
-  #     PORT: 4000
-  #     PROXY_PORT_SESSION: ${POOLER_PROXY_PORT_SESSION_PROJETO}    
-  #     PROXY_PORT_TRANSACTION: ${POOLER_PROXY_PORT_TRANSACTION_PROJETO}
-  #     POSTGRES_HOST: ${POSTGRES_HOST}
-  #     POSTGRES_PORT: ${POSTGRES_PORT}
-  #     POSTGRES_DB: ${POSTGRES_DATABASE}
-  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-  #     DATABASE_URL: ecto://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DATABASE}
-  #     CLUSTER_POSTGRES: true
-  #     SECRET_KEY_BASE: ${SECRET_KEY_BASE}
-  #     VAULT_ENC_KEY: ${VAULT_ENC_KEY}
-  #     API_JWT_SECRET: ${JWT_SECRET_PROJETO}
-  #     METRICS_JWT_SECRET: ${JWT_SECRET_PROJETO}
-  #     REGION: local
-  #     ERL_AFLAGS: -proto_dist inet_tcp
-  #     POOLER_TENANT_ID: ${POOLER_TENANT_ID}
-  #     POOLER_DEFAULT_POOL_SIZE: ${POOLER_DEFAULT_POOL_SIZE}
-  #     POOLER_MAX_CLIENT_CONN: ${POOLER_MAX_CLIENT_CONN}
-  #     POOLER_POOL_MODE: transaction
-  #   command:
-  #     - /bin/sh
-  #     - -c
-  #     - |
-  #       export PGPASSWORD="$POSTGRES_PASSWORD"
-  #       psql \
-  #         "host=$POSTGRES_HOST port=$POSTGRES_PORT user=$POSTGRES_USER dbname=$POSTGRES_DATABASE sslmode=disable" \
-  #         -c "CREATE SCHEMA IF NOT EXISTS _supavisor;" \
-  #       && echo "Schema _supavisor OK" \
-  #       && /bin/sh /etc/pooler/init-tenant.sh \
-  #       && /app/bin/migrate \
-  #       && /app/bin/supavisor eval "$$(cat /etc/pooler/pooler.exs)" \
-  #       && /app/bin/server
   meta:
     container_name: supabase-meta-{{project_id}}
     image: supabase/postgres-meta:v0.96.1

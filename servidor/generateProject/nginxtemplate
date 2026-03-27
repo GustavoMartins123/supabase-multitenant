@@ -229,6 +229,14 @@ http {
             if ($arg_apikey = "") { return 401; }
             if ($is_valid_api_key != 1) { return 403; }
             
+            if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Allow-Origin' $cors_origin always;
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
+                add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version' always;
+                return 204;
+            }
+
+
             rewrite ^/realtime/v1/websocket$ /socket/websocket break;
 
             proxy_pass http://$realtime_upstream;
@@ -237,17 +245,6 @@ http {
             proxy_set_header Connection $connection_upgrade;
             proxy_set_header Host "{{project_id}}.localhost"; 
             proxy_read_timeout 86400;
-
-            add_header 'Access-Control-Allow-Origin' $cors_origin always;
-            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
-            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
-            
-            if ($request_method = 'OPTIONS') {
-                add_header 'Access-Control-Allow-Origin' $cors_origin always;
-                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
-                add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version' always;
-                return 204;
-            }
 
             add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
