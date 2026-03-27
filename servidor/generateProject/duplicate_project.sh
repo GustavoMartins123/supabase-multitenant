@@ -275,7 +275,7 @@ supavisor_tenant() {
   local response
   response=$(docker exec supabase-pooler curl -s -w '\n%{http_code}' -X PUT "http://localhost:4000/api/tenants/$NEW_PROJECT" \
        -H 'Content-Type: application/json' \
-       -H "Authorization: Bearer $ANON_TOKEN" \
+       -H "Authorization: Bearer $GLOBAL_ANON_TOKEN" \
        -d "$json" 2>&1)
   
   local http_code=$(echo "$response" | tail -n1)
@@ -307,6 +307,7 @@ exp=$((now_epoch + (8 * 365 * 24 * 3600)))
 
 ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$NEW_PROJECT\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
 SERVICE_TOKEN=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$NEW_PROJECT\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
+GLOBAL_ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$NEW_PROJECT\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET")
 CONFIG_TOKEN_PROJETO=$(openssl rand -hex 32)
 
 mkdir -p "$OUT_DIR/nginx" "$OUT_DIR/pooler"
