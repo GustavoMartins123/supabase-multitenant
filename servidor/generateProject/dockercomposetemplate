@@ -9,7 +9,7 @@ services:
     container_name: supabase-nginx-{{project_id}}
     restart: unless-stopped
     volumes:
-      - ../../auth_template/recovery.html:/usr/share/nginx/html/recovery.html:ro
+      - ${HOST_PROJECT_ROOT}/servidor/auth_template/recovery.html:/usr/share/nginx/html/recovery.html:ro
     networks:
       - rede-supabase
     labels:
