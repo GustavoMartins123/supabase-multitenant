@@ -7,6 +7,81 @@ die() { echo "❌  $*" >&2; exit 1; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
+TRANSACTION_DIR="$PROJECT_ROOT/.generate_transaction_$$"
+MODIFIED_FILES=()
+CREATED_DIRS=()
+CREATED_DB=""
+CREATED_REALTIME_TENANT=""
+CREATED_SUPAVISOR_TENANT=""
+
+init_transaction() {
+  mkdir -p "$TRANSACTION_DIR"
+  echo "🔄 Sistema de transação inicializado"
+}
+
+register_created_dir() {
+  local dir="$1"
+  CREATED_DIRS+=("$dir")
+}
+
+register_created_db() {
+  CREATED_DB="$1"
+}
+
+register_realtime_tenant() {
+  CREATED_REALTIME_TENANT="$1"
+}
+
+register_supavisor_tenant() {
+  CREATED_SUPAVISOR_TENANT="$1"
+}
+
+commit_transaction() {
+  if [[ -d "$TRANSACTION_DIR" ]]; then
+    rm -rf "$TRANSACTION_DIR"
+    echo "✅ Transação confirmada. Backups removidos."
+  fi
+}
+
+rollback_transaction() {
+  echo "❌ Erro detectado! Revertendo alterações..."
+  
+  for ((idx=${#CREATED_DIRS[@]}-1; idx>=0; idx--)); do
+    local dir="${CREATED_DIRS[idx]}"
+    if [[ -d "$dir" ]]; then
+      echo "   Removendo diretório: $dir"
+      rm -rf "$dir"
+    fi
+  done
+  
+  if [[ -n "$CREATED_DB" ]]; then
+    echo "   Removendo banco de dados: $CREATED_DB"
+    docker exec supabase-db psql -U supabase_admin -d postgres -c \
+      "DROP DATABASE IF EXISTS $CREATED_DB;" 2>/dev/null || true
+  fi
+  
+  if [[ -n "$CREATED_REALTIME_TENANT" ]]; then
+    echo "   Removendo tenant Realtime: $CREATED_REALTIME_TENANT"
+    docker exec realtime-dev.supabase-realtime curl -s -X DELETE \
+      "http://localhost:4000/api/tenants/$CREATED_REALTIME_TENANT" 2>/dev/null || true
+  fi
+  
+  if [[ -n "$CREATED_SUPAVISOR_TENANT" ]]; then
+    echo "   Removendo tenant Supavisor: $CREATED_SUPAVISOR_TENANT"
+    docker exec supabase-pooler curl -s -X DELETE \
+      "http://localhost:4000/api/tenants/$CREATED_SUPAVISOR_TENANT" 2>/dev/null || true
+  fi
+  
+  if [[ -d "$TRANSACTION_DIR" ]]; then
+    rm -rf "$TRANSACTION_DIR"
+  fi
+  
+  echo "⚠️  Todas as alterações foram revertidas."
+  exit 1
+}
+
+trap rollback_transaction ERR
+
 set -a
 source "$PROJECT_ROOT/secrets/.env"
 source "$PROJECT_ROOT/.env"
@@ -94,8 +169,11 @@ generate_db() {
   docker exec supabase-db psql -U supabase_admin -d postgres -tAc \
     "SELECT 1 FROM pg_database WHERE datname = '$db';" | grep -q 1 && {
       echo "Banco $db já existe"; return; }
+  
   docker exec supabase-db \
     psql -U supabase_admin -d postgres -c "CREATE DATABASE $db TEMPLATE _supabase_template;"
+  
+  register_created_db "$db"
   
   echo "Garantindo permissões básicas no banco $db..."
   docker exec supabase-db \
@@ -159,6 +237,7 @@ realtime_tenant() {
     echo "⚠️  AVISO: Falha ao criar tenant Realtime (HTTP $http_code)"
     echo "   Body: $body"
   else
+    register_realtime_tenant "$PROJECT_ID"
     echo "✔️  Realtime tenant criado"
   fi
 }
@@ -199,6 +278,8 @@ supavisor_tenant() {
        -H 'Content-Type: application/json' \
        -H "Authorization: Bearer $GLOBAL_ANON_TOKEN" \
        -d "$json"
+  
+  register_supavisor_tenant "$PROJECT_ID"
   echo "Supavisor tenant criado"
 }
 
@@ -219,7 +300,10 @@ SERVICE_TOKEN=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$PROJECT_ID\"
 GLOBAL_ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_ID\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET")
 CONFIG_TOKEN_PROJETO=$(openssl rand -hex 32)
 
+init_transaction
+
 mkdir -p "$OUT_DIR/storage/stub/stub" "$OUT_DIR/nginx"  "$OUT_DIR/pooler"
+register_created_dir "$OUT_DIR"
 
 template_to_file "$SCRIPT_DIR/nginxtemplate"      "$OUT_DIR/nginx/nginx_${PROJECT_ID}.conf"
 template_to_file "$SCRIPT_DIR/.envtemplate"       "$OUT_DIR/.env"
@@ -245,3 +329,5 @@ docker compose -p "$PROJECT_ID" \
 echo "✅  Projeto $PROJECT_ID configurado com sucesso (porta $NGINX_PORT)"
 
 echo "NGINX_PORT=$NGINX_PORT"
+
+commit_transaction

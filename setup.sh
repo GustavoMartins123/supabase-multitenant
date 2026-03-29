@@ -8,6 +8,9 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+TRANSACTION_DIR=".setup_transaction_$$"
+MODIFIED_FILES=()
+
 print_status() {
     echo -e "${BLUE}[INFO]${NC} $1"
 }
@@ -23,6 +26,68 @@ print_warning() {
 print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
+
+init_transaction() {
+    mkdir -p "$TRANSACTION_DIR"
+    print_status "Sistema de transação inicializado em $TRANSACTION_DIR"
+}
+
+backup_file() {
+    local file="$1"
+    if [[ -f "$file" ]]; then
+        local backup_path="$TRANSACTION_DIR/$(echo "$file" | tr '/' '_')"
+        cp "$file" "$backup_path"
+        MODIFIED_FILES+=("$file")
+        print_status "Backup criado: $file -> $backup_path"
+    fi
+}
+
+safe_sed() {
+    local pattern="$1"
+    local file="$2"
+    local temp_file="$TRANSACTION_DIR/temp_$(basename "$file")"
+    
+    if [[ ! " ${MODIFIED_FILES[@]} " =~ " ${file} " ]]; then
+        backup_file "$file"
+    fi
+
+    sed "$pattern" "$file" > "$temp_file"
+    
+    if [[ $? -eq 0 ]]; then
+        mv "$temp_file" "$file"
+        return 0
+    else
+        print_error "Falha ao aplicar modificação em $file"
+        return 1
+    fi
+}
+
+commit_transaction() {
+    if [[ -d "$TRANSACTION_DIR" ]]; then
+        rm -rf "$TRANSACTION_DIR"
+        print_success "Transação confirmada. Backups removidos."
+    fi
+}
+
+rollback_transaction() {
+    print_error "Erro detectado! Revertendo alterações..."
+    
+    if [[ -d "$TRANSACTION_DIR" ]]; then
+        for file in "${MODIFIED_FILES[@]}"; do
+            local backup_path="$TRANSACTION_DIR/$(echo "$file" | tr '/' '_')"
+            if [[ -f "$backup_path" ]]; then
+                cp "$backup_path" "$file"
+                print_status "Restaurado: $file"
+            fi
+        done
+        rm -rf "$TRANSACTION_DIR"
+        print_warning "Todas as alterações foram revertidas."
+    fi
+    
+    exit 1
+}
+
+trap rollback_transaction ERR
 
 generate_db_enc_key() {
     openssl rand -base64 12 | cut -c1-16
@@ -130,6 +195,8 @@ get_server_ip() {
 }
 
 main() {
+    init_transaction
+    
     print_status "Iniciando configuração do ambiente..."
 
     if [[ ! -d "servidor" ]]; then
@@ -182,16 +249,16 @@ main() {
     DASHBOARD_PASSWORD=$(generate_realtime_dashboard_pass)
     cp servidor/.env.example servidor/.env
 
-    sed -i "s|DB_ENC_KEY=pass|DB_ENC_KEY=$DB_ENC_KEY|g" servidor/.env
-    sed -i "s|VAULT_ENC_KEY=pass|VAULT_ENC_KEY=$VAULT_ENC_KEY|g" servidor/.env
-    sed -i "s|SECRET_KEY_BASE=pass|SECRET_KEY_BASE=$SECRET_KEY_BASE|g" servidor/.env
-    sed -i "s|LOGFLARE_API_KEY=pass|LOGFLARE_API_KEY=$LOGFLARE_API_KEY|g" servidor/.env
-    sed -i "s|FERNET_SECRET=pass|FERNET_SECRET=$SHARED_FERNET_SECRET|g" servidor/.env
-    sed -i "s|NGINX_SHARED_TOKEN=pass|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" servidor/.env
-    sed -i "s|PROJECT_DELETE_PASSWORD=pass|PROJECT_DELETE_PASSWORD=$PROJECT_DELETE_PASSWORD|g" servidor/.env
-    sed -i "s|SERVER_URL=pass|SERVER_URL=${SERVER_IP}|g" servidor/.env
-    sed -i "s|DASHBOARD_USER=pass|DASHBOARD_USER=${DASHBOARD_USER}|g" servidor/.env
-    sed -i "s|DASHBOARD_PASSWORD=pass|DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD}|g" servidor/.env
+    safe_sed "s|DB_ENC_KEY=pass|DB_ENC_KEY=$DB_ENC_KEY|g" servidor/.env
+    safe_sed "s|VAULT_ENC_KEY=pass|VAULT_ENC_KEY=$VAULT_ENC_KEY|g" servidor/.env
+    safe_sed "s|SECRET_KEY_BASE=pass|SECRET_KEY_BASE=$SECRET_KEY_BASE|g" servidor/.env
+    safe_sed "s|LOGFLARE_API_KEY=pass|LOGFLARE_API_KEY=$LOGFLARE_API_KEY|g" servidor/.env
+    safe_sed "s|FERNET_SECRET=pass|FERNET_SECRET=$SHARED_FERNET_SECRET|g" servidor/.env
+    safe_sed "s|NGINX_SHARED_TOKEN=pass|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" servidor/.env
+    safe_sed "s|PROJECT_DELETE_PASSWORD=pass|PROJECT_DELETE_PASSWORD=$PROJECT_DELETE_PASSWORD|g" servidor/.env
+    safe_sed "s|SERVER_URL=pass|SERVER_URL=${SERVER_IP}|g" servidor/.env
+    safe_sed "s|DASHBOARD_USER=pass|DASHBOARD_USER=${DASHBOARD_USER}|g" servidor/.env
+    safe_sed "s|DASHBOARD_PASSWORD=pass|DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD}|g" servidor/.env
     print_success "Arquivo servidor/.env configurado com sucesso!"
 
     print_status "Configurando servidor/secrets..."
@@ -206,8 +273,8 @@ main() {
 
     cp servidor/secrets/.env.example servidor/secrets/.env
     
-    sed -i "s|JWT_SECRET=pass|JWT_SECRET=$JWT_SECRET|g" servidor/secrets/.env
-    sed -i "s|POSTGRES_PASSWORD=pass|POSTGRES_PASSWORD=$POSTGRES_PASSWORD|g" servidor/secrets/.env
+    safe_sed "s|JWT_SECRET=pass|JWT_SECRET=$JWT_SECRET|g" servidor/secrets/.env
+    safe_sed "s|POSTGRES_PASSWORD=pass|POSTGRES_PASSWORD=$POSTGRES_PASSWORD|g" servidor/secrets/.env
     
     print_success "Arquivo servidor/secrets/.env configurado com sucesso!"
     
@@ -222,18 +289,18 @@ main() {
     POSTGRES_NGINX_PASSWORD=$(generate_postgres_password)
 
     cp studio/.env.example studio/.env
-    sed -i "s|FERNET_SECRET=pass|FERNET_SECRET=$SHARED_FERNET_SECRET|g" studio/.env
-    sed -i "s|NGINX_SHARED_TOKEN=pass|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" studio/.env
-    sed -i "s|COOKIE_SIGN_SECRET=pass|COOKIE_SIGN_SECRET=$COOKIE_SIGN_SECRET|g" studio/.env
-    sed -i "s|POSTGRES_NGINX_PASSWORD=pass|POSTGRES_NGINX_PASSWORD=$POSTGRES_NGINX_PASSWORD|g" studio/.env
+    safe_sed "s|FERNET_SECRET=pass|FERNET_SECRET=$SHARED_FERNET_SECRET|g" studio/.env
+    safe_sed "s|NGINX_SHARED_TOKEN=pass|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" studio/.env
+    safe_sed "s|COOKIE_SIGN_SECRET=pass|COOKIE_SIGN_SECRET=$COOKIE_SIGN_SECRET|g" studio/.env
+    safe_sed "s|POSTGRES_NGINX_PASSWORD=pass|POSTGRES_NGINX_PASSWORD=$POSTGRES_NGINX_PASSWORD|g" studio/.env
     if [[ "$SERVER_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
     [[ "$SERVER_IP" =~ : ]]; then
         PROTO="http"
     else
         PROTO="https"
     fi 
-    sed -i "s|^SERVER_DOMAIN=.*|SERVER_DOMAIN=${PROTO}://${SERVER_IP}|g" studio/.env
-    sed -i "s|BACKEND_PROTO=pass|BACKEND_PROTO=$PROTO|g" studio/.env
+    safe_sed "s|^SERVER_DOMAIN=.*|SERVER_DOMAIN=${PROTO}://${SERVER_IP}|g" studio/.env
+    safe_sed "s|BACKEND_PROTO=pass|BACKEND_PROTO=$PROTO|g" studio/.env
     print_success "Arquivo studio/.env configurado com sucesso!"
     
     echo ""
@@ -261,7 +328,8 @@ main() {
 
 
     print_status "Configurando Nginx do Studio com o IP local detectado..."
-    sed -i "s|server_name pass|server_name $LOCAL_IP|" studio/nginx/nginx.conf
+    backup_file "studio/nginx/nginx.conf"
+    safe_sed "s|server_name pass|server_name $LOCAL_IP|" studio/nginx/nginx.conf
     print_success "Nginx do Studio configurado para escutar em $LOCAL_IP."
 
     print_status "Configurando Authelia com o IP local..."
@@ -271,32 +339,38 @@ main() {
     if [[ -f "$authelia_config" ]]; then
         print_status "Configurando Authelia com o IP local e segredos únicos..."
         
-        sed -i "s|<SEU_IP>|$LOCAL_IP|g" "$authelia_config"
+        backup_file "$authelia_config"
+        safe_sed "s|<SEU_IP>|$LOCAL_IP|g" "$authelia_config"
 
         local jwt_secret=$(generate_logflare_api_key)
         local session_secret=$(generate_logflare_api_key)
         local storage_key=$(generate_logflare_api_key)
 
-        sed -i "s|JWT_SECRET|$jwt_secret|g" "$authelia_config"
-        sed -i "s|SESSION_SECRET|$session_secret|g" "$authelia_config"
-        sed -i "s|STORAGE_KEY|$storage_key|g" "$authelia_config"
+        safe_sed "s|JWT_SECRET|$jwt_secret|g" "$authelia_config"
+        safe_sed "s|SESSION_SECRET|$session_secret|g" "$authelia_config"
+        safe_sed "s|STORAGE_KEY|$storage_key|g" "$authelia_config"
         
         print_success "Arquivo de configuração do Authelia ($authelia_config) atualizado."
     else
         print_warning "Arquivo de configuração do Authelia ($authelia_config) não encontrado."
     fi
     print_status "Configurando a whitelist da api python "
-    sed -i "s|<SEU_IP>/32|$LOCAL_IP/32|g" servidor/docker-compose-api.yml
+    backup_file "servidor/docker-compose-api.yml"
+    safe_sed "s|<SEU_IP>/32|$LOCAL_IP/32|g" servidor/docker-compose-api.yml
     print_status "Configurando update_geoip.sh com o caminho real..."
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    sed -i "s|seucaminho|$SCRIPT_DIR|g" servidor/traefik/update_geoip.sh
-    sed -i "s|HOST_PROJECT_ROOT=pass|HOST_PROJECT_ROOT=$SCRIPT_DIR|g" servidor/.env
-    sed -i "s|API_URL=https://<SEU_IP>/api/internal/push|API_URL=https://$LOCAL_IP/api/internal/push|g" servidor/api-internal/app/push_worker.py
+    backup_file "servidor/traefik/update_geoip.sh"
+    safe_sed "s|seucaminho|$SCRIPT_DIR|g" servidor/traefik/update_geoip.sh
+    safe_sed "s|HOST_PROJECT_ROOT=pass|HOST_PROJECT_ROOT=$SCRIPT_DIR|g" servidor/.env
+    backup_file "servidor/api-internal/app/push_worker.py"
+    safe_sed "s|API_URL=https://<SEU_IP>/api/internal/push|API_URL=https://$LOCAL_IP/api/internal/push|g" servidor/api-internal/app/push_worker.py
 
-
-    sed -i "s|<SEU_IP>|$LOCAL_IP|g" studio/docker-compose.yml
+    backup_file "studio/docker-compose.yml"
+    safe_sed "s|<SEU_IP>|$LOCAL_IP|g" studio/docker-compose.yml
     print_success "Api python configurada para permitir esse ip $LOCAL_IP a consultar ela."
     print_success "Script update_geoip.sh configurado com o caminho: $SCRIPT_DIR"
+    
+    commit_transaction
 }
 main
 
