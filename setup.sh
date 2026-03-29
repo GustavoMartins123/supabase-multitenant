@@ -287,16 +287,15 @@ main() {
     fi
     print_status "Configurando a whitelist da api python "
     sed -i "s|<SEU_IP>/32|$LOCAL_IP/32|g" servidor/docker-compose-api.yml
-    sed -i "s|{{nginx_shared_token}}|$SHARED_NGINX_TOKEN|g" servidor/docker-compose-api.yml
+    print_status "Configurando update_geoip.sh com o caminho real..."
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    sed -i "s|seucaminho|$SCRIPT_DIR|g" servidor/traefik/update_geoip.sh
+    sed -i "s|HOST_PROJECT_ROOT=pass|HOST_PROJECT_ROOT=$SCRIPT_DIR|g" servidor/.env
     sed -i "s|API_URL=https://<SEU_IP>/api/internal/push|API_URL=https://$LOCAL_IP/api/internal/push|g" servidor/api-internal/app/push_worker.py
 
 
     sed -i "s|<SEU_IP>|$LOCAL_IP|g" studio/docker-compose.yml
     print_success "Api python configurada para permitir esse ip $LOCAL_IP a consultar ela."
-
-    print_status "Configurando update_geoip.sh com o caminho real..."
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    sed -i "s|seucaminho|$SCRIPT_DIR|g" servidor/traefik/update_geoip.sh
     print_success "Script update_geoip.sh configurado com o caminho: $SCRIPT_DIR"
 }
 main

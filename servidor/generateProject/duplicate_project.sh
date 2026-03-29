@@ -190,6 +190,7 @@ template_to_file() {
     -e "s|{{config_token}}|$CONFIG_TOKEN_PROJETO|g" \
     -e "s|{{jwt_secret}}|$JWT_SECRET_PROJETO|g" \
     -e "s|{{server_url}}|$SERVER_URL|g" \
+    -e "s|{{project_root}}|$HOST_PROJECT_ROOT|g" \
     "$template" > "$outfile"
 }
 

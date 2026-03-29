@@ -48,10 +48,10 @@ with CRLF line terminators
 
 ---
 
-### Converter todos os scripts do projeto
+### Converter todos os scripts e enviroments do projeto
 
 ```bash
-find . -type f -name "*.sh" -exec sed -i 's/\r$//' {} +
+find . -type f \( -name "*.sh" -o -name ".env*" \) -exec sed -i 's/\r$//' {} +
 ```
 
 ---
@@ -69,14 +69,6 @@ sed -i 's/\r$//' setup.sh
 ```bash
 sudo bash setup.sh
 ```
-
----
-
-## 💡 Observações
-
-- Esse erro é muito comum em ambientes híbridos (Windows + Linux + Docker)
-- Afeta qualquer script shell (`.sh`)
-- Não está relacionado a dependências ou permissões
 
 ---
 

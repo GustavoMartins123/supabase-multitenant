@@ -172,7 +172,7 @@ services:
     networks:
       - rede-supabase
     volumes:
-      - ./storage:/var/lib/storage:z
+      - ${HOST_PROJECT_ROOT}/servidor/projects/{{project_id}}/storage:/var/lib/storage:z
     healthcheck:
       test:
         [
