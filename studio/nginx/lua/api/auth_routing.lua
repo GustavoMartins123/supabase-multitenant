@@ -2,7 +2,6 @@ local ref = ngx.var.project_ref
 if not ref or ref == "default" then
     return
 end
--- faz fetch da chave (pode abrir socket)
 local get = require "get_service_key"
 local key = get(ref)
 if key and key ~= "" then
@@ -14,8 +13,11 @@ local proj = ngx.var.project_ref
 local method = ngx.var.request_method
 local uri = ngx.var.uri
 local user_id = uri:match("^/api/platform/auth/default/users/(.+)$")
+local is_invite = uri:match("^/api/platform/auth/default/invite$")
 
-if method == "POST" and not user_id then
+if method == "POST" and is_invite then
+    ngx.req.set_uri("auth/v1/invite", false)
+elseif method == "POST" and not user_id then
     ngx.req.set_uri("auth/v1/signup", false)
 elseif method == "DELETE" and user_id then
     ngx.req.set_uri("auth/v1/admin/users/" .. user_id, false)

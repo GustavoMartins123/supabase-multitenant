@@ -78,6 +78,8 @@ http {
     server {
         listen {{nginx_port}};
         server_name _{{project_id}};
+        absolute_redirect off;
+        port_in_redirect off;
 
         set $cors_origin "";
         if ($http_origin ~* "^https?://.*$") {
@@ -85,6 +87,28 @@ http {
         }
        
         location /recovery.html {
+            allow 172.20.0.0/16;
+            deny all;
+            root /usr/share/nginx/html;
+            add_header Content-Type text/html;
+            add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
+            expires off;
+        }
+
+        location /invite.html {
+            allow 172.20.0.0/16;
+            deny all;
+            root /usr/share/nginx/html;
+            add_header Content-Type text/html;
+            add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
+            expires off;
+        }
+
+        location = /verify-success.html/ {
+            return 301 /verify-success.html;
+        }
+
+        location = /verify-success.html {
             root /usr/share/nginx/html;
             add_header Content-Type text/html;
             add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
@@ -116,6 +140,9 @@ http {
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $real_scheme;
             proxy_set_header X-Forwarded-Host $host;
+            proxy_set_header X-Forwarded-Uri /{{project_id}}$request_uri;
+            proxy_set_header X-Original-URI /{{project_id}}$request_uri;
+            proxy_set_header X-Original-URL $real_scheme://$host/{{project_id}}$request_uri;
             
             add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, PATCH, DELETE' always;
@@ -130,6 +157,10 @@ http {
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $real_scheme;
+            proxy_set_header X-Forwarded-Host $host;
+            proxy_set_header X-Forwarded-Uri /{{project_id}}$request_uri;
+            proxy_set_header X-Original-URI /{{project_id}}$request_uri;
+            proxy_set_header X-Original-URL $real_scheme://$host/{{project_id}}$request_uri;
             add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
@@ -144,6 +175,10 @@ http {
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $real_scheme;
+            proxy_set_header X-Forwarded-Host $host;
+            proxy_set_header X-Forwarded-Uri /{{project_id}}$request_uri;
+            proxy_set_header X-Original-URI /{{project_id}}$request_uri;
+            proxy_set_header X-Original-URL $real_scheme://$host/{{project_id}}$request_uri;
             add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
@@ -158,6 +193,10 @@ http {
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $real_scheme;
+            proxy_set_header X-Forwarded-Host $host;
+            proxy_set_header X-Forwarded-Uri /{{project_id}}$request_uri;
+            proxy_set_header X-Original-URI /{{project_id}}$request_uri;
+            proxy_set_header X-Original-URL $real_scheme://$host/{{project_id}}$request_uri;
             add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
@@ -362,7 +401,7 @@ http {
                 return 401;
             }
             
-            set $config_url "$real_scheme://{{server_url}}/{{project_id}}";
+            set $config_url "{{project_public_url}}";
             
             default_type application/json;
             add_header Cache-Control "no-store";

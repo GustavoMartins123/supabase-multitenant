@@ -10,6 +10,8 @@ services:
     restart: unless-stopped
     volumes:
       - ${HOST_PROJECT_ROOT}/servidor/auth_template/recovery.html:/usr/share/nginx/html/recovery.html:ro
+      - ${HOST_PROJECT_ROOT}/servidor/auth_template/invite.html:/usr/share/nginx/html/invite.html:ro
+      - ${HOST_PROJECT_ROOT}/servidor/auth_template/verify-success.html:/usr/share/nginx/html/verify-success.html:ro
     networks:
       - rede-supabase
     labels:
@@ -93,6 +95,8 @@ services:
       # GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED: true
       # GOTRUE_SMTP_MAX_FREQUENCY: 1s
       GOTRUE_MAILER_TEMPLATES_RECOVERY: http://supabase-nginx-{{project_id}}:{{nginx_port}}/recovery.html
+      GOTRUE_MAILER_TEMPLATES_INVITE: http://supabase-nginx-{{project_id}}:{{nginx_port}}/invite.html
+      GOTRUE_MAILER_SUBJECTS_INVITE: ${MAILER_SUBJECTS_INVITE}
       GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL}
       GOTRUE_SMTP_HOST: ${SMTP_HOST}
       GOTRUE_SMTP_PORT: ${SMTP_PORT}

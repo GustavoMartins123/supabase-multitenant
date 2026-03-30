@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Convite</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .button {
+            display: inline-block;
+            padding: 12px 24px;
+            background-color: #4CAF50;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        .token {
+            font-size: 24px;
+            letter-spacing: 2px;
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f5f5f5;
+            border-radius: 4px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <h2>Você foi convidado!</h2>
+    <p>Olá,</p>
+    <p>Você foi convidado para se juntar ao projeto. Clique no botão abaixo para aceitar o convite:</p>
+    
+    <a href="{{ .ConfirmationURL }}" class="button">Aceitar Convite</a>
+    
+    <p>Ou copie e cole este código no aplicativo:</p>
+    <div class="token">{{ .Token }}</div>
+    
+    <p>Este convite irá expirar em 24 horas. Se você não esperava este convite, pode ignorar este e-mail com segurança.</p>
+</body>
+</html>

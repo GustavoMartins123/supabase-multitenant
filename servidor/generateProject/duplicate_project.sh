@@ -88,6 +88,7 @@ source "$PROJECT_ROOT/.env"
 set +a
 
 [[ -z "${JWT_SECRET:-}" ]] && { echo "JWT_SECRET ausente"; exit 1; }
+[[ -z "${SERVER_URL:-}" ]] && { echo "SERVER_URL ausente"; exit 1; }
 
 ORIGINAL_PROJECT="${1:-}"
 NEW_PROJECT="${2:-}"
@@ -256,18 +257,61 @@ EOSQL
 NGINX_PORT=$(generate_unique_port)
 META_PORT=$(generate_unique_port)
 
+normalize_public_base_url() {
+  local url="${1%/}"
+  [[ "$url" =~ ^https?:// ]] || url="https://$url"
+  echo "$url"
+}
+
+escape_sed_replacement() {
+  printf '%s' "$1" | sed -e 's/[&|\\]/\\&/g'
+}
+
+PUBLIC_BASE_URL="$(normalize_public_base_url "$SERVER_URL")"
+PROJECT_PUBLIC_URL="$PUBLIC_BASE_URL/$NEW_PROJECT"
+PROJECT_AUTH_EXTERNAL_URL="$PROJECT_PUBLIC_URL/auth/v1"
+PROJECT_AUTH_VERIFY_PATH="/$NEW_PROJECT/auth/v1/verify"
+
 template_to_file() {
   local template="$1" outfile="$2"
+  local anon_key service_role_key project_id nginx_port meta_port config_token jwt_secret
+  local server_url public_base_url project_public_url project_auth_external_url project_auth_verify_path project_root
+  local logflare_api_key pooler_transaction pooler_session
+
+  anon_key="$(escape_sed_replacement "$ANON_TOKEN")"
+  service_role_key="$(escape_sed_replacement "$SERVICE_TOKEN")"
+  project_id="$(escape_sed_replacement "$NEW_PROJECT")"
+  nginx_port="$(escape_sed_replacement "$NGINX_PORT")"
+  meta_port="$(escape_sed_replacement "$META_PORT")"
+  config_token="$(escape_sed_replacement "$CONFIG_TOKEN_PROJETO")"
+  jwt_secret="$(escape_sed_replacement "$JWT_SECRET_PROJETO")"
+  server_url="$(escape_sed_replacement "$SERVER_URL")"
+  public_base_url="$(escape_sed_replacement "$PUBLIC_BASE_URL")"
+  project_public_url="$(escape_sed_replacement "$PROJECT_PUBLIC_URL")"
+  project_auth_external_url="$(escape_sed_replacement "$PROJECT_AUTH_EXTERNAL_URL")"
+  project_auth_verify_path="$(escape_sed_replacement "$PROJECT_AUTH_VERIFY_PATH")"
+  project_root="$(escape_sed_replacement "$HOST_PROJECT_ROOT")"
+  logflare_api_key="$(escape_sed_replacement "${LOGFLARE_API_KEY:-}")"
+  pooler_transaction="$(escape_sed_replacement "${POOLER_PROXY_PORT_TRANSACTION:-}")"
+  pooler_session="$(escape_sed_replacement "${POOLER_PROXY_PORT_SESSION:-}")"
+
   sed \
-    -e "s|{{anon_key}}|$ANON_TOKEN|g" \
-    -e "s|{{service_role_key}}|$SERVICE_TOKEN|g" \
-    -e "s|{{project_id}}|$NEW_PROJECT|g" \
-    -e "s|{{nginx_port}}|$NGINX_PORT|g" \
-    -e "s|{{meta_port}}|$META_PORT|g" \
-    -e "s|{{config_token}}|$CONFIG_TOKEN_PROJETO|g" \
-    -e "s|{{jwt_secret}}|$JWT_SECRET_PROJETO|g" \
-    -e "s|{{server_url}}|$SERVER_URL|g" \
-    -e "s|{{project_root}}|$HOST_PROJECT_ROOT|g" \
+    -e "s|{{anon_key}}|$anon_key|g" \
+    -e "s|{{service_role_key}}|$service_role_key|g" \
+    -e "s|{{project_id}}|$project_id|g" \
+    -e "s|{{nginx_port}}|$nginx_port|g" \
+    -e "s|{{meta_port}}|$meta_port|g" \
+    -e "s|{{config_token}}|$config_token|g" \
+    -e "s|{{jwt_secret}}|$jwt_secret|g" \
+    -e "s|{{server_url}}|$server_url|g" \
+    -e "s|{{public_base_url}}|$public_base_url|g" \
+    -e "s|{{project_public_url}}|$project_public_url|g" \
+    -e "s|{{project_auth_external_url}}|$project_auth_external_url|g" \
+    -e "s|{{project_auth_verify_path}}|$project_auth_verify_path|g" \
+    -e "s|{{project_root}}|$project_root|g" \
+    -e "s|{{logflare_api_key}}|$logflare_api_key|g" \
+    -e "s|{{pooler_transaction}}|$pooler_transaction|g" \
+    -e "s|{{pooler_session}}|$pooler_session|g" \
     "$template" > "$outfile"
 }
 

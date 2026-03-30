@@ -4,15 +4,16 @@ PROJECT_ROOT={{project_root}}
 
 
 
-SITE_URL=http://localhost:3000
-ADDITIONAL_REDIRECT_URLS=
+SITE_URL={{project_public_url}}/verify-success.html
+ADDITIONAL_REDIRECT_URLS={{project_public_url}}/verify-success.html
 DISABLE_SIGNUP=false
-API_EXTERNAL_URL=http://localhost:8000
+API_EXTERNAL_URL={{project_auth_external_url}}
 
-MAILER_URLPATHS_CONFIRMATION="/auth/v1/verify"
-MAILER_URLPATHS_INVITE="/auth/v1/verify"
-MAILER_URLPATHS_RECOVERY="/auth/v1/verify"
-MAILER_URLPATHS_EMAIL_CHANGE="/auth/v1/verify"
+MAILER_URLPATHS_CONFIRMATION="{{project_auth_verify_path}}"
+MAILER_URLPATHS_INVITE="{{project_auth_verify_path}}"
+MAILER_URLPATHS_RECOVERY="{{project_auth_verify_path}}"
+MAILER_URLPATHS_EMAIL_CHANGE="{{project_auth_verify_path}}"
+MAILER_SUBJECTS_INVITE="Você foi convidado"
 
 
 ENABLE_EMAIL_SIGNUP=true

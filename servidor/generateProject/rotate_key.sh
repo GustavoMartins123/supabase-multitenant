@@ -56,6 +56,8 @@ source "$PROJECT_ROOT/secrets/.env"
 source "$PROJECT_ROOT/.env"
 set +a
 
+[[ -z "${SERVER_URL:-}" ]] && die "SERVER_URL ausente"
+
 PROJECT_ID="${1:-}"
 
 [[ -z "$PROJECT_ID" ]] && die "Uso: $0 <project_id>"
@@ -80,6 +82,16 @@ generate_jwt() {
   echo "$h.$p.$sig"
 }
 
+normalize_public_base_url() {
+  local url="${1%/}"
+  [[ "$url" =~ ^https?:// ]] || url="https://$url"
+  echo "$url"
+}
+
+escape_sed_replacement() {
+  printf '%s' "$1" | sed -e 's/[&|\\]/\\&/g'
+}
+
 now=$(date +%s)
 exp=$((now + (8 * 365 * 24 * 3600)))
 
@@ -87,6 +99,8 @@ echo "🔄 Gerando novos tokens para projeto $PROJECT_ID..."
 
 NEW_ANON=$(generate_jwt    "{\"role\":\"anon\",\"iss\":\"$PROJECT_ID\",\"iat\":$now,\"exp\":$exp}"         "$JWT_SECRET_PROJETO")
 NEW_SERVICE=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$PROJECT_ID\",\"iat\":$now,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
+PUBLIC_BASE_URL="$(normalize_public_base_url "$SERVER_URL")"
+PROJECT_PUBLIC_URL="$PUBLIC_BASE_URL/$PROJECT_ID"
 
 init_transaction
 
@@ -94,13 +108,14 @@ backup_file "$PROJECT_DIR/nginx/nginx_${PROJECT_ID}.conf"
 backup_file "$PROJECT_DIR/.env"
 
 sed \
-  -e "s|{{anon_key}}|$NEW_ANON|g" \
-  -e "s|{{service_role_key}}|$NEW_SERVICE|g" \
-  -e "s|{{project_id}}|$PROJECT_ID|g" \
-  -e "s|{{nginx_port}}|$NGINX_PORT|g" \
-  -e "s|{{meta_port}}|$META_PORT|g" \
-  -e "s|{{config_token}}|$CONFIG_TOKEN|g" \
-  -e "s|{{server_url}}|$SERVER_URL|g" \
+  -e "s|{{anon_key}}|$(escape_sed_replacement "$NEW_ANON")|g" \
+  -e "s|{{service_role_key}}|$(escape_sed_replacement "$NEW_SERVICE")|g" \
+  -e "s|{{project_id}}|$(escape_sed_replacement "$PROJECT_ID")|g" \
+  -e "s|{{nginx_port}}|$(escape_sed_replacement "$NGINX_PORT")|g" \
+  -e "s|{{meta_port}}|$(escape_sed_replacement "$META_PORT")|g" \
+  -e "s|{{config_token}}|$(escape_sed_replacement "$CONFIG_TOKEN")|g" \
+  -e "s|{{server_url}}|$(escape_sed_replacement "$SERVER_URL")|g" \
+  -e "s|{{project_public_url}}|$(escape_sed_replacement "$PROJECT_PUBLIC_URL")|g" \
   "$SCRIPT_DIR/nginxtemplate" > "$PROJECT_DIR/nginx/nginx_${PROJECT_ID}.conf"
 
 sed -i "s|^ANON_KEY_PROJETO=.*|ANON_KEY_PROJETO=$NEW_ANON|"             "$PROJECT_DIR/.env"
