@@ -6,17 +6,14 @@ die() { echo "❌ $*" >&2; exit 1; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
-# Diretório temporário para transações
 TRANSACTION_DIR="$PROJECT_ROOT/.rotate_transaction_$$"
 MODIFIED_FILES=()
 
-# Inicializa o sistema de transação
 init_transaction() {
   mkdir -p "$TRANSACTION_DIR"
   echo "🔄 Sistema de transação inicializado"
 }
 
-# Faz backup de um arquivo antes de modificá-lo
 backup_file() {
   local file="$1"
   if [[ -f "$file" ]]; then
@@ -27,7 +24,6 @@ backup_file() {
   fi
 }
 
-# Commit: remove backups após sucesso
 commit_transaction() {
   if [[ -d "$TRANSACTION_DIR" ]]; then
     rm -rf "$TRANSACTION_DIR"
@@ -35,7 +31,6 @@ commit_transaction() {
   fi
 }
 
-# Rollback: restaura todos os arquivos modificados
 rollback_transaction() {
   echo "❌ Erro detectado! Revertendo alterações..."
   
@@ -54,7 +49,6 @@ rollback_transaction() {
   exit 1
 }
 
-# Trap para capturar erros e fazer rollback
 trap rollback_transaction ERR
 
 set -a
@@ -63,6 +57,7 @@ source "$PROJECT_ROOT/.env"
 set +a
 
 PROJECT_ID="${1:-}"
+
 [[ -z "$PROJECT_ID" ]] && die "Uso: $0 <project_id>"
 
 PROJECT_DIR="$PROJECT_ROOT/projects/$PROJECT_ID"
@@ -88,13 +83,13 @@ generate_jwt() {
 now=$(date +%s)
 exp=$((now + (8 * 365 * 24 * 3600)))
 
+echo "🔄 Gerando novos tokens para projeto $PROJECT_ID..."
+
 NEW_ANON=$(generate_jwt    "{\"role\":\"anon\",\"iss\":\"$PROJECT_ID\",\"iat\":$now,\"exp\":$exp}"         "$JWT_SECRET_PROJETO")
 NEW_SERVICE=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$PROJECT_ID\",\"iat\":$now,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
 
-# Inicializa transação
 init_transaction
 
-# Backup dos arquivos que serão modificados
 backup_file "$PROJECT_DIR/nginx/nginx_${PROJECT_ID}.conf"
 backup_file "$PROJECT_DIR/.env"
 
@@ -118,8 +113,13 @@ docker compose -p "$PROJECT_ID" \
   --env-file .env \
   up --build -d nginx
 
+echo ""
+echo "✅ Tokens rotacionados com sucesso para projeto $PROJECT_ID"
+echo ""
 echo "ANON_KEY_PROJETO=$NEW_ANON"
 echo "SERVICE_ROLE_KEY_PROJETO=$NEW_SERVICE"
+echo ""
+echo "⚠️  NOTA: O JWT_SECRET_PROJETO não foi alterado (não é recomendado)"
+echo "   Apenas os tokens foram regenerados com o mesmo secret."
 
-# Commit da transação - tudo deu certo
 commit_transaction

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# duplicate_project.sh - COM DEBUG DETALHADO
+# duplicate_project.sh
 set -euo pipefail
 
 die() { echo "❌  $*" >&2; exit 1; }
@@ -379,7 +379,7 @@ if [[ -f "$OUT_DIR/.env" ]]; then
 fi
 
 if [[ -z "${JWT_SECRET_PROJETO:-}" ]]; then
-    JWT_SECRET_PROJETO=$(openssl rand -hex 32)
+    JWT_SECRET_PROJETO=$(openssl rand -base64 32 | tr '/+' '_-' | tr -d '\n\r')
 fi
 now_epoch=$(date +%s)
 iat=$now_epoch
@@ -388,7 +388,7 @@ exp=$((now_epoch + (8 * 365 * 24 * 3600)))
 ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$NEW_PROJECT\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
 SERVICE_TOKEN=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$NEW_PROJECT\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
 GLOBAL_ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$NEW_PROJECT\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET")
-CONFIG_TOKEN_PROJETO=$(openssl rand -hex 32)
+CONFIG_TOKEN_PROJETO=$(openssl rand -hex 32 | tr -d '\n\r')
 
 init_transaction
 
@@ -438,7 +438,6 @@ echo ""
 echo "🚀 Subindo containers com Docker Compose..."
 cd "$OUT_DIR"
 
-# Capturar output completo do docker compose
 echo "   Executando: docker compose up --build -d"
 compose_output=$(docker compose -p "$NEW_PROJECT" \
   --env-file ../../secrets/.env \

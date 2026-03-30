@@ -289,7 +289,7 @@ supavisor_tenant() {
   fi
 
   if [[ -z "${JWT_SECRET_PROJETO:-}" ]]; then
-      JWT_SECRET_PROJETO=$(openssl rand -hex 32)
+      JWT_SECRET_PROJETO=$(openssl rand -base64 32 | tr '/+' '_-' | tr -d '\n\r')
   fi
 now_epoch=$(date +%s)
 iat=$now_epoch
@@ -298,7 +298,7 @@ exp=$((now_epoch + (8 * 365 * 24 * 3600)))
 ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_ID\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
 SERVICE_TOKEN=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$PROJECT_ID\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
 GLOBAL_ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_ID\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET")
-CONFIG_TOKEN_PROJETO=$(openssl rand -hex 32)
+CONFIG_TOKEN_PROJETO=$(openssl rand -hex 32 | tr -d '\n\r')
 
 init_transaction
 

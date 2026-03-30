@@ -40,6 +40,16 @@ JOB_STATUS: dict[str, str] = {}
 async def get_pool():
     return await asyncpg.create_pool(DB_DSN, min_size=1, max_size=5)
 
+async def rollback_project_from_db(pool, project_name: str):
+    """Remove projeto do banco em caso de falha na criação/duplicação"""
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM projects WHERE name = $1", project_name)
+        print(f"Rollback: Projeto '{project_name}' removido do banco")
+    except Exception as e:
+        print(f"Erro no rollback do banco: {e}")
+
+
 RESERVED_WORDS = {
     'select','from','where','insert','update','delete','table',
     'create','drop','join','group','order','limit','into','index',
@@ -252,6 +262,7 @@ async def _duplicate_and_store_keys(job_id: str, original_name: str, new_name: s
         if proc.returncode != 0:
             await set_status("failed")
             print(stdout.decode())
+            await rollback_project_from_db(pool, new_name)
             return
 
         proc2 = await asyncio.create_subprocess_exec(
@@ -263,6 +274,7 @@ async def _duplicate_and_store_keys(job_id: str, original_name: str, new_name: s
         if proc2.returncode != 0:
             await set_status("failed")
             print(err2.decode())
+            await rollback_project_from_db(pool, new_name)
             return
 
         lines = out2.decode().splitlines()
@@ -273,6 +285,7 @@ async def _duplicate_and_store_keys(job_id: str, original_name: str, new_name: s
         if not anon or not service or not config_token:
             await set_status("failed")
             print("Missing tokens")
+            await rollback_project_from_db(pool, new_name)
             return
 
         anon_enc = fernet.encrypt(anon.encode()).decode()
@@ -291,6 +304,7 @@ async def _duplicate_and_store_keys(job_id: str, original_name: str, new_name: s
     except Exception as e:
         await set_status("failed")
         print(f"Worker error: {e}")
+        await rollback_project_from_db(pool, new_name)
 
 
 async def execute_delete_script(project_name: str):
@@ -661,6 +675,7 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: str):
         if proc.returncode != 0:
             await set_status("failed")
             print(stdout.decode())
+            await rollback_project_from_db(pool, project_name)
             return
 
         proc2 = await asyncio.create_subprocess_exec(
@@ -672,6 +687,7 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: str):
         if proc2.returncode != 0:
             await set_status("failed")
             print(err2.decode())
+            await rollback_project_from_db(pool, project_name)
             return
 
         lines = out2.decode().splitlines()
@@ -682,6 +698,7 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: str):
         if not anon or not service or not config_token:
             await set_status("failed")
             print("Missing tokens")
+            await rollback_project_from_db(pool, project_name)
             return
 
         anon_enc = fernet.encrypt(anon.encode()).decode()
@@ -700,6 +717,7 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: str):
     except Exception as e:
         await set_status("failed")
         print(f"Worker error: {e}")
+        await rollback_project_from_db(pool, project_name)
 
 def _name_matches(cont_json: dict, project: str) -> bool:
     patt = re.compile(rf"-{re.escape(project)}$")
