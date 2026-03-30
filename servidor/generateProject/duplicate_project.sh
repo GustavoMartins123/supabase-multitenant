@@ -2,7 +2,7 @@
 # duplicate_project.sh
 set -euo pipefail
 
-die() { echo "❌  $*" >&2; exit 1; }
+die() { echo "❌  $*" >&2; return 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
