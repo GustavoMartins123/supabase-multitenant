@@ -104,13 +104,32 @@ http {
             expires off;
         }
 
-        location = /verify-success.html/ {
-            return 301 /verify-success.html;
-        }
-
         location = /verify-success.html {
             root /usr/share/nginx/html;
             add_header Content-Type text/html;
+            add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
+            expires off;
+        }
+
+        location = /verify-success.html/ {
+            root /usr/share/nginx/html;
+            try_files /verify-success.html =404;
+            add_header Content-Type text/html;
+            add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
+            expires off;
+        }
+
+        location = /verify-success.js {
+            root /usr/share/nginx/html;
+            default_type application/javascript;
+            add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
+            expires off;
+        }
+
+        location = /verify-success.html/verify-success.js {
+            root /usr/share/nginx/html;
+            try_files /verify-success.js =404;
+            default_type application/javascript;
             add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
             expires off;
         }

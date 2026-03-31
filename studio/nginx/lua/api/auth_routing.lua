@@ -13,10 +13,16 @@ local proj = ngx.var.project_ref
 local method = ngx.var.request_method
 local uri = ngx.var.uri
 local user_id = uri:match("^/api/platform/auth/default/users/(.+)$")
-local is_invite = uri:match("^/api/platform/auth/default/invite$")
+local post_routes = {
+    ["/api/platform/auth/default/invite"] = "auth/v1/invite",
+    ["/api/platform/auth/default/recover"] = "auth/v1/recover",
+    ["/api/platform/auth/default/magiclink"] = "auth/v1/magiclink",
+}
 
-if method == "POST" and is_invite then
-    ngx.req.set_uri("auth/v1/invite", false)
+local post_target = post_routes[uri]
+
+if method == "POST" and post_target then
+    ngx.req.set_uri(post_target, false)
 elseif method == "POST" and not user_id then
     ngx.req.set_uri("auth/v1/signup", false)
 elseif method == "DELETE" and user_id then

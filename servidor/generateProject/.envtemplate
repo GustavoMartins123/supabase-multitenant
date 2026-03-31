@@ -14,7 +14,7 @@ MAILER_URLPATHS_INVITE="{{project_auth_verify_path}}"
 MAILER_URLPATHS_RECOVERY="{{project_auth_verify_path}}"
 MAILER_URLPATHS_EMAIL_CHANGE="{{project_auth_verify_path}}"
 MAILER_SUBJECTS_INVITE="Você foi convidado"
-
+MAILER_SUBJECTS_RECOVERY="Redefinir sua senha"
 
 ENABLE_EMAIL_SIGNUP=true
 #important -> default is false

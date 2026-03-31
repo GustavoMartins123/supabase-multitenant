@@ -66,6 +66,17 @@
             margin: 0;
             font-size: 14px;
         }
+        .muted {
+            margin-top: 16px;
+            font-size: 14px;
+            color: #94a3b8;
+        }
+        .hidden {
+            display: none;
+        }
+        .error-icon {
+            background: #ef4444;
+        }
         @keyframes scaleIn {
             from {
                 transform: scale(0);
@@ -80,14 +91,16 @@
 </head>
 <body>
     <div class="container">
-        <div class="success-icon"></div>
-        <h1>Convite Aceito com Sucesso!</h1>
-        <p>Sua conta foi criada e você agora tem acesso ao projeto.</p>
-        <p>Você pode fechar esta página e fazer login no aplicativo.</p>
-        <div class="info">
+        <div id="icon" class="success-icon"></div>
+        <h1 id="title">Confirmando seu convite...</h1>
+        <p id="description">Estamos validando o link de acesso.</p>
+        <p id="secondary">Aguarde alguns segundos.</p>
+        <div id="details" class="info hidden">
             <p><strong>Próximos passos:</strong></p>
             <p>Use suas credenciais para acessar o sistema.</p>
         </div>
+        <p id="muted" class="muted">Se esta página não continuar automaticamente, abra novamente o convite pelo e-mail.</p>
     </div>
+    <script src="verify-success.js"></script>
 </body>
 </html>
