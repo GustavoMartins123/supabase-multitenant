@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login Seguro</title>
+    <style>
+        body { margin: 0; padding: 24px; background: #f4f7fb; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1f2937; }
+        .card { max-width: 620px; margin: 0 auto; background: #ffffff; border-radius: 16px; padding: 32px; box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08); }
+        .badge { display: inline-block; padding: 6px 12px; border-radius: 999px; background: #f0f9ff; color: #0369a1; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+        h1 { margin: 16px 0 12px; font-size: 28px; line-height: 1.2; color: #111827; }
+        p { margin: 0 0 16px; font-size: 16px; line-height: 1.6; color: #4b5563; }
+        .button { display: inline-block; padding: 14px 22px; margin: 12px 0 24px; background: #2563eb; color: #ffffff !important; text-decoration: none; border-radius: 10px; font-weight: 700; }
+        .footer { font-size: 14px; color: #6b7280; border-top: 1px solid #f1f5f9; padding-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <span class="badge">Acesso Rápido</span>
+        <h1>Seu Link de Acesso</h1>
+        <p>Você solicitou um link para entrar no sistema de forma rápida e segura. Clique no botão abaixo para acessar sua conta.</p>
+        <a href="{{ if .RedirectTo }}{{ .RedirectTo }}?token={{ .TokenHash }}&type=magiclink{{ else }}{{ .SiteURL }}?token={{ .TokenHash }}&type=magiclink{{ end }}" class="button">Fazer Login</a>
+        <p class="footer">Se você não solicitou este link, pode ignorar este e-mail com segurança. O link expira em breve.</p>
+    </div>
+</body>
+</html>

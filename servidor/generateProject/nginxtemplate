@@ -104,6 +104,33 @@ http {
             expires off;
         }
 
+        location /magiclink.html {
+            allow 172.20.0.0/16;
+            deny all;
+            root /usr/share/nginx/html;
+            add_header Content-Type text/html;
+            add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
+            expires off;
+        }
+
+        location /confirmation.html {
+            allow 172.20.0.0/16;
+            deny all;
+            root /usr/share/nginx/html;
+            add_header Content-Type text/html;
+            add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
+            expires off;
+        }
+
+        location /email_change.html {
+            allow 172.20.0.0/16;
+            deny all;
+            root /usr/share/nginx/html;
+            add_header Content-Type text/html;
+            add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
+            expires off;
+        }
+
         location = /verify-success.html {
             root /usr/share/nginx/html;
             add_header Content-Type text/html;

@@ -9,10 +9,7 @@ services:
     container_name: supabase-nginx-{{project_id}}
     restart: unless-stopped
     volumes:
-      - ${HOST_PROJECT_ROOT}/servidor/auth_template/recovery.html:/usr/share/nginx/html/recovery.html:ro
-      - ${HOST_PROJECT_ROOT}/servidor/auth_template/invite.html:/usr/share/nginx/html/invite.html:ro
-      - ${HOST_PROJECT_ROOT}/servidor/auth_template/verify-success.html:/usr/share/nginx/html/verify-success.html:ro
-      - ${HOST_PROJECT_ROOT}/servidor/auth_template/verify-success.js:/usr/share/nginx/html/verify-success.js:ro
+      - ${HOST_PROJECT_ROOT}/servidor/auth_template:/usr/share/nginx/html:ro
     networks:
       - rede-supabase
     labels:
@@ -97,8 +94,14 @@ services:
       # GOTRUE_SMTP_MAX_FREQUENCY: 1s
       GOTRUE_MAILER_TEMPLATES_RECOVERY: http://supabase-nginx-{{project_id}}:{{nginx_port}}/recovery.html
       GOTRUE_MAILER_TEMPLATES_INVITE: http://supabase-nginx-{{project_id}}:{{nginx_port}}/invite.html
+      GOTRUE_MAILER_TEMPLATES_CONFIRMATION: http://supabase-nginx-{{project_id}}:{{nginx_port}}/confirmation.html
+      GOTRUE_MAILER_TEMPLATES_EMAIL_CHANGE: http://supabase-nginx-{{project_id}}:{{nginx_port}}/email_change.html
+      GOTRUE_MAILER_TEMPLATES_MAGIC_LINK: http://supabase-nginx-{{project_id}}:{{nginx_port}}/magiclink.html
       GOTRUE_MAILER_SUBJECTS_INVITE: ${MAILER_SUBJECTS_INVITE}
       GOTRUE_MAILER_SUBJECTS_RECOVERY: ${MAILER_SUBJECTS_RECOVERY}
+      GOTRUE_MAILER_SUBJECTS_MAGIC_LINK: ${MAILER_SUBJECTS_MAGIC_LINK}
+      GOTRUE_MAILER_SUBJECTS_CONFIRMATION: ${MAILER_SUBJECTS_CONFIRMATION}
+      GOTRUE_MAILER_SUBJECTS_EMAIL_CHANGE: ${MAILER_SUBJECTS_EMAIL_CHANGE}
       GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL}
       GOTRUE_SMTP_HOST: ${SMTP_HOST}
       GOTRUE_SMTP_PORT: ${SMTP_PORT}
@@ -109,6 +112,7 @@ services:
       GOTRUE_MAILER_URLPATHS_CONFIRMATION: ${MAILER_URLPATHS_CONFIRMATION}
       GOTRUE_MAILER_URLPATHS_RECOVERY: ${MAILER_URLPATHS_RECOVERY}
       GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: ${MAILER_URLPATHS_EMAIL_CHANGE}
+      GOTRUE_MAILER_URLPATHS_MAGIC_LINK: ${MAILER_URLPATHS_MAGIC_LINK}
 
       GOTRUE_EXTERNAL_PHONE_ENABLED: ${ENABLE_PHONE_SIGNUP}
       GOTRUE_SMS_AUTOCONFIRM: ${ENABLE_PHONE_AUTOCONFIRM}

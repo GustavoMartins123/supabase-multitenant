@@ -270,12 +270,11 @@ escape_sed_replacement() {
 PUBLIC_BASE_URL="$(normalize_public_base_url "$SERVER_URL")"
 PROJECT_PUBLIC_URL="$PUBLIC_BASE_URL/$NEW_PROJECT"
 PROJECT_AUTH_EXTERNAL_URL="$PROJECT_PUBLIC_URL/auth/v1"
-PROJECT_AUTH_VERIFY_PATH="/$NEW_PROJECT/auth/v1/verify"
 
 template_to_file() {
   local template="$1" outfile="$2"
   local anon_key service_role_key project_id nginx_port meta_port config_token jwt_secret
-  local server_url public_base_url project_public_url project_auth_external_url project_auth_verify_path project_root
+  local server_url public_base_url project_public_url project_auth_external_url project_root
   local logflare_api_key pooler_transaction pooler_session
 
   anon_key="$(escape_sed_replacement "$ANON_TOKEN")"
@@ -289,7 +288,6 @@ template_to_file() {
   public_base_url="$(escape_sed_replacement "$PUBLIC_BASE_URL")"
   project_public_url="$(escape_sed_replacement "$PROJECT_PUBLIC_URL")"
   project_auth_external_url="$(escape_sed_replacement "$PROJECT_AUTH_EXTERNAL_URL")"
-  project_auth_verify_path="$(escape_sed_replacement "$PROJECT_AUTH_VERIFY_PATH")"
   project_root="$(escape_sed_replacement "$HOST_PROJECT_ROOT")"
   logflare_api_key="$(escape_sed_replacement "${LOGFLARE_API_KEY:-}")"
   pooler_transaction="$(escape_sed_replacement "${POOLER_PROXY_PORT_TRANSACTION:-}")"
@@ -307,7 +305,6 @@ template_to_file() {
     -e "s|{{public_base_url}}|$public_base_url|g" \
     -e "s|{{project_public_url}}|$project_public_url|g" \
     -e "s|{{project_auth_external_url}}|$project_auth_external_url|g" \
-    -e "s|{{project_auth_verify_path}}|$project_auth_verify_path|g" \
     -e "s|{{project_root}}|$project_root|g" \
     -e "s|{{logflare_api_key}}|$logflare_api_key|g" \
     -e "s|{{pooler_transaction}}|$pooler_transaction|g" \
