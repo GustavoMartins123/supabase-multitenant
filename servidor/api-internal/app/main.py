@@ -37,8 +37,14 @@ except ValueError:
 
 JOB_STATUS: dict[str, str] = {}
 
+db_pool: Optional[asyncpg.Pool] = None
+
 async def get_pool():
-    return await asyncpg.create_pool(DB_DSN, min_size=1, max_size=5)
+    """Retorna o pool global de conexões"""
+    global db_pool
+    if db_pool is None:
+        raise RuntimeError("Database pool not initialized")
+    return db_pool
 
 async def rollback_project_from_db(pool, project_name: str):
     """Remove projeto do banco em caso de falha na criação/duplicação"""
@@ -85,6 +91,21 @@ def validate_service_name(raw: str) -> str:
     return name
 
 app = FastAPI()
+
+@app.on_event("startup")
+async def startup():
+    """Inicializa o pool de conexões no startup da aplicação"""
+    global db_pool
+    db_pool = await asyncpg.create_pool(DB_DSN, min_size=1, max_size=10)
+    print("✅ Database pool initialized")
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Fecha o pool de conexões no shutdown da aplicação"""
+    global db_pool
+    if db_pool:
+        await db_pool.close()
+        print("✅ Database pool closed")
 
 @app.middleware("http")
 async def validate_shared_token(request: Request, call_next):

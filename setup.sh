@@ -361,7 +361,7 @@ main() {
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     backup_file "servidor/traefik/update_geoip.sh"
     safe_sed "s|seucaminho|$SCRIPT_DIR|g" servidor/traefik/update_geoip.sh
-    safe_sed "s|HOST_PROJECT_ROOT="pass"|HOST_PROJECT_ROOT=\"$SCRIPT_DIR\"|g" servidor/.env
+    safe_sed "s|HOST_PROJECT_ROOT=\"pass\"|HOST_PROJECT_ROOT=\"$SCRIPT_DIR\"|g" servidor/.env
     backup_file "servidor/api-internal/app/push_worker.py"
     safe_sed "s|API_URL=https://<SEU_IP>/api/internal/push|API_URL=https://$LOCAL_IP/api/internal/push|g" servidor/api-internal/app/push_worker.py
 

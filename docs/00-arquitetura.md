@@ -19,25 +19,43 @@ O sistema permite gerenciar múltiplos projetos Supabase isolados em um único s
 
 ### Replication Slots
 
-PostgreSQL não permite usar o mesmo replication slot em databases diferentes simultaneamente. Por isso, cada projeto precisa de seu próprio slot para o Realtime funcionar.
+PostgreSQL não permite usar o mesmo replication slot em databases diferentes simultaneamente. Por isso, cada projeto precisa de seus próprios slots para o Realtime funcionar.
 
-**Padrão de nomenclatura:**
-```
-supabase_realtime_messages_replication_slot_projeto_a
-supabase_realtime_messages_replication_slot_projeto_b
-```
+**Existem dois tipos de slots por projeto:**
 
-O tenant_id é extraído do header `Host` injetado pelo Nginx do projeto e usado para construir o nome do slot específico.
+1. **Slot principal (registrado no tenant):**
+   ```
+   supabase_realtime_replication_slot_projeto_a
+   ```
+   - Registrado via API do Realtime durante criação do projeto
+   - Usado para replicação geral do tenant
+
+2. **Slot de broadcast (criado dinamicamente):**
+   ```
+   supabase_realtime_messages_replication_slot_projeto_a
+   ```
+   - Criado automaticamente pelo Realtime quando há conexão WebSocket ativa
+   - Usado especificamente para a tabela `realtime.messages` (broadcast)
+   - É TEMPORARY - existe apenas enquanto há conexões ativas
+   - Formato: `supabase_{schema}_{table}_replication_slot_{tenant_id}`
+   - Onde `schema="realtime"`, `table="messages"`, `tenant_id="projeto_a"`
+
+O tenant_id é extraído do header `Host` injetado pelo Nginx do projeto e usado para construir o nome dos slots específicos.
 
 ### JWT Tokens
 
-Todos os projetos usam o mesmo `JWT_SECRET` (compartilhado), mas cada projeto tem tokens únicos.
+Cada projeto tem seu próprio `JWT_SECRET` único, gerado aleatoriamente durante a criação do projeto.
 
-**Geração:**
+**Geração do Secret:**
+```bash
+JWT_SECRET_PROJETO=$(openssl rand -base64 32 | tr '/+' '_-' | tr -d '\n\r')
+```
+
+**Geração dos Tokens:**
 - Algoritmo: HS256 (HMAC SHA256)
 - Validade: 8 anos
 - Roles: `anon` e `service_role`
-- Diferenciação: campo `iss` (issuer) único por projeto
+- Secret: Único por projeto
 
 **Exemplo:**
 ```json
@@ -116,6 +134,353 @@ postgres://supabase_storage_admin.projeto_x:senha@pooler:5432/postgres
 
 **Gateway:**
 - **Traefik:** Roteamento dinâmico baseado em labels Docker
+
+---
+
+## Serviços Compartilhados
+
+### Realtime (Global)
+
+**Um único container atende todos os projetos.**
+
+**Modificações importantes para multi-tenant:**
+
+O Realtime original do Supabase não suporta múltiplos projetos com JWT secrets isolados. Duas modificações foram implementadas:
+
+#### 1. Autenticação Multi-Tenant (router.ex)
+
+**Problema original:**
+O Realtime validava JWT usando apenas o secret global antes de identificar o tenant, impossibilitando JWT secrets isolados por projeto.
+
+**Solução implementada:**
+O fluxo de autenticação foi invertido para buscar o JWT secret do tenant antes de validar o token.
+
+**Arquivo modificado:** `servidor/volumes/realtime/router.ex`
+
+**Fluxo de autenticação:**
+
+```elixir
+# 1. Extrai tenant_id da requisição (path_params ou body_params)
+tenant_id = conn.path_params["tenant_id"]
+
+# 2. Busca tenant no banco de dados
+%Tenant{jwt_secret: jwt_secret} = Api.get_tenant_by_external_id(tenant_id)
+
+# 3. Descriptografa o JWT secret do tenant
+secret = Crypto.decrypt!(jwt_secret)
+
+# 4. Valida token com o secret específico do tenant
+{:ok, claims} = authorize(token, secret, nil)
+
+# 5. Valida claim "iss" (issuer) para garantir que corresponde ao tenant
+case Map.get(claims, "iss") do
+  ^tenant_id -> :ok
+  _ -> {:error, :tenant_claim_mismatch}
+end
+
+# 6. Fallback: Se tenant não existir, tenta validar com secret global
+# (usado para operações administrativas)
+```
+
+**Vantagens:**
+- Cada projeto tem seu JWT secret isolado
+- Tokens de um projeto não podem ser usados em outro
+- Rotação de chaves independente por projeto
+- Mantém compatibilidade com secret global para admin
+
+#### 2. Replication Slots Dinâmicos (replication_connection.ex)
+
+**Modificação na função `replication_slot_name/3`:**
+
+**Original:**
+```elixir
+def replication_slot_name(schema, table) do
+  "supabase_#{schema}_#{table}_replication_slot_#{slot_suffix()}"
+end
+
+defp slot_suffix, do: Application.get_env(:realtime, :slot_name_suffix)
+```
+
+**Modificado:**
+```elixir
+def replication_slot_name(schema, table, tenant_id) do
+  "supabase_#{schema}_#{table}_replication_slot_#{tenant_id}"
+end
+```
+
+**Resultado prático:**
+- Schema: "realtime" (fixo)
+- Table: "messages" (fixo)
+- Tenant ID: "projeto_x" (dinâmico)
+- Slot de broadcast: `supabase_realtime_messages_replication_slot_projeto_x` (criado automaticamente)
+- Slot principal: `supabase_realtime_replication_slot_projeto_x` (registrado no tenant)
+
+**Como funciona:**
+
+1. Nginx do projeto injeta: `Host: meu_projeto.localhost`
+2. Realtime extrai `tenant_id` do header Host
+3. Usa tenant_id para construir nome do replication slot
+4. Cada projeto tem seu slot isolado no PostgreSQL
+
+**Fluxo completo:**
+
+```
+WebSocket: wss://servidor/projeto_x/realtime/v1
+  ↓
+Traefik roteia para nginx-projeto-x
+  ↓
+Nginx injeta: Host: projeto_x.localhost
+  ↓
+Proxy para Realtime global
+  ↓
+Realtime extrai tenant_id = "projeto_x"
+  ↓
+Busca JWT secret do tenant no banco
+  ↓
+Valida token com secret específico do projeto
+  ↓
+Conecta no database _supabase_projeto_x
+  ↓
+Usa slot: supabase_realtime_messages_replication_slot_projeto_x
+  ↓
+Stream de mudanças específico do projeto
+```
+
+**Arquivos modificados:**
+- `servidor/volumes/realtime/router.ex` (autenticação multi-tenant)
+- `servidor/volumes/realtime/replication_connection.ex` (slots dinâmicos)
+- Injetados no container Realtime durante build
+
+### Supavisor (Pooler)
+
+**Um único container gerencia conexões de todos os projetos.**
+
+Ver seção "Conceitos Base" para detalhes sobre como o roteamento multi-tenant funciona (sufixo do username, modos de pooling, configuração padrão).
+
+**Vantagens:**
+
+- Pool compartilhado entre projetos
+- Isolamento por tenant_id no username
+- Limites configuráveis por projeto
+- Suporta múltiplos modos de pooling
+
+### Edge Functions
+
+**Compartilhadas entre projetos.**
+
+Localização: `servidor/volumes/functions/`
+
+Cada projeto pode ter sua pasta:
+```
+functions/
+├── main/          # Functions globais
+├── projeto_a/     # Functions do projeto A
+└── projeto_b/     # Functions do projeto B
+```
+
+---
+
+## Serviços Por Projeto
+
+Cada projeto provisionado na infraestrutura roda seus próprios containers isolados para garantir estabilidade e isolamento lógico. A stack base inclui:
+
+- **Nginx:** Router e gateway interno (validações API Key, regras CORS e reescritas de path).
+- **GoTrue:** Serviço de autenticação e gestão de usuários (`/auth/v1/`).
+- **PostgREST:** Motor hiper-rápido que gera a API REST via introspecção do banco (`/rest/v1/`).
+- **Storage:** Gerenciamento de arquivos, pastas e políticas de Storage (`/storage/v1/`).
+- **ImgProxy:** Processador dinâmico de imagens e redimensionamento em tempo real.
+- **Postgres-Meta:** Microserviço focado em relatar dados essenciais do PostgreSQL.
+
+A maioria destes fluxos padronizam conexões HTTP simples (através do Supavisor, onde necessário). O Postgres-Meta é uma exceção arquitetural detalhada abaixo.
+
+### Serviço em Destaque: Postgres-Meta
+
+**Um container por projeto.**
+
+**O que é:**
+- API que expõe metadados do PostgreSQL
+- Usado exclusivamente pelo Supabase Studio
+
+**Responsabilidades:**
+- Listar tabelas, colunas, schemas
+- Consultar policies (RLS), functions, triggers
+- Fornecer informações para a interface do Studio
+- Cache de metadados para evitar queries pesadas
+
+**Como funciona:**
+```
+Studio precisa listar tabelas
+  ↓
+GET /api/platform/pg-meta/default/tables
+  ↓
+Nginx Studio injeta service_role
+  ↓
+Proxy para: https://servidor/projeto_x/meta/tables
+  ↓
+Postgres-Meta consulta information_schema
+  ↓
+Retorna JSON com lista de tabelas
+```
+
+**Conexão:**
+- Conecta direto no PostgreSQL (não usa Supavisor)
+- Precisa de acesso total ao information_schema
+- Cada projeto tem seu próprio container Meta
+
+---
+
+## Setup Inicial
+
+### Primeira Inicialização do PostgreSQL
+
+Na primeira vez que o PostgreSQL sobe, um script de inicialização cria a estrutura base do sistema.
+
+**Script:** `servidor/volumes/db/create_template.sh`
+
+**Montado em:** `/docker-entrypoint-initdb.d/zzz-create_template.sh`
+
+⚠️ O prefixo `zzz-` garante que este script execute por último, após todos os outros scripts de inicialização do Supabase (roles.sql, jwt.sql, webhooks.sql, etc.).
+
+### O Que o Script Faz
+
+```text
+1. Cria schema _analytics
+   CREATE SCHEMA IF NOT EXISTS _analytics;
+   
+   Usado para armazenar métricas e logs do sistema.
+
+2. Cria database _supabase_template (vazio)
+   CREATE DATABASE _supabase_template;
+
+3. Faz dump do database postgres
+   pg_dump -U postgres -d postgres \
+     --exclude-schema=cron \
+     | grep -v "CREATE EXTENSION.*pg_cron" \
+     | grep -v "COMMENT ON EXTENSION pg_cron"
+   
+   Captura toda a estrutura criada pelos scripts de inicialização:
+   - roles.sql (anon, service_role, authenticator, etc.)
+   - jwt.sql (validação JWT)
+   - webhooks.sql, logs.sql, realtime.sql
+   - storage.sql (schemas e functions)
+   - Todas as extensions (pg_net, pgjwt, etc.)
+
+4. Restaura dump em _supabase_template
+   psql -U postgres -d _supabase_template
+   
+   Agora _supabase_template tem toda a estrutura base do Supabase.
+
+5. Cria tabelas do sistema no database postgres
+   
+   A) Tabela projects:
+      CREATE TABLE projects (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        name TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        anon_key TEXT,
+        service_role TEXT
+      );
+   
+   B) Tabela project_members:
+      CREATE TABLE project_members (
+        project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL,
+        role TEXT DEFAULT 'member',
+        PRIMARY KEY (project_id, user_id)
+      );
+   
+   C) Tabela jobs:
+      CREATE TABLE jobs (
+        job_id UUID PRIMARY KEY,
+        project TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT now()
+      );
+
+6. Transforma _supabase_template em template
+   ALTER DATABASE _supabase_template WITH is_template = true;
+   UPDATE pg_database SET datallowconn = false 
+   WHERE datname = '_supabase_template';
+   
+   - is_template = true: Permite usar como template no CREATE DATABASE
+   - datallowconn = false: Impede conexões diretas
+```
+
+### O Que Está no Template
+
+**Schemas:**
+- `auth` (GoTrue - autenticação)
+- `storage` (Storage - arquivos)
+- `realtime` (Realtime - subscriptions)
+- `extensions` (Extensions instaladas)
+- `public` (Schema padrão do usuário)
+
+**Roles:**
+- `anon` (acesso público)
+- `authenticated` (usuários autenticados)
+- `service_role` (acesso total)
+- `authenticator` (role de conexão)
+- `supabase_auth_admin` (GoTrue)
+- `supabase_storage_admin` (Storage)
+- `pgbouncer` (Supavisor)
+
+**Extensions:**
+- `pg_net` (HTTP requests)
+- `pgjwt` (JWT validation)
+- `uuid-ossp` (UUID generation)
+- `pgcrypto` (Encryption)
+- E outras extensions do Supabase
+
+**Functions e Triggers:**
+- Validação JWT
+- Webhooks
+- Storage policies
+- Realtime triggers
+
+### Quando o Template é Usado
+
+**Criação de projeto:**
+```bash
+CREATE DATABASE _supabase_projeto_novo TEMPLATE _supabase_template;
+```
+
+---
+
+## Banco de Dados Compartilhado
+
+### Estrutura
+
+**Database `postgres` (sistema):**
+```sql
+-- Tabelas do sistema
+projects (id, name, owner_id, anon_key, service_role, ...)
+project_members (project_id, user_email, role, ...)
+```
+
+**Databases por projeto:**
+```
+projeto_a  -- Database isolado do Projeto A
+projeto_b  -- Database isolado do Projeto B
+projeto_c  -- Database isolado do Projeto C
+```
+
+### Isolamento
+
+Cada projeto tem:
+- Database próprio no PostgreSQL
+- Schemas próprios (auth, storage, realtime, etc.)
+- Replication slot próprio para Realtime
+- Roles próprios (authenticator, anon, service_role)
+
+### Conexões
+
+**Via Supavisor (Pooler):**
+- GoTrue, PostgREST, Storage → conectam via pooler
+- Pool compartilhado, mas cada serviço especifica o database
+
+**Conexão Direta:**
+- Meta → conecta direto no PostgreSQL
 
 ---
 
@@ -226,6 +591,35 @@ Esses headers são usados pela API Python para validar permissões.
    PostgREST → Nginx Projeto → Traefik → Nginx Studio → Usuário
 ```
 
+### Exemplo: POST /rest/v1/users (Aplicação Externa)
+
+**Fluxo básico:** `Usuário → Traefik → Nginx Projeto → Serviço`
+
+```text
+1. Traefik recebe:
+   - Lê label: PathPrefix(`/projeto_x`)
+   - Aplica middleware: strip-projeto_x
+   - Remove /projeto_x do path
+   - Roteia para: nginx-projeto_x:9999
+
+2. Nginx Projeto recebe:
+   POST /rest/v1/users
+   - Valida: anon_key_xxx é válida? ✓
+   - Reescreve: /rest/v1/users → /users
+   - Adiciona headers CORS
+   - Proxy para: rest:3000
+
+3. PostgREST recebe:
+   POST http://rest:3000/users
+   - Valida JWT
+   - Conecta no banco via pooler
+   - Executa: INSERT INTO users (name) VALUES ('João')
+   - Retorna: {"id": 1, "name": "João"}
+
+4. Resposta volta:
+   PostgREST → Nginx Projeto → Traefik → Usuário
+```
+
 ---
 
 ## Nginx do Projeto - Roteamento Interno
@@ -259,10 +653,21 @@ map $http_apikey $is_admin_key {
 
 **Fluxo de validação:**
 
-1. Extrai header `apikey` da requisição
-2. Compara com anon_key e service_role_key do projeto
-3. Se não for válida: retorna 403 Forbidden
-4. Se válida: permite acesso ao serviço
+O Nginx valida a chave de formas diferentes conforme o tipo de rota:
+
+1. **Rotas HTTP** (`/auth/v1/`, `/rest/v1/`, `/storage/v1/`, `/functions/v1/`, `/meta/`)
+   - Lê a chave no header `apikey` (`$http_apikey`)
+   - Compara com `anon_key` e `service_role_key`
+   - Se estiver ausente: retorna `401`
+   - Se for inválida: retorna `403`
+
+2. **Realtime / WebSocket** (`/realtime/v1/websocket`)
+   - Lê a chave no query param `apikey` (`$arg_apikey`)
+   - Compara com `anon_key` e `service_role_key`
+   - Se estiver ausente: retorna `401`
+   - Se for inválida: retorna `403`
+
+Isso permite que o gateway trate HTTP tradicional e conexões WebSocket com regras próprias de validação.
 
 ### Mapeamento de Serviços
 
@@ -451,11 +856,11 @@ if ($request_method = 'OPTIONS') {
 add_header 'Access-Control-Allow-Origin' $cors_origin always;
 ```
 
-### Endpoint de Configuração
+---
 
-O Nginx expõe um endpoint especial para o Studio obter configurações do projeto:
+## Endpoints Especiais
 
-### Endpoint de Configuração
+### Endpoint de Configuração (/config)
 
 O Nginx expõe um endpoint especial para aplicações obterem configurações do projeto de forma segura:
 
@@ -507,35 +912,40 @@ const config = await response.json();
 const supabase = createClient(config.supabase_url, config.anon_key);
 ```
 
-Usuário → Traefik → Nginx Projeto → Serviço
+---
 
-Exemplo detalhado (POST /rest/v1/users):
+## Traefik - Roteamento Dinâmico
 
-1. Traefik recebe:
-   - Lê label: PathPrefix(`/projeto_x`)
-   - Aplica middleware: strip-projeto_x
-   - Remove /projeto_x do path
-   - Roteia para: nginx-projeto_x:9999
+### Como Funciona
 
-2. Nginx Projeto recebe:
-   POST /rest/v1/users
-   - Valida: anon_key_xxx é válida? ✓
-   - Reescreve: /rest/v1/users → /users
-   - Adiciona headers CORS
-   - Proxy para: rest:3000
+Traefik monitora o Docker socket e lê labels dos containers automaticamente.
 
-3. PostgREST recebe:
-   POST http://rest:3000/users
-   - Valida JWT
-   - Conecta no banco via pooler
-   - Executa: INSERT INTO users (name) VALUES ('João')
-   - Retorna: {"id": 1, "name": "João"}
+**Labels do projeto:**
+```yaml
+labels:
+  - "traefik.enable=true"
+  - "traefik.http.routers.supabase-nginx-meu_projeto.rule=PathPrefix(`/meu_projeto`)"
+  - "traefik.http.services.supabase-nginx-meu_projeto.loadbalancer.server.port=PORTA"
+  - "traefik.http.routers.supabase-nginx-meu_projeto.middlewares=strip-meu_projeto"
+  - "traefik.http.middlewares.strip-meu_projeto.stripprefix.prefixes=/meu_projeto"
+```
 
-4. Resposta volta:
-   PostgREST → Nginx Projeto → Traefik → Usuário
+**Fluxo:**
+
+```
+Requisição: GET /meu_projeto/rest/v1/tabela
+  ↓
+Traefik lê rule: PathPrefix(`/meu_projeto`)
+  ↓
+Aplica middleware: strip-meu_projeto (remove /meu_projeto)
+  ↓
+Envia para nginx-meu_projeto:PORTA
+  ↓
+Nginx do projeto recebe: GET /rest/v1/tabela
 ```
 
 ---
+
 
 ## Sistema de Cache de Service Keys
 
@@ -619,179 +1029,70 @@ docker restart nginx
 
 ---
 
-## Banco de Dados Compartilhado
-
-### Estrutura
-
-**Database `postgres` (sistema):**
-```sql
--- Tabelas do sistema
-projects (id, name, owner_email, anon_key, service_role, ...)
-project_members (project_id, user_email, role, ...)
-```
-
-**Databases por projeto:**
-```
-projeto_a  -- Database isolado do Projeto A
-projeto_b  -- Database isolado do Projeto B
-projeto_c  -- Database isolado do Projeto C
-```
-
-### Isolamento
-
-Cada projeto tem:
-- Database próprio no PostgreSQL
-- Schemas próprios (auth, storage, realtime, etc.)
-- Replication slot próprio para Realtime
-- Roles próprios (authenticator, anon, service_role)
-
-### Conexões
-
-**Via Supavisor (Pooler):**
-- GoTrue, PostgREST, Storage → conectam via pooler
-- Pool compartilhado, mas cada serviço especifica o database
-
-**Conexão Direta:**
-- Meta → conecta direto no PostgreSQL
-
----
-
-## Setup Inicial
-
-### Primeira Inicialização do PostgreSQL
-
-Na primeira vez que o PostgreSQL sobe, um script de inicialização cria a estrutura base do sistema.
-
-**Script:** `servidor/volumes/db/create_template.sh`
-
-**Montado em:** `/docker-entrypoint-initdb.d/zzz-create_template.sh`
-
-⚠️ O prefixo `zzz-` garante que este script execute por último, após todos os outros scripts de inicialização do Supabase (roles.sql, jwt.sql, webhooks.sql, etc.).
-
-### O Que o Script Faz
+### Fluxo de Requisição
 
 ```
-1. Cria schema _analytics
-   CREATE SCHEMA IF NOT EXISTS _analytics;
-   
-   Usado para armazenar métricas e logs do sistema.
-
-2. Cria database _supabase_template (vazio)
-   CREATE DATABASE _supabase_template;
-
-3. Faz dump do database postgres
-   pg_dump -U postgres -d postgres \
-     --exclude-schema=cron \
-     | grep -v "CREATE EXTENSION.*pg_cron" \
-     | grep -v "COMMENT ON EXTENSION pg_cron"
-   
-   Captura toda a estrutura criada pelos scripts de inicialização:
-   - roles.sql (anon, service_role, authenticator, etc.)
-   - jwt.sql (validação JWT)
-   - webhooks.sql, logs.sql, realtime.sql
-   - storage.sql (schemas e functions)
-   - Todas as extensions (pg_net, pgjwt, etc.)
-
-4. Restaura dump em _supabase_template
-   psql -U postgres -d _supabase_template
-   
-   Agora _supabase_template tem toda a estrutura base do Supabase.
-
-5. Cria tabelas do sistema no database postgres
-   
-   A) Tabela projects:
-      CREATE TABLE projects (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        name TEXT NOT NULL,
-        owner_id TEXT NOT NULL,
-        anon_key TEXT,
-        service_role TEXT
-      );
-   
-   B) Tabela project_members:
-      CREATE TABLE project_members (
-        project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
-        user_id TEXT NOT NULL,
-        role TEXT DEFAULT 'member',
-        PRIMARY KEY (project_id, user_id)
-      );
-   
-   C) Tabela jobs:
-      CREATE TABLE jobs (
-        job_id UUID PRIMARY KEY,
-        project TEXT NOT NULL,
-        owner_id TEXT NOT NULL,
-        status TEXT NOT NULL,
-        updated_at TIMESTAMPTZ DEFAULT now()
-      );
-
-6. Transforma _supabase_template em template
-   ALTER DATABASE _supabase_template WITH is_template = true;
-   UPDATE pg_database SET datallowconn = false 
-   WHERE datname = '_supabase_template';
-   
-   - is_template = true: Permite usar como template no CREATE DATABASE
-   - datallowconn = false: Impede conexões diretas (proteção)
+┌────────┐
+│ Studio │
+└───┬────┘
+    │ GET /rest/v1/tabela
+    ▼
+┌─────────────┐
+│ Nginx/Lua   │ Lê cookie, busca service_role, injeta Authorization
+└─────┬───────┘
+      │ GET /projeto_x/rest/v1/tabela + Authorization
+      ▼
+┌─────────┐
+│ Traefik │ Roteia baseado em PathPrefix
+└────┬────┘
+     │ GET /rest/v1/tabela (prefixo removido)
+     ▼
+┌──────────────┐
+│ Nginx Projeto│ Valida apikey
+└──────┬───────┘
+       │ GET /tabela
+       ▼
+┌───────────┐
+│ PostgREST │ Consulta database via Supavisor
+└───────────┘
 ```
 
-### Por Que Usar Template?
+## Isolamento e Segurança
 
-**Sem template:**
-```sql
-CREATE DATABASE projeto_novo;
--- Precisa rodar todos os scripts manualmente
--- Demora ~30 segundos por projeto
-```
+### Validação de Permissões
 
-**Com template:**
-```sql
-CREATE DATABASE projeto_novo TEMPLATE _supabase_template;
--- Clona estrutura completa em ~2 segundos
-```
+**Nível 1: Authelia**
+- Valida credenciais do usuário
+- Retorna email e grupos do usuário
 
-**Vantagens:**
-- Criação de projeto 15x mais rápida
-- Garante que todos os projetos têm estrutura idêntica
-- Não precisa reexecutar migrations
-- Reduz chance de erros
+**Nível 1.5: Nginx/Lua**
+- Hasheia o email com SHA256
+- Injeta headers: Remote-Email (hasheado), Remote-Groups
 
-### O Que Está no Template
+**Nível 2: API Python**
+- Recebe email hasheado
+- Hasheia emails do banco para comparar
+- Valida se usuário é dono ou membro do projeto
+- Consulta tabela `project_members` no database `postgres`
+- Verifica role (admin ou member)
 
-**Schemas:**
-- `auth` (GoTrue - autenticação)
-- `storage` (Storage - arquivos)
-- `realtime` (Realtime - subscriptions)
-- `extensions` (Extensions instaladas)
-- `public` (Schema padrão do usuário)
+**Nível 3: Nginx do Projeto**
+- Valida se Authorization header é válido
+- Verifica se é anon_key ou service_role do projeto
 
-**Roles:**
-- `anon` (acesso público)
-- `authenticated` (usuários autenticados)
-- `service_role` (acesso total)
-- `authenticator` (role de conexão)
-- `supabase_auth_admin` (GoTrue)
-- `supabase_storage_admin` (Storage)
-- `pgbouncer` (Supavisor)
+**Nível 4: PostgREST/GoTrue**
+- Valida JWT signature com JWT_SECRET único do projeto
+- Cada projeto tem seu próprio secret, impossibilitando uso de tokens entre projetos
+- Aplica Row Level Security (RLS) do PostgreSQL
 
-**Extensions:**
-- `pg_net` (HTTP requests)
-- `pgjwt` (JWT validation)
-- `uuid-ossp` (UUID generation)
-- `pgcrypto` (Encryption)
-- E outras extensions do Supabase
+### O que Impede Acesso Não Autorizado
 
-**Functions e Triggers:**
-- Validação JWT
-- Webhooks
-- Storage policies
-- Realtime triggers
+**Usuário A não pode acessar projeto do Usuário B porque:**
 
-### Quando o Template é Usado
-
-**Criação de projeto:**
-```bash
-CREATE DATABASE _supabase_projeto_novo TEMPLATE _supabase_template;
-```
+1. API Python valida membros antes de retornar service_role
+2. Cookie `supabase_project` é assinado
+3. Service_role é específica de cada projeto
+4. Nginx do projeto valida a apikey
 
 ---
 
@@ -827,7 +1128,9 @@ CREATE DATABASE _supabase_projeto_novo TEMPLATE _supabase_template;
    - META_PORT (range 4000-14000, até 20 tentativas)
    - Verifica se porta está livre com lsof
 
-6. Script gera JWT tokens
+6. Script gera JWT secret e tokens
+   - Gera JWT_SECRET único: openssl rand -base64 32
+   - Cria tokens anon e service_role com esse secret
    Ver seção "Conceitos Base" para detalhes sobre geração de tokens.
 
 7. Script cria estrutura de pastas
@@ -849,15 +1152,22 @@ CREATE DATABASE _supabase_projeto_novo TEMPLATE _supabase_template;
    Inclui todos os schemas, roles, extensions, functions e triggers.
 
 9. Script registra tenant no Realtime
-   Ver seção "Conceitos Base" para detalhes sobre replication slots.
    
    POST http://realtime:4000/api/tenants
    Body: {
-     name: "meu_projeto",
-     jwt_secret: "...",
-     db_name: "_supabase_meu_projeto",
-     slot_name: "supabase_realtime_replication_slot_meu_projeto"
+     "external_id": "meu_projeto",
+     "jwt_secret": "...",
+     "db_name": "_supabase_meu_projeto",
+     "db_host": "supabase-db",
+     "db_port": 5432,
+     "db_user": "supabase_admin",
+     "db_password": "...",
+     "slot_name": "supabase_realtime_replication_slot_meu_projeto"
    }
+   
+   Este é o slot principal do tenant. O Realtime também criará automaticamente
+   um segundo slot (supabase_realtime_messages_replication_slot_meu_projeto)
+   quando houver conexões WebSocket ativas para broadcast.
 
 10. Script registra tenant no Supavisor
     Ver seção "Conceitos Base" para detalhes sobre pools de conexão.
@@ -878,7 +1188,7 @@ CREATE DATABASE _supabase_projeto_novo TEMPLATE _supabase_template;
 
 13. API Python salva no banco sistema (postgres)
     INSERT INTO projects (
-      name, owner_email, 
+      name, owner_id, 
       anon_key, service_role,  -- criptografados com Fernet
       nginx_port, meta_port,
       ...
@@ -891,193 +1201,306 @@ CREATE DATABASE _supabase_projeto_novo TEMPLATE _supabase_template;
 
 ---
 
-## Traefik - Roteamento Dinâmico
+## Duplicação de Projeto
 
-### Como Funciona
+**With-Data:**
+- Copia estrutura completa
+- Copia todos os dados das tabelas
+- Copia arquivos do storage (com xattr preservados)
+- Uso: Backup, staging, testes
 
-Traefik monitora o Docker socket e lê labels dos containers automaticamente.
+### Processo Completo
 
-**Labels do projeto:**
-```yaml
-labels:
-  - "traefik.enable=true"
-  - "traefik.http.routers.supabase-nginx-meu_projeto.rule=PathPrefix(`/meu_projeto`)"
-  - "traefik.http.services.supabase-nginx-meu_projeto.loadbalancer.server.port=PORTA"
-  - "traefik.http.routers.supabase-nginx-meu_projeto.middlewares=strip-meu_projeto"
-  - "traefik.http.middlewares.strip-meu_projeto.stripprefix.prefixes=/meu_projeto"
+**Executado pelo script `duplicate_project.sh`:**
+
+```bash
+bash duplicate_project.sh projeto_original projeto_novo [with-data|schema-only]
 ```
 
 **Fluxo:**
 
 ```
-Requisição: GET /meu_projeto/rest/v1/tabela
-  ↓
-Traefik lê rule: PathPrefix(`/meu_projeto`)
-  ↓
-Aplica middleware: strip-meu_projeto (remove /meu_projeto)
-  ↓
-Envia para nginx-meu_projeto:PORTA
-  ↓
-Nginx do projeto recebe: GET /rest/v1/tabela
+1. Validações iniciais
+   - Verifica se projeto original existe
+   - Valida nome do novo projeto (minúsculas, sem ponto, não reservado)
+   - Verifica se novo projeto já existe
+
+2. Gera portas aleatórias
+   - NGINX_PORT (4000-14000, até 20 tentativas)
+   - META_PORT (4000-14000, até 20 tentativas)
+
+3. Gera novos JWT tokens
+   Ver seção "Conceitos Base" para detalhes sobre geração de tokens.
+   Cada projeto tem tokens únicos (iss diferente).
+
+4. Cria estrutura de pastas
+   servidor/projects/projeto_novo/
+   ├── docker-compose.yml
+   ├── .env
+   ├── Dockerfile
+   ├── nginx/
+   │   └── nginx_projeto_novo.conf
+   └── pooler/
+       └── pooler.exs
+
+5. Duplica database
+
+   A) Cria database vazio:
+      CREATE DATABASE _supabase_projeto_novo;
+   
+   B) Garante que roles existem:
+      - pgbouncer
+      - authenticator
+      - supabase_auth_admin
+      - supabase_storage_admin
+   
+   C) Faz dump do banco original:
+   
+      Schema-only:
+      - pg_dump --schema=auth --schema=storage --schema-only
+      - pg_dump --exclude-schema=auth --exclude-schema=storage --schema-only
+      - Copia dados de migrations (auth.schema_migrations, storage.migrations)
+      
+      With-data:
+      - pg_dump completo (schema + dados)
+   
+   D) Restaura dump no novo database:
+      psql -d _supabase_projeto_novo < dump.sql
+   
+   E) Marca migrations como executadas:
+      UPDATE auth.schema_migrations SET dirty = false;
+      UPDATE storage.migrations SET dirty = false;
+
+6. Copia storage (apenas with-data)
+   
+   Usa tar com preservação de xattr:
+   
+   cd projeto_original/storage
+   tar --xattrs --xattrs-include='*' --acls -cpf - . | \
+     (cd projeto_novo/storage && tar --xattrs --xattrs-include='*' --acls -xpf -)
+   
+   Flags importantes:
+   - --xattrs: Preserva extended attributes (metadados do Storage)
+   - --acls: Preserva permissões ACL
+   - -p: Preserva permissões, ownership, timestamps
+
+7. Registra tenant no Realtime
+   Ver seção "Conceitos Base" para detalhes sobre replication slots.
+   
+   POST http://realtime:4000/api/tenants
+   Body: {
+     name: "projeto_novo",
+     jwt_secret: "...",
+     db_name: "_supabase_projeto_novo",
+     slot_name: "supabase_realtime_replication_slot_projeto_novo"
+   }
+
+8. Registra tenant no Supavisor
+   Ver seção "Conceitos Base" para detalhes sobre pools de conexão.
+   
+   PUT http://pooler:4000/api/tenants/projeto_novo
+
+9. Sobe containers do novo projeto
+   cd servidor/projects/projeto_novo
+   docker compose -p projeto_novo \
+     --env-file ../../secrets/.env \
+     --env-file ../../.env \
+     --env-file .env \
+     up --build -d
+
+10. Traefik descobre automaticamente
+    - Lê labels Docker
+    - Registra rota: /projeto_novo → nginx-projeto_novo:NGINX_PORT
+
+11. API Python salva no banco sistema
+    INSERT INTO projects (
+      name, owner_id,
+      anon_key, service_role,  -- criptografados com Fernet
+      nginx_port, meta_port,
+      ...
+    )
 ```
+
+### Por Que Copiar Migrations?
+
+**Crítico para Auth e Storage não quebrarem:**
+
+```sql
+-- Copia histórico de migrations
+pg_dump --data-only \
+  -t 'auth.schema_migrations' \
+  -t 'storage.migrations'
+```
+
+Se não copiar:
+- GoTrue tenta rodar migrations novamente
+- Storage tenta rodar migrations novamente
+- Pode causar erros ou inconsistências
 
 ---
 
-## Serviços Compartilhados
+## Deleção de Projeto
 
-### Realtime (Global)
+### Segurança
 
-**Um único container atende todos os projetos.**
+A deleção de projeto requer autenticação em múltiplos níveis:
 
-**Modificação importante para multi-tenant:**
+**Senha de Deleção:**
+- Gerada automaticamente no `setup.sh`
+- Armazenada em: `servidor/.env` como `PROJECT_DELETE_PASSWORD`
+- Única para toda a instalação
+- Deve ser enviada no header `X-Delete-Password`
 
-O Realtime original do Supabase não suporta múltiplos projetos nativamente. A solução implementada modifica a função `replication_slot_name/1`:
+**Permissões:**
+- Apenas usuários do grupo `admin` podem deletar projetos
+- Validado pelo Nginx/Lua (`check_admin.lua`)
+- API Python valida novamente
 
-**Original:**
-```elixir
-def replication_slot_name(schema, table) do
-  "supabase_#{schema}_#{table}_replication_slot_#{slot_suffix()}"
-end
-```
+### Fluxo Completo
 
-**Modificado:**
-```elixir
-def replication_slot_name(%__MODULE__{table: table, schema: schema, tenant_id: tenant_id}) do
-  "supabase_#{schema}_#{table}_replication_slot_#{tenant_id}"
-end
-```
-
-**Como funciona:**
-
-1. Nginx do projeto injeta: `Host: meu_projeto.localhost`
-2. Realtime extrai `tenant_id` do header Host
-3. Usa tenant_id para construir nome do replication slot (ver seção "Conceitos Base")
-
-**Fluxo completo:**
+**Executado pela API Python, que chama `delete_project.sh`:**
 
 ```
-WebSocket: wss://servidor/projeto_x/realtime/v1
-  ↓
-Traefik roteia para nginx-projeto-x
-  ↓
-Nginx injeta: Host: projeto_x.localhost
-  ↓
-Proxy para Realtime global
-  ↓
-Realtime extrai tenant_id = "projeto_x"
-  ↓
-Conecta no database _supabase_projeto_x
-  ↓
-Usa slot específico do projeto (ver "Conceitos Base")
-  ↓
-Stream de mudanças específico do projeto
+1. Usuário clica em "Deletar Projeto" no Flutter
+   DELETE /api/projects/meu_projeto
+   Headers:
+     Remote-Email: (SHA256 hash)
+     Remote-Groups: admin
+     X-Delete-Password: senha_gerada_no_setup
+
+2. Nginx Studio valida permissões
+   - Verifica se método é DELETE
+   - Verifica se X-Delete-Password está presente
+   - Executa check_admin.lua (valida grupo admin)
+   - Executa admin_projects_delete_check.lua
+
+3. API Python valida credenciais
+   - Verifica se usuário está no grupo admin
+   - Valida senha com hmac.compare_digest()
+   - Verifica se PROJECT_DELETE_PASSWORD está configurado
+
+4. API Python pausa serviços críticos
+   docker pause realtime-dev.supabase-realtime
+   docker pause supabase-pooler
+   
+   Motivo: Evitar conexões ativas durante deleção
+
+5. API Python remove containers do projeto
+   - Lista containers com get_project_containers()
+   - Remove cada container: docker rm -f <container>
+
+6. API Python limpa registros do Realtime
+   DELETE FROM _realtime.extensions WHERE tenant_external_id = 'meu_projeto'
+   DELETE FROM _realtime.tenants WHERE external_id = 'meu_projeto'
+
+7. API Python aguarda 10 segundos
+   Garante que conexões sejam finalizadas
+
+8. API Python termina conexões ativas
+   SELECT pg_terminate_backend(pid)
+   FROM pg_stat_activity
+   WHERE datname = '_supabase_meu_projeto'
+     AND pid <> pg_backend_pid()
+
+9. API Python aguarda 2 segundos
+   Garante que conexões foram terminadas
+
+10. API Python dropa replication slots
+    Chama drop_supabase_replication_slots()
+    Remove slots: supabase_realtime_*_replication_slot_meu_projeto
+
+11. API Python dropa database
+    DROP DATABASE IF EXISTS "_supabase_meu_projeto"
+
+12. API Python limpa tabelas do sistema (database postgres)
+    DELETE FROM project_members WHERE project_id = <id>
+    DELETE FROM jobs WHERE project = 'meu_projeto'
+    DELETE FROM projects WHERE id = <id>
+
+13. API Python limpa registros do Supavisor
+    DELETE FROM _supavisor.users WHERE tenant_external_id = 'meu_projeto'
+    DELETE FROM _supavisor.tenants WHERE external_id = 'meu_projeto'
+
+14. API Python despausa serviços críticos
+    docker unpause realtime-dev.supabase-realtime
+    docker unpause supabase-pooler
+
+15. API Python chama delete_project.sh
+    bash delete_project.sh meu_projeto
+    
+    Script remove diretório físico:
+    rm -rf servidor/projects/meu_projeto/
+
+16. API Python valida deleção
+    - Verifica se database ainda existe
+    - Retorna erros se houver falhas parciais
+
+17. Resposta final
+    {
+      "project": "meu_projeto",
+      "status": "success" | "partial_success",
+      "message": "...",
+      "errors": [...]  // Se houver
+    }
 ```
 
-**Arquivo modificado:**
-- `servidor/volumes/realtime/replication_connection.ex`
-- Injetado no container Realtime durante build
+### O Que é Removido
 
-### Supavisor (Pooler)
+**Containers Docker:**
+- nginx-meu_projeto
+- gotrue-meu_projeto
+- rest-meu_projeto
+- storage-meu_projeto
+- meta-meu_projeto
+- imgproxy-meu_projeto
 
-**Um único container gerencia conexões de todos os projetos.**
+**Database PostgreSQL:**
+- _supabase_meu_projeto (database completo)
 
-Ver seção "Conceitos Base" para detalhes sobre como o roteamento multi-tenant funciona (sufixo do username, modos de pooling, configuração padrão).
+**Registros do Sistema:**
+- Tabela `projects`
+- Tabela `project_members`
+- Tabela `jobs`
+- Tabela `_realtime.tenants`
+- Tabela `_realtime.extensions`
+- Tabela `_supavisor.tenants`
+- Tabela `_supavisor.users`
 
-**Vantagens:**
+**Replication Slots:**
+- supabase_realtime_*_replication_slot_meu_projeto
 
-- Pool compartilhado entre projetos
-- Isolamento por tenant_id no username
-- Limites configuráveis por projeto
-- Suporta múltiplos modos de pooling
+**Arquivos Físicos:**
+- servidor/projects/meu_projeto/ (pasta completa)
+  - docker-compose.yml
+  - .env
+  - nginx/
+  - pooler/
+  - storage/ (todos os arquivos armazenados)
 
-### Edge Functions
+**Roteamento Traefik:**
+- Removido automaticamente quando containers são deletados
 
-**Compartilhadas entre projetos.**
+### Por Que Pausar Realtime e Supavisor?
 
-Localização: `servidor/volumes/functions/`
+Durante a deleção, conexões ativas podem causar:
+- Locks no database impedindo DROP DATABASE
+- Tentativas de reconexão durante a deleção
+- Erros de replication slot em uso
 
-Cada projeto pode ter sua pasta:
-```
-functions/
-├── main/          # Functions globais
-├── projeto_a/     # Functions do projeto A
-└── projeto_b/     # Functions do projeto B
-```
----
+Pausar os containers garante que:
+- Nenhuma nova conexão é criada
+- Conexões existentes podem ser terminadas
+- Deleção ocorre de forma limpa
 
-## Por Projeto
+### Tratamento de Erros
 
-### Postgres-Meta
+A API retorna `partial_success` se:
+- Containers não foram removidos completamente
+- Replication slots não foram dropados
+- Database ainda existe após DROP DATABASE
+- Script delete_project.sh falhou
 
-**Um container por projeto.**
-
-**O que é:**
-- API que expõe metadados do PostgreSQL
-- Usado exclusivamente pelo Supabase Studio
-
-**Responsabilidades:**
-- Listar tabelas, colunas, schemas
-- Consultar policies (RLS), functions, triggers
-- Fornecer informações para a interface do Studio
-- Cache de metadados para evitar queries pesadas
-
-**Como funciona:**
-```
-Studio precisa listar tabelas
-  ↓
-GET /api/platform/pg-meta/default/tables
-  ↓
-Nginx Studio injeta service_role
-  ↓
-Proxy para: https://servidor/projeto_x/meta/tables
-  ↓
-Postgres-Meta consulta information_schema
-  ↓
-Retorna JSON com lista de tabelas
-```
-
-**Conexão:**
-- Conecta direto no PostgreSQL (não usa Supavisor)
-- Precisa de acesso total ao information_schema
-- Cada projeto tem seu próprio container Meta
-
----
-
-## Isolamento e Segurança
-
-### Validação de Permissões
-
-**Nível 1: Authelia**
-- Valida credenciais do usuário
-- Retorna email e grupos do usuário
-
-**Nível 1.5: Nginx/Lua**
-- Hasheia o email com SHA256
-- Injeta headers: Remote-Email (hasheado), Remote-Groups
-
-**Nível 2: API Python**
-- Recebe email hasheado
-- Hasheia emails do banco para comparar
-- Valida se usuário é dono ou membro do projeto
-- Consulta tabela `project_members` no database `postgres`
-- Verifica role (admin ou member)
-
-**Nível 3: Nginx do Projeto**
-- Valida se Authorization header é válido
-- Verifica se é anon_key ou service_role do projeto
-
-**Nível 4: PostgREST/GoTrue**
-- Valida JWT signature com JWT_SECRET do projeto
-- Aplica Row Level Security (RLS) do PostgreSQL
-
-### O que Impede Acesso Não Autorizado
-
-**Usuário A não pode acessar projeto do Usuário B porque:**
-
-1. API Python valida membros antes de retornar service_role
-2. Cookie `supabase_project` é assinado
-3. Service_role é específica de cada projeto
-4. Nginx do projeto valida a apikey
+Todos os erros são retornados no array `errors` da resposta.
 
 ---
 
@@ -1106,7 +1529,7 @@ Traefik → Projetos (Máquina 2)
 ```
 
 **Nginx Studio acessa API Python:**
-- Via HTTP: `http://IP_EXTERNO:18000/api/...`
+- Via HTTP: `http://IP_EXTERNO/api/...`
 - Protegido por IP allowlist
 - Header: `X-Shared-Token: NGINX_SHARED_TOKEN`
 
@@ -1360,310 +1783,6 @@ SELECT maintain_log_partitions();
 
 ---
 
-## Duplicação de Projeto
-**With-Data:**
-- Copia estrutura completa
-- Copia todos os dados das tabelas
-- Copia arquivos do storage (com xattr preservados)
-- Uso: Backup, staging, testes
-
-### Processo Completo
-
-**Executado pelo script `duplicate_project.sh`:**
-
-```bash
-bash duplicate_project.sh projeto_original projeto_novo [with-data|schema-only]
-```
-
-**Fluxo:**
-
-```
-1. Validações iniciais
-   - Verifica se projeto original existe
-   - Valida nome do novo projeto (minúsculas, sem ponto, não reservado)
-   - Verifica se novo projeto já existe
-
-2. Gera portas aleatórias
-   - NGINX_PORT (4000-14000, até 20 tentativas)
-   - META_PORT (4000-14000, até 20 tentativas)
-
-3. Gera novos JWT tokens
-   Ver seção "Conceitos Base" para detalhes sobre geração de tokens.
-   Cada projeto tem tokens únicos (iss diferente).
-
-4. Cria estrutura de pastas
-   servidor/projects/projeto_novo/
-   ├── docker-compose.yml
-   ├── .env
-   ├── Dockerfile
-   ├── nginx/
-   │   └── nginx_projeto_novo.conf
-   └── pooler/
-       └── pooler.exs
-
-5. Duplica database
-
-   A) Cria database vazio:
-      CREATE DATABASE _supabase_projeto_novo;
-   
-   B) Garante que roles existem:
-      - pgbouncer
-      - authenticator
-      - supabase_auth_admin
-      - supabase_storage_admin
-   
-   C) Faz dump do banco original:
-   
-      Schema-only:
-      - pg_dump --schema=auth --schema=storage --schema-only
-      - pg_dump --exclude-schema=auth --exclude-schema=storage --schema-only
-      - Copia dados de migrations (auth.schema_migrations, storage.migrations)
-      
-      With-data:
-      - pg_dump completo (schema + dados)
-   
-   D) Restaura dump no novo database:
-      psql -d _supabase_projeto_novo < dump.sql
-   
-   E) Marca migrations como executadas:
-      UPDATE auth.schema_migrations SET dirty = false;
-      UPDATE storage.migrations SET dirty = false;
-
-6. Copia storage (apenas with-data)
-   
-   Usa tar com preservação de xattr:
-   
-   cd projeto_original/storage
-   tar --xattrs --xattrs-include='*' --acls -cpf - . | \
-     (cd projeto_novo/storage && tar --xattrs --xattrs-include='*' --acls -xpf -)
-   
-   Flags importantes:
-   - --xattrs: Preserva extended attributes (metadados do Storage)
-   - --acls: Preserva permissões ACL
-   - -p: Preserva permissões, ownership, timestamps
-
-7. Registra tenant no Realtime
-   Ver seção "Conceitos Base" para detalhes sobre replication slots.
-   
-   POST http://realtime:4000/api/tenants
-   Body: {
-     name: "projeto_novo",
-     jwt_secret: "...",
-     db_name: "_supabase_projeto_novo",
-     slot_name: "supabase_realtime_replication_slot_projeto_novo"
-   }
-
-8. Registra tenant no Supavisor
-   Ver seção "Conceitos Base" para detalhes sobre pools de conexão.
-   
-   PUT http://pooler:4000/api/tenants/projeto_novo
-
-9. Sobe containers do novo projeto
-   cd servidor/projects/projeto_novo
-   docker compose -p projeto_novo \
-     --env-file ../../secrets/.env \
-     --env-file ../../.env \
-     --env-file .env \
-     up --build -d
-
-10. Traefik descobre automaticamente
-    - Lê labels Docker
-    - Registra rota: /projeto_novo → nginx-projeto_novo:NGINX_PORT
-
-11. API Python salva no banco sistema
-    INSERT INTO projects (
-      name, owner_email,
-      anon_key, service_role,  -- criptografados com Fernet
-      nginx_port, meta_port,
-      ...
-    )
-```
-
-
-
-### Por Que Copiar Migrations?
-
-**Crítico para Auth e Storage não quebrarem:**
-
-```sql
--- Copia histórico de migrations
-pg_dump --data-only \
-  -t 'auth.schema_migrations' \
-  -t 'storage.migrations'
-```
-
-Se não copiar:
-- GoTrue tenta rodar migrations novamente
-- Storage tenta rodar migrations novamente
-- Pode causar erros ou inconsistências
-
----
-
-## Deleção de Projeto
-
-### Segurança
-
-A deleção de projeto requer autenticação em múltiplos níveis:
-
-**Senha de Deleção:**
-- Gerada automaticamente no `setup.sh`
-- Armazenada em: `servidor/.env` como `PROJECT_DELETE_PASSWORD`
-- Única para toda a instalação
-- Deve ser enviada no header `X-Delete-Password`
-
-**Permissões:**
-- Apenas usuários do grupo `admin` podem deletar projetos
-- Validado pelo Nginx/Lua (`check_admin.lua`)
-- API Python valida novamente
-
-### Fluxo Completo
-
-**Executado pela API Python, que chama `delete_project.sh`:**
-
-```
-1. Usuário clica em "Deletar Projeto" no Flutter
-   DELETE /api/projects/meu_projeto
-   Headers:
-     Remote-Email: (SHA256 hash)
-     Remote-Groups: admin
-     X-Delete-Password: senha_gerada_no_setup
-
-2. Nginx Studio valida permissões
-   - Verifica se método é DELETE
-   - Verifica se X-Delete-Password está presente
-   - Executa check_admin.lua (valida grupo admin)
-   - Executa admin_projects_delete_check.lua
-
-3. API Python valida credenciais
-   - Verifica se usuário está no grupo admin
-   - Valida senha com hmac.compare_digest()
-   - Verifica se PROJECT_DELETE_PASSWORD está configurado
-
-4. API Python pausa serviços críticos
-   docker pause realtime-dev.supabase-realtime
-   docker pause supabase-pooler
-   
-   Motivo: Evitar conexões ativas durante deleção
-
-5. API Python remove containers do projeto
-   - Lista containers com get_project_containers()
-   - Remove cada container: docker rm -f <container>
-
-6. API Python limpa registros do Realtime
-   DELETE FROM _realtime.extensions WHERE tenant_external_id = 'meu_projeto'
-   DELETE FROM _realtime.tenants WHERE external_id = 'meu_projeto'
-
-7. API Python aguarda 10 segundos
-   Garante que conexões sejam finalizadas
-
-8. API Python termina conexões ativas
-   SELECT pg_terminate_backend(pid)
-   FROM pg_stat_activity
-   WHERE datname = '_supabase_meu_projeto'
-     AND pid <> pg_backend_pid()
-
-9. API Python aguarda 2 segundos
-   Garante que conexões foram terminadas
-
-10. API Python dropa replication slots
-    Chama drop_supabase_replication_slots()
-    Remove slots: supabase_realtime_*_replication_slot_meu_projeto
-
-11. API Python dropa database
-    DROP DATABASE IF EXISTS "_supabase_meu_projeto"
-
-12. API Python limpa tabelas do sistema (database postgres)
-    DELETE FROM project_members WHERE project_id = <id>
-    DELETE FROM jobs WHERE project = 'meu_projeto'
-    DELETE FROM projects WHERE id = <id>
-
-13. API Python limpa registros do Supavisor
-    DELETE FROM _supavisor.users WHERE tenant_external_id = 'meu_projeto'
-    DELETE FROM _supavisor.tenants WHERE external_id = 'meu_projeto'
-
-14. API Python despausa serviços críticos
-    docker unpause realtime-dev.supabase-realtime
-    docker unpause supabase-pooler
-
-15. API Python chama delete_project.sh
-    bash delete_project.sh meu_projeto
-    
-    Script remove diretório físico:
-    rm -rf servidor/projects/meu_projeto/
-
-16. API Python valida deleção
-    - Verifica se database ainda existe
-    - Retorna erros se houver falhas parciais
-
-17. Resposta final
-    {
-      "project": "meu_projeto",
-      "status": "success" | "partial_success",
-      "message": "...",
-      "errors": [...]  // Se houver
-    }
-```
-
-### O Que é Removido
-
-**Containers Docker:**
-- nginx-meu_projeto
-- gotrue-meu_projeto
-- rest-meu_projeto
-- storage-meu_projeto
-- meta-meu_projeto
-- imgproxy-meu_projeto
-
-**Database PostgreSQL:**
-- _supabase_meu_projeto (database completo)
-
-**Registros do Sistema:**
-- Tabela `projects`
-- Tabela `project_members`
-- Tabela `jobs`
-- Tabela `_realtime.tenants`
-- Tabela `_realtime.extensions`
-- Tabela `_supavisor.tenants`
-- Tabela `_supavisor.users`
-
-**Replication Slots:**
-- supabase_realtime_*_replication_slot_meu_projeto
-
-**Arquivos Físicos:**
-- servidor/projects/meu_projeto/ (pasta completa)
-  - docker-compose.yml
-  - .env
-  - nginx/
-  - pooler/
-  - storage/ (todos os arquivos armazenados)
-
-**Roteamento Traefik:**
-- Removido automaticamente quando containers são deletados
-
-### Por Que Pausar Realtime e Supavisor?
-
-Durante a deleção, conexões ativas podem causar:
-- Locks no database impedindo DROP DATABASE
-- Tentativas de reconexão durante a deleção
-- Erros de replication slot em uso
-
-Pausar os containers garante que:
-- Nenhuma nova conexão é criada
-- Conexões existentes podem ser terminadas
-- Deleção ocorre de forma limpa
-
-### Tratamento de Erros
-
-A API retorna `partial_success` se:
-- Containers não foram removidos completamente
-- Replication slots não foram dropados
-- Database ainda existe após DROP DATABASE
-- Script delete_project.sh falhou
-
-Todos os erros são retornados no array `errors` da resposta.
-
----
-
 ## Limitações e Escalabilidade
 
 ### Limitações Atuais
@@ -1715,34 +1834,6 @@ Todos os erros são retornados no array `errors` da resposta.
 ┌──────────────────┐
 │ Supabase Studio  │ 8. Interface de gerenciamento
 └──────────────────┘
-```
-
-### Fluxo de Requisição
-
-```
-┌────────┐
-│ Studio │
-└───┬────┘
-    │ GET /rest/v1/tabela
-    ▼
-┌─────────────┐
-│ Nginx/Lua   │ Lê cookie, busca service_role, injeta Authorization
-└─────┬───────┘
-      │ GET /projeto_x/rest/v1/tabela + Authorization
-      ▼
-┌─────────┐
-│ Traefik │ Roteia baseado em PathPrefix
-└────┬────┘
-     │ GET /rest/v1/tabela (prefixo removido)
-     ▼
-┌──────────────┐
-│ Nginx Projeto│ Valida apikey
-└──────┬───────┘
-       │ GET /tabela
-       ▼
-┌───────────┐
-│ PostgREST │ Consulta database via Supavisor
-└───────────┘
 ```
 
 ---

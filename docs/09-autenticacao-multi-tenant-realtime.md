@@ -6,7 +6,7 @@ Este documento explica as modificações feitas no Realtime para suportar autent
 
 ## Contexto da Mudança
 
-O Realtime foi modificado para suportar autenticação multi-tenant, permitindo que cada projeto tenha seu próprio `jwt_secret` ao invés de usar apenas um secret global compartilhado.
+O Realtime foi modificado para suportar autenticação multi-tenant, permitindo que cada projeto tenha seu próprio `jwt_secret` ao invés de usar apenas um secret global compartilhado. Esta é uma modificação crítica que viabiliza o isolamento entre projetos.
 
 ### Problema Original
 
@@ -14,11 +14,20 @@ No Supabase original, o Realtime usa um único `JWT_SECRET` global para validar 
 
 - Todos os projetos compartilham o mesmo secret
 - Um token válido de um projeto poderia ser usado em outro projeto
-- Não há isolamento real de segurança entre projetos
+- Não há isolamento real de entre projetos
+- Comprometimento de um secret afeta todos os projetos
 
 ### Solução Implementada
 
-A solução implementa um sistema de autenticação em cascata que tenta validar o token usando o `jwt_secret` específico do tenant primeiro, e só usa o secret global como fallback.
+A solução implementa um sistema de autenticação em cascata que **inverte o fluxo original**: ao invés de validar o token primeiro e depois identificar o tenant, o sistema agora identifica o tenant primeiro, busca seu JWT secret específico, e só então valida o token.
+
+**Fluxo invertido:**
+```
+Original: Token → Validação (secret global) → Identificação do tenant
+Novo:     Identificação do tenant → Busca secret do tenant → Validação do token
+```
+
+Isso permite que cada projeto tenha seu próprio JWT secret isolado, mantendo compatibilidade com o secret global como fallback para operações administrativas.
 
 ---
 
