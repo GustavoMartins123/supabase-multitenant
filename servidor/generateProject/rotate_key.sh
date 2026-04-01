@@ -57,20 +57,29 @@ source "$PROJECT_ROOT/.env"
 set +a
 
 [[ -z "${SERVER_URL:-}" ]] && die "SERVER_URL ausente"
+[[ -z "${HOST_PROJECT_ROOT:-}" ]] && die "HOST_PROJECT_ROOT ausente"
 
 PROJECT_ID="${1:-}"
 
 [[ -z "$PROJECT_ID" ]] && die "Uso: $0 <project_id>"
 
 PROJECT_DIR="$PROJECT_ROOT/projects/$PROJECT_ID"
-[[ -d "$PROJECT_DIR" ]] || die "Projeto '$PROJECT_ID' não encontrado"
+[[ -d "$PROJECT_DIR" ]] || die "Projeto '$PROJECT_ID' não encontrado em $PROJECT_DIR"
 
-source "$PROJECT_DIR/.env"
-NGINX_PORT="${NGINX_PORT:-}"
-META_PORT="${META_PORT:-}"
-CONFIG_TOKEN="${CONFIG_TOKEN_PROJETO:-}"
+NGINX_PORT=$(grep "^NGINX_PORT=" "$PROJECT_DIR/.env" | cut -d'=' -f2)
+META_PORT=$(grep "^META_PORT=" "$PROJECT_DIR/.env" | cut -d'=' -f2)
+CONFIG_TOKEN=$(grep "^CONFIG_TOKEN_PROJETO=" "$PROJECT_DIR/.env" | cut -d'=' -f2)
+JWT_SECRET_PROJETO=$(grep "^JWT_SECRET_PROJETO=" "$PROJECT_DIR/.env" | cut -d'=' -f2)
+PROJECT_UUID=$(grep "^PROJECT_UUID=" "$PROJECT_DIR/.env" | cut -d'=' -f2)
+
 [[ -z "$NGINX_PORT" ]] && die "NGINX_PORT não encontrado no .env do projeto"
 [[ -z "$META_PORT" ]]  && die "META_PORT não encontrado no .env do projeto"
+[[ -z "$JWT_SECRET_PROJETO" ]]  && die "JWT_SECRET_PROJETO não encontrado no .env do projeto"
+
+if [[ -z "$PROJECT_UUID" ]]; then
+    echo "⚠️  PROJECT_UUID não encontrado no .env - usando PROJECT_ID como fallback (projeto antigo)"
+    PROJECT_UUID="$PROJECT_ID"
+fi
 
 generate_jwt() {
   local payload="$1" secret="$2"
@@ -93,12 +102,13 @@ escape_sed_replacement() {
 }
 
 now=$(date +%s)
-exp=$((now + (8 * 365 * 24 * 3600)))
+exp=$((now + (3 * 30 * 24 * 3600)))
 
 echo "🔄 Gerando novos tokens para projeto $PROJECT_ID..."
+echo "   Usando issuer: $PROJECT_UUID"
 
-NEW_ANON=$(generate_jwt    "{\"role\":\"anon\",\"iss\":\"$PROJECT_ID\",\"iat\":$now,\"exp\":$exp}"         "$JWT_SECRET_PROJETO")
-NEW_SERVICE=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$PROJECT_ID\",\"iat\":$now,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
+NEW_ANON=$(generate_jwt    "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now,\"exp\":$exp}"         "$JWT_SECRET_PROJETO")
+NEW_SERVICE=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
 PUBLIC_BASE_URL="$(normalize_public_base_url "$SERVER_URL")"
 PROJECT_PUBLIC_URL="$PUBLIC_BASE_URL/$PROJECT_ID"
 

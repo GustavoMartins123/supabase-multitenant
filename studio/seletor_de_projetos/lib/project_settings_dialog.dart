@@ -9,6 +9,7 @@ import 'session.dart';
 import 'data/project_repository.dart';
 import 'providers/config_provider.dart';
 import 'providers/project_settings_provider.dart';
+import 'providers/project_list_provider.dart';
 import 'services/projectService.dart';
 import 'dialogs/transferProjectDialog.dart';
 
@@ -130,8 +131,12 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     try {
       final data =
           await ref.read(projectRepositoryProvider).rotateKey(widget.ref);
-      setState(() => _currentAnonKey = data['anon_key']);
+      final newKey = data['anon_key'];
+      setState(() => _currentAnonKey = newKey);
       await ref.read(projectRepositoryProvider).cacheBust(widget.ref);
+      
+      ref.read(projectListProvider.notifier).updateProjectKey(widget.ref, newKey);
+      
       _showSnack('Nova chave gerada!', SupabaseColors.success);
     } catch (e) {
       _showSnack('Erro ao gerar chave: $e', SupabaseColors.error);

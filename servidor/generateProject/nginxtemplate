@@ -328,7 +328,7 @@ http {
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection $connection_upgrade;
-            proxy_set_header Host "{{project_id}}.localhost"; 
+            proxy_set_header Host "{{project_uuid}}.localhost"; 
             proxy_read_timeout 86400;
 
             add_header 'Access-Control-Allow-Origin' $cors_origin always;

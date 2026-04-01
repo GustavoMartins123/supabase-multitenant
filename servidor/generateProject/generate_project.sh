@@ -91,7 +91,9 @@ set +a
 [[ -z "${SERVER_URL:-}" ]] && { echo "SERVER_URL ausente"; exit 1; }
 
 PROJECT_ID="${1:-}"
-[[ -z "$PROJECT_ID" ]] && { echo "Uso: $0 <project_id>"; exit 1; }
+PROJECT_UUID="${2:-}"
+[[ -z "$PROJECT_ID" ]] && { echo "Uso: $0 <project_id> <project_uuid>"; exit 1; }
+[[ -z "$PROJECT_UUID" ]] && { echo "Uso: $0 <project_id> <project_uuid>"; exit 1; }
 
 PROJECT_ID_LOWER=$(echo "$PROJECT_ID" | tr '[:upper:]' '[:lower:]')
 
@@ -203,13 +205,14 @@ PROJECT_AUTH_EXTERNAL_URL="$PROJECT_PUBLIC_URL/auth/v1"
 
 template_to_file() {
   local template="$1" outfile="$2"
-  local anon_key service_role_key project_id nginx_port meta_port config_token jwt_secret
+  local anon_key service_role_key project_id project_uuid nginx_port meta_port config_token jwt_secret
   local server_url public_base_url project_public_url project_auth_external_url project_root
   local logflare_api_key
 
   anon_key="$(escape_sed_replacement "$ANON_TOKEN")"
   service_role_key="$(escape_sed_replacement "$SERVICE_TOKEN")"
   project_id="$(escape_sed_replacement "$PROJECT_ID")"
+  project_uuid="$(escape_sed_replacement "$PROJECT_UUID")"
   nginx_port="$(escape_sed_replacement "$NGINX_PORT")"
   meta_port="$(escape_sed_replacement "$META_PORT")"
   config_token="$(escape_sed_replacement "$CONFIG_TOKEN_PROJETO")"
@@ -225,6 +228,7 @@ template_to_file() {
     -e "s|{{anon_key}}|$anon_key|g" \
     -e "s|{{service_role_key}}|$service_role_key|g" \
     -e "s|{{project_id}}|$project_id|g" \
+    -e "s|{{project_uuid}}|$project_uuid|g" \
     -e "s|{{nginx_port}}|$nginx_port|g" \
     -e "s|{{meta_port}}|$meta_port|g" \
     -e "s|{{config_token}}|$config_token|g" \
@@ -246,8 +250,8 @@ realtime_tenant() {
     -H 'Authorization: Bearer $ANON_TOKEN' \
     -d '{
       \"tenant\":{
-        \"name\":\"$PROJECT_ID\",
-        \"external_id\":\"$PROJECT_ID\",
+        \"name\":\"$PROJECT_UUID\",
+        \"external_id\":\"$PROJECT_UUID\",
         \"jwt_secret\":\"$JWT_SECRET_PROJETO\",
         \"max_concurrent_users\":${MAX_CONCURRENT_USERS:-200},
         \"extensions\":[{
@@ -274,8 +278,8 @@ realtime_tenant() {
     echo "⚠️  AVISO: Falha ao criar tenant Realtime (HTTP $http_code)"
     echo "   Body: $body"
   else
-    register_realtime_tenant "$PROJECT_ID"
-    echo "✔️  Realtime tenant criado"
+    register_realtime_tenant "$PROJECT_UUID"
+    echo "✔️  Realtime tenant criado com UUID: $PROJECT_UUID"
   fi
 }
 
@@ -328,13 +332,16 @@ supavisor_tenant() {
   if [[ -z "${JWT_SECRET_PROJETO:-}" ]]; then
       JWT_SECRET_PROJETO=$(openssl rand -base64 32 | tr '/+' '_-' | tr -d '\n\r')
   fi
+
+echo "✔️  UUID do projeto: $PROJECT_UUID"
+
 now_epoch=$(date +%s)
 iat=$now_epoch
-exp=$((now_epoch + (8 * 365 * 24 * 3600)))
+exp=$((now_epoch + (3 * 30 * 24 * 3600)))
 
-ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_ID\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
-SERVICE_TOKEN=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$PROJECT_ID\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
-GLOBAL_ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_ID\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET")
+ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
+SERVICE_TOKEN=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$PROJECT_UUID\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
+GLOBAL_ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":$iat,\"exp\":$exp}" "$JWT_SECRET")
 CONFIG_TOKEN_PROJETO=$(openssl rand -hex 32 | tr -d '\n\r')
 
 init_transaction

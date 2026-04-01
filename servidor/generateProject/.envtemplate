@@ -1,4 +1,5 @@
 PROJECT_ID={{project_id}}
+PROJECT_UUID={{project_uuid}}
 POSTGRES_DATABASE=_supabase_{{project_id}}
 PROJECT_ROOT={{project_root}}
 

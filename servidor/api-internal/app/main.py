@@ -273,9 +273,11 @@ async def _duplicate_and_store_keys(job_id: str, original_name: str, new_name: s
 
     try:
         copy_mode = "with-data" if copy_data else "schema-only"
+        
+        project_uuid = str(uuid.uuid4())
 
         proc = await asyncio.create_subprocess_exec(
-            "bash", str(DUPLICATE_SCRIPT), original_name, new_name, copy_mode,
+            "bash", str(DUPLICATE_SCRIPT), original_name, new_name, copy_mode, project_uuid,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
@@ -340,6 +342,34 @@ async def execute_delete_script(project_name: str):
     stdout, stderr = await proc.communicate()
     success = proc.returncode == 0
     return success, stdout.decode(), stderr.decode()
+
+def get_project_uuid_from_env(project_name: str) -> Optional[str]:
+    """
+    Tenta ler o PROJECT_UUID do .env do projeto.
+    Retorna None se não encontrar (projeto antigo).
+    
+    Dentro do Docker, os projetos estão montados em /docker/projects
+    """
+    try:
+        env_path = pathlib.Path("/docker/projects") / project_name / ".env"
+        
+        if not env_path.exists():
+            print(f"Arquivo .env não encontrado em: {env_path}")
+            return None
+        
+        with open(env_path, 'r') as f:
+            for line in f:
+                if line.startswith('PROJECT_UUID='):
+                    uuid_value = line.split('=', 1)[1].strip()
+                    if uuid_value:
+                        print(f"PROJECT_UUID encontrado: {uuid_value}")
+                        return uuid_value
+        
+        print(f"PROJECT_UUID não encontrado no .env de {project_name}")
+        return None
+    except Exception as e:
+        print(f"Erro ao ler PROJECT_UUID do .env: {e}")
+        return None
 
 async def drop_supabase_replication_slots(
     conn: asyncpg.Connection, project_name: str
@@ -419,6 +449,14 @@ async def delete_project(
 
     errors = []
     db_name = f"_supabase_{project_name}"
+    
+    project_uuid = get_project_uuid_from_env(project_name)
+    tenant_external_id = project_uuid if project_uuid else project_name
+    
+    if project_uuid:
+        print(f"Deletando projeto com UUID: {project_uuid}")
+    else:
+        print(f"Deletando projeto antigo (sem UUID), usando project_name: {project_name}")
 
     await asyncio.create_subprocess_exec("docker", "pause", "realtime-dev.supabase-realtime")
     await asyncio.create_subprocess_exec("docker", "pause", "supabase-pooler")
@@ -434,8 +472,16 @@ async def delete_project(
         await asyncio.sleep(1)
 
         async with pool.acquire() as conn:
-            await conn.execute('DELETE FROM _realtime.extensions WHERE tenant_external_id = $1', project_name)
-            await conn.execute('DELETE FROM _realtime.tenants WHERE external_id = $1', project_name)
+            deleted_ext = await conn.execute(
+                'DELETE FROM _realtime.extensions WHERE tenant_external_id = $1', 
+                tenant_external_id
+            )
+            deleted_tenant = await conn.execute(
+                'DELETE FROM _realtime.tenants WHERE external_id = $1', 
+                tenant_external_id
+            )
+            
+            print(f"Realtime cleanup: extensions={deleted_ext}, tenants={deleted_tenant}")
 
             await asyncio.sleep(10)
 
@@ -687,8 +733,10 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: str):
     await set_status("running")
 
     try:
+        project_uuid = str(uuid.uuid4())
+        
         proc = await asyncio.create_subprocess_exec(
-            "bash", str(SCRIPT), project_name,
+            "bash", str(SCRIPT), project_name, project_uuid,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )

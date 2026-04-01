@@ -81,4 +81,16 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
     final current = state.value ?? [];
     state = AsyncData(current.where((p) => p['name'] != name).toList());
   }
+
+  void updateProjectKey(String projectRef, String newAnonKey) {
+    final current = state.value ?? [];
+    state = AsyncData(
+      current.map((p) {
+        if (p['name'] == projectRef) {
+          return {...p, 'anon_token': newAnonKey};
+        }
+        return p;
+      }).toList(),
+    );
+  }
 }

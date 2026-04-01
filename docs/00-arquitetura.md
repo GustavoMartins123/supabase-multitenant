@@ -53,7 +53,7 @@ JWT_SECRET_PROJETO=$(openssl rand -base64 32 | tr '/+' '_-' | tr -d '\n\r')
 
 **Geração dos Tokens:**
 - Algoritmo: HS256 (HMAC SHA256)
-- Validade: 8 anos
+- Validade: 3 meses
 - Roles: `anon` e `service_role`
 - Secret: Único por projeto
 
@@ -653,7 +653,7 @@ map $http_apikey $is_admin_key {
 
 **Fluxo de validação:**
 
-O Nginx valida a chave de formas diferentes conforme o tipo de rota:
+O Nginx do projeto valida a chave de formas diferentes conforme o tipo de rota:
 
 1. **Rotas HTTP** (`/auth/v1/`, `/rest/v1/`, `/storage/v1/`, `/functions/v1/`, `/meta/`)
    - Lê a chave no header `apikey` (`$http_apikey`)

@@ -395,7 +395,7 @@ Trocar o JWT_SECRET causa problemas sérios:
 - Precisa sincronizar em múltiplos lugares (Realtime, sistema, projeto)
 
 **Quando rotacionar tokens é útil:**
-- Expiração programada (tokens com 8 anos de validade)
+- Expiração programada
 - Suspeita de vazamento de token específico
 - Pode ter período de transição (aceitar token antigo e novo)
 
