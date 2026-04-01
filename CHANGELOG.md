@@ -4,6 +4,56 @@ Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 
 O formato deste arquivo segue as diretrizes do [Keep a Changelog](https://keepachangelog.com/) e este projeto adota [Versionamento Semântico](https://semver.org/).
 
+## [1.1.0] - 2026-04-01
+
+### Adicionado
+- Sistema de UUID para identificação de projetos multi-tenant
+- PROJECT_UUID salvo no .env de cada projeto
+- Tenant do Realtime agora usa UUID como external_id
+- Fallback para project_name em projetos antigos
+- Função `get_project_uuid_from_env()` para leitura de UUID do .env
+- Método `updateProjectKey()` no ProjectListNotifier para atualização cirúrgica de cache
+
+### Alterado
+- Expiração de tokens JWT reduzida de 8 anos para 3 meses
+- Issuer (iss) dos JWTs agora usa UUID em vez de project_name
+- UUID gerado no Python e passado como argumento para scripts shell
+- Nginx usa UUID no header Host do websocket Realtime
+- Rotate key mantém UUID existente
+- Deleção de projetos usa UUID para Realtime e project_name para Supavisor
+- Cache da ANON_KEY no Flutter agora atualiza corretamente após rotação
+
+### Corrigido
+- Bug de cache no Flutter onde ANON_KEY não atualizava após rotação
+- Caminho de leitura do .env dentro do Docker (/docker/projects)
+
+## [1.0.10] - 2026-03-23 a 2026-03-31
+
+### Adicionado
+- Sistema completo de templates de email para Auth (invite, recovery, magic link, confirmation, email change)
+- Documentação de autenticação multi-tenant com validação JWT por tenant
+- Sistema de transações com rollback automático nos scripts de geração
+- API GeoIP self-hosted com fallback para GitHub
+- Middleware de validação de token compartilhado para segurança da API
+- Componentes Elixir customizados para Realtime
+- Token JWT global para autenticação do Supavisor
+
+### Alterado
+- Refatoração da UI de gerenciamento com providers e componentes
+- Melhorias no fluxo de convite e recuperação de senha
+- Tratamento de erros nos scripts shell usando return em vez de exit
+- Atualização do banco de dados GeoIP com fallback automático
+- Expansão da documentação de arquitetura com detalhes de roteamento Nginx
+- Modo de transferência de projetos melhorado
+
+### Corrigido
+- Caminho de montagem do volume recovery.html no Nginx
+- Tratamento de CRLF em scripts shell
+- Documentação sobre erro de CRLF adicionada
+
+### Removido
+- Variáveis de ambiente não utilizadas do pooler proxy port
+
 ## [1.0.9] - 2026-03-20
 
 ### Adicionado
