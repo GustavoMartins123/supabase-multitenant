@@ -1361,18 +1361,26 @@ async def get_project_ai_functions(
         })
     return functions
 
-@app.post("/api/projects/{ref}/query")
-async def execute_project_query(
+@app.post("/api/projects/{ref}/execute-function")
+async def execute_project_function(
     ref: str,
-    body: Dict[str, str],
+    body: Dict[str, Any],
     user: str = Header(..., alias="Remote-Email"),
     pool=Depends(get_pool)
 ):
     ref = validate_project_id(ref)
-    query = body.get("query")
     
-    if not query:
-        raise HTTPException(400, "query is required")
+    function_name = body.get("function_name")
+    arguments = body.get("arguments", {})
+    
+    if not function_name:
+        raise HTTPException(400, "function_name is required")
+    
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', function_name):
+        raise HTTPException(400, "Invalid function name")
+    
+    if not isinstance(arguments, dict):
+        raise HTTPException(400, "arguments must be an object with named parameters")
 
     user_id = user.lower().strip()
     async with pool.acquire() as conn:
@@ -1385,11 +1393,70 @@ async def execute_project_query(
     if not has_access:
         raise HTTPException(404, "Project not found or access denied")
 
+    proj_conn = None
     try:
         proj_conn = await get_project_conn(ref)
-        rows = await proj_conn.fetch(query)
-        await proj_conn.close()
-    except Exception as e:
-        raise HTTPException(400, f"Query error: {str(e)}")
+        
+        func_info = await proj_conn.fetchrow("""
+            SELECT 
+                p.proname as name,
+                pg_get_function_arguments(p.oid) as args,
+                obj_description(p.oid, 'pg_proc') as comment
+            FROM pg_proc p
+            JOIN pg_namespace n ON p.pronamespace = n.oid
+            WHERE n.nspname = 'public' 
+            AND p.proname = $1
+        """, function_name)
+        
+        if not func_info:
+            raise HTTPException(404, f"Function '{function_name}' not found in public schema")
+        
+        comment = func_info['comment'] or ""
+        ai_tags = ["[ai]", "@ai-tool", "@ai", "#ai"]
+        has_ai_tag = any(tag in comment.lower() for tag in ai_tags)
+        
+        if not has_ai_tag:
+            raise HTTPException(403, f"Function '{function_name}' is not tagged as [AI] and cannot be executed")
+        
+        func_args = func_info['args'] or ""
+        param_names = []
+        optional_params = []
 
-    return [dict(r) for r in rows]
+        for arg in func_args.split(','):
+            arg = arg.strip()
+            if not arg:
+                continue
+            parts = arg.split()
+            if not parts:
+                continue
+            param_name = parts[0]
+            if 'DEFAULT' in arg.upper():
+                optional_params.append(param_name)
+            else:
+                param_names.append(param_name)
+
+        for param_name in param_names:
+            if param_name not in arguments:
+                raise HTTPException(400, f"Missing required parameter: {param_name}")
+
+        ordered_args = []
+        for param_name in param_names:
+            ordered_args.append(arguments[param_name])
+        for param_name in optional_params:
+            if param_name in arguments:
+                ordered_args.append(arguments[param_name])
+        
+        placeholders = ", ".join(f"${i+1}" for i in range(len(ordered_args)))
+        query = f"SELECT {function_name}({placeholders}) as result"
+        
+        rows = await proj_conn.fetch(query, *ordered_args)
+        
+        return [dict(r) for r in rows]
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"Function execution error: {str(e)}")
+    finally:
+        if proj_conn:
+            await proj_conn.close()

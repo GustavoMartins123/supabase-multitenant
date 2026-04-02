@@ -1,5 +1,5 @@
 -- project_db_helper.lua
--- Módulo para buscar funções do projeto via API postgres-meta
+-- Módulo para buscar funções do projeto via API
 -- Usa HTTP em vez de conexão direta ao PostgreSQL
 
 local http = require("resty.http")
@@ -213,41 +213,14 @@ function _M.execute_function(project_ref, func_name, arguments)
     end
     
     local safe_name = func_name:gsub("[^%w_]", "")
-    
-    local args_list = {}
-    if arguments and type(arguments) == "table" then
-        if #arguments > 0 then
-            for i, v in ipairs(arguments) do
-                if type(v) == "string" then
-                    table.insert(args_list, "'" .. v:gsub("'", "''") .. "'")
-                elseif type(v) == "number" then
-                    table.insert(args_list, tostring(v))
-                elseif type(v) == "boolean" then
-                    table.insert(args_list, v and "true" or "false")
-                elseif type(v) == "table" then
-                    table.insert(args_list, "'" .. cjson.encode(v):gsub("'", "''") .. "'::jsonb")
-                end
-            end
-        else
-            for k, v in pairs(arguments) do
-                if type(v) == "string" then
-                    table.insert(args_list, "'" .. v:gsub("'", "''") .. "'")
-                elseif type(v) == "number" then
-                    table.insert(args_list, tostring(v))
-                elseif type(v) == "boolean" then
-                    table.insert(args_list, v and "true" or "false")
-                elseif type(v) == "table" then
-                    table.insert(args_list, "'" .. cjson.encode(v):gsub("'", "''") .. "'::jsonb")
-                end
-            end
-        end
+    if safe_name ~= func_name then
+        return nil, "Invalid function name"
     end
     
-    local query = string.format(
-        "SELECT %s(%s) as result",
-        safe_name,
-        table.concat(args_list, ", ")
-    )
+    local args_object = {}
+    if arguments and type(arguments) == "table" then
+        args_object = arguments
+    end
     
     local httpc = http.new()
     httpc:set_timeout(30000)
@@ -262,8 +235,8 @@ function _M.execute_function(project_ref, func_name, arguments)
         exec_user_id = str.to_hex(h:final())
     end
 
-    local url = SERVER_DOMAIN .. "/api/projects/" .. project_ref .. "/query"
-    ngx.log(ngx.INFO, "[PROJECT-DB] Executing query: ", url)
+    local url = SERVER_DOMAIN .. "/api/projects/" .. project_ref .. "/execute-function"
+    ngx.log(ngx.INFO, "[PROJECT-DB] Executing function: ", safe_name, " with args: ", cjson.encode(args_object))
     
     local res, err = httpc:request_uri(url, {
         method = "POST",
@@ -272,18 +245,21 @@ function _M.execute_function(project_ref, func_name, arguments)
             ["Content-Type"] = "application/json",
             ["X-Shared-Token"] = NGINX_SHARED_TOKEN
         },
-        body = cjson.encode({ query = query }),
+        body = cjson.encode({ 
+            function_name = safe_name,
+            arguments = args_object 
+        }),
         ssl_verify = false
     })
     
     if not res then
-        ngx.log(ngx.ERR, "[PROJECT-DB] Query request failed: ", err)
+        ngx.log(ngx.ERR, "[PROJECT-DB] Function request failed: ", err)
         return nil, err
     end
     
     if res.status ~= 200 then
-        ngx.log(ngx.ERR, "[PROJECT-DB] Query returned status: ", res.status, " body: ", res.body)
-        return nil, "Query error: " .. (res.body or res.status)
+        ngx.log(ngx.ERR, "[PROJECT-DB] Function returned status: ", res.status, " body: ", res.body)
+        return nil, "Function error: " .. (res.body or res.status)
     end
     
     local result = cjson.decode(res.body)
@@ -291,7 +267,7 @@ function _M.execute_function(project_ref, func_name, arguments)
         return nil, "Invalid JSON response"
     end
     
-    ngx.log(ngx.INFO, "[PROJECT-DB] Query result: ", cjson.encode(result))
+    ngx.log(ngx.INFO, "[PROJECT-DB] Function result: ", cjson.encode(result))
     
     if type(result) == "table" and result[1] then
         return result[1].result or result[1], nil
