@@ -15,15 +15,22 @@ print_error() {
 }
 
 main() {
+    local CERT_HOST="${1:-authelia}"
     local SSL_DIR="studio/authelia/ssl"
+    local SAN_ARGS=(--sans "authelia" --sans "localhost" --sans "127.0.0.1")
     
     local ABSOLUTE_SSL_DIR
     ABSOLUTE_SSL_DIR="$(pwd)/$SSL_DIR"
+
+    if [[ "$CERT_HOST" != "authelia" && "$CERT_HOST" != "localhost" && "$CERT_HOST" != "127.0.0.1" ]]; then
+        SAN_ARGS+=(--sans "$CERT_HOST")
+    fi
     
     print_status "Diretório de destino dos certificados: $ABSOLUTE_SSL_DIR"
+    print_status "Gerando certificado para host principal: $CERT_HOST"
 
     print_status "Executando o container do Authelia para criar os arquivos..."
-    if docker run --rm -u "$(id -u):$(id -g)" -v "$ABSOLUTE_SSL_DIR:/data/authelia/keys" authelia/authelia:4.39 authelia crypto certificate rsa generate --common-name "authelia" --directory /data/authelia/keys; then
+    if docker run --rm -u "$(id -u):$(id -g)" -v "$ABSOLUTE_SSL_DIR:/data/authelia/keys" authelia/authelia:4.39 authelia crypto certificate rsa generate --common-name "$CERT_HOST" "${SAN_ARGS[@]}" --directory /data/authelia/keys; then
         print_success "Certificados gerados com sucesso pelo Authelia."
     else
         print_warning "Primeira tentativa falhou. Limpando e tentando novamente..."
@@ -36,7 +43,7 @@ main() {
         mkdir -p "$ABSOLUTE_SSL_DIR"
         print_status "Diretório recriado e tentando novamente..."
 
-        if docker run --rm -v "$ABSOLUTE_SSL_DIR:/data/authelia/keys" authelia/authelia:4.39 authelia crypto certificate rsa generate --common-name "authelia" --directory /data/authelia/keys; then
+        if docker run --rm -v "$ABSOLUTE_SSL_DIR:/data/authelia/keys" authelia/authelia:4.39 authelia crypto certificate rsa generate --common-name "$CERT_HOST" "${SAN_ARGS[@]}" --directory /data/authelia/keys; then
             print_success "Certificados gerados com sucesso pelo Authelia (fallback)."
             chmod 755 "$ABSOLUTE_SSL_DIR"
         else

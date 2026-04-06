@@ -113,6 +113,10 @@ generate_jwt_secret() {
     openssl rand -base64 64 | tr -d '\n'
 }
 
+generate_push_worker_token() {
+    openssl rand -hex 32
+}
+
 generate_postgres_password() {
   openssl rand -base64 32 | tr '/+' '_-' | tr -d '\n'
 }
@@ -229,6 +233,7 @@ main() {
 
     SHARED_FERNET_SECRET=$(generate_logflare_api_key)
     SHARED_NGINX_TOKEN=$(generate_logflare_api_key)
+    PUSH_WORKER_TOKEN=$(generate_push_worker_token)
 
     SERVER_IP=$(get_server_ip)
     SERVER_IP=$(echo "$SERVER_IP" | xargs)
@@ -255,8 +260,12 @@ main() {
     safe_sed "s|LOGFLARE_API_KEY=pass|LOGFLARE_API_KEY=$LOGFLARE_API_KEY|g" servidor/.env
     safe_sed "s|FERNET_SECRET=pass|FERNET_SECRET=$SHARED_FERNET_SECRET|g" servidor/.env
     safe_sed "s|NGINX_SHARED_TOKEN=pass|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" servidor/.env
+    safe_sed "s|PUSH_WORKER_TOKEN=pass|PUSH_WORKER_TOKEN=$PUSH_WORKER_TOKEN|g" servidor/.env
     safe_sed "s|PROJECT_DELETE_PASSWORD=pass|PROJECT_DELETE_PASSWORD=$PROJECT_DELETE_PASSWORD|g" servidor/.env
     safe_sed "s|SERVER_URL=pass|SERVER_URL=${SERVER_IP}|g" servidor/.env
+    safe_sed "s|^PUSH_API_URL=.*|PUSH_API_URL=https://${LOCAL_IP}:4000/api/internal/push|g" servidor/.env
+    safe_sed "s|PUSH_VERIFY_TLS=true|PUSH_VERIFY_TLS=true|g" servidor/.env
+    safe_sed "s|PUSH_CA_FILE=/docker/push-certs/ca.pem|PUSH_CA_FILE=/docker/push-certs/ca.pem|g" servidor/.env
     safe_sed "s|DASHBOARD_USER=pass|DASHBOARD_USER=${DASHBOARD_USER}|g" servidor/.env
     safe_sed "s|DASHBOARD_PASSWORD=pass|DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD}|g" servidor/.env
     print_success "Arquivo servidor/.env configurado com sucesso!"
@@ -291,6 +300,7 @@ main() {
     cp studio/.env.example studio/.env
     safe_sed "s|FERNET_SECRET=pass|FERNET_SECRET=$SHARED_FERNET_SECRET|g" studio/.env
     safe_sed "s|NGINX_SHARED_TOKEN=pass|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" studio/.env
+    safe_sed "s|PUSH_WORKER_TOKEN=pass|PUSH_WORKER_TOKEN=$PUSH_WORKER_TOKEN|g" studio/.env
     safe_sed "s|COOKIE_SIGN_SECRET=pass|COOKIE_SIGN_SECRET=$COOKIE_SIGN_SECRET|g" studio/.env
     safe_sed "s|POSTGRES_NGINX_PASSWORD=pass|POSTGRES_NGINX_PASSWORD=$POSTGRES_NGINX_PASSWORD|g" studio/.env
     if [[ "$SERVER_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
@@ -324,7 +334,13 @@ main() {
     echo ""
 
     print_status "Gerando certificados SSL autoassinados para o Studio/Authelia..."
-    bash authelia.sh
+    bash authelia.sh "$LOCAL_IP"
+
+    print_status "Copiando certificado do Studio para o servidor Python..."
+    mkdir -p servidor/certs
+    backup_file "servidor/certs/ca.pem"
+    cp studio/authelia/ssl/ca.pem servidor/certs/ca.pem
+    print_success "Certificado copiado para servidor/certs/ca.pem"
 
 
     print_status "Configurando Nginx do Studio com o IP local detectado..."
@@ -362,8 +378,6 @@ main() {
     backup_file "servidor/traefik/update_geoip.sh"
     safe_sed "s|seucaminho|$SCRIPT_DIR|g" servidor/traefik/update_geoip.sh
     safe_sed "s|HOST_PROJECT_ROOT=\"pass\"|HOST_PROJECT_ROOT=\"$SCRIPT_DIR\"|g" servidor/.env
-    backup_file "servidor/api-internal/app/push_worker.py"
-    safe_sed "s|API_URL=https://<SEU_IP>/api/internal/push|API_URL=https://$LOCAL_IP/api/internal/push|g" servidor/api-internal/app/push_worker.py
 
     backup_file "studio/docker-compose.yml"
     safe_sed "s|<SEU_IP>|$LOCAL_IP|g" studio/docker-compose.yml

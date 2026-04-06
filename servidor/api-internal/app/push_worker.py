@@ -2,13 +2,31 @@ import asyncio
 import os
 import json
 import urllib.request
+import urllib.error
 from urllib.parse import urlparse
 import asyncpg
 import ssl
 
 BASE_DSN = os.getenv("DB_DSN")
-API_URL = "https://<SEU_IP>/api/internal/push"
-ssl._create_default_https_context = ssl._create_unverified_context
+API_URL = os.getenv("PUSH_API_URL", "https://<SEU_IP>:4000/api/internal/push")
+PUSH_WORKER_TOKEN = os.getenv("PUSH_WORKER_TOKEN")
+PUSH_REQUEST_TIMEOUT = float(os.getenv("PUSH_REQUEST_TIMEOUT", "10"))
+PUSH_VERIFY_TLS = os.getenv("PUSH_VERIFY_TLS", "false").lower() in ("1", "true", "yes", "on")
+PUSH_CA_FILE = os.getenv("PUSH_CA_FILE", "/docker/push-certs/ca.pem")
+
+if not PUSH_WORKER_TOKEN:
+    raise RuntimeError("Missing PUSH_WORKER_TOKEN environment variable")
+
+def build_ssl_context() -> ssl.SSLContext:
+    if not PUSH_VERIFY_TLS:
+        return ssl._create_unverified_context()
+
+    if PUSH_CA_FILE:
+        return ssl.create_default_context(cafile=PUSH_CA_FILE)
+
+    return ssl.create_default_context()
+
+SSL_CONTEXT = build_ssl_context()
 
 def get_tenant_dsn(base_dsn: str, db_name: str) -> str:
     parsed = urlparse(base_dsn)
@@ -25,13 +43,25 @@ async def send_to_api(token_fcm: str, body: str, project_name: str) -> bool:
     req = urllib.request.Request(
         API_URL, 
         data=json.dumps(payload).encode('utf-8'), 
-        headers={"Content-Type": "application/json"}, 
+        headers={
+            "Content-Type": "application/json",
+            "X-Push-Worker-Token": PUSH_WORKER_TOKEN,
+        }, 
         method='POST'
     )
     
     try:
-        response = await asyncio.to_thread(urllib.request.urlopen, req, timeout=10)
+        response = await asyncio.to_thread(
+            urllib.request.urlopen,
+            req,
+            timeout=PUSH_REQUEST_TIMEOUT,
+            context=SSL_CONTEXT,
+        )
         return response.status in (200, 201)
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")
+        print(f"[{project_name}] ❌ Push rejeitado: HTTP {e.code} - {detail}")
+        return False
     except Exception as e:
         print(f"[{project_name}] ❌ Erro ao avisar a api: {e}")
         return False
