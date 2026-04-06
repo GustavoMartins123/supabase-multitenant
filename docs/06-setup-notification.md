@@ -3,7 +3,10 @@
 Por padrão, a plataforma utiliza uma arquitetura descentralizada para o envio de notificações push via Firebase Cloud Messaging (FCM). O roteamento e a assinatura de segurança (OAuth2) acontecem na borda (Gateway Nginx), enquanto um *Worker* assíncrono em Python gerencia as filas usando um padrão híbrido de escuta ativa (LISTEN/NOTIFY) no PostgreSQL.
 
 > [!NOTE]
-> A infraestrutura do **Gateway (Nginx + Lua)** já vem **100% configurada**. O endpoint `/api/internal/push` e a lógica de autenticação JWT com o Google já estão prontos para uso, bastando apenas o arquivo de credenciais.
+> A infraestrutura base do **Gateway (Nginx + Lua)** para push já vem pronta, mas o fluxo atual nao depende apenas do `firebase.json`.
+> A rota `/api/internal/push` e protegida por `X-Push-Worker-Token` e foi desenhada para uso exclusivo do `push-worker`.
+> Se o worker estiver em outra maquina, ele deve chamar o Nginx do Studio em `https://<IP_DO_STUDIO>:4000/api/internal/push`.
+> A porta `9091` pertence ao Authelia e e apenas a entrada de autenticacao do navegador; o worker nao deve usá-la.
 
 Os passos a seguir configuram as credenciais do Google e preparam o banco de dados dos projetos para se integrarem a esse fluxo.
 
@@ -14,6 +17,9 @@ Antes de prosseguir, certifique-se de que:
 - **Projeto Firebase**: Você possui um projeto criado no [Firebase Console](https://console.firebase.google.com/).
 - **Service Account**: Você gerou e baixou a chave privada (arquivo JSON) da Conta de Serviço do Firebase (Configurações do Projeto > Contas de Serviço > Gerar nova chave privada).
 - **Worker em execução**: O serviço `push-worker` está configurado e rodando no seu ambiente Docker.
+- **Segredo compartilhado**: `PUSH_WORKER_TOKEN` deve estar configurado com o mesmo valor em `studio/.env` e `servidor/.env`.
+- **URL correta do gateway**: `PUSH_API_URL` deve apontar para `https://<IP_DO_STUDIO>:4000/api/internal/push`.
+- **TLS confiável entre as máquinas**: se `PUSH_VERIFY_TLS=true`, o certificado do Studio precisa ser confiável no servidor Python. O `setup.sh` copia `studio/authelia/ssl/ca.pem` para `servidor/certs/ca.pem`, que e montado no container como `/docker/push-certs/ca.pem`.
 
 ---
 
@@ -33,6 +39,27 @@ mv /caminho/do/seu/download/arquivo-do-google.json ./authelia/firebase.json
 ```
 
 Importante: Certifique-se de que o arquivo seja um arquivo real e não um diretório. Se o Docker criou uma pasta fantasma chamada `firebase.json/` anteriormente, exclua a pasta antes de mover o arquivo. O Nginx refletirá a mudança na mesma hora, sem necessidade de reiniciar.
+
+### Passo 1.2: Confirmar variaveis de integracao entre Studio e Worker
+
+O fluxo atual de push depende das variaveis abaixo:
+
+```env
+# studio/.env
+PUSH_WORKER_TOKEN=...
+
+# servidor/.env
+PUSH_WORKER_TOKEN=...
+PUSH_API_URL=https://<IP_DO_STUDIO>:4000/api/internal/push
+PUSH_VERIFY_TLS=true
+PUSH_CA_FILE=/docker/push-certs/ca.pem
+```
+
+Notas importantes:
+
+- `PUSH_WORKER_TOKEN` precisa ser o mesmo nas duas maquinas.
+- `PUSH_API_URL` deve apontar para o IP ou dominio usado no certificado do Studio.
+- Se o certificado do Studio for autoassinado, ele precisa conter SAN compativel com o host usado em `PUSH_API_URL`.
 
 ### Passo 2: Estruturar o Banco de Dados dos Projetos
 
@@ -137,6 +164,12 @@ Abra o `docker-compose-api.yml` e remova os `#` da frente do serviço `push-work
     environment:
       PYTHONUNBUFFERED: 1
       DB_DSN: postgres://supabase_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/postgres
+      PUSH_API_URL: ${PUSH_API_URL}
+      PUSH_WORKER_TOKEN: ${PUSH_WORKER_TOKEN}
+      PUSH_VERIFY_TLS: ${PUSH_VERIFY_TLS}
+      PUSH_CA_FILE: ${PUSH_CA_FILE}
+    volumes:
+      - ./certs:/docker/push-certs:ro
     command: ["python", "app/push_worker.py"]
 ```
 
@@ -144,7 +177,7 @@ Abra o `docker-compose-api.yml` e remova os `#` da frente do serviço `push-work
 Após salvar o arquivo, suba o contêiner executando o comando abaixo na pasta raiz:
 
 ```bash
-docker compose -f docker-compose-api.yml --env-file secrets/.env --env-file .env u
+docker compose -f docker-compose-api.yml --env-file secrets/.env --env-file .env up --build -d push-worker
 ```
 
 ### Passo 4: Como Enviar uma Notificação
@@ -173,6 +206,13 @@ O primeiro lugar para olhar é o contêiner do Python, pois ele é responsável 
 docker logs -f docker-push-worker-1
 ```
 
+Se aparecer erro de TLS parecido com `certificate verify failed` ou `IP address mismatch`, revise nesta ordem:
+
+1. `PUSH_API_URL` esta usando o host correto e a porta `4000`
+2. o certificado do Studio contem SAN para esse IP ou dominio
+3. `servidor/certs/ca.pem` foi atualizado com o certificado correto
+4. o container do `push-worker` foi recriado depois da troca do certificado
+
 **5.2. Verificando o Gateway Nginx (Servidor Studio)**
 
 Se o log do Worker não mostrar nenhum erro de conexão, mas a notificação ainda não chegou, o bloqueio ocorreu na camada do Lua/Nginx (validação do JWT, leitura do firebase.json ou comunicação com o Google).
@@ -183,3 +223,9 @@ Acesse o contêiner do Nginx no servidor do Studio e leia o arquivo de log de er
 docker exec -it nginx bash
 cat /var/log/studio_error.log
 ```
+
+Se o log mostrar `401` ou `403` para `/api/internal/push`, valide:
+
+- se o `PUSH_WORKER_TOKEN` do worker e o mesmo do `studio/.env`
+- se o worker esta fazendo `POST`
+- se o Nginx do Studio foi recriado depois da atualizacao do `.env`

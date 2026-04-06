@@ -13,6 +13,22 @@ O sistema permite gerenciar múltiplos projetos Supabase isolados em um único s
 - **Roteamento dinâmico** via Traefik + Nginx/Lua
 - **Autenticação centralizada** via Authelia
 
+### Como o `setup.sh` interpreta os enderecos
+
+O `setup.sh` trabalha com dois enderecos diferentes:
+
+- **IP/domínio digitado pelo usuário:** representa o servidor principal, onde ficam Traefik, API Python e os projetos Supabase
+- **IP local detectado automaticamente:** representa a maquina atual onde o Studio local roda com Authelia + Nginx/OpenResty
+
+Na pratica:
+
+- o valor digitado alimenta `SERVER_URL` e `SERVER_DOMAIN`
+- o IP local detectado alimenta o certificado do Studio, o `server_name` do Nginx local e o `PUSH_API_URL`
+
+Se os dois valores forem iguais, o setup prepara um ambiente de maquina unica.
+Se forem diferentes, o setup prepara uma topologia com Studio local e servidor principal remoto.
+Se a topologia mudar depois, o ajuste normalmente fica concentrado nos arquivos `.env` e na recriacao dos containers afetados.
+
 ---
 
 ## Conceitos Base
@@ -101,6 +117,12 @@ postgres://supabase_storage_admin.projeto_x:senha@pooler:5432/postgres
 
 **Porta:** 9091 (Authelia) e 4000 (Nginx)
 
+**Fluxo de entrada:**
+- **9091:** porta de entrada do navegador para autenticação no Authelia
+- **4000:** endpoint principal do Nginx/OpenResty, usado depois do login para servir o Flutter, fazer proxy para o Supabase Studio e expor rotas administrativas internas
+- Em outras palavras: o usuário entra por `9091`, autentica, e a navegação normal do painel continua em `4000`
+- Integrações servidor-servidor que falam com o gateway do Studio, como o `push-worker`, devem apontar para `4000`
+
 **Componentes:**
 - **Authelia:** Autenticação de usuários
 - **Nginx/OpenResty + Lua:** Gateway inteligente que injeta credenciais
@@ -112,6 +134,7 @@ postgres://supabase_storage_admin.projeto_x:senha@pooler:5432/postgres
 - Permitir seleção de projeto
 - Injetar `Authorization` header com service_role do projeto
 - Fazer proxy para o Traefik
+- Expor rotas administrativas internas consumidas pelo próprio gateway e por workers confiáveis
 
 ### Servidor
 

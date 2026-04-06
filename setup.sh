@@ -161,7 +161,7 @@ get_server_ip() {
     local validation_result
     
     while true; do
-        read -rp "IP ou Dominio do servidor: " server_ip
+        read -rp "IP ou Dominio do servidor principal (Traefik/API/projetos): " server_ip
 
         server_ip=$(echo "$server_ip" | xargs)
         
@@ -196,6 +196,51 @@ get_server_ip() {
     done
     
     echo "$server_ip"
+}
+
+confirm_network_topology() {
+    local local_ip="$1"
+    local server_ip="$2"
+    local answer
+
+    echo ""
+    print_status "Resumo da topologia detectada:"
+    echo "  - IP local desta maquina (Studio/Authelia/Nginx): $local_ip"
+    echo "  - IP ou dominio digitado para o servidor principal: $server_ip"
+    echo ""
+    echo "Como o setup usa esses valores:"
+    echo "  - O valor digitado vai para SERVER_URL e SERVER_DOMAIN"
+    echo "  - Ele representa a maquina do servidor principal (Traefik/API/projetos)"
+    echo "  - O IP local detectado fica para o Studio local, certificados e PUSH_API_URL"
+    echo ""
+
+    if [[ "$server_ip" == "$local_ip" ]]; then
+        print_warning "Voce digitou o mesmo IP da maquina local."
+        echo "  Isso prepara o ambiente para rodar servidor principal e Studio na mesma maquina."
+        echo "  Se depois voce mover o Studio ou o servidor para outra maquina, normalmente basta ajustar os arquivos .env e recriar os containers envolvidos."
+    else
+        print_status "Voce esta configurando uma topologia com Studio local e servidor principal em outro host."
+        echo "  Isso e o esperado quando a interface administrativa roda em uma maquina e os projetos/API em outra."
+    fi
+
+    echo ""
+    while true; do
+        read -rp "Confirmar essa configuracao de rede? [s/N]: " answer
+        answer=$(echo "$answer" | xargs | tr '[:upper:]' '[:lower:]')
+
+        case "$answer" in
+            s|sim)
+                return 0
+                ;;
+            n|nao|"")
+                print_error "Configuracao cancelada pelo usuario."
+                exit 1
+                ;;
+            *)
+                print_warning "Resposta invalida. Digite 's' para confirmar ou 'n' para cancelar."
+                ;;
+        esac
+    done
 }
 
 main() {
@@ -237,7 +282,7 @@ main() {
 
     SERVER_IP=$(get_server_ip)
     SERVER_IP=$(echo "$SERVER_IP" | xargs)
-    # LOCAL_IP=$SERVER_IP
+    confirm_network_topology "$LOCAL_IP" "$SERVER_IP"
     print_status "Configurando servidor principal..."
     
     if [[ ! -f "servidor/.env.example" ]]; then

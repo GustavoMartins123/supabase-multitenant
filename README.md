@@ -158,8 +158,14 @@ cd supabase-multitenant
 
 ```bash
 sudo bash setup.sh
-# The server IP or Domain requested by the script is where the database and Traefik will be hosted.
+# The IP/domain requested by the script is the main server host (Traefik/API/projects).
 ```
+
+Important:
+
+- During `setup.sh`, the typed IP/domain is treated as the **main server** host.
+- The script also detects the **local IP of the current machine**, which is used for the local Studio stack (`Authelia + Nginx/OpenResty`), the self-signed certificate, and the default `PUSH_API_URL`.
+- If you type the same IP as the local machine, the setup prepares a single-machine installation.
 
 ### 3\. Starting the containers
 
@@ -214,6 +220,13 @@ docker ps
 
 If everything has the status `Up`, access the interface at the IP you configured in `setup.sh` (e.g., `https://<your_local_ip>:9091`). You should be redirected to the Authelia login screen.
 Use the user 'teste' with the password 'teste' to log in.
+
+Important about the Studio ports:
+
+- `9091` is the browser entrypoint for Authelia authentication.
+- `4000` is the Studio Nginx/OpenResty endpoint that serves the Flutter selector, proxies Supabase Studio, and exposes the internal administrative routes used by the platform.
+- The usual browser flow is: open `https://<your_local_ip>:9091`, authenticate in Authelia, then continue operating through `https://<your_local_ip>:4000`.
+- Server-to-server integrations that target the Studio gateway, such as the `push-worker`, must use port `4000`, not `9091`.
 
 ## Maintenance and Important Notes
 
