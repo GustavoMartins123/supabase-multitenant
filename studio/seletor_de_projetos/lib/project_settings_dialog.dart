@@ -129,14 +129,16 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
 
     setState(() => _rotatingKey = true);
     try {
-      final data =
-          await ref.read(projectRepositoryProvider).rotateKey(widget.ref);
+      final data = await ref
+          .read(projectRepositoryProvider)
+          .rotateKey(widget.ref);
       final newKey = data['anon_key'];
       setState(() => _currentAnonKey = newKey);
-      await ref.read(projectRepositoryProvider).cacheBust(widget.ref);
-      
-      ref.read(projectListProvider.notifier).updateProjectKey(widget.ref, newKey);
-      
+
+      ref
+          .read(projectListProvider.notifier)
+          .updateProjectKey(widget.ref, newKey);
+
       _showSnack('Nova chave gerada!', SupabaseColors.success);
     } catch (e) {
       _showSnack('Erro ao gerar chave: $e', SupabaseColors.error);
@@ -157,8 +159,9 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
   Widget build(BuildContext context) {
     final configAsync = ref.watch(configProvider);
     final serverDomain = configAsync.value?['server_domain'] as String? ?? '';
-    final projectUrl =
-        serverDomain.isNotEmpty ? '$serverDomain/${widget.ref}' : widget.ref;
+    final projectUrl = serverDomain.isNotEmpty
+        ? '$serverDomain/${widget.ref}'
+        : widget.ref;
 
     final membersAsync = ref.watch(projectMembersProvider(widget.ref));
     final myId = Session().myId;

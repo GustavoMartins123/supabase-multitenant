@@ -87,7 +87,8 @@ class ProjectRepository {
       final dynamic data = jsonDecode(resp.body);
       if (data is List) return data;
       if (data is Map) {
-        if (data.containsKey('members')) return data['members'] as List<dynamic>;
+        if (data.containsKey('members'))
+          return data['members'] as List<dynamic>;
         if (data.containsKey('users')) return data['users'] as List<dynamic>;
       }
       return [];
@@ -131,9 +132,14 @@ class ProjectRepository {
     throw Exception('Erro ao carregar usuários: ${resp.body}');
   }
 
-  Future<List<dynamic>> getTransferAvailableUsers(String ref, {String mode = 'owner'}) async {
+  Future<List<dynamic>> getTransferAvailableUsers(
+    String ref, {
+    String mode = 'owner',
+  }) async {
     final resp = await http.get(
-      Uri.parse('/api/projects/$ref/available-users?include_members=true&mode=$mode'),
+      Uri.parse(
+        '/api/projects/$ref/available-users?include_members=true&mode=$mode',
+      ),
     );
     if (resp.statusCode == 200) {
       if (resp.body.isEmpty) return [];
@@ -144,7 +150,9 @@ class ProjectRepository {
       }
       return [];
     }
-    throw Exception('Erro ao carregar usuários para transferência: ${resp.body}');
+    throw Exception(
+      'Erro ao carregar usuários para transferência: ${resp.body}',
+    );
   }
 
   Future<Map<String, dynamic>> rotateKey(String ref) async {
@@ -153,10 +161,6 @@ class ProjectRepository {
       return jsonDecode(resp.body);
     }
     throw Exception('Erro ao rotacionar chave: ${resp.body}');
-  }
-
-  Future<void> cacheBust(String ref) async {
-    await http.get(Uri.parse('/api/internal/cache-bust?ref=$ref'));
   }
 
   Future<void> doAction(String ref, String action) async {

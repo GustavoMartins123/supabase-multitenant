@@ -9,7 +9,7 @@ from fastapi import FastAPI, BackgroundTasks, Depends, Header, HTTPException, Qu
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from cryptography.fernet import Fernet
-from typing import Optional, List, Dict
+from typing import Any, Optional, List, Dict
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
 SCRIPT = BASE_DIR / "scripts" / "generate_project.sh"
@@ -563,7 +563,12 @@ async def rotate_project_key(
     )
     stdout, stderr = await proc.communicate()
     if proc.returncode != 0:
-        raise HTTPException(500, f"Rotate failed: {stderr.decode()}")
+        stdout_text = stdout.decode().strip()
+        stderr_text = stderr.decode().strip()
+        print(f"[rotate-key] stdout for {project_name}: {stdout_text}")
+        print(f"[rotate-key] stderr for {project_name}: {stderr_text}")
+        detail = stderr_text or stdout_text or "rotate script exited with no output"
+        raise HTTPException(500, f"Rotate failed: {detail}")
 
     lines = stdout.decode().splitlines()
     kv = {k: v for k, v in (line.split("=", 1) for line in lines if "=" in line)}
