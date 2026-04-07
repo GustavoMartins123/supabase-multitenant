@@ -44,6 +44,9 @@ services:
       DEFAULT_PROJECT_NAME: postgres
       SUPABASE_PUBLIC_URL: https://<SEU_IP>:4000
       NEXT_PUBLIC_ENABLE_LOGS: false
+      SNIPPETS_MANAGEMENT_FOLDER: /app/snippets
+    volumes:
+      - ./snippets:/app/snippets
   postgres:
     build:
       context: ./postgres
