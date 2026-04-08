@@ -221,7 +221,11 @@ local function deterministic_uuid(inputs)
     }, "-")
 end
 
-local function virtual_snippet_id(name)
+local function virtual_snippet_id(name, virtual_folder_id)
+    if virtual_folder_id and virtual_folder_id ~= cjson.null and virtual_folder_id ~= "" then
+        return deterministic_uuid({ virtual_folder_id, string.format("%s.sql", name) })
+    end
+
     return deterministic_uuid({ string.format("%s.sql", name) })
 end
 
@@ -234,12 +238,37 @@ local function build_folder_name(user_hash, project_scope)
     return string.format("%s__%s", user_hash, normalized_scope)
 end
 
+local function build_folder_prefix(user_hash, project_scope)
+    return build_folder_name(user_hash, project_scope) .. "__"
+end
+
+local function sanitize_folder_segment(name)
+    local value = tostring(name or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if value == "" then
+        return nil, "Folder name is required"
+    end
+
+    if value:find("%z", 1, true) or value:find("/", 1, true) or value:find("\\", 1, true) then
+        return nil, "Invalid folder name"
+    end
+
+    return value
+end
+
+local function actual_child_folder_name(user_hash, project_scope, visible_name)
+    return build_folder_prefix(user_hash, project_scope) .. visible_name
+end
+
 local function actual_folder_id(folder_name)
     return deterministic_uuid({ folder_name })
 end
 
 local function actual_snippet_id(folder_id, name)
     return deterministic_uuid({ folder_id, string.format("%s.sql", name) })
+end
+
+local function virtual_folder_id(user_hash, project_scope, visible_name)
+    return deterministic_uuid({ build_folder_name(user_hash, project_scope), visible_name })
 end
 
 local function snippet_map_key(project_ref, user_hash, request_id)
@@ -254,6 +283,24 @@ end
 local function actual_map_key(project_ref, user_hash, actual_id)
     return table.concat({
         "snippet-actual-map",
+        project_ref or "",
+        user_hash or "",
+        actual_id or "",
+    }, ":")
+end
+
+local function folder_map_key(project_ref, user_hash, request_id)
+    return table.concat({
+        "folder-id-map",
+        project_ref or "",
+        user_hash or "",
+        request_id or "",
+    }, ":")
+end
+
+local function folder_actual_map_key(project_ref, user_hash, actual_id)
+    return table.concat({
+        "folder-actual-map",
         project_ref or "",
         user_hash or "",
         actual_id or "",
@@ -276,6 +323,22 @@ local function get_preferred_virtual_id(project_ref, user_hash, actual_id)
     return id_map_cache:get(actual_map_key(project_ref, user_hash, actual_id))
 end
 
+local function get_mapped_actual_folder_id(project_ref, user_hash, request_id)
+    if not id_map_cache or not project_ref or not user_hash or not request_id or request_id == "" then
+        return nil
+    end
+
+    return id_map_cache:get(folder_map_key(project_ref, user_hash, request_id))
+end
+
+local function get_preferred_virtual_folder_id(project_ref, user_hash, actual_id)
+    if not id_map_cache or not project_ref or not user_hash or not actual_id or actual_id == "" then
+        return nil
+    end
+
+    return id_map_cache:get(folder_actual_map_key(project_ref, user_hash, actual_id))
+end
+
 local function set_mapped_actual_id(project_ref, user_hash, request_id, actual_id, remember_as_preferred)
     if not id_map_cache or not project_ref or not user_hash or not request_id or request_id == "" then
         return
@@ -291,6 +354,46 @@ local function set_mapped_actual_id(project_ref, user_hash, request_id, actual_i
     end
 end
 
+local function set_mapped_actual_folder_id(project_ref, user_hash, request_id, actual_id, remember_as_preferred)
+    if not id_map_cache or not project_ref or not user_hash or not request_id or request_id == "" then
+        return
+    end
+    if not actual_id or actual_id == "" then
+        return
+    end
+
+    id_map_cache:set(folder_map_key(project_ref, user_hash, request_id), actual_id, 86400)
+
+    if remember_as_preferred then
+        id_map_cache:set(folder_actual_map_key(project_ref, user_hash, actual_id), request_id, 86400)
+    end
+end
+
+local function append_unique(items, seen, value)
+    if not value or value == "" or seen[value] then
+        return
+    end
+
+    seen[value] = true
+    table.insert(items, value)
+end
+
+local function build_folder_aliases(user_hash, project_scope, folder, visible_name)
+    local aliases = {}
+    local seen = {}
+
+    append_unique(aliases, seen, virtual_folder_id(user_hash, project_scope, visible_name))
+    append_unique(aliases, seen, virtual_folder_id(user_hash, "default", visible_name))
+    append_unique(aliases, seen, deterministic_uuid({ visible_name }))
+
+    if type(folder) == "table" then
+        append_unique(aliases, seen, folder.id)
+        append_unique(aliases, seen, deterministic_uuid({ folder.name }))
+    end
+
+    return aliases
+end
+
 local function clone_table(value)
     local cloned = {}
     for key, item in pairs(value or {}) do
@@ -299,14 +402,14 @@ local function clone_table(value)
     return cloned
 end
 
-local function to_virtual_snippet(snippet, virtual_id)
+local function to_virtual_snippet(snippet, virtual_id, virtual_folder_id)
     local cloned = clone_table(snippet)
     cloned.id = virtual_id or virtual_snippet_id(cloned.name or "")
-    cloned.folder_id = cjson.null
+    cloned.folder_id = virtual_folder_id or cjson.null
     return cloned
 end
 
-local function resolve_virtual_snippet_id(project_ref, user_hash, snippet)
+local function resolve_virtual_snippet_id(project_ref, user_hash, snippet, virtual_folder_id)
     if type(snippet) ~= "table" or not snippet.id or snippet.id == "" then
         return nil
     end
@@ -317,23 +420,9 @@ local function resolve_virtual_snippet_id(project_ref, user_hash, snippet)
         return preferred
     end
 
-    local canonical = virtual_snippet_id(snippet.name or "")
+    local canonical = virtual_snippet_id(snippet.name or "", virtual_folder_id)
     set_mapped_actual_id(project_ref, user_hash, canonical, snippet.id, false)
     return canonical
-end
-
-local function map_actual_cursor_to_virtual(actual_cursor, snippets, project_ref, user_hash)
-    if not actual_cursor or actual_cursor == "" then
-        return nil
-    end
-
-    for _, snippet in ipairs(snippets or {}) do
-        if snippet.id == actual_cursor then
-            return resolve_virtual_snippet_id(project_ref, user_hash, snippet)
-        end
-    end
-
-    return nil
 end
 
 local function parse_json_response(res)
@@ -344,7 +433,27 @@ local function parse_json_response(res)
     return cjson_safe.decode(res.body) or {}
 end
 
-local function find_existing_user_folder(project_ref, folder_name)
+local function normalize_limit(value)
+    local parsed = tonumber(value)
+    if not parsed or parsed <= 0 then
+        return 100
+    end
+
+    parsed = math.floor(parsed)
+    if parsed > 1000 then
+        return 1000
+    end
+
+    return parsed
+end
+
+local function normalize_sort(sort_by, sort_order)
+    local resolved_sort = sort_by == "name" and "name" or "inserted_at"
+    local resolved_order = sort_order == "asc" and "asc" or "desc"
+    return resolved_sort, resolved_order
+end
+
+local function list_all_folders(project_ref)
     local res, err = studio_request("GET", "/api/platform/projects/" .. project_ref .. "/content/folders", {
         query = {
             type = "sql",
@@ -364,46 +473,140 @@ local function find_existing_user_folder(project_ref, folder_name)
     end
 
     local payload = parse_json_response(res)
-    local folders = (((payload or {}).data or {}).folders) or {}
+    return (((payload or {}).data or {}).folders) or {}
+end
+
+local function load_namespace_state(project_ref, user_hash, project_scope)
+    local folders, err = list_all_folders(project_ref)
+    if not folders then
+        return nil, err
+    end
+
+    local root_name = build_folder_name(user_hash, project_scope)
+    local prefix = build_folder_prefix(user_hash, project_scope)
+    local state = {
+        root_name = root_name,
+        prefix = prefix,
+        root_folder = nil,
+        child_folders = {},
+        child_by_actual_id = {},
+        child_by_virtual_id = {},
+        child_by_visible_name = {},
+    }
+
     for _, folder in ipairs(folders) do
-        if folder.name == folder_name then
-            return folder
+        if folder.name == root_name then
+            state.root_folder = folder
+        elseif folder.name:sub(1, #prefix) == prefix then
+            local visible_name = folder.name:sub(#prefix + 1)
+            if visible_name ~= "" then
+                local safe_visible_name = sanitize_folder_segment(visible_name)
+                if safe_visible_name then
+                    visible_name = safe_visible_name
+                end
+
+                local preferred_virtual_id = get_preferred_virtual_folder_id(project_scope, user_hash, folder.id)
+                local aliases = build_folder_aliases(user_hash, project_scope, folder, visible_name)
+                local canonical_virtual_id = aliases[1]
+                local resolved_virtual_id = preferred_virtual_id
+                if not resolved_virtual_id or resolved_virtual_id == "" then
+                    resolved_virtual_id = canonical_virtual_id
+                end
+
+                set_mapped_actual_folder_id(project_scope, user_hash, canonical_virtual_id, folder.id, false)
+                if resolved_virtual_id ~= canonical_virtual_id then
+                    set_mapped_actual_folder_id(project_scope, user_hash, resolved_virtual_id, folder.id, true)
+                end
+
+                local virtual = {
+                    id = resolved_virtual_id,
+                    name = visible_name,
+                    owner_id = folder.owner_id or 1,
+                    parent_id = cjson.null,
+                    project_id = folder.project_id or 1,
+                }
+                local entry = {
+                    actual = folder,
+                    virtual = virtual,
+                    canonical_virtual_id = canonical_virtual_id,
+                    aliases = aliases,
+                }
+                table.insert(state.child_folders, entry)
+                state.child_by_actual_id[folder.id] = entry
+                state.child_by_virtual_id[virtual.id] = entry
+                for _, alias in ipairs(aliases) do
+                    state.child_by_virtual_id[alias] = entry
+                end
+                state.child_by_visible_name[visible_name] = entry
+            end
         end
     end
 
-    return nil
+    table.sort(state.child_folders, function(a, b)
+        return (a.virtual.name or ""):lower() < (b.virtual.name or ""):lower()
+    end)
+
+    return state
 end
 
-local function resolve_user_folder(project_ref, project_scope, create_if_missing)
-    local user_hash, user_err = get_user_hash()
-    if not user_hash then
-        return nil, user_err
+local function resolve_namespace_root_folder(project_ref, user_hash, project_scope, create_if_missing)
+    local state, state_err = load_namespace_state(project_ref, user_hash, project_scope)
+    if not state then
+        return nil, nil, state_err
     end
 
-    local folder_name = build_folder_name(user_hash, project_scope)
-
-    local folder, find_err = find_existing_user_folder(project_ref, folder_name)
-    if folder then
-        return folder
+    if state.root_folder then
+        return state.root_folder, state
     end
 
     if not create_if_missing then
-        return {
-            id = actual_folder_id(folder_name),
-            name = folder_name,
+        local synthetic = {
+            id = actual_folder_id(state.root_name),
+            name = state.root_name,
             owner_id = 1,
             parent_id = cjson.null,
             project_id = 1,
             _synthetic = true,
         }
-    end
-
-    if find_err then
-        ngx.log(ngx.WARN, "[CONTENT-PROXY] Could not confirm existing folder before create: ", find_err)
+        state.root_folder = synthetic
+        return synthetic, state
     end
 
     local create_res, create_err = studio_request("POST", "/api/platform/projects/" .. project_ref .. "/content/folders", {
-        body = cjson.encode({ name = folder_name }),
+        body = cjson.encode({ name = state.root_name }),
+        headers = { ["Content-Type"] = "application/json" },
+    })
+
+    if not create_res then
+        return nil, nil, "failed to create folder: " .. (create_err or "unknown error")
+    end
+
+    local refreshed, refreshed_err = load_namespace_state(project_ref, user_hash, project_scope)
+    if refreshed and refreshed.root_folder then
+        return refreshed.root_folder, refreshed
+    end
+
+    return nil, nil, refreshed_err or "failed to resolve user folder"
+end
+
+local function create_namespaced_folder(project_ref, user_hash, project_scope, visible_name)
+    local safe_name, safe_err = sanitize_folder_segment(visible_name)
+    if not safe_name then
+        return nil, safe_err
+    end
+
+    local state, state_err = load_namespace_state(project_ref, user_hash, project_scope)
+    if not state then
+        return nil, state_err
+    end
+
+    if state.child_by_visible_name[safe_name] then
+        return nil, "Folder already exists"
+    end
+
+    local actual_name = actual_child_folder_name(user_hash, project_scope, safe_name)
+    local create_res, create_err = studio_request("POST", "/api/platform/projects/" .. project_ref .. "/content/folders", {
+        body = cjson.encode({ name = actual_name }),
         headers = { ["Content-Type"] = "application/json" },
     })
 
@@ -411,19 +614,12 @@ local function resolve_user_folder(project_ref, project_scope, create_if_missing
         return nil, "failed to create folder: " .. (create_err or "unknown error")
     end
 
-    if create_res.status == 200 or create_res.status == 201 then
-        local created = parse_json_response(create_res)
-        if created and created.id then
-            return created
-        end
+    local refreshed, refreshed_err = load_namespace_state(project_ref, user_hash, project_scope)
+    if refreshed and refreshed.child_by_visible_name[safe_name] then
+        return refreshed.child_by_visible_name[safe_name], refreshed
     end
 
-    folder = find_existing_user_folder(project_ref, folder_name)
-    if folder then
-        return folder
-    end
-
-    return nil, "failed to resolve user folder"
+    return nil, refreshed_err or "failed to resolve created folder"
 end
 
 local function list_user_snippets(project_ref, folder_id)
@@ -447,23 +643,145 @@ local function list_user_snippets(project_ref, folder_id)
     return (((payload or {}).data or {}).contents) or {}
 end
 
-local function find_actual_snippet_by_request_id(project_ref, folder_id, user_hash, request_id)
+local function collect_namespace_snippets(project_ref, namespace_state, opts)
+    opts = opts or {}
+
+    local snippets = {}
+
+    local function append_from_folder(folder)
+        if not folder or folder._synthetic then
+            return true
+        end
+
+        local folder_snippets, folder_err = list_user_snippets(project_ref, folder.id)
+        if not folder_snippets then
+            return nil, folder_err
+        end
+
+        for _, snippet in ipairs(folder_snippets) do
+            table.insert(snippets, snippet)
+        end
+
+        return true
+    end
+
+    if opts.actual_folder then
+        local ok, folder_err = append_from_folder(opts.actual_folder)
+        if not ok then
+            return nil, folder_err
+        end
+        return snippets
+    end
+
+    if opts.include_root ~= false then
+        local ok, folder_err = append_from_folder(namespace_state.root_folder)
+        if not ok then
+            return nil, folder_err
+        end
+    end
+
+    if opts.include_children then
+        for _, entry in ipairs(namespace_state.child_folders) do
+            local ok, folder_err = append_from_folder(entry.actual)
+            if not ok then
+                return nil, folder_err
+            end
+        end
+    end
+
+    return snippets
+end
+
+local function resolve_virtual_folder_id_for_snippet(namespace_state, snippet)
+    if type(snippet) ~= "table" then
+        return nil
+    end
+
+    local actual_folder_id = snippet.folder_id
+    if actual_folder_id == nil or actual_folder_id == cjson.null or actual_folder_id == "" then
+        return nil
+    end
+
+    if namespace_state.root_folder and actual_folder_id == namespace_state.root_folder.id then
+        return nil
+    end
+
+    local entry = namespace_state.child_by_actual_id[actual_folder_id]
+    return entry and entry.virtual.id or nil
+end
+
+local function virtualize_snippet(scope_key, user_hash, namespace_state, snippet, forced_virtual_id)
+    local virtual_folder = resolve_virtual_folder_id_for_snippet(namespace_state, snippet)
+    local virtual_id = forced_virtual_id or resolve_virtual_snippet_id(scope_key, user_hash, snippet, virtual_folder)
+    return to_virtual_snippet(snippet, virtual_id, virtual_folder)
+end
+
+local function resolve_actual_folder(scope_key, user_hash, namespace_state, requested_folder_id)
+    if requested_folder_id == nil or requested_folder_id == cjson.null or requested_folder_id == "" then
+        return namespace_state.root_folder
+    end
+
+    local entry = namespace_state.child_by_virtual_id[requested_folder_id]
+        or namespace_state.child_by_actual_id[requested_folder_id]
+    if entry then
+        if user_hash and requested_folder_id ~= entry.actual.id then
+            set_mapped_actual_folder_id(scope_key, user_hash, requested_folder_id, entry.actual.id, true)
+        end
+        return entry.actual
+    end
+
+    if user_hash then
+        local mapped_actual_id = get_mapped_actual_folder_id(scope_key, user_hash, requested_folder_id)
+        if mapped_actual_id and mapped_actual_id ~= "" then
+            entry = namespace_state.child_by_actual_id[mapped_actual_id]
+            if entry then
+                set_mapped_actual_folder_id(scope_key, user_hash, requested_folder_id, entry.actual.id, true)
+                return entry.actual
+            end
+        end
+    end
+
+    for _, folder_entry in ipairs(namespace_state.child_folders) do
+        for _, alias in ipairs(folder_entry.aliases or {}) do
+            if alias == requested_folder_id then
+                if user_hash then
+                    set_mapped_actual_folder_id(
+                        scope_key,
+                        user_hash,
+                        requested_folder_id,
+                        folder_entry.actual.id,
+                        requested_folder_id ~= folder_entry.actual.id
+                    )
+                end
+                return folder_entry.actual
+            end
+        end
+    end
+
+    return nil
+end
+
+local function find_actual_snippet_in_collection(scope_key, user_hash, request_id, namespace_state, snippets)
     if not request_id or request_id == "" then
         return nil
     end
 
-    local snippets, err = list_user_snippets(project_ref, folder_id)
-    if not snippets then
-        ngx.log(ngx.WARN, "[CONTENT-PROXY] Could not list user snippets: ", err or "unknown error")
-        return nil
+    local mapped_actual_id = get_mapped_actual_id(scope_key, user_hash, request_id)
+    if mapped_actual_id and mapped_actual_id ~= "" then
+        for _, snippet in ipairs(snippets or {}) do
+            if snippet.id == mapped_actual_id then
+                return snippet
+            end
+        end
     end
 
-    for _, snippet in ipairs(snippets) do
-        local canonical_id = virtual_snippet_id(snippet.name)
-        local visible_id = resolve_virtual_snippet_id(project_ref, user_hash, snippet)
+    for _, snippet in ipairs(snippets or {}) do
+        local virtual_folder = resolve_virtual_folder_id_for_snippet(namespace_state, snippet)
+        local canonical_id = virtual_snippet_id(snippet.name, virtual_folder)
+        local visible_id = resolve_virtual_snippet_id(scope_key, user_hash, snippet, virtual_folder)
 
         if snippet.id == request_id or canonical_id == request_id or visible_id == request_id then
-            set_mapped_actual_id(project_ref, user_hash, request_id, snippet.id, visible_id == request_id)
+            set_mapped_actual_id(scope_key, user_hash, request_id, snippet.id, visible_id == request_id)
             return snippet
         end
     end
@@ -471,26 +789,30 @@ local function find_actual_snippet_by_request_id(project_ref, folder_id, user_ha
     return nil
 end
 
-local function resolve_actual_snippet(project_ref, folder_id, user_hash, request_id)
+local function resolve_actual_snippet(project_ref, namespace_state, scope_key, user_hash, request_id, actual_folder)
     if not request_id or request_id == "" then
         return nil
     end
 
-    local mapped_actual_id = get_mapped_actual_id(project_ref, user_hash, request_id)
-    if mapped_actual_id and mapped_actual_id ~= "" then
-        local snippets, err = list_user_snippets(project_ref, folder_id)
-        if not snippets then
-            ngx.log(ngx.WARN, "[CONTENT-PROXY] Could not validate cached snippet id: ", err or "unknown error")
-        else
-            for _, snippet in ipairs(snippets) do
-                if snippet.id == mapped_actual_id then
-                    return snippet
-                end
-            end
-        end
+    local snippets, err = collect_namespace_snippets(
+        project_ref,
+        namespace_state,
+        actual_folder and { actual_folder = actual_folder } or { include_root = true, include_children = true }
+    )
+    if not snippets then
+        ngx.log(ngx.WARN, "[CONTENT-PROXY] Could not list namespace snippets: ", err or "unknown error")
+        return nil
     end
 
-    return find_actual_snippet_by_request_id(project_ref, folder_id, user_hash, request_id)
+    return find_actual_snippet_in_collection(scope_key, user_hash, request_id, namespace_state, snippets)
+end
+
+local function build_virtual_folder_array(namespace_state)
+    local folders = {}
+    for _, entry in ipairs(namespace_state.child_folders) do
+        table.insert(folders, clone_table(entry.virtual))
+    end
+    return folders
 end
 
 local function parse_boolean(value)
@@ -508,73 +830,116 @@ local function parse_boolean(value)
     return nil
 end
 
-local function rewrite_content_list_response(actual_payload, args, project_ref, user_hash)
-    local actual_contents = (((actual_payload or {}).data or {}).contents) or {}
-    local virtual_contents = {}
+local function build_virtual_snippet_page(raw_snippets, args, scope_key, user_hash, namespace_state)
+    local favorite_filter = parse_boolean(args.favorite)
+    local search_term = tostring(args.name or ""):lower()
+    local items = {}
 
-    for _, snippet in ipairs(actual_contents) do
-        table.insert(
-            virtual_contents,
-            to_virtual_snippet(snippet, resolve_virtual_snippet_id(project_ref, user_hash, snippet))
-        )
+    for _, snippet in ipairs(raw_snippets or {}) do
+        local virtual = virtualize_snippet(scope_key, user_hash, namespace_state, snippet)
+        local matches_search =
+            search_term == ""
+            or ((virtual.name or ""):lower():find(search_term, 1, true) ~= nil)
+        local matches_favorite = favorite_filter == nil or virtual.favorite == favorite_filter
+
+        if matches_search and matches_favorite then
+            table.insert(items, virtual)
+        end
     end
 
-    local favorite_filter = parse_boolean(args.favorite)
-    if favorite_filter ~= nil then
-        local filtered = {}
-        for _, snippet in ipairs(virtual_contents) do
-            if snippet.favorite == favorite_filter then
-                table.insert(filtered, snippet)
+    local sort_by, sort_order = normalize_sort(args.sort_by, args.sort_order)
+    table.sort(items, function(a, b)
+        local a_key
+        local b_key
+
+        if sort_by == "name" then
+            a_key = (a.name or ""):lower()
+            b_key = (b.name or ""):lower()
+        else
+            a_key = a.inserted_at or ""
+            b_key = b.inserted_at or ""
+        end
+
+        if a_key == b_key then
+            if sort_order == "asc" then
+                return (a.id or "") < (b.id or "")
+            end
+            return (a.id or "") > (b.id or "")
+        end
+
+        if sort_order == "asc" then
+            return a_key < b_key
+        end
+        return a_key > b_key
+    end)
+
+    local start_index = 1
+    if args.cursor and args.cursor ~= "" then
+        for index, item in ipairs(items) do
+            if item.id == args.cursor then
+                start_index = index + 1
+                break
             end
         end
-        virtual_contents = filtered
     end
 
-    local response = {
-        data = json_array(virtual_contents),
-    }
+    local limit = normalize_limit(args.limit)
+    local page = {}
+    local last_index = math.min(#items, start_index + limit - 1)
 
-    local virtual_cursor = map_actual_cursor_to_virtual(
-        actual_payload.cursor,
-        actual_contents,
-        project_ref,
-        user_hash
-    )
-    if virtual_cursor then
-        response.cursor = virtual_cursor
+    for index = start_index, last_index do
+        if items[index] then
+            table.insert(page, items[index])
+        end
     end
 
+    local next_cursor = nil
+    if last_index < #items and page[#page] then
+        next_cursor = page[#page].id
+    end
+
+    return page, next_cursor
+end
+
+local function build_content_response(raw_snippets, args, scope_key, user_hash, namespace_state)
+    local page, next_cursor = build_virtual_snippet_page(raw_snippets, args, scope_key, user_hash, namespace_state)
+    local response = { data = json_array(page) }
+    if next_cursor then
+        response.cursor = next_cursor
+    end
     return response
 end
 
-local function rewrite_folder_list_response(actual_payload, project_ref, user_hash)
-    local actual_contents = (((actual_payload or {}).data or {}).contents) or {}
-    local virtual_contents = {}
-
-    for _, snippet in ipairs(actual_contents) do
-        table.insert(
-            virtual_contents,
-            to_virtual_snippet(snippet, resolve_virtual_snippet_id(project_ref, user_hash, snippet))
-        )
+local function build_root_folder_response(root_snippets, namespace_snippets, args, scope_key, user_hash, namespace_state)
+    local source_snippets = root_snippets
+    if args.name and args.name ~= "" then
+        source_snippets = namespace_snippets
     end
 
+    local page, next_cursor = build_virtual_snippet_page(source_snippets, args, scope_key, user_hash, namespace_state)
+    local response = {
+        data = {
+            folders = json_array(build_virtual_folder_array(namespace_state)),
+            contents = json_array(page),
+        },
+    }
+    if next_cursor then
+        response.cursor = next_cursor
+    end
+    return response
+end
+
+local function build_folder_contents_response(folder_snippets, args, scope_key, user_hash, namespace_state)
+    local page, next_cursor = build_virtual_snippet_page(folder_snippets, args, scope_key, user_hash, namespace_state)
     local response = {
         data = {
             folders = json_array({}),
-            contents = json_array(virtual_contents),
+            contents = json_array(page),
         },
     }
-
-    local virtual_cursor = map_actual_cursor_to_virtual(
-        actual_payload.cursor,
-        actual_contents,
-        project_ref,
-        user_hash
-    )
-    if virtual_cursor then
-        response.cursor = virtual_cursor
+    if next_cursor then
+        response.cursor = next_cursor
     end
-
     return response
 end
 
@@ -596,37 +961,37 @@ function _M.handle_content()
             return respond_json(200, { data = json_array({}) })
         end
 
-        local user_hash = get_user_hash()
+        local user_hash, user_hash_err = get_user_hash()
+        if not user_hash then
+            ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to get user hash: ", user_hash_err or "unknown error")
+            return respond_json(500, { error = { message = "Failed to resolve user identity" } })
+        end
 
-        local folder, folder_err = resolve_user_folder(api_project_ref, project_scope, true)
-        if not folder then
+        local root_folder, namespace_state, folder_err =
+            resolve_namespace_root_folder(api_project_ref, user_hash, project_scope, true)
+        if not root_folder then
             ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to resolve user folder: ", folder_err or "unknown error")
             return respond_json(500, { error = { message = "Failed to resolve user folder" } })
         end
 
-        local upstream_args = clone_table(args)
-        upstream_args.type = nil
-        upstream_args.visibility = nil
-
-        if upstream_args.cursor then
-            local mapped = resolve_actual_snippet(project_scope, folder.id, user_hash, upstream_args.cursor)
-            upstream_args.cursor = mapped and mapped.id or nil
+        local snippets, snippets_err
+        if args.name and args.name ~= "" then
+            snippets, snippets_err = collect_namespace_snippets(api_project_ref, namespace_state, {
+                include_root = true,
+                include_children = true,
+            })
+        else
+            snippets, snippets_err = collect_namespace_snippets(api_project_ref, namespace_state, {
+                actual_folder = root_folder,
+            })
         end
 
-        local res, err = studio_request("GET", "/api/platform/projects/" .. api_project_ref .. "/content/folders/" .. folder.id, {
-            query = upstream_args,
-        })
-
-        if not res then
-            ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to fetch user content: ", err or "unknown error")
+        if not snippets then
+            ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to fetch user content: ", snippets_err or "unknown error")
             return respond_json(502, { error = { message = "Failed to fetch snippets" } })
         end
 
-        if res.status ~= 200 then
-            return respond_from_studio(res)
-        end
-
-        return respond_json(200, rewrite_content_list_response(parse_json_response(res), args, project_scope, user_hash))
+        return respond_json(200, build_content_response(snippets, args, project_scope, user_hash, namespace_state))
     end
 
     if method == "PUT" then
@@ -651,30 +1016,49 @@ function _M.handle_content()
             return respond_json(500, { error = { message = "Failed to resolve user identity" } })
         end
 
-        local folder, folder_err = resolve_user_folder(api_project_ref, project_scope, true)
-        if not folder then
+        local root_folder, namespace_state, folder_err =
+            resolve_namespace_root_folder(api_project_ref, user_hash, project_scope, true)
+        if not root_folder then
             ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to ensure user folder: ", folder_err or "unknown error")
             return respond_json(500, { error = { message = "Failed to ensure user folder" } })
         end
 
         local incoming_id = payload.id
-        local canonical_virtual_id = virtual_snippet_id(payload.name or "")
-        local existing = resolve_actual_snippet(project_scope, folder.id, user_hash, incoming_id)
+        local requested_virtual_folder_id = payload.folder_id
+        local canonical_virtual_id = virtual_snippet_id(payload.name or "", requested_virtual_folder_id)
+        local existing = resolve_actual_snippet(
+            api_project_ref,
+            namespace_state,
+            project_scope,
+            user_hash,
+            incoming_id
+        )
         if not existing and canonical_virtual_id ~= incoming_id then
-            existing = resolve_actual_snippet(project_scope, folder.id, user_hash, canonical_virtual_id)
+            existing = resolve_actual_snippet(
+                api_project_ref,
+                namespace_state,
+                project_scope,
+                user_hash,
+                canonical_virtual_id
+            )
+        end
+
+        local target_folder = resolve_actual_folder(project_scope, user_hash, namespace_state, requested_virtual_folder_id)
+        if not target_folder then
+            return respond_json(404, { error = { message = "Folder not found" } })
         end
 
         if existing then
             payload.id = existing.id
         else
-            payload.id = canonical_virtual_id
+            payload.id = incoming_id or canonical_virtual_id
         end
 
         if type(payload.content) == "table" then
             payload.content.content_id = payload.id
         end
 
-        payload.folder_id = folder.id
+        payload.folder_id = target_folder.id
 
         local encoded = cjson.encode(payload)
         local res, err = studio_request("PUT", "/api/platform/projects/" .. api_project_ref .. "/content", {
@@ -693,9 +1077,12 @@ function _M.handle_content()
 
         local saved = parse_json_response(res)
         if type(saved) == "table" and saved.name then
-            set_mapped_actual_id(project_scope, user_hash, incoming_id, saved.id, true)
-            set_mapped_actual_id(project_scope, user_hash, canonical_virtual_id, saved.id, false)
-            saved = to_virtual_snippet(saved, incoming_id or canonical_virtual_id)
+            local preferred_virtual_id = incoming_id or canonical_virtual_id
+            set_mapped_actual_id(project_scope, user_hash, preferred_virtual_id, saved.id, true)
+            if canonical_virtual_id ~= preferred_virtual_id then
+                set_mapped_actual_id(project_scope, user_hash, canonical_virtual_id, saved.id, false)
+            end
+            saved = virtualize_snippet(project_scope, user_hash, namespace_state, saved, preferred_virtual_id)
         end
 
         return respond_json(res.status, saved)
@@ -707,10 +1094,17 @@ function _M.handle_content()
             return passthrough_current_request()
         end
 
-        local user_hash = get_user_hash()
-        local folder = resolve_user_folder(api_project_ref, project_scope, false)
-        if not folder then
-            return respond_json(200, json_array({}))
+        local user_hash, user_hash_err = get_user_hash()
+        if not user_hash then
+            ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to get user hash: ", user_hash_err or "unknown error")
+            return respond_json(500, { error = { message = "Failed to resolve user identity" } })
+        end
+
+        local _, namespace_state, folder_err =
+            resolve_namespace_root_folder(api_project_ref, user_hash, project_scope, false)
+        if not namespace_state then
+            ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to resolve namespace for delete: ", folder_err or "unknown error")
+            return respond_json(500, { error = { message = "Failed to resolve user folder" } })
         end
 
         local mapped_ids = {}
@@ -719,9 +1113,15 @@ function _M.handle_content()
             local trimmed = (id or ""):gsub("^%s+", ""):gsub("%s+$", "")
             if trimmed ~= "" then
                 table.insert(requested_ids, trimmed)
-                local actual = resolve_actual_snippet(project_scope, folder.id, user_hash, trimmed)
+                local actual = resolve_actual_snippet(
+                    api_project_ref,
+                    namespace_state,
+                    project_scope,
+                    user_hash,
+                    trimmed
+                )
                 if not actual then
-                    return passthrough_current_request()
+                    return respond_json(404, { error = { message = "Content not found." } })
                 end
                 table.insert(mapped_ids, actual.id)
             end
@@ -761,41 +1161,185 @@ function _M.handle_folders()
     local method = ngx.req.get_method()
     local args = ngx.req.get_uri_args()
 
-    if method ~= "GET" or args.type ~= "sql" then
+    local user_hash, user_hash_err = get_user_hash()
+    if not user_hash then
+        ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to get user hash: ", user_hash_err or "unknown error")
+        return respond_json(500, { error = { message = "Failed to resolve user identity" } })
+    end
+
+    if method == "GET" then
+        if args.type ~= "sql" then
+            return passthrough_current_request()
+        end
+
+        local root_folder, namespace_state, folder_err =
+            resolve_namespace_root_folder(api_project_ref, user_hash, project_scope, true)
+        if not root_folder then
+            ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to resolve user folder for folders route: ", folder_err or "unknown error")
+            return respond_json(500, { error = { message = "Failed to resolve user folder" } })
+        end
+
+        local root_snippets, root_err = collect_namespace_snippets(api_project_ref, namespace_state, {
+            actual_folder = root_folder,
+        })
+        if not root_snippets then
+            ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to fetch root snippets: ", root_err or "unknown error")
+            return respond_json(502, { error = { message = "Failed to fetch folder contents" } })
+        end
+
+        local namespace_snippets = root_snippets
+        if args.name and args.name ~= "" then
+            namespace_snippets, root_err = collect_namespace_snippets(api_project_ref, namespace_state, {
+                include_root = true,
+                include_children = true,
+            })
+            if not namespace_snippets then
+                ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to fetch namespace snippets: ", root_err or "unknown error")
+                return respond_json(502, { error = { message = "Failed to fetch folder contents" } })
+            end
+        end
+
+        return respond_json(
+            200,
+            build_root_folder_response(root_snippets, namespace_snippets, args, project_scope, user_hash, namespace_state)
+        )
+    end
+
+    if method == "POST" then
+        local raw_body, body_err = read_body()
+        if body_err then
+            return respond_json(400, { error = { message = "Failed to read request body" } })
+        end
+
+        local payload = cjson_safe.decode(raw_body or "")
+        if type(payload) ~= "table" then
+            return respond_json(400, { error = { message = "Invalid request body" } })
+        end
+
+        if payload.parentId and payload.parentId ~= "" and payload.parentId ~= cjson.null then
+            return respond_json(400, { error = { message = "Nested folders are not supported" } })
+        end
+
+        local _, _, root_err = resolve_namespace_root_folder(api_project_ref, user_hash, project_scope, true)
+        if root_err then
+            ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to ensure namespace root before create folder: ", root_err)
+            return respond_json(500, { error = { message = "Failed to resolve user folder" } })
+        end
+
+        local created, create_err = create_namespaced_folder(api_project_ref, user_hash, project_scope, payload.name)
+        if not created then
+            return respond_json(500, { error = { message = create_err or "Failed to create folder" } })
+        end
+
+        return respond_json(201, created.virtual)
+    end
+
+    if method == "DELETE" then
+        local raw_ids = args.ids
+        local requested_ids = {}
+
+        if type(raw_ids) == "string" then
+            for id in string.gmatch(raw_ids, "([^,]+)") do
+                local trimmed = (id or ""):gsub("^%s+", ""):gsub("%s+$", "")
+                if trimmed ~= "" then
+                    table.insert(requested_ids, trimmed)
+                end
+            end
+        elseif type(raw_ids) == "table" then
+            for _, id in ipairs(raw_ids) do
+                local trimmed = tostring(id or ""):gsub("^%s+", ""):gsub("%s+$", "")
+                if trimmed ~= "" then
+                    table.insert(requested_ids, trimmed)
+                end
+            end
+        end
+
+        if #requested_ids == 0 then
+            return respond_json(400, { error = { message = "Folder IDs are required" } })
+        end
+
+        local root_folder, namespace_state, folder_err =
+            resolve_namespace_root_folder(api_project_ref, user_hash, project_scope, false)
+        if not namespace_state then
+            ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to resolve namespace for folder delete: ", folder_err or "unknown error")
+            return respond_json(500, { error = { message = "Failed to resolve user folder" } })
+        end
+
+        local actual_ids = {}
+        for _, id in ipairs(requested_ids) do
+            local actual_folder = resolve_actual_folder(project_scope, user_hash, namespace_state, id)
+            if not actual_folder or (root_folder and actual_folder.id == root_folder.id) then
+                return respond_json(404, { error = { message = "Folder not found" } })
+            end
+            table.insert(actual_ids, actual_folder.id)
+        end
+
+        local res, err = studio_request("DELETE", "/api/platform/projects/" .. api_project_ref .. "/content/folders", {
+            query = { ids = table.concat(actual_ids, ",") },
+        })
+
+        if not res then
+            ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to delete folders: ", err or "unknown error")
+            return respond_json(502, { error = { message = "Failed to delete folder" } })
+        end
+
+        if res.status < 200 or res.status >= 300 then
+            return respond_from_studio(res)
+        end
+
+        return respond_json(res.status, {})
+    end
+
+    return passthrough_current_request()
+end
+
+function _M.handle_folder_item()
+    local api_project_ref = get_project_ref()
+    local folder_id = ngx.var.uri:match("/content/folders/([^/]+)$")
+    if not api_project_ref or not folder_id then
         return passthrough_current_request()
     end
 
-    local user_hash = get_user_hash()
+    local project_scope = get_project_scope()
+    local method = ngx.req.get_method()
 
-    local folder, folder_err = resolve_user_folder(api_project_ref, project_scope, true)
-    if not folder then
-        ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to resolve user folder for folders route: ", folder_err or "unknown error")
+    local user_hash, user_hash_err = get_user_hash()
+    if not user_hash then
+        ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to get user hash: ", user_hash_err or "unknown error")
+        return respond_json(500, { error = { message = "Failed to resolve user identity" } })
+    end
+
+    local root_folder, namespace_state, folder_err =
+        resolve_namespace_root_folder(api_project_ref, user_hash, project_scope, false)
+    if not namespace_state then
+        ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to resolve namespace for folder item: ", folder_err or "unknown error")
         return respond_json(500, { error = { message = "Failed to resolve user folder" } })
     end
 
-    local upstream_args = clone_table(args)
-    upstream_args.type = nil
-    upstream_args.visibility = nil
-
-    if upstream_args.cursor then
-        local mapped = resolve_actual_snippet(project_scope, folder.id, user_hash, upstream_args.cursor)
-        upstream_args.cursor = mapped and mapped.id or nil
+    local actual_folder = resolve_actual_folder(project_scope, user_hash, namespace_state, folder_id)
+    if not actual_folder or (root_folder and actual_folder.id == root_folder.id) then
+        return respond_json(404, { error = { message = "Folder not found" } })
     end
 
-    local res, err = studio_request("GET", "/api/platform/projects/" .. api_project_ref .. "/content/folders/" .. folder.id, {
-        query = upstream_args,
-    })
+    if method == "GET" then
+        local args = ngx.req.get_uri_args()
+        local snippets, err = collect_namespace_snippets(api_project_ref, namespace_state, {
+            actual_folder = actual_folder,
+        })
 
-    if not res then
-        ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to fetch folder contents: ", err or "unknown error")
-        return respond_json(502, { error = { message = "Failed to fetch folder contents" } })
+        if not snippets then
+            ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to fetch virtual folder contents: ", err or "unknown error")
+            return respond_json(502, { error = { message = "Failed to fetch folder contents" } })
+        end
+
+        return respond_json(200, build_folder_contents_response(snippets, args, project_scope, user_hash, namespace_state))
     end
 
-    if res.status ~= 200 then
-        return respond_from_studio(res)
+    if method == "PATCH" then
+        return respond_json(200, {})
     end
 
-    return respond_json(200, rewrite_folder_list_response(parse_json_response(res), project_scope, user_hash))
+    return passthrough_current_request()
 end
 
 function _M.handle_count()
@@ -810,37 +1354,41 @@ function _M.handle_count()
         return passthrough_current_request()
     end
 
-    local folder, folder_err = resolve_user_folder(api_project_ref, project_scope, true)
-    if not folder then
+    local user_hash, user_hash_err = get_user_hash()
+    if not user_hash then
+        ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to get user hash: ", user_hash_err or "unknown error")
+        return respond_json(500, { error = { message = "Failed to resolve user identity" } })
+    end
+
+    local _, namespace_state, folder_err =
+        resolve_namespace_root_folder(api_project_ref, user_hash, project_scope, true)
+    if not namespace_state then
         ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to resolve user folder for count route: ", folder_err or "unknown error")
         return respond_json(500, { error = { message = "Failed to resolve user folder" } })
     end
 
-    local res, err = studio_request("GET", "/api/platform/projects/" .. api_project_ref .. "/content/folders/" .. folder.id, {
-        query = {
-            name = args.name,
-            limit = "100",
-            sort_by = "inserted_at",
-            sort_order = "desc",
-        },
+    local all_snippets, snippets_err = collect_namespace_snippets(api_project_ref, namespace_state, {
+        include_root = true,
+        include_children = true,
     })
-
-    if not res then
-        ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to fetch snippets for count: ", err or "unknown error")
+    if not all_snippets then
+        ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to fetch snippets for count: ", snippets_err or "unknown error")
         return respond_json(502, { error = { message = "Failed to fetch snippets for count" } })
     end
 
-    if res.status ~= 200 then
-        return respond_from_studio(res)
-    end
-
-    local actual_contents = (((parse_json_response(res) or {}).data or {}).contents) or {}
     if args.name and args.name ~= "" then
-        return respond_json(200, { count = #actual_contents })
+        local search_term = tostring(args.name or ""):lower()
+        local count = 0
+        for _, snippet in ipairs(all_snippets) do
+            if (snippet.name or ""):lower():find(search_term, 1, true) ~= nil then
+                count = count + 1
+            end
+        end
+        return respond_json(200, { count = count })
     end
 
     local favorites = 0
-    for _, snippet in ipairs(actual_contents) do
+    for _, snippet in ipairs(all_snippets) do
         if snippet.favorite then
             favorites = favorites + 1
         end
@@ -849,7 +1397,7 @@ function _M.handle_count()
     return respond_json(200, {
         shared = 0,
         favorites = favorites,
-        private = #actual_contents,
+        private = #all_snippets,
     })
 end
 
@@ -861,16 +1409,22 @@ function _M.handle_item()
     end
     local project_scope = get_project_scope()
 
-    local user_hash = get_user_hash()
-
-    local folder = resolve_user_folder(api_project_ref, project_scope, false)
-    if not folder then
-        return passthrough_current_request()
+    local user_hash, user_hash_err = get_user_hash()
+    if not user_hash then
+        ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to get user hash: ", user_hash_err or "unknown error")
+        return respond_json(500, { error = { message = "Failed to resolve user identity" } })
     end
 
-    local actual = resolve_actual_snippet(project_scope, folder.id, user_hash, item_id)
+    local _, namespace_state, folder_err =
+        resolve_namespace_root_folder(api_project_ref, user_hash, project_scope, false)
+    if not namespace_state then
+        ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to resolve namespace for item route: ", folder_err or "unknown error")
+        return respond_json(500, { error = { message = "Failed to resolve user folder" } })
+    end
+
+    local actual = resolve_actual_snippet(api_project_ref, namespace_state, project_scope, user_hash, item_id)
     if not actual or not actual.id then
-        return passthrough_current_request()
+        return respond_json(404, { message = "Content not found." })
     end
 
     local res, err = studio_request("GET", "/api/platform/projects/" .. api_project_ref .. "/content/item/" .. actual.id)
@@ -885,7 +1439,7 @@ function _M.handle_item()
 
     local payload = parse_json_response(res)
     if type(payload) == "table" and payload.name then
-        payload = to_virtual_snippet(payload, item_id)
+        payload = virtualize_snippet(project_scope, user_hash, namespace_state, payload, item_id)
     end
 
     return respond_json(200, payload)
