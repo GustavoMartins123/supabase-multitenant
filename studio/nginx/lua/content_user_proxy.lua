@@ -34,6 +34,15 @@ local function get_project_ref()
     return ngx.var.uri:match("^/api/platform/projects/([^/]+)/content")
 end
 
+local function get_project_scope()
+    local project_ref = ngx.var.project_ref
+    if project_ref and project_ref ~= "" then
+        return project_ref
+    end
+
+    return get_project_ref() or "default"
+end
+
 local function read_body()
     ngx.req.read_body()
 
@@ -216,8 +225,17 @@ local function virtual_snippet_id(name)
     return deterministic_uuid({ string.format("%s.sql", name) })
 end
 
-local function actual_folder_id(user_hash)
-    return deterministic_uuid({ user_hash })
+local function build_folder_name(user_hash, project_scope)
+    local normalized_scope = tostring(project_scope or ""):gsub("[^%w._-]", "_")
+    if normalized_scope == "" or normalized_scope == "default" then
+        return user_hash
+    end
+
+    return string.format("%s__%s", user_hash, normalized_scope)
+end
+
+local function actual_folder_id(folder_name)
+    return deterministic_uuid({ folder_name })
 end
 
 local function actual_snippet_id(folder_id, name)
@@ -326,7 +344,7 @@ local function parse_json_response(res)
     return cjson_safe.decode(res.body) or {}
 end
 
-local function find_existing_user_folder(project_ref, user_hash)
+local function find_existing_user_folder(project_ref, folder_name)
     local res, err = studio_request("GET", "/api/platform/projects/" .. project_ref .. "/content/folders", {
         query = {
             type = "sql",
@@ -348,7 +366,7 @@ local function find_existing_user_folder(project_ref, user_hash)
     local payload = parse_json_response(res)
     local folders = (((payload or {}).data or {}).folders) or {}
     for _, folder in ipairs(folders) do
-        if folder.name == user_hash then
+        if folder.name == folder_name then
             return folder
         end
     end
@@ -356,21 +374,23 @@ local function find_existing_user_folder(project_ref, user_hash)
     return nil
 end
 
-local function resolve_user_folder(project_ref, create_if_missing)
+local function resolve_user_folder(project_ref, project_scope, create_if_missing)
     local user_hash, user_err = get_user_hash()
     if not user_hash then
         return nil, user_err
     end
 
-    local folder, find_err = find_existing_user_folder(project_ref, user_hash)
+    local folder_name = build_folder_name(user_hash, project_scope)
+
+    local folder, find_err = find_existing_user_folder(project_ref, folder_name)
     if folder then
         return folder
     end
 
     if not create_if_missing then
         return {
-            id = actual_folder_id(user_hash),
-            name = user_hash,
+            id = actual_folder_id(folder_name),
+            name = folder_name,
             owner_id = 1,
             parent_id = cjson.null,
             project_id = 1,
@@ -383,7 +403,7 @@ local function resolve_user_folder(project_ref, create_if_missing)
     end
 
     local create_res, create_err = studio_request("POST", "/api/platform/projects/" .. project_ref .. "/content/folders", {
-        body = cjson.encode({ name = user_hash }),
+        body = cjson.encode({ name = folder_name }),
         headers = { ["Content-Type"] = "application/json" },
     })
 
@@ -398,7 +418,7 @@ local function resolve_user_folder(project_ref, create_if_missing)
         end
     end
 
-    folder = find_existing_user_folder(project_ref, user_hash)
+    folder = find_existing_user_folder(project_ref, folder_name)
     if folder then
         return folder
     end
@@ -559,10 +579,11 @@ local function rewrite_folder_list_response(actual_payload, project_ref, user_ha
 end
 
 function _M.handle_content()
-    local project_ref = get_project_ref()
-    if not project_ref then
+    local api_project_ref = get_project_ref()
+    if not api_project_ref then
         return passthrough_current_request()
     end
+    local project_scope = get_project_scope()
 
     local method = ngx.req.get_method()
     local args = ngx.req.get_uri_args()
@@ -577,7 +598,7 @@ function _M.handle_content()
 
         local user_hash = get_user_hash()
 
-        local folder, folder_err = resolve_user_folder(project_ref, true)
+        local folder, folder_err = resolve_user_folder(api_project_ref, project_scope, true)
         if not folder then
             ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to resolve user folder: ", folder_err or "unknown error")
             return respond_json(500, { error = { message = "Failed to resolve user folder" } })
@@ -588,11 +609,11 @@ function _M.handle_content()
         upstream_args.visibility = nil
 
         if upstream_args.cursor then
-            local mapped = resolve_actual_snippet(project_ref, folder.id, user_hash, upstream_args.cursor)
+            local mapped = resolve_actual_snippet(project_scope, folder.id, user_hash, upstream_args.cursor)
             upstream_args.cursor = mapped and mapped.id or nil
         end
 
-        local res, err = studio_request("GET", "/api/platform/projects/" .. project_ref .. "/content/folders/" .. folder.id, {
+        local res, err = studio_request("GET", "/api/platform/projects/" .. api_project_ref .. "/content/folders/" .. folder.id, {
             query = upstream_args,
         })
 
@@ -605,7 +626,7 @@ function _M.handle_content()
             return respond_from_studio(res)
         end
 
-        return respond_json(200, rewrite_content_list_response(parse_json_response(res), args, project_ref, user_hash))
+        return respond_json(200, rewrite_content_list_response(parse_json_response(res), args, project_scope, user_hash))
     end
 
     if method == "PUT" then
@@ -630,7 +651,7 @@ function _M.handle_content()
             return respond_json(500, { error = { message = "Failed to resolve user identity" } })
         end
 
-        local folder, folder_err = resolve_user_folder(project_ref, true)
+        local folder, folder_err = resolve_user_folder(api_project_ref, project_scope, true)
         if not folder then
             ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to ensure user folder: ", folder_err or "unknown error")
             return respond_json(500, { error = { message = "Failed to ensure user folder" } })
@@ -638,9 +659,9 @@ function _M.handle_content()
 
         local incoming_id = payload.id
         local canonical_virtual_id = virtual_snippet_id(payload.name or "")
-        local existing = resolve_actual_snippet(project_ref, folder.id, user_hash, incoming_id)
+        local existing = resolve_actual_snippet(project_scope, folder.id, user_hash, incoming_id)
         if not existing and canonical_virtual_id ~= incoming_id then
-            existing = resolve_actual_snippet(project_ref, folder.id, user_hash, canonical_virtual_id)
+            existing = resolve_actual_snippet(project_scope, folder.id, user_hash, canonical_virtual_id)
         end
 
         if existing then
@@ -656,7 +677,7 @@ function _M.handle_content()
         payload.folder_id = folder.id
 
         local encoded = cjson.encode(payload)
-        local res, err = studio_request("PUT", "/api/platform/projects/" .. project_ref .. "/content", {
+        local res, err = studio_request("PUT", "/api/platform/projects/" .. api_project_ref .. "/content", {
             body = encoded,
             headers = { ["Content-Type"] = "application/json" },
         })
@@ -672,8 +693,8 @@ function _M.handle_content()
 
         local saved = parse_json_response(res)
         if type(saved) == "table" and saved.name then
-            set_mapped_actual_id(project_ref, user_hash, incoming_id, saved.id, true)
-            set_mapped_actual_id(project_ref, user_hash, canonical_virtual_id, saved.id, false)
+            set_mapped_actual_id(project_scope, user_hash, incoming_id, saved.id, true)
+            set_mapped_actual_id(project_scope, user_hash, canonical_virtual_id, saved.id, false)
             saved = to_virtual_snippet(saved, incoming_id or canonical_virtual_id)
         end
 
@@ -687,7 +708,7 @@ function _M.handle_content()
         end
 
         local user_hash = get_user_hash()
-        local folder = resolve_user_folder(project_ref, false)
+        local folder = resolve_user_folder(api_project_ref, project_scope, false)
         if not folder then
             return respond_json(200, json_array({}))
         end
@@ -698,7 +719,7 @@ function _M.handle_content()
             local trimmed = (id or ""):gsub("^%s+", ""):gsub("%s+$", "")
             if trimmed ~= "" then
                 table.insert(requested_ids, trimmed)
-                local actual = resolve_actual_snippet(project_ref, folder.id, user_hash, trimmed)
+                local actual = resolve_actual_snippet(project_scope, folder.id, user_hash, trimmed)
                 if not actual then
                     return passthrough_current_request()
                 end
@@ -706,7 +727,7 @@ function _M.handle_content()
             end
         end
 
-        local res, err = studio_request("DELETE", "/api/platform/projects/" .. project_ref .. "/content", {
+        local res, err = studio_request("DELETE", "/api/platform/projects/" .. api_project_ref .. "/content", {
             query = { ids = table.concat(mapped_ids, ",") },
         })
 
@@ -731,10 +752,11 @@ function _M.handle_content()
 end
 
 function _M.handle_folders()
-    local project_ref = get_project_ref()
-    if not project_ref then
+    local api_project_ref = get_project_ref()
+    if not api_project_ref then
         return passthrough_current_request()
     end
+    local project_scope = get_project_scope()
 
     local method = ngx.req.get_method()
     local args = ngx.req.get_uri_args()
@@ -745,7 +767,7 @@ function _M.handle_folders()
 
     local user_hash = get_user_hash()
 
-    local folder, folder_err = resolve_user_folder(project_ref, true)
+    local folder, folder_err = resolve_user_folder(api_project_ref, project_scope, true)
     if not folder then
         ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to resolve user folder for folders route: ", folder_err or "unknown error")
         return respond_json(500, { error = { message = "Failed to resolve user folder" } })
@@ -756,11 +778,11 @@ function _M.handle_folders()
     upstream_args.visibility = nil
 
     if upstream_args.cursor then
-        local mapped = resolve_actual_snippet(project_ref, folder.id, user_hash, upstream_args.cursor)
+        local mapped = resolve_actual_snippet(project_scope, folder.id, user_hash, upstream_args.cursor)
         upstream_args.cursor = mapped and mapped.id or nil
     end
 
-    local res, err = studio_request("GET", "/api/platform/projects/" .. project_ref .. "/content/folders/" .. folder.id, {
+    local res, err = studio_request("GET", "/api/platform/projects/" .. api_project_ref .. "/content/folders/" .. folder.id, {
         query = upstream_args,
     })
 
@@ -773,27 +795,28 @@ function _M.handle_folders()
         return respond_from_studio(res)
     end
 
-    return respond_json(200, rewrite_folder_list_response(parse_json_response(res), project_ref, user_hash))
+    return respond_json(200, rewrite_folder_list_response(parse_json_response(res), project_scope, user_hash))
 end
 
 function _M.handle_count()
-    local project_ref = get_project_ref()
-    if not project_ref then
+    local api_project_ref = get_project_ref()
+    if not api_project_ref then
         return passthrough_current_request()
     end
+    local project_scope = get_project_scope()
 
     local args = ngx.req.get_uri_args()
     if args.type ~= "sql" then
         return passthrough_current_request()
     end
 
-    local folder, folder_err = resolve_user_folder(project_ref, true)
+    local folder, folder_err = resolve_user_folder(api_project_ref, project_scope, true)
     if not folder then
         ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to resolve user folder for count route: ", folder_err or "unknown error")
         return respond_json(500, { error = { message = "Failed to resolve user folder" } })
     end
 
-    local res, err = studio_request("GET", "/api/platform/projects/" .. project_ref .. "/content/folders/" .. folder.id, {
+    local res, err = studio_request("GET", "/api/platform/projects/" .. api_project_ref .. "/content/folders/" .. folder.id, {
         query = {
             name = args.name,
             limit = "100",
@@ -831,25 +854,26 @@ function _M.handle_count()
 end
 
 function _M.handle_item()
-    local project_ref = get_project_ref()
+    local api_project_ref = get_project_ref()
     local item_id = ngx.var.uri:match("/content/item/([^/]+)$")
-    if not project_ref or not item_id then
+    if not api_project_ref or not item_id then
         return passthrough_current_request()
     end
+    local project_scope = get_project_scope()
 
     local user_hash = get_user_hash()
 
-    local folder = resolve_user_folder(project_ref, false)
+    local folder = resolve_user_folder(api_project_ref, project_scope, false)
     if not folder then
         return passthrough_current_request()
     end
 
-    local actual = resolve_actual_snippet(project_ref, folder.id, user_hash, item_id)
+    local actual = resolve_actual_snippet(project_scope, folder.id, user_hash, item_id)
     if not actual or not actual.id then
         return passthrough_current_request()
     end
 
-    local res, err = studio_request("GET", "/api/platform/projects/" .. project_ref .. "/content/item/" .. actual.id)
+    local res, err = studio_request("GET", "/api/platform/projects/" .. api_project_ref .. "/content/item/" .. actual.id)
     if not res then
         ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to fetch snippet by item id: ", err or "unknown error")
         return respond_json(502, { error = { message = "Failed to fetch snippet" } })
