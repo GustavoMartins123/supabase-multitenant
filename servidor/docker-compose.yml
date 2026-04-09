@@ -1,4 +1,4 @@
-#docker compose  --env-file secrets/.env     --env-file .env up --build -d
+#docker compose --env-file .env up --build -d
 
 #Caso for usar wal arquives descomente essa linha:
 #- archive_command=/bin/cp %p /wal-archive/%f
@@ -16,7 +16,6 @@ services:
       context: ./volumes/db
     restart: unless-stopped
     env_file:
-      - secrets/.env
       - .env
     networks:
       rede-supabase:
@@ -66,7 +65,7 @@ services:
       PGDATABASE: ${POSTGRES_DB}
       POSTGRES_DB: ${POSTGRES_DB}
       JWT_SECRET: ${JWT_SECRET}
-      JWT_EXP: ${JWT_EXPIRY}
+      JWT_EXP: 3600
     mem_limit: 24g
     memswap_limit: 24g
     shm_size: 4gb
@@ -180,7 +179,6 @@ services:
     #image: supabase/realtime:v2.34.41
     restart: unless-stopped
     env_file:
-      - secrets/.env
       - .env
     networks:
       - rede-supabase
@@ -226,7 +224,6 @@ services:
     container_name: supabase-pooler
     image: supabase/supavisor:2.7.4
     env_file:
-      - secrets/.env
       - .env
     restart: unless-stopped
     networks:
@@ -274,7 +271,6 @@ services:
     container_name: supabase-edge-functions
     image: supabase/edge-runtime:v1.73.0
     env_file:
-      - secrets/.env
       - .env
     restart: unless-stopped
     networks:

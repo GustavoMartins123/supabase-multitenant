@@ -270,7 +270,7 @@ Os comandos abaixo forçam a recriação dos contêineres, garantindo que eles u
 
 ```bash
 # Inicia o PostgreSQL, a API de gerenciamento, etc.
-docker compose -f servidor/docker-compose.yml --env-file servidor/secrets/.env --env-file servidor/.env up -d --force-recreate
+docker compose -f servidor/docker-compose.yml --env-file servidor/.env up -d --force-recreate
 ```
 Reinicie o Gateway de Borda (Traefik) e de permissão para escrita ao arquivo 'acme.json':
 
@@ -289,5 +289,5 @@ docker compose -f studio/docker-compose.yml up -d --force-recreate
 Reinicie o Projeto Existente que foi Modificado:
 ```bash
 # Aplica os novos labels de HTTPS ao projeto. Substitua nos dois <seu_projeto> pelo nome real.
-docker compose -f projects/<seu_projeto>/docker-compose.yml -p <seu_projeto> --env-file servidor/secrets/.env --env-file servidor/.env --env-file projects/<seu_projeto>/.env up -d --force-recreate
+docker compose -f projects/<seu_projeto>/docker-compose.yml -p <seu_projeto> --env-file servidor/.env --env-file projects/<seu_projeto>/.env up -d --force-recreate
 ```

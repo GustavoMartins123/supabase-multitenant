@@ -64,7 +64,6 @@ docker ps -a | grep nome_do_projeto
 
 cd servidor/projects/nome_do_projeto
 docker compose -p nome_do_projeto \
-  --env-file ../../secrets/.env \
   --env-file ../../.env \
   --env-file .env \
   up -d
@@ -524,7 +523,7 @@ command:
 Reinicie o banco:
 ```bash
 cd servidor
-docker compose --env-file secrets/.env --env-file .env up -d --force-recreate db
+docker compose --env-file .env up -d --force-recreate db
 ```
 
 ---

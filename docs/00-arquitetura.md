@@ -1200,7 +1200,6 @@ docker restart nginx
 11. Script executa docker compose
     cd servidor/projects/meu_projeto
     docker compose -p meu_projeto \
-      --env-file ../../secrets/.env \
       --env-file ../../.env \
       --env-file .env \
       up --build -d
@@ -1326,7 +1325,6 @@ bash duplicate_project.sh projeto_original projeto_novo [with-data|schema-only]
 9. Sobe containers do novo projeto
    cd servidor/projects/projeto_novo
    docker compose -p projeto_novo \
-     --env-file ../../secrets/.env \
      --env-file ../../.env \
      --env-file .env \
      up --build -d

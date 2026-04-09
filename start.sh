@@ -4,8 +4,8 @@ set -e
 
 echo "▶️  Iniciando a base de dados e serviços Supabase..."
 cd servidor
-docker compose -f docker-compose.yml --env-file .env --env-file secrets/.env up --build -d
-docker compose  -f docker-compose-api.yml --env-file secrets/.env   --env-file .env up --build -d
+docker compose -f docker-compose.yml --env-file .env up --build -d
+docker compose -f docker-compose-api.yml --env-file .env up --build -d
 echo "✅ Serviços Supabase iniciados. Aguardando o banco de dados ficar pronto..."
 
 
@@ -39,7 +39,6 @@ for project_dir in projects/*/; do
         echo "  ▶️  Iniciando projeto: $project_name"
         docker compose -p "$project_name" \
             -f "$project_dir/docker-compose.yml" \
-            --env-file secrets/.env \
             --env-file .env \
             --env-file "$project_dir/.env" \
             up --build -d

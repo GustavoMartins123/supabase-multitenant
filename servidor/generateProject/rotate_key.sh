@@ -52,7 +52,6 @@ rollback_transaction() {
 trap rollback_transaction ERR
 
 set -a
-source "$PROJECT_ROOT/secrets/.env"
 source "$PROJECT_ROOT/.env"
 set +a
 
@@ -186,7 +185,6 @@ fi
 
 cd "$PROJECT_DIR"
 docker compose -p "$PROJECT_ID" \
-  --env-file ../../secrets/.env \
   --env-file ../../.env \
   --env-file .env \
   up --build -d nginx

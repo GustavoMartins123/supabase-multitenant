@@ -177,7 +177,7 @@ Abra o `docker-compose-api.yml` e remova os `#` da frente do serviço `push-work
 Após salvar o arquivo, suba o contêiner executando o comando abaixo na pasta raiz:
 
 ```bash
-docker compose -f docker-compose-api.yml --env-file secrets/.env --env-file .env up --build -d push-worker
+docker compose -f docker-compose-api.yml --env-file .env up --build -d push-worker
 ```
 
 ### Passo 4: Como Enviar uma Notificação

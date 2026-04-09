@@ -17,7 +17,6 @@ WORKDIR /docker
 COPY ./api-internal/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY ./api-internal/app ./app
-COPY ./secrets/ /docker/secrets/
 COPY /generateProject ./scripts/
 RUN chmod +x ./scripts/extract_token.sh
 RUN chmod +x ./scripts/generate_project.sh

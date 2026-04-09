@@ -83,7 +83,6 @@ rollback_transaction() {
 trap rollback_transaction ERR
 
 set -a
-source "$PROJECT_ROOT/secrets/.env"
 source "$PROJECT_ROOT/.env"
 set +a
 
@@ -487,7 +486,6 @@ cd "$OUT_DIR"
 
 echo "   Executando: docker compose up --build -d"
 compose_output=$(docker compose -p "$NEW_PROJECT" \
-  --env-file ../../secrets/.env \
   --env-file ../../.env \
   --env-file .env \
   up --build -d 2>&1)

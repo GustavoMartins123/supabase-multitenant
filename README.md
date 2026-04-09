@@ -186,7 +186,7 @@ sudo bash start.sh
       ```bash
       # Starts PostgreSQL, the management API, etc.
       cd servidor/
-      docker compose --env-file secrets/.env --env-file .env up -d
+      docker compose --env-file .env up -d
       cd .. 
       ```
 

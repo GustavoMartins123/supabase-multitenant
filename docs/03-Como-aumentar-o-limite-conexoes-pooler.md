@@ -25,7 +25,6 @@ Depois de editar, recrie o Supavisor/pooler normalmente para que os novos projet
 
 ```bash
 docker compose -f servidor/docker-compose.yml \
-  --env-file servidor/secrets/.env \
   --env-file servidor/.env \
   up -d --force-recreate supabase-pooler
 ```

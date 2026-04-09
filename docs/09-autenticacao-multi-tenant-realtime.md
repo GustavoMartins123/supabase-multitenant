@@ -416,11 +416,10 @@ Nesses casos raros, seria necessário:
 ### Diferença do JWT_SECRET Global
 
 **JWT_SECRET global (ainda usado):**
-- Configurado em `servidor/secrets/.env`
+- Configurado em `servidor/.env`
 - Formato: base64 (64 bytes = 512 bits de entropia)
 - Usado por serviços compartilhados (db, realtime, api-internal)
 - Fallback para autenticação no Realtime
-- Usado para operações administrativas
 
 **JWT_SECRET_PROJETO (por projeto):**
 - Gerado durante criação do projeto

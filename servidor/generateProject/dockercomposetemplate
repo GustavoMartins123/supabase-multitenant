@@ -1,5 +1,5 @@
 #para subir estando no diretorio do projeto -> docker/projects/{{project_id}}
-#docker compose -p {{project_id}} --env-file ../../secrets/.env --env-file ../../.env  --env-file .env up --build -d
+#docker compose -p {{project_id}} --env-file ../../.env --env-file .env up --build -d
 name: supabase
 services:
   nginx:
@@ -44,7 +44,6 @@ services:
     image: supabase/gotrue:v2.188.1
     restart: unless-stopped
     env_file:
-      - ../../secrets/.env
       - ../../.env
       - .env
     networks:
@@ -80,12 +79,15 @@ services:
       GOTRUE_JWT_ADMIN_ROLES: service_role
       GOTRUE_JWT_AUD: authenticated
       GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
-      GOTRUE_JWT_EXP: ${JWT_EXPIRY}
+      GOTRUE_JWT_EXP: ${JWT_EXPIRY:-3600}
       GOTRUE_JWT_SECRET: ${JWT_SECRET_PROJETO}
 
       GOTRUE_EXTERNAL_EMAIL_ENABLED: ${ENABLE_EMAIL_SIGNUP}
       GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: ${ENABLE_ANONYMOUS_USERS}
       GOTRUE_MAILER_AUTOCONFIRM: ${ENABLE_EMAIL_AUTOCONFIRM}
+      GOTRUE_MAILER_OTP_EXP: ${GOTRUE_MAILER_OTP_EXP:-1800}
+      GOTRUE_PASSWORD_MIN_LENGTH: ${GOTRUE_PASSWORD_MIN_LENGTH:-6}
+      GOTRUE_EXTERNAL_IMPLICIT_FLOW_ENABLED: ${GOTRUE_EXTERNAL_IMPLICIT_FLOW_ENABLED:-false}
 
       # Uncomment to bypass nonce check in ID Token flow. Commonly set to true when using Google Sign In on mobile.
       # GOTRUE_EXTERNAL_SKIP_NONCE_CHECK: true
@@ -114,8 +116,8 @@ services:
       GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: ${MAILER_URLPATHS_EMAIL_CHANGE}
       GOTRUE_MAILER_URLPATHS_MAGIC_LINK: ${MAILER_URLPATHS_MAGIC_LINK}
 
-      GOTRUE_EXTERNAL_PHONE_ENABLED: ${ENABLE_PHONE_SIGNUP}
-      GOTRUE_SMS_AUTOCONFIRM: ${ENABLE_PHONE_AUTOCONFIRM}
+      GOTRUE_EXTERNAL_PHONE_ENABLED: ${ENABLE_PHONE_SIGNUP:-false}
+      GOTRUE_SMS_AUTOCONFIRM: ${ENABLE_PHONE_AUTOCONFIRM:-false}
       # Uncomment to enable custom access token hook. Please see: https://supabase.com/docs/guides/auth/auth-hooks for full list of hooks and additional details about custom_access_token_hook
 
       # GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED: "true"
@@ -141,7 +143,6 @@ services:
     image: postgrest/postgrest:v14.6
     restart: unless-stopped
     env_file:
-      - ../../secrets/.env
       - ../../.env
       - .env
     networks:
@@ -155,17 +156,17 @@ services:
     environment:
       PGRST_DB_URI: postgres://authenticator.{{project_id}}:${POSTGRES_PASSWORD}@${POSTGRES_POOLER}:${POOLER_PROXY_PORT_SESSION}/${POSTGRES_DATABASE}
       PGRST_DB_SCHEMA_CACHE_DURATION: 20
-      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS}
+      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS:-public}
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: ${JWT_SECRET_PROJETO}
       PGRST_DB_USE_LEGACY_GUCS: "false"
       PGRST_DB_PREPARED_STATEMENTS: true
       PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET_PROJETO}
-      PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY}
-      PGRST_DB_MAX_ROWS: 200000
-      PGRST_DB_POOL: 100
-      PGRST_DB_POOL_TIMEOUT: 60
-      PGRST_DB_POOL_ACQUISITION_TIMEOUT: 60
+      PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY:-3600}
+      PGRST_DB_MAX_ROWS: ${PGRST_DB_MAX_ROWS:-200000}
+      PGRST_DB_POOL: ${PGRST_DB_POOL:-100}
+      PGRST_DB_POOL_TIMEOUT: ${PGRST_DB_POOL_TIMEOUT:-60}
+      PGRST_DB_POOL_ACQUISITION_TIMEOUT: ${PGRST_DB_POOL_ACQUISITION_TIMEOUT:-60}
     command:
       [
         "postgrest"
@@ -176,7 +177,6 @@ services:
     image: supabase/storage-api:v1.44.9
     restart: unless-stopped
     env_file:
-      - ../../secrets/.env
       - ../../.env
       - .env
     networks:
@@ -207,7 +207,7 @@ services:
       POSTGREST_URL: http://rest:3000
       PGRST_JWT_SECRET: ${JWT_SECRET_PROJETO}
       DATABASE_URL: postgres://supabase_storage_admin.{{project_id}}:${POSTGRES_PASSWORD}@${POSTGRES_POOLER}:${POOLER_PROXY_PORT_TRANSACTION}/${POSTGRES_DATABASE}
-      FILE_SIZE_LIMIT: 524288000
+      FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT:-524288000}
       STORAGE_BACKEND: file
 
       #Permite usar o Tus
@@ -220,7 +220,7 @@ services:
       # TODO: https://github.com/supabase/storage-api/issues/55
       REGION: stub
       GLOBAL_S3_BUCKET: stub
-      ENABLE_IMAGE_TRANSFORMATION: "true"
+      ENABLE_IMAGE_TRANSFORMATION: "${ENABLE_IMAGE_TRANSFORMATION:-true}"
       IMGPROXY_URL: http://imgproxy:5001
 
   imgproxy:

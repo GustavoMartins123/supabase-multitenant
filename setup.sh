@@ -297,12 +297,17 @@ main() {
     PROJECT_DELETE_PASSWORD=$(generate_jwt_secret)
     DASHBOARD_USER=$(generate_user_realtime)
     DASHBOARD_PASSWORD=$(generate_realtime_dashboard_pass)
+    JWT_SECRET=$(generate_jwt_secret)
+    POSTGRES_PASSWORD=$(generate_postgres_password)
+
     cp servidor/.env.example servidor/.env
 
+    safe_sed "s|POSTGRES_PASSWORD=pass|POSTGRES_PASSWORD=$POSTGRES_PASSWORD|g" servidor/.env
     safe_sed "s|DB_ENC_KEY=pass|DB_ENC_KEY=$DB_ENC_KEY|g" servidor/.env
     safe_sed "s|VAULT_ENC_KEY=pass|VAULT_ENC_KEY=$VAULT_ENC_KEY|g" servidor/.env
     safe_sed "s|SECRET_KEY_BASE=pass|SECRET_KEY_BASE=$SECRET_KEY_BASE|g" servidor/.env
     safe_sed "s|LOGFLARE_API_KEY=pass|LOGFLARE_API_KEY=$LOGFLARE_API_KEY|g" servidor/.env
+    safe_sed "s|JWT_SECRET=pass|JWT_SECRET=$JWT_SECRET|g" servidor/.env
     safe_sed "s|FERNET_SECRET=pass|FERNET_SECRET=$SHARED_FERNET_SECRET|g" servidor/.env
     safe_sed "s|NGINX_SHARED_TOKEN=pass|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" servidor/.env
     safe_sed "s|PUSH_WORKER_TOKEN=pass|PUSH_WORKER_TOKEN=$PUSH_WORKER_TOKEN|g" servidor/.env
@@ -315,23 +320,6 @@ main() {
     safe_sed "s|DASHBOARD_PASSWORD=pass|DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD}|g" servidor/.env
     print_success "Arquivo servidor/.env configurado com sucesso!"
 
-    print_status "Configurando servidor/secrets..."
-    
-    if [[ ! -f "servidor/secrets/.env.example" ]]; then
-        print_error "Arquivo servidor/secrets/.env.example não encontrado!"
-        exit 1
-    fi
-    
-    JWT_SECRET=$(generate_jwt_secret)
-    POSTGRES_PASSWORD=$(generate_postgres_password)
-
-    cp servidor/secrets/.env.example servidor/secrets/.env
-    
-    safe_sed "s|JWT_SECRET=pass|JWT_SECRET=$JWT_SECRET|g" servidor/secrets/.env
-    safe_sed "s|POSTGRES_PASSWORD=pass|POSTGRES_PASSWORD=$POSTGRES_PASSWORD|g" servidor/secrets/.env
-    
-    print_success "Arquivo servidor/secrets/.env configurado com sucesso!"
-    
     print_status "Configurando studio..."
     
     if [[ ! -f "studio/.env.example" ]]; then
@@ -363,7 +351,6 @@ main() {
     echo ""
     print_status "Arquivos configurados:"
     echo "  ✓ servidor/.env"
-    echo "  ✓ servidor/secrets/.env"
     echo "  ✓ studio/.env"
     echo ""
     print_status "Chaves compartilhadas configuradas:"

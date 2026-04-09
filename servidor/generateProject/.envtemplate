@@ -9,6 +9,10 @@ SITE_URL={{project_public_url}}/verify-success.html
 ADDITIONAL_REDIRECT_URLS={{project_public_url}}/verify-success.html
 DISABLE_SIGNUP=false
 API_EXTERNAL_URL={{project_auth_external_url}}
+JWT_EXPIRY=3600
+GOTRUE_MAILER_OTP_EXP=1800
+GOTRUE_PASSWORD_MIN_LENGTH=6
+GOTRUE_EXTERNAL_IMPLICIT_FLOW_ENABLED=false
 
 MAILER_URLPATHS_CONFIRMATION="/verify"
 MAILER_URLPATHS_INVITE="/verify"
@@ -26,8 +30,26 @@ ENABLE_EMAIL_SIGNUP=true
 ENABLE_EMAIL_AUTOCONFIRM=true
 #important -> default is false
 ENABLE_ANONYMOUS_USERS=false
+ENABLE_PHONE_SIGNUP=false
+ENABLE_PHONE_AUTOCONFIRM=false
 
+PGRST_DB_SCHEMAS=public
+PGRST_DB_MAX_ROWS=200000
+PGRST_DB_POOL=100
+PGRST_DB_POOL_TIMEOUT=60
+PGRST_DB_POOL_ACQUISITION_TIMEOUT=60
+
+FILE_SIZE_LIMIT=524288000
 IMGPROXY_ENABLE_WEBP_DETECTION=true
+ENABLE_IMAGE_TRANSFORMATION=true
+
+# Optional per-project SMTP override
+# SMTP_ADMIN_EMAIL=noreply.example@example.com
+# SMTP_HOST=smtp.gmail.com
+# SMTP_PORT=587
+# SMTP_USER=noreply.example@example.com
+# SMTP_PASS='supersecretpassword'
+# SMTP_SENDER_NAME="Supabase"
 
 LOGFLARE_API_KEY={{logflare_api_key}}
 ANON_KEY_PROJETO={{anon_key}}

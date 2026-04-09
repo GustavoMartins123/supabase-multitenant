@@ -182,7 +182,7 @@ Se você prefere iniciar cada parte da plataforma individualmente para ter mais 
     ```bash
     # Inicia o PostgreSQL, a API de gerenciamento, etc.
     cd servidor/
-    docker compose --env-file secrets/.env --env-file .env up -d
+    docker compose --env-file .env up -d
     cd .. 
     ```
 

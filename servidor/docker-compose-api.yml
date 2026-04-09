@@ -1,4 +1,4 @@
-#docker compose  -f docker-compose-api.yml --env-file secrets/.env   --env-file .env up --build -d
+#docker compose -f docker-compose-api.yml --env-file .env up --build -d
 services:
   projects-api:
     build: 
