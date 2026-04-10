@@ -116,33 +116,6 @@ PROJECT_ID="$PROJECT_ID_LOWER"
 echo "✔️  Nome de projeto validado: $PROJECT_ID"
 
 
-is_port_in_use() {
-  local port="$1"
-  if lsof -i :"$port" > /dev/null 2>&1; then
-    return 0 
-  else
-    return 1 
-  fi
-}
-
-generate_unique_port() {
-  local port
-  local max_attempts=20
-  local attempt=0
-  while [ $attempt -lt $max_attempts ]; do
-    port=$(( RANDOM % 10000 + 4000 ))
-    if ! is_port_in_use "$port"; then
-      echo "$port"
-      return
-    fi
-    echo "Porta $port está em uso, tentando outra..." >&2
-    attempt=$((attempt + 1))
-  done
-  echo "Erro: Não foi possível encontrar uma porta livre após $max_attempts tentativas." >&2
-  exit 1
-}
-
-
 docker_must_exist() {
   docker inspect "$1" >/dev/null 2>&1 || die "Contêiner $1 não encontrado"
 }
@@ -184,10 +157,6 @@ generate_db() {
   echo "Banco $db criado com sucesso"
 }
 
-# porta aleatória 4000-14000
-NGINX_PORT=$(generate_unique_port)
-META_PORT=$(generate_unique_port)
-
 normalize_public_base_url() {
   local url="${1%/}"
   [[ "$url" =~ ^https?:// ]] || url="https://$url"
@@ -204,7 +173,7 @@ PROJECT_AUTH_EXTERNAL_URL="$PROJECT_PUBLIC_URL/auth/v1"
 
 template_to_file() {
   local template="$1" outfile="$2"
-  local anon_key service_role_key project_id project_uuid nginx_port meta_port config_token jwt_secret
+  local anon_key service_role_key project_id project_uuid config_token jwt_secret
   local server_url public_base_url project_public_url project_auth_external_url project_root
   local logflare_api_key
 
@@ -212,8 +181,6 @@ template_to_file() {
   service_role_key="$(escape_sed_replacement "$SERVICE_TOKEN")"
   project_id="$(escape_sed_replacement "$PROJECT_ID")"
   project_uuid="$(escape_sed_replacement "$PROJECT_UUID")"
-  nginx_port="$(escape_sed_replacement "$NGINX_PORT")"
-  meta_port="$(escape_sed_replacement "$META_PORT")"
   config_token="$(escape_sed_replacement "$CONFIG_TOKEN_PROJETO")"
   jwt_secret="$(escape_sed_replacement "$JWT_SECRET_PROJETO")"
   server_url="$(escape_sed_replacement "$SERVER_URL")"
@@ -228,8 +195,6 @@ template_to_file() {
     -e "s|{{service_role_key}}|$service_role_key|g" \
     -e "s|{{project_id}}|$project_id|g" \
     -e "s|{{project_uuid}}|$project_uuid|g" \
-    -e "s|{{nginx_port}}|$nginx_port|g" \
-    -e "s|{{meta_port}}|$meta_port|g" \
     -e "s|{{config_token}}|$config_token|g" \
     -e "s|{{jwt_secret}}|$jwt_secret|g" \
     -e "s|{{server_url}}|$server_url|g" \
@@ -368,8 +333,6 @@ docker compose -p "$PROJECT_ID" \
   --env-file .env \
   up --build -d || die "Erro ao subir docker compose para $PROJECT_ID"
 
-echo "✅  Projeto $PROJECT_ID configurado com sucesso (porta $NGINX_PORT)"
-
-echo "NGINX_PORT=$NGINX_PORT"
+echo "✅  Projeto $PROJECT_ID configurado com sucesso"
 
 commit_transaction

@@ -387,6 +387,189 @@ async def execute_delete_script(project_name: str):
     success = proc.returncode == 0
     return success, stdout.decode(), stderr.decode()
 
+
+async def _run_command(*command: str) -> tuple[int, str, str]:
+    proc = await asyncio.create_subprocess_exec(
+        *command,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    return proc.returncode, stdout.decode().strip(), stderr.decode().strip()
+
+
+async def _delete_project_impl(
+    project_name: str,
+    pool,
+    *,
+    current_job_id: str | None = None,
+) -> dict:
+    errors: list[str] = []
+    db_name = f"_supabase_{project_name}"
+
+    project_uuid = get_project_uuid_from_env(project_name)
+    tenant_external_id = project_uuid if project_uuid else project_name
+
+    if project_uuid:
+        print(f"Deletando projeto com UUID: {project_uuid}")
+    else:
+        print(f"Deletando projeto antigo (sem UUID), usando project_name: {project_name}")
+
+    paused_services: list[str] = []
+    for service_name in ("realtime-dev.supabase-realtime", "supabase-pooler"):
+        code, _, stderr = await _run_command("docker", "pause", service_name)
+        if code == 0:
+            paused_services.append(service_name)
+        elif "already paused" not in stderr.lower():
+            errors.append(
+                f"Erro ao pausar {service_name}: {stderr or f'codigo {code}'}"
+            )
+
+    try:
+        containers = await get_project_containers(project_name)
+        for container in containers:
+            container_name = container.get("Names", "")
+            if not container_name:
+                continue
+
+            code, _, stderr = await _run_command(
+                "docker", "rm", "-f", container_name
+            )
+            if code != 0:
+                errors.append(
+                    f"Erro ao remover {container_name}: {stderr or f'codigo {code}'}"
+                )
+
+        await asyncio.sleep(1)
+
+        async with pool.acquire() as conn:
+            deleted_ext = await conn.execute(
+                'DELETE FROM _realtime.extensions WHERE tenant_external_id = $1',
+                tenant_external_id,
+            )
+            deleted_tenant = await conn.execute(
+                'DELETE FROM _realtime.tenants WHERE external_id = $1',
+                tenant_external_id,
+            )
+
+            print(f"Realtime cleanup: extensions={deleted_ext}, tenants={deleted_tenant}")
+
+            await asyncio.sleep(10)
+
+            await conn.execute(
+                """
+                SELECT pg_terminate_backend(pid)
+                FROM pg_stat_activity
+                WHERE datname = $1 AND pid <> pg_backend_pid()
+                """,
+                db_name,
+            )
+
+            await asyncio.sleep(2)
+            slot_errors = await drop_supabase_replication_slots(conn, project_name)
+            if slot_errors:
+                errors.extend(slot_errors)
+
+            try:
+                await conn.execute(
+                    'DROP DATABASE IF EXISTS ' + '"' + db_name.replace('"', '""') + '"'
+                )
+            except Exception as drop_error:
+                errors.append(f"Erro ao dropar banco {db_name}: {drop_error}")
+
+            project_id = await conn.fetchval(
+                "SELECT id FROM projects WHERE name = $1",
+                project_name,
+            )
+            if project_id:
+                await conn.execute(
+                    "DELETE FROM project_members WHERE project_id = $1",
+                    project_id,
+                )
+                if current_job_id:
+                    await conn.execute(
+                        "DELETE FROM jobs WHERE project = $1 AND job_id <> $2",
+                        project_name,
+                        current_job_id,
+                    )
+                else:
+                    await conn.execute(
+                        "DELETE FROM jobs WHERE project = $1",
+                        project_name,
+                    )
+                await conn.execute("DELETE FROM projects WHERE id = $1", project_id)
+            else:
+                errors.append(
+                    f"Projeto {project_name} não encontrado para limpeza final."
+                )
+
+            await conn.execute(
+                'DELETE FROM _supavisor.users WHERE tenant_external_id = $1',
+                project_name,
+            )
+            await conn.execute(
+                'DELETE FROM _supavisor.tenants WHERE external_id = $1',
+                project_name,
+            )
+    finally:
+        for service_name in paused_services:
+            code, _, stderr = await _run_command("docker", "unpause", service_name)
+            if code != 0 and "not paused" not in stderr.lower():
+                errors.append(
+                    f"Erro ao despausar {service_name}: {stderr or f'codigo {code}'}"
+                )
+
+    success, stdout, stderr = await execute_delete_script(project_name)
+    if not success:
+        detail = stderr.strip() or stdout.strip() or "erro desconhecido"
+        errors.append(f"Erro ao excluir diretórios: {detail}")
+
+    async with pool.acquire() as conn:
+        db_exists = await conn.fetchval(
+            "SELECT 1 FROM pg_database WHERE datname = $1",
+            db_name,
+        )
+        if db_exists:
+            errors.append(f"Banco {db_name} ainda existe")
+
+    return {
+        "project": project_name,
+        "status": "success" if not errors else "partial_success",
+        "message": (
+            "Projeto excluído com sucesso."
+            if not errors
+            else "Projeto excluído com avisos."
+        ),
+        "errors": errors,
+        "success": len(errors) == 0,
+    }
+
+
+async def _delete_project_background(job_id: str, project_name: str) -> None:
+    await _set_job_status(
+        job_id,
+        "running",
+        message="Excluindo projeto...",
+    )
+
+    try:
+        pool = await get_pool()
+        result = await _delete_project_impl(
+            project_name,
+            pool,
+            current_job_id=job_id,
+        )
+
+        message = result["message"]
+        if result["errors"]:
+            message = message + "\n" + "\n".join(result["errors"])
+
+        await _set_job_status(job_id, "done", message=message)
+    except Exception as exc:
+        message = f"Falha ao excluir projeto: {exc}"
+        await _set_job_status(job_id, "failed", message=message)
+        print(f"[delete_project] {project_name}: background task failed: {exc}")
+
 def get_project_uuid_from_env(project_name: str) -> Optional[str]:
     """
     Tenta ler o PROJECT_UUID do .env do projeto.
@@ -473,6 +656,7 @@ async def drop_supabase_replication_slots(
 @app.delete("/api/projects/{project_name}")
 async def delete_project(
     project_name: str,
+    tasks: BackgroundTasks,
     user: str = Header(..., alias="Remote-Email"),
     groups: str = Header("", alias="Remote-Groups"),
     x_delete_password: str = Header(..., alias="X-Delete-Password"),
@@ -491,86 +675,29 @@ async def delete_project(
     if not hmac.compare_digest(x_delete_password, DELETE_PASSWORD):
         raise HTTPException(403, "Invalid delete password")
 
-    errors = []
-    db_name = f"_supabase_{project_name}"
-    
-    project_uuid = get_project_uuid_from_env(project_name)
-    tenant_external_id = project_uuid if project_uuid else project_name
-    
-    if project_uuid:
-        print(f"Deletando projeto com UUID: {project_uuid}")
-    else:
-        print(f"Deletando projeto antigo (sem UUID), usando project_name: {project_name}")
-
-    await asyncio.create_subprocess_exec("docker", "pause", "realtime-dev.supabase-realtime")
-    await asyncio.create_subprocess_exec("docker", "pause", "supabase-pooler")
-    try:
-        containers = await get_project_containers(project_name)
-        for container in containers:
-            container_name = container.get("Names", "")
-            if container_name:
-                await asyncio.create_subprocess_exec("docker", "rm", "-f", container_name)
-    except Exception as e:
-        errors.append(f"Erro ao remover containers: {str(e)}")
-    try:
-        await asyncio.sleep(1)
-
-        async with pool.acquire() as conn:
-            deleted_ext = await conn.execute(
-                'DELETE FROM _realtime.extensions WHERE tenant_external_id = $1', 
-                tenant_external_id
-            )
-            deleted_tenant = await conn.execute(
-                'DELETE FROM _realtime.tenants WHERE external_id = $1', 
-                tenant_external_id
-            )
-            
-            print(f"Realtime cleanup: extensions={deleted_ext}, tenants={deleted_tenant}")
-
-            await asyncio.sleep(10)
-
-            await conn.execute("""
-                SELECT pg_terminate_backend(pid)
-                FROM pg_stat_activity
-                WHERE datname = $1 AND pid <> pg_backend_pid()
-            """, db_name)
-
-            await asyncio.sleep(2)
-            slot_errors = await drop_supabase_replication_slots(conn, project_name)
-
-            if slot_errors:
-                errors.append(f"Erro ao dropar os slots {slot_errors}")
-            try:
-                await conn.execute(
-                    'DROP DATABASE IF EXISTS ' + '"' + db_name.replace('"', '""') + '"'
-                )
-            except Exception as drop_error:
-                errors.append(f"Erro ao dropar banco {db_name}: {drop_error}")
-            project_id = await conn.fetchval("SELECT id FROM projects WHERE name = $1", project_name)
-            await conn.execute("DELETE FROM project_members WHERE project_id = $1", project_id)
-            await conn.execute("DELETE FROM jobs WHERE project = $1", project_name)
-            await conn.execute("DELETE FROM projects WHERE id = $1", project_id)
-            await conn.execute('DELETE FROM _supavisor.users WHERE tenant_external_id = $1', project_name)
-            await conn.execute('DELETE FROM _supavisor.tenants WHERE external_id = $1', project_name)
-
-    finally:
-        await asyncio.create_subprocess_exec("docker", "unpause", "realtime-dev.supabase-realtime")
-        await asyncio.create_subprocess_exec("docker", "unpause", "supabase-pooler")
-    success, stdout, stderr = await execute_delete_script(project_name)
-    if not success:
-        errors.append(f"Erro ao excluir diretórios: {stderr.strip()}")
-
     async with pool.acquire() as conn:
-        db_exists = await conn.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", db_name)
-        if db_exists:
-            errors.append(f"Banco {db_name} ainda existe")
+        project_exists = await conn.fetchval(
+            "SELECT 1 FROM projects WHERE name = $1",
+            project_name,
+        )
+        if not project_exists:
+            raise HTTPException(404, "Project not found")
 
-    return {
-        "project": project_name,
-        "status": "success" if not errors else "partial_success",
-        "message": "Projeto excluído com sucesso" if not errors else "Projeto excluído com erros",
-        "errors": errors
-    }
+    job_id = await _create_project_job(
+        pool,
+        project_name,
+        user,
+        message="Exclusão iniciada em segundo plano.",
+    )
+    tasks.add_task(_delete_project_background, job_id, project_name)
+    return JSONResponse(
+        status_code=202,
+        content={
+            "job_id": job_id,
+            "status": "queued",
+            "message": "Exclusão iniciada em segundo plano.",
+        },
+    )
 
 
 class AddMember(BaseModel):

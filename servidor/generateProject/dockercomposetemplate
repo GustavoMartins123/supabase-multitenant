@@ -20,7 +20,7 @@ services:
       # - "traefik.http.routers.supabase-nginx-{{project_id}}.tls.certresolver=letsencrypt"
       - "traefik.http.routers.supabase-nginx-{{project_id}}.rule=PathPrefix(`/{{project_id}}`)"
       - "traefik.http.routers.supabase-nginx-{{project_id}}.entrypoints=web"
-      - "traefik.http.services.supabase-nginx-{{project_id}}.loadbalancer.server.port={{nginx_port}}"
+      - "traefik.http.services.supabase-nginx-{{project_id}}.loadbalancer.server.port=8080"
       - "traefik.http.middlewares.nginx-{{project_id}}-stripprefix.stripprefix.prefixes=/{{project_id}}"
 
 
@@ -94,11 +94,11 @@ services:
 
       # GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED: true
       # GOTRUE_SMTP_MAX_FREQUENCY: 1s
-      GOTRUE_MAILER_TEMPLATES_RECOVERY: http://supabase-nginx-{{project_id}}:{{nginx_port}}/recovery.html
-      GOTRUE_MAILER_TEMPLATES_INVITE: http://supabase-nginx-{{project_id}}:{{nginx_port}}/invite.html
-      GOTRUE_MAILER_TEMPLATES_CONFIRMATION: http://supabase-nginx-{{project_id}}:{{nginx_port}}/confirmation.html
-      GOTRUE_MAILER_TEMPLATES_EMAIL_CHANGE: http://supabase-nginx-{{project_id}}:{{nginx_port}}/email_change.html
-      GOTRUE_MAILER_TEMPLATES_MAGIC_LINK: http://supabase-nginx-{{project_id}}:{{nginx_port}}/magiclink.html
+      GOTRUE_MAILER_TEMPLATES_RECOVERY: http://supabase-nginx-{{project_id}}:8080/recovery.html
+      GOTRUE_MAILER_TEMPLATES_INVITE: http://supabase-nginx-{{project_id}}:8080/invite.html
+      GOTRUE_MAILER_TEMPLATES_CONFIRMATION: http://supabase-nginx-{{project_id}}:8080/confirmation.html
+      GOTRUE_MAILER_TEMPLATES_EMAIL_CHANGE: http://supabase-nginx-{{project_id}}:8080/email_change.html
+      GOTRUE_MAILER_TEMPLATES_MAGIC_LINK: http://supabase-nginx-{{project_id}}:8080/magiclink.html
       GOTRUE_MAILER_SUBJECTS_INVITE: ${MAILER_SUBJECTS_INVITE}
       GOTRUE_MAILER_SUBJECTS_RECOVERY: ${MAILER_SUBJECTS_RECOVERY}
       GOTRUE_MAILER_SUBJECTS_MAGIC_LINK: ${MAILER_SUBJECTS_MAGIC_LINK}
@@ -253,7 +253,7 @@ services:
     networks:
       - rede-supabase
     environment:
-      PG_META_PORT: ${META_PORT}
+      PG_META_PORT: 8080
       PG_META_DB_HOST: ${POSTGRES_HOST}
       PG_META_DB_PORT: ${POSTGRES_PORT}
       PG_META_DB_NAME: ${POSTGRES_DATABASE}

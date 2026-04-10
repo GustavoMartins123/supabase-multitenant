@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
+import '../models/job.dart';
+
 class JobWaitResult {
   const JobWaitResult({required this.ok, required this.status, this.message});
 
@@ -148,51 +150,51 @@ class ProjectService {
         },
       );
 
-      Navigator.pop(context); // Fecha o diálogo de loading
+      final job = Job.fromResponse(response);
+      if (job != null) {
+        final waited = await waitForJob(job.id);
+        if (context.mounted) {
+          Navigator.pop(context);
+        }
+
+        await _showDeleteResultDialog(
+          context,
+          message:
+              waited.message ??
+              (waited.ok
+                  ? 'Projeto excluído com sucesso.'
+                  : 'Falha ao excluir projeto.'),
+          success: waited.ok,
+        );
+        return waited.ok;
+      }
+
+      if (context.mounted) {
+        Navigator.pop(context);
+      }
 
       if (response.statusCode == 200) {
         final result = jsonDecode(response.body);
-        await showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: Icon(
-              result['status'] == 'success'
-                  ? Icons.check_circle
-                  : Icons.warning,
-              color: result['status'] == 'success'
-                  ? Colors.green
-                  : Colors.orange,
-              size: 48,
-            ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  result['message'] ?? 'Projeto excluído',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                if (result['errors'] != null &&
-                    result['errors'].isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  const Text('Erros encontrados:'),
-                  ...result['errors'].map<Widget>((e) => Text('• $e')),
-                ],
-              ],
-            ),
-            actions: [
-              ElevatedButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
+        final status = result['status']?.toString() ?? 'unknown';
+        final errors = (result['errors'] as List?)?.map((e) => e.toString());
+        final message = [
+          result['message']?.toString() ?? 'Projeto excluído',
+          if (errors != null && errors.isNotEmpty) errors.join('\n'),
+        ].where((part) => part.isNotEmpty).join('\n');
+
+        await _showDeleteResultDialog(
+          context,
+          message: message,
+          success: status == 'success',
         );
-        return true;
+        return status == 'success';
       } else {
         throw Exception(jsonDecode(response.body)['detail'] ?? response.body);
       }
     } catch (e) {
-      Navigator.pop(context);
+      if (context.mounted) {
+        Navigator.pop(context);
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Erro na exclusão: $e'),
@@ -201,6 +203,39 @@ class ProjectService {
       );
       return false;
     }
+  }
+
+  static Future<void> _showDeleteResultDialog(
+    BuildContext context, {
+    required String message,
+    required bool success,
+  }) async {
+    final isWarning = success && message.toLowerCase().contains('aviso');
+    final icon = success
+        ? (isWarning ? Icons.warning : Icons.check_circle)
+        : Icons.error;
+    final color = success
+        ? (isWarning ? Colors.orange : Colors.green)
+        : Colors.red;
+
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Icon(icon, color: color, size: 48),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(message, style: const TextStyle(fontWeight: FontWeight.bold)),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   static Future<JobWaitResult> waitForJob(

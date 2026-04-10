@@ -56,5 +56,3 @@ ANON_KEY_PROJETO={{anon_key}}
 SERVICE_ROLE_KEY_PROJETO={{service_role_key}}
 CONFIG_TOKEN_PROJETO={{config_token}}
 JWT_SECRET_PROJETO={{jwt_secret}}
-META_PORT={{meta_port}}
-NGINX_PORT={{nginx_port}}

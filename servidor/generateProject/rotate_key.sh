@@ -87,14 +87,10 @@ upsert_env_value() {
   fi
 }
 
-NGINX_PORT=$(get_env_value "NGINX_PORT" "$PROJECT_DIR/.env")
-META_PORT=$(get_env_value "META_PORT" "$PROJECT_DIR/.env")
 CONFIG_TOKEN=$(get_env_value "CONFIG_TOKEN_PROJETO" "$PROJECT_DIR/.env")
 JWT_SECRET_PROJETO=$(get_env_value "JWT_SECRET_PROJETO" "$PROJECT_DIR/.env")
 PROJECT_UUID=$(get_env_value "PROJECT_UUID" "$PROJECT_DIR/.env")
 
-[[ -z "$NGINX_PORT" ]] && die "NGINX_PORT não encontrado no .env do projeto"
-[[ -z "$META_PORT" ]]  && die "META_PORT não encontrado no .env do projeto"
 [[ -z "$CONFIG_TOKEN" ]] && die "CONFIG_TOKEN_PROJETO não encontrado no .env do projeto"
 [[ -z "$JWT_SECRET_PROJETO" ]]  && die "JWT_SECRET_PROJETO não encontrado no .env do projeto"
 
@@ -138,15 +134,13 @@ PROJECT_PUBLIC_URL="$PUBLIC_BASE_URL/$PROJECT_ID"
 
 template_to_file() {
   local template="$1" outfile="$2"
-  local anon_key service_role_key project_id project_uuid nginx_port meta_port config_token jwt_secret
+  local anon_key service_role_key project_id project_uuid config_token jwt_secret
   local server_url public_base_url project_public_url
 
   anon_key="$(escape_sed_replacement "$NEW_ANON")"
   service_role_key="$(escape_sed_replacement "$NEW_SERVICE")"
   project_id="$(escape_sed_replacement "$PROJECT_ID")"
   project_uuid="$(escape_sed_replacement "$PROJECT_UUID")"
-  nginx_port="$(escape_sed_replacement "$NGINX_PORT")"
-  meta_port="$(escape_sed_replacement "$META_PORT")"
   config_token="$(escape_sed_replacement "$CONFIG_TOKEN")"
   jwt_secret="$(escape_sed_replacement "$JWT_SECRET_PROJETO")"
   server_url="$(escape_sed_replacement "$SERVER_URL")"
@@ -158,8 +152,6 @@ template_to_file() {
     -e "s|{{service_role_key}}|$service_role_key|g" \
     -e "s|{{project_id}}|$project_id|g" \
     -e "s|{{project_uuid}}|$project_uuid|g" \
-    -e "s|{{nginx_port}}|$nginx_port|g" \
-    -e "s|{{meta_port}}|$meta_port|g" \
     -e "s|{{config_token}}|$config_token|g" \
     -e "s|{{jwt_secret}}|$jwt_secret|g" \
     -e "s|{{server_url}}|$server_url|g" \
