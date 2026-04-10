@@ -7,7 +7,86 @@ import '../session.dart';
 
 final projectRepositoryProvider = Provider((ref) => ProjectRepository());
 
+class ProjectActionResult {
+  const ProjectActionResult({this.message, this.job});
+
+  final String? message;
+  final Job? job;
+}
+
 class ProjectRepository {
+  Map<String, dynamic>? _tryDecodeObject(String body) {
+    if (body.isEmpty) return null;
+
+    try {
+      final data = jsonDecode(body);
+      return data is Map<String, dynamic> ? data : null;
+    } on FormatException {
+      return null;
+    }
+  }
+
+  String? _extractMessage(http.Response resp) {
+    final data = _tryDecodeObject(resp.body);
+    final message = data?['message'];
+    return message == null || message.toString().isEmpty
+        ? null
+        : message.toString();
+  }
+
+  Never _throwParsedError(http.Response resp) {
+    String? errorMessage;
+
+    try {
+      final data = _tryDecodeObject(resp.body);
+      if (data != null) {
+        final errors = data['errors'];
+        final detail = data['detail'];
+        final message = data['message'];
+
+        if (errors is List && errors.isNotEmpty) {
+          errorMessage = errors.join('\n');
+        } else if (detail != null && detail.toString().isNotEmpty) {
+          errorMessage = detail.toString();
+        } else if (message != null && message.toString().isNotEmpty) {
+          errorMessage = message.toString();
+        }
+      }
+    } on FormatException {
+      errorMessage = null;
+    }
+
+    throw Exception(
+      errorMessage ??
+          (resp.body.isEmpty ? 'HTTP ${resp.statusCode}' : resp.body),
+    );
+  }
+
+  void _ensureCommandSucceeded(
+    http.Response resp, {
+    Set<int> allowedStatusCodes = const {200},
+  }) {
+    if (!allowedStatusCodes.contains(resp.statusCode)) {
+      _throwParsedError(resp);
+    }
+
+    if (resp.body.isEmpty) return;
+
+    try {
+      final data = _tryDecodeObject(resp.body);
+      if (data != null) {
+        final success = data['success'];
+        final errors = data['errors'];
+
+        if (success == false || (errors is List && errors.isNotEmpty)) {
+          _throwParsedError(resp);
+        }
+      }
+    } on FormatException {
+      return;
+    }
+  }
+
   Future<Map<String, dynamic>?> fetchConfig() async {
     try {
       final r = await http.get(Uri.parse('/api/config'));
@@ -163,12 +242,13 @@ class ProjectRepository {
     throw Exception('Erro ao rotacionar chave: ${resp.body}');
   }
 
-  Future<void> doAction(String ref, String action) async {
+  Future<ProjectActionResult> doAction(String ref, String action) async {
     final resp = await http.post(Uri.parse('/api/projects/$ref/$action'));
-    if (resp.statusCode != 200) {
-      final err = jsonDecode(resp.body)['detail'] ?? resp.body;
-      throw Exception(err);
-    }
+    _ensureCommandSucceeded(resp, allowedStatusCodes: const {200, 202});
+    return ProjectActionResult(
+      message: _extractMessage(resp),
+      job: Job.fromResponse(resp),
+    );
   }
 
   Future<void> transferProject(String ref, String newOwnerId) async {
@@ -232,5 +312,56 @@ class ProjectRepository {
       final error = jsonDecode(response.body)['error'] ?? 'Erro desconhecido';
       throw Exception(error);
     }
+  }
+
+  Future<Map<String, String>> fetchProjectSettings(String ref) async {
+    final resp = await http.get(Uri.parse('/api/projects/$ref/settings'));
+    if (resp.statusCode == 200) {
+      final data = jsonDecode(resp.body);
+      final raw = data['settings'] as Map<String, dynamic>;
+      return raw.map((k, v) => MapEntry(k, v.toString()));
+    }
+    if (resp.statusCode == 403) {
+      throw Exception('Acesso negado');
+    }
+    throw Exception('Erro ao carregar settings: ${resp.body}');
+  }
+
+  Future<List<String>> updateProjectSettings(
+    String ref,
+    Map<String, String> settings,
+  ) async {
+    final resp = await http.put(
+      Uri.parse('/api/projects/$ref/settings'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'settings': settings}),
+    );
+    if (resp.statusCode == 200) {
+      final data = jsonDecode(resp.body);
+      final raw = data['affected_services'] as List<dynamic>? ?? [];
+      return raw.map((e) => e.toString()).toList();
+    }
+    try {
+      final err = jsonDecode(resp.body)['detail'] ?? resp.body;
+      throw Exception(err);
+    } catch (_) {
+      throw Exception(resp.body);
+    }
+  }
+
+  Future<ProjectActionResult> recreateServices(
+    String ref,
+    List<String> services,
+  ) async {
+    final resp = await http.post(
+      Uri.parse('/api/projects/$ref/recreate-services'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'services': services}),
+    );
+    _ensureCommandSucceeded(resp, allowedStatusCodes: const {200, 202});
+    return ProjectActionResult(
+      message: _extractMessage(resp),
+      job: Job.fromResponse(resp),
+    );
   }
 }

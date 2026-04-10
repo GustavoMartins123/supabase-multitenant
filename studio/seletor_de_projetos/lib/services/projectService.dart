@@ -2,6 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
+class JobWaitResult {
+  const JobWaitResult({required this.ok, required this.status, this.message});
+
+  final bool ok;
+  final String status;
+  final String? message;
+}
+
 class ProjectService {
   static Future<bool> confirmAndDeleteProject(
     BuildContext context,
@@ -195,20 +203,41 @@ class ProjectService {
     }
   }
 
-  static Future<bool> waitUntilReady(
+  static Future<JobWaitResult> waitForJob(
     String jobId, {
     Duration every = const Duration(seconds: 3),
     int max = 100,
   }) async {
     for (var i = 0; i < max; i++) {
       await Future.delayed(every);
-      final st = await http
+      final data = await http
           .get(Uri.parse('/api/projects/status/$jobId'))
-          .then((r) => jsonDecode(r.body)['status'])
-          .catchError((_) => null);
-      if (st == 'done') return true;
-      if (st == 'failed') return false;
+          .then((r) => jsonDecode(r.body) as Map<String, dynamic>)
+          .catchError((_) => <String, dynamic>{});
+
+      final st = data['status']?.toString() ?? 'unknown';
+      final message = data['message']?.toString();
+
+      if (st == 'done') {
+        return JobWaitResult(ok: true, status: st, message: message);
+      }
+      if (st == 'failed') {
+        return JobWaitResult(ok: false, status: st, message: message);
+      }
     }
-    return false; // timeout
+    return const JobWaitResult(
+      ok: false,
+      status: 'timeout',
+      message: 'Tempo limite excedido aguardando a operacao.',
+    );
+  }
+
+  static Future<bool> waitUntilReady(
+    String jobId, {
+    Duration every = const Duration(seconds: 3),
+    int max = 100,
+  }) async {
+    final result = await waitForJob(jobId, every: every, max: max);
+    return result.ok;
   }
 }

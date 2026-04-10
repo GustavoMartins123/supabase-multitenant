@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../data/project_repository.dart';
+import '../providers/project_settings_provider.dart';
 import '../project_settings_dialog.dart';
 import '../supabase_colors.dart';
 import 'supabase_button.dart';
@@ -42,18 +42,6 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
   bool _hover = false;
   bool _keyVisible = false;
 
-  late final Future<String?> _statusFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    if (!widget.isLoading) {
-      _statusFuture = ref
-          .read(projectRepositoryProvider)
-          .fetchProjectStatus(widget.refKey);
-    }
-  }
-
   Future<void> _openSettings() async {
     final deleted = await showDialog<String>(
       context: context,
@@ -82,249 +70,242 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
       return _buildLoadingCard();
     }
 
-    return FutureBuilder<String?>(
-      future: _statusFuture,
-      builder: (context, snapshot) {
-        final isRunning = snapshot.data == 'running';
-        final statusLoading = snapshot.connectionState != ConnectionState.done;
+    final statusAsync = ref.watch(projectStatusProvider(widget.refKey));
+    final isRunning = statusAsync.value?.status == 'running';
+    final statusLoading = statusAsync.isLoading && !statusAsync.hasValue;
 
-        return MouseRegion(
-          onEnter: (_) => setState(() => _hover = true),
-          onExit: (_) => setState(() => _hover = false),
-          cursor: SystemMouseCursors.click,
-          child: GestureDetector(
-            onTap: widget.onTap,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeOut,
-              decoration: BoxDecoration(
-                color: _hover
-                    ? SupabaseColors.surface200
-                    : SupabaseColors.surface100,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: _hover
-                      ? SupabaseColors.borderHover
-                      : SupabaseColors.border,
-                  width: 1,
-                ),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+          decoration: BoxDecoration(
+            color: _hover
+                ? SupabaseColors.surface200
+                : SupabaseColors.surface100,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: _hover
+                  ? SupabaseColors.borderHover
+                  : SupabaseColors.border,
+              width: 1,
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          width: 48,
-                          height: 48,
-                          decoration: BoxDecoration(
-                            color: SupabaseColors.bg300,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Icon(
-                            Icons.storage_rounded,
-                            color: SupabaseColors.brand,
-                            size: 24,
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: SupabaseColors.bg300,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.storage_rounded,
+                        color: SupabaseColors.brand,
+                        size: 24,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
                             children: [
-                              Row(
-                                children: [
-                                  Flexible(
-                                    child: Text(
-                                      widget.refKey,
-                                      style: const TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                        color: SupabaseColors.textPrimary,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
+                              Flexible(
+                                child: Text(
+                                  widget.refKey,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: SupabaseColors.textPrimary,
                                   ),
-                                  const SizedBox(width: 8),
-                                  Container(
-                                    width: 8,
-                                    height: 8,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: statusLoading
-                                          ? SupabaseColors.textMuted
-                                          : (isRunning
-                                                ? SupabaseColors.brand
-                                                : SupabaseColors.error),
-                                    ),
-                                  ),
-                                ],
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
-                              const SizedBox(height: 4),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      _projectUrl,
-                                      style: const TextStyle(
-                                        fontSize: 13,
-                                        color: SupabaseColors.textMuted,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  IconBtn(
-                                    icon: Icons.link_rounded,
-                                    tooltip: 'Copiar URL',
-                                    onPressed: () {
-                                      Clipboard.setData(
-                                        ClipboardData(text: _projectUrl),
-                                      );
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        const SnackBar(
-                                          content: Text('URL copiada!'),
-                                          backgroundColor:
-                                              SupabaseColors.success,
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                ],
+                              const SizedBox(width: 8),
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: statusLoading
+                                      ? SupabaseColors.textMuted
+                                      : (isRunning
+                                            ? SupabaseColors.brand
+                                            : SupabaseColors.error),
+                                ),
                               ),
                             ],
                           ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  _projectUrl,
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    color: SupabaseColors.textMuted,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              IconBtn(
+                                icon: Icons.link_rounded,
+                                tooltip: 'Copiar URL',
+                                onPressed: () {
+                                  Clipboard.setData(
+                                    ClipboardData(text: _projectUrl),
+                                  );
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('URL copiada!'),
+                                      backgroundColor: SupabaseColors.success,
+                                    ),
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconBtn(
+                          icon: widget.isFavorite
+                              ? Icons.star_rounded
+                              : Icons.star_border_rounded,
+                          color: widget.isFavorite
+                              ? SupabaseColors.favorite
+                              : SupabaseColors.textSecondary,
+                          tooltip: widget.isFavorite
+                              ? 'Remover dos favoritos'
+                              : 'Adicionar aos favoritos',
+                          onPressed: widget.onToggleFavorite,
                         ),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconBtn(
-                              icon: widget.isFavorite
-                                  ? Icons.star_rounded
-                                  : Icons.star_border_rounded,
-                              color: widget.isFavorite
-                                  ? SupabaseColors.favorite
-                                  : SupabaseColors.textSecondary,
-                              tooltip: widget.isFavorite
-                                  ? 'Remover dos favoritos'
-                                  : 'Adicionar aos favoritos',
-                              onPressed: widget.onToggleFavorite,
+                        PopupMenuButton<String>(
+                          icon: const Icon(
+                            Icons.more_vert_rounded,
+                            color: SupabaseColors.textSecondary,
+                            size: 20,
+                          ),
+                          color: SupabaseColors.bg300,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            side: const BorderSide(
+                              color: SupabaseColors.border,
                             ),
-                            PopupMenuButton<String>(
-                              icon: const Icon(
-                                Icons.more_vert_rounded,
-                                color: SupabaseColors.textSecondary,
-                                size: 20,
-                              ),
-                              color: SupabaseColors.bg300,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                side: const BorderSide(
-                                  color: SupabaseColors.border,
-                                ),
-                              ),
-                              offset: const Offset(0, 40),
-                              onSelected: (val) {
-                                if (val == 'settings') _openSettings();
-                                if (val == 'duplicate') widget.onDuplicate();
-                              },
-                              itemBuilder: (ctx) => [
-                                _buildMenuItem(
-                                  'settings',
-                                  Icons.settings_outlined,
-                                  'Configurações do Projeto',
-                                ),
-                                _buildMenuItem(
-                                  'duplicate',
-                                  Icons.copy_outlined,
-                                  'Duplicar projeto e dados',
-                                ),
-                              ],
+                          ),
+                          offset: const Offset(0, 40),
+                          onSelected: (val) {
+                            if (val == 'settings') _openSettings();
+                            if (val == 'duplicate') widget.onDuplicate();
+                          },
+                          itemBuilder: (ctx) => [
+                            _buildMenuItem(
+                              'settings',
+                              Icons.settings_outlined,
+                              'Configurações do Projeto',
+                            ),
+                            _buildMenuItem(
+                              'duplicate',
+                              Icons.copy_outlined,
+                              'Duplicar projeto e dados',
                             ),
                           ],
                         ),
                       ],
                     ),
-                    const Spacer(),
-                    const Text(
-                      'CHAVE ANÔNIMA',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: SupabaseColors.textMuted,
-                        letterSpacing: 1.0,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: SupabaseColors.bg300.withValues(alpha: 0.5),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: SupabaseColors.border),
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              _keyVisible
-                                  ? widget.anonKey
-                                  : '••••••••••••••••••••••••••••••',
-                              style: const TextStyle(
-                                fontSize: 13,
-                                color: SupabaseColors.textSecondary,
-                                fontFamily: 'monospace',
-                                letterSpacing: 2,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          IconBtn(
-                            icon: _keyVisible
-                                ? Icons.visibility_off_outlined
-                                : Icons.visibility_outlined,
-                            tooltip: _keyVisible
-                                ? 'Esconder chave'
-                                : 'Mostrar chave',
-                            onPressed: () =>
-                                setState(() => _keyVisible = !_keyVisible),
-                          ),
-                          IconBtn(
-                            icon: Icons.copy_outlined,
-                            tooltip: 'Copiar chave',
-                            onPressed: () {
-                              Clipboard.setData(
-                                ClipboardData(text: widget.anonKey),
-                              );
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Chave copiada!'),
-                                  backgroundColor: SupabaseColors.success,
-                                ),
-                              );
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
                   ],
                 ),
-              ),
+                const Spacer(),
+                const Text(
+                  'CHAVE ANÔNIMA',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: SupabaseColors.textMuted,
+                    letterSpacing: 1.0,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: SupabaseColors.bg300.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: SupabaseColors.border),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _keyVisible
+                              ? widget.anonKey
+                              : '••••••••••••••••••••••••••••••',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: SupabaseColors.textSecondary,
+                            fontFamily: 'monospace',
+                            letterSpacing: 2,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      IconBtn(
+                        icon: _keyVisible
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                        tooltip: _keyVisible
+                            ? 'Esconder chave'
+                            : 'Mostrar chave',
+                        onPressed: () =>
+                            setState(() => _keyVisible = !_keyVisible),
+                      ),
+                      IconBtn(
+                        icon: Icons.copy_outlined,
+                        tooltip: 'Copiar chave',
+                        onPressed: () {
+                          Clipboard.setData(
+                            ClipboardData(text: widget.anonKey),
+                          );
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Chave copiada!'),
+                              backgroundColor: SupabaseColors.success,
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 

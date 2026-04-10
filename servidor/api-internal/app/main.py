@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from cryptography.fernet import Fernet
 from typing import Any, Optional, List, Dict
+from dotenv import dotenv_values
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
 SCRIPT = BASE_DIR / "scripts" / "generate_project.sh"
@@ -36,6 +37,7 @@ except ValueError:
     )
 
 JOB_STATUS: dict[str, str] = {}
+JOB_DETAILS: dict[str, dict[str, Any]] = {}
 
 db_pool: Optional[asyncpg.Pool] = None
 
@@ -45,6 +47,48 @@ async def get_pool():
     if db_pool is None:
         raise RuntimeError("Database pool not initialized")
     return db_pool
+
+
+def _set_job_message(job_id: str, message: str | None) -> None:
+    if message is None:
+        return
+    JOB_DETAILS.setdefault(job_id, {})["message"] = message
+
+
+async def _set_job_status(
+    job_id: str,
+    new_status: str,
+    *,
+    message: str | None = None,
+) -> None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE jobs SET status=$1, updated_at=now() WHERE job_id=$2",
+            new_status,
+            job_id,
+        )
+    _set_job_message(job_id, message)
+
+
+async def _create_project_job(
+    pool,
+    project_name: str,
+    user: str,
+    *,
+    message: str | None = None,
+) -> str:
+    job_id = str(uuid.uuid4())
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO jobs(job_id, project, owner_id, status)
+               VALUES($1, $2, $3, 'queued')""",
+            job_id,
+            project_name,
+            user,
+        )
+    _set_job_message(job_id, message)
+    return job_id
 
 async def rollback_project_from_db(pool, project_name: str):
     """Remove projeto do banco em caso de falha na criação/duplicação"""
@@ -709,7 +753,12 @@ async def project_status(job_id: str, pool=Depends(get_pool)):
     row = await pool.fetchrow(
         "SELECT status FROM jobs WHERE job_id=$1", job_id
     )
-    return {"job_id": job_id, "status": row["status"] if row else "unknown"}
+    details = JOB_DETAILS.get(job_id, {})
+    return {
+        "job_id": job_id,
+        "status": row["status"] if row else "unknown",
+        "message": details.get("message"),
+    }
 
 @app.get("/api/projects/internal/enc-key/{ref}")
 async def enc_key(
@@ -810,6 +859,178 @@ async def get_project_containers(project: str) -> list[dict]:
     containers = [json.loads(l) for l in lines if _name_matches(json.loads(l), project)]
     return containers
 
+
+PROJECT_SERVICE_ORDER = ["meta", "auth", "rest", "imgproxy", "storage", "nginx"]
+
+
+def _get_project_service_priority(name: str) -> int:
+    lowered = name.lower()
+    for idx, service in enumerate(PROJECT_SERVICE_ORDER):
+        if service in lowered:
+            return idx
+    return 999
+
+
+def _sort_project_containers(containers: list[dict]) -> list[dict]:
+    return sorted(
+        containers,
+        key=lambda container: _get_project_service_priority(
+            container.get("Names", "")
+        ),
+    )
+
+
+def _services_touch_project_nginx(services: list[str]) -> bool:
+    return any(service.strip().lower() == "nginx" for service in services)
+
+
+def _containers_touch_project_nginx(containers: list[dict]) -> bool:
+    return any("nginx" in container.get("Names", "").lower() for container in containers)
+
+
+async def _stop_project_containers(
+    project_name: str,
+    containers: list[dict],
+) -> dict:
+    stopped_containers: list[str] = []
+    errors: list[str] = []
+
+    for container in _sort_project_containers(containers):
+        container_name = container.get("Names", "")
+        container_status = container.get("State", "")
+
+        try:
+            if container_status == "running":
+                proc = await asyncio.create_subprocess_exec(
+                    "docker",
+                    "stop",
+                    container_name,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await proc.communicate()
+
+                if proc.returncode == 0:
+                    stopped_containers.append(container_name)
+                else:
+                    errors.append(
+                        f"Error stopping {container_name}: {stderr.decode().strip()}"
+                    )
+            else:
+                stopped_containers.append(f"{container_name} (already stopped)")
+        except Exception as exc:
+            errors.append(f"Error stopping {container_name}: {exc}")
+
+    return {
+        "project": project_name,
+        "stopped_containers": stopped_containers,
+        "errors": errors,
+        "success": len(errors) == 0,
+    }
+
+
+async def _stop_project_containers_background(
+    job_id: str,
+    project_name: str,
+    containers: list[dict],
+) -> None:
+    await _set_job_status(
+        job_id,
+        "running",
+        message="Parando servicos do projeto...",
+    )
+    try:
+        result = await _stop_project_containers(project_name, containers)
+        if result["errors"]:
+            message = "\n".join(result["errors"])
+            await _set_job_status(job_id, "failed", message=message)
+            print(
+                f"[stop_project] {project_name}: "
+                + " | ".join(result["errors"])
+            )
+            return
+
+        await _set_job_status(
+            job_id,
+            "done",
+            message="Projeto parado com sucesso.",
+        )
+    except Exception as exc:
+        message = f"Falha ao parar projeto: {exc}"
+        await _set_job_status(job_id, "failed", message=message)
+        print(f"[stop_project] {project_name}: background task failed: {exc}")
+
+
+async def _recreate_project_services_impl(
+    project_name: str,
+    services: list[str],
+) -> dict:
+    project_dir = _get_project_dir(project_name)
+    if not project_dir.exists():
+        raise HTTPException(404, f"Diretório do projeto '{project_name}' não encontrado")
+
+    errors: list[str] = []
+
+    compose_base = [
+        "docker", "compose",
+        "-p", project_name,
+        "--env-file", "../../.env",
+        "--env-file", ".env",
+    ]
+
+    step_cmd = compose_base + ["up", "-d", "--force-recreate"] + services
+    proc = await asyncio.create_subprocess_exec(
+        *step_cmd,
+        cwd=str(project_dir),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        errors.append(f"Erro no recreate: {stderr.decode().strip()}")
+
+    return {
+        "project": project_name,
+        "recreated_services": services if not errors else [],
+        "errors": errors,
+        "success": len(errors) == 0,
+    }
+
+
+async def _recreate_project_services_background(
+    job_id: str,
+    project_name: str,
+    services: list[str],
+) -> None:
+    await _set_job_status(
+        job_id,
+        "running",
+        message=f"Recriando servicos: {', '.join(services)}",
+    )
+    try:
+        result = await _recreate_project_services_impl(project_name, services)
+        if result["errors"]:
+            message = "\n".join(result["errors"])
+            await _set_job_status(job_id, "failed", message=message)
+            print(
+                f"[recreate_project_services] {project_name}: "
+                + " | ".join(result["errors"])
+            )
+            return
+
+        await _set_job_status(
+            job_id,
+            "done",
+            message=f"Servicos recriados: {', '.join(services)}",
+        )
+    except Exception as exc:
+        message = f"Falha ao recriar servicos: {exc}"
+        await _set_job_status(job_id, "failed", message=message)
+        print(
+            f"[recreate_project_services] {project_name}: "
+            f"background task failed: {exc}"
+        )
+
 async def get_project_status(project_name: str) -> dict:
     containers = await get_project_containers(project_name)
 
@@ -880,6 +1101,7 @@ async def get_project_docker_status(
 @app.post("/api/projects/{project_name}/stop")
 async def stop_project(
     project_name: str,
+    tasks: BackgroundTasks,
     user: str = Header(..., alias="Remote-Email"),
     groups: str = Header("", alias="Remote-Groups"),
     pool=Depends(get_pool)
@@ -907,37 +1129,29 @@ async def stop_project(
     if not containers:
         raise HTTPException(404, "No containers found for this project")
 
-    stopped_containers = []
-    errors = []
+    if _containers_touch_project_nginx(containers):
+        job_id = await _create_project_job(
+            pool,
+            project_name,
+            user,
+            message="Parada iniciada em segundo plano.",
+        )
+        tasks.add_task(
+            _stop_project_containers_background,
+            job_id,
+            project_name,
+            containers,
+        )
+        return JSONResponse(
+            status_code=202,
+            content={
+                "job_id": job_id,
+                "status": "queued",
+                "message": "Parada iniciada em segundo plano.",
+            },
+        )
 
-    for container in containers:
-        container_name = container.get("Names", "")
-        container_status = container.get("State", "")
-
-        try:
-            if container_status == "running":
-                proc = await asyncio.create_subprocess_exec(
-                    "docker", "stop", container_name,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                stdout, stderr = await proc.communicate()
-
-                if proc.returncode == 0:
-                    stopped_containers.append(container_name)
-                else:
-                    errors.append(f"Error stopping {container_name}: {stderr.decode()}")
-            else:
-                stopped_containers.append(f"{container_name} (already stopped)")
-        except Exception as e:
-            errors.append(f"Error stopping {container_name}: {str(e)}")
-
-    return {
-        "project": project_name,
-        "stopped_containers": stopped_containers,
-        "errors": errors,
-        "success": len(errors) == 0
-    }
+    return await _stop_project_containers(project_name, containers)
 
 @app.post("/api/projects/{project_name}/start")
 async def start_project(
@@ -972,15 +1186,7 @@ async def start_project(
     started_containers = []
     errors = []
 
-    service_order = ["meta", "auth", "rest", "imgproxy", "storage", "nginx"]
-
-    def get_service_priority(container_name: str) -> int:
-        for i, service in enumerate(service_order):
-            if service in container_name.lower():
-                return i
-        return 999
-
-    sorted_containers = sorted(containers, key=lambda c: get_service_priority(c.get("Names", "")))
+    sorted_containers = _sort_project_containers(containers)
 
     for container in sorted_containers:
         container_name = container.get("Names", "")
@@ -1046,17 +1252,7 @@ async def restart_project(
     if not containers:
         raise HTTPException(404, "No containers found for this project")
 
-    service_order = ["meta", "auth", "rest", "imgproxy", "storage", "nginx"]
-
-    def get_service_priority(name: str) -> int:
-        for idx, svc in enumerate(service_order):
-            if svc in name.lower():
-                return idx
-        return 999
-
-    sorted_containers = sorted(
-        containers, key=lambda c: get_service_priority(c.get("Names", ""))
-    )
+    sorted_containers = _sort_project_containers(containers)
 
     restarted_containers: list[str] = []
     errors: list[str] = []
@@ -1465,3 +1661,256 @@ async def execute_project_function(
     finally:
         if proj_conn:
             await proj_conn.close()
+
+SETTINGS_WHITELIST = {
+    "ENABLE_EMAIL_SIGNUP",
+    "ENABLE_EMAIL_AUTOCONFIRM",
+    "ENABLE_ANONYMOUS_USERS",
+    "ENABLE_PHONE_SIGNUP",
+    "ENABLE_PHONE_AUTOCONFIRM",
+    "JWT_EXPIRY",
+    "GOTRUE_MAILER_OTP_EXP",
+    "GOTRUE_PASSWORD_MIN_LENGTH",
+    "GOTRUE_EXTERNAL_IMPLICIT_FLOW_ENABLED",
+    "PGRST_DB_SCHEMAS",
+    "FILE_SIZE_LIMIT",
+    "ENABLE_IMAGE_TRANSFORMATION",
+}
+
+SETTING_TO_SERVICES: dict[str, list[str]] = {
+    "ENABLE_EMAIL_SIGNUP":                     ["auth"],
+    "ENABLE_EMAIL_AUTOCONFIRM":                ["auth"],
+    "ENABLE_ANONYMOUS_USERS":                  ["auth"],
+    "ENABLE_PHONE_SIGNUP":                     ["auth"],
+    "ENABLE_PHONE_AUTOCONFIRM":                ["auth"],
+    "JWT_EXPIRY":                              ["auth", "rest"],
+    "GOTRUE_MAILER_OTP_EXP":                   ["auth"],
+    "GOTRUE_PASSWORD_MIN_LENGTH":              ["auth"],
+    "GOTRUE_EXTERNAL_IMPLICIT_FLOW_ENABLED":   ["auth"],
+    "PGRST_DB_SCHEMAS":                        ["rest"],
+    "FILE_SIZE_LIMIT":                         ["storage"],
+    "ENABLE_IMAGE_TRANSFORMATION":             ["storage"],
+}
+
+def _get_project_env_path(project_name: str) -> pathlib.Path:
+    return pathlib.Path("/docker/projects") / project_name / ".env"
+
+def _get_project_dir(project_name: str) -> pathlib.Path:
+    return pathlib.Path("/docker/projects") / project_name
+
+def _read_env_whitelisted(env_path: pathlib.Path) -> dict[str, str]:
+    all_values = dotenv_values(env_path)
+    return {k: (v or "") for k, v in all_values.items() if k in SETTINGS_WHITELIST}
+
+
+def _write_env_whitelisted(env_path: pathlib.Path, updates: dict[str, str]) -> None:
+    with open(env_path, "r") as f:
+        lines = f.readlines()
+
+    updated_keys: set[str] = set()
+    new_lines: list[str] = []
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            new_lines.append(line)
+            continue
+        if "=" in stripped:
+            key = stripped.split("=", 1)[0].strip()
+            if key in updates and key in SETTINGS_WHITELIST:
+                value = updates[key]
+                new_lines.append(f"{key}={value}\n")
+                updated_keys.add(key)
+                continue
+
+        new_lines.append(line)
+
+    for key, value in updates.items():
+        if key not in updated_keys and key in SETTINGS_WHITELIST:
+            new_lines.append(f"{key}={value}\n")
+
+    with open(env_path, "w") as f:
+        f.writelines(new_lines)
+
+
+def _get_affected_services(changed_keys: list[str]) -> list[str]:
+    services: set[str] = set()
+    for key in changed_keys:
+        for svc in SETTING_TO_SERVICES.get(key, []):
+            services.add(svc)
+    return sorted(services)
+
+
+class UpdateSettings(BaseModel):
+    settings: Dict[str, str]
+
+
+class RecreateServices(BaseModel):
+    services: List[str]
+
+
+@app.get("/api/projects/{project_name}/settings")
+async def get_project_settings(
+    project_name: str,
+    user: str = Header(..., alias="Remote-Email"),
+    groups: str = Header("", alias="Remote-Groups"),
+    pool=Depends(get_pool),
+):
+    project_name = validate_project_id(project_name)
+
+    async with pool.acquire() as conn:
+        project_id = await conn.fetchval(
+            "SELECT id FROM projects WHERE name = $1", project_name
+        )
+        if not project_id:
+            raise HTTPException(404, "Project not found")
+
+        role = await conn.fetchval(
+            "SELECT role FROM project_members WHERE project_id = $1 AND user_id = $2",
+            project_id, user,
+        )
+        groups_list = [g.strip() for g in groups.split(",") if g.strip()]
+        is_global_admin = "admin" in groups_list
+
+        if role != "admin" and not is_global_admin:
+            raise HTTPException(
+                403,
+                "Acesso negado: apenas admin do projeto ou administrador do sistema",
+            )
+
+    env_path = _get_project_env_path(project_name)
+    if not env_path.exists():
+        raise HTTPException(404, f"Arquivo .env não encontrado para o projeto '{project_name}'")
+
+    settings = _read_env_whitelisted(env_path)
+
+    return {
+        "settings": settings,
+    }
+
+
+@app.put("/api/projects/{project_name}/settings")
+async def update_project_settings(
+    project_name: str,
+    body: UpdateSettings,
+    user: str = Header(..., alias="Remote-Email"),
+    groups: str = Header("", alias="Remote-Groups"),
+    pool=Depends(get_pool),
+):
+    project_name = validate_project_id(project_name)
+
+    async with pool.acquire() as conn:
+        project_id = await conn.fetchval(
+            "SELECT id FROM projects WHERE name = $1", project_name
+        )
+        if not project_id:
+            raise HTTPException(404, "Project not found")
+
+        role = await conn.fetchval(
+            "SELECT role FROM project_members WHERE project_id = $1 AND user_id = $2",
+            project_id, user,
+        )
+        groups_list = [g.strip() for g in groups.split(",") if g.strip()]
+        is_global_admin = "admin" in groups_list
+
+        if role != "admin" and not is_global_admin:
+            raise HTTPException(
+                403,
+                "Acesso negado: apenas admin do projeto ou administrador do sistema",
+            )
+
+    invalid_keys = set(body.settings.keys()) - SETTINGS_WHITELIST
+    if invalid_keys:
+        raise HTTPException(
+            400,
+            f"Variáveis não permitidas: {', '.join(sorted(invalid_keys))}",
+        )
+
+    if not body.settings:
+        raise HTTPException(400, "Nenhuma configuração enviada")
+
+    env_path = _get_project_env_path(project_name)
+    if not env_path.exists():
+        raise HTTPException(404, f"Arquivo .env não encontrado para o projeto '{project_name}'")
+
+    _write_env_whitelisted(env_path, body.settings)
+
+    affected = _get_affected_services(list(body.settings.keys()))
+
+    return {
+        "status": "updated",
+        "updated_keys": list(body.settings.keys()),
+        "affected_services": affected,
+        "message": f"Configurações salvas. Serviços afetados: {', '.join(affected)}. Recrie-os para aplicar.",
+    }
+
+
+ALLOWED_RECREATE_SERVICES = {"auth", "rest", "storage", "imgproxy", "nginx", "meta"}
+
+@app.post("/api/projects/{project_name}/recreate-services")
+async def recreate_project_services(
+    project_name: str,
+    body: RecreateServices,
+    tasks: BackgroundTasks,
+    user: str = Header(..., alias="Remote-Email"),
+    groups: str = Header("", alias="Remote-Groups"),
+    pool=Depends(get_pool),
+):
+    """
+    Recreate specific services of a project using docker compose down + up.
+    This is needed (instead of just restart) because env vars are read at
+    container creation time, not on restart.
+    """
+    project_name = validate_project_id(project_name)
+
+    async with pool.acquire() as conn:
+        project_id = await conn.fetchval(
+            "SELECT id FROM projects WHERE name = $1", project_name
+        )
+        if not project_id:
+            raise HTTPException(404, "Project not found")
+
+        role = await conn.fetchval(
+            "SELECT role FROM project_members WHERE project_id = $1 AND user_id = $2",
+            project_id, user,
+        )
+        groups_list = [g.strip() for g in groups.split(",") if g.strip()]
+        is_global_admin = "admin" in groups_list
+
+        if role != "admin" and not is_global_admin:
+            raise HTTPException(
+                403,
+                "Acesso negado: apenas admin do projeto ou administrador do sistema",
+            )
+
+    invalid_services = set(body.services) - ALLOWED_RECREATE_SERVICES
+    if invalid_services:
+        raise HTTPException(400, f"Serviços inválidos: {', '.join(sorted(invalid_services))}")
+
+    if not body.services:
+        raise HTTPException(400, "Nenhum serviço especificado")
+
+    services = body.services
+    if _services_touch_project_nginx(services):
+        job_id = await _create_project_job(
+            pool,
+            project_name,
+            user,
+            message="Recriacao iniciada em segundo plano.",
+        )
+        tasks.add_task(
+            _recreate_project_services_background,
+            job_id,
+            project_name,
+            services,
+        )
+        return JSONResponse(
+            status_code=202,
+            content={
+                "job_id": job_id,
+                "status": "queued",
+                "message": "Recriacao iniciada em segundo plano.",
+            },
+        )
+
+    return await _recreate_project_services_impl(project_name, services)

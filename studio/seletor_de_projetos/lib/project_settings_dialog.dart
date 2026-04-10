@@ -21,6 +21,7 @@ import 'widgets/danger_button.dart';
 import 'widgets/section_widget.dart';
 import 'widgets/project_settings/status_section.dart';
 import 'widgets/project_settings/members_section.dart';
+import 'widgets/project_settings/env_settings_section.dart';
 import 'models/project_member.dart';
 import 'models/AllUsers.dart';
 
@@ -207,6 +208,11 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
                       _buildAnonKeySection(myRole),
                       const SizedBox(height: 20),
                       _buildConfigTokenSection(),
+                      const SizedBox(height: 20),
+                      EnvSettingsSection(
+                        projectRef: widget.ref,
+                        isAdmin: myRole == 'admin' || Session().isSysAdmin,
+                      ),
                       const SizedBox(height: 20),
                       MembersSection(projectRef: widget.ref),
                     ],

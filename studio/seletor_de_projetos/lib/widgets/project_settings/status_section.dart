@@ -4,21 +4,48 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/project_settings_provider.dart';
 import '../../data/project_repository.dart';
 import '../../supabase_colors.dart';
+import '../../services/projectService.dart';
 import '../action_button.dart';
 import '../section_widget.dart';
 import '../error_box.dart';
 import '../../session.dart';
 import '../../models/project_member.dart';
 
-class StatusSection extends ConsumerWidget {
+class StatusSection extends ConsumerStatefulWidget {
   final String projectRef;
   const StatusSection({super.key, required this.projectRef});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final statusAsync = ref.watch(projectStatusProvider(projectRef));
-    final membersAsync = ref.watch(projectMembersProvider(projectRef));
-    final busy = Session().isBusy(projectRef);
+  ConsumerState<StatusSection> createState() => _StatusSectionState();
+}
+
+class _StatusSectionState extends ConsumerState<StatusSection> {
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _busy = Session().isBusy(widget.projectRef);
+    Session().busyListenable.addListener(_onBusyChanged);
+  }
+
+  @override
+  void dispose() {
+    Session().busyListenable.removeListener(_onBusyChanged);
+    super.dispose();
+  }
+
+  void _onBusyChanged() {
+    final newBusy = Session().isBusy(widget.projectRef);
+    if (newBusy != _busy) {
+      setState(() => _busy = newBusy);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final statusAsync = ref.watch(projectStatusProvider(widget.projectRef));
+    final membersAsync = ref.watch(projectMembersProvider(widget.projectRef));
 
     final myId = Session().myId;
     final myRole =
@@ -29,6 +56,7 @@ class StatusSection extends ConsumerWidget {
             )
             .role ??
         'member';
+    final canManageProject = myRole == 'admin' || Session().isSysAdmin;
 
     return SectionWidget(
       title: 'STATUS',
@@ -101,7 +129,7 @@ class StatusSection extends ConsumerWidget {
                   ),
                 ],
               ),
-              if (myRole == 'admin') ...[
+              if (canManageProject) ...[
                 const SizedBox(height: 16),
                 Row(
                   children: [
@@ -110,10 +138,8 @@ class StatusSection extends ConsumerWidget {
                         icon: Icons.play_arrow_rounded,
                         label: 'Start',
                         color: SupabaseColors.success,
-                        onPressed: busy
-                            ? null
-                            : () => _doAction(context, ref, 'start'),
-                        busy: busy,
+                        onPressed: _busy ? null : () => _doAction('start'),
+                        busy: _busy,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -122,10 +148,8 @@ class StatusSection extends ConsumerWidget {
                         icon: Icons.stop_rounded,
                         label: 'Stop',
                         color: SupabaseColors.error,
-                        onPressed: busy
-                            ? null
-                            : () => _doAction(context, ref, 'stop'),
-                        busy: busy,
+                        onPressed: _busy ? null : () => _doAction('stop'),
+                        busy: _busy,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -134,10 +158,18 @@ class StatusSection extends ConsumerWidget {
                         icon: Icons.restart_alt_rounded,
                         label: 'Restart',
                         color: SupabaseColors.info,
-                        onPressed: busy
-                            ? null
-                            : () => _doAction(context, ref, 'restart'),
-                        busy: busy,
+                        onPressed: _busy ? null : () => _doAction('restart'),
+                        busy: _busy,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ActionButton(
+                        icon: Icons.refresh_rounded,
+                        label: 'Recreate',
+                        color: SupabaseColors.warning,
+                        onPressed: _busy ? null : () => _doRecreate(),
+                        busy: _busy,
                       ),
                     ),
                   ],
@@ -150,24 +182,45 @@ class StatusSection extends ConsumerWidget {
     );
   }
 
-  void _doAction(BuildContext context, WidgetRef ref, String action) async {
+  void _doAction(String action) async {
     final tracker = Session();
-    if (tracker.isBusy(projectRef)) return;
+    if (tracker.isBusy(widget.projectRef)) return;
 
-    tracker.setBusy(projectRef, true);
+    tracker.setBusy(widget.projectRef, true);
     try {
-      await ref.read(projectRepositoryProvider).doAction(projectRef, action);
-      if (context.mounted) {
+      final result = await ref
+          .read(projectRepositoryProvider)
+          .doAction(widget.projectRef, action);
+      final job = result.job;
+
+      if (job != null) {
+        final waited = await ProjectService.waitForJob(job.id);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                waited.message ??
+                    (waited.ok
+                        ? 'Ação $action executada'
+                        : 'Falha ao executar $action'),
+              ),
+              backgroundColor: waited.ok
+                  ? SupabaseColors.success
+                  : SupabaseColors.error,
+            ),
+          );
+        }
+      } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Ação $action executada'),
+            content: Text(result.message ?? 'Ação $action executada'),
             backgroundColor: SupabaseColors.success,
           ),
         );
       }
-      ref.invalidate(projectStatusProvider(projectRef));
+      ref.invalidate(projectStatusProvider(widget.projectRef));
     } catch (e) {
-      if (context.mounted) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Erro: $e'),
@@ -176,7 +229,107 @@ class StatusSection extends ConsumerWidget {
         );
       }
     } finally {
-      tracker.setBusy(projectRef, false);
+      tracker.setBusy(widget.projectRef, false);
+    }
+  }
+
+  void _doRecreate() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: SupabaseColors.bg200,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: const BorderSide(color: SupabaseColors.border),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.refresh_rounded, color: SupabaseColors.warning),
+            SizedBox(width: 8),
+            Text(
+              'Recriar todos os serviços?',
+              style: TextStyle(color: SupabaseColors.textPrimary),
+            ),
+          ],
+        ),
+        content: const Text(
+          'Todos os containers serão destruídos e recriados (down + up). '
+          'Isso aplica alterações no .env mas causa indisponibilidade temporária.',
+          style: TextStyle(color: SupabaseColors.textSecondary, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: TextButton.styleFrom(
+              foregroundColor: SupabaseColors.warning,
+            ),
+            child: const Text('Recriar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true || !mounted) return;
+
+    final tracker = Session();
+    if (tracker.isBusy(widget.projectRef)) return;
+
+    tracker.setBusy(widget.projectRef, true);
+    try {
+      final allServices = [
+        'auth',
+        'rest',
+        'storage',
+        'imgproxy',
+        'nginx',
+        'meta',
+      ];
+      final result = await ref
+          .read(projectRepositoryProvider)
+          .recreateServices(widget.projectRef, allServices);
+
+      final job = result.job;
+      if (job != null) {
+        final waited = await ProjectService.waitForJob(job.id);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                waited.message ??
+                    (waited.ok
+                        ? 'Serviços recriados com sucesso'
+                        : 'Falha ao recriar serviços'),
+              ),
+              backgroundColor: waited.ok
+                  ? SupabaseColors.success
+                  : SupabaseColors.error,
+            ),
+          );
+        }
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result.message ?? 'Serviços recriados com sucesso'),
+            backgroundColor: SupabaseColors.success,
+          ),
+        );
+      }
+      ref.invalidate(projectStatusProvider(widget.projectRef));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao recriar: $e'),
+            backgroundColor: SupabaseColors.error,
+          ),
+        );
+      }
+    } finally {
+      tracker.setBusy(widget.projectRef, false);
     }
   }
 }

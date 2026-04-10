@@ -30,7 +30,8 @@ class UserProjectsAdminScreen extends ConsumerStatefulWidget {
       _UserProjectsAdminScreenState();
 }
 
-class _UserProjectsAdminScreenState extends ConsumerState<UserProjectsAdminScreen>
+class _UserProjectsAdminScreenState
+    extends ConsumerState<UserProjectsAdminScreen>
     with SingleTickerProviderStateMixin {
   List<ProjectInfo> _projects = [];
   bool _loading = true;
@@ -90,8 +91,11 @@ class _UserProjectsAdminScreenState extends ConsumerState<UserProjectsAdminScree
   Future<List<AvailableUser>> _loadAvailableUsers(String projectName) async {
     try {
       final repository = ref.read(projectRepositoryProvider);
-      final data = await repository.getTransferAvailableUsers(projectName, mode: 'admin');
-      
+      final data = await repository.getTransferAvailableUsers(
+        projectName,
+        mode: 'admin',
+      );
+
       return data
           .map((item) => AvailableUser.fromJson(item))
           .where((user) => user.isActive == true)
@@ -635,19 +639,28 @@ class _UserProjectsAdminScreenState extends ConsumerState<UserProjectsAdminScree
   void _doAction(String projectName, String action) async {
     _session.setBusy(projectName, true);
     try {
-      final resp = await http.post(
-        Uri.parse('/api/projects/$projectName/$action'),
-      );
+      final result = await ref
+          .read(projectRepositoryProvider)
+          .doAction(projectName, action);
 
-      if (resp.statusCode == 200) {
+      final job = result.job;
+      if (job != null) {
+        final waited = await ProjectService.waitForJob(job.id);
         _showSnack(
-          'Ação "$action" executada em "$projectName"',
+          waited.message ??
+              (waited.ok
+                  ? 'Ação "$action" executada em "$projectName"'
+                  : 'Falha ao executar "$action" em "$projectName"'),
+          waited.ok ? SupabaseColors.success : SupabaseColors.error,
+        );
+      } else {
+        _showSnack(
+          result.message ?? 'Ação "$action" executada em "$projectName"',
           SupabaseColors.success,
         );
-        await _fetchProjects();
-      } else {
-        throw Exception('Erro: ${resp.body}');
       }
+
+      await _fetchProjects();
     } catch (e) {
       _showSnack(e.toString(), SupabaseColors.error);
     } finally {

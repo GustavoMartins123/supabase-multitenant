@@ -27,3 +27,10 @@ final projectStatusProvider = FutureProvider.autoDispose
           .getFullStatus(projectRef);
       return ProjectDockerStatus.fromJson(raw);
     });
+
+final projectEnvSettingsProvider = FutureProvider.autoDispose
+    .family<Map<String, String>, String>((ref, projectRef) async {
+      return ref
+          .watch(projectRepositoryProvider)
+          .fetchProjectSettings(projectRef);
+    });

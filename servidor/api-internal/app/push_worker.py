@@ -28,6 +28,24 @@ def build_ssl_context() -> ssl.SSLContext:
 
 SSL_CONTEXT = build_ssl_context()
 
+
+def is_missing_database_error(exc: Exception) -> bool:
+    if isinstance(exc, asyncpg.exceptions.InvalidCatalogNameError):
+        return True
+
+    message = str(exc).lower()
+    return "database" in message and "does not exist" in message
+
+
+async def close_connection(conn: asyncpg.Connection | None) -> None:
+    if conn is None or conn.is_closed():
+        return
+
+    try:
+        await conn.close()
+    except Exception:
+        pass
+
 def get_tenant_dsn(base_dsn: str, db_name: str) -> str:
     parsed = urlparse(base_dsn)
     new_dsn = parsed._replace(path=f"/{db_name}")
@@ -78,6 +96,7 @@ async def poll_tenant(db_name: str):
         wakeup_event.set()
 
     while True:
+        conn = None
         try:
             conn = await asyncpg.connect(tenant_dsn)
             await conn.add_listener('new_push', acordar_python)
@@ -120,13 +139,22 @@ async def poll_tenant(db_name: str):
                         pass
                         
                 except asyncpg.exceptions.UndefinedTableError:
-                    await conn.close()
+                    await close_connection(conn)
+                    conn = None
                     await asyncio.sleep(3600)
                     break
 
+        except asyncio.CancelledError:
+            print(f"[{project_name}] Monitoramento encerrado.")
+            raise
         except Exception as e:
+            if is_missing_database_error(e):
+                print(f"[{project_name}] Banco ausente. Encerrando monitoramento do worker.")
+                return
             print(f"[{project_name}] Erro de conexão, tentando reconectar... {e}")
             await asyncio.sleep(5)
+        finally:
+            await close_connection(conn)
 
 async def worker_manager():
     active_tasks = {}
@@ -144,6 +172,29 @@ async def worker_manager():
             await conn.close()
             
             current_dbs = {record['datname'] for record in databases}
+
+            finished_dbs = [
+                db_name for db_name, task in active_tasks.items() if task.done()
+            ]
+            for db_name in finished_dbs:
+                task = active_tasks.pop(db_name)
+                try:
+                    task.result()
+                except asyncio.CancelledError:
+                    pass
+                except Exception as exc:
+                    print(f"[{db_name}] Worker encerrado com erro: {exc}")
+
+            removed_dbs = set(active_tasks) - current_dbs
+            removed_tasks = []
+            for db_name in removed_dbs:
+                print(f"[{db_name.replace('_supabase_', '')}] Banco removido da lista. Encerrando monitoramento.")
+                task = active_tasks.pop(db_name)
+                task.cancel()
+                removed_tasks.append(task)
+
+            if removed_tasks:
+                await asyncio.gather(*removed_tasks, return_exceptions=True)
             
             for db_name in current_dbs:
                 if db_name not in active_tasks:
