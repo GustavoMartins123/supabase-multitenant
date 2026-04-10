@@ -1663,6 +1663,7 @@ async def execute_project_function(
             await proj_conn.close()
 
 SETTINGS_WHITELIST = {
+    "DISABLE_SIGNUP",
     "ENABLE_EMAIL_SIGNUP",
     "ENABLE_EMAIL_AUTOCONFIRM",
     "ENABLE_ANONYMOUS_USERS",
@@ -1673,11 +1674,16 @@ SETTINGS_WHITELIST = {
     "GOTRUE_PASSWORD_MIN_LENGTH",
     "GOTRUE_EXTERNAL_IMPLICIT_FLOW_ENABLED",
     "PGRST_DB_SCHEMAS",
+    "PGRST_DB_MAX_ROWS",
+    "PGRST_DB_POOL",
+    "PGRST_DB_POOL_TIMEOUT",
+    "PGRST_DB_POOL_ACQUISITION_TIMEOUT",
     "FILE_SIZE_LIMIT",
     "ENABLE_IMAGE_TRANSFORMATION",
 }
 
 SETTING_TO_SERVICES: dict[str, list[str]] = {
+    "DISABLE_SIGNUP":                          ["auth"],
     "ENABLE_EMAIL_SIGNUP":                     ["auth"],
     "ENABLE_EMAIL_AUTOCONFIRM":                ["auth"],
     "ENABLE_ANONYMOUS_USERS":                  ["auth"],
@@ -1688,6 +1694,10 @@ SETTING_TO_SERVICES: dict[str, list[str]] = {
     "GOTRUE_PASSWORD_MIN_LENGTH":              ["auth"],
     "GOTRUE_EXTERNAL_IMPLICIT_FLOW_ENABLED":   ["auth"],
     "PGRST_DB_SCHEMAS":                        ["rest"],
+    "PGRST_DB_MAX_ROWS":                       ["rest"],
+    "PGRST_DB_POOL":                           ["rest"],
+    "PGRST_DB_POOL_TIMEOUT":                   ["rest"],
+    "PGRST_DB_POOL_ACQUISITION_TIMEOUT":       ["rest"],
     "FILE_SIZE_LIMIT":                         ["storage"],
     "ENABLE_IMAGE_TRANSFORMATION":             ["storage"],
 }

@@ -28,6 +28,14 @@ enum _FieldType { toggle, number, text }
 
 const _kSettings = [
   _SettingMeta(
+    key: 'DISABLE_SIGNUP',
+    label: 'Bloquear Novos Cadastros',
+    description:
+        'Impede novos cadastros no projeto, mesmo com provedores habilitados',
+    type: _FieldType.toggle,
+    category: 'Autenticação',
+  ),
+  _SettingMeta(
     key: 'ENABLE_EMAIL_SIGNUP',
     label: 'Cadastro por E-mail',
     description: 'Permitir que usuários se cadastrem via e-mail',
@@ -97,6 +105,34 @@ const _kSettings = [
     label: 'Schemas Expostos (PostgREST)',
     description: 'Schemas acessíveis via API REST (separados por vírgula)',
     type: _FieldType.text,
+    category: 'Banco de Dados',
+  ),
+  _SettingMeta(
+    key: 'PGRST_DB_MAX_ROWS',
+    label: 'Máx. de Linhas por Consulta',
+    description: 'Limite padrão de linhas retornadas pela API REST',
+    type: _FieldType.number,
+    category: 'Banco de Dados',
+  ),
+  _SettingMeta(
+    key: 'PGRST_DB_POOL',
+    label: 'Pool do PostgREST',
+    description: 'Quantidade de conexões que a API REST pode manter abertas',
+    type: _FieldType.number,
+    category: 'Banco de Dados',
+  ),
+  _SettingMeta(
+    key: 'PGRST_DB_POOL_TIMEOUT',
+    label: 'Timeout do Pool (seg)',
+    description: 'Tempo de espera por conexão livre no pool do PostgREST',
+    type: _FieldType.number,
+    category: 'Banco de Dados',
+  ),
+  _SettingMeta(
+    key: 'PGRST_DB_POOL_ACQUISITION_TIMEOUT',
+    label: 'Timeout de Aquisição (seg)',
+    description: 'Tempo máximo para a API REST adquirir uma conexão do pool',
+    type: _FieldType.number,
     category: 'Banco de Dados',
   ),
 
