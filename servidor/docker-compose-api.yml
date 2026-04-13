@@ -1,6 +1,7 @@
 #docker compose -f docker-compose-api.yml --env-file .env up --build -d
 services:
   projects-api:
+    container_name: projects-api
     build: 
       context: .
       dockerfile: ./api-internal/Dockerfile
@@ -24,6 +25,7 @@ services:
       - traefik.http.routers.projects.middlewares=lanonly, api-security-chain@file
       - traefik.http.services.projects.loadbalancer.server.port=18000  
   # push-worker:
+  #   container_name: push-worker
   #   build:
   #     context: .
   #     dockerfile: ./api-internal/Dockerfile

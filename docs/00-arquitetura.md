@@ -1643,7 +1643,7 @@ filter_global_services:
       "supabase-pooler",
       "realtime-dev.supabase-realtime",
       "supabase-edge-functions",
-      "docker-projects-api-1",
+      "projects-api",
       "traefik-traefik-1"
     ], .container_name)
 ```

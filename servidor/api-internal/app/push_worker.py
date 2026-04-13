@@ -13,6 +13,7 @@ PUSH_WORKER_TOKEN = os.getenv("PUSH_WORKER_TOKEN")
 PUSH_REQUEST_TIMEOUT = float(os.getenv("PUSH_REQUEST_TIMEOUT", "10"))
 PUSH_VERIFY_TLS = os.getenv("PUSH_VERIFY_TLS", "false").lower() in ("1", "true", "yes", "on")
 PUSH_CA_FILE = os.getenv("PUSH_CA_FILE", "/docker/push-certs/ca.pem")
+SUPPORTED_PLATFORMS = ("android", "ios")
 
 if not PUSH_WORKER_TOKEN:
     raise RuntimeError("Missing PUSH_WORKER_TOKEN environment variable")
@@ -84,6 +85,28 @@ async def send_to_api(token_fcm: str, body: str, project_name: str) -> bool:
         print(f"[{project_name}] ❌ Erro ao avisar a api: {e}")
         return False
 
+
+async def get_pending_notifications(conn: asyncpg.Connection):
+    query = """
+        SELECT id, user_id, body
+        FROM notifications
+        WHERE status = 'pendente'
+        ORDER BY created_at
+        LIMIT 10
+        FOR UPDATE SKIP LOCKED
+    """
+    return await conn.fetch(query)
+
+
+async def get_user_push_tokens(conn: asyncpg.Connection, user_id):
+    query = """
+        SELECT DISTINCT token, platform
+        FROM push_tokens
+        WHERE user_id = $1
+          AND platform = ANY($2::text[])
+    """
+    return await conn.fetch(query, user_id, list(SUPPORTED_PLATFORMS))
+
 async def poll_tenant(db_name: str):
     project_name = db_name.replace("_supabase_", "")
     tenant_dsn = get_tenant_dsn(BASE_DSN, db_name)
@@ -104,27 +127,31 @@ async def poll_tenant(db_name: str):
             while True:
                 try:
                     async with conn.transaction():
-                        query = """
-                            SELECT n.id, n.user_id, n.body, pt.token 
-                            FROM notifications n
-                            LEFT JOIN push_tokens pt ON n.user_id = pt.user_id AND pt.platform = 'android'
-                            WHERE n.status = 'pendente' 
-                            LIMIT 10 
-                            FOR UPDATE OF n SKIP LOCKED
-                        """
-                        rows = await conn.fetch(query)
+                        rows = await get_pending_notifications(conn)
                         
                         for row in rows:
-                            if not row['token']:
+                            token_rows = await get_user_push_tokens(conn, row["user_id"])
+
+                            if not token_rows:
                                 print(f"[{project_name}] ⚠️ Usuário {row['user_id']} sem token. Marcando como erro.")
                                 await conn.execute("UPDATE notifications SET status = 'sem_token' WHERE id = $1", row['id'])
                                 continue
-                            
-                            sucesso = await send_to_api(row['token'], row['body'], project_name)
-                            
-                            if sucesso:
+
+                            success_count = 0
+                            for token_row in token_rows:
+                                sucesso = await send_to_api(token_row["token"], row["body"], project_name)
+                                if sucesso:
+                                    success_count += 1
+
+                            if success_count > 0:
                                 await conn.execute("UPDATE notifications SET status = 'enviado' WHERE id = $1", row['id'])
-                                print(f"[{project_name}] Push enviado com sucesso!")
+                                if success_count == len(token_rows):
+                                    print(f"[{project_name}] Push enviado com sucesso para {success_count} dispositivo(s)!")
+                                else:
+                                    print(
+                                        f"[{project_name}] Push enviado parcialmente "
+                                        f"({success_count}/{len(token_rows)} dispositivo(s))."
+                                    )
                             else:
                                 await conn.execute("UPDATE notifications SET status = 'erro' WHERE id = $1", row['id'])
                     

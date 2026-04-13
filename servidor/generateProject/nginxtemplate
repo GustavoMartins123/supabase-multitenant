@@ -82,7 +82,7 @@ http {
         port_in_redirect off;
 
         set $cors_origin "";
-        if ($http_origin ~* "^https?://.*$") {
+        if ($http_origin ~* ^(https?://localhost(:\d+)?|https?://{{server_url}}(:\d+)?)$) {
             set $cors_origin $http_origin;
         }
        

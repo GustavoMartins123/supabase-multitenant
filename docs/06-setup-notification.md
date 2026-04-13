@@ -16,7 +16,7 @@ Antes de prosseguir, certifique-se de que:
 
 - **Projeto Firebase**: Você possui um projeto criado no [Firebase Console](https://console.firebase.google.com/).
 - **Service Account**: Você gerou e baixou a chave privada (arquivo JSON) da Conta de Serviço do Firebase (Configurações do Projeto > Contas de Serviço > Gerar nova chave privada).
-- **Worker em execução**: O serviço `push-worker` está configurado e rodando no seu ambiente Docker.
+- **Worker habilitado**: por padrão, o serviço `push-worker` vem comentado em `servidor/docker-compose-api.yml`. Descomente-o e suba o container antes de validar o fluxo ponta a ponta.
 - **Segredo compartilhado**: `PUSH_WORKER_TOKEN` deve estar configurado com o mesmo valor em `studio/.env` e `servidor/.env`.
 - **URL correta do gateway**: `PUSH_API_URL` deve apontar para `https://<IP_DO_STUDIO>:4000/api/internal/push`.
 - **TLS confiável entre as máquinas**: se `PUSH_VERIFY_TLS=true`, o certificado do Studio precisa ser confiável no servidor Python. O `setup.sh` copia `studio/authelia/ssl/ca.pem` para `servidor/certs/ca.pem`, que e montado no container como `/docker/push-certs/ca.pem`.
@@ -93,13 +93,6 @@ CREATE POLICY "Usuários gerenciam seus próprios tokens"
 ON public.push_tokens 
 FOR ALL 
 USING (auth.uid() = user_id);
-
-ALTER TABLE public.push_tokens ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Usuários gerenciam seus próprios tokens" 
-ON public.push_tokens 
-FOR ALL 
-USING (auth.uid() = user_id);
 ```
 
 **2.2. Criar Função de Alerta (O Grito do Banco)**
@@ -156,6 +149,7 @@ Abra o `docker-compose-api.yml` e remova os `#` da frente do serviço `push-work
 
 ```yaml
   push-worker:
+    container_name: push-worker
     build:
       context: .
       dockerfile: ./api-internal/Dockerfile
@@ -174,7 +168,7 @@ Abra o `docker-compose-api.yml` e remova os `#` da frente do serviço `push-work
 ```
 
 **3.2. Aplicar a alteração**
-Após salvar o arquivo, suba o contêiner executando o comando abaixo na pasta raiz:
+Após salvar o arquivo, suba o contêiner executando o comando abaixo dentro da pasta `servidor/`:
 
 ```bash
 docker compose -f docker-compose-api.yml --env-file .env up --build -d push-worker
@@ -203,7 +197,7 @@ Se as notificações não estiverem chegando ou o status no banco de dados ficar
 O primeiro lugar para olhar é o contêiner do Python, pois ele é responsável por ler a fila do banco e iniciar o disparo. Execute o comando no servidor onde a API dos projetos está rodando:
 
 ```bash
-docker logs -f docker-push-worker-1
+docker logs -f push-worker
 ```
 
 Se aparecer erro de TLS parecido com `certificate verify failed` ou `IP address mismatch`, revise nesta ordem:

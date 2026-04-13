@@ -605,7 +605,7 @@ docker logs authelia --tail 100 -f
 
 docker logs nginx --tail 100 -f
 
-docker logs docker-projects-api-1 --tail 100 -f
+docker logs projects-api --tail 100 -f
 
 docker logs supabase-db --tail 100 -f
 ```
