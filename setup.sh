@@ -312,7 +312,14 @@ main() {
     safe_sed "s|NGINX_SHARED_TOKEN=pass|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" servidor/.env
     safe_sed "s|PUSH_WORKER_TOKEN=pass|PUSH_WORKER_TOKEN=$PUSH_WORKER_TOKEN|g" servidor/.env
     safe_sed "s|PROJECT_DELETE_PASSWORD=pass|PROJECT_DELETE_PASSWORD=$PROJECT_DELETE_PASSWORD|g" servidor/.env
+    if [[ "$SERVER_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
+    [[ "$SERVER_IP" =~ : ]]; then
+        PROTO="http"
+    else
+        PROTO="https"
+    fi
     safe_sed "s|SERVER_URL=pass|SERVER_URL=${SERVER_IP}|g" servidor/.env
+    safe_sed "s|SERVER_PROTO=pass|SERVER_PROTO=${PROTO}|g" servidor/.env
     safe_sed "s|^PUSH_API_URL=.*|PUSH_API_URL=https://${LOCAL_IP}:4000/api/internal/push|g" servidor/.env
     safe_sed "s|PUSH_VERIFY_TLS=true|PUSH_VERIFY_TLS=true|g" servidor/.env
     safe_sed "s|PUSH_CA_FILE=/docker/push-certs/ca.pem|PUSH_CA_FILE=/docker/push-certs/ca.pem|g" servidor/.env
@@ -336,12 +343,6 @@ main() {
     safe_sed "s|PUSH_WORKER_TOKEN=pass|PUSH_WORKER_TOKEN=$PUSH_WORKER_TOKEN|g" studio/.env
     safe_sed "s|COOKIE_SIGN_SECRET=pass|COOKIE_SIGN_SECRET=$COOKIE_SIGN_SECRET|g" studio/.env
     safe_sed "s|POSTGRES_NGINX_PASSWORD=pass|POSTGRES_NGINX_PASSWORD=$POSTGRES_NGINX_PASSWORD|g" studio/.env
-    if [[ "$SERVER_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
-    [[ "$SERVER_IP" =~ : ]]; then
-        PROTO="http"
-    else
-        PROTO="https"
-    fi 
     safe_sed "s|^SERVER_DOMAIN=.*|SERVER_DOMAIN=${PROTO}://${SERVER_IP}|g" studio/.env
     safe_sed "s|BACKEND_PROTO=pass|BACKEND_PROTO=$PROTO|g" studio/.env
     print_success "Arquivo studio/.env configurado com sucesso!"

@@ -1015,6 +1015,132 @@ def _containers_touch_project_nginx(containers: list[dict]) -> bool:
     return any("nginx" in container.get("Names", "").lower() for container in containers)
 
 
+def _get_root_env_path() -> pathlib.Path:
+    return BASE_DIR / ".env"
+
+
+def _get_project_env_path(project_name: str) -> pathlib.Path:
+    return pathlib.Path("/docker/projects") / project_name / ".env"
+
+
+def _get_project_dir(project_name: str) -> pathlib.Path:
+    return pathlib.Path("/docker/projects") / project_name
+
+
+def _normalize_public_base_url(url: str, proto: str | None = None) -> str:
+    normalized = url.rstrip("/")
+    if not re.match(r"^https?://", normalized):
+        normalized_proto = (proto or "").strip().lower()
+        if normalized_proto in {"http", "https"}:
+            normalized = f"{normalized_proto}://{normalized}"
+        else:
+            normalized = f"https://{normalized}"
+    return normalized
+
+
+def _read_env_file(env_path: pathlib.Path) -> dict[str, str]:
+    return {k: (v or "") for k, v in dotenv_values(env_path).items()}
+
+
+def _read_existing_env_file(env_path: pathlib.Path, missing_message: str) -> dict[str, str]:
+    if not env_path.exists():
+        raise RuntimeError(missing_message)
+    return _read_env_file(env_path)
+
+
+def _render_generated_template(
+    template_path: pathlib.Path,
+    output_path: pathlib.Path,
+    replacements: dict[str, str],
+) -> None:
+    content = template_path.read_text(encoding="utf-8")
+    for key, value in replacements.items():
+        content = content.replace(f"{{{{{key}}}}}", value)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(content, encoding="utf-8")
+
+
+def _get_project_template_replacements(project_name: str) -> dict[str, str]:
+    root_env_path = _get_root_env_path()
+    project_env_path = _get_project_env_path(project_name)
+
+    root_env = _read_existing_env_file(
+        root_env_path,
+        "Arquivo .env raiz não encontrado",
+    )
+    project_env = _read_existing_env_file(
+        project_env_path,
+        f"Arquivo .env não encontrado para o projeto '{project_name}'",
+    )
+
+    server_url = root_env.get("SERVER_URL", "").strip()
+    server_proto = root_env.get("SERVER_PROTO", "").strip()
+    host_project_root = root_env.get("HOST_PROJECT_ROOT", "").strip()
+    if not server_url:
+        raise RuntimeError("SERVER_URL ausente no .env raiz")
+    if not host_project_root:
+        raise RuntimeError("HOST_PROJECT_ROOT ausente no .env raiz")
+
+    required_project_keys = (
+        "ANON_KEY_PROJETO",
+        "SERVICE_ROLE_KEY_PROJETO",
+        "CONFIG_TOKEN_PROJETO",
+        "JWT_SECRET_PROJETO",
+    )
+    missing_project_keys = [
+        key for key in required_project_keys if not project_env.get(key, "").strip()
+    ]
+    if missing_project_keys:
+        joined = ", ".join(missing_project_keys)
+        raise RuntimeError(
+            f".env do projeto '{project_name}' sem chaves obrigatórias: {joined}"
+        )
+
+    public_base_url = _normalize_public_base_url(server_url, server_proto)
+    project_public_url = f"{public_base_url}/{project_name}"
+    project_auth_external_url = f"{project_public_url}/auth/v1"
+
+    return {
+        "anon_key": project_env["ANON_KEY_PROJETO"],
+        "service_role_key": project_env["SERVICE_ROLE_KEY_PROJETO"],
+        "project_id": project_name,
+        "project_uuid": project_env.get("PROJECT_UUID") or project_name,
+        "config_token": project_env["CONFIG_TOKEN_PROJETO"],
+        "jwt_secret": project_env["JWT_SECRET_PROJETO"],
+        "server_url": server_url,
+        "public_base_url": public_base_url,
+        "project_public_url": project_public_url,
+        "project_auth_external_url": project_auth_external_url,
+        "project_root": host_project_root,
+        "logflare_api_key": root_env.get("LOGFLARE_API_KEY", ""),
+    }
+
+
+def _sync_project_nginx_generated_files(project_name: str) -> None:
+    project_dir = _get_project_dir(project_name)
+    if not project_dir.exists():
+        raise RuntimeError(f"Diretório do projeto '{project_name}' não encontrado")
+
+    script_dir = BASE_DIR / "scripts"
+    replacements = _get_project_template_replacements(project_name)
+
+    _render_generated_template(
+        script_dir / "nginxtemplate",
+        project_dir / "nginx" / f"nginx_{project_name}.conf",
+        replacements,
+    )
+    _render_generated_template(
+        script_dir / "Dockerfile",
+        project_dir / "Dockerfile",
+        replacements,
+    )
+    _render_generated_template(
+        script_dir / "dockercomposetemplate",
+        project_dir / "docker-compose.yml",
+        replacements,
+    )
+
+
 async def _stop_project_containers(
     project_name: str,
     containers: list[dict],
@@ -1105,7 +1231,14 @@ async def _recreate_project_services_impl(
         "--env-file", ".env",
     ]
 
-    step_cmd = compose_base + ["up", "-d", "--force-recreate"] + services
+    if _services_touch_project_nginx(services):
+        _sync_project_nginx_generated_files(project_name)
+
+    step_cmd = compose_base + ["up", "-d"]
+    if _services_touch_project_nginx(services):
+        step_cmd.append("--build")
+    step_cmd.append("--force-recreate")
+    step_cmd += services
     proc = await asyncio.create_subprocess_exec(
         *step_cmd,
         cwd=str(project_dir),
@@ -1825,19 +1958,13 @@ SETTING_TO_SERVICES: dict[str, list[str]] = {
     "PGRST_DB_POOL":                           ["rest"],
     "PGRST_DB_POOL_TIMEOUT":                   ["rest"],
     "PGRST_DB_POOL_ACQUISITION_TIMEOUT":       ["rest"],
-    "FILE_SIZE_LIMIT":                         ["storage"],
+    "FILE_SIZE_LIMIT":                         ["storage", "nginx"],
     "ENABLE_IMAGE_TRANSFORMATION":             ["storage"],
 }
 
-def _get_project_env_path(project_name: str) -> pathlib.Path:
-    return pathlib.Path("/docker/projects") / project_name / ".env"
-
-def _get_project_dir(project_name: str) -> pathlib.Path:
-    return pathlib.Path("/docker/projects") / project_name
-
 def _read_env_whitelisted(env_path: pathlib.Path) -> dict[str, str]:
-    all_values = dotenv_values(env_path)
-    return {k: (v or "") for k, v in all_values.items() if k in SETTINGS_WHITELIST}
+    all_values = _read_env_file(env_path)
+    return {k: value for k, value in all_values.items() if k in SETTINGS_WHITELIST}
 
 
 def _write_env_whitelisted(env_path: pathlib.Path, updates: dict[str, str]) -> None:

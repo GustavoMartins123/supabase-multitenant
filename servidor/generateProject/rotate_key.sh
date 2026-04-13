@@ -113,7 +113,16 @@ generate_jwt() {
 
 normalize_public_base_url() {
   local url="${1%/}"
-  [[ "$url" =~ ^https?:// ]] || url="https://$url"
+  local proto="${2:-}"
+  if [[ "$url" =~ ^https?:// ]]; then
+    echo "$url"
+    return
+  fi
+  if [[ -n "$proto" ]]; then
+    url="${proto}://$url"
+  else
+    url="https://$url"
+  fi
   echo "$url"
 }
 
@@ -129,13 +138,15 @@ echo "   Usando issuer: $PROJECT_UUID"
 
 NEW_ANON=$(generate_jwt    "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now,\"exp\":$exp}"         "$JWT_SECRET_PROJETO")
 NEW_SERVICE=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
-PUBLIC_BASE_URL="$(normalize_public_base_url "$SERVER_URL")"
+PUBLIC_BASE_URL="$(normalize_public_base_url "$SERVER_URL" "${SERVER_PROTO:-}")"
 PROJECT_PUBLIC_URL="$PUBLIC_BASE_URL/$PROJECT_ID"
+PROJECT_AUTH_EXTERNAL_URL="$PROJECT_PUBLIC_URL/auth/v1"
 
 template_to_file() {
   local template="$1" outfile="$2"
   local anon_key service_role_key project_id project_uuid config_token jwt_secret
-  local server_url public_base_url project_public_url
+  local server_url public_base_url project_public_url project_auth_external_url project_root
+  local logflare_api_key
 
   anon_key="$(escape_sed_replacement "$NEW_ANON")"
   service_role_key="$(escape_sed_replacement "$NEW_SERVICE")"
@@ -146,6 +157,9 @@ template_to_file() {
   server_url="$(escape_sed_replacement "$SERVER_URL")"
   public_base_url="$(escape_sed_replacement "$PUBLIC_BASE_URL")"
   project_public_url="$(escape_sed_replacement "$PROJECT_PUBLIC_URL")"
+  project_auth_external_url="$(escape_sed_replacement "$PROJECT_AUTH_EXTERNAL_URL")"
+  project_root="$(escape_sed_replacement "$HOST_PROJECT_ROOT")"
+  logflare_api_key="$(escape_sed_replacement "${LOGFLARE_API_KEY:-}")"
 
   sed \
     -e "s|{{anon_key}}|$anon_key|g" \
@@ -157,15 +171,22 @@ template_to_file() {
     -e "s|{{server_url}}|$server_url|g" \
     -e "s|{{public_base_url}}|$public_base_url|g" \
     -e "s|{{project_public_url}}|$project_public_url|g" \
+    -e "s|{{project_auth_external_url}}|$project_auth_external_url|g" \
+    -e "s|{{project_root}}|$project_root|g" \
+    -e "s|{{logflare_api_key}}|$logflare_api_key|g" \
     "$template" > "$outfile"
 }
 
 init_transaction
 
 backup_file "$PROJECT_DIR/nginx/nginx_${PROJECT_ID}.conf"
+backup_file "$PROJECT_DIR/Dockerfile"
+backup_file "$PROJECT_DIR/docker-compose.yml"
 backup_file "$PROJECT_DIR/.env"
 
 template_to_file "$SCRIPT_DIR/nginxtemplate" "$PROJECT_DIR/nginx/nginx_${PROJECT_ID}.conf"
+template_to_file "$SCRIPT_DIR/Dockerfile" "$PROJECT_DIR/Dockerfile"
+template_to_file "$SCRIPT_DIR/dockercomposetemplate" "$PROJECT_DIR/docker-compose.yml"
 
 upsert_env_value "ANON_KEY_PROJETO" "$NEW_ANON" "$PROJECT_DIR/.env"
 upsert_env_value "SERVICE_ROLE_KEY_PROJETO" "$NEW_SERVICE" "$PROJECT_DIR/.env"

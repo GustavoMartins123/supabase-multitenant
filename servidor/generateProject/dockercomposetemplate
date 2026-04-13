@@ -8,6 +8,8 @@ services:
       dockerfile: Dockerfile
     container_name: supabase-nginx-{{project_id}}
     restart: unless-stopped
+    environment:
+      FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT:-524288000}
     volumes:
       - ${HOST_PROJECT_ROOT}/servidor/auth_template:/usr/share/nginx/html:ro
     networks:

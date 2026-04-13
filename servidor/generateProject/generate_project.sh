@@ -159,7 +159,16 @@ generate_db() {
 
 normalize_public_base_url() {
   local url="${1%/}"
-  [[ "$url" =~ ^https?:// ]] || url="https://$url"
+  local proto="${2:-}"
+  if [[ "$url" =~ ^https?:// ]]; then
+    echo "$url"
+    return
+  fi
+  if [[ -n "$proto" ]]; then
+    url="${proto}://$url"
+  else
+    url="https://$url"
+  fi
   echo "$url"
 }
 
@@ -167,7 +176,7 @@ escape_sed_replacement() {
   printf '%s' "$1" | sed -e 's/[&|\\]/\\&/g'
 }
 
-PUBLIC_BASE_URL="$(normalize_public_base_url "$SERVER_URL")"
+PUBLIC_BASE_URL="$(normalize_public_base_url "$SERVER_URL" "${SERVER_PROTO:-}")"
 PROJECT_PUBLIC_URL="$PUBLIC_BASE_URL/$PROJECT_ID"
 PROJECT_AUTH_EXTERNAL_URL="$PROJECT_PUBLIC_URL/auth/v1"
 

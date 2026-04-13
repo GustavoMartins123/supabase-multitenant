@@ -352,7 +352,7 @@ http {
             if ($is_valid_key != 1) {
                 return 403;
             }
-            client_max_body_size 500M;
+            client_max_body_size ${FILE_SIZE_LIMIT};
 
             rewrite ^/storage/v1/(.*)$ /$1 break;
             
