@@ -114,55 +114,7 @@ labels:
 
 ---
 
-### 2. Erro ao Criar Projeto: "Porta já em uso"
-
-**Sintoma:**
-- Ao criar um novo projeto, o processo falha
-- Logs mostram: `bind: address already in use`
-
-**Causa:**
-A porta aleatória gerada para o projeto já está sendo usada por outro processo.
-
-**Como Diagnosticar:**
-```bash
-# Verifique os logs da API
-docker logs docker-projects-api-1
-
-# Ou verifique qual processo está usando a porta
-lsof -i :PORTA
-# ou
-netstat -tulpn | grep PORTA
-```
-
-**Solução:**
-
-O sistema já tenta gerar portas aleatórias, mas se o erro persistir:
-
-1. **Aguarde alguns segundos e tente criar o projeto novamente**
-   - O script tenta até 20 vezes encontrar uma porta livre
-
-2. **Se continuar falhando, verifique se há muitos processos rodando:**
-   ```bash
-   # Liste todas as portas em uso
-   netstat -tulpn | grep LISTEN
-   ```
-
-3. **Libere portas não utilizadas:**
-   ```bash
-   # Identifique processos órfãos
-   docker ps -a | grep Exited
-   
-   # Remova containers parados
-   docker container prune
-   ```
-
-**Como Prevenir:**
-- Não rode outros serviços nas portas 4000-14000 (range usado pelo sistema)
-- Faça limpeza regular de containers parados
-
----
-
-### 3. Usuário Não Consegue Fazer Login no Authelia
+### 2. Usuário Não Consegue Fazer Login no Authelia
 
 **Sintoma:**
 - Credenciais corretas, mas login falha
@@ -226,7 +178,7 @@ docker logs authelia | grep -i "authentication"
 
 ---
 
-### 4. Projeto Criado Mas Não Aparece na Lista
+### 3. Projeto Criado Mas Não Aparece na Lista
 
 **Sintoma:**
 - Projeto foi criado (job status = "done")
@@ -279,7 +231,7 @@ SELECT name, anon_key, service_role FROM projects WHERE name = 'nome_projeto';
 
 ## Erros Comuns
 
-### 5. Problemas com Storage Após Duplicação de Projeto
+### 4. Problemas com Storage Após Duplicação de Projeto
 
 Este erro pode se manifestar de diferentes formas, mas todas relacionadas à cópia incorreta dos arquivos do storage.
 
@@ -415,7 +367,7 @@ WHERE name = 'bucket/path/file.jpg';
 
 ---
 
-### 6. Erro de Permissões no Storage
+### 5. Erro de Permissões no Storage
 
 **Sintoma:**
 - Erro "Permission denied" ao acessar storage
@@ -433,7 +385,7 @@ sudo chmod -R 755 storage/
 
 ---
 
-### 7. Replication Slot Travado
+### 6. Replication Slot Travado
 
 **Sintoma:**
 - Erro ao deletar projeto
@@ -482,7 +434,7 @@ WHERE slot_name LIKE '%nome_projeto%';
 
 ---
 
-### 8. "too many clients already" no PostgreSQL
+### 7. "too many clients already" no PostgreSQL
 
 **Sintoma:**
 - Aplicações não conseguem conectar ao banco
@@ -528,7 +480,7 @@ docker compose --env-file .env up -d --force-recreate db
 
 ---
 
-### 9. Cookie de Projeto Inválido (Erro 403)
+### 8. Cookie de Projeto Inválido (Erro 403)
 
 **Sintoma:**
 - Ao acessar projeto, erro 403
@@ -562,7 +514,7 @@ O cookie `supabase_project` expirou (24h) ou foi corrompido.
 
 ---
 
-### 10. Erro ao Iniciar Containers: "network not found"
+### 9. Erro ao Iniciar Containers: "network not found"
 
 **Sintoma:**
 - Containers não iniciam
@@ -584,7 +536,7 @@ bash start.sh
 
 ---
 
-### 11. Projeto Não Responde Após Restart
+### 10. Projeto Não Responde Após Restart
 
 **Sintoma:**
 - Projeto foi reiniciado mas não responde
@@ -751,6 +703,6 @@ bash start.sh
 
 ---
 
-**Última atualização:** Março 2026
+**Última atualização:** Abril 2026
 
 **Contribuições:** Se você resolveu um erro de forma diferente ou encontrou um novo, por favor contribua atualizando este documento!

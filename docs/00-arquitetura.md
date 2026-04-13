@@ -653,7 +653,7 @@ Cada projeto tem seu próprio container Nginx que funciona como gateway interno,
 
 **Container:** `supabase-nginx-{{project_id}}`
 
-**Porta interna:** Gerada aleatoriamente (4000-14000) durante criação do projeto
+**Porta interna:** 8080
 
 **Arquivo de configuração:** `servidor/projects/{{project_id}}/nginx/nginx_{{project_id}}.conf`
 
@@ -1146,17 +1146,12 @@ docker restart nginx
    - Não pode ser palavra reservada SQL
    - Não pode já existir
 
-5. Script gera portas aleatórias
-   - NGINX_PORT (range 4000-14000, até 20 tentativas)
-   - META_PORT (range 4000-14000, até 20 tentativas)
-   - Verifica se porta está livre com lsof
-
-6. Script gera JWT secret e tokens
+5. Script gera JWT secret e tokens
    - Gera JWT_SECRET único: openssl rand -base64 32
    - Cria tokens anon e service_role com esse secret
    Ver seção "Conceitos Base" para detalhes sobre geração de tokens.
 
-7. Script cria estrutura de pastas
+6. Script cria estrutura de pastas
    servidor/projects/meu_projeto/
    ├── docker-compose.yml (do dockercomposetemplate)
    ├── .env (do .envtemplate)
@@ -1168,13 +1163,13 @@ docker restart nginx
    └── storage/
        └── stub/stub/
 
-8. Script cria database no PostgreSQL
+7. Script cria database no PostgreSQL
    CREATE DATABASE _supabase_meu_projeto TEMPLATE _supabase_template;
    
    Clona estrutura completa do template (ver seção "Setup Inicial").
    Inclui todos os schemas, roles, extensions, functions e triggers.
 
-9. Script registra tenant no Realtime
+8. Script registra tenant no Realtime
    
    POST http://realtime:4000/api/tenants
    Body: {
@@ -1192,23 +1187,23 @@ docker restart nginx
    um segundo slot (supabase_realtime_messages_replication_slot_meu_projeto)
    quando houver conexões WebSocket ativas para broadcast.
 
-10. Script registra tenant no Supavisor
+9. Script registra tenant no Supavisor
     Ver seção "Conceitos Base" para detalhes sobre pools de conexão.
     
     PUT http://pooler:4000/api/tenants/meu_projeto
 
-11. Script executa docker compose
+10. Script executa docker compose
     cd servidor/projects/meu_projeto
     docker compose -p meu_projeto \
       --env-file ../../.env \
       --env-file .env \
       up --build -d
 
-12. Traefik descobre automaticamente
+11. Traefik descobre automaticamente
     - Lê labels Docker do container nginx-meu_projeto
     - Registra rota: /meu_projeto → nginx-meu_projeto:NGINX_PORT
 
-13. API Python salva no banco sistema (postgres)
+12. API Python salva no banco sistema (postgres)
     INSERT INTO projects (
       name, owner_id, 
       anon_key, service_role,  -- criptografados com Fernet
@@ -1216,7 +1211,7 @@ docker restart nginx
       ...
     )
 
-14. Projeto está pronto
+13. Projeto está pronto
     - Aparece na lista do Flutter
     - Usuário pode acessar via Studio
 ```
@@ -1247,15 +1242,11 @@ bash duplicate_project.sh projeto_original projeto_novo [with-data|schema-only]
    - Valida nome do novo projeto (minúsculas, sem ponto, não reservado)
    - Verifica se novo projeto já existe
 
-2. Gera portas aleatórias
-   - NGINX_PORT (4000-14000, até 20 tentativas)
-   - META_PORT (4000-14000, até 20 tentativas)
-
-3. Gera novos JWT tokens
+2. Gera novos JWT tokens
    Ver seção "Conceitos Base" para detalhes sobre geração de tokens.
    Cada projeto tem tokens únicos (iss diferente).
 
-4. Cria estrutura de pastas
+3. Cria estrutura de pastas
    servidor/projects/projeto_novo/
    ├── docker-compose.yml
    ├── .env
@@ -1265,7 +1256,7 @@ bash duplicate_project.sh projeto_original projeto_novo [with-data|schema-only]
    └── pooler/
        └── pooler.exs
 
-5. Duplica database
+4. Duplica database
 
    A) Cria database vazio:
       CREATE DATABASE _supabase_projeto_novo;
@@ -1293,7 +1284,7 @@ bash duplicate_project.sh projeto_original projeto_novo [with-data|schema-only]
       UPDATE auth.schema_migrations SET dirty = false;
       UPDATE storage.migrations SET dirty = false;
 
-6. Copia storage (apenas with-data)
+5. Copia storage (apenas with-data)
    
    Usa tar com preservação de xattr:
    
@@ -1306,7 +1297,7 @@ bash duplicate_project.sh projeto_original projeto_novo [with-data|schema-only]
    - --acls: Preserva permissões ACL
    - -p: Preserva permissões, ownership, timestamps
 
-7. Registra tenant no Realtime
+6. Registra tenant no Realtime
    Ver seção "Conceitos Base" para detalhes sobre replication slots.
    
    POST http://realtime:4000/api/tenants
@@ -1317,23 +1308,23 @@ bash duplicate_project.sh projeto_original projeto_novo [with-data|schema-only]
      slot_name: "supabase_realtime_replication_slot_projeto_novo"
    }
 
-8. Registra tenant no Supavisor
+7. Registra tenant no Supavisor
    Ver seção "Conceitos Base" para detalhes sobre pools de conexão.
    
    PUT http://pooler:4000/api/tenants/projeto_novo
 
-9. Sobe containers do novo projeto
+8. Sobe containers do novo projeto
    cd servidor/projects/projeto_novo
    docker compose -p projeto_novo \
      --env-file ../../.env \
      --env-file .env \
      up --build -d
 
-10. Traefik descobre automaticamente
+9. Traefik descobre automaticamente
     - Lê labels Docker
     - Registra rota: /projeto_novo → nginx-projeto_novo:NGINX_PORT
 
-11. API Python salva no banco sistema
+10. API Python salva no banco sistema
     INSERT INTO projects (
       name, owner_id,
       anon_key, service_role,  -- criptografados com Fernet
@@ -1809,7 +1800,6 @@ SELECT maintain_log_partitions();
 ### Limitações Atuais
 
 **Por Projeto:**
-- Porta única (range 4000-14000 = ~10.000 portas disponíveis)
 - Recursos compartilhados (CPU, RAM, disco)
 
 ### Escalabilidade Horizontal
