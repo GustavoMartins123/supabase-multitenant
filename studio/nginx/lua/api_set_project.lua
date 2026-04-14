@@ -9,7 +9,7 @@ local mac = hmac:new(key, hmac.ALGOS.SHA256)
 local sig = str.to_hex(mac:final(ref.."."..ts))
 
 ngx.header["Set-Cookie"] =
-    ("supabase_project=%s.%s.%s; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400")
+    ("supabase_project=%s.%s.%s; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800")
     :format(ref, ts, sig)
 
 ngx.say("ok")
