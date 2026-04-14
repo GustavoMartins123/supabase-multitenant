@@ -457,7 +457,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
               ],
             ),
           ],
-          if (myRole == 'admin') ...[
+          if (myRole == 'admin' || Session().isSysAdmin) ...[
             const SizedBox(height: 12),
             SecondaryButton(
               label: 'Gerar nova chave',

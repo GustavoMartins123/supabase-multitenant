@@ -709,9 +709,13 @@ class AddMember(BaseModel):
 async def rotate_project_key(
     project_name: str,
     user: str = Header(..., alias="Remote-Email"),
+    groups: str = Header("", alias="Remote-Groups"),
     pool=Depends(get_pool),
 ):
     project_name = validate_project_id(project_name)
+
+    groups_list = [g.strip() for g in (groups or "").split(",") if g.strip()]
+    is_global_admin = "admin" in groups_list
 
     async with pool.acquire() as conn:
         project_id = await conn.fetchval(
@@ -724,8 +728,8 @@ async def rotate_project_key(
             "SELECT role FROM project_members WHERE project_id = $1 AND user_id = $2",
             project_id, user
         )
-        if role != "admin":
-            raise HTTPException(403, "Only project admin can rotate keys")
+        if role != "admin" and not is_global_admin:
+            raise HTTPException(403, "Only project admin or system admin can rotate keys")
 
     proc = await asyncio.create_subprocess_exec(
         "bash", str(ROTATE_SCRIPT), project_name,
@@ -2033,14 +2037,12 @@ async def get_project_settings(
             "SELECT role FROM project_members WHERE project_id = $1 AND user_id = $2",
             project_id, user,
         )
-        groups_list = [g.strip() for g in groups.split(",") if g.strip()]
-        is_global_admin = "admin" in groups_list
-
-        if role != "admin" and not is_global_admin:
-            raise HTTPException(
-                403,
-                "Acesso negado: apenas admin do projeto ou administrador do sistema",
-            )
+        
+        if not role:
+            groups_list = [g.strip() for g in groups.split(",") if g.strip()]
+            is_global_admin = "admin" in groups_list
+            if not is_global_admin:
+                raise HTTPException(403, "Acesso negado: você não é membro deste projeto")
 
     env_path = _get_project_env_path(project_name)
     if not env_path.exists():
