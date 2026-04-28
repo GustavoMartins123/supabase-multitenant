@@ -15,6 +15,9 @@ if not body then
 end
 
 local cjson = require "cjson.safe"
+local user_identity = require "user_identity"
+local authelia_identifiers = require "authelia_identifiers"
+local user_sync = require "user_sync"
 local user_data = cjson.decode(body)
 if not user_data then
     ngx.status = ngx.HTTP_BAD_REQUEST
@@ -59,6 +62,9 @@ if not email:match(email_pat) then
     ngx.say('{"error":"Invalid email format"}')
     return ngx.exit(ngx.HTTP_BAD_REQUEST)
 end
+
+local normalized_email = user_identity.normalize_email(email)
+local user_id = user_identity.hash_email(normalized_email)
 
 -- Validar tamanho mínimo da senha
 if string.len(password) < 8 then
@@ -197,7 +203,7 @@ for existing_user, _ in pairs(yaml_data.users) do
 end
 
 -- Verificar se email já existe
-local email_lower = email:lower()
+local email_lower = normalized_email
 for _, user_info in pairs(yaml_data.users) do
     if user_info.email and user_info.email:lower() == email_lower then
         ngx.status = ngx.HTTP_CONFLICT
@@ -234,6 +240,25 @@ local function build_authelia_user(password_hash, email, display_name, is_admin)
     }
 end
 
+local function write_yaml_file(path, data)
+    local serialized = lyaml.dump({ data })
+    local handle, write_err = io.open(path, "w")
+    if not handle then
+        return nil, write_err
+    end
+    handle:write(serialized)
+    handle:close()
+    return true
+end
+
+local authelia_user_id, created_identifier, identifier_err = authelia_identifiers.ensure_identifier(username)
+if not authelia_user_id then
+    ngx.log(ngx.ERR, "[CREATE_USER] Failed to generate/export Authelia identifier: ", identifier_err)
+    ngx.status = ngx.HTTP_INTERNAL_SERVER_ERROR
+    ngx.say('{"error": "Failed to generate Authelia opaque identifier"}')
+    return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
+end
+
 local new_user_record = build_authelia_user(
     password_hash,
     email,
@@ -243,30 +268,53 @@ local new_user_record = build_authelia_user(
 yaml_data.users[username] = new_user_record
 
 -- Serializar e salvar YAML
-local updated_yaml = lyaml.dump({ yaml_data })
-
-local f_write, err_write = io.open(yaml_path, "w")
-if not f_write then
+local ok_write, err_write = write_yaml_file(yaml_path, yaml_data)
+if not ok_write then
     ngx.log(ngx.ERR, "[CREATE_USER] Failed to write YAML: ", err_write)
     ngx.status = ngx.HTTP_INTERNAL_SERVER_ERROR
     ngx.say('{"error": "Failed to update user database"}')
     return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
 end
-f_write:write(updated_yaml)
-f_write:close()
-
--- Gerar ID para cache (hash do username)
-local user_id = ngx.md5(username:lower())
 
 -- Adicionar ao cache
 local cache = ngx.shared.users_cache
 local cache_user = {
     username = username,
     display_name = display_name,
-    email = email,
-    is_active = true
+    email = normalized_email,
+    user_uuid = authelia_user_id,
+    is_active = true,
+    is_admin = false
 }
-cache:set(user_id, cjson.encode(cache_user))
+local encoded_cache_user = cjson.encode(cache_user)
+cache:set(user_id, encoded_cache_user)
+cache:set(authelia_user_id, encoded_cache_user)
+
+local sync_result, sync_err = user_sync.sync_user({
+    id = authelia_user_id,
+    username = username,
+    display_name = display_name,
+    groups = {"active"},
+    is_active = true
+})
+
+if sync_err then
+    ngx.log(ngx.ERR, "[CREATE_USER] Failed to sync user with backend: ", sync_err)
+    yaml_data.users[username] = nil
+    write_yaml_file(yaml_path, yaml_data)
+    cache:delete(user_id)
+    cache:delete(authelia_user_id)
+    ngx.status = ngx.HTTP_BAD_GATEWAY
+    ngx.say('{"error": "User created in Authelia but failed to sync with backend"}')
+    return ngx.exit(ngx.HTTP_BAD_GATEWAY)
+end
+
+if sync_result and sync_result.id then
+    cache_user.user_uuid = sync_result.id
+    local encoded = cjson.encode(cache_user)
+    cache:set(user_id, encoded)
+    cache:set(sync_result.id, encoded)
+end
 
 ngx.log(ngx.ERR, "[CREATE_USER] Successfully created user: ", username)
 
@@ -276,7 +324,8 @@ ngx.header.content_type = "application/json"
 ngx.say(cjson.encode({
     message = "User created successfully",
     user = {
-        id = user_id,
+        id = sync_result and sync_result.id or authelia_user_id,
+        user_hash = user_id,
         username = username,
         display_name = display_name,
         email = email,

@@ -253,6 +253,7 @@ http {
             if ($is_admin_key = 0) {
                 return 404;
             }
+            rewrite ^/rest/v1/(.*)$ /$1 break; 
             proxy_pass http://$rest_upstream;
         }
 

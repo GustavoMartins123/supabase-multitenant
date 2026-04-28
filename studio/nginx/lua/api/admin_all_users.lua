@@ -6,24 +6,24 @@ if not slug or slug == "" then
     return ngx.exit(400)
 end
 
--- FONTE 1: Buscar membros atuais do projeto (API Python)
 local members_res = ngx.location.capture("/_internal_api/projects/" .. slug .. "/members")
 local current_members = {}
 local member_lookup = {}
-local admin_users = {} -- Track de usuários que já são admin
+local admin_users = {}
 
 if members_res.status == 200 then
     current_members = cjson.decode(members_res.body) or {}
     for _, m in ipairs(current_members) do
-        if m.user_id then
-            member_lookup[m.user_id] = {
+        local member_key = m.user_hash or m.user_id
+        if member_key then
+            member_lookup[member_key] = {
                 role = m.role,
                 is_member = true
             }
             
             -- Marcar usuários que já são admin
             if m.role == "admin" then
-                admin_users[m.user_id] = true
+                admin_users[member_key] = true
             end
         end
     end
@@ -42,12 +42,12 @@ end
 
 ngx.log(ngx.ERR, "[ALL-USERS] Cache has ", #keys, " user keys")
 
--- COMBINAR: Criar lista de usuários disponíveis para transferência
 local all_users = {}
 local users_found = 0
 local members_found = 0
 local available_found = 0
 local admins_excluded = 0
+local seen_ids = {}
 
 for _, user_hash in ipairs(keys) do
     if user_hash ~= "__mtime" then
@@ -56,35 +56,41 @@ for _, user_hash in ipairs(keys) do
             local user_data = cjson.decode(user_json)
             
             if user_data then
-                users_found = users_found + 1
-                
-                -- LÓGICA DE FILTRAGEM:
-                -- Incluir APENAS se:
-                -- 1. NÃO é membro do projeto (disponível para entrar)
-                -- 2. É membro mas NÃO é admin (pode virar admin)
-                local is_current_admin = admin_users[user_hash] == true
-                
-                if not is_current_admin then
-                    local user_info = {
-                        user_id = user_hash,
-                        display_name = user_data.display_name or "Unknown",
-                        username = user_data.username or "unknown",
-                        is_active = user_data.is_active or false,
-                        status = "available"
-                    }
+                if not (user_data.user_uuid and user_hash == user_data.user_uuid) then
+                    users_found = users_found + 1
                     
-                    -- Se é membro atual (mas não admin), enriquecer com dados do projeto
-                    if member_lookup[user_hash] then
-                        user_info.status = "member"
-                        user_info.project_role = member_lookup[user_hash].role
-                        members_found = members_found + 1
-                        ngx.log(ngx.ERR, "[ALL-USERS] Including non-admin member: ", user_data.display_name, " role: ", member_lookup[user_hash].role)
-                    else
-                        available_found = available_found + 1
-                        ngx.log(ngx.ERR, "[ALL-USERS] Including available user: ", user_data.display_name)
+                    -- LÓGICA DE FILTRAGEM:
+                    -- Incluir APENAS se:
+                    -- 1. NÃO é membro do projeto (disponível para entrar)
+                    -- 2. É membro mas NÃO é admin (pode virar admin)
+                    local canonical_id = user_data.user_uuid or user_hash
+                    local is_current_admin = admin_users[user_hash] == true or admin_users[canonical_id] == true
+
+                    if not is_current_admin and not seen_ids[canonical_id] then
+                        seen_ids[canonical_id] = true
+                        local user_info = {
+                            user_id = canonical_id,
+                            user_hash = user_hash,
+                            display_name = user_data.display_name or "Unknown",
+                            username = user_data.username or "unknown",
+                            is_active = user_data.is_active or false,
+                            status = "available"
+                        }
+
+                        -- Se é membro atual (mas não admin), enriquecer com dados do projeto
+                        if member_lookup[user_hash] or member_lookup[canonical_id] then
+                            local member_info = member_lookup[user_hash] or member_lookup[canonical_id]
+                            user_info.status = "member"
+                            user_info.project_role = member_info.role
+                            members_found = members_found + 1
+                            ngx.log(ngx.ERR, "[ALL-USERS] Including non-admin member: ", user_data.display_name, " role: ", member_info.role)
+                        else
+                            available_found = available_found + 1
+                            ngx.log(ngx.ERR, "[ALL-USERS] Including available user: ", user_data.display_name)
+                        end
+
+                        table.insert(all_users, user_info)
                     end
-                    
-                    table.insert(all_users, user_info)
                 end
             end
         end
@@ -101,6 +107,10 @@ for _, member in ipairs(current_members) do
         local found_in_cache = false
         for _, user in ipairs(all_users) do
             if user.user_id == member.user_id then
+                if user.user_hash and member.user_hash and user.user_hash == member.user_hash then
+                    found_in_cache = true
+                    break
+                end
                 found_in_cache = true
                 break
             end
@@ -109,6 +119,7 @@ for _, member in ipairs(current_members) do
         if not found_in_cache then
             table.insert(orphaned_members, {
                 user_id = member.user_id,
+                user_hash = member.user_hash,
                 display_name = "Unknown User",
                 username = "unknown",
                 is_active = false,

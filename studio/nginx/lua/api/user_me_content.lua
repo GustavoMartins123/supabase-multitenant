@@ -4,7 +4,8 @@ local response = {
     is_admin = ngx.var.myrole == "true",
     username = ngx.var.username or "",
     display_name = ngx.var.display_name or "",
-    user_id = ngx.var.user_hash or ""
+    user_id = ngx.var.user_id or ngx.var.user_hash or "",
+    user_hash = ngx.var.user_hash or ""
 }
 
 ngx.header.content_type = "application/json"

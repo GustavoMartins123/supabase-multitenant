@@ -1,6 +1,7 @@
 local groups = ngx.var.authelia_groups or ""
 local groups_clean = groups:gsub("[%[%]]", "")
 local is_admin = false
+local user_identity = require "user_identity"
 
 for group in groups_clean:gmatch("[^,]+") do
     if group:match("^%s*admin%s*$") then
@@ -15,15 +16,8 @@ end
 
 local email = ngx.var.authelia_email
 if email and email ~= "" then
-    local resty_sha2 = require "resty.sha256"
-    local str = require "resty.string"
-    
-    local normalized_email = email:lower():gsub("%s+", "")
-    
-    local hasher = resty_sha2:new()
-    hasher:update(normalized_email)
-    local digest = hasher:final()
-    local hash = str.to_hex(digest)
+    local normalized_email = user_identity.normalize_email(email)
+    local hash = user_identity.hash_email(normalized_email)
     
     local cache = ngx.shared.users_cache
     local user_data_json = cache:get(hash)
@@ -36,6 +30,7 @@ if email and email ~= "" then
             ngx.var.username = user_data.username or ""
             ngx.var.display_name = user_data.display_name or ""
             ngx.var.user_hash = hash
+            ngx.var.user_id = user_data.user_uuid or hash
             
             ngx.log(ngx.INFO, "[USER_ME] Usuário encontrado no cache: " .. 
                 (user_data.username or "N/A") .. " (" .. normalized_email .. ")")

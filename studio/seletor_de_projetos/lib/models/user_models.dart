@@ -29,6 +29,7 @@ class UserListResponse {
 
 class UserInfo {
   final String id;
+  final String? userUuid;
   final String username;
   final String displayName;
   final bool isActive;
@@ -37,6 +38,7 @@ class UserInfo {
 
   UserInfo({
     required this.id,
+    this.userUuid,
     required this.username,
     required this.displayName,
     required this.isActive,
@@ -47,6 +49,7 @@ class UserInfo {
   factory UserInfo.fromJson(Map<String, dynamic> json) {
     return UserInfo(
       id: json['id'] ?? '',
+      userUuid: json['user_uuid'],
       username: json['username'] ?? '',
       displayName: json['display_name'] ?? '',
       isActive: json['is_active'] ?? false,

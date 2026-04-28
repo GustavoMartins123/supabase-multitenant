@@ -1,0 +1,3 @@
+# yaml-language-server: $schema=https://www.authelia.com/schemas/v4.40/json-schema/export.identifiers.json
+
+identifiers: []

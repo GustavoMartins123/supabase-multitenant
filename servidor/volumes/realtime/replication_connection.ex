@@ -441,9 +441,14 @@ defmodule Realtime.Tenants.ReplicationConnection do
   ##end
 
   ##defp slot_suffix, do: Application.get_env(:realtime, :slot_name_suffix)
-  
+
   def replication_slot_name(schema, table, tenant_id) do
-    "supabase_#{schema}_#{table}_replication_slot_#{tenant_id}"
+    tenant_hash =
+      :crypto.hash(:sha256, tenant_id)
+      |> Base.encode16(case: :lower)
+      |> binary_part(0, 16)
+
+    "supabase_#{schema}_#{table}_replication_slot_#{tenant_hash}"
   end
 
   defp tuple_to_map(tuple_data, columns) do

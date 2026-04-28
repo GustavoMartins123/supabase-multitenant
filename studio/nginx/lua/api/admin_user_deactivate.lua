@@ -1,6 +1,8 @@
 local user_id = ngx.var[1]
 
 local cache = ngx.shared.users_cache
+local authelia_identifiers = require "authelia_identifiers"
+local user_sync = require "user_sync"
 local user_data = cache:get(user_id)
 if not user_data then
     ngx.status = ngx.HTTP_NOT_FOUND
@@ -38,6 +40,17 @@ if not yaml_data or not yaml_data.users then
     return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
 end
 
+local function write_yaml_file(path, data)
+    local serialized = lyaml.dump({ data })
+    local handle, write_err = io.open(path, "w")
+    if not handle then
+        return nil, write_err
+    end
+    handle:write(serialized)
+    handle:close()
+    return true
+end
+
 local user_entry = yaml_data.users[username]
 if not user_entry then
     ngx.log(ngx.ERR, "[DEACTIVATE] User not found in YAML: ", username)
@@ -47,13 +60,11 @@ if not user_entry then
 end
 
 do
-    local sha2 = require "resty.sha256"
-    local str  = require "resty.string"
-    local h    = sha2:new()
-    h:update((ngx.var.authelia_email or ""):lower():gsub("%s+", ""))
-    local caller_id = str.to_hex(h:final())
-
-    local target_is_me    = (caller_id == user_id)
+    local caller_id = ngx.req.get_headers()["X-User-Id"] or ""
+    local target_is_me = caller_id ~= "" and (
+        caller_id == tostring(user.user_uuid or "")
+        or caller_id == user_id
+    )
 
     local target_is_admin = false
     for _, g in ipairs(user_entry.groups or {}) do
@@ -92,6 +103,10 @@ if user_entry.groups then
 end
 
 user_entry.groups = user_entry.groups or {}
+local original_groups = {}
+for _, group_name in ipairs(user_entry.groups) do
+    table.insert(original_groups, group_name)
+end
 local new_groups = {}
 for _, g in ipairs(user_entry.groups) do
     if g ~= "active" then
@@ -101,19 +116,55 @@ end
 table.insert(new_groups, "inactive")
 user_entry.groups = new_groups
 
-local updated_yaml = lyaml.dump({ yaml_data })
-local f_write, err_write = io.open(yaml_path, "w")
-if not f_write then
+local ok_write, err_write = write_yaml_file(yaml_path, yaml_data)
+if not ok_write then
     ngx.log(ngx.ERR, "[DEACTIVATE] Failed to write YAML: ", err_write)
     ngx.status = ngx.HTTP_INTERNAL_SERVER_ERROR
     ngx.say('{"error": "Failed to update user database"}')
     return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
 end
-f_write:write(updated_yaml)
-f_write:close()
 
 user.is_active = false
-cache:set(user_id, cjson.encode(user))
+
+if not user.user_uuid or user.user_uuid == "" then
+    local ensured_user_uuid, _, identifier_err = authelia_identifiers.ensure_identifier(username)
+    if not ensured_user_uuid then
+        ngx.log(ngx.ERR, "[DEACTIVATE] Failed to generate/export Authelia identifier: ", identifier_err)
+        user_entry.groups = original_groups
+        write_yaml_file(yaml_path, yaml_data)
+        ngx.status = ngx.HTTP_INTERNAL_SERVER_ERROR
+        ngx.say('{"error": "Failed to generate Authelia opaque identifier"}')
+        return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
+    end
+    user.user_uuid = ensured_user_uuid
+end
+
+local sync_result, sync_err = user_sync.sync_user({
+    id = user.user_uuid,
+    username = username,
+    display_name = user.display_name,
+    groups = user_entry.groups,
+    is_active = false
+})
+
+if sync_err then
+    ngx.log(ngx.ERR, "[DEACTIVATE] Failed to sync user with backend: ", sync_err)
+    user_entry.groups = original_groups
+    write_yaml_file(yaml_path, yaml_data)
+    ngx.status = ngx.HTTP_BAD_GATEWAY
+    ngx.say('{"error": "User deactivated in Authelia but failed to sync with backend"}')
+    return ngx.exit(ngx.HTTP_BAD_GATEWAY)
+end
+
+if sync_result and sync_result.id then
+    user.user_uuid = sync_result.id
+end
+
+local encoded_user = cjson.encode(user)
+cache:set(user_id, encoded_user)
+if user.user_uuid and user.user_uuid ~= "" then
+    cache:set(user.user_uuid, encoded_user)
+end
 
 ngx.log(ngx.ERR, "[DEACTIVATE] Successfully deactivated user: ", username)
 
@@ -121,7 +172,8 @@ ngx.header.content_type = "application/json"
 ngx.say(cjson.encode({
     message = "User deactivated successfully",
     user = {
-        id = user_id,
+        id = sync_result and sync_result.id or user.user_uuid or user_id,
+        user_hash = user_id,
         username = username,
         display_name = user.display_name,
         status = "deactivated"

@@ -8,7 +8,8 @@ local members = cjson.decode(res.body) or {}
 
 -- Enriquece com dados do cache e marca status
 for _, m in ipairs(members) do
-    local ud_json = cache:get(m.user_id)
+    local cache_key = m.user_hash or m.user_id
+    local ud_json = cache:get(cache_key)
     if ud_json then
         local ud = cjson.decode(ud_json)
         m.display_name = ud.display_name

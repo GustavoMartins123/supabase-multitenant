@@ -292,8 +292,8 @@ class ProjectRepository {
     if (resp.users.isNotEmpty) {
       final session = Session();
       resp.users.sort((a, b) {
-        if (a.id == session.myId) return -1;
-        if (b.id == session.myId) return 1;
+        if ((a.userUuid ?? a.id) == session.myId) return -1;
+        if ((b.userUuid ?? b.id) == session.myId) return 1;
         return 0;
       });
     }

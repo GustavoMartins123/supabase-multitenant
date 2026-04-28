@@ -13,8 +13,11 @@ local req_headers = ngx.req.get_headers()
 local res = ngx.location.capture("/_internal_api/projects/" .. slug .. "/rotate-key", {
     method = ngx.HTTP_POST,
     headers = {
-        ["Remote-Email"] = req_headers["Remote-Email"],
         ["Remote-Groups"] = req_headers["Remote-Groups"],
+        ["X-User-Id"] = req_headers["X-User-Id"],
+        ["X-User-Groups"] = req_headers["X-User-Groups"],
+        ["X-User-Username"] = req_headers["X-User-Username"],
+        ["X-User-Display-Name"] = req_headers["X-User-Display-Name"],
     }
 })
 

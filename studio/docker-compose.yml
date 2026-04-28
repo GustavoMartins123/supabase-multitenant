@@ -47,22 +47,22 @@ services:
       SNIPPETS_MANAGEMENT_FOLDER: /app/snippets
     volumes:
       - ./snippets:/app/snippets
-  postgres:
-    build:
-      context: ./postgres
-      dockerfile: Dockerfile
-    container_name: nginx-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_NGINX_PASSWORD}
-    volumes:
-      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-      - ./postgres/entrypoint.sh:/docker-entrypoint-initdb.d/entrypoint.sh:ro
-      - ./postgres/logs:/var/log/postgresql
-      - ./postgres/data:/var/lib/postgresql/data:Z
-    expose:
-      - "8999" 
+  # postgres:
+  #   build:
+  #     context: ./postgres
+  #     dockerfile: Dockerfile
+  #   container_name: nginx-postgres
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_DB: ${POSTGRES_DB}
+  #     POSTGRES_USER: ${POSTGRES_USER}
+  #     POSTGRES_PASSWORD: ${POSTGRES_NGINX_PASSWORD}
+  #   volumes:
+  #     - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+  #     - ./postgres/entrypoint.sh:/docker-entrypoint-initdb.d/entrypoint.sh:ro
+  #     - ./postgres/logs:/var/log/postgresql
+  #     - ./postgres/data:/var/lib/postgresql/data:Z
+  #   expose:
+  #     - "8999" 
 volumes:
   usersdb:

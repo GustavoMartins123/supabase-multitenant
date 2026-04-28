@@ -11,6 +11,7 @@ end
 local users = {}
 local active_count = 0
 local inactive_count = 0
+local seen_ids = {}
 
 for _, key in ipairs(keys) do
     if key ~= "__mtime" then
@@ -18,9 +19,14 @@ for _, key in ipairs(keys) do
         if user_data then
             local user = cjson.decode(user_data)
             if user then
-                if not user.is_admin then
+                local canonical_id = user.user_uuid or key
+                local is_uuid_alias = user.user_uuid and user.user_uuid == key
+
+                if not user.is_admin and not is_uuid_alias and not seen_ids[canonical_id] then
+                    seen_ids[canonical_id] = true
                     local safe_user = {
-                        id = key,
+                        id = canonical_id,
+                        user_uuid = user.user_uuid,
                         username = user.username,
                         display_name = user.display_name,
                         is_active = user.is_active,

@@ -181,6 +181,26 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
     return false;
   }
 
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    
+    const units = ['KB', 'MB', 'GB', 'TB', 'PB'];
+    double size = bytes.toDouble();
+    int unitIndex = -1;
+    
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex++;
+    }
+    
+    if (unitIndex == 1 && size >= 1000) {
+      size /= 1024;
+      unitIndex++;
+    }
+    
+    return '${size.toStringAsFixed(2)} ${units[unitIndex]}';
+  }
+
   void _initFromSettings(Map<String, String> settings) {
     if (_original.isEmpty) {
       _original = Map.from(settings);
@@ -719,46 +739,66 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
           ),
         );
       case _FieldType.number:
-        return SizedBox(
-          width: 120,
-          height: 32,
-          child: TextField(
-            controller: TextEditingController(text: value)
-              ..selection = TextSelection.collapsed(offset: value.length),
-            enabled: enabled,
-            keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            onChanged: (v) => _updateValue(meta.key, v),
-            style: const TextStyle(
-              fontSize: 12,
-              fontFamily: 'monospace',
-              color: SupabaseColors.textPrimary,
-            ),
-            decoration: InputDecoration(
-              isDense: true,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 8,
-                vertical: 8,
-              ),
-              filled: true,
-              fillColor: SupabaseColors.bg200,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(4),
-                borderSide: const BorderSide(color: SupabaseColors.border),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(4),
-                borderSide: const BorderSide(color: SupabaseColors.border),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(4),
-                borderSide: const BorderSide(
-                  color: SupabaseColors.brand,
-                  width: 1.5,
+        final isFileSize = meta.key == 'FILE_SIZE_LIMIT';
+        final bytes = int.tryParse(value) ?? 0;
+        final formattedSize = _formatBytes(bytes);
+        
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 120,
+              height: 32,
+              child: TextField(
+                controller: TextEditingController(text: value)
+                  ..selection = TextSelection.collapsed(offset: value.length),
+                enabled: enabled,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                onChanged: (v) => _updateValue(meta.key, v),
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                  color: SupabaseColors.textPrimary,
+                ),
+                decoration: InputDecoration(
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 8,
+                  ),
+                  filled: true,
+                  fillColor: SupabaseColors.bg200,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(4),
+                    borderSide: const BorderSide(color: SupabaseColors.border),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(4),
+                    borderSide: const BorderSide(color: SupabaseColors.border),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(4),
+                    borderSide: const BorderSide(
+                      color: SupabaseColors.brand,
+                      width: 1.5,
+                    ),
+                  ),
                 ),
               ),
             ),
-          ),
+            if (isFileSize && bytes > 0) ...[
+              const SizedBox(width: 8),
+              Text(
+                '≈ $formattedSize',
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: SupabaseColors.textMuted,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ],
+          ],
         );
       case _FieldType.text:
         return SizedBox(

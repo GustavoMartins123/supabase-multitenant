@@ -124,15 +124,19 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
                           Row(
                             children: [
                               Flexible(
-                                child: Text(
-                                  widget.refKey,
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    color: SupabaseColors.textPrimary,
+                                child: Tooltip(
+                                  message: widget.refKey,
+                                  waitDuration: const Duration(milliseconds: 500),
+                                  child: Text(
+                                    widget.refKey,
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: SupabaseColors.textPrimary,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                               const SizedBox(width: 8),

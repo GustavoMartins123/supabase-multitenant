@@ -1,5 +1,6 @@
 local email = ngx.var.authelia_email
 local groups = ngx.var.authelia_groups or ""
+local user_context_headers = require "user_context_headers"
 
 if not email or email == "" then
     return ngx.exit(ngx.HTTP_UNAUTHORIZED)
@@ -11,12 +12,4 @@ if not is_admin then
     return ngx.exit(ngx.HTTP_FORBIDDEN)
 end
 
-local sha256 = require "resty.sha256"
-local str = require "resty.string"
-local hasher = sha256:new()
-hasher:update(email)
-local digest = hasher:final()
-local email_hash = str.to_hex(digest)
-
-ngx.req.set_header("Remote-Email", email_hash)
-ngx.req.set_header("Remote-Groups", groups)
+user_context_headers.apply(email, groups)

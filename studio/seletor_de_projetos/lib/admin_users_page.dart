@@ -366,10 +366,10 @@ class _AdminUsersPageState extends ConsumerState<AdminUsersPage>
                               user: user,
                               onToggle: () => _toggleUserStatus(user),
                               isLoading: _isToggling,
-                              isMe: user.id == Session().myId,
+                              isMe: (user.userUuid ?? user.id) == Session().myId,
                               canToggle:
                                   Session().isSysAdmin &&
-                                  user.id != Session().myId,
+                                  (user.userUuid ?? user.id) != Session().myId,
                             ),
                           )
                           .toList(),

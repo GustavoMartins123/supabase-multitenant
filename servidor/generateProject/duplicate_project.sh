@@ -45,7 +45,7 @@ commit_transaction() {
 
 rollback_transaction() {
   echo "❌ Erro detectado! Revertendo alterações..."
-  
+
   for ((idx=${#CREATED_DIRS[@]}-1; idx>=0; idx--)); do
     local dir="${CREATED_DIRS[idx]}"
     if [[ -d "$dir" ]]; then
@@ -53,7 +53,7 @@ rollback_transaction() {
       rm -rf "$dir"
     fi
   done
-  
+
   if [[ -n "$CREATED_DB" ]]; then
     echo "   Removendo banco de dados: $CREATED_DB"
     docker exec supabase-db psql -U supabase_admin -d postgres -c \
@@ -65,17 +65,17 @@ rollback_transaction() {
     docker exec realtime-dev.supabase-realtime curl -s -X DELETE \
       "http://localhost:4000/api/tenants/$CREATED_REALTIME_TENANT" 2>/dev/null || true
   fi
-  
+
   if [[ -n "$CREATED_SUPAVISOR_TENANT" ]]; then
     echo "   Removendo tenant Supavisor: $CREATED_SUPAVISOR_TENANT"
     docker exec supabase-pooler curl -s -X DELETE \
       "http://localhost:4000/api/tenants/$CREATED_SUPAVISOR_TENANT" 2>/dev/null || true
   fi
-  
+
   if [[ -d "$TRANSACTION_DIR" ]]; then
     rm -rf "$TRANSACTION_DIR"
   fi
-  
+
   echo "⚠️  Todas as alterações foram revertidas."
   exit 1
 }
@@ -156,15 +156,28 @@ duplicate_db() {
   local original_db="$1"
   local new_db="$2"
   local mode="$3"
-  
+
   echo "💾 Copiando banco de dados..."
-  
+
+  echo "   Identificando tabelas com Realtime habilitado no banco original..."
+  local realtime_tables
+  realtime_tables=$(docker exec supabase-db psql -U supabase_admin -d "$original_db" -tAc \
+    "SELECT string_agg(schemaname || '.' || tablename, ',')
+     FROM pg_publication_tables
+     WHERE pubname = 'supabase_realtime';" 2>/dev/null || echo "")
+
+  if [[ -n "$realtime_tables" && "$realtime_tables" != "" ]]; then
+    echo "   ✔️  Tabelas com Realtime: $realtime_tables"
+  else
+    echo "   ℹ️  Nenhuma tabela com Realtime habilitado encontrada"
+  fi
+
   echo "   Criando banco $new_db vazio..."
   docker exec supabase-db psql -U supabase_admin -d postgres -c \
     "CREATE DATABASE $new_db;" || die "Falha ao criar banco $new_db"
-  
+
   register_created_db "$new_db"
-  
+
   echo "   Garantindo que roles existem..."
   docker exec supabase-db psql -U supabase_admin -d postgres <<-EOSQL
     DO \$\$
@@ -172,39 +185,42 @@ duplicate_db() {
       IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'pgbouncer') THEN
         EXECUTE 'CREATE ROLE pgbouncer LOGIN PASSWORD ''$POSTGRES_PASSWORD''';
       END IF;
-      
+
       IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticator') THEN
         EXECUTE 'CREATE ROLE authenticator LOGIN PASSWORD ''$POSTGRES_PASSWORD'' NOINHERIT';
       END IF;
-      
+
       IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_auth_admin') THEN
         EXECUTE 'CREATE ROLE supabase_auth_admin LOGIN PASSWORD ''$POSTGRES_PASSWORD''';
       END IF;
-      
+
       IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_storage_admin') THEN
         EXECUTE 'CREATE ROLE supabase_storage_admin LOGIN PASSWORD ''$POSTGRES_PASSWORD''';
       END IF;
     END \$\$;
 EOSQL
-  
+
   echo "   Garantindo permissões básicas no novo banco..."
   docker exec supabase-db psql -U supabase_admin -d postgres -c \
     "GRANT CREATE ON DATABASE $new_db TO supabase_storage_admin; GRANT CREATE ON DATABASE $new_db TO supabase_auth_admin;" || die "Falha ao garantir permissões do banco"
-  
+
   local dump_file="/tmp/dump_${ORIGINAL_PROJECT}_$(date +%s).sql"
-  
+  local rt_structure_file="/tmp/dump_rt_structure_${ORIGINAL_PROJECT}_$(date +%s).sql"
+  local rt_migrations_file="/tmp/dump_rt_migrations_${ORIGINAL_PROJECT}_$(date +%s).sql"
+
   if [[ "$mode" == "with-data" ]]; then
-    echo "   Fazendo dump completo (schema + dados + storage)..."
+    echo "   Fazendo dump completo (schema + dados), excluindo realtime..."
     docker exec supabase-db pg_dump -U supabase_admin -d "$original_db" \
+        --exclude-schema=realtime \
         > "$dump_file" || die "Falha ao fazer dump"
   else
-    echo "   Fazendo dump schema-only..."
+    echo "   Fazendo dump schema-only, excluindo realtime..."
     docker exec supabase-db pg_dump -U supabase_admin -d "$original_db" \
         --schema=auth --schema=storage --schema-only \
         > "$dump_file" || die "Falha ao fazer dump auth/storage"
-    
+
     docker exec supabase-db pg_dump -U supabase_admin -d "$original_db" \
-        --exclude-schema=auth --exclude-schema=storage --schema-only \
+        --exclude-schema=auth --exclude-schema=storage --exclude-schema=realtime --schema-only \
         >> "$dump_file" || die "Falha ao fazer dump public schema"
 
     echo "   Copiando histórico de migrations (Essencial para o Auth/Storage não quebrar)..."
@@ -214,21 +230,109 @@ EOSQL
         -t 'storage.migrations' \
         >> "$dump_file" || echo "Aviso: Falha ao copiar dados de migrations"
   fi
-  
-  echo "✔️  Dump criado: $dump_file ($(du -h "$dump_file" | cut -f1))"
-  
-  echo "   Restaurando dump..."
+
+  echo "   Copiando estrutura do schema realtime (tabelas, partições, funções)..."
+  docker exec supabase-db pg_dump -U supabase_admin -d "$original_db" \
+      --schema=realtime --schema-only \
+      > "$rt_structure_file" || echo "Aviso: Falha ao copiar estrutura do realtime"
+
+  echo "   Copiando migration history do realtime..."
+  docker exec supabase-db pg_dump -U supabase_admin -d "$original_db" \
+      --data-only \
+      -t 'realtime.schema_migrations' \
+      > "$rt_migrations_file" 2>/dev/null || echo "Aviso: Falha ao copiar migrations do realtime"
+
+  echo "✔️  Dumps criados"
+
+  echo "   Restaurando dump principal..."
   docker exec -i supabase-db psql -U supabase_admin -d "$new_db" \
     < "$dump_file" || die "Falha ao restaurar dump"
-  
+
+  echo "   Restaurando estrutura do realtime..."
+  docker exec -i supabase-db psql -U supabase_admin -d "$new_db" \
+    < "$rt_structure_file" || echo "Aviso: Falha ao restaurar estrutura do realtime"
+
+  echo "   Restaurando migration history do realtime..."
+  docker exec -i supabase-db psql -U supabase_admin -d "$new_db" \
+    < "$rt_migrations_file" 2>/dev/null || echo "Aviso: Falha ao restaurar migrations do realtime"
+
   echo "   Marcando migrations como executadas..."
   docker exec supabase-db psql -U supabase_admin -d "$new_db" <<-EOSQL
     UPDATE auth.schema_migrations SET dirty = false WHERE dirty = true;
     UPDATE storage.migrations SET dirty = false WHERE dirty = true;
     ALTER DATABASE $new_db SET search_path TO public, auth, storage, extensions;
 EOSQL
-  
-  rm -f "$dump_file"
+
+  echo "   Limpando dados de runtime do realtime..."
+  docker exec supabase-db psql -U supabase_admin -d "$new_db" -c \
+    "TRUNCATE realtime.subscription RESTART IDENTITY CASCADE;" 2>/dev/null || true
+
+  echo "   Criando partições do realtime.messages para datas atuais..."
+  docker exec supabase-db psql -U supabase_admin -d "$new_db" <<-'EOSQL'
+    DO $part$
+    DECLARE
+      d DATE;
+      partition_name TEXT;
+      start_ts TEXT;
+      end_ts TEXT;
+    BEGIN
+      FOR d IN SELECT generate_series(
+        (current_date - interval '1 day')::date,
+        (current_date + interval '3 days')::date,
+        '1 day'::interval
+      )::date
+      LOOP
+        partition_name := 'messages_' || to_char(d, 'YYYY_MM_DD');
+        start_ts := d::text;
+        end_ts := (d + interval '1 day')::date::text;
+        BEGIN
+          EXECUTE format(
+            'CREATE TABLE IF NOT EXISTS realtime.%I PARTITION OF realtime.messages FOR VALUES FROM (%L) TO (%L)',
+            partition_name, start_ts, end_ts
+          );
+        EXCEPTION WHEN duplicate_table THEN
+          NULL;
+        END;
+      END LOOP;
+    END $part$;
+EOSQL
+
+  echo "   Recriando publicações do realtime..."
+  docker exec supabase-db psql -U supabase_admin -d "$new_db" -c \
+    "DROP PUBLICATION IF EXISTS supabase_realtime;
+     DROP PUBLICATION IF EXISTS supabase_realtime_messages;
+     DROP PUBLICATION IF EXISTS supabase_realtime_messages_publication;
+     CREATE PUBLICATION supabase_realtime;
+     CREATE PUBLICATION supabase_realtime_messages_publication FOR TABLE realtime.messages;" \
+    || die "Falha ao recriar publicação supabase_realtime"
+
+  if [[ -n "$realtime_tables" && "$realtime_tables" != "" ]]; then
+    echo "   Re-habilitando Realtime nas tabelas: $realtime_tables"
+    local add_sql=""
+    IFS=',' read -ra RT_TABLES <<< "$realtime_tables"
+    for tbl in "${RT_TABLES[@]}"; do
+      tbl=$(echo "$tbl" | xargs)
+      if [[ -n "$tbl" ]]; then
+        add_sql+="ALTER PUBLICATION supabase_realtime ADD TABLE $tbl;"$'\n'
+      fi
+    done
+
+    if [[ -n "$add_sql" ]]; then
+      docker exec supabase-db psql -U supabase_admin -d "$new_db" -c "$add_sql" \
+        || echo "⚠️  Aviso: Falha parcial ao re-habilitar Realtime em algumas tabelas"
+      echo "   ✔️  Realtime re-habilitado nas tabelas do banco original"
+    fi
+  fi
+
+  echo "   Limpando replication slots órfãos..."
+  docker exec supabase-db psql -U supabase_admin -d "$new_db" -c \
+    "SELECT pg_drop_replication_slot(slot_name)
+     FROM pg_replication_slots
+     WHERE slot_name LIKE 'supabase_realtime_%'
+       AND database = '$new_db'
+       AND active = false;" 2>/dev/null || true
+
+  rm -f "$dump_file" "$rt_structure_file" "$rt_migrations_file"
   echo "✔️  Banco duplicado com sucesso"
 }
 
@@ -293,7 +397,7 @@ template_to_file() {
 realtime_tenant() {
   echo "🔄 Criando tenant Realtime..."
   docker_must_exist realtime-dev.supabase-realtime
-  
+
   local response
   response=$(docker exec realtime-dev.supabase-realtime sh -c "curl -s -w '\n%{http_code}' -X POST http://localhost:4000/api/tenants \
     -H 'Content-Type: application/json' \
@@ -318,19 +422,19 @@ realtime_tenant() {
             \"ssl_enforced\":false,
             \"slot_name\":\"supabase_realtime_replication_slot_$NEW_PROJECT\"
           }}]}}'" 2>&1)
-  
+
   local http_code=$(echo "$response" | tail -n1)
   local body=$(echo "$response" | head -n-1)
-  
+
   echo "   HTTP Status: $http_code"
   echo "   Response: $body"
-  
+
   if [[ "$http_code" != "200" && "$http_code" != "201" ]]; then
     echo "⚠️  AVISO: Falha ao criar tenant Realtime (HTTP $http_code)"
     echo "   Body: $body"
     return 1
   fi
-  
+
   register_realtime_tenant "$PROJECT_UUID"
   echo "✔️  Realtime tenant criado com UUID: $PROJECT_UUID"
 }
@@ -338,7 +442,7 @@ realtime_tenant() {
 supavisor_tenant() {
   echo "🔄 Criando tenant Supavisor..."
   docker_must_exist supabase-pooler
-  
+
   local pg_version; pg_version="$(get_pg_version)"
   local json
   json=$(jq -n \
@@ -369,25 +473,25 @@ supavisor_tenant() {
          }]
        }
      }')
-  
+
   local response
   response=$(docker exec supabase-pooler curl -s -w '\n%{http_code}' -X PUT "http://localhost:4000/api/tenants/$NEW_PROJECT" \
        -H 'Content-Type: application/json' \
        -H "Authorization: Bearer $GLOBAL_ANON_TOKEN" \
        -d "$json" 2>&1)
-  
+
   local http_code=$(echo "$response" | tail -n1)
   local body=$(echo "$response" | head -n-1)
-  
+
   echo "   HTTP Status: $http_code"
   echo "   Response: $body"
-  
+
   if [[ "$http_code" != "200" && "$http_code" != "201" ]]; then
     echo "⚠️  AVISO: Falha ao criar tenant Supavisor (HTTP $http_code)"
     echo "   Body: $body"
     return 1
   fi
-  
+
   register_supavisor_tenant "$NEW_PROJECT"
   echo "✔️  Supavisor tenant criado"
 }
@@ -431,12 +535,12 @@ if [[ "$COPY_MODE" == "with-data" ]]; then
   ORIGINAL_STORAGE="$PROJECT_ROOT/projects/$ORIGINAL_PROJECT/storage"
   if [[ -d "$ORIGINAL_STORAGE" ]]; then
     echo "📦 Copiando storage com TAR (preservando xattrs)..."
-    
+
     mkdir -p "$OUT_DIR/storage"
-    
+
     (cd "$ORIGINAL_STORAGE" && tar --xattrs --xattrs-include='*' --acls -cpf - .) | \
       (cd "$OUT_DIR/storage" && tar --xattrs --xattrs-include='*' --acls -xpf -)
-    
+
     if [ $? -eq 0 ]; then
       echo "✔️  Storage copiado ($(du -sh "$OUT_DIR/storage" | cut -f1))"
     else

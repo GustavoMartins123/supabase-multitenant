@@ -66,6 +66,7 @@ class UsersSummary {
 
 class AvailableUser {
   final String userId;
+  final String? userHash;
   final String displayName;
   final String username;
   final bool isActive;
@@ -75,6 +76,7 @@ class AvailableUser {
 
   AvailableUser({
     required this.userId,
+    this.userHash,
     required this.displayName,
     required this.username,
     required this.isActive,
@@ -86,6 +88,7 @@ class AvailableUser {
   factory AvailableUser.fromJson(Map<String, dynamic> json) {
     return AvailableUser(
       userId: json['user_id'] ?? '',
+      userHash: json['user_hash'],
       displayName: json['display_name'] ?? 'Unknown',
       username: json['username'] ?? 'unknown',
       isActive: json['is_active'] ?? false,
@@ -98,6 +101,7 @@ class AvailableUser {
   Map<String, dynamic> toJson() {
     return {
       'user_id': userId,
+      if (userHash != null) 'user_hash': userHash,
       'display_name': displayName,
       'username': username,
       'is_active': isActive,
@@ -113,13 +117,19 @@ class AvailableUser {
 
 class AvailableUserShort {
   final String userId;
+  final String? userHash;
   final String displayName;
 
-  AvailableUserShort({required this.userId, required this.displayName});
+  AvailableUserShort({
+    required this.userId,
+    this.userHash,
+    required this.displayName,
+  });
 
   factory AvailableUserShort.fromJson(Map<String, dynamic> j) =>
       AvailableUserShort(
         userId: j['user_id'] as String,
+        userHash: j['user_hash'] as String?,
         displayName: j['display_name'] as String,
       );
 }

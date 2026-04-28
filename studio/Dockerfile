@@ -10,10 +10,23 @@ COPY seletor_de_projetos/ .
 
 RUN flutter build web --release
 
-FROM openresty/openresty:1.29.2.1-alpine-fat
+FROM authelia/authelia:4.39 AS authelia-cli
+
+FROM openresty/openresty:1.29.2.3-4-bookworm-fat
 
 
-RUN apk add --no-cache build-base curl openssl-dev yaml-dev argon2 openssl git inotify-tools
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        curl \
+        libssl-dev \
+        libyaml-dev \
+        argon2 \
+        openssl \
+        git \
+        inotify-tools \
+        luarocks \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN luarocks install https://luarocks.org/manifests/hisham/luafilesystem-1.8.0-1.rockspec
 COPY lyaml-6.2.8-1.src /tmp/lyaml-6.2.8-1.src
@@ -30,6 +43,8 @@ RUN luarocks install https://luarocks.org/manifests/rsander/lua-resty-string-0.0
     && luarocks install https://luarocks.org/manifests/moorefu/lua-resty-crypto-master-0.rockspec \
     && luarocks install https://luarocks.org/manifests/daurnimator/luaossl-20250929-0.rockspec \
     && luarocks install https://luarocks.org/manifests/leafo/pgmoon-1.16.0-1.rockspec
+
+COPY --from=authelia-cli /app/authelia /usr/local/bin/authelia
 
 COPY nginx/nginx.conf /etc/nginx/nginx.conf
 COPY nginx/lua/ /usr/local/openresty/lualib/

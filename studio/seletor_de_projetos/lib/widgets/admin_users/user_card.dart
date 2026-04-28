@@ -182,7 +182,7 @@ class UserCard extends StatelessWidget {
                         context,
                         MaterialPageRoute(
                           builder: (context) => UserProjectsAdminScreen(
-                            userIdHash: user.id,
+                            userIdHash: user.userUuid ?? user.id,
                             userName: user.username,
                           ),
                         ),

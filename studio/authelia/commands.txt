@@ -5,6 +5,27 @@ docker exec authelia \
     --new-encryption-key nova_chave \
     --sqlite.path /config/db.sqlite3
 
+# Exportar os opaque identifiers dos usuarios do Authelia para ids.yml
+docker exec authelia \
+  authelia storage user identifiers export \
+    --config /config/configuration.yml \
+    --file /config/ids.yml.tmp && \
+docker exec authelia mv /config/ids.yml.tmp /config/ids.yml
+
+# Gerar opaque identifiers no storage do Authelia para usuarios especificos
+docker exec authelia \
+  authelia storage user identifiers generate \
+    --config /config/configuration.yml \
+    --users usuario1,usuario2 \
+    --services openid \
+    --sectors ""
+
+# Importar ids.yml de volta no storage do Authelia
+docker exec authelia \
+  authelia storage user identifiers import \
+    --config /config/configuration.yml \
+    /config/ids.yml
+
 #criar um senha em argon 2
 docker run --rm -it authelia/authelia:4.39 authelia crypto hash generate argon2
 
