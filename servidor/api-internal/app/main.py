@@ -2467,6 +2467,30 @@ SETTINGS_WHITELIST = {
     "ENABLE_IMAGE_TRANSFORMATION",
 }
 
+BOOLEAN_SETTINGS = {
+    "DISABLE_SIGNUP",
+    "ENABLE_EMAIL_SIGNUP",
+    "ENABLE_EMAIL_AUTOCONFIRM",
+    "ENABLE_ANONYMOUS_USERS",
+    "ENABLE_PHONE_SIGNUP",
+    "ENABLE_PHONE_AUTOCONFIRM",
+    "GOTRUE_EXTERNAL_IMPLICIT_FLOW_ENABLED",
+    "ENABLE_IMAGE_TRANSFORMATION",
+}
+
+INTEGER_SETTING_RANGES = {
+    "JWT_EXPIRY": (60, 3153600000),
+    "GOTRUE_MAILER_OTP_EXP": (60, 3153600000),
+    "GOTRUE_PASSWORD_MIN_LENGTH": (6, 128),
+    "PGRST_DB_MAX_ROWS": (1, 1000000000),
+    "PGRST_DB_POOL": (1, 10000),
+    "PGRST_DB_POOL_TIMEOUT": (1, 3153600000),
+    "PGRST_DB_POOL_ACQUISITION_TIMEOUT": (1, 3153600000),
+    "FILE_SIZE_LIMIT": (1, 9007199254740991),
+}
+
+SCHEMA_NAME_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
+
 SETTING_TO_SERVICES: dict[str, list[str]] = {
     "DISABLE_SIGNUP":                          ["auth"],
     "ENABLE_EMAIL_SIGNUP":                     ["auth"],
@@ -2490,6 +2514,61 @@ SETTING_TO_SERVICES: dict[str, list[str]] = {
 def _read_env_whitelisted(env_path: pathlib.Path) -> dict[str, str]:
     all_values = _read_env_file(env_path)
     return {k: value for k, value in all_values.items() if k in SETTINGS_WHITELIST}
+
+
+def _normalize_setting_value(key: str, raw_value: str) -> str:
+    value = str(raw_value).strip()
+    if "\n" in value or "\r" in value or "\x00" in value:
+        raise HTTPException(400, f"{key}: valor não pode conter quebra de linha ou byte nulo")
+    if not value:
+        raise HTTPException(400, f"{key}: valor obrigatório")
+
+    if key in BOOLEAN_SETTINGS:
+        normalized = value.lower()
+        if normalized not in {"true", "false"}:
+            raise HTTPException(400, f"{key}: use true ou false")
+        return normalized
+
+    int_range = INTEGER_SETTING_RANGES.get(key)
+    if int_range:
+        if not re.fullmatch(r"\d+", value):
+            raise HTTPException(400, f"{key}: use apenas números inteiros")
+        parsed = int(value)
+        min_value, max_value = int_range
+        if parsed < min_value or parsed > max_value:
+            raise HTTPException(
+                400,
+                f"{key}: use um valor entre {min_value} e {max_value}",
+            )
+        return str(parsed)
+
+    if key == "PGRST_DB_SCHEMAS":
+        schemas = [part.strip() for part in value.split(",")]
+        if not schemas or any(not part for part in schemas):
+            raise HTTPException(400, f"{key}: informe schemas separados por vírgula")
+        for schema in schemas:
+            if not SCHEMA_NAME_RE.fullmatch(schema):
+                raise HTTPException(400, f"{key}: schema inválido: {schema}")
+        return ",".join(schemas)
+
+    raise HTTPException(400, f"{key}: configuração sem validador")
+
+
+def _normalize_settings_updates(settings: dict[str, str]) -> dict[str, str]:
+    invalid_keys = set(settings.keys()) - SETTINGS_WHITELIST
+    if invalid_keys:
+        raise HTTPException(
+            400,
+            f"Variáveis não permitidas: {', '.join(sorted(invalid_keys))}",
+        )
+
+    if not settings:
+        raise HTTPException(400, "Nenhuma configuração enviada")
+
+    return {
+        key: _normalize_setting_value(key, value)
+        for key, value in settings.items()
+    }
 
 
 def _write_env_whitelisted(env_path: pathlib.Path, updates: dict[str, str]) -> None:
@@ -2576,27 +2655,19 @@ async def update_project_settings(
         project_row = await get_project_row(conn, project_name)
         await ensure_project_admin_access(conn, project_id=project_row["id"], auth_user=auth_user)
 
-    invalid_keys = set(body.settings.keys()) - SETTINGS_WHITELIST
-    if invalid_keys:
-        raise HTTPException(
-            400,
-            f"Variáveis não permitidas: {', '.join(sorted(invalid_keys))}",
-        )
-
-    if not body.settings:
-        raise HTTPException(400, "Nenhuma configuração enviada")
+    updates = _normalize_settings_updates(body.settings)
 
     env_path = _get_project_env_path(project_name)
     if not env_path.exists():
         raise HTTPException(404, f"Arquivo .env não encontrado para o projeto '{project_name}'")
 
-    _write_env_whitelisted(env_path, body.settings)
+    _write_env_whitelisted(env_path, updates)
 
-    affected = _get_affected_services(list(body.settings.keys()))
+    affected = _get_affected_services(list(updates.keys()))
 
     return {
         "status": "updated",
-        "updated_keys": list(body.settings.keys()),
+        "updated_keys": list(updates.keys()),
         "affected_services": affected,
         "message": f"Configurações salvas. Serviços afetados: {', '.join(affected)}. Recrie-os para aplicar.",
     }

@@ -26,6 +26,28 @@ class _SettingMeta {
 
 enum _FieldType { toggle, number, text }
 
+const _kIntegerRanges = {
+  'JWT_EXPIRY': (min: 60, max: 3153600000),
+  'GOTRUE_MAILER_OTP_EXP': (min: 60, max: 3153600000),
+  'GOTRUE_PASSWORD_MIN_LENGTH': (min: 6, max: 128),
+  'PGRST_DB_MAX_ROWS': (min: 1, max: 1000000000),
+  'PGRST_DB_POOL': (min: 1, max: 10000),
+  'PGRST_DB_POOL_TIMEOUT': (min: 1, max: 3153600000),
+  'PGRST_DB_POOL_ACQUISITION_TIMEOUT': (min: 1, max: 3153600000),
+  'FILE_SIZE_LIMIT': (min: 1, max: 9007199254740991),
+};
+
+const _kBooleanKeys = {
+  'DISABLE_SIGNUP',
+  'ENABLE_EMAIL_SIGNUP',
+  'ENABLE_EMAIL_AUTOCONFIRM',
+  'ENABLE_ANONYMOUS_USERS',
+  'ENABLE_PHONE_SIGNUP',
+  'ENABLE_PHONE_AUTOCONFIRM',
+  'GOTRUE_EXTERNAL_IMPLICIT_FLOW_ENABLED',
+  'ENABLE_IMAGE_TRANSFORMATION',
+};
+
 const _kSettings = [
   _SettingMeta(
     key: 'DISABLE_SIGNUP',
@@ -70,7 +92,6 @@ const _kSettings = [
     type: _FieldType.toggle,
     category: 'Autenticação',
   ),
-
   _SettingMeta(
     key: 'JWT_EXPIRY',
     label: 'Expiração do JWT (seg)',
@@ -99,7 +120,6 @@ const _kSettings = [
     type: _FieldType.toggle,
     category: 'Tokens e Segurança',
   ),
-
   _SettingMeta(
     key: 'PGRST_DB_SCHEMAS',
     label: 'Schemas Expostos (PostgREST)',
@@ -135,7 +155,6 @@ const _kSettings = [
     type: _FieldType.number,
     category: 'Banco de Dados',
   ),
-
   _SettingMeta(
     key: 'FILE_SIZE_LIMIT',
     label: 'Limite de Arquivo (bytes)',
@@ -181,23 +200,36 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
     return false;
   }
 
+  Map<String, String> get _validationErrors {
+    final errors = <String, String>{};
+    for (final meta in _kSettings) {
+      final error = _validateSetting(meta.key, _current[meta.key] ?? '');
+      if (error != null) {
+        errors[meta.key] = error;
+      }
+    }
+    return errors;
+  }
+
+  bool get _hasValidationErrors => _validationErrors.isNotEmpty;
+
   String _formatBytes(int bytes) {
     if (bytes < 1024) return '$bytes B';
-    
+
     const units = ['KB', 'MB', 'GB', 'TB', 'PB'];
     double size = bytes.toDouble();
     int unitIndex = -1;
-    
+
     while (size >= 1024 && unitIndex < units.length - 1) {
       size /= 1024;
       unitIndex++;
     }
-    
+
     if (unitIndex == 1 && size >= 1000) {
       size /= 1024;
       unitIndex++;
     }
-    
+
     return '${size.toStringAsFixed(2)} ${units[unitIndex]}';
   }
 
@@ -214,6 +246,65 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
     });
   }
 
+  String _normalizeInputValue(String key, String value) {
+    if (key == 'PGRST_DB_SCHEMAS') {
+      return value
+          .split(',')
+          .map((part) => part.trim())
+          .where((part) => part.isNotEmpty)
+          .join(',');
+    }
+    return value.trim();
+  }
+
+  String? _validateSetting(String key, String value) {
+    if (value.contains('\n') ||
+        value.contains('\r') ||
+        value.contains('\u0000')) {
+      return 'Valor não pode conter quebra de linha ou byte nulo.';
+    }
+
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      return 'Valor obrigatório.';
+    }
+
+    if (_kBooleanKeys.contains(key)) {
+      final normalized = trimmed.toLowerCase();
+      if (normalized != 'true' && normalized != 'false') {
+        return 'Use true ou false.';
+      }
+      return null;
+    }
+
+    final range = _kIntegerRanges[key];
+    if (range != null) {
+      final parsed = int.tryParse(trimmed);
+      if (parsed == null) {
+        return 'Use apenas números inteiros.';
+      }
+      if (parsed < range.min || parsed > range.max) {
+        return 'Use um valor entre ${range.min} e ${range.max}.';
+      }
+      return null;
+    }
+
+    if (key == 'PGRST_DB_SCHEMAS') {
+      final schemas = trimmed.split(',').map((part) => part.trim()).toList();
+      if (schemas.any((part) => part.isEmpty)) {
+        return 'Informe schemas separados por vírgula.';
+      }
+      final validIdentifier = RegExp(r'^[a-z_][a-z0-9_]*$');
+      for (final schema in schemas) {
+        if (!validIdentifier.hasMatch(schema)) {
+          return 'Schema inválido: $schema.';
+        }
+      }
+    }
+
+    return null;
+  }
+
   bool _isTrue(String? value) {
     if (value == null) return false;
     final v = value.trim().toLowerCase();
@@ -221,10 +312,18 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
   }
 
   Future<void> _save() async {
+    final validationErrors = _validationErrors;
+    if (validationErrors.isNotEmpty) {
+      final firstError = validationErrors.values.first;
+      _showSnack('Corrija as configurações: $firstError', SupabaseColors.error);
+      setState(() {});
+      return;
+    }
+
     final changes = <String, String>{};
     for (final key in _current.keys) {
       if (_original[key] != _current[key]) {
-        changes[key] = _current[key]!;
+        changes[key] = _normalizeInputValue(key, _current[key]!);
       }
     }
     if (changes.isEmpty) return;
@@ -466,53 +565,56 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
       title: 'CONFIGURAÇÕES DO AMBIENTE',
       trailing: widget.isAdmin && _hasChanges
           ? _saving
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: SupabaseColors.brand,
-                    ),
-                  )
-                : Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: _save,
-                      borderRadius: BorderRadius.circular(6),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: SupabaseColors.brand.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(
-                            color: SupabaseColors.brand.withValues(alpha: 0.3),
-                          ),
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.save_rounded,
-                              size: 14,
-                              color: SupabaseColors.brand,
-                            ),
-                            SizedBox(width: 6),
-                            Text(
-                              'Salvar',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: SupabaseColors.brand,
-                              ),
-                            ),
-                          ],
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: SupabaseColors.brand,
+                  ),
+                )
+              : Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: _hasValidationErrors ? null : _save,
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: SupabaseColors.brand.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: (_hasValidationErrors
+                                  ? SupabaseColors.error
+                                  : SupabaseColors.brand)
+                              .withValues(alpha: 0.3),
                         ),
                       ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.save_rounded,
+                            size: 14,
+                            color: SupabaseColors.brand,
+                          ),
+                          SizedBox(width: 6),
+                          Text(
+                            'Salvar',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: SupabaseColors.brand,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  )
+                  ),
+                )
           : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -678,6 +780,7 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
   Widget _buildSettingRow(_SettingMeta meta) {
     final value = _current[meta.key] ?? '';
     final enabled = widget.isAdmin && !_saving;
+    final error = _validateSetting(meta.key, value);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -713,14 +816,19 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
               ),
             ),
             const SizedBox(width: 12),
-            _buildFieldWidget(meta, value, enabled),
+            _buildFieldWidget(meta, value, enabled, error),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildFieldWidget(_SettingMeta meta, String value, bool enabled) {
+  Widget _buildFieldWidget(
+    _SettingMeta meta,
+    String value,
+    bool enabled,
+    String? error,
+  ) {
     switch (meta.type) {
       case _FieldType.toggle:
         return SizedBox(
@@ -732,7 +840,7 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
               onChanged: enabled
                   ? (v) => _updateValue(meta.key, v ? 'true' : 'false')
                   : null,
-              activeColor: SupabaseColors.brand,
+              activeThumbColor: SupabaseColors.brand,
               inactiveThumbColor: SupabaseColors.textMuted,
               inactiveTrackColor: SupabaseColors.bg300,
             ),
@@ -742,104 +850,115 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
         final isFileSize = meta.key == 'FILE_SIZE_LIMIT';
         final bytes = int.tryParse(value) ?? 0;
         final formattedSize = _formatBytes(bytes);
-        
-        return Row(
-          mainAxisSize: MainAxisSize.min,
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 120,
+                  height: 32,
+                  child: TextField(
+                    controller: TextEditingController(text: value)
+                      ..selection = TextSelection.collapsed(
+                        offset: value.length,
+                      ),
+                    enabled: enabled,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    onChanged: (v) => _updateValue(meta.key, v),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                      color: SupabaseColors.textPrimary,
+                    ),
+                    decoration: _fieldDecoration(error),
+                  ),
+                ),
+                if (isFileSize && bytes > 0) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    '≈ $formattedSize',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: SupabaseColors.textMuted,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            if (error != null) _buildFieldError(error),
+          ],
+        );
+      case _FieldType.text:
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             SizedBox(
-              width: 120,
+              width: 180,
               height: 32,
               child: TextField(
                 controller: TextEditingController(text: value)
                   ..selection = TextSelection.collapsed(offset: value.length),
                 enabled: enabled,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'[a-z0-9_,]')),
+                ],
                 onChanged: (v) => _updateValue(meta.key, v),
                 style: const TextStyle(
                   fontSize: 12,
                   fontFamily: 'monospace',
                   color: SupabaseColors.textPrimary,
                 ),
-                decoration: InputDecoration(
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 8,
-                  ),
-                  filled: true,
-                  fillColor: SupabaseColors.bg200,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(4),
-                    borderSide: const BorderSide(color: SupabaseColors.border),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(4),
-                    borderSide: const BorderSide(color: SupabaseColors.border),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(4),
-                    borderSide: const BorderSide(
-                      color: SupabaseColors.brand,
-                      width: 1.5,
-                    ),
-                  ),
-                ),
+                decoration: _fieldDecoration(error),
               ),
             ),
-            if (isFileSize && bytes > 0) ...[
-              const SizedBox(width: 8),
-              Text(
-                '≈ $formattedSize',
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: SupabaseColors.textMuted,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ],
+            if (error != null) _buildFieldError(error),
           ],
         );
-      case _FieldType.text:
-        return SizedBox(
-          width: 180,
-          height: 32,
-          child: TextField(
-            controller: TextEditingController(text: value)
-              ..selection = TextSelection.collapsed(offset: value.length),
-            enabled: enabled,
-            onChanged: (v) => _updateValue(meta.key, v),
-            style: const TextStyle(
-              fontSize: 12,
-              fontFamily: 'monospace',
-              color: SupabaseColors.textPrimary,
-            ),
-            decoration: InputDecoration(
-              isDense: true,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 8,
-                vertical: 8,
-              ),
-              filled: true,
-              fillColor: SupabaseColors.bg200,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(4),
-                borderSide: const BorderSide(color: SupabaseColors.border),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(4),
-                borderSide: const BorderSide(color: SupabaseColors.border),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(4),
-                borderSide: const BorderSide(
-                  color: SupabaseColors.brand,
-                  width: 1.5,
-                ),
-              ),
-            ),
-          ),
-        );
     }
+  }
+
+  InputDecoration _fieldDecoration(String? error) {
+    final borderColor =
+        error == null ? SupabaseColors.border : SupabaseColors.error;
+    return InputDecoration(
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      filled: true,
+      fillColor: SupabaseColors.bg200,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(4),
+        borderSide: BorderSide(color: borderColor),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(4),
+        borderSide: BorderSide(color: borderColor),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(4),
+        borderSide: BorderSide(
+          color: error == null ? SupabaseColors.brand : SupabaseColors.error,
+          width: 1.5,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFieldError(String error) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: SizedBox(
+        width: 180,
+        child: Text(
+          error,
+          textAlign: TextAlign.right,
+          style: const TextStyle(fontSize: 10, color: SupabaseColors.error),
+        ),
+      ),
+    );
   }
 }

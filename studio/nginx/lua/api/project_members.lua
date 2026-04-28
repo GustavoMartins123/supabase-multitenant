@@ -2,7 +2,17 @@ local cjson  = require "cjson.safe"
 local cache  = ngx.shared.users_cache
 local uri    = "/_internal_api/projects/" .. ngx.var.slug .. "/members"
 
-local res = ngx.location.capture(uri, { method = ngx.HTTP_GET })
+local req_headers = ngx.req.get_headers()
+local res = ngx.location.capture(uri, {
+    method = ngx.HTTP_GET,
+    headers = {
+        ["Remote-Groups"] = req_headers["Remote-Groups"],
+        ["X-User-Id"] = req_headers["X-User-Id"],
+        ["X-User-Groups"] = req_headers["X-User-Groups"],
+        ["X-User-Username"] = req_headers["X-User-Username"],
+        ["X-User-Display-Name"] = req_headers["X-User-Display-Name"],
+    }
+})
 if res.status ~= 200 then return ngx.exit(res.status) end
 local members = cjson.decode(res.body) or {}
 
