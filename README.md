@@ -177,8 +177,19 @@ Important:
 
 ```bash
 # This will start the core services, the gateway, and the management UI
-sudo bash start.sh
+bash start.sh
 ```
+
+> Do not run `start.sh` with `sudo`. Running the whole stack as root changes
+> environment variables, Docker Compose context, file ownership, and mounted
+> volume permissions. This can prevent Studio/Authelia from syncing user IDs
+> correctly. If Docker requires elevated permissions, add your user to the
+> `docker` group and log in again:
+>
+> ```bash
+> sudo usermod -aG docker "$USER"
+> ```
+
 **Option 2: Manual Start (For Control or Debugging)**
 
   1.  **Start the Base Services (Database):**

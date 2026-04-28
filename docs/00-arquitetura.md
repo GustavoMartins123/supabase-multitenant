@@ -395,24 +395,89 @@ Na primeira vez que o PostgreSQL sobe, um script de inicialização cria a estru
 
 5. Cria tabelas do sistema no database postgres
    
-   A) Tabela projects:
+   A) Extensão de UUID:
+      CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+   B) Tabela users:
+      CREATE TABLE users (
+        id UUID PRIMARY KEY,
+        authelia_username TEXT UNIQUE NOT NULL,
+        display_name TEXT,
+        authelia_groups TEXT[] NOT NULL DEFAULT '{}'::text[],
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        source TEXT NOT NULL DEFAULT 'authelia',
+        last_login_at TIMESTAMPTZ,
+        last_sync_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      COMMENT ON COLUMN users.id IS
+        'Opaque identifier do usuario no Authelia/OpenID quando disponivel.';
+      COMMENT ON COLUMN users.authelia_username IS
+        'Nome de usuario vindo do Authelia. Serve como atributo, nao como identidade canonica.';
+
+   C) Tabela user_groups:
+      CREATE TABLE user_groups (
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        group_name TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'authelia',
+        synced_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (user_id, group_name)
+      );
+
+   D) Tabela user_group_audit:
+      CREATE TABLE user_group_audit (
+        id BIGSERIAL PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        group_name TEXT NOT NULL,
+        action TEXT NOT NULL,
+        old_value JSONB,
+        new_value JSONB,
+        actor_type TEXT NOT NULL DEFAULT 'system',
+        actor_user_id UUID,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+   E) Tabela projects:
       CREATE TABLE projects (
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        name TEXT NOT NULL,
+        name TEXT NOT NULL UNIQUE,
         owner_id TEXT NOT NULL,
+        owner_uuid UUID REFERENCES users(id) ON DELETE SET NULL,
         anon_key TEXT,
-        service_role TEXT
+        service_role TEXT,
+        config_token TEXT
       );
+
+      COMMENT ON COLUMN projects.owner_id IS
+        'UUID canonico do usuario serializado em texto por compatibilidade.';
    
-   B) Tabela project_members:
+   F) Tabela project_members:
       CREATE TABLE project_members (
         project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
         user_id TEXT NOT NULL,
+        user_uuid UUID REFERENCES users(id) ON DELETE SET NULL,
         role TEXT DEFAULT 'member',
         PRIMARY KEY (project_id, user_id)
       );
+
+      COMMENT ON COLUMN project_members.user_id IS
+        'UUID canonico do usuario serializado em texto por compatibilidade.';
+
+   G) Tabela project_members_audit:
+      CREATE TABLE project_members_audit (
+        id BIGSERIAL PRIMARY KEY,
+        project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        target_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        old_role TEXT,
+        new_role TEXT,
+        action TEXT NOT NULL,
+        actor_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
    
-   C) Tabela jobs:
+   H) Tabela jobs:
       CREATE TABLE jobs (
         job_id UUID PRIMARY KEY,
         project TEXT NOT NULL,
@@ -420,6 +485,18 @@ Na primeira vez que o PostgreSQL sobe, um script de inicialização cria a estru
         status TEXT NOT NULL,
         updated_at TIMESTAMPTZ DEFAULT now()
       );
+
+      COMMENT ON COLUMN jobs.owner_id IS
+        'UUID canonico do usuario serializado em texto por compatibilidade.';
+
+   I) Índices auxiliares:
+      CREATE INDEX IF NOT EXISTS idx_users_last_sync_at ON users(last_sync_at);
+      CREATE INDEX IF NOT EXISTS idx_user_groups_user_id ON user_groups(user_id);
+      CREATE INDEX IF NOT EXISTS idx_projects_owner_id ON projects(owner_id);
+      CREATE INDEX IF NOT EXISTS idx_projects_owner_uuid ON projects(owner_uuid);
+      CREATE INDEX IF NOT EXISTS idx_project_members_user_id ON project_members(user_id);
+      CREATE INDEX IF NOT EXISTS idx_project_members_user_uuid ON project_members(user_uuid);
+      CREATE INDEX IF NOT EXISTS idx_project_members_audit_project_id ON project_members_audit(project_id);
 
 6. Transforma _supabase_template em template
    ALTER DATABASE _supabase_template WITH is_template = true;
@@ -535,9 +612,9 @@ Cookie válido por 24 horas (86400s)
 Redireciona para Supabase Studio
 ```
 
-### 3. Headers Injetados pelo Authelia
+### 3. Headers de Identidade Injetados pelo Nginx/Lua
 
-Após autenticação, Authelia retorna o email e grupos do usuário. O Nginx/Lua então processa e injeta headers:
+Após autenticação, Authelia retorna o email e grupos do usuário. O Nginx/Lua resolve esse usuário para um UUID estável, sincroniza a identidade com a API Python e injeta headers internos:
 
 **Processo:**
 
@@ -547,26 +624,26 @@ Após autenticação, Authelia retorna o email e grupos do usuário. O Nginx/Lua
    Remote-Groups: active,admin
    ```
 
-2. Nginx/Lua hasheia o email (SHA256):
-   ```lua
-   local sha256 = require "resty.sha256"
-   local hasher = sha256:new()
-   hasher:update(email)
-   local digest = hasher:final()
-   local email_hash = str.to_hex(digest)
-   ```
+2. Nginx/Lua normaliza o email, consulta o cache local e resolve o identificador estável do usuário:
+   - chave auxiliar: `email:<email_normalizado>` → UUID
+   - chave principal: `<uuid>` → payload do usuário
+   - se necessário, o fluxo de sincronização cria/exporta o identificador opaco do Authelia
 
-3. Nginx injeta headers hasheados:
+3. Nginx injeta headers internos:
    ```
-   Remote-Email: a1b2c3d4e5f6...  (SHA256 do email)
+   X-User-Id: 7b7b2f9d-4f4a-4e5d-9e9d-...
+   X-User-Groups: active,admin
+   X-User-Username: usuario
+   X-User-Display-Name: Usuário Exemplo
    Remote-Groups: active,admin
    ```
 
-**Por que hashear o email?**
-- Privacidade: email não trafega em texto plano
-- Consistência: API Python também usa hash para validar
+**Por que usar UUID em vez de hash do email?**
+- Estabilidade: mudança de email/username não muda o identificador interno
+- Segurança: permissões não dependem de um atributo textual mutável
+- Consistência: API Python valida `X-User-Id` contra a tabela `users`
 
-Esses headers são usados pela API Python para validar permissões.
+Esses headers são usados pela API Python para validar permissões e auditar ações.
 
 ---
 
@@ -580,8 +657,8 @@ Esses headers são usados pela API Python para validar permissões.
 
 2. Nginx Studio (Lua) intercepta
    - Authelia já validou e retornou email/grupos
-   - Lua hasheia email com SHA256
-   - Injeta Remote-Email (hash) e Remote-Groups
+   - Lua resolve o UUID do usuário
+   - Injeta `X-User-Id`, `X-User-Groups` e `Remote-Groups`
    - Lê cookie supabase_project → "projeto_x"
    - Valida assinatura HMAC do cookie
    - Busca service_role do projeto_x (cache ou API)
@@ -1089,12 +1166,12 @@ docker restart nginx
 - Retorna email e grupos do usuário
 
 **Nível 1.5: Nginx/Lua**
-- Hasheia o email com SHA256
-- Injeta headers: Remote-Email (hasheado), Remote-Groups
+- Resolve o UUID do usuário autenticado
+- Injeta headers: `X-User-Id`, `X-User-Groups`, `X-User-Username`, `X-User-Display-Name` e `Remote-Groups`
 
 **Nível 2: API Python**
-- Recebe email hasheado
-- Hasheia emails do banco para comparar
+- Recebe `X-User-Id`
+- Valida o UUID na tabela `users`
 - Valida se usuário é dono ou membro do projeto
 - Consulta tabela `project_members` no database `postgres`
 - Verifica role (admin ou member)
@@ -1129,11 +1206,11 @@ docker restart nginx
 1. Usuário clica em "Criar Projeto" no Flutter
    POST /api/projects
    Body: { name: "meu_projeto" }
-   Headers: Remote-Email (SHA256 hash), Remote-Groups
+   Headers: X-User-Id, X-User-Groups, Remote-Groups
 
 2. API Python valida permissões
-   - Recebe email hasheado no header
-   - Hasheia emails do banco para comparar
+   - Recebe `X-User-Id`
+   - Busca o usuário sincronizado na tabela `users`
    - Verifica se usuário pode criar projetos
    - Valida nome (único, sem caracteres especiais)
 
@@ -1376,7 +1453,8 @@ A deleção de projeto requer autenticação em múltiplos níveis:
 1. Usuário clica em "Deletar Projeto" no Flutter
    DELETE /api/projects/meu_projeto
    Headers:
-     Remote-Email: (SHA256 hash)
+     X-User-Id: UUID do usuário autenticado
+     X-User-Groups: admin
      Remote-Groups: admin
      X-Delete-Password: senha_gerada_no_setup
 
