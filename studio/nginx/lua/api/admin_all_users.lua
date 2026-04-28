@@ -14,7 +14,7 @@ local admin_users = {}
 if members_res.status == 200 then
     current_members = cjson.decode(members_res.body) or {}
     for _, m in ipairs(current_members) do
-        local member_key = m.user_hash or m.user_id
+        local member_key = m.user_id
         if member_key then
             member_lookup[member_key] = {
                 role = m.role,
@@ -49,28 +49,27 @@ local available_found = 0
 local admins_excluded = 0
 local seen_ids = {}
 
-for _, user_hash in ipairs(keys) do
-    if user_hash ~= "__mtime" then
-        local user_json = cache:get(user_hash)
+for _, user_key in ipairs(keys) do
+    if user_key ~= "__mtime" and not user_key:match("^email:") then
+        local user_json = cache:get(user_key)
         if user_json then
             local user_data = cjson.decode(user_json)
             
             if user_data then
-                if not (user_data.user_uuid and user_hash == user_data.user_uuid) then
+                local canonical_id = user_data.user_uuid or user_key
+                if canonical_id == user_key then
                     users_found = users_found + 1
                     
                     -- LÓGICA DE FILTRAGEM:
                     -- Incluir APENAS se:
                     -- 1. NÃO é membro do projeto (disponível para entrar)
                     -- 2. É membro mas NÃO é admin (pode virar admin)
-                    local canonical_id = user_data.user_uuid or user_hash
-                    local is_current_admin = admin_users[user_hash] == true or admin_users[canonical_id] == true
+                    local is_current_admin = admin_users[user_key] == true or admin_users[canonical_id] == true
 
                     if not is_current_admin and not seen_ids[canonical_id] then
                         seen_ids[canonical_id] = true
                         local user_info = {
                             user_id = canonical_id,
-                            user_hash = user_hash,
                             display_name = user_data.display_name or "Unknown",
                             username = user_data.username or "unknown",
                             is_active = user_data.is_active or false,
@@ -78,8 +77,8 @@ for _, user_hash in ipairs(keys) do
                         }
 
                         -- Se é membro atual (mas não admin), enriquecer com dados do projeto
-                        if member_lookup[user_hash] or member_lookup[canonical_id] then
-                            local member_info = member_lookup[user_hash] or member_lookup[canonical_id]
+                        if member_lookup[user_key] or member_lookup[canonical_id] then
+                            local member_info = member_lookup[user_key] or member_lookup[canonical_id]
                             user_info.status = "member"
                             user_info.project_role = member_info.role
                             members_found = members_found + 1
@@ -107,10 +106,6 @@ for _, member in ipairs(current_members) do
         local found_in_cache = false
         for _, user in ipairs(all_users) do
             if user.user_id == member.user_id then
-                if user.user_hash and member.user_hash and user.user_hash == member.user_hash then
-                    found_in_cache = true
-                    break
-                end
                 found_in_cache = true
                 break
             end
@@ -119,7 +114,6 @@ for _, member in ipairs(current_members) do
         if not found_in_cache then
             table.insert(orphaned_members, {
                 user_id = member.user_id,
-                user_hash = member.user_hash,
                 display_name = "Unknown User",
                 username = "unknown",
                 is_active = false,

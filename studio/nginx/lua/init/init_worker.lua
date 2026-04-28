@@ -32,6 +32,9 @@
                                 local encoded = cjson.encode(cached_user)
                                 cache:set(cache_key, encoded)
                                 cache:set(sync_result.id, encoded)
+                                if cached_user.email and cached_user.email ~= "" then
+                                    cache:set("email:" .. cached_user.email, sync_result.id)
+                                end
                             end
                         end
                         synced = synced + 1
@@ -71,7 +74,6 @@
                 
                 local email = user_identity.normalize_email(attr.email or "")
                 local display_name = attr.displayname or uname
-                local hash = user_identity.hash_email(email)
                 local user_uuid, _, identifier_err = authelia_identifiers.ensure_identifier(uname)
                 if not user_uuid then
                     ngx.log(ngx.ERR, "[SYNC] Falha ao gerar/exportar opaque identifier para ", uname, ": ", identifier_err)
@@ -86,15 +88,16 @@
                 }
                 local encoded_payload = cjson.encode(cache_payload)
                 
-                cache:set(hash, encoded_payload)
                 if user_uuid and user_uuid ~= "" then
                     cache:set(user_uuid, encoded_payload)
+                    if email ~= "" then
+                        cache:set("email:" .. email, user_uuid)
+                    end
                 end
 
                 ngx.log(
                     ngx.INFO,
                     "[CACHE] Usuario carregado: ", uname,
-                    " hash=", hash,
                     " uuid=", user_uuid or "missing",
                     " active=", tostring(is_active),
                     " admin=", tostring(is_admin)
@@ -102,7 +105,7 @@
                 
                 ngx.log(ngx.INFO, "[CACHE] set() – user=", uname,
                     " email=", email,
-                    " hash=", hash,
+                    " uuid=", user_uuid or "missing",
                     " active=", is_active,
                     " admin=", is_admin)
 
@@ -114,7 +117,7 @@
                         groups = sync_groups,
                         is_active = is_active,
                         source = "studio_bootstrap",
-                        cache_key = hash,
+                        cache_key = user_uuid,
                     })
                 else
                     ngx.log(ngx.WARN, "[SYNC] Usuario ignorado porque nao foi possivel obter opaque identifier: ", uname)

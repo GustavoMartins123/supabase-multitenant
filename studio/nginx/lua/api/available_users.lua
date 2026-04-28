@@ -41,7 +41,7 @@ if include_members then
     local member_ids = {}
     
     for _, m in ipairs(current) do
-        local member_key = m.user_hash or m.user_id
+        local member_key = m.user_id
         if m.role == "admin" then
             admin_ids[member_key] = true
             ngx.log(ngx.INFO, "[AVAILABLE][CONTENT] Found admin: ", member_key)
@@ -62,17 +62,16 @@ if include_members then
         ngx.log(ngx.INFO, "[AVAILABLE][CONTENT] Modo ADMIN: retornando todos os usuários ativos exceto admins")
         
         for _, h in ipairs(keys) do
-            if h ~= "__mtime" then
+            if h ~= "__mtime" and not h:match("^email:") then
                 local ud_json = cache:get(h)
                 if ud_json then
                     local ud = cjson.decode(ud_json)
                     local canonical_id = ud.user_uuid or h
-                    local is_uuid_alias = ud.user_uuid and ud.user_uuid == h
-                    if not is_uuid_alias and not admin_ids[h] and not admin_ids[canonical_id] and ud.is_active then
+                    local is_primary_user = canonical_id == h
+                    if is_primary_user and not admin_ids[h] and not admin_ids[canonical_id] and ud.is_active then
                         ngx.log(ngx.INFO, "[AVAILABLE][CONTENT] Adding user: ", ud.username, " (", h, ")")
                         table.insert(available, { 
                             user_id = canonical_id,
-                            user_hash = h,
                             display_name = ud.display_name,
                             username = ud.username,
                             is_active = true,
@@ -96,16 +95,16 @@ if include_members then
         if has_non_admin_members then
             ngx.log(ngx.INFO, "[AVAILABLE][CONTENT] Retornando ", table.getn(member_ids), " membros não-admins")
             for _, h in ipairs(keys) do
-                local ud_json = cache:get(h)
-                if ud_json then
+                if h ~= "__mtime" and not h:match("^email:") then
+                    local ud_json = cache:get(h)
+                    if ud_json then
                     local ud = cjson.decode(ud_json)
                     local canonical_id = ud.user_uuid or h
-                    local is_uuid_alias = ud.user_uuid and ud.user_uuid == h
-                    if not is_uuid_alias and (member_ids[h] or member_ids[canonical_id]) then
+                    local is_primary_user = canonical_id == h
+                    if is_primary_user and (member_ids[h] or member_ids[canonical_id]) then
                         if ud.is_active then
                             table.insert(available, { 
                                 user_id = canonical_id,
-                                user_hash = h,
                                 display_name = ud.display_name,
                                 username = ud.username,
                                 is_active = true,
@@ -113,6 +112,7 @@ if include_members then
                             })
                         end
                     end
+                end
                 end
             end
         else
@@ -126,16 +126,15 @@ if include_members then
             end
             
             for _, h in ipairs(keys) do
-                if h ~= "__mtime" then
+                if h ~= "__mtime" and not h:match("^email:") then
                     local ud_json = cache:get(h)
                     if ud_json then
                         local ud = cjson.decode(ud_json)
                         local canonical_id = ud.user_uuid or h
-                        local is_uuid_alias = ud.user_uuid and ud.user_uuid == h
-                        if not is_uuid_alias and not all_project_users[h] and not all_project_users[canonical_id] and ud.is_active then
+                        local is_primary_user = canonical_id == h
+                        if is_primary_user and not all_project_users[h] and not all_project_users[canonical_id] and ud.is_active then
                             table.insert(available, { 
                                 user_id = canonical_id,
-                                user_hash = h,
                                 display_name = ud.display_name,
                                 username = ud.username,
                                 is_active = true,
@@ -159,7 +158,7 @@ else
     ngx.log(ngx.INFO, "[AVAILABLE][CONTENT] Modo adicionar: excluindo membros atuais")
     local used = {}
     for _, m in ipairs(current) do
-        local member_key = m.user_hash or m.user_id
+        local member_key = m.user_id
         if member_key then
             used[member_key] = true
             ngx.log(ngx.INFO, "[AVAILABLE][CONTENT] Excluding current member: ", member_key)
@@ -176,18 +175,17 @@ else
 
     local available = {}
     for _, h in ipairs(keys) do
-        if h ~= "__mtime" then
+        if h ~= "__mtime" and not h:match("^email:") then
             local ud_json = cache:get(h)
             if ud_json then
                 local ud = cjson.decode(ud_json)
                 local canonical_id = ud.user_uuid or h
-                local is_uuid_alias = ud.user_uuid and ud.user_uuid == h
-                if not is_uuid_alias and not used[h] and not used[canonical_id] then
+                local is_primary_user = canonical_id == h
+                if is_primary_user and not used[h] and not used[canonical_id] then
                     if ud.is_active then
                     ngx.log(ngx.INFO, "[AVAILABLE][CONTENT] Adding available user: ", ud.username, " (", h, ")")
                     table.insert(available, { 
                         user_id = canonical_id,
-                        user_hash = h,
                         display_name = ud.display_name,
                         username = ud.username,
                         is_active = true,

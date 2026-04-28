@@ -145,7 +145,6 @@ ngx.say(cjson.encode({
     message = "User activated successfully",
     user = {
         id = sync_result and sync_result.id or user.user_uuid or user_id,
-        user_hash = user_id,
         username = username,
         display_name = user.display_name,
         status = "active"

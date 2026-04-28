@@ -64,7 +64,6 @@ if not email:match(email_pat) then
 end
 
 local normalized_email = user_identity.normalize_email(email)
-local user_id = user_identity.hash_email(normalized_email)
 
 -- Validar tamanho mínimo da senha
 if string.len(password) < 8 then
@@ -287,8 +286,8 @@ local cache_user = {
     is_admin = false
 }
 local encoded_cache_user = cjson.encode(cache_user)
-cache:set(user_id, encoded_cache_user)
 cache:set(authelia_user_id, encoded_cache_user)
+cache:set("email:" .. normalized_email, authelia_user_id)
 
 local sync_result, sync_err = user_sync.sync_user({
     id = authelia_user_id,
@@ -302,8 +301,8 @@ if sync_err then
     ngx.log(ngx.ERR, "[CREATE_USER] Failed to sync user with backend: ", sync_err)
     yaml_data.users[username] = nil
     write_yaml_file(yaml_path, yaml_data)
-    cache:delete(user_id)
     cache:delete(authelia_user_id)
+    cache:delete("email:" .. normalized_email)
     ngx.status = ngx.HTTP_BAD_GATEWAY
     ngx.say('{"error": "User created in Authelia but failed to sync with backend"}')
     return ngx.exit(ngx.HTTP_BAD_GATEWAY)
@@ -312,8 +311,8 @@ end
 if sync_result and sync_result.id then
     cache_user.user_uuid = sync_result.id
     local encoded = cjson.encode(cache_user)
-    cache:set(user_id, encoded)
     cache:set(sync_result.id, encoded)
+    cache:set("email:" .. normalized_email, sync_result.id)
 end
 
 ngx.log(ngx.ERR, "[CREATE_USER] Successfully created user: ", username)
@@ -325,7 +324,6 @@ ngx.say(cjson.encode({
     message = "User created successfully",
     user = {
         id = sync_result and sync_result.id or authelia_user_id,
-        user_hash = user_id,
         username = username,
         display_name = display_name,
         email = email,

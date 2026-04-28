@@ -51,16 +51,7 @@ local function calculate_message_size_kb(msg)
     return math.ceil(#content_str / 1024)
 end
 
-function _M.generate(studio_request, user_email, project_ref, openai_api_key, openai_model, api_base_url)
-    local user_id = nil
-    do
-        local sha256 = require "resty.sha256"
-        local str = require "resty.string"
-        local h = sha256:new()
-        h:update(user_email)
-        user_id = str.to_hex(h:final())
-    end
-    
+function _M.generate(studio_request, user_id, project_ref, openai_api_key, openai_model, api_base_url)
     local project_functions = {}
     local project_tools = {}
     if project_ref ~= "default" then

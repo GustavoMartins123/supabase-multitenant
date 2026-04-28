@@ -14,15 +14,15 @@ local inactive_count = 0
 local seen_ids = {}
 
 for _, key in ipairs(keys) do
-    if key ~= "__mtime" then
+    if key ~= "__mtime" and not key:match("^email:") then
         local user_data = cache:get(key)
         if user_data then
             local user = cjson.decode(user_data)
             if user then
                 local canonical_id = user.user_uuid or key
-                local is_uuid_alias = user.user_uuid and user.user_uuid == key
+                local is_primary_user = canonical_id == key
 
-                if not user.is_admin and not is_uuid_alias and not seen_ids[canonical_id] then
+                if not user.is_admin and is_primary_user and not seen_ids[canonical_id] then
                     seen_ids[canonical_id] = true
                     local safe_user = {
                         id = canonical_id,

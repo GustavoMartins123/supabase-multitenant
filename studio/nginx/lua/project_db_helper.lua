@@ -12,6 +12,22 @@ local functions_cache = ngx.shared.service_keys
 local SERVER_DOMAIN = os.getenv("SERVER_DOMAIN") or "http://localhost"
 local NGINX_SHARED_TOKEN = os.getenv("NGINX_SHARED_TOKEN")
 local get_service_key = require "get_service_key"
+local user_identity = require "user_identity"
+
+local function current_user_id()
+    local header_user_id = ngx.req.get_headers()["X-User-Id"]
+    if header_user_id and header_user_id ~= "" then
+        return header_user_id
+    end
+
+    local email = user_identity.normalize_email(ngx.var.authelia_email or "")
+    if email == "" then
+        return ""
+    end
+
+    local cache = ngx.shared.users_cache
+    return (cache and cache:get("email:" .. email)) or ""
+end
 
 function _M.get_available_functions(project_ref)
     if not project_ref or project_ref == "" or project_ref == "default" then
@@ -29,15 +45,7 @@ function _M.get_available_functions(project_ref)
     local httpc = http.new()
     httpc:set_timeout(10000)
     
-    local user_id = ""
-    local email = ngx.var.authelia_email or ""
-    if email ~= "" then
-        local sha256 = require "resty.sha256"
-        local str = require "resty.string"
-        local h = sha256:new()
-        h:update(email:lower():gsub("%s+", ""))
-        user_id = str.to_hex(h:final())
-    end
+    local user_id = current_user_id()
 
     ngx.log(ngx.WARN, "[PROJECT-DB] user_id='", user_id, "' project_ref='", project_ref, "'")
 
@@ -47,7 +55,7 @@ function _M.get_available_functions(project_ref)
     local res, err = httpc:request_uri(url, {
         method = "GET",
         headers = {
-            ["Remote-Email"] = user_id,
+            ["X-User-Id"] = user_id,
             ["Content-Type"] = "application/json",
             ["X-Shared-Token"] = NGINX_SHARED_TOKEN
         },
@@ -225,15 +233,7 @@ function _M.execute_function(project_ref, func_name, arguments)
     local httpc = http.new()
     httpc:set_timeout(30000)
 
-    local exec_user_id = ""
-    local exec_email = ngx.var.authelia_email or ""
-    if exec_email ~= "" then
-        local sha256 = require "resty.sha256"
-        local str = require "resty.string"
-        local h = sha256:new()
-        h:update(exec_email:lower():gsub("%s+", ""))
-        exec_user_id = str.to_hex(h:final())
-    end
+    local exec_user_id = current_user_id()
 
     local url = SERVER_DOMAIN .. "/api/projects/" .. project_ref .. "/execute-function"
     ngx.log(ngx.INFO, "[PROJECT-DB] Executing function: ", safe_name, " with args: ", cjson.encode(args_object))
@@ -241,7 +241,7 @@ function _M.execute_function(project_ref, func_name, arguments)
     local res, err = httpc:request_uri(url, {
         method = "POST",
         headers = {
-            ["Remote-Email"] = exec_user_id,
+            ["X-User-Id"] = exec_user_id,
             ["Content-Type"] = "application/json",
             ["X-Shared-Token"] = NGINX_SHARED_TOKEN
         },

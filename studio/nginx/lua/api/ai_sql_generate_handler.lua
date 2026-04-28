@@ -1,6 +1,7 @@
 local cjson = require "cjson.safe"
 local ai_generate = require "ai_sql_generate"
 local db_helper = require "db_helper"
+local user_identity = require "user_identity"
 
 ngx.req.read_body()
 local body = ngx.req.get_body_data()
@@ -19,7 +20,27 @@ if not studio_request then
 end
 
 local project_ref = ngx.var.project_ref or "default"
-local user_id = ngx.var.authelia_email
+local function current_user_id()
+    local header_user_id = ngx.req.get_headers()["X-User-Id"]
+    if header_user_id and header_user_id ~= "" then
+        return header_user_id
+    end
+
+    local email = user_identity.normalize_email(ngx.var.authelia_email or "")
+    if email == "" then
+        return ""
+    end
+
+    local cache = ngx.shared.users_cache
+    return (cache and cache:get("email:" .. email)) or ""
+end
+
+local user_id = current_user_id()
+if user_id == "" then
+    ngx.status = ngx.HTTP_UNAUTHORIZED
+    ngx.say('{"error": "User identity not found"}')
+    return ngx.exit(ngx.HTTP_UNAUTHORIZED)
+end
 
 local session_id = studio_request.chatId
 
