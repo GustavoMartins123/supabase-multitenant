@@ -136,6 +136,12 @@ postgres://supabase_storage_admin.projeto_x:senha@pooler:5432/postgres
 - Fazer proxy para o Traefik
 - Expor rotas administrativas internas consumidas pelo próprio gateway e por workers confiáveis
 
+**Autenticação de integrações internas:**
+- Rotas chamadas por serviços backend, como `/api/internal/push`, não usam identidade de usuário
+- O `push-worker` assina cada chamada com `INTERNAL_HMAC_SECRET`
+- O Nginx/Lua valida `X-Internal-Service`, timestamp, nonce, assinatura HMAC e hash do body
+- O nonce é guardado temporariamente em `lua_shared_dict internal_hmac_nonces` para reduzir replay
+
 ### Servidor
 
 **Componentes:**
@@ -629,9 +635,10 @@ Após autenticação, Authelia retorna o email e grupos do usuário. O Nginx/Lua
    - chave principal: `<uuid>` → payload do usuário
    - se necessário, o fluxo de sincronização cria/exporta o identificador opaco do Authelia
 
-3. Nginx injeta headers internos:
+3. Nginx injeta headers internos locais e, ao chamar a API Python, envia um token de identidade assinado:
    ```
    X-User-Id: 7b7b2f9d-4f4a-4e5d-9e9d-...
+   X-User-Token: v1.<payload_base64url>.<hmac_sha256_hex>
    X-User-Groups: active,admin
    X-User-Username: usuario
    X-User-Display-Name: Usuário Exemplo
@@ -641,9 +648,9 @@ Após autenticação, Authelia retorna o email e grupos do usuário. O Nginx/Lua
 **Por que usar UUID em vez de hash do email?**
 - Estabilidade: mudança de email/username não muda o identificador interno
 - Segurança: permissões não dependem de um atributo textual mutável
-- Consistência: API Python valida `X-User-Id` contra a tabela `users`
+- Consistência: API Python extrai o UUID de `X-User-Token`, valida a assinatura HMAC e consulta a tabela `users`
 
-Esses headers são usados pela API Python para validar permissões e auditar ações.
+`X-User-Id` continua existindo como contexto local dentro do OpenResty. A fronteira com a API Python usa `X-User-Token`, assinado com `NGINX_HMAC_SECRET`, com `iat` e `exp` curtos para reduzir replay.
 
 ---
 
@@ -658,7 +665,7 @@ Esses headers são usados pela API Python para validar permissões e auditar aç
 2. Nginx Studio (Lua) intercepta
    - Authelia já validou e retornou email/grupos
    - Lua resolve o UUID do usuário
-   - Injeta `X-User-Id`, `X-User-Groups` e `Remote-Groups`
+   - Injeta contexto local de usuário e assina `X-User-Token` para chamadas internas à API Python
    - Lê cookie supabase_project → "projeto_x"
    - Valida assinatura HMAC do cookie
    - Busca service_role do projeto_x (cache ou API)
@@ -718,6 +725,43 @@ Esses headers são usados pela API Python para validar permissões e auditar aç
 
 4. Resposta volta:
    PostgREST → Nginx Projeto → Traefik → Usuário
+```
+
+### Exemplo: Push Worker → /api/internal/push
+
+**Fluxo básico:** `push-worker → Nginx Studio/Lua → Firebase FCM`
+
+```text
+1. Worker Python monitora os databases dos projetos
+   - Usa LISTEN/NOTIFY no PostgreSQL para acordar quando há nova notificação
+   - Busca registros pendentes em public.notifications
+   - Busca tokens FCM em public.push_tokens
+
+2. Worker monta a chamada para o gateway do Studio
+   POST https://<IP_DO_STUDIO>:4000/api/internal/push
+   Body: { project, token, body }
+   Headers:
+     X-Internal-Service: push-worker
+     X-Internal-Timestamp: <unix_timestamp>
+     X-Internal-Nonce: <nonce>
+     X-Internal-Signature: <hmac_sha256_hex>
+
+3. Nginx/Lua valida a chamada backend-to-backend
+   - Confere método POST
+   - Valida INTERNAL_HMAC_SECRET
+   - Valida timestamp curto
+   - Bloqueia nonce reutilizado via internal_hmac_nonces
+   - Recalcula o hash do body e a assinatura HMAC
+
+4. send_push.lua dispara para o Firebase
+   - Lê /config/firebase.json
+   - Assina JWT OAuth2 para o Google
+   - Envia a mensagem para FCM
+
+5. Worker atualiza o status da notificação no database do projeto
+   - enviado
+   - sem_token
+   - erro
 ```
 
 ---
@@ -1167,10 +1211,12 @@ docker restart nginx
 
 **Nível 1.5: Nginx/Lua**
 - Resolve o UUID do usuário autenticado
-- Injeta headers: `X-User-Id`, `X-User-Groups`, `X-User-Username`, `X-User-Display-Name` e `Remote-Groups`
+- Mantém `X-User-Id`, `X-User-Groups`, `X-User-Username`, `X-User-Display-Name` e `Remote-Groups` como contexto local do gateway
+- Assina `X-User-Token` para chamadas que atravessam a fronteira Nginx/Lua → API Python
 
 **Nível 2: API Python**
-- Recebe `X-User-Id`
+- Recebe `X-User-Token`
+- Valida assinatura HMAC, `iat`, `exp` e UUID do usuário
 - Valida o UUID na tabela `users`
 - Valida se usuário é dono ou membro do projeto
 - Consulta tabela `project_members` no database `postgres`
@@ -1206,10 +1252,10 @@ docker restart nginx
 1. Usuário clica em "Criar Projeto" no Flutter
    POST /api/projects
    Body: { name: "meu_projeto" }
-   Headers: X-User-Id, X-User-Groups, Remote-Groups
+   Headers internos: X-User-Token
 
 2. API Python valida permissões
-   - Recebe `X-User-Id`
+   - Recebe e valida `X-User-Token`
    - Busca o usuário sincronizado na tabela `users`
    - Verifica se usuário pode criar projetos
    - Valida nome (único, sem caracteres especiais)
@@ -1453,7 +1499,7 @@ A deleção de projeto requer autenticação em múltiplos níveis:
 1. Usuário clica em "Deletar Projeto" no Flutter
    DELETE /api/projects/meu_projeto
    Headers:
-     X-User-Id: UUID do usuário autenticado
+     X-User-Token: token HMAC do usuário autenticado
      X-User-Groups: admin
      Remote-Groups: admin
      X-Delete-Password: senha_gerada_no_setup

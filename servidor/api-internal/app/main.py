@@ -3,6 +3,10 @@ import uuid
 import pathlib
 import asyncpg
 import hmac
+import base64
+import binascii
+import hashlib
+import time
 import asyncio, json, re
 from fastapi import FastAPI, BackgroundTasks, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -21,11 +25,15 @@ DB_DSN = os.getenv("DB_DSN")
 FERNET_SECRET = os.getenv("FERNET_SECRET")
 DELETE_PASSWORD = os.getenv("PROJECT_DELETE_PASSWORD")
 NGINX_SHARED_TOKEN = os.getenv("NGINX_SHARED_TOKEN")
+NGINX_HMAC_SECRET = os.getenv("NGINX_HMAC_SECRET")
+USER_TOKEN_MAX_CLOCK_SKEW_SECONDS = int(os.getenv("USER_TOKEN_MAX_CLOCK_SKEW_SECONDS", "30"))
 
 if not FERNET_SECRET:
     raise RuntimeError("Missing FERNET_SECRET environment variable")
 if not NGINX_SHARED_TOKEN:
     raise RuntimeError("Missing NGINX_SHARED_TOKEN environment variable")
+if not NGINX_HMAC_SECRET:
+    raise RuntimeError("Missing NGINX_HMAC_SECRET environment variable")
     
 try:
     fernet = Fernet(FERNET_SECRET.encode())
@@ -66,6 +74,62 @@ def parse_uuid_value(raw: str | None) -> uuid.UUID | None:
         return uuid.UUID(candidate)
     except ValueError:
         return None
+
+
+def decode_base64url_json(raw: str) -> dict[str, Any] | None:
+    try:
+        padded = raw + ("=" * (-len(raw) % 4))
+        decoded = base64.urlsafe_b64decode(padded.encode("ascii"))
+        payload = json.loads(decoded.decode("utf-8"))
+    except (ValueError, json.JSONDecodeError, UnicodeDecodeError, binascii.Error):
+        return None
+
+    return payload if isinstance(payload, dict) else None
+
+
+def resolve_user_id_from_hmac_token(request: Request) -> uuid.UUID:
+    token = (request.headers.get("X-User-Token") or "").strip()
+    if not token:
+        raise HTTPException(401, "X-User-Token ausente")
+
+    parts = token.split(".")
+    if len(parts) != 3 or parts[0] != "v1":
+        raise HTTPException(401, "X-User-Token inválido")
+
+    _, encoded_payload, signature = parts
+    try:
+        expected_signature = hmac.new(
+            NGINX_HMAC_SECRET.encode("utf-8"),
+            encoded_payload.encode("ascii"),
+            hashlib.sha256,
+        ).hexdigest()
+    except UnicodeEncodeError:
+        raise HTTPException(401, "X-User-Token inválido")
+
+    if not hmac.compare_digest(signature, expected_signature):
+        raise HTTPException(401, "X-User-Token com assinatura inválida")
+
+    payload = decode_base64url_json(encoded_payload)
+    if payload is None:
+        raise HTTPException(401, "X-User-Token com payload inválido")
+
+    now = int(time.time())
+    try:
+        exp = int(payload.get("exp", 0))
+        iat = int(payload.get("iat", 0))
+    except (TypeError, ValueError):
+        raise HTTPException(401, "X-User-Token com datas inválidas")
+
+    if exp <= now - USER_TOKEN_MAX_CLOCK_SKEW_SECONDS:
+        raise HTTPException(401, "X-User-Token expirado")
+    if iat > now + USER_TOKEN_MAX_CLOCK_SKEW_SECONDS:
+        raise HTTPException(401, "X-User-Token emitido no futuro")
+
+    user_id = parse_uuid_value(str(payload.get("sub") or ""))
+    if user_id is None:
+        raise HTTPException(401, "X-User-Token sem usuário válido")
+
+    return user_id
 
 
 async def ensure_identity_schema(pool: asyncpg.Pool) -> None:
@@ -462,9 +526,7 @@ async def resolve_authenticated_user(
     request: Request,
     pool: asyncpg.Pool,
 ) -> dict[str, Any]:
-    header_user_id = parse_uuid_value(request.headers.get("X-User-Id"))
-    if header_user_id is None:
-        raise HTTPException(401, "X-User-Id ausente ou inválido")
+    signed_user_id = resolve_user_id_from_hmac_token(request)
 
     async with pool.acquire() as conn:
         user_row = await conn.fetchrow(
@@ -473,7 +535,7 @@ async def resolve_authenticated_user(
             FROM users
             WHERE id = $1
             """,
-            header_user_id,
+            signed_user_id,
         )
 
         if user_row:

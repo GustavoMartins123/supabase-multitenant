@@ -1,6 +1,10 @@
 import asyncio
 import os
 import json
+import hashlib
+import hmac
+import secrets
+import time
 import urllib.request
 import urllib.error
 from urllib.parse import urlparse
@@ -9,14 +13,41 @@ import ssl
 
 BASE_DSN = os.getenv("DB_DSN")
 API_URL = os.getenv("PUSH_API_URL", "https://<SEU_IP>:4000/api/internal/push")
-PUSH_WORKER_TOKEN = os.getenv("PUSH_WORKER_TOKEN")
+INTERNAL_HMAC_SECRET = os.getenv("INTERNAL_HMAC_SECRET")
 PUSH_REQUEST_TIMEOUT = float(os.getenv("PUSH_REQUEST_TIMEOUT", "10"))
 PUSH_VERIFY_TLS = os.getenv("PUSH_VERIFY_TLS", "false").lower() in ("1", "true", "yes", "on")
 PUSH_CA_FILE = os.getenv("PUSH_CA_FILE", "/docker/push-certs/ca.pem")
 SUPPORTED_PLATFORMS = ("android", "ios")
 
-if not PUSH_WORKER_TOKEN:
-    raise RuntimeError("Missing PUSH_WORKER_TOKEN environment variable")
+if not INTERNAL_HMAC_SECRET:
+    raise RuntimeError("Missing INTERNAL_HMAC_SECRET environment variable")
+
+
+def build_internal_hmac_headers(method: str, url: str, body: bytes) -> dict[str, str]:
+    timestamp = str(int(time.time()))
+    nonce = secrets.token_hex(16)
+    path = urlparse(url).path or "/"
+    body_hash = hashlib.sha256(body).hexdigest()
+    canonical = "\n".join([
+        "push-v1",
+        method.upper(),
+        path,
+        timestamp,
+        nonce,
+        body_hash,
+    ])
+    signature = hmac.new(
+        INTERNAL_HMAC_SECRET.encode("utf-8"),
+        canonical.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    return {
+        "X-Internal-Service": "push-worker",
+        "X-Internal-Timestamp": timestamp,
+        "X-Internal-Nonce": nonce,
+        "X-Internal-Signature": signature,
+    }
 
 def build_ssl_context() -> ssl.SSLContext:
     if not PUSH_VERIFY_TLS:
@@ -58,14 +89,16 @@ async def send_to_api(token_fcm: str, body: str, project_name: str) -> bool:
         "token": token_fcm,
         "body": body
     }
+    request_body = json.dumps(payload).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        **build_internal_hmac_headers("POST", API_URL, request_body),
+    }
     
     req = urllib.request.Request(
         API_URL, 
-        data=json.dumps(payload).encode('utf-8'), 
-        headers={
-            "Content-Type": "application/json",
-            "X-Push-Worker-Token": PUSH_WORKER_TOKEN,
-        }, 
+        data=request_body, 
+        headers=headers, 
         method='POST'
     )
     

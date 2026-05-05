@@ -8,6 +8,7 @@ local res = ngx.location.capture(uri, {
     headers = {
         ["Remote-Groups"] = req_headers["Remote-Groups"],
         ["X-User-Id"] = req_headers["X-User-Id"],
+        ["X-User-Token"] = req_headers["X-User-Token"],
         ["X-User-Groups"] = req_headers["X-User-Groups"],
         ["X-User-Username"] = req_headers["X-User-Username"],
         ["X-User-Display-Name"] = req_headers["X-User-Display-Name"],

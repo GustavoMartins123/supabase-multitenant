@@ -13,6 +13,7 @@ local SERVER_DOMAIN = os.getenv("SERVER_DOMAIN") or "http://localhost"
 local NGINX_SHARED_TOKEN = os.getenv("NGINX_SHARED_TOKEN")
 local get_service_key = require "get_service_key"
 local user_identity = require "user_identity"
+local user_hmac_token = require "user_hmac_token"
 
 local function current_user_id()
     local header_user_id = ngx.req.get_headers()["X-User-Id"]
@@ -27,6 +28,20 @@ local function current_user_id()
 
     local cache = ngx.shared.users_cache
     return (cache and cache:get("email:" .. email)) or ""
+end
+
+local function current_user_token(user_id)
+    local header_token = ngx.req.get_headers()["X-User-Token"]
+    if header_token and header_token ~= "" then
+        return header_token
+    end
+
+    local token, err = user_hmac_token.sign(user_id)
+    if not token then
+        ngx.log(ngx.ERR, "[PROJECT-DB] Failed to sign user token: ", err or "unknown error")
+        return ""
+    end
+    return token
 end
 
 function _M.get_available_functions(project_ref)
@@ -46,6 +61,7 @@ function _M.get_available_functions(project_ref)
     httpc:set_timeout(10000)
     
     local user_id = current_user_id()
+    local user_token = current_user_token(user_id)
 
     ngx.log(ngx.WARN, "[PROJECT-DB] user_id='", user_id, "' project_ref='", project_ref, "'")
 
@@ -55,7 +71,7 @@ function _M.get_available_functions(project_ref)
     local res, err = httpc:request_uri(url, {
         method = "GET",
         headers = {
-            ["X-User-Id"] = user_id,
+            ["X-User-Token"] = user_token,
             ["Content-Type"] = "application/json",
             ["X-Shared-Token"] = NGINX_SHARED_TOKEN
         },
@@ -234,6 +250,7 @@ function _M.execute_function(project_ref, func_name, arguments)
     httpc:set_timeout(30000)
 
     local exec_user_id = current_user_id()
+    local exec_user_token = current_user_token(exec_user_id)
 
     local url = SERVER_DOMAIN .. "/api/projects/" .. project_ref .. "/execute-function"
     ngx.log(ngx.INFO, "[PROJECT-DB] Executing function: ", safe_name, " with args: ", cjson.encode(args_object))
@@ -241,7 +258,7 @@ function _M.execute_function(project_ref, func_name, arguments)
     local res, err = httpc:request_uri(url, {
         method = "POST",
         headers = {
-            ["X-User-Id"] = exec_user_id,
+            ["X-User-Token"] = exec_user_token,
             ["Content-Type"] = "application/json",
             ["X-Shared-Token"] = NGINX_SHARED_TOKEN
         },

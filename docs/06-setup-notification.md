@@ -4,7 +4,7 @@ Por padrão, a plataforma utiliza uma arquitetura descentralizada para o envio d
 
 > [!NOTE]
 > A infraestrutura base do **Gateway (Nginx + Lua)** para push já vem pronta, mas o fluxo atual nao depende apenas do `firebase.json`.
-> A rota `/api/internal/push` e protegida por `X-Push-Worker-Token` e foi desenhada para uso exclusivo do `push-worker`.
+> A rota `/api/internal/push` e protegida por assinatura HMAC backend-to-backend e foi desenhada para uso exclusivo do `push-worker`.
 > Se o worker estiver em outra maquina, ele deve chamar o Nginx do Studio em `https://<IP_DO_STUDIO>:4000/api/internal/push`.
 > A porta `9091` pertence ao Authelia e e apenas a entrada de autenticacao do navegador; o worker nao deve usá-la.
 
@@ -17,7 +17,7 @@ Antes de prosseguir, certifique-se de que:
 - **Projeto Firebase**: Você possui um projeto criado no [Firebase Console](https://console.firebase.google.com/).
 - **Service Account**: Você gerou e baixou a chave privada (arquivo JSON) da Conta de Serviço do Firebase (Configurações do Projeto > Contas de Serviço > Gerar nova chave privada).
 - **Worker habilitado**: por padrão, o serviço `push-worker` vem comentado em `servidor/docker-compose-api.yml`. Descomente-o e suba o container antes de validar o fluxo ponta a ponta.
-- **Segredo compartilhado**: `PUSH_WORKER_TOKEN` deve estar configurado com o mesmo valor em `studio/.env` e `servidor/.env`.
+- **Segredo compartilhado interno**: `INTERNAL_HMAC_SECRET` deve estar configurado com o mesmo valor em `studio/.env` e `servidor/.env`. O `setup.sh` gera esse valor automaticamente.
 - **URL correta do gateway**: `PUSH_API_URL` deve apontar para `https://<IP_DO_STUDIO>:4000/api/internal/push`.
 - **TLS confiável entre as máquinas**: se `PUSH_VERIFY_TLS=true`, o certificado do Studio precisa ser confiável no servidor Python. O `setup.sh` copia `studio/authelia/ssl/ca.pem` para `servidor/certs/ca.pem`, que e montado no container como `/docker/push-certs/ca.pem`.
 
@@ -46,10 +46,11 @@ O fluxo atual de push depende das variaveis abaixo:
 
 ```env
 # studio/.env
-PUSH_WORKER_TOKEN=...
+INTERNAL_HMAC_SECRET=...
+INTERNAL_HMAC_MAX_SKEW_SECONDS=60
 
 # servidor/.env
-PUSH_WORKER_TOKEN=...
+INTERNAL_HMAC_SECRET=...
 PUSH_API_URL=https://<IP_DO_STUDIO>:4000/api/internal/push
 PUSH_VERIFY_TLS=true
 PUSH_CA_FILE=/docker/push-certs/ca.pem
@@ -57,9 +58,21 @@ PUSH_CA_FILE=/docker/push-certs/ca.pem
 
 Notas importantes:
 
-- `PUSH_WORKER_TOKEN` precisa ser o mesmo nas duas maquinas.
+- `INTERNAL_HMAC_SECRET` precisa ser o mesmo nas duas maquinas. O worker usa esse segredo para assinar cada chamada e o Lua valida a assinatura.
+- `INTERNAL_HMAC_MAX_SKEW_SECONDS` define a janela maxima, em segundos, aceita pelo Nginx entre o timestamp assinado e o relogio local. O padrao e `60`.
 - `PUSH_API_URL` deve apontar para o IP ou dominio usado no certificado do Studio.
 - Se o certificado do Studio for autoassinado, ele precisa conter SAN compativel com o host usado em `PUSH_API_URL`.
+
+A chamada do worker para `/api/internal/push` usa estes headers internos:
+
+```text
+X-Internal-Service: push-worker
+X-Internal-Timestamp: <unix_timestamp>
+X-Internal-Nonce: <nonce_aleatorio>
+X-Internal-Signature: <hmac_sha256_hex>
+```
+
+O HMAC assina metodo, path, timestamp, nonce e o `sha256` do corpo da requisicao. O Nginx valida a janela de tempo e guarda o nonce temporariamente para reduzir replay.
 
 ### Passo 2: Estruturar o Banco de Dados dos Projetos
 
@@ -159,7 +172,7 @@ Abra o `docker-compose-api.yml` e remova os `#` da frente do serviço `push-work
       PYTHONUNBUFFERED: 1
       DB_DSN: postgres://supabase_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/postgres
       PUSH_API_URL: ${PUSH_API_URL}
-      PUSH_WORKER_TOKEN: ${PUSH_WORKER_TOKEN}
+      INTERNAL_HMAC_SECRET: ${INTERNAL_HMAC_SECRET}
       PUSH_VERIFY_TLS: ${PUSH_VERIFY_TLS}
       PUSH_CA_FILE: ${PUSH_CA_FILE}
     volumes:
@@ -209,7 +222,7 @@ Se aparecer erro de TLS parecido com `certificate verify failed` ou `IP address 
 
 **5.2. Verificando o Gateway Nginx (Servidor Studio)**
 
-Se o log do Worker não mostrar nenhum erro de conexão, mas a notificação ainda não chegou, o bloqueio ocorreu na camada do Lua/Nginx (validação do JWT, leitura do firebase.json ou comunicação com o Google).
+Se o log do Worker não mostrar nenhum erro de conexão, mas a notificação ainda não chegou, o bloqueio ocorreu na camada do Lua/Nginx (validação HMAC interna, leitura do firebase.json, assinatura OAuth2 do Google ou comunicação com o Firebase).
 
 Acesse o contêiner do Nginx no servidor do Studio e leia o arquivo de log de erros:
 
@@ -220,6 +233,7 @@ cat /var/log/studio_error.log
 
 Se o log mostrar `401` ou `403` para `/api/internal/push`, valide:
 
-- se o `PUSH_WORKER_TOKEN` do worker e o mesmo do `studio/.env`
+- se o `INTERNAL_HMAC_SECRET` do worker e o mesmo do `studio/.env`
 - se o worker esta fazendo `POST`
+- se o relogio das duas maquinas esta sincronizado, pois a assinatura usa timestamp curto
 - se o Nginx do Studio foi recriado depois da atualizacao do `.env`

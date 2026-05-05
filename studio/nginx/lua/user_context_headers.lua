@@ -1,5 +1,6 @@
 local cjson = require "cjson.safe"
 local user_identity = require "user_identity"
+local user_hmac_token = require "user_hmac_token"
 
 local M = {}
 
@@ -34,6 +35,22 @@ function M.apply(email, groups)
     end
     if user_id ~= "" then
         ngx.req.set_header("X-User-Id", user_id)
+        pcall(function()
+            ngx.var.auth_user_id = user_id
+        end)
+        local token, token_err = user_hmac_token.sign(user_id, {
+            username = user_data and user_data.username or nil,
+            display_name = user_data and user_data.display_name or nil,
+            groups = groups or "",
+        })
+        if token then
+            ngx.req.set_header("X-User-Token", token)
+            pcall(function()
+                ngx.var.auth_user_token = token
+            end)
+        else
+            ngx.log(ngx.ERR, "[AUTH] Falha ao assinar token de usuario: ", token_err or "erro desconhecido")
+        end
     end
 
     return user_id

@@ -6,7 +6,18 @@ if not slug or slug == "" then
     return ngx.exit(400)
 end
 
-local members_res = ngx.location.capture("/_internal_api/projects/" .. slug .. "/members")
+local req_headers = ngx.req.get_headers()
+local members_res = ngx.location.capture("/_internal_api/projects/" .. slug .. "/members", {
+    method = ngx.HTTP_GET,
+    headers = {
+        ["Remote-Groups"] = req_headers["Remote-Groups"],
+        ["X-User-Id"] = req_headers["X-User-Id"],
+        ["X-User-Token"] = req_headers["X-User-Token"],
+        ["X-User-Groups"] = req_headers["X-User-Groups"],
+        ["X-User-Username"] = req_headers["X-User-Username"],
+        ["X-User-Display-Name"] = req_headers["X-User-Display-Name"],
+    }
+})
 local current_members = {}
 local member_lookup = {}
 local admin_users = {}

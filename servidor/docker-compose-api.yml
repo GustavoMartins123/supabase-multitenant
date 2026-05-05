@@ -13,6 +13,8 @@ services:
       FERNET_SECRET: ${FERNET_SECRET}
       PROJECT_DELETE_PASSWORD: ${PROJECT_DELETE_PASSWORD}
       NGINX_SHARED_TOKEN: ${NGINX_SHARED_TOKEN}
+      NGINX_HMAC_SECRET: ${NGINX_HMAC_SECRET:-}
+      USER_TOKEN_MAX_CLOCK_SKEW_SECONDS: ${USER_TOKEN_MAX_CLOCK_SKEW_SECONDS:-30}
     volumes:
       - ./projects:/docker/projects:rw        # bind-mount relativo  :contentReference[oaicite:0]{index=0}
       - ./certs:/docker/push-certs:ro
@@ -35,7 +37,7 @@ services:
   #     PYTHONUNBUFFERED: 1
   #     DB_DSN: postgres://supabase_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/postgres
   #     PUSH_API_URL: ${PUSH_API_URL}
-  #     PUSH_WORKER_TOKEN: ${PUSH_WORKER_TOKEN}
+  #     INTERNAL_HMAC_SECRET: ${INTERNAL_HMAC_SECRET}
   #     PUSH_VERIFY_TLS: ${PUSH_VERIFY_TLS}
   #     PUSH_CA_FILE: ${PUSH_CA_FILE}
   #   volumes:

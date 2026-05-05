@@ -113,7 +113,7 @@ generate_jwt_secret() {
     openssl rand -base64 64 | tr -d '\n'
 }
 
-generate_push_worker_token() {
+generate_hmac_secret() {
     openssl rand -hex 32
 }
 
@@ -278,7 +278,8 @@ main() {
 
     SHARED_FERNET_SECRET=$(generate_logflare_api_key)
     SHARED_NGINX_TOKEN=$(generate_logflare_api_key)
-    PUSH_WORKER_TOKEN=$(generate_push_worker_token)
+    SHARED_NGINX_HMAC_SECRET=$(generate_hmac_secret)
+    SHARED_INTERNAL_HMAC_SECRET=$(generate_hmac_secret)
 
     SERVER_IP=$(get_server_ip)
     SERVER_IP=$(echo "$SERVER_IP" | xargs)
@@ -310,7 +311,8 @@ main() {
     safe_sed "s|JWT_SECRET=pass|JWT_SECRET=$JWT_SECRET|g" servidor/.env
     safe_sed "s|FERNET_SECRET=pass|FERNET_SECRET=$SHARED_FERNET_SECRET|g" servidor/.env
     safe_sed "s|NGINX_SHARED_TOKEN=pass|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" servidor/.env
-    safe_sed "s|PUSH_WORKER_TOKEN=pass|PUSH_WORKER_TOKEN=$PUSH_WORKER_TOKEN|g" servidor/.env
+    safe_sed "s|NGINX_HMAC_SECRET=pass|NGINX_HMAC_SECRET=$SHARED_NGINX_HMAC_SECRET|g" servidor/.env
+    safe_sed "s|INTERNAL_HMAC_SECRET=pass|INTERNAL_HMAC_SECRET=$SHARED_INTERNAL_HMAC_SECRET|g" servidor/.env
     safe_sed "s|PROJECT_DELETE_PASSWORD=pass|PROJECT_DELETE_PASSWORD=$PROJECT_DELETE_PASSWORD|g" servidor/.env
     if [[ "$SERVER_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
     [[ "$SERVER_IP" =~ : ]]; then
@@ -340,7 +342,8 @@ main() {
     cp studio/.env.example studio/.env
     safe_sed "s|FERNET_SECRET=pass|FERNET_SECRET=$SHARED_FERNET_SECRET|g" studio/.env
     safe_sed "s|NGINX_SHARED_TOKEN=pass|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" studio/.env
-    safe_sed "s|PUSH_WORKER_TOKEN=pass|PUSH_WORKER_TOKEN=$PUSH_WORKER_TOKEN|g" studio/.env
+    safe_sed "s|NGINX_HMAC_SECRET=pass|NGINX_HMAC_SECRET=$SHARED_NGINX_HMAC_SECRET|g" studio/.env
+    safe_sed "s|INTERNAL_HMAC_SECRET=pass|INTERNAL_HMAC_SECRET=$SHARED_INTERNAL_HMAC_SECRET|g" studio/.env
     safe_sed "s|COOKIE_SIGN_SECRET=pass|COOKIE_SIGN_SECRET=$COOKIE_SIGN_SECRET|g" studio/.env
     safe_sed "s|POSTGRES_NGINX_PASSWORD=pass|POSTGRES_NGINX_PASSWORD=$POSTGRES_NGINX_PASSWORD|g" studio/.env
     safe_sed "s|^SERVER_DOMAIN=.*|SERVER_DOMAIN=${PROTO}://${SERVER_IP}|g" studio/.env
@@ -357,6 +360,8 @@ main() {
     print_status "Chaves compartilhadas configuradas:"
     echo "  - FERNET_SECRET (servidor e studio)"
     echo "  - NGINX_SHARED_TOKEN (servidor e studio)"
+    echo "  - NGINX_HMAC_SECRET (servidor e studio)"
+    echo "  - INTERNAL_HMAC_SECRET (servidor e studio)"
     echo ""
     if [[ "$PROTO" == "http" ]]; then
         IP_DOMAIN="IP"

@@ -1,7 +1,10 @@
 local bit = require "bit"
+local digest = require "resty.openssl.digest"
+local hmac_sha256 = require "utils.hmac_sha256"
+local str = require "resty.string"
 
-local expected_token = os.getenv("PUSH_WORKER_TOKEN") or ""
-local provided_token = ngx.req.get_headers()["X-Push-Worker-Token"]
+local secret = os.getenv("INTERNAL_HMAC_SECRET") or ""
+local max_skew = tonumber(os.getenv("INTERNAL_HMAC_MAX_SKEW_SECONDS") or "60") or 60
 
 local function secure_compare(left, right)
     if not left or not right or #left ~= #right then
@@ -15,30 +18,131 @@ local function secure_compare(left, right)
     return diff == 0
 end
 
-if ngx.var.request_method ~= "POST" then
-    ngx.status = ngx.HTTP_METHOD_NOT_ALLOWED
+local function respond(status, message)
+    ngx.status = status
     ngx.header.content_type = "application/json"
-    ngx.say('{"error":"Use POST method"}')
-    return ngx.exit(ngx.HTTP_METHOD_NOT_ALLOWED)
+    ngx.say('{"error":"' .. message .. '"}')
+    return ngx.exit(status)
 end
 
-if expected_token == "" then
-    ngx.log(ngx.ERR, "[PUSH] PUSH_WORKER_TOKEN nao configurado")
+local function get_header(headers, name)
+    return headers[name] or headers[name:lower()]
+end
+
+local function read_body()
+    ngx.req.read_body()
+
+    local body = ngx.req.get_body_data()
+    if body then
+        return body
+    end
+
+    local body_file = ngx.req.get_body_file()
+    if not body_file then
+        return ""
+    end
+
+    local file, err = io.open(body_file, "rb")
+    if not file then
+        ngx.log(ngx.ERR, "[PUSH] Falha ao ler body temporario: ", err or "erro desconhecido")
+        return nil
+    end
+
+    local data = file:read("*a")
+    file:close()
+    return data or ""
+end
+
+local function sha256_hex(value)
+    local ctx, err = digest.new("sha256")
+    if not ctx then
+        return nil, err
+    end
+
+    local ok, update_err = ctx:update(value)
+    if not ok then
+        return nil, update_err
+    end
+
+    local raw, final_err = ctx:final()
+    if not raw then
+        return nil, final_err
+    end
+
+    return str.to_hex(raw)
+end
+
+if ngx.var.request_method ~= "POST" then
+    return respond(ngx.HTTP_METHOD_NOT_ALLOWED, "Use POST method")
+end
+
+if secret == "" then
+    ngx.log(ngx.ERR, "[PUSH] INTERNAL_HMAC_SECRET nao configurado")
     return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
 end
 
-if not provided_token or provided_token == "" then
-    ngx.log(ngx.WARN, "[PUSH] Requisicao sem X-Push-Worker-Token")
-    ngx.status = ngx.HTTP_UNAUTHORIZED
-    ngx.header.content_type = "application/json"
-    ngx.say('{"error":"Missing push worker token"}')
-    return ngx.exit(ngx.HTTP_UNAUTHORIZED)
+local headers = ngx.req.get_headers()
+local service = get_header(headers, "X-Internal-Service")
+local timestamp = tonumber(get_header(headers, "X-Internal-Timestamp") or "")
+local nonce = get_header(headers, "X-Internal-Nonce")
+local provided_signature = get_header(headers, "X-Internal-Signature")
+
+if service ~= "push-worker" then
+    ngx.log(ngx.WARN, "[PUSH] Servico interno invalido: ", service or "")
+    return respond(ngx.HTTP_UNAUTHORIZED, "Invalid internal service")
 end
 
-if not secure_compare(provided_token, expected_token) then
-    ngx.log(ngx.WARN, "[PUSH] Token invalido para /api/internal/push")
-    ngx.status = ngx.HTTP_FORBIDDEN
-    ngx.header.content_type = "application/json"
-    ngx.say('{"error":"Invalid push worker token"}')
-    return ngx.exit(ngx.HTTP_FORBIDDEN)
+if not timestamp or not nonce or nonce == "" or not provided_signature or provided_signature == "" then
+    ngx.log(ngx.WARN, "[PUSH] Headers HMAC ausentes")
+    return respond(ngx.HTTP_UNAUTHORIZED, "Missing internal signature")
+end
+
+local now = ngx.time()
+if math.abs(now - timestamp) > max_skew then
+    ngx.log(ngx.WARN, "[PUSH] Timestamp HMAC fora da janela: ", timestamp)
+    return respond(ngx.HTTP_UNAUTHORIZED, "Expired internal signature")
+end
+
+local nonce_cache = ngx.shared.internal_hmac_nonces
+if not nonce_cache then
+    ngx.log(ngx.ERR, "[PUSH] lua_shared_dict internal_hmac_nonces nao configurado")
+    return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
+end
+
+local body = read_body()
+if body == nil then
+    return respond(ngx.HTTP_BAD_REQUEST, "Invalid request body")
+end
+
+local body_hash, hash_err = sha256_hex(body)
+if not body_hash then
+    ngx.log(ngx.ERR, "[PUSH] Falha ao calcular sha256 do body: ", hash_err or "erro desconhecido")
+    return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
+end
+
+local canonical = table.concat({
+    "push-v1",
+    ngx.var.request_method,
+    ngx.var.uri,
+    tostring(timestamp),
+    nonce,
+    body_hash,
+}, "\n")
+
+local expected_signature, sign_err = hmac_sha256.hex(secret, canonical)
+if not expected_signature then
+    ngx.log(ngx.ERR, "[PUSH] Falha ao calcular HMAC: ", sign_err or "erro desconhecido")
+    return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
+end
+
+if not secure_compare(provided_signature, expected_signature) then
+    ngx.log(ngx.WARN, "[PUSH] Assinatura HMAC invalida para /api/internal/push")
+    return respond(ngx.HTTP_FORBIDDEN, "Invalid internal signature")
+end
+
+local nonce_key = service .. ":" .. nonce
+local nonce_added, nonce_err = nonce_cache:add(nonce_key, true, max_skew)
+if not nonce_added then
+    ngx.log(ngx.WARN, "[PUSH] Nonce HMAC reutilizado ou invalido: ", nonce_err or "exists")
+    return respond(ngx.HTTP_UNAUTHORIZED, "Replayed internal signature")
 end

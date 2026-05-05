@@ -22,6 +22,7 @@ local res = ngx.location.capture("/_internal_api/projects/" .. slug .. "/members
     headers = {
         ["Remote-Groups"] = remote_groups,
         ["X-User-Id"] = request_headers["X-User-Id"],
+        ["X-User-Token"] = request_headers["X-User-Token"],
         ["X-User-Groups"] = request_headers["X-User-Groups"],
         ["X-User-Username"] = request_headers["X-User-Username"],
         ["X-User-Display-Name"] = request_headers["X-User-Display-Name"]
