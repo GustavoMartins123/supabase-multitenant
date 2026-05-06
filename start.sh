@@ -22,6 +22,20 @@ done
 
 echo -e "\n✅ Banco de dados está pronto e aceitando conexões."
 
+echo "⏳ Aguardando Supavisor ficar pronto..."
+COUNTER=0
+until docker exec supabase-pooler curl -sS -o /dev/null http://localhost:4000 2>/dev/null; do
+    if [ $COUNTER -gt 60 ]; then
+        echo "❌ ERRO: O Supavisor não respondeu a tempo. Verifique os logs com 'docker logs supabase-pooler'."
+        exit 1
+    fi
+    printf "."
+    sleep 2
+    let COUNTER=COUNTER+1
+done
+
+echo -e "\n✅ Supavisor está pronto."
+
 echo "▶️  Iniciando o Traefik..."
 
 docker compose -f traefik/docker-compose.yml up -d

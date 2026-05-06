@@ -26,7 +26,6 @@ CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY,
   authelia_username TEXT UNIQUE NOT NULL,
   display_name TEXT,
-  authelia_groups TEXT[] NOT NULL DEFAULT '{}'::text[],
   is_active BOOLEAN NOT NULL DEFAULT true,
   source TEXT NOT NULL DEFAULT 'authelia',
   last_login_at TIMESTAMPTZ,
@@ -69,35 +68,31 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
 CREATE TABLE IF NOT EXISTS projects (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL UNIQUE,
-  owner_id TEXT NOT NULL,
-  owner_uuid UUID REFERENCES users(id) ON DELETE SET NULL,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
   anon_key TEXT,
   service_role TEXT,
   config_token TEXT
 );
 
 COMMENT ON COLUMN projects.owner_id IS
-  'UUID canonico do usuario serializado em texto por compatibilidade.';
+  'UUID canonico do usuario dono do projeto.';
 
 CREATE INDEX IF NOT EXISTS idx_projects_owner_id ON projects(owner_id);
-CREATE INDEX IF NOT EXISTS idx_projects_owner_uuid ON projects(owner_uuid);
 EOSQL
 
 echo "Criando tabela dos membros do projeto"
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
 CREATE TABLE IF NOT EXISTS project_members (
   project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
-  user_id TEXT NOT NULL,
-  user_uuid UUID REFERENCES users(id) ON DELETE SET NULL,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   role TEXT DEFAULT 'member',
   PRIMARY KEY (project_id, user_id)
 );
 
 COMMENT ON COLUMN project_members.user_id IS
-  'UUID canonico do usuario serializado em texto por compatibilidade.';
+  'UUID canonico do usuario membro do projeto.';
 
 CREATE INDEX IF NOT EXISTS idx_project_members_user_id ON project_members(user_id);
-CREATE INDEX IF NOT EXISTS idx_project_members_user_uuid ON project_members(user_uuid);
 EOSQL
 
 echo "Criando tabelas de auditoria..."
@@ -121,13 +116,13 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
   CREATE TABLE jobs (
     job_id     UUID PRIMARY KEY,
     project    TEXT    NOT NULL,
-    owner_id   TEXT    NOT NULL,
+    owner_id   UUID    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     status     TEXT    NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT now()
   );
 
   COMMENT ON COLUMN jobs.owner_id IS
-    'UUID canonico do usuario serializado em texto por compatibilidade.';
+    'UUID canonico do usuario que iniciou o job.';
 EOSQL
 
 echo "Transformando _supabase_template em um template de fato..."

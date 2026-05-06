@@ -142,7 +142,6 @@ async def ensure_identity_schema(pool: asyncpg.Pool) -> None:
                 id UUID PRIMARY KEY,
                 authelia_username TEXT UNIQUE NOT NULL,
                 display_name TEXT,
-                authelia_groups TEXT[] NOT NULL DEFAULT '{}'::text[],
                 is_active BOOLEAN NOT NULL DEFAULT true,
                 source TEXT NOT NULL DEFAULT 'authelia',
                 last_login_at TIMESTAMPTZ,
@@ -182,16 +181,10 @@ async def ensure_identity_schema(pool: asyncpg.Pool) -> None:
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             );
 
-            ALTER TABLE projects
-                ADD COLUMN IF NOT EXISTS owner_uuid UUID REFERENCES users(id) ON DELETE SET NULL;
-
-            ALTER TABLE project_members
-                ADD COLUMN IF NOT EXISTS user_uuid UUID REFERENCES users(id) ON DELETE SET NULL;
-
             CREATE INDEX IF NOT EXISTS idx_users_last_sync_at ON users(last_sync_at);
             CREATE INDEX IF NOT EXISTS idx_user_groups_user_id ON user_groups(user_id);
-            CREATE INDEX IF NOT EXISTS idx_projects_owner_uuid ON projects(owner_uuid);
-            CREATE INDEX IF NOT EXISTS idx_project_members_user_uuid ON project_members(user_uuid);
+            CREATE INDEX IF NOT EXISTS idx_projects_owner_id ON projects(owner_id);
+            CREATE INDEX IF NOT EXISTS idx_project_members_user_id ON project_members(user_id);
             CREATE INDEX IF NOT EXISTS idx_project_members_audit_project_id ON project_members_audit(project_id);
             """
         )
@@ -200,7 +193,7 @@ async def ensure_identity_schema(pool: asyncpg.Pool) -> None:
 async def audit_user_group_change(
     conn: asyncpg.Connection,
     *,
-    user_id: str,
+    user_id: uuid.UUID,
     group_name: str,
     action: str,
     old_value: dict[str, Any] | None,
@@ -253,7 +246,7 @@ async def sync_user_record(
 
     row = await conn.fetchrow(
         """
-        SELECT id, authelia_groups
+        SELECT id
         FROM users
         WHERE id = $1
         """,
@@ -266,16 +259,14 @@ async def sync_user_record(
             UPDATE users
             SET authelia_username = $1,
                 display_name = $2,
-                authelia_groups = $3,
-                is_active = $4,
-                source = $5,
+                is_active = $3,
+                source = $4,
                 last_sync_at = now(),
                 updated_at = now()
-            WHERE id = $6
+            WHERE id = $5
             """,
             normalized_username,
             display_name,
-            normalized_groups,
             is_active,
             source,
             user_id,
@@ -285,15 +276,14 @@ async def sync_user_record(
             """
             INSERT INTO users(
                 id, authelia_username, display_name,
-                authelia_groups, is_active, source
+                is_active, source
             )
-            VALUES($1, $2, $3, $4, $5, $6)
+            VALUES($1, $2, $3, $4, $5)
             RETURNING id
             """,
             user_id,
             normalized_username,
             display_name,
-            normalized_groups,
             is_active,
             source,
         )
@@ -383,7 +373,7 @@ async def _set_job_status(
 async def _create_project_job(
     pool,
     project_name: str,
-    user: str,
+    user: uuid.UUID,
     *,
     message: str | None = None,
 ) -> str:
@@ -531,9 +521,19 @@ async def resolve_authenticated_user(
     async with pool.acquire() as conn:
         user_row = await conn.fetchrow(
             """
-            SELECT id, authelia_username, display_name, authelia_groups, is_active
-            FROM users
-            WHERE id = $1
+            SELECT
+                u.id,
+                u.authelia_username,
+                u.display_name,
+                u.is_active,
+                COALESCE(
+                    array_agg(ug.group_name) FILTER (WHERE ug.group_name IS NOT NULL),
+                    ARRAY[]::text[]
+                ) AS groups
+            FROM users u
+            LEFT JOIN user_groups ug ON ug.user_id = u.id
+            WHERE u.id = $1
+            GROUP BY u.id
             """,
             signed_user_id,
         )
@@ -553,10 +553,9 @@ async def resolve_authenticated_user(
     if not user_row["is_active"]:
         raise HTTPException(403, "Usuário desativado")
 
-    groups = normalize_groups(user_row["authelia_groups"])
+    groups = normalize_groups(user_row["groups"])
     return {
         "db_user_id": user_row["id"],
-        "user_id_text": str(user_row["id"]),
         "username": user_row["authelia_username"],
         "display_name": user_row["display_name"],
         "groups": groups,
@@ -604,7 +603,7 @@ async def require_synced_user_record(
 
 async def get_project_row(conn: asyncpg.Connection, project_name: str) -> asyncpg.Record:
     row = await conn.fetchrow(
-        "SELECT id, owner_id, owner_uuid FROM projects WHERE name = $1",
+        "SELECT id, owner_id FROM projects WHERE name = $1",
         project_name,
     )
     if not row:
@@ -623,13 +622,11 @@ async def get_project_role(
         SELECT role
         FROM project_members
         WHERE project_id = $1
-          AND (user_uuid = $2 OR user_id = $3)
-        ORDER BY CASE WHEN user_uuid = $2 THEN 0 ELSE 1 END
+          AND user_id = $2
         LIMIT 1
         """,
         project_id,
         auth_user["db_user_id"],
-        auth_user["user_id_text"],
     )
 
 
@@ -637,23 +634,21 @@ async def get_project_member_row(
     conn: asyncpg.Connection,
     *,
     project_id: str,
-    user_uuid: uuid.UUID | None,
-    user_key: str | None,
+    user_id: uuid.UUID | None,
 ) -> asyncpg.Record | None:
+    if user_id is None:
+        return None
+
     return await conn.fetchrow(
         """
-        SELECT user_id, user_uuid, role
+        SELECT user_id, role
         FROM project_members
         WHERE project_id = $1
-          AND (user_uuid = $2 OR user_id = $3)
-        ORDER BY
-            CASE WHEN user_uuid = $2 THEN 0 ELSE 1 END,
-            CASE WHEN user_id = $3 THEN 0 ELSE 1 END
+          AND user_id = $2
         LIMIT 1
         """,
         project_id,
-        user_uuid,
-        user_key,
+        user_id,
     )
 
 
@@ -661,69 +656,33 @@ async def upsert_project_member(
     conn: asyncpg.Connection,
     *,
     project_id: str,
-    user_uuid: uuid.UUID,
-    user_key: str,
+    user_id: uuid.UUID,
     role: str,
 ) -> str | None:
-    matching_rows = await conn.fetch(
+    existing_role = await conn.fetchval(
         """
-        SELECT user_id, user_uuid, role
+        SELECT role
         FROM project_members
-        WHERE project_id = $1
-          AND (user_uuid = $2 OR user_id = $3)
-        ORDER BY
-            CASE WHEN user_id = $3 THEN 0 ELSE 1 END,
-            CASE WHEN user_uuid = $2 THEN 0 ELSE 1 END,
-            user_id
-        """,
-        project_id,
-        user_uuid,
-        user_key,
-    )
-
-    if not matching_rows:
-        await conn.execute(
-            """
-            INSERT INTO project_members(project_id, user_id, user_uuid, role)
-            VALUES($1, $2, $3, $4)
-            """,
-            project_id,
-            user_key,
-            user_uuid,
-            role,
-        )
-        return None
-
-    canonical = matching_rows[0]
-    await conn.execute(
-        """
-        UPDATE project_members
-        SET user_id = $3,
-            user_uuid = $4,
-            role = $5
         WHERE project_id = $1
           AND user_id = $2
         """,
         project_id,
-        canonical["user_id"],
-        user_key,
-        user_uuid,
+        user_id,
+    )
+
+    await conn.execute(
+        """
+        INSERT INTO project_members(project_id, user_id, role)
+        VALUES($1, $2, $3)
+        ON CONFLICT (project_id, user_id)
+        DO UPDATE SET role = EXCLUDED.role
+        """,
+        project_id,
+        user_id,
         role,
     )
 
-    stale_user_ids = [row["user_id"] for row in matching_rows[1:]]
-    if stale_user_ids:
-        await conn.execute(
-            """
-            DELETE FROM project_members
-            WHERE project_id = $1
-              AND user_id = ANY($2::text[])
-            """,
-            project_id,
-            stale_user_ids,
-        )
-
-    return canonical["role"]
+    return existing_role
 
 
 async def ensure_project_member_access(
@@ -737,12 +696,11 @@ async def ensure_project_member_access(
         SELECT 1
         FROM project_members
         WHERE project_id = $1
-          AND (user_uuid = $2 OR user_id = $3)
+          AND user_id = $2
         LIMIT 1
         """,
         project_id,
         auth_user["db_user_id"],
-        auth_user["user_id_text"],
     )
     if not in_project and not auth_user["is_global_admin"]:
         raise HTTPException(403, "Acesso negado: você não é membro deste projeto")
@@ -764,11 +722,11 @@ async def audit_project_member_change(
     conn: asyncpg.Connection,
     *,
     project_id: str,
-    target_user_id: str | None,
+    target_user_id: uuid.UUID | None,
     old_role: str | None,
     new_role: str | None,
     action: str,
-    actor_user_id: str | None,
+    actor_user_id: uuid.UUID | None,
 ) -> None:
     await conn.execute(
         """
@@ -801,10 +759,10 @@ async def list_projects(
                   SELECT 1
                   FROM project_members m
                   WHERE m.project_id = p.id
-                    AND (m.user_uuid = $1 OR m.user_id = $2)
+                    AND m.user_id = $1
               )
             ORDER BY p.name
-        """, auth_user["db_user_id"], auth_user["user_id_text"])
+        """, auth_user["db_user_id"])
     result = []
     for r in rows:
         anon_token = fernet.decrypt(r["anon_key"].encode()).decode()
@@ -840,26 +798,26 @@ async def create_project(
                 raise HTTPException(status_code=409, detail="Project already exists")
             project_id = await conn.fetchval(
                     """
-                    INSERT INTO projects(name, owner_id, owner_uuid)
-                    VALUES($1, $2, $3)
+                    INSERT INTO projects(name, owner_id)
+                    VALUES($1, $2)
                     RETURNING id
                     """,
-                    name, auth_user["user_id_text"], auth_user["db_user_id"]
+                    name, auth_user["db_user_id"]
                 )
             await conn.execute(
                     """
-                    INSERT INTO project_members(project_id, user_id, user_uuid, role)
-                    VALUES($1, $2, $3, 'admin')
+                    INSERT INTO project_members(project_id, user_id, role)
+                    VALUES($1, $2, 'admin')
                     """,
-                    project_id, auth_user["user_id_text"], auth_user["db_user_id"]
+                    project_id, auth_user["db_user_id"]
                 )
             await conn.execute(
                 """INSERT INTO jobs(job_id, project, owner_id, status)
                    VALUES($1, $2, $3, 'queued')""",
-                job_id, name, auth_user["user_id_text"]
+                job_id, name, auth_user["db_user_id"]
             )
 
-    tasks.add_task(_provision_and_store_keys, job_id, name, auth_user["user_id_text"])
+    tasks.add_task(_provision_and_store_keys, job_id, name, auth_user["db_user_id"])
     return {"job_id": job_id, "status": "queued"}
 
 
@@ -897,20 +855,20 @@ async def duplicate_project(
                 raise HTTPException(409, "Nome de projeto já existe")
 
             project_id = await conn.fetchval("""
-                INSERT INTO projects(name, owner_id, owner_uuid)
-                VALUES($1, $2, $3) RETURNING id
-            """, new_name, auth_user["user_id_text"], auth_user["db_user_id"])
+                INSERT INTO projects(name, owner_id)
+                VALUES($1, $2) RETURNING id
+            """, new_name, auth_user["db_user_id"])
 
             await conn.execute("""
-                INSERT INTO project_members(project_id, user_id, user_uuid, role)
-                VALUES($1, $2, $3, 'admin')
-            """, project_id, auth_user["user_id_text"], auth_user["db_user_id"])
+                INSERT INTO project_members(project_id, user_id, role)
+                VALUES($1, $2, 'admin')
+            """, project_id, auth_user["db_user_id"])
 
             job_id = str(uuid.uuid4())
             await conn.execute(
                 """INSERT INTO jobs(job_id, project, owner_id, status)
                    VALUES($1, $2, $3, 'queued')""",
-                job_id, new_name, auth_user["user_id_text"]
+                job_id, new_name, auth_user["db_user_id"]
             )
 
     tasks.add_task(
@@ -918,14 +876,20 @@ async def duplicate_project(
         job_id,
         original,
         new_name,
-        auth_user["user_id_text"],
+        auth_user["db_user_id"],
         body.copy_data,
     )
 
     return {"job_id": job_id, "status": "queued"}
 
 
-async def _duplicate_and_store_keys(job_id: str, original_name: str, new_name: str, owner_id: str, copy_data: bool):
+async def _duplicate_and_store_keys(
+    job_id: str,
+    original_name: str,
+    new_name: str,
+    owner_id: uuid.UUID,
+    copy_data: bool,
+):
     pool = await get_pool()
     async def set_status(st: str):
         async with pool.acquire() as conn:
@@ -1306,7 +1270,7 @@ async def delete_project(
     job_id = await _create_project_job(
         pool,
         project_name,
-        auth_user["user_id_text"],
+        auth_user["db_user_id"],
         message="Exclusão iniciada em segundo plano.",
     )
     tasks.add_task(_delete_project_background, job_id, project_name)
@@ -1408,8 +1372,7 @@ async def add_member(
             existing_role = await upsert_project_member(
                 conn,
                 project_id=project_row["id"],
-                user_uuid=target_user["id"],
-                user_key=str(target_user["id"]),
+                user_id=target_user["id"],
                 role=member.role,
             )
             await audit_project_member_change(
@@ -1439,14 +1402,13 @@ async def list_members_by_ref(
         await ensure_project_member_access(conn, project_id=pid, auth_user=auth_user)
 
         rows = await conn.fetch(
-            "SELECT user_id, user_uuid, role FROM project_members "
+            "SELECT user_id, role FROM project_members "
             "WHERE project_id=$1",
             pid,
         )
     return [
         {
-            "user_id": str(r["user_uuid"]) if r["user_uuid"] else r["user_id"],
-            "user_uuid": str(r["user_uuid"]) if r["user_uuid"] else None,
+            "user_id": str(r["user_id"]),
             "role": r["role"],
         }
         for r in rows
@@ -1483,25 +1445,21 @@ async def remove_member_by_ref(
             field_name="member_id",
         )
         target_uuid = target_member["id"] if target_member else parse_uuid_value(member_id)
-        target_key = str(target_member["id"]) if target_member else member_id.strip()
         old_member_row = await get_project_member_row(
             conn,
             project_id=project_id,
-            user_uuid=target_uuid,
-            user_key=target_key,
+            user_id=target_uuid,
         )
         old_role = old_member_row["role"] if old_member_row else None
-        target_uuid = old_member_row["user_uuid"] if old_member_row and old_member_row["user_uuid"] else target_uuid
 
         await conn.execute(
             """
             DELETE FROM project_members
             WHERE project_id = $1
-              AND (user_uuid = $2 OR user_id = $3)
+              AND user_id = $2
             """,
             project_id,
             target_uuid,
-            target_key,
         )
         if old_role is not None:
             await audit_project_member_change(
@@ -1545,7 +1503,7 @@ async def enc_key(
 
     return {"enc_service_key": row["service_role"]}
 
-async def _provision_and_store_keys(job_id: str, project_name: str, user: str):
+async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.UUID):
     pool = await get_pool()
     async def set_status(st: str):
         await pool.execute(
@@ -2009,7 +1967,7 @@ async def stop_project(
         job_id = await _create_project_job(
             pool,
             project_name,
-            auth_user["user_id_text"],
+            auth_user["db_user_id"],
             message="Parada iniciada em segundo plano.",
         )
         tasks.add_task(
@@ -2201,9 +2159,7 @@ async def get_projects_for_user(
     if not uid:
         raise HTTPException(400, "user_id é obrigatório")
     target_uuid = parse_uuid_value(uid)
-    target_hash = uid.strip().lower()
-
-    if target_uuid is None and not re.fullmatch(r"[0-9a-f]{64}", target_hash):
+    if target_uuid is None:
         raise HTTPException(400, "user_id inválido")
 
     async with pool.acquire() as conn:
@@ -2211,9 +2167,9 @@ async def get_projects_for_user(
             SELECT DISTINCT p.name
             FROM projects p
             JOIN project_members m ON p.id = m.project_id
-            WHERE (m.user_uuid = $1 OR m.user_id = $2)
-            AND m.role = 'admin'
-        """, target_uuid, target_hash)
+            WHERE m.user_id = $1
+              AND m.role = 'admin'
+        """, target_uuid)
 
         projects = []
         for r in rows:
@@ -2253,7 +2209,7 @@ async def list_all_users_for_admin(
             raise HTTPException(404, "project not found")
 
         current_members = await conn.fetch(
-            "SELECT user_id, user_uuid, role FROM project_members WHERE project_id=$1",
+            "SELECT user_id, role FROM project_members WHERE project_id=$1",
             project["id"],
         )
 
@@ -2262,8 +2218,7 @@ async def list_all_users_for_admin(
         "project_id": project["id"],
         "current_members": [
             {
-                "user_id": str(m["user_uuid"]) if m["user_uuid"] else m["user_id"],
-                "user_uuid": str(m["user_uuid"]) if m["user_uuid"] else None,
+                "user_id": str(m["user_id"]),
                 "role": m["role"],
                 "status": "member"
             } for m in current_members
@@ -2304,21 +2259,19 @@ async def transfer_project(
 
             project_id = proj_row["id"]
             current_owner = proj_row["owner_id"]
-            current_owner_uuid = proj_row["owner_uuid"]
 
-            if current_owner_uuid == new_owner_user["id"] or current_owner == str(new_owner_user["id"]):
+            if current_owner == new_owner_user["id"]:
                 return {"status": "noop", "detail": "Já é o proprietário"}
 
             await conn.execute(
-                "UPDATE projects SET owner_id = $1, owner_uuid = $2 WHERE id = $3",
-                str(new_owner_user["id"]), new_owner_user["id"], project_id,
+                "UPDATE projects SET owner_id = $1 WHERE id = $2",
+                new_owner_user["id"], project_id,
             )
 
             previous_target_role = await upsert_project_member(
                 conn,
                 project_id=project_id,
-                user_uuid=new_owner_user["id"],
-                user_key=str(new_owner_user["id"]),
+                user_id=new_owner_user["id"],
                 role="admin",
             )
             await audit_project_member_change(
@@ -2336,16 +2289,16 @@ async def transfer_project(
                 UPDATE project_members
                 SET role = 'member'
                 WHERE project_id = $1
-                  AND (user_uuid = $2 OR user_id = $3)
+                  AND user_id = $2
                   AND role       = 'admin'
                 """,
-                project_id, current_owner_uuid, current_owner,
+                project_id, current_owner,
             )
             if current_owner:
                 await audit_project_member_change(
                     conn,
                     project_id=project_id,
-                    target_user_id=current_owner_uuid,
+                    target_user_id=current_owner,
                     old_role="admin",
                     new_role="member",
                     action="owner_transfer",
@@ -2769,7 +2722,7 @@ async def recreate_project_services(
         job_id = await _create_project_job(
             pool,
             project_name,
-            auth_user["user_id_text"],
+            auth_user["db_user_id"],
             message="Recriacao iniciada em segundo plano.",
         )
         tasks.add_task(

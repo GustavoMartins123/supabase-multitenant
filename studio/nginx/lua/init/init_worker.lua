@@ -5,6 +5,7 @@
         local user_sync = require "user_sync"
         local cache = ngx.shared.users_cache
         local yaml = "/config/users_database.yml"
+        local max_bootstrap_attempts = 20
 
         local function queue_user_sync(users_for_sync)
             if ngx.worker.id() ~= 0 or not users_for_sync or #users_for_sync == 0 then
@@ -56,6 +57,7 @@
             ngx.log(ngx.INFO, "Carregando usuários do arquivo YAML…")
             local users_for_sync = {}
             local cjson = require "cjson.safe"
+            local missing_identifiers = 0
             
             for uname, attr in pairs(t.users or {}) do
                 local groups = attr.groups or {}
@@ -76,6 +78,7 @@
                 local display_name = attr.displayname or uname
                 local user_uuid, _, identifier_err = authelia_identifiers.ensure_identifier(uname)
                 if not user_uuid then
+                    missing_identifiers = missing_identifiers + 1
                     ngx.log(ngx.ERR, "[SYNC] Falha ao gerar/exportar opaque identifier para ", uname, ": ", identifier_err)
                 end
                 local cache_payload = {
@@ -127,6 +130,12 @@
             cache:set("__mtime", lfs.attributes(yaml, "modification"))
             ngx.log(ngx.INFO, "[CACHE] Cache atualizado em mtime=", cache:get("__mtime"))
             queue_user_sync(users_for_sync)
+
+            if missing_identifiers > 0 then
+                return nil, "falha ao obter opaque identifier para " .. missing_identifiers .. " usuario(s)"
+            end
+
+            return true
         end
 
         local function watch_yaml_dir(premature)
@@ -172,26 +181,49 @@
         ngx.thread.spawn(read_events)
     end
     if ngx.worker.id() == 0 then
-        local ok, timer_err = ngx.timer.at(0, function(premature)
-            if premature then
-                return
-            end
+        local function schedule_bootstrap(delay, attempt)
+            local ok, timer_err = ngx.timer.at(delay, function(premature)
+                if premature then
+                    return
+                end
 
-            local loaded, load_err = pcall(load_users)
-            if not loaded then
-                ngx.log(ngx.ERR, "[CACHE] Erro ao carregar usuarios no bootstrap: ", load_err)
-                return
-            end
+                local loaded, load_ok, load_err = pcall(load_users)
+                if not loaded or not load_ok then
+                    local err = loaded and load_err or load_ok
+                    if attempt < max_bootstrap_attempts then
+                        local next_delay = math.min(30, math.max(1, attempt * 2))
+                        ngx.log(
+                            ngx.WARN,
+                            "[CACHE] Bootstrap de usuarios falhou na tentativa ",
+                            attempt,
+                            "/",
+                            max_bootstrap_attempts,
+                            ": ",
+                            err or "erro desconhecido",
+                            ". Tentando novamente em ",
+                            next_delay,
+                            "s"
+                        )
+                        schedule_bootstrap(next_delay, attempt + 1)
+                    else
+                        ngx.log(ngx.ERR, "[CACHE] Bootstrap de usuarios falhou apos ", attempt, " tentativas: ", err)
+                    end
+                    return
+                end
 
-            local keys, err = cache:get_keys(0)
-            if keys then
-                ngx.log(ngx.INFO, "[CACHE] total keys loaded: ", #keys)
-            else
-                ngx.log(ngx.INFO, "[CACHE] get_keys error: ", err)
+                local keys, err = cache:get_keys(0)
+                if keys then
+                    ngx.log(ngx.INFO, "[CACHE] total keys loaded: ", #keys)
+                else
+                    ngx.log(ngx.INFO, "[CACHE] get_keys error: ", err)
+                end
+            end)
+
+            if not ok then
+                ngx.log(ngx.ERR, "[CACHE] Falha ao agendar bootstrap de usuarios: ", timer_err)
             end
-        end)
-        if not ok then
-            ngx.log(ngx.ERR, "[CACHE] Falha ao agendar bootstrap de usuarios: ", timer_err)
         end
+
+        schedule_bootstrap(0, 1)
         ngx.timer.at(0, watch_yaml_dir)
     end
