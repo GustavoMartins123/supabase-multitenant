@@ -216,6 +216,7 @@ docker ps
 
 Se tudo estiver com status `Up`, acesse o Studio no IP que você configurou no `setup.sh` (por exemplo: `https://<seu_ip_local>:9091`).
 No primeiro acesso, crie a conta administrativa inicial pelo navegador. Depois disso, a aplicação redireciona para o fluxo de login do Authelia.
+Requisições HTTP simples para `:9091` são redirecionadas para HTTPS na mesma porta.
 
 ---
 

@@ -54,5 +54,5 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 RUN which argon2 && argon2 -h || echo "argon2 installation check failed"
 
-EXPOSE 4000
+EXPOSE 443
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

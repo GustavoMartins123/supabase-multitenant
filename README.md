@@ -234,6 +234,7 @@ If everything has the status `Up`, access the Studio endpoint at the IP you conf
 Important about the Studio ports:
 
 - `9091` is the single public Studio endpoint served by Nginx/OpenResty.
+- Plain HTTP requests to `:9091` are redirected to HTTPS on the same port.
 - Authelia is reached through the same origin under `/auth`.
 - The usual browser flow is: open `https://<your_local_ip>:9091`; if no admin exists, create the initial administrator, otherwise the app redirects unauthenticated users to Authelia.
 - Server-to-server integrations that target the Studio gateway, such as the `push-worker`, must also use port `9091`.
