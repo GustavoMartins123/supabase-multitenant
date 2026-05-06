@@ -61,11 +61,6 @@
             
             local function is_bootstrap_placeholder(uname, attr)
                 return uname == "__bootstrap_placeholder__"
-                    or (
-                        type(attr) == "table"
-                        and type(attr.extra) == "table"
-                        and attr.extra.bootstrap_placeholder == true
-                    )
             end
 
             for uname, attr in pairs(t.users or {}) do

@@ -10,7 +10,6 @@ users:
     locale: ''
     phone_extension: ''
     extra:
-      bootstrap_placeholder: true
       created_at: ts:2026-05-06T00:00:00Z
     family_name: ''
     given_name: ''

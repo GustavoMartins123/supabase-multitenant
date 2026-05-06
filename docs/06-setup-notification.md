@@ -6,7 +6,7 @@ Por padrão, a plataforma utiliza uma arquitetura descentralizada para o envio d
 > A infraestrutura base do **Gateway (Nginx + Lua)** para push já vem pronta, mas o fluxo atual nao depende apenas do `firebase.json`.
 > A rota `/api/internal/push` e protegida por assinatura HMAC backend-to-backend e foi desenhada para uso exclusivo do `push-worker`.
 > Se o worker estiver em outra maquina, ele deve chamar o Nginx do Studio em `https://<IP_DO_STUDIO>:9091/api/internal/push`.
-> A porta `9091` e a origem publica unica do Studio; o Authelia fica acessivel pela mesma origem em `/auth/`.
+> A porta `9091` e a origem publica unica do Studio; o Authelia fica acessivel pela mesma origem em `/auth`.
 
 Os passos a seguir configuram as credenciais do Google e preparam o banco de dados dos projetos para se integrarem a esse fluxo.
 

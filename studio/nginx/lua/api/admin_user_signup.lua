@@ -200,11 +200,6 @@ local original_yaml_data = lyaml.load(content)
 
 local function is_bootstrap_placeholder(username, user_info)
     return username == "__bootstrap_placeholder__"
-        or (
-            type(user_info) == "table"
-            and type(user_info.extra) == "table"
-            and user_info.extra.bootstrap_placeholder == true
-        )
 end
 
 local function users_have_admin(users)

@@ -119,8 +119,8 @@ postgres://supabase_storage_admin.projeto_x:senha@pooler:5432/postgres
 
 **Fluxo de entrada:**
 - **9091:** origem publica unica do Studio, servida pelo Nginx/OpenResty
-- **/auth/**: proxy interno do Nginx para o Authelia
-- Em outras palavras: o usuário entra por `9091`; se ainda não existe administrador, o Flutter abre o bootstrap do admin inicial, senão usuários sem sessão são enviados para `/auth/`
+- **/auth**: proxy interno do Nginx para o Authelia
+- Em outras palavras: o usuário entra por `9091`; se ainda não existe administrador, o Flutter abre o bootstrap do admin inicial, senão usuários sem sessão são enviados para `/auth?rd=...`
 - Integrações servidor-servidor que falam com o gateway do Studio, como o `push-worker`, devem apontar para `9091`
 
 **Componentes:**
