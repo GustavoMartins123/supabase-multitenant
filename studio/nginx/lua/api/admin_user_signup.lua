@@ -30,6 +30,7 @@ local username = user_data.username
 local password = user_data.password  -- Agora recebe senha em texto plano
 local display_name = user_data.display_name
 local email = user_data.email
+local is_bootstrap_admin = ngx.var.bootstrap_admin == "true"
 
 if not username or username == "" then
     ngx.status = ngx.HTTP_BAD_REQUEST
@@ -66,9 +67,12 @@ end
 local normalized_email = user_identity.normalize_email(email)
 
 -- Validar tamanho mínimo da senha
-if string.len(password) < 8 then
+local min_password_length = is_bootstrap_admin and 12 or 8
+if string.len(password) < min_password_length then
     ngx.status = ngx.HTTP_BAD_REQUEST
-    ngx.say('{"error": "Password must have at least 8 characters"}')
+    ngx.say(cjson.encode({
+        error = "Password must have at least " .. tostring(min_password_length) .. " characters"
+    }))
     return ngx.exit(ngx.HTTP_BAD_REQUEST)
 end
 
@@ -185,16 +189,47 @@ local content = f:read("*a")
 f:close()
 
 local yaml_data = lyaml.load(content)
-if not yaml_data or not yaml_data.users then
+if type(yaml_data) ~= "table" then
     ngx.status = ngx.HTTP_INTERNAL_SERVER_ERROR
     ngx.say('{"error": "Invalid YAML structure"}')
     return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
 end
+yaml_data.users = yaml_data.users or {}
+
+local original_yaml_data = lyaml.load(content)
+
+local function is_bootstrap_placeholder(username, user_info)
+    return username == "__bootstrap_placeholder__"
+        or (
+            type(user_info) == "table"
+            and type(user_info.extra) == "table"
+            and user_info.extra.bootstrap_placeholder == true
+        )
+end
+
+local function users_have_admin(users)
+    for username, user_info in pairs(users or {}) do
+        if user_info.disabled ~= true and not is_bootstrap_placeholder(username, user_info) then
+            for _, group in ipairs(user_info.groups or {}) do
+                if group == "admin" then
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+
+if is_bootstrap_admin and users_have_admin(yaml_data.users) then
+    ngx.status = ngx.HTTP_FORBIDDEN
+    ngx.say('{"error": "Initial admin already exists"}')
+    return ngx.exit(ngx.HTTP_FORBIDDEN)
+end
 
 -- Verificar se username já existe (case-insensitive)
 local username_lower = username:lower()
-for existing_user, _ in pairs(yaml_data.users) do
-    if existing_user:lower() == username_lower then
+for existing_user, user_info in pairs(yaml_data.users) do
+    if not is_bootstrap_placeholder(existing_user, user_info) and existing_user:lower() == username_lower then
         ngx.status = ngx.HTTP_CONFLICT
         ngx.say('{"error": "Username already exists"}')
         return ngx.exit(ngx.HTTP_CONFLICT)
@@ -203,19 +238,24 @@ end
 
 -- Verificar se email já existe
 local email_lower = normalized_email
-for _, user_info in pairs(yaml_data.users) do
-    if user_info.email and user_info.email:lower() == email_lower then
+for existing_user, user_info in pairs(yaml_data.users) do
+    if not is_bootstrap_placeholder(existing_user, user_info) and user_info.email and user_info.email:lower() == email_lower then
         ngx.status = ngx.HTTP_CONFLICT
         ngx.say('{"error": "Email already exists"}')
         return ngx.exit(ngx.HTTP_CONFLICT)
     end
 end
 local function build_authelia_user(password_hash, email, display_name, is_admin)
+    local groups = {"active"}
+    if is_admin then
+        table.insert(groups, "admin")
+    end
+
     -- `lyaml.null` força o '~' em YAML
     return {
         middle_name    = '',
         email          = email,
-        groups         = {"active"},
+        groups         = groups,
         family_name    = '',
         nickname       = '',
         gender         = '',
@@ -261,8 +301,18 @@ end
 local new_user_record = build_authelia_user(
     password_hash,
     email,
-    display_name                     
+    display_name,
+    is_bootstrap_admin
 )
+
+if is_bootstrap_admin then
+    for existing_user, user_info in pairs(yaml_data.users) do
+        if is_bootstrap_placeholder(existing_user, user_info) then
+            yaml_data.users[existing_user] = nil
+        end
+    end
+end
+
 -- Criar novo usuário
 yaml_data.users[username] = new_user_record
 
@@ -283,7 +333,7 @@ local cache_user = {
     email = normalized_email,
     user_uuid = authelia_user_id,
     is_active = true,
-    is_admin = false
+    is_admin = is_bootstrap_admin
 }
 local encoded_cache_user = cjson.encode(cache_user)
 cache:set(authelia_user_id, encoded_cache_user)
@@ -293,14 +343,19 @@ local sync_result, sync_err = user_sync.sync_user({
     id = authelia_user_id,
     username = username,
     display_name = display_name,
-    groups = {"active"},
-    is_active = true
+    groups = new_user_record.groups,
+    is_active = true,
+    source = is_bootstrap_admin and "studio_bootstrap" or "studio_admin"
 })
 
 if sync_err then
     ngx.log(ngx.ERR, "[CREATE_USER] Failed to sync user with backend: ", sync_err)
-    yaml_data.users[username] = nil
-    write_yaml_file(yaml_path, yaml_data)
+    if type(original_yaml_data) == "table" then
+        write_yaml_file(yaml_path, original_yaml_data)
+    else
+        yaml_data.users[username] = nil
+        write_yaml_file(yaml_path, yaml_data)
+    end
     cache:delete(authelia_user_id)
     cache:delete("email:" .. normalized_email)
     ngx.status = ngx.HTTP_BAD_GATEWAY
@@ -321,13 +376,14 @@ ngx.log(ngx.ERR, "[CREATE_USER] Successfully created user: ", username)
 ngx.status = ngx.HTTP_CREATED
 ngx.header.content_type = "application/json"
 ngx.say(cjson.encode({
-    message = "User created successfully",
+    message = is_bootstrap_admin and "Initial admin created successfully" or "User created successfully",
     user = {
         id = sync_result and sync_result.id or authelia_user_id,
         username = username,
         display_name = display_name,
         email = email,
-        status = "active"
+        status = "active",
+        is_admin = is_bootstrap_admin
     },
     timestamp = os.time()
 }))

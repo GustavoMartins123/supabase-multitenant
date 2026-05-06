@@ -322,7 +322,7 @@ main() {
     fi
     safe_sed "s|SERVER_URL=pass|SERVER_URL=${SERVER_IP}|g" servidor/.env
     safe_sed "s|SERVER_PROTO=pass|SERVER_PROTO=${PROTO}|g" servidor/.env
-    safe_sed "s|^PUSH_API_URL=.*|PUSH_API_URL=https://${LOCAL_IP}:4000/api/internal/push|g" servidor/.env
+    safe_sed "s|^PUSH_API_URL=.*|PUSH_API_URL=https://${LOCAL_IP}:9091/api/internal/push|g" servidor/.env
     safe_sed "s|PUSH_VERIFY_TLS=true|PUSH_VERIFY_TLS=true|g" servidor/.env
     safe_sed "s|PUSH_CA_FILE=/docker/push-certs/ca.pem|PUSH_CA_FILE=/docker/push-certs/ca.pem|g" servidor/.env
     safe_sed "s|DASHBOARD_USER=pass|DASHBOARD_USER=${DASHBOARD_USER}|g" servidor/.env

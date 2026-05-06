@@ -115,13 +115,13 @@ postgres://supabase_storage_admin.projeto_x:senha@pooler:5432/postgres
 
 ### Studio
 
-**Porta:** 9091 (Authelia) e 4000 (Nginx)
+**Porta pública:** 9091 (Nginx/OpenResty)
 
 **Fluxo de entrada:**
-- **9091:** porta de entrada do navegador para autenticação no Authelia
-- **4000:** endpoint principal do Nginx/OpenResty, usado depois do login para servir o Flutter, fazer proxy para o Supabase Studio e expor rotas administrativas internas
-- Em outras palavras: o usuário entra por `9091`, autentica, e a navegação normal do painel continua em `4000`
-- Integrações servidor-servidor que falam com o gateway do Studio, como o `push-worker`, devem apontar para `4000`
+- **9091:** origem publica unica do Studio, servida pelo Nginx/OpenResty
+- **/auth/**: proxy interno do Nginx para o Authelia
+- Em outras palavras: o usuário entra por `9091`; se ainda não existe administrador, o Flutter abre o bootstrap do admin inicial, senão usuários sem sessão são enviados para `/auth/`
+- Integrações servidor-servidor que falam com o gateway do Studio, como o `push-worker`, devem apontar para `9091`
 
 **Componentes:**
 - **Authelia:** Autenticação de usuários
@@ -596,10 +596,14 @@ Cada projeto tem:
 
 ```
 Usuário → https://ip:9091
-  ↓
-Authelia valida credenciais (users_database.yml)
-  ↓
-Redireciona para https://ip:4000 (Nginx Studio)
+        ↓
+Nginx serve o Flutter selector
+        ↓
+Se não existe admin: bootstrap cria o admin inicial em users_database.yml
+        ↓
+Se já existe admin: usuário sem sessão é redirecionado para Authelia
+        ↓
+Authelia valida credenciais e retorna para https://ip:9091
   ↓
 Nginx serve Flutter Web
 ```
@@ -738,7 +742,7 @@ Após autenticação, Authelia retorna o email e grupos do usuário. O Nginx/Lua
    - Busca tokens FCM em public.push_tokens
 
 2. Worker monta a chamada para o gateway do Studio
-   POST https://<IP_DO_STUDIO>:4000/api/internal/push
+   POST https://<IP_DO_STUDIO>:9091/api/internal/push
    Body: { project, token, body }
    Headers:
      X-Internal-Service: push-worker
@@ -1646,7 +1650,7 @@ Todos os erros são retornados no array `errors` da resposta.
 
 **Máquina 1 (Rede Local - sem IP externo):**
 - Studio (Authelia + Nginx/Lua + Flutter)
-- Porta 9091 (Authelia) acessível apenas na LAN
+- Porta 9091 (Nginx/OpenResty Studio) acessível apenas na LAN
 
 **Máquina 2 (Servidor - com IP externo):**
 - PostgreSQL, Supavisor, Realtime, Functions
@@ -1951,23 +1955,28 @@ SELECT maintain_log_partitions();
 └────┬────┘
      │ 1. Acessa https://ip:9091
      ▼
+┌─────────────┐
+│ Nginx/Lua   │ 2. Serve Flutter Web
+└─────┬───────┘
+      │ 3. Bootstrap admin ou /login
+      ▼
 ┌──────────┐
-│ Authelia │ 2. Valida credenciais
+│ Authelia │ 4. Valida credenciais
 └────┬─────┘
-     │ 3. Redireciona para :4000
+     │ 5. Retorna para :9091
      ▼
 ┌─────────────┐
-│ Nginx/Lua   │ 4. Serve Flutter Web
+│ Nginx/Lua   │ 6. injeta contexto do usuário
 └─────┬───────┘
-      │ 5. Usuário seleciona projeto
+      │ 7. Usuário seleciona projeto
       ▼
 ┌─────────────┐
-│ /set-project│ 6. Cria cookie assinado
+│ /set-project│ 8. Cria cookie assinado
 └─────┬───────┘
-      │ 7. Redireciona para Studio
+      │ 9. Redireciona para Studio
       ▼
 ┌──────────────────┐
-│ Supabase Studio  │ 8. Interface de gerenciamento
+│ Supabase Studio  │ 10. Interface de gerenciamento
 └──────────────────┘
 ```
 

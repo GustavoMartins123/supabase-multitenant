@@ -59,71 +59,84 @@
             local cjson = require "cjson.safe"
             local missing_identifiers = 0
             
+            local function is_bootstrap_placeholder(uname, attr)
+                return uname == "__bootstrap_placeholder__"
+                    or (
+                        type(attr) == "table"
+                        and type(attr.extra) == "table"
+                        and attr.extra.bootstrap_placeholder == true
+                    )
+            end
+
             for uname, attr in pairs(t.users or {}) do
-                local groups = attr.groups or {}
-                local sync_groups = {}
-                local is_active = false
-                local is_admin = false
-                
-                for _, group in ipairs(groups) do
-                    table.insert(sync_groups, group)
-                    if group == "active" then
-                        is_active = true
-                    elseif group == "admin" then
-                        is_admin = true
-                    end
-                end
-                
-                local email = user_identity.normalize_email(attr.email or "")
-                local display_name = attr.displayname or uname
-                local user_uuid, _, identifier_err = authelia_identifiers.ensure_identifier(uname)
-                if not user_uuid then
-                    missing_identifiers = missing_identifiers + 1
-                    ngx.log(ngx.ERR, "[SYNC] Falha ao gerar/exportar opaque identifier para ", uname, ": ", identifier_err)
-                end
-                local cache_payload = {
-                    email = email,
-                    display_name = is_active and display_name or (display_name .. " (INATIVO)"),
-                    username = uname,
-                    is_active = is_active,
-                    is_admin = is_admin,
-                    user_uuid = user_uuid,
-                }
-                local encoded_payload = cjson.encode(cache_payload)
-                
-                if user_uuid and user_uuid ~= "" then
-                    cache:set(user_uuid, encoded_payload)
-                    if email ~= "" then
-                        cache:set("email:" .. email, user_uuid)
-                    end
-                end
-
-                ngx.log(
-                    ngx.INFO,
-                    "[CACHE] Usuario carregado: ", uname,
-                    " uuid=", user_uuid or "missing",
-                    " active=", tostring(is_active),
-                    " admin=", tostring(is_admin)
-                )
-                
-                ngx.log(ngx.INFO, "[CACHE] set() – user=", uname,
-                    " email=", email,
-                    " uuid=", user_uuid or "missing",
-                    " active=", is_active,
-                    " admin=", is_admin)
-
-                if user_uuid and user_uuid ~= "" then
-                    table.insert(users_for_sync, {
-                        id = user_uuid,
-                        username = uname,
-                        display_name = display_name,
-                        groups = sync_groups,
-                        is_active = is_active,
-                        source = "studio_bootstrap",
-                        cache_key = user_uuid,
-                    })
+                if attr.disabled == true or is_bootstrap_placeholder(uname, attr) then
+                    ngx.log(ngx.INFO, "[CACHE] Usuario ignorado no bootstrap: ", uname)
                 else
-                    ngx.log(ngx.WARN, "[SYNC] Usuario ignorado porque nao foi possivel obter opaque identifier: ", uname)
+                    local groups = attr.groups or {}
+                    local sync_groups = {}
+                    local is_active = false
+                    local is_admin = false
+
+                    for _, group in ipairs(groups) do
+                        table.insert(sync_groups, group)
+                        if group == "active" then
+                            is_active = true
+                        elseif group == "admin" then
+                            is_admin = true
+                        end
+                    end
+
+                    local email = user_identity.normalize_email(attr.email or "")
+                    local display_name = attr.displayname or uname
+                    local user_uuid, _, identifier_err = authelia_identifiers.ensure_identifier(uname)
+                    if not user_uuid then
+                        missing_identifiers = missing_identifiers + 1
+                        ngx.log(ngx.ERR, "[SYNC] Falha ao gerar/exportar opaque identifier para ", uname, ": ", identifier_err)
+                    end
+                    local cache_payload = {
+                        email = email,
+                        display_name = is_active and display_name or (display_name .. " (INATIVO)"),
+                        username = uname,
+                        is_active = is_active,
+                        is_admin = is_admin,
+                        user_uuid = user_uuid,
+                    }
+                    local encoded_payload = cjson.encode(cache_payload)
+
+                    if user_uuid and user_uuid ~= "" then
+                        cache:set(user_uuid, encoded_payload)
+                        if email ~= "" then
+                            cache:set("email:" .. email, user_uuid)
+                        end
+                    end
+
+                    ngx.log(
+                        ngx.INFO,
+                        "[CACHE] Usuario carregado: ", uname,
+                        " uuid=", user_uuid or "missing",
+                        " active=", tostring(is_active),
+                        " admin=", tostring(is_admin)
+                    )
+
+                    ngx.log(ngx.INFO, "[CACHE] set() – user=", uname,
+                        " email=", email,
+                        " uuid=", user_uuid or "missing",
+                        " active=", is_active,
+                        " admin=", is_admin)
+
+                    if user_uuid and user_uuid ~= "" then
+                        table.insert(users_for_sync, {
+                            id = user_uuid,
+                            username = uname,
+                            display_name = display_name,
+                            groups = sync_groups,
+                            is_active = is_active,
+                            source = "studio_bootstrap",
+                            cache_key = user_uuid,
+                        })
+                    else
+                        ngx.log(ngx.WARN, "[SYNC] Usuario ignorado porque nao foi possivel obter opaque identifier: ", uname)
+                    end
                 end
             end
             

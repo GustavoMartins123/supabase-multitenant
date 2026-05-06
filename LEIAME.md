@@ -36,8 +36,8 @@ Simplificar a criação e a gestão de novos projetos utilizando a arquitetura d
 
 ```mermaid
 flowchart TB
- subgraph subGraph0["Estúdio Local - :4000"]
-        Authelia["🔐 Authelia :9091\nAutenticação"]
+ subgraph subGraph0["Estúdio Local - :9091"]
+        Authelia["🔐 Authelia\nAutenticação"]
         Lan["🛜 Internet/Usuários/LAN"]
         Nginx["🌐 Nginx/OpenResty :443\nGerenciador Local"]
         Flutter["📱 Flutter Web\nSeletor de Projetos"]
@@ -74,8 +74,8 @@ flowchart TB
         Network["🔗 rede-supabase\n172.20.0.0/16"]
   end
     World["🌐 Internet/Usuários"] -- World --> Traefik["🚦 Traefik :80/:443\nGateway Principal"]
-    Lan -- :9091 --> Authelia
-    Authelia -- :4000 --> Nginx
+    Lan -- :9091 --> Nginx
+    Nginx -- "/auth" --> Authelia
     Nginx --> Flutter
     Flutter --> Studio
     Nginx -. "LAN - Requisições por projeto via '/project_id'" .-> Traefik
@@ -214,9 +214,8 @@ Após alguns instantes, verifique se todos os containers estão em execução:
 docker ps
 ```
 
-Se tudo estiver com status `Up`, acesse a interface no IP que você configurou no `setup.sh` (por exemplo: `https://<seu_ip_local>:9091`).
-Você deverá ser redirecionado para a tela de login do Authelia.
-Use o usuário 'teste' com a senha 'teste' para fazer login.
+Se tudo estiver com status `Up`, acesse o Studio no IP que você configurou no `setup.sh` (por exemplo: `https://<seu_ip_local>:9091`).
+No primeiro acesso, crie a conta administrativa inicial pelo navegador. Depois disso, a aplicação redireciona para o fluxo de login do Authelia.
 
 ---
 

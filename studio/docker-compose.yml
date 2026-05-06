@@ -17,8 +17,6 @@ services:
       - ./authelia:/config
     environment:
       - TZ=America/Sao_Paulo
-    ports:
-      - 9091:9091
     restart: unless-stopped
 
   nginx:
@@ -27,7 +25,7 @@ services:
       dockerfile: Dockerfile 
     container_name: nginx
     ports:
-      - 4000:443
+      - 9091:443
     restart: unless-stopped
     env_file:
       - .env
@@ -42,7 +40,7 @@ services:
       STUDIO_PG_META_URL: https://nginx:443/api/platform/pg-meta
       DEFAULT_ORGANIZATION_NAME: postgres
       DEFAULT_PROJECT_NAME: postgres
-      SUPABASE_PUBLIC_URL: https://<SEU_IP>:4000
+      SUPABASE_PUBLIC_URL: https://<SEU_IP>:9091
       NEXT_PUBLIC_ENABLE_LOGS: false
       SNIPPETS_MANAGEMENT_FOLDER: /app/snippets
     volumes:

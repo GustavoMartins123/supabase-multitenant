@@ -38,8 +38,8 @@ To simplify the creation and management of new projects using the Supabase archi
 
 ```mermaid
 flowchart TB
- subgraph subGraph0["Local Studio - :4000"]
-        Authelia["🔐 Authelia :9091\nAuthentication"]
+ subgraph subGraph0["Local Studio - :9091"]
+        Authelia["🔐 Authelia\nAuthentication"]
         Lan["🛜 Internet/Users/LAN"]
         Nginx["🌐 Nginx/OpenResty :443\nLocal Manager"]
         Flutter["📱 Flutter Web\nProject Selector"]
@@ -76,8 +76,8 @@ flowchart TB
         Network["🔗 rede-supabase\n172.20.0.0/16"]
   end
     World["🌐 Internet/Users"] -- World --> Traefik["🚦 Traefik :80/:443\nMain Gateway"]
-    Lan -- :9091 --> Authelia
-    Authelia -- :4000 --> Nginx
+    Lan -- :9091 --> Nginx
+    Nginx -- "/auth" --> Authelia
     Nginx --> Flutter
     Flutter --> Studio
     Nginx -. "LAN - Per-project requests via '/project_id'" .-> Traefik
@@ -229,15 +229,14 @@ After a few moments, check if all containers are running:
 docker ps
 ```
 
-If everything has the status `Up`, access the interface at the IP you configured in `setup.sh` (e.g., `https://<your_local_ip>:9091`). You should be redirected to the Authelia login screen.
-Use the user 'teste' with the password 'teste' to log in.
+If everything has the status `Up`, access the Studio endpoint at the IP you configured in `setup.sh` (e.g., `https://<your_local_ip>:9091`). On the first access, create the initial administrator account in the browser. After that, the app redirects you to the Authelia login flow.
 
 Important about the Studio ports:
 
-- `9091` is the browser entrypoint for Authelia authentication.
-- `4000` is the Studio Nginx/OpenResty endpoint that serves the Flutter selector, proxies Supabase Studio, and exposes the internal administrative routes used by the platform.
-- The usual browser flow is: open `https://<your_local_ip>:9091`, authenticate in Authelia, then continue operating through `https://<your_local_ip>:4000`.
-- Server-to-server integrations that target the Studio gateway, such as the `push-worker`, must use port `4000`, not `9091`.
+- `9091` is the single public Studio endpoint served by Nginx/OpenResty.
+- Authelia is reached through the same origin under `/auth/`.
+- The usual browser flow is: open `https://<your_local_ip>:9091`; if no admin exists, create the initial administrator, otherwise the app redirects unauthenticated users to Authelia.
+- Server-to-server integrations that target the Studio gateway, such as the `push-worker`, must also use port `9091`.
 
 ## Maintenance and Important Notes
 

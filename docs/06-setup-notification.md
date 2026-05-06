@@ -5,8 +5,8 @@ Por padrão, a plataforma utiliza uma arquitetura descentralizada para o envio d
 > [!NOTE]
 > A infraestrutura base do **Gateway (Nginx + Lua)** para push já vem pronta, mas o fluxo atual nao depende apenas do `firebase.json`.
 > A rota `/api/internal/push` e protegida por assinatura HMAC backend-to-backend e foi desenhada para uso exclusivo do `push-worker`.
-> Se o worker estiver em outra maquina, ele deve chamar o Nginx do Studio em `https://<IP_DO_STUDIO>:4000/api/internal/push`.
-> A porta `9091` pertence ao Authelia e e apenas a entrada de autenticacao do navegador; o worker nao deve usá-la.
+> Se o worker estiver em outra maquina, ele deve chamar o Nginx do Studio em `https://<IP_DO_STUDIO>:9091/api/internal/push`.
+> A porta `9091` e a origem publica unica do Studio; o Authelia fica acessivel pela mesma origem em `/auth/`.
 
 Os passos a seguir configuram as credenciais do Google e preparam o banco de dados dos projetos para se integrarem a esse fluxo.
 
@@ -18,7 +18,7 @@ Antes de prosseguir, certifique-se de que:
 - **Service Account**: Você gerou e baixou a chave privada (arquivo JSON) da Conta de Serviço do Firebase (Configurações do Projeto > Contas de Serviço > Gerar nova chave privada).
 - **Worker habilitado**: por padrão, o serviço `push-worker` vem comentado em `servidor/docker-compose-api.yml`. Descomente-o e suba o container antes de validar o fluxo ponta a ponta.
 - **Segredo compartilhado interno**: `INTERNAL_HMAC_SECRET` deve estar configurado com o mesmo valor em `studio/.env` e `servidor/.env`. O `setup.sh` gera esse valor automaticamente.
-- **URL correta do gateway**: `PUSH_API_URL` deve apontar para `https://<IP_DO_STUDIO>:4000/api/internal/push`.
+- **URL correta do gateway**: `PUSH_API_URL` deve apontar para `https://<IP_DO_STUDIO>:9091/api/internal/push`.
 - **TLS confiável entre as máquinas**: se `PUSH_VERIFY_TLS=true`, o certificado do Studio precisa ser confiável no servidor Python. O `setup.sh` copia `studio/authelia/ssl/ca.pem` para `servidor/certs/ca.pem`, que e montado no container como `/docker/push-certs/ca.pem`.
 
 ---
@@ -51,7 +51,7 @@ INTERNAL_HMAC_MAX_SKEW_SECONDS=60
 
 # servidor/.env
 INTERNAL_HMAC_SECRET=...
-PUSH_API_URL=https://<IP_DO_STUDIO>:4000/api/internal/push
+PUSH_API_URL=https://<IP_DO_STUDIO>:9091/api/internal/push
 PUSH_VERIFY_TLS=true
 PUSH_CA_FILE=/docker/push-certs/ca.pem
 ```
@@ -215,7 +215,7 @@ docker logs -f push-worker
 
 Se aparecer erro de TLS parecido com `certificate verify failed` ou `IP address mismatch`, revise nesta ordem:
 
-1. `PUSH_API_URL` esta usando o host correto e a porta `4000`
+1. `PUSH_API_URL` esta usando o host correto e a porta `9091`
 2. o certificado do Studio contem SAN para esse IP ou dominio
 3. `servidor/certs/ca.pem` foi atualizado com o certificado correto
 4. o container do `push-worker` foi recriado depois da troca do certificado

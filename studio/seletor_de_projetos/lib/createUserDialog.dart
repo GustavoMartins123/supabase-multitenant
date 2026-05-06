@@ -5,8 +5,13 @@ import 'package:seletor_de_projetos/supabase_colors.dart';
 
 class CreateUserDialog extends StatefulWidget {
   final VoidCallback onUserCreated;
+  final bool bootstrapMode;
 
-  const CreateUserDialog({super.key, required this.onUserCreated});
+  const CreateUserDialog({
+    super.key,
+    required this.onUserCreated,
+    this.bootstrapMode = false,
+  });
 
   @override
   State<CreateUserDialog> createState() => _CreateUserDialogState();
@@ -59,7 +64,11 @@ class _CreateUserDialogState extends State<CreateUserDialog>
 
     try {
       final response = await http.post(
-        Uri.parse('/api/admin/users/signup'),
+        Uri.parse(
+          widget.bootstrapMode
+              ? '/api/bootstrap/admin'
+              : '/api/admin/users/signup',
+        ),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'username': _usernameController.text.trim(),
@@ -70,13 +79,16 @@ class _CreateUserDialogState extends State<CreateUserDialog>
       );
 
       if (response.statusCode == 201) {
+        if (!mounted) return;
         Navigator.of(context).pop();
         widget.onUserCreated();
       } else {
         final error = jsonDecode(response.body)['error'] ?? 'Erro desconhecido';
+        if (!mounted) return;
         _showSnack('Erro: $error', SupabaseColors.error);
       }
     } catch (e) {
+      if (!mounted) return;
       _showSnack('Erro ao criar usuário: $e', SupabaseColors.error);
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -132,22 +144,26 @@ class _CreateUserDialogState extends State<CreateUserDialog>
                           ),
                         ),
                         const SizedBox(width: 12),
-                        const Expanded(
+                        Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Novo Usuário',
-                                style: TextStyle(
+                                widget.bootstrapMode
+                                    ? 'Administrador Inicial'
+                                    : 'Novo Usuário',
+                                style: const TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w600,
                                   color: SupabaseColors.textPrimary,
                                 ),
                               ),
-                              SizedBox(height: 2),
+                              const SizedBox(height: 2),
                               Text(
-                                'Preencha os dados do usuário',
-                                style: TextStyle(
+                                widget.bootstrapMode
+                                    ? 'Crie a primeira conta administrativa'
+                                    : 'Preencha os dados do usuário',
+                                style: const TextStyle(
                                   fontSize: 12,
                                   color: SupabaseColors.textMuted,
                                 ),
@@ -155,7 +171,10 @@ class _CreateUserDialogState extends State<CreateUserDialog>
                             ],
                           ),
                         ),
-                        _CloseBtn(onPressed: () => Navigator.of(context).pop()),
+                        if (!widget.bootstrapMode)
+                          _CloseBtn(
+                            onPressed: () => Navigator.of(context).pop(),
+                          ),
                       ],
                     ),
                     const SizedBox(height: 24),
@@ -167,10 +186,12 @@ class _CreateUserDialogState extends State<CreateUserDialog>
                       hint: 'Ex: joao_silva',
                       icon: Icons.account_circle_rounded,
                       validator: (value) {
-                        if (value == null || value.trim().isEmpty)
+                        if (value == null || value.trim().isEmpty) {
                           return 'Obrigatório';
-                        if (value.trim().length < 3)
+                        }
+                        if (value.trim().length < 3) {
                           return 'Mínimo 3 caracteres';
+                        }
                         return null;
                       },
                     ),
@@ -181,8 +202,9 @@ class _CreateUserDialogState extends State<CreateUserDialog>
                       hint: 'Ex: João Silva',
                       icon: Icons.badge_rounded,
                       validator: (value) {
-                        if (value == null || value.trim().isEmpty)
+                        if (value == null || value.trim().isEmpty) {
                           return 'Obrigatório';
+                        }
                         return null;
                       },
                     ),
@@ -194,8 +216,9 @@ class _CreateUserDialogState extends State<CreateUserDialog>
                       icon: Icons.email_rounded,
                       keyboardType: TextInputType.emailAddress,
                       validator: (value) {
-                        if (value == null || value.trim().isEmpty)
+                        if (value == null || value.trim().isEmpty) {
                           return 'Obrigatório';
+                        }
                         if (!RegExp(
                           r'^[\w\.\+\-]+@[\w\.\-]+\.\w+$',
                         ).hasMatch(value)) {
@@ -223,9 +246,15 @@ class _CreateUserDialogState extends State<CreateUserDialog>
                         ),
                       ),
                       validator: (value) {
-                        if (value == null || value.isEmpty)
+                        if (value == null || value.isEmpty) {
                           return 'Obrigatório';
-                        if (value.length < 8) return 'Mínimo 8 caracteres';
+                        }
+                        if (widget.bootstrapMode && value.length < 12) {
+                          return 'Mínimo 12 caracteres';
+                        }
+                        if (value.length < 8) {
+                          return 'Mínimo 8 caracteres';
+                        }
                         return null;
                       },
                     ),
@@ -249,8 +278,9 @@ class _CreateUserDialogState extends State<CreateUserDialog>
                         ),
                       ),
                       validator: (value) {
-                        if (value != _passwordController.text)
+                        if (value != _passwordController.text) {
                           return 'Senhas não coincidem';
+                        }
                         return null;
                       },
                     ),
@@ -260,23 +290,25 @@ class _CreateUserDialogState extends State<CreateUserDialog>
                     Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
-                        TextButton(
-                          onPressed: _isLoading
-                              ? null
-                              : () => Navigator.of(context).pop(),
-                          style: TextButton.styleFrom(
-                            foregroundColor: SupabaseColors.textSecondary,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 10,
+                        if (!widget.bootstrapMode) ...[
+                          TextButton(
+                            onPressed: _isLoading
+                                ? null
+                                : () => Navigator.of(context).pop(),
+                            style: TextButton.styleFrom(
+                              foregroundColor: SupabaseColors.textSecondary,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 10,
+                              ),
+                            ),
+                            child: const Text(
+                              'Cancelar',
+                              style: TextStyle(fontSize: 13),
                             ),
                           ),
-                          child: const Text(
-                            'Cancelar',
-                            style: TextStyle(fontSize: 13),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
+                          const SizedBox(width: 8),
+                        ],
                         _isLoading
                             ? Container(
                                 padding: const EdgeInsets.symmetric(
@@ -313,7 +345,9 @@ class _CreateUserDialogState extends State<CreateUserDialog>
                                 ),
                               )
                             : _PrimaryButton(
-                                label: 'Criar Usuário',
+                                label: widget.bootstrapMode
+                                    ? 'Criar Administrador'
+                                    : 'Criar Usuário',
                                 icon: Icons.check_rounded,
                                 onPressed: _createUser,
                               ),

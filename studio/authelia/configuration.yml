@@ -1,5 +1,5 @@
 server:
-  address: tcp://0.0.0.0:9091/
+  address: tcp://0.0.0.0:9091/auth
   tls:
     certificate: /config/ssl/ca.pem
     key:         /config/ssl/ca.key 
@@ -17,13 +17,13 @@ session:
   cookies:
     - name: authelia_session
       domain: <SEU_IP>       
-      authelia_url: https://<SEU_IP>:9091
-      default_redirection_url: https://<SEU_IP>:4000
+      authelia_url: https://<SEU_IP>:9091/auth
+      default_redirection_url: https://<SEU_IP>:9091
       same_site: lax
   secret: "SESSION_SECRET"
   expiration: '7d'
   inactivity: '24h'
-  remember_me_duration: '30d'
+  remember_me: '30d'
 
 #openssl rand -hex 96
 storage:

@@ -1,16 +1,17 @@
 ---
 users:
-  teste:
-    disabled: false
+  __bootstrap_placeholder__:
+    disabled: true
     password: $argon2id$v=19$m=65536,t=3,p=4$W4CGddhkzRo9cARHsxdoPA$ly9FEn7cp3lzPsDtCz6JqTIm9XvVpTwVoHKyV4jTjTs
     address: ~
-    email: teste@example.com
-    displayname: Teste
+    email: bootstrap-placeholder@example.invalid
+    displayname: Bootstrap Placeholder
     middle_name: ''
     locale: ''
     phone_extension: ''
     extra:
-      created_at: ts:2025-07-04T13:19:01Z
+      bootstrap_placeholder: true
+      created_at: ts:2026-05-06T00:00:00Z
     family_name: ''
     given_name: ''
     nickname: ''
@@ -21,7 +22,6 @@ users:
     zoneinfo: ''
     phone_number: ''
     groups:
-    - active
-    - admin
+    - bootstrap-placeholder
     picture: ''
 ...
