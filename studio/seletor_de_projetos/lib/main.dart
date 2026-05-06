@@ -14,6 +14,7 @@ Future<void> main() async {
 
   var needsBootstrapAdmin = false;
   var redirectingToLogin = false;
+  var accessDenied = false;
 
   final bootstrapResponse = await http.get(Uri.parse('/api/bootstrap/status'));
   if (bootstrapResponse.statusCode == 200) {
@@ -24,6 +25,10 @@ Future<void> main() async {
   if (!needsBootstrapAdmin) {
     final r = await http.get(Uri.parse('/api/user/me'));
     try {
+      if (r.statusCode == 403) {
+        accessDenied = true;
+        throw const _AccessDeniedException();
+      }
       if (r.statusCode != 200) {
         throw const FormatException('Sessao ausente');
       }
@@ -33,6 +38,9 @@ Future<void> main() async {
       s.myUsername = data['username'];
       s.myDisplayName = data['display_name'];
       s.isSysAdmin = data['is_admin'];
+    } on _AccessDeniedException {
+      // Usuário autenticado, mas sem autorização no Authelia. Não redireciona
+      // para login para evitar loop quando a conta foi desativada.
     } on FormatException {
       redirectingToLogin = true;
       html.window.location.href = _loginUrl();
@@ -44,6 +52,7 @@ Future<void> main() async {
       child: ProjectInitApp(
         needsBootstrapAdmin: needsBootstrapAdmin,
         redirectingToLogin: redirectingToLogin,
+        accessDenied: accessDenied,
       ),
     ),
   );
@@ -54,15 +63,26 @@ String _loginUrl() {
   return '${location.protocol}//${location.hostname}:9091/login';
 }
 
+String _logoutUrl() {
+  final location = html.window.location;
+  return '${location.protocol}//${location.hostname}:9091/logout';
+}
+
+class _AccessDeniedException implements Exception {
+  const _AccessDeniedException();
+}
+
 class ProjectInitApp extends StatelessWidget {
   const ProjectInitApp({
     super.key,
     required this.needsBootstrapAdmin,
     required this.redirectingToLogin,
+    required this.accessDenied,
   });
 
   final bool needsBootstrapAdmin;
   final bool redirectingToLogin;
+  final bool accessDenied;
 
   @override
   Widget build(BuildContext ctx) => MaterialApp(
@@ -87,10 +107,81 @@ class ProjectInitApp extends StatelessWidget {
         themeMode: ThemeMode.dark,
         home: needsBootstrapAdmin
             ? const BootstrapAdminPage()
-            : redirectingToLogin
-                ? const _RedirectingPage()
-                : const ProjectListPage(),
+            : accessDenied
+                ? const _AccessDeniedPage()
+                : redirectingToLogin
+                    ? const _RedirectingPage()
+                    : const ProjectListPage(),
       );
+}
+
+class _AccessDeniedPage extends StatelessWidget {
+  const _AccessDeniedPage();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: SupabaseColors.bg100,
+      body: Center(
+        child: Container(
+          width: 420,
+          margin: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: SupabaseColors.bg200,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: SupabaseColors.border),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Icon(
+                Icons.lock_outline_rounded,
+                color: SupabaseColors.warning,
+                size: 34,
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Acesso negado',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: SupabaseColors.textPrimary,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Sua conta não tem permissão para acessar o Studio.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: SupabaseColors.textSecondary,
+                  fontSize: 13,
+                ),
+              ),
+              const SizedBox(height: 22),
+              ElevatedButton.icon(
+                onPressed: () {
+                  html.window.location.href = _logoutUrl();
+                },
+                icon: const Icon(Icons.logout_rounded, size: 18),
+                label: const Text('Sair'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: SupabaseColors.brand,
+                  foregroundColor: SupabaseColors.bg100,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _RedirectingPage extends StatelessWidget {

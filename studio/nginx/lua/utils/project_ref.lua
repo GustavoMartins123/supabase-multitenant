@@ -1,16 +1,34 @@
 local cookie = ngx.var.cookie_supabase_project
 if not cookie then return "default" end
 
+local function should_log_invalid_cookie()
+    local uri = ngx.var.uri or ""
+    return not (
+        uri == "/auth"
+        or uri:match("^/auth/")
+        or uri == "/login"
+        or uri == "/logout"
+    )
+end
+
 local hmac_sha256 = require "utils.hmac_sha256"
 local key = COOKIE_SECRET
 
 local ref, ts, sig = cookie:match("^([^%.]+)%.(%d+)%.([0-9a-f]+)$")
-if not ref then return "default" end
+if not ref then
+    if should_log_invalid_cookie() then
+        ngx.log(ngx.WARN, "Cookie de projeto malformado; limpando cookie")
+    end
+    return "default"
+end
 
 local cookie_age = ngx.time() - tonumber(ts)
 local max_age = 604800
 
 if cookie_age > max_age then
+    if should_log_invalid_cookie() then
+        ngx.log(ngx.INFO, "Cookie de projeto expirado para projeto: ", ref)
+    end
     return "default"
 end
 
@@ -20,7 +38,9 @@ if not expect then
     return "default"
 end
 if string.lower(expect) ~= string.lower(sig) then
-    ngx.log(ngx.ERR, "Assinatura de cookie inválida para projeto: ", ref)
+    if should_log_invalid_cookie() then
+        ngx.log(ngx.WARN, "Assinatura de cookie inválida para projeto: ", ref, "; limpando cookie")
+    end
     return "default"
 end
 
