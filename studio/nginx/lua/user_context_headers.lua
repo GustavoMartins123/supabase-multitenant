@@ -34,7 +34,6 @@ function M.apply(email, groups)
         ngx.req.set_header("X-User-Display-Name", user_data.display_name)
     end
     if user_id ~= "" then
-        ngx.req.set_header("X-User-Id", user_id)
         pcall(function()
             ngx.var.auth_user_id = user_id
         end)

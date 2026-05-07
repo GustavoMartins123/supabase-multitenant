@@ -640,9 +640,8 @@ Após autenticação, Authelia retorna o email e grupos do usuário. O Nginx/Lua
    - chave principal: `<uuid>` → payload do usuário
    - se necessário, o fluxo de sincronização cria/exporta o identificador opaco do Authelia
 
-3. Nginx injeta headers internos locais e, ao chamar a API Python, envia um token de identidade assinado:
+3. Nginx injeta contexto local e, ao chamar a API Python, envia somente o token de identidade assinado:
    ```
-   X-User-Id: 7b7b2f9d-4f4a-4e5d-9e9d-...
    X-User-Token: v1.<payload_base64url>.<hmac_sha256_hex>
    X-User-Groups: active,admin
    X-User-Username: usuario
@@ -650,12 +649,12 @@ Após autenticação, Authelia retorna o email e grupos do usuário. O Nginx/Lua
    Remote-Groups: active,admin
    ```
 
-**Por que usar UUID em vez de hash do email?**
+**Por que usar UUID estável?**
 - Estabilidade: mudança de email/username não muda o identificador interno
 - Segurança: permissões não dependem de um atributo textual mutável
 - Consistência: API Python extrai o UUID de `X-User-Token`, valida a assinatura HMAC e consulta a tabela `users`
 
-`X-User-Id` continua existindo como contexto local dentro do OpenResty. A fronteira com a API Python usa `X-User-Token`, assinado com `NGINX_HMAC_SECRET`, com `iat` e `exp` curtos para reduzir replay.
+O UUID sem assinatura fica apenas como contexto interno do OpenResty quando algum script Lua local precisa dele. A fronteira com a API Python usa `X-User-Token`, assinado com `NGINX_HMAC_SECRET`, com `iat` e `exp` curtos para reduzir replay.
 
 ---
 
@@ -1216,7 +1215,7 @@ docker restart nginx
 
 **Nível 1.5: Nginx/Lua**
 - Resolve o UUID do usuário autenticado
-- Mantém `X-User-Id`, `X-User-Groups`, `X-User-Username`, `X-User-Display-Name` e `Remote-Groups` como contexto local do gateway
+- Mantém grupos, username e display name como contexto local do gateway
 - Assina `X-User-Token` para chamadas que atravessam a fronteira Nginx/Lua → API Python
 
 **Nível 2: API Python**

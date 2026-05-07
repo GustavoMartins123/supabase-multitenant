@@ -15,11 +15,6 @@ local function json_array(items)
 end
 
 local function get_user_id()
-    local header_user_id = ngx.req.get_headers()["X-User-Id"]
-    if header_user_id and header_user_id ~= "" then
-        return header_user_id
-    end
-
     local email = user_identity.normalize_email(ngx.var.authelia_email or "")
     if email == "" then
         return nil, "authelia_email unavailable"

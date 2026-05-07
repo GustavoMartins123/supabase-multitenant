@@ -60,7 +60,7 @@ if not user_entry then
 end
 
 do
-    local caller_id = ngx.req.get_headers()["X-User-Id"] or ""
+    local caller_id = ngx.var.auth_user_id or ""
     local target_is_me = caller_id ~= "" and (
         caller_id == tostring(user.user_uuid or "")
         or caller_id == user_id
