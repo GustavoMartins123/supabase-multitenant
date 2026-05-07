@@ -4,7 +4,70 @@ Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 
 O formato deste arquivo segue as diretrizes do [Keep a Changelog](https://keepachangelog.com/) e este projeto adota [Versionamento Semântico](https://semver.org/).
 
-## [1.1.0] - 2026-04-01
+## [0.13.0-alpha] - 2026-04-02 a 2026-05-07
+
+### 2026-05-07
+- Jobs passaram a persistir status e mensagem na tabela `jobs`, removendo o estado em memória do processo Python para esses dados.
+- Cadastro/bootstrap de admin e cadastro de usuários comuns passaram a gerar hash Argon2id via LuaJIT FFI/libargon2, sem senha em `/tmp`, sem shell e sem senha em argumento de processo.
+- Removida a dependência de `X-User-Id` na comunicação interna entre serviços Lua/Nginx.
+
+### 2026-05-06
+- Studio consolidado em origem pública única `https://<IP>:9091`, com Authelia integrado em `/auth`.
+- Documentado e ajustado o redirecionamento de HTTP para HTTPS na porta `9091`.
+- Removida barra final do caminho de autenticação do Authelia e corrigidos redirects.
+- Adicionada validação/limpeza do cookie `supabase_project`.
+- Usuário desativado passou a receber tela de acesso negado sem loop de login.
+- Membros de projeto migrados para identidade por UUID e grupos normalizados no banco.
+- Bootstrap do primeiro administrador passou a ocorrer pelo front, sem credencial inicial fixa.
+
+### 2026-05-05
+- Implementada autenticação interna baseada em HMAC entre Nginx/Lua, API Python e documentação relacionada.
+- `NGINX_SHARED_TOKEN` mantido como camada básica da API interna, sem substituir o HMAC de usuário.
+- `push_worker` integrado ao fluxo HMAC backend-to-backend para `/api/internal/push`.
+
+### 2026-04-28
+- Instruções de startup e documentação de schema atualizadas.
+- Validação de settings e normalização de configuração de ambiente adicionadas.
+- Identidade do usuário migrada de hash de email para UUID canônico.
+- Assinatura HMAC em Lua refatorada com utilitário SHA256 próprio e suporte a Fernet.
+- Sincronização de identidade de usuários com Authelia implementada.
+
+### 2026-04-14
+- Adicionado bypass de administrador do sistema para rotação de keys e acesso a settings.
+- Lifetime do cookie de projeto aumentado com lógica de renovação.
+
+### 2026-04-13
+- Nomeação de containers padronizada e entrega de push notification aprimorada.
+- Documentação de geração de portas aleatórias removida/atualizada.
+- `SERVER_PROTO` adicionado à configuração e geração de templates de projeto refatorada.
+
+### 2026-04-10
+- Deleção de projeto refatorada para executar em background jobs.
+- Templates de geração, duplicação, rotação e deleção de projetos melhorados.
+- Configurações de bloqueio de signup e pool do PostgREST adicionadas à API/UI.
+- Settings de projeto e mensagens de status de job adicionadas ao Studio/API.
+
+### 2026-04-09
+- Configuração de ambiente consolidada e estrutura antiga de `secrets` removida.
+- `.env.example`, templates, scripts e documentação ajustados para o novo modelo de configuração.
+
+### 2026-04-08
+- Proxy Lua de conteúdo do usuário adicionado com endpoints para raiz, pastas, itens e contagem.
+- Isolamento por escopo de projeto adicionado para conteúdo do usuário.
+- Endpoint de item de pasta adicionado e gerenciamento de pastas aprimorado.
+
+### 2026-04-07
+- Pasta de gerenciamento de snippets adicionada com volume Docker.
+
+### 2026-04-06
+- Documentação de topologia, portas do Studio e integração do push-worker atualizada.
+- `push_worker` tornou-se configurável com TLS e gerenciamento de certificados.
+- Rotação de keys de projeto recebeu melhorias de erro e suporte a migração.
+
+### 2026-04-02
+- Execução de funções de IA adicionada com validação e tratamento de parâmetros.
+
+## [0.12.0-alpha] - 2026-04-01
 
 ### Adicionado
 - Sistema de UUID para identificação de projetos multi-tenant
@@ -27,7 +90,7 @@ O formato deste arquivo segue as diretrizes do [Keep a Changelog](https://keepac
 - Bug de cache no Flutter onde ANON_KEY não atualizava após rotação
 - Caminho de leitura do .env dentro do Docker (/docker/projects)
 
-## [1.0.10] - 2026-03-23 a 2026-03-31
+## [0.11.0-alpha] - 2026-03-23 a 2026-03-31
 
 ### Adicionado
 - Sistema completo de templates de email para Auth (invite, recovery, magic link, confirmation, email change)
@@ -54,7 +117,7 @@ O formato deste arquivo segue as diretrizes do [Keep a Changelog](https://keepac
 ### Removido
 - Variáveis de ambiente não utilizadas do pooler proxy port
 
-## [1.0.9] - 2026-03-20
+## [0.10.0-alpha] - 2026-03-20
 
 ### Adicionado
 - Autenticação para dashboard do Realtime com usuário e senha gerados automaticamente
@@ -64,7 +127,7 @@ O formato deste arquivo segue as diretrizes do [Keep a Changelog](https://keepac
 - Atualização de imagens Docker dos componentes principais
 - Limpeza de comentários no PostgreSQL
 
-## [1.0.8] - 2026-03-19
+## [0.9.0-alpha] - 2026-03-19
 
 ### Adicionado
 - Sistema de rotação de chaves JWT anônimas por projeto
@@ -79,7 +142,7 @@ O formato deste arquivo segue as diretrizes do [Keep a Changelog](https://keepac
 - Tratamento de tags de "thinking" do LLM no parsing de argumentos
 - Melhorias nos headers de cache control
 
-## [1.0.7] - 2026-03-17
+## [0.8.0-alpha] - 2026-03-17
 
 ### Adicionado
 - Documentação completa da arquitetura do sistema multi-tenant
@@ -94,13 +157,13 @@ O formato deste arquivo segue as diretrizes do [Keep a Changelog](https://keepac
 ### Removido
 - Script `fix-permissions.sh` desnecessário
 
-## [1.0.6] - 2026-03-16
+## [0.7.0-alpha] - 2026-03-16
 
 ### Adicionado
 - Documentação de gerenciamento de usuários Authelia
 - Arquivo `tarefas.md` adicionado ao `.gitignore`
 
-## [1.0.5] - 2026-03-11 a 2026-03-12
+## [0.6.0-alpha] - 2026-03-11 a 2026-03-12
 
 ### Adicionado
 - Sistema completo de notificações push com Firebase FCM
@@ -111,7 +174,7 @@ O formato deste arquivo segue as diretrizes do [Keep a Changelog](https://keepac
 ### Alterado
 - Refatoração completa do gateway Nginx/Lua para melhor organização
 
-## [1.0.4] - 2026-03-05
+## [0.5.0-alpha] - 2026-03-05
 
 ### Adicionado
 - Persistência de plugins do Traefik usando volume no host
@@ -121,7 +184,7 @@ O formato deste arquivo segue as diretrizes do [Keep a Changelog](https://keepac
 ### Alterado
 - Removido shell script na criação de usuário do Realtime
 
-## [1.0.3] - 2025-12-16 a 2025-12-18
+## [0.4.0-alpha] - 2025-12-16 a 2025-12-18
 
 ### Adicionado
 - Sistema de startup dinâmico para múltiplos projetos
@@ -136,7 +199,7 @@ O formato deste arquivo segue as diretrizes do [Keep a Changelog](https://keepac
 - Configuração antiga do Vector
 - Script de correção de permissões
 
-## [1.0.2] - 2025-11-25 a 2025-12-12
+## [0.3.0-alpha] - 2025-11-25 a 2025-12-12
 
 ### Adicionado
 - Validação de admin key para endpoint `/rest/v1/`
@@ -157,7 +220,7 @@ O formato deste arquivo segue as diretrizes do [Keep a Changelog](https://keepac
 - Extensão de arquivo de log do Vector
 - Gerenciamento de partições no banco de dados
 
-## [1.0.1] - 2025-10-17 a 2025-11-04
+## [0.2.0-alpha] - 2025-10-17 a 2025-11-04
 
 ### Adicionado
 - Documentação sobre duplicação de projetos
@@ -167,7 +230,7 @@ O formato deste arquivo segue as diretrizes do [Keep a Changelog](https://keepac
 - Dockerfile atualizado para usar imagem base do Flutter
 - Melhorias no README
 
-## [1.0.0] - 2025-05-05
+## [0.1.0-alpha] - 2025-05-05
 
 ### Removido
 - Pastas originais do Supabase:
