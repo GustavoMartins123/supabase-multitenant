@@ -6,7 +6,14 @@ if not email or email == "" then
     return ngx.exit(ngx.HTTP_UNAUTHORIZED)
 end
 
-local is_admin = string.find(groups, "admin") ~= nil
+local groups_clean = groups:gsub("[%[%]]", "")
+local is_admin = false
+for group in groups_clean:gmatch("[^,]+") do
+    if group:match("^%s*admin%s*$") then
+        is_admin = true
+        break
+    end
+end
 if not is_admin then
     ngx.log(ngx.ERR, "[ALL-USERS] User not admin: ", email, " groups: ", groups)
     return ngx.exit(ngx.HTTP_FORBIDDEN)
