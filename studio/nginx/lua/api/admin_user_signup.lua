@@ -15,10 +15,12 @@ if not body then
 end
 
 local cjson = require "cjson.safe"
+local argon2_password = require "argon2_password"
 local user_identity = require "user_identity"
 local authelia_identifiers = require "authelia_identifiers"
 local user_sync = require "user_sync"
 local user_data = cjson.decode(body)
+body = nil
 if not user_data then
     ngx.status = ngx.HTTP_BAD_REQUEST
     ngx.say('{"error": "Invalid JSON format"}')
@@ -78,76 +80,21 @@ end
 
 -- FUNÇÃO INTERNA: Gerar hash Argon2 da senha
 local function generate_argon2_hash(plain_password)
-    -- Gerar salt aleatório de 16 bytes (mesmo que Authelia usa)
-    local salt_cmd = "openssl rand -base64 16"
-    local salt_handle = io.popen(salt_cmd)
-    if not salt_handle then
-        ngx.log(ngx.ERR, "[CREATE_USER] Failed to generate salt")
-        return nil
-    end
-    
-    local salt_b64 = salt_handle:read("*a")
-    salt_handle:close()
-    
-    if not salt_b64 or salt_b64 == "" then
-        ngx.log(ngx.ERR, "[CREATE_USER] Empty salt generated")
-        return nil
-    end
-    
-    -- Remover quebras de linha do salt
-    salt_b64 = salt_b64:gsub("%s+", "")
-    
-    local tmp_pass_file = "/tmp/argon2_pass_" .. tostring(ngx.now()) .. "_" .. tostring(math.random(10000, 99999))
-    local f_pass = io.open(tmp_pass_file, "w")
-    if not f_pass then
-        ngx.log(ngx.ERR, "[CREATE_USER] Failed to create temp file for password")
-        return nil
-    end
-    f_pass:write(plain_password)
-    f_pass:close()
-    
     -- Usar parâmetros exatos do Authelia:
     -- -t 3: time cost (iterações)
-    -- -m 16: memory cost (65536 KB = 2^16)
+    -- m=65536: memory cost em KiB
     -- -p 4: parallelism (4 threads)
-    -- -l 32: hash length
-    -- -e: encoded output
-    local cmd = string.format(
-        "cat %s | argon2 '%s' -id -t 3 -m 16 -p 4 -l 32 -e; rm -f %s",
-        tmp_pass_file,
-        salt_b64,
-        tmp_pass_file
-    )
-    
+    -- hash length 32 bytes
     ngx.log(ngx.ERR, "[CREATE_USER] Generating argon2 hash with Authelia parameters")
-    
-    local handle = io.popen(cmd)
-    if not handle then
-        ngx.log(ngx.ERR, "[CREATE_USER] Failed to execute argon2 command")
-        os.remove(tmp_pass_file)
+
+    local hash = argon2_password.hash_password(plain_password)
+    if not hash then
         return nil
     end
-    
-    local output = handle:read("*a")
-    local success, exit_code = handle:close()
-    os.remove(tmp_pass_file)
-    
-    if not success then
-        ngx.log(ngx.ERR, "[CREATE_USER] Argon2 command failed with exit code: ", tostring(exit_code))
-        return nil
-    end
-    
-    if not output or output == "" then
-        ngx.log(ngx.ERR, "[CREATE_USER] Argon2 command returned empty output")
-        return nil
-    end
-    
-    -- Limpar output (remover quebras de linha)
-    local hash = output:gsub("%s+", "")
-    
+
     -- Validar se o hash tem o formato correto e parâmetros do Authelia
     if not hash:match("^%$argon2id%$v=19%$m=65536,t=3,p=4%$") then
-        ngx.log(ngx.ERR, "[CREATE_USER] Hash format doesn't match Authelia parameters: ", hash)
+        ngx.log(ngx.ERR, "[CREATE_USER] Hash format doesn't match Authelia parameters")
         -- Ainda assim retornar o hash se for válido argon2id
         if not hash:match("^%$argon2id%$") then
             return nil
@@ -160,6 +107,8 @@ end
 
 -- Gerar hash da senha
 local password_hash = generate_argon2_hash(password)
+user_data.password = nil
+password = nil
 if not password_hash then
     ngx.status = ngx.HTTP_INTERNAL_SERVER_ERROR
     ngx.say('{"error": "Failed to generate password hash"}')
@@ -168,7 +117,7 @@ end
 
 -- Validar se o hash foi gerado corretamente (deve começar com $argon2id$)
 if not password_hash:match("^%$argon2id%$") then
-    ngx.log(ngx.ERR, "[CREATE_USER] Invalid hash format generated: ", password_hash)
+    ngx.log(ngx.ERR, "[CREATE_USER] Invalid hash format generated")
     ngx.status = ngx.HTTP_INTERNAL_SERVER_ERROR
     ngx.say('{"error": "Invalid password hash generated"}')
     return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)

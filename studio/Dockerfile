@@ -21,6 +21,8 @@ RUN apt-get update \
         curl \
         libssl-dev \
         libyaml-dev \
+        libargon2-1 \
+        libargon2-dev \
         argon2 \
         openssl \
         git \
@@ -53,6 +55,7 @@ COPY nginx/docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 RUN which argon2 && argon2 -h || echo "argon2 installation check failed"
+RUN ldconfig -p | grep -q libargon2
 
 EXPOSE 443
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

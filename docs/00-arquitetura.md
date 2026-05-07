@@ -490,6 +490,7 @@ Na primeira vez que o PostgreSQL sobe, um script de inicialização cria a estru
         project TEXT NOT NULL,
         owner_id TEXT NOT NULL,
         status TEXT NOT NULL,
+        message TEXT,
         updated_at TIMESTAMPTZ DEFAULT now()
       );
 

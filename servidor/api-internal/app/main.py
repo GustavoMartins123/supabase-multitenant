@@ -43,9 +43,6 @@ except ValueError:
         "generated via Fernet.generate_key()."
     )
 
-JOB_STATUS: dict[str, str] = {}
-JOB_DETAILS: dict[str, dict[str, Any]] = {}
-
 db_pool: Optional[asyncpg.Pool] = None
 
 
@@ -188,6 +185,23 @@ async def ensure_identity_schema(pool: asyncpg.Pool) -> None:
             CREATE INDEX IF NOT EXISTS idx_project_members_audit_project_id ON project_members_audit(project_id);
             """
         )
+
+
+async def ensure_jobs_schema(pool: asyncpg.Pool) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS jobs (
+                job_id UUID PRIMARY KEY,
+                project TEXT NOT NULL,
+                owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                status TEXT NOT NULL,
+                message TEXT,
+                updated_at TIMESTAMPTZ DEFAULT now()
+            )
+            """
+        )
+        await conn.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS message TEXT")
 
 
 async def audit_user_group_change(
@@ -348,12 +362,6 @@ async def get_pool():
     return db_pool
 
 
-def _set_job_message(job_id: str, message: str | None) -> None:
-    if message is None:
-        return
-    JOB_DETAILS.setdefault(job_id, {})["message"] = message
-
-
 async def _set_job_status(
     job_id: str,
     new_status: str,
@@ -362,12 +370,23 @@ async def _set_job_status(
 ) -> None:
     pool = await get_pool()
     async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE jobs SET status=$1, updated_at=now() WHERE job_id=$2",
-            new_status,
-            job_id,
-        )
-    _set_job_message(job_id, message)
+        if message is None:
+            await conn.execute(
+                "UPDATE jobs SET status=$1, updated_at=now() WHERE job_id=$2",
+                new_status,
+                job_id,
+            )
+        else:
+            await conn.execute(
+                """
+                UPDATE jobs
+                SET status=$1, message=$2, updated_at=now()
+                WHERE job_id=$3
+                """,
+                new_status,
+                message,
+                job_id,
+            )
 
 
 async def _create_project_job(
@@ -380,13 +399,13 @@ async def _create_project_job(
     job_id = str(uuid.uuid4())
     async with pool.acquire() as conn:
         await conn.execute(
-            """INSERT INTO jobs(job_id, project, owner_id, status)
-               VALUES($1, $2, $3, 'queued')""",
+            """INSERT INTO jobs(job_id, project, owner_id, status, message)
+               VALUES($1, $2, $3, 'queued', $4)""",
             job_id,
             project_name,
             user,
+            message,
         )
-    _set_job_message(job_id, message)
     return job_id
 
 async def rollback_project_from_db(pool, project_name: str):
@@ -441,6 +460,7 @@ async def startup():
     global db_pool
     db_pool = await asyncpg.create_pool(DB_DSN, min_size=1, max_size=10)
     await ensure_identity_schema(db_pool)
+    await ensure_jobs_schema(db_pool)
     print("✅ Database pool initialized")
 
 @app.on_event("shutdown")
@@ -1478,13 +1498,12 @@ async def remove_member_by_ref(
 @app.get("/api/projects/status/{job_id}")
 async def project_status(job_id: str, pool=Depends(get_pool)):
     row = await pool.fetchrow(
-        "SELECT status FROM jobs WHERE job_id=$1", job_id
+        "SELECT status, message FROM jobs WHERE job_id=$1", job_id
     )
-    details = JOB_DETAILS.get(job_id, {})
     return {
         "job_id": job_id,
         "status": row["status"] if row else "unknown",
-        "message": details.get("message"),
+        "message": row["message"] if row else None,
     }
 
 @app.get("/api/projects/internal/enc-key/{ref}")

@@ -118,6 +118,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     project    TEXT    NOT NULL,
     owner_id   UUID    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     status     TEXT    NOT NULL,
+    message    TEXT,
     updated_at TIMESTAMPTZ DEFAULT now()
   );
 
