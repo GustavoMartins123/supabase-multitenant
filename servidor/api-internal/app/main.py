@@ -419,6 +419,7 @@ async def rollback_project_from_db(pool, project_name: str):
 
 
 RESERVED_WORDS = {
+    'default',
     'select','from','where','insert','update','delete','table',
     'create','drop','join','group','order','limit','into','index',
     'view','trigger','procedure','function','database','schema',

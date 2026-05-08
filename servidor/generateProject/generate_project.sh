@@ -103,7 +103,7 @@ PROJECT_ID_LOWER=$(echo "$PROJECT_ID" | tr '[:upper:]' '[:lower:]')
 
 
 RESERVED=(
-  select from where insert update delete table create drop join group order limit into index view trigger procedure function database schema primary foreign key constraint unique null not and or in like between exists having union inner left right outer cross on as case when then else end if while for begin commit rollback
+  default select from where insert update delete table create drop join group order limit into index view trigger procedure function database schema primary foreign key constraint unique null not and or in like between exists having union inner left right outer cross on as case when then else end if while for begin commit rollback
 )
 for word in "${RESERVED[@]}"; do
   [[ "$PROJECT_ID_LOWER" == "$word" ]] && die "'$PROJECT_ID_LOWER' é palavra reservada."

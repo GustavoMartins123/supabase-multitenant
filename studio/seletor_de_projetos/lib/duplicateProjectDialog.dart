@@ -23,6 +23,7 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
   String _crop(String s) => s.length > 40 ? s.substring(0, 40) : s;
 
   static const _reserved = <String>{
+    'default',
     'select',
     'from',
     'where',

@@ -8,6 +8,7 @@ local _M = {}
 
 local STUDIO_BASE_URL = "http://studio:3000"
 local id_map_cache = ngx.shared.service_keys
+local respond_json
 
 local function json_array(items)
     local arr = items or {}
@@ -35,11 +36,24 @@ end
 
 local function get_project_scope()
     local project_ref = ngx.var.project_ref
-    if project_ref and project_ref ~= "" then
+    if project_ref and project_ref ~= "" and project_ref ~= "default" then
         return project_ref
     end
 
-    return get_project_ref() or "default"
+    return nil
+end
+
+local function require_project_scope()
+    local project_scope = get_project_scope()
+    if project_scope then
+        return project_scope
+    end
+
+    return respond_json(403, {
+        error = {
+            message = "Selecione um projeto antes de acessar snippets.",
+        },
+    })
 end
 
 local function read_body()
@@ -112,7 +126,7 @@ local function studio_request(method, path, opts)
     })
 end
 
-local function respond_json(status, payload)
+function respond_json(status, payload)
     ngx.status = status
     ngx.header["Content-Type"] = "application/json; charset=utf-8"
     ngx.say(cjson.encode(payload))
@@ -947,7 +961,7 @@ function _M.handle_content()
     if not api_project_ref then
         return passthrough_current_request()
     end
-    local project_scope = get_project_scope()
+    local project_scope = require_project_scope()
 
     local method = ngx.req.get_method()
     local args = ngx.req.get_uri_args()
@@ -1155,7 +1169,7 @@ function _M.handle_folders()
     if not api_project_ref then
         return passthrough_current_request()
     end
-    local project_scope = get_project_scope()
+    local project_scope = require_project_scope()
 
     local method = ngx.req.get_method()
     local args = ngx.req.get_uri_args()
@@ -1299,7 +1313,7 @@ function _M.handle_folder_item()
         return passthrough_current_request()
     end
 
-    local project_scope = get_project_scope()
+    local project_scope = require_project_scope()
     local method = ngx.req.get_method()
 
     local user_id, user_id_err = get_user_id()
@@ -1346,7 +1360,7 @@ function _M.handle_count()
     if not api_project_ref then
         return passthrough_current_request()
     end
-    local project_scope = get_project_scope()
+    local project_scope = require_project_scope()
 
     local args = ngx.req.get_uri_args()
     if args.type ~= "sql" then
@@ -1406,7 +1420,7 @@ function _M.handle_item()
     if not api_project_ref or not item_id then
         return passthrough_current_request()
     end
-    local project_scope = get_project_scope()
+    local project_scope = require_project_scope()
 
     local user_id, user_id_err = get_user_id()
     if not user_id then

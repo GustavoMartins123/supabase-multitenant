@@ -11,7 +11,7 @@ services:
       - usersdb:/config 
     restart: "no"
   authelia:
-    image: authelia/authelia:fix-healthcheck-order
+    image: authelia/authelia:4.39
     container_name: authelia
     volumes:
       - ./authelia:/config

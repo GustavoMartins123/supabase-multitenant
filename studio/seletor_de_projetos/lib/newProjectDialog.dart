@@ -22,6 +22,7 @@ class _NewProjectDialogState extends State<NewProjectDialog>
   String _crop(String s) => s.length > 40 ? s.substring(0, 40) : s;
 
   static const _reserved = <String>{
+    'default',
     'select',
     'from',
     'where',
@@ -323,70 +324,70 @@ class _NewProjectDialogState extends State<NewProjectDialog>
                       },
                       fieldViewBuilder:
                           (context, controller, focusNode, onSubmitted) {
-                            if (controller.text != _ctrl.text) {
-                              controller.text = _ctrl.text;
-                              controller.selection = _ctrl.selection;
-                            }
+                        if (controller.text != _ctrl.text) {
+                          controller.text = _ctrl.text;
+                          controller.selection = _ctrl.selection;
+                        }
 
-                            return TextFormField(
-                              controller: controller,
-                              focusNode: focusNode,
-                              decoration: InputDecoration(
-                                hintText: 'ex.: meu_projeto_incrivel',
-                                hintStyle: const TextStyle(
-                                  color: SupabaseColors.textMuted,
-                                  fontSize: 13,
-                                ),
-                                prefixIcon: const Icon(
-                                  Icons.folder_rounded,
-                                  color: SupabaseColors.textMuted,
-                                  size: 18,
-                                ),
-                                filled: true,
-                                fillColor: SupabaseColors.bg300,
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(6),
-                                  borderSide: const BorderSide(
-                                    color: SupabaseColors.border,
-                                  ),
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(6),
-                                  borderSide: const BorderSide(
-                                    color: SupabaseColors.border,
-                                  ),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(6),
-                                  borderSide: const BorderSide(
-                                    color: SupabaseColors.brand,
-                                    width: 2,
-                                  ),
-                                ),
-                                errorBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(6),
-                                  borderSide: const BorderSide(
-                                    color: SupabaseColors.error,
-                                  ),
-                                ),
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 14,
-                                ),
+                        return TextFormField(
+                          controller: controller,
+                          focusNode: focusNode,
+                          decoration: InputDecoration(
+                            hintText: 'ex.: meu_projeto_incrivel',
+                            hintStyle: const TextStyle(
+                              color: SupabaseColors.textMuted,
+                              fontSize: 13,
+                            ),
+                            prefixIcon: const Icon(
+                              Icons.folder_rounded,
+                              color: SupabaseColors.textMuted,
+                              size: 18,
+                            ),
+                            filled: true,
+                            fillColor: SupabaseColors.bg300,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(6),
+                              borderSide: const BorderSide(
+                                color: SupabaseColors.border,
                               ),
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                                color: SupabaseColors.textPrimary,
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(6),
+                              borderSide: const BorderSide(
+                                color: SupabaseColors.border,
                               ),
-                              validator: _validate,
-                              onChanged: (value) {
-                                _ctrl.text = value;
-                                _ctrl.selection = controller.selection;
-                              },
-                              onFieldSubmitted: (_) => _submit(),
-                            );
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(6),
+                              borderSide: const BorderSide(
+                                color: SupabaseColors.brand,
+                                width: 2,
+                              ),
+                            ),
+                            errorBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(6),
+                              borderSide: const BorderSide(
+                                color: SupabaseColors.error,
+                              ),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 14,
+                            ),
+                          ),
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: SupabaseColors.textPrimary,
+                          ),
+                          validator: _validate,
+                          onChanged: (value) {
+                            _ctrl.text = value;
+                            _ctrl.selection = controller.selection;
                           },
+                          onFieldSubmitted: (_) => _submit(),
+                        );
+                      },
                       onSelected: (String selection) {
                         _selectSuggestion(selection);
                       },

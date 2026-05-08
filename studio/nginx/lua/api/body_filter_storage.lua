@@ -11,12 +11,15 @@ if ngx.ctx.process_sign_response and not ngx.ctx.sign_response_processed then
         
         if success and response_data and type(response_data) == "table" and #response_data > 0 then
             local first_item = response_data[1]
-            ngx.log(ngx.ERR, "DEBUG first_item: ", cjson.encode(first_item))
             if first_item and first_item.signedURL then
-                local server_path = ngx.var.server_path or ""
-                server_path = ngx.re.gsub(server_path, "/$", "", "jo")
+                local public_origin = ngx.var.studio_public_origin
+                if not public_origin or public_origin == "" then
+                    public_origin = (ngx.var.scheme or "https") .. "://" .. (ngx.var.http_host or ngx.var.host or "")
+                end
+                public_origin = ngx.re.gsub(public_origin, "/$", "", "jo")
+
                 local signed_url = ngx.re.gsub(first_item.signedURL, "^/", "", "jo")
-                local full_url = server_path .. "/storage/v1/" .. signed_url
+                local full_url = public_origin .. "/storage/v1/" .. signed_url
                 cjson.encode_escape_forward_slash(false)
                 local result = { signedUrl = full_url }
                 
