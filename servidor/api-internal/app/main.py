@@ -10,7 +10,7 @@ import time
 import asyncio, json, re
 from fastapi import FastAPI, BackgroundTasks, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from app.schemas import NewProject, DuplicateProject, UserSyncPayload, AddMember, TransferBody, UpdateSettings, RecreateServices
 from cryptography.fernet import Fernet
 from typing import Any, Optional, List, Dict
 from dotenv import dotenv_values
@@ -495,22 +495,7 @@ async def validate_shared_token(request: Request, call_next):
     response = await call_next(request)
     return response
 
-class NewProject(BaseModel):
-    name: str
 
-class DuplicateProject(BaseModel):
-    original_name: str
-    new_name: str
-    copy_data: bool = False
-
-
-class UserSyncPayload(BaseModel):
-    id: uuid.UUID
-    username: str
-    display_name: str | None = None
-    groups: List[str] = Field(default_factory=list)
-    is_active: bool = True
-    source: str = "studio_sync"
 
 
 @app.post("/api/projects/internal/users/sync")
@@ -790,7 +775,9 @@ async def list_projects(
         result.append({
             "name": r["name"], 
             "anon_token": anon_token,
-            "config_token": config_token
+            "config_token": config_token,
+            "file_size_limit": _get_project_file_size_limit(r["name"]),
+            "storage_limit_token": _get_project_storage_limit_token(r["name"]),
         })
     return result
 
@@ -1304,9 +1291,7 @@ async def delete_project(
     )
 
 
-class AddMember(BaseModel):
-    user_id: str
-    role: str = 'member'
+
 
 
 @app.post("/api/projects/{project_name}/rotate-key")
@@ -1646,6 +1631,67 @@ def _get_project_dir(project_name: str) -> pathlib.Path:
     return pathlib.Path("/docker/projects") / project_name
 
 
+def _get_project_pending_settings_path(project_name: str) -> pathlib.Path:
+    return _get_project_dir(project_name) / ".settings_pending.json"
+
+
+def _read_project_pending_settings(project_name: str) -> dict[str, Any]:
+    pending_path = _get_project_pending_settings_path(project_name)
+    if not pending_path.exists():
+        return {}
+    try:
+        data = json.loads(pending_path.read_text())
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_project_pending_settings(
+    project_name: str,
+    affected_services: list[str],
+) -> None:
+    pending_path = _get_project_pending_settings_path(project_name)
+    payload = {
+        "affected_services": affected_services,
+        "storage_limit_token": _get_project_storage_limit_token(project_name),
+        "updated_at": int(time.time()),
+    }
+    pending_path.write_text(json.dumps(payload))
+
+
+def _clear_project_pending_settings(project_name: str) -> None:
+    pending_path = _get_project_pending_settings_path(project_name)
+    try:
+        pending_path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _get_project_file_size_limit(project_name: str) -> str:
+    env_path = _get_project_env_path(project_name)
+    try:
+        values = _read_env_file(env_path)
+    except Exception:
+        return "524288000"
+
+    value = str(values.get("FILE_SIZE_LIMIT", "")).strip()
+    if re.fullmatch(r"\d+", value) and int(value) > 0:
+        return value
+    return "524288000"
+
+
+def _get_project_storage_limit_token(project_name: str) -> str:
+    limit = _get_project_file_size_limit(project_name)
+    ts = str(int(time.time()))
+    payload = f"{project_name}.{limit}.{ts}"
+    sig = hmac.new(
+        NGINX_HMAC_SECRET.encode(),
+        payload.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{payload}.{sig}"
+
+
 def _normalize_public_base_url(url: str, proto: str | None = None) -> str:
     normalized = url.rstrip("/")
     if not re.match(r"^https?://", normalized):
@@ -1897,6 +1943,7 @@ async def _recreate_project_services_background(
             )
             return
 
+        _clear_project_pending_settings(project_name)
         await _set_job_status(
             job_id,
             "done",
@@ -2197,7 +2244,9 @@ async def get_projects_for_user(
                 "name": r["name"],
                 "status": project_status["status"],
                 "running_containers": project_status["running"],
-                "total_containers": project_status["total"]
+                "total_containers": project_status["total"],
+                "file_size_limit": _get_project_file_size_limit(r["name"]),
+                "storage_limit_token": _get_project_storage_limit_token(r["name"]),
             })
 
     return {"projects": projects}
@@ -2246,8 +2295,7 @@ async def list_all_users_for_admin(
         "nginx_route": f"/api/projects/{name}/all-users"
     }
 
-class TransferBody(BaseModel):
-    new_owner_id: str
+
 
 @app.post("/api/projects/{project_name}/transfer", status_code=200)
 async def transfer_project(
@@ -2643,12 +2691,7 @@ def _get_affected_services(changed_keys: list[str]) -> list[str]:
     return sorted(services)
 
 
-class UpdateSettings(BaseModel):
-    settings: Dict[str, str]
 
-
-class RecreateServices(BaseModel):
-    services: List[str]
 
 
 @app.get("/api/projects/{project_name}/settings")
@@ -2669,9 +2712,12 @@ async def get_project_settings(
         raise HTTPException(404, f"Arquivo .env não encontrado para o projeto '{project_name}'")
 
     settings = _read_env_whitelisted(env_path)
+    pending = _read_project_pending_settings(project_name)
 
     return {
         "settings": settings,
+        "pending_affected_services": pending.get("affected_services", []),
+        "storage_limit_token": pending.get("storage_limit_token"),
     }
 
 
@@ -2698,11 +2744,17 @@ async def update_project_settings(
     _write_env_whitelisted(env_path, updates)
 
     affected = _get_affected_services(list(updates.keys()))
+    if affected:
+        _write_project_pending_settings(project_name, affected)
+    else:
+        _clear_project_pending_settings(project_name)
 
     return {
         "status": "updated",
         "updated_keys": list(updates.keys()),
         "affected_services": affected,
+        "file_size_limit": _get_project_file_size_limit(project_name),
+        "storage_limit_token": _get_project_storage_limit_token(project_name),
         "message": f"Configurações salvas. Serviços afetados: {', '.join(affected)}. Recrie-os para aplicar.",
     }
 
@@ -2759,4 +2811,7 @@ async def recreate_project_services(
             },
         )
 
-    return await _recreate_project_services_impl(project_name, services)
+    result = await _recreate_project_services_impl(project_name, services)
+    if result.get("success"):
+        _clear_project_pending_settings(project_name)
+    return result

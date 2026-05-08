@@ -1,3 +1,5 @@
+require("storage_upload_limit").enforce()
+
 local ref = ngx.var.project_ref
 if not ref or ref == "default" then
     return

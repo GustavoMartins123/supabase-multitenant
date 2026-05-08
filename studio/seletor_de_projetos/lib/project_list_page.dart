@@ -98,10 +98,10 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
   Future<void> _showDuplicateDialog(String originalProjectName) async {
     final Map<String, dynamic>? newProject =
         await showDialog<Map<String, dynamic>>(
-          context: context,
-          builder: (_) =>
-              DuplicateProjectDialog(originalProjectName: originalProjectName),
-        );
+      context: context,
+      builder: (_) =>
+          DuplicateProjectDialog(originalProjectName: originalProjectName),
+    );
 
     if (newProject?['name'] != null && newProject?['name'].trim().isNotEmpty) {
       await _duplicateAndWait(
@@ -167,8 +167,17 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
     }
   }
 
-  Future<void> _openProject(String refKey) async {
-    await http.get(Uri.parse('/set-project?ref=$refKey'));
+  Future<void> _openProject(String refKey, Object? storageLimitToken) async {
+    final uri = Uri(
+      path: '/set-project',
+      queryParameters: {
+        'ref': refKey,
+        if (storageLimitToken != null)
+          'storage_limit_token': storageLimitToken.toString(),
+      },
+    );
+
+    await http.get(uri);
     html.window.open(
       '${html.window.location.origin}/project/default',
       '_blank',
@@ -365,12 +374,10 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
     Set<String> favorites,
     String? serverDomain,
   ) {
-    final favProjects = projects
-        .where((p) => favorites.contains(p['name']))
-        .toList();
-    final otherProjects = projects
-        .where((p) => !favorites.contains(p['name']))
-        .toList();
+    final favProjects =
+        projects.where((p) => favorites.contains(p['name'])).toList();
+    final otherProjects =
+        projects.where((p) => !favorites.contains(p['name'])).toList();
 
     return Padding(
       padding: const EdgeInsets.all(24),
@@ -463,7 +470,10 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
       serverDomain: serverDomain,
       onTap: project['is_loading'] == true
           ? () {}
-          : () => _openProject(project['name']),
+          : () => _openProject(
+                project['name'],
+                project['storage_limit_token'],
+              ),
       onDuplicate: () => _showDuplicateDialog(project['name']),
       onToggleFavorite: () =>
           ref.read(favoritesProvider.notifier).toggleFavorite(project['name']),

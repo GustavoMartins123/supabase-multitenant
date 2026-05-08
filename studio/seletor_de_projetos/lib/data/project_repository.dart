@@ -14,6 +14,28 @@ class ProjectActionResult {
   final Job? job;
 }
 
+class UpdateSettingsResult {
+  const UpdateSettingsResult({
+    required this.affectedServices,
+    this.storageLimitToken,
+  });
+
+  final List<String> affectedServices;
+  final String? storageLimitToken;
+}
+
+class ProjectSettingsData {
+  const ProjectSettingsData({
+    required this.settings,
+    required this.pendingAffectedServices,
+    this.storageLimitToken,
+  });
+
+  final Map<String, String> settings;
+  final List<String> pendingAffectedServices;
+  final String? storageLimitToken;
+}
+
 class ProjectRepository {
   Map<String, dynamic>? _tryDecodeObject(String body) {
     if (body.isEmpty) return null;
@@ -314,12 +336,18 @@ class ProjectRepository {
     }
   }
 
-  Future<Map<String, String>> fetchProjectSettings(String ref) async {
+  Future<ProjectSettingsData> fetchProjectSettings(String ref) async {
     final resp = await http.get(Uri.parse('/api/projects/$ref/settings'));
     if (resp.statusCode == 200) {
       final data = jsonDecode(resp.body);
       final raw = data['settings'] as Map<String, dynamic>;
-      return raw.map((k, v) => MapEntry(k, v.toString()));
+      final pendingRaw =
+          data['pending_affected_services'] as List<dynamic>? ?? [];
+      return ProjectSettingsData(
+        settings: raw.map((k, v) => MapEntry(k, v.toString())),
+        pendingAffectedServices: pendingRaw.map((e) => e.toString()).toList(),
+        storageLimitToken: data['storage_limit_token']?.toString(),
+      );
     }
     if (resp.statusCode == 403) {
       throw Exception('Acesso negado');
@@ -327,7 +355,7 @@ class ProjectRepository {
     throw Exception('Erro ao carregar settings: ${resp.body}');
   }
 
-  Future<List<String>> updateProjectSettings(
+  Future<UpdateSettingsResult> updateProjectSettings(
     String ref,
     Map<String, String> settings,
   ) async {
@@ -339,7 +367,10 @@ class ProjectRepository {
     if (resp.statusCode == 200) {
       final data = jsonDecode(resp.body);
       final raw = data['affected_services'] as List<dynamic>? ?? [];
-      return raw.map((e) => e.toString()).toList();
+      return UpdateSettingsResult(
+        affectedServices: raw.map((e) => e.toString()).toList(),
+        storageLimitToken: data['storage_limit_token']?.toString(),
+      );
     }
     try {
       final err = jsonDecode(resp.body)['detail'] ?? resp.body;

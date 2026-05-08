@@ -4,8 +4,8 @@ import '../services/projectService.dart';
 
 final projectListProvider =
     AsyncNotifierProvider<ProjectListNotifier, List<Map<String, dynamic>>>(
-      ProjectListNotifier.new,
-    );
+  ProjectListNotifier.new,
+);
 
 class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
   @override
@@ -19,7 +19,14 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
 
     state = AsyncData([
       ...current,
-      {'name': name, 'anon_token': '', 'config_token': '', 'is_loading': true},
+      {
+        'name': name,
+        'anon_token': '',
+        'config_token': '',
+        'file_size_limit': '',
+        'storage_limit_token': '',
+        'is_loading': true,
+      },
     ]);
 
     final job = await rep.createProject(name);
@@ -50,6 +57,8 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
         'name': newName,
         'anon_token': '',
         'config_token': '',
+        'file_size_limit': '',
+        'storage_limit_token': '',
         'is_loading': true,
       },
     ]);

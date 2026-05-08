@@ -384,11 +384,10 @@ class _UserProjectsAdminScreenState
                             : SupabaseColors.warning,
                         boxShadow: [
                           BoxShadow(
-                            color:
-                                (isRunning
-                                        ? SupabaseColors.success
-                                        : SupabaseColors.warning)
-                                    .withValues(alpha: 0.5),
+                            color: (isRunning
+                                    ? SupabaseColors.success
+                                    : SupabaseColors.warning)
+                                .withValues(alpha: 0.5),
                             blurRadius: 6,
                             spreadRadius: 1,
                           ),
@@ -511,7 +510,10 @@ class _UserProjectsAdminScreenState
                         color: SupabaseColors.brand,
                         onPressed: busy
                             ? null
-                            : () => _openProject(project.name),
+                            : () => _openProject(
+                                  project.name,
+                                  project.storageLimitToken,
+                                ),
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -531,9 +533,8 @@ class _UserProjectsAdminScreenState
                         icon: Icons.stop_rounded,
                         label: 'Stop',
                         color: SupabaseColors.error,
-                        onPressed: busy
-                            ? null
-                            : () => _doAction(project.name, 'stop'),
+                        onPressed:
+                            busy ? null : () => _doAction(project.name, 'stop'),
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -564,9 +565,8 @@ class _UserProjectsAdminScreenState
                         icon: Icons.delete_outline_rounded,
                         label: 'Excluir',
                         color: SupabaseColors.error,
-                        onPressed: busy
-                            ? null
-                            : () => _confirmAndDelete(project.name),
+                        onPressed:
+                            busy ? null : () => _confirmAndDelete(project.name),
                       ),
                     ),
                   ],
@@ -628,8 +628,17 @@ class _UserProjectsAdminScreenState
     );
   }
 
-  Future<void> _openProject(String ref) async {
-    await http.get(Uri.parse('/set-project?ref=$ref'));
+  Future<void> _openProject(String ref, String storageLimitToken) async {
+    final uri = Uri(
+      path: '/set-project',
+      queryParameters: {
+        'ref': ref,
+        if (storageLimitToken.isNotEmpty)
+          'storage_limit_token': storageLimitToken,
+      },
+    );
+
+    await http.get(uri);
     html.window.open(
       '${html.window.location.origin}/project/default',
       '_blank',
