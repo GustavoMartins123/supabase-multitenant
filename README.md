@@ -50,13 +50,13 @@ flowchart TB
         Realtime["⚡ Realtime :4000\nGlobal"]
         Pooler["🏊 Supavisor\nConnection Pooler\nGlobal"]
         Functions["⚙️ Edge Functions\n/functions/main\nGlobal"]
+        MetaGlobal["🔧 Postgres Meta :8080\nGlobal"]
   end
  subgraph subGraph2["Project A (project_id_a)"]
         NginxA["🌐 Nginx A :port_a\n/project_id_a"]
         AuthA["🔑 GoTrue A :9999"]
         RestA["📡 PostgREST A :3000"]
         StorageA["📦 Storage A :5000"]
-        MetaA["🔧 Meta A :meta_port_a"]
         ImgA["🖼️ ImgProxy A :5001"]
   end
  subgraph subGraph3["Project B (project_id_b)"]
@@ -64,7 +64,6 @@ flowchart TB
         AuthB["🔑 GoTrue B :9999"]
         RestB["📡 PostgREST B :3000"]
         StorageB["📦 Storage B :5000"]
-        MetaB["🔧 Meta B :meta_port_b"]
         ImgB["🖼️ ImgProxy B :5001"]
   end
  subgraph subGraph4["Dynamic Projects"]
@@ -83,24 +82,23 @@ flowchart TB
     Nginx -. "LAN - Per-project requests via '/project_id'" .-> Traefik
     Traefik -. LAN .-> API["🐍 Projects API :18000\nPython\nManages Projects"]
     Pooler --> DB
+    MetaGlobal -. "Encrypted dynamic connection" .-> DB
     NginxA --> AuthA & RestA & StorageA & Functions
-    NginxA -. via roleKey .-> MetaA
     StorageA --> ImgA
     NginxB --> AuthB & RestB & StorageB & Functions
-    NginxB -. via roleKey .-> MetaB
     StorageB --> ImgB
     Traefik --> NginxA
     Traefik --> NginxB
     AuthA -. via Pooler .-> Pooler
     RestA -. via Pooler .-> Pooler
     StorageA -. via Pooler .-> Pooler
-    MetaA -. Direct Connection .-> DB
     AuthB -. via Pooler .-> Pooler
     RestB -. via Pooler .-> Pooler
     StorageB -. via Pooler .-> Pooler
-    MetaB -. Direct Connection .-> DB
     NginxA -. WebSocket .-> Realtime
     NginxB -. WebSocket .-> Realtime
+    Nginx -. "pg-meta via Projects API" .-> API
+    API -. "x-connection-encrypted" .-> MetaGlobal
     API -. Creates/Manages .-> NginxA & NginxB
     API -. Docker Socket .-> DockerSock["🐳 Docker Socket\nContainer Creation"]
     Flutter -. "/set-project?ref=" .-> Nginx
@@ -112,17 +110,16 @@ flowchart TB
      Realtime:::shared
      Pooler:::shared
      Functions:::shared
+     MetaGlobal:::shared
      NginxA:::project
      AuthA:::project
      RestA:::project
      StorageA:::project
-     MetaA:::project
      ImgA:::project
      NginxB:::project
      AuthB:::project
      RestB:::project
      StorageB:::project
-     MetaB:::project
      ImgB:::project
      World:::external
      Traefik:::gateway

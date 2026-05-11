@@ -152,7 +152,7 @@ generate_db() {
   
   echo "Garantindo permissões básicas no banco $db..."
   docker exec supabase-db \
-    psql -U supabase_admin -d postgres -c "GRANT CREATE ON DATABASE $db TO supabase_storage_admin; GRANT CREATE ON DATABASE $db TO supabase_auth_admin;"
+    psql -U supabase_admin -d postgres -c "REVOKE CONNECT, TEMPORARY ON DATABASE $db FROM PUBLIC; GRANT CONNECT, TEMPORARY ON DATABASE $db TO pgbouncer; GRANT CONNECT, TEMPORARY ON DATABASE $db TO authenticator; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $db TO supabase_storage_admin; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $db TO supabase_auth_admin;"
   
   echo "Banco $db criado com sucesso"
 }

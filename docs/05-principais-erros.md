@@ -558,7 +558,7 @@ Ordem de inicialização incorreta ou serviços não prontos.
    docker logs nome_projeto-auth-1
    docker logs nome_projeto-rest-1
    docker logs nome_projeto-storage-1
-   docker logs nome_projeto-meta-1
+   docker logs postgres-meta-global
    ```
 
 3. **Reinicie na ordem correta:**
@@ -571,8 +571,6 @@ Ordem de inicialização incorreta ou serviços não prontos.
    
    # Inicie via interface do Studio (ordem correta automática)
    # Ou manualmente:
-   docker start nome_projeto-meta-1
-   sleep 2
    docker start nome_projeto-auth-1
    sleep 2
    docker start nome_projeto-rest-1
@@ -583,6 +581,37 @@ Ordem de inicialização incorreta ou serviços não prontos.
    sleep 2
    docker start nome_projeto-nginx-1
    ```
+
+---
+
+### 11. `Tenant or user not found` no Auth, Rest ou Storage
+
+**Sintoma:**
+- Storage falha com `Tenant or user not found`
+- PostgREST falha ao carregar schema cache
+- GoTrue/Auth reinicia com erro de conexão no Supavisor
+- Logs do `supabase-pooler` mostram `permission denied for database "_supabase_nome_projeto"`
+
+**Causa provável:**
+O tenant do Supavisor não foi criado ou falhou durante a criação. Se `CONNECT` foi removido de `PUBLIC` nos bancos de projeto, o role `pgbouncer` também precisa ter `CONNECT` no banco para o Supavisor resolver os usuários do tenant.
+
+**Verificação:**
+```bash
+docker exec supabase-db psql -U supabase_admin -d postgres -c "
+SELECT
+  has_database_privilege('pgbouncer', '_supabase_nome_projeto', 'CONNECT') AS pgbouncer_connect,
+  has_database_privilege('meta_guest', '_supabase_nome_projeto', 'CONNECT') AS meta_guest_connect;
+"
+```
+
+**Correção:**
+```bash
+docker exec supabase-db psql -U supabase_admin -d postgres -c "
+GRANT CONNECT, TEMPORARY ON DATABASE _supabase_nome_projeto TO pgbouncer;
+"
+```
+
+Depois recrie o tenant do Supavisor pelo fluxo normal de criação do projeto ou rode novamente a etapa que chama `PUT /api/tenants/<nome_projeto>`. Se o tenant já foi recriado, os serviços costumam recuperar sozinhos; caso contrário, reinicie os containers do projeto.
 
 ---
 

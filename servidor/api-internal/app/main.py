@@ -8,10 +8,14 @@ import binascii
 import hashlib
 import time
 import asyncio, json, re
+import urllib.parse
+import httpx
 from fastapi import FastAPI, BackgroundTasks, Depends, Header, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from app.schemas import NewProject, DuplicateProject, UserSyncPayload, AddMember, TransferBody, UpdateSettings, RecreateServices
 from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
 from typing import Any, Optional, List, Dict
 from dotenv import dotenv_values
 
@@ -27,6 +31,35 @@ DELETE_PASSWORD = os.getenv("PROJECT_DELETE_PASSWORD")
 NGINX_SHARED_TOKEN = os.getenv("NGINX_SHARED_TOKEN")
 NGINX_HMAC_SECRET = os.getenv("NGINX_HMAC_SECRET")
 USER_TOKEN_MAX_CLOCK_SKEW_SECONDS = int(os.getenv("USER_TOKEN_MAX_CLOCK_SKEW_SECONDS", "30"))
+PG_META_ALLOWED_HOSTS = {
+    host.strip().lower()
+    for host in os.getenv("PG_META_ALLOWED_HOSTS", "postgres-meta-global").split(",")
+    if host.strip()
+}
+
+
+def _validate_pg_meta_internal_url(raw_url: str) -> str:
+    parsed = urllib.parse.urlparse(raw_url.strip().rstrip("/"))
+    if parsed.scheme not in {"http", "https"}:
+        raise RuntimeError("Invalid PG_META_INTERNAL_URL: scheme must be http or https")
+    if not parsed.hostname:
+        raise RuntimeError("Invalid PG_META_INTERNAL_URL: missing hostname")
+    if parsed.username or parsed.password:
+        raise RuntimeError("Invalid PG_META_INTERNAL_URL: userinfo is not allowed")
+    if parsed.path not in {"", "/"}:
+        raise RuntimeError("Invalid PG_META_INTERNAL_URL: path is not allowed")
+    if parsed.query or parsed.fragment or parsed.params:
+        raise RuntimeError("Invalid PG_META_INTERNAL_URL: query, params and fragment are not allowed")
+    if parsed.hostname.lower() not in PG_META_ALLOWED_HOSTS:
+        raise RuntimeError(
+            "Invalid PG_META_INTERNAL_URL: hostname is not in PG_META_ALLOWED_HOSTS"
+        )
+    return urllib.parse.urlunparse(parsed)
+
+
+PG_META_INTERNAL_URL = _validate_pg_meta_internal_url(
+    os.getenv("PG_META_INTERNAL_URL", "http://postgres-meta-global:8080")
+)
 
 if not FERNET_SECRET:
     raise RuntimeError("Missing FERNET_SECRET environment variable")
@@ -1693,6 +1726,32 @@ def _get_project_storage_limit_token(project_name: str) -> str:
     return f"{payload}.{sig}"
 
 
+def _get_project_service_role_key(project_name: str) -> str:
+    env_path = _get_project_env_path(project_name)
+    project_env = _read_existing_env_file(
+        env_path,
+        f"Arquivo .env não encontrado para o projeto '{project_name}'",
+    )
+    service_role_key = str(project_env.get("SERVICE_ROLE_KEY_PROJETO", "")).strip()
+    if not service_role_key:
+        raise RuntimeError(
+            f".env do projeto '{project_name}' sem a chave SERVICE_ROLE_KEY_PROJETO"
+        )
+    return service_role_key
+
+
+def _extract_project_admin_apikey(request: Request) -> str:
+    apikey = (request.headers.get("apikey") or "").strip()
+    if apikey:
+        return apikey
+
+    authorization = (request.headers.get("authorization") or "").strip()
+    if authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+
+    return ""
+
+
 def _normalize_public_base_url(url: str, proto: str | None = None) -> str:
     normalized = url.rstrip("/")
     if not re.match(r"^https?://", normalized):
@@ -2381,7 +2440,6 @@ async def transfer_project(
 
 async def get_project_conn(project_ref: str):
     """Creates a direct asyncpg connection to _supabase_{ref} using same credentials as main pool."""
-    import urllib.parse
     dsn = urllib.parse.urlparse(DB_DSN)
     db_name = f"_supabase_{project_ref}"
     return await asyncpg.connect(
@@ -2390,6 +2448,114 @@ async def get_project_conn(project_ref: str):
         user=dsn.username,
         password=dsn.password,
         database=db_name
+    )
+
+
+def get_project_meta_connection_string(project_ref: str) -> str:
+    dsn = urllib.parse.urlparse(DB_DSN)
+    if dsn.scheme not in {"postgres", "postgresql"} or not dsn.hostname or not dsn.username:
+        raise RuntimeError("DB_DSN inválido para construir a conexão administrativa do projeto")
+
+    db_name = f"_supabase_{project_ref}"
+    return urllib.parse.urlunparse(
+        dsn._replace(
+            path=f"/{urllib.parse.quote(db_name, safe='')}",
+            params="",
+            query="",
+            fragment="",
+        )
+    )
+
+def encrypt_postgres_meta_uri(uri: str, passphrase: str) -> str:
+    salt = os.urandom(8)
+    data = passphrase.encode('utf-8') + salt
+    key_iv = b''
+    last_hash = b''
+    while len(key_iv) < 48:
+        last_hash = hashlib.md5(last_hash + data).digest()
+        key_iv += last_hash
+    key = key_iv[:32]
+    iv = key_iv[32:48]
+
+    cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+    encryptor = cipher.encryptor()
+
+    pad_len = 16 - (len(uri) % 16)
+    padded_uri = uri.encode('utf-8') + bytes([pad_len] * pad_len)
+
+    ciphertext = encryptor.update(padded_uri) + encryptor.finalize()
+    return base64.b64encode(b"Salted__" + salt + ciphertext).decode('utf-8')
+
+
+@app.api_route(
+    "/api/projects/{ref}/meta",
+    methods=["GET", "POST", "PATCH", "DELETE"],
+)
+@app.api_route(
+    "/api/projects/{ref}/meta/{meta_path:path}",
+    methods=["GET", "POST", "PATCH", "DELETE"],
+)
+async def proxy_project_meta(
+    ref: str,
+    request: Request,
+    meta_path: str = "",
+    pool=Depends(get_pool)
+):
+    ref = validate_project_id(ref)
+    auth_user = await resolve_authenticated_user(request, pool)
+
+    async with pool.acquire() as conn:
+        project_row = await get_project_row(conn, ref)
+        await ensure_project_member_access(conn, project_id=project_row["id"], auth_user=auth_user)
+
+    try:
+        expected_apikey = _get_project_service_role_key(ref)
+        project_connection_string = get_project_meta_connection_string(ref)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    provided_apikey = _extract_project_admin_apikey(request)
+    if not provided_apikey:
+        raise HTTPException(status_code=401, detail="apikey administrativa ausente")
+    if not hmac.compare_digest(provided_apikey, expected_apikey):
+        raise HTTPException(status_code=403, detail="apikey administrativa inválida para o projeto")
+
+    target_path = meta_path.lstrip("/")
+    target_url = f"{PG_META_INTERNAL_URL}/{target_path}" if target_path else PG_META_INTERNAL_URL
+    upstream_headers = {"x-connection-encrypted": encrypt_postgres_meta_uri(project_connection_string, FERNET_SECRET)}
+
+    content_type = request.headers.get("content-type")
+    if content_type:
+        upstream_headers["content-type"] = content_type
+
+    x_pg_application_name = request.headers.get("x-pg-application-name")
+    if x_pg_application_name:
+        upstream_headers["x-pg-application-name"] = x_pg_application_name
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0)) as client:
+            upstream_response = await client.request(
+                request.method,
+                target_url,
+                params=list(request.query_params.multi_items()),
+                headers=upstream_headers,
+                content=await request.body(),
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Falha ao acessar postgres-meta global: {exc}",
+        )
+
+    response_headers: dict[str, str] = {}
+    response_content_type = upstream_response.headers.get("content-type")
+    if response_content_type:
+        response_headers["content-type"] = response_content_type
+
+    return Response(
+        content=upstream_response.content,
+        status_code=upstream_response.status_code,
+        headers=response_headers,
     )
 
 @app.get("/api/projects/{ref}/functions")

@@ -248,19 +248,6 @@ services:
       IMGPROXY_LOCAL_FILESYSTEM_ROOT: /
       IMGPROXY_USE_ETAG: "true"
       IMGPROXY_ENABLE_WEBP_DETECTION: ${IMGPROXY_ENABLE_WEBP_DETECTION}
-  meta:
-    container_name: supabase-meta-{{project_id}}
-    image: supabase/postgres-meta:v0.96.1
-    restart: unless-stopped
-    networks:
-      - rede-supabase
-    environment:
-      PG_META_PORT: 8080
-      PG_META_DB_HOST: ${POSTGRES_HOST}
-      PG_META_DB_PORT: ${POSTGRES_PORT}
-      PG_META_DB_NAME: ${POSTGRES_DATABASE}
-      PG_META_DB_USER: supabase_admin
-      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
 
 networks:
   rede-supabase:

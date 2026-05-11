@@ -202,7 +202,7 @@ EOSQL
 
   echo "   Garantindo permissões básicas no novo banco..."
   docker exec supabase-db psql -U supabase_admin -d postgres -c \
-    "GRANT CREATE ON DATABASE $new_db TO supabase_storage_admin; GRANT CREATE ON DATABASE $new_db TO supabase_auth_admin;" || die "Falha ao garantir permissões do banco"
+    "REVOKE CONNECT, TEMPORARY ON DATABASE $new_db FROM PUBLIC; GRANT CONNECT, TEMPORARY ON DATABASE $new_db TO pgbouncer; GRANT CONNECT, TEMPORARY ON DATABASE $new_db TO authenticator; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $new_db TO supabase_storage_admin; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $new_db TO supabase_auth_admin;" || die "Falha ao garantir permissões do banco"
 
   local dump_file="/tmp/dump_${ORIGINAL_PROJECT}_$(date +%s).sql"
   local rt_structure_file="/tmp/dump_rt_structure_${ORIGINAL_PROJECT}_$(date +%s).sql"

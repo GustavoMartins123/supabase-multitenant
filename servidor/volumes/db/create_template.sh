@@ -133,3 +133,81 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
 EOSQL
 
 echo "Template _supabase_template criado com sucesso."
+
+echo "Criando banco e usuário restrito para fallback do pg-meta..."
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+    CREATE DATABASE meta_trap;
+    CREATE USER meta_guest WITH
+        LOGIN
+        NOSUPERUSER
+        NOCREATEDB
+        NOCREATEROLE
+        NOINHERIT
+        NOREPLICATION
+        NOBYPASSRLS
+        CONNECTION LIMIT 5
+        PASSWORD '$META_GUEST_PASSWORD';
+    ALTER ROLE meta_guest SET search_path = 'pg_catalog';
+    ALTER ROLE meta_guest SET statement_timeout = '5s';
+    ALTER ROLE meta_guest SET idle_in_transaction_session_timeout = '5s';
+
+    REVOKE pg_monitor FROM meta_guest;
+    REVOKE pg_read_all_data FROM meta_guest;
+    REVOKE pg_write_all_data FROM meta_guest;
+    REVOKE pg_read_all_settings FROM meta_guest;
+    REVOKE pg_read_all_stats FROM meta_guest;
+    REVOKE pg_stat_scan_tables FROM meta_guest;
+    REVOKE pg_read_server_files FROM meta_guest;
+    REVOKE pg_write_server_files FROM meta_guest;
+    REVOKE pg_execute_server_program FROM meta_guest;
+    REVOKE pg_signal_backend FROM meta_guest;
+
+    REVOKE CONNECT ON DATABASE postgres FROM PUBLIC;
+    REVOKE TEMPORARY ON DATABASE postgres FROM PUBLIC;
+    REVOKE CONNECT, TEMPORARY ON DATABASE _supabase FROM PUBLIC;
+    REVOKE CONNECT ON DATABASE _supabase_template FROM PUBLIC;
+    REVOKE TEMPORARY ON DATABASE _supabase_template FROM PUBLIC;
+    REVOKE CONNECT, TEMPORARY ON DATABASE logs_db FROM PUBLIC;
+    REVOKE CONNECT, TEMPORARY ON DATABASE template0 FROM PUBLIC;
+    REVOKE CONNECT, TEMPORARY ON DATABASE template1 FROM PUBLIC;
+    GRANT CONNECT, TEMPORARY ON DATABASE _supabase TO supabase_admin;
+    GRANT CONNECT, TEMPORARY ON DATABASE logs_db TO supabase_admin;
+    GRANT CONNECT, TEMPORARY ON DATABASE logs_db TO vector_writer;
+    REVOKE ALL ON DATABASE meta_trap FROM PUBLIC;
+    REVOKE ALL ON DATABASE meta_trap FROM meta_guest;
+    REVOKE CREATE, TEMPORARY ON DATABASE meta_trap FROM PUBLIC;
+    REVOKE CREATE, TEMPORARY ON DATABASE meta_trap FROM meta_guest;
+    GRANT CONNECT ON DATABASE meta_trap TO meta_guest;
+
+    \c meta_trap
+    REVOKE ALL ON SCHEMA public FROM PUBLIC;
+    REVOKE ALL ON SCHEMA public FROM meta_guest;
+    REVOKE ALL ON ALL TABLES IN SCHEMA public FROM PUBLIC;
+    REVOKE ALL ON ALL TABLES IN SCHEMA public FROM meta_guest;
+    REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC;
+    REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM meta_guest;
+    REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC;
+    REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM meta_guest;
+    CREATE SCHEMA meta_guard AUTHORIZATION supabase_admin;
+    REVOKE ALL ON SCHEMA meta_guard FROM PUBLIC;
+    CREATE OR REPLACE FUNCTION meta_guard.block_meta_guest_extension_ddl()
+    RETURNS event_trigger
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    SET search_path = pg_catalog
+    AS \$\$
+    BEGIN
+        IF session_user = 'meta_guest' OR current_user = 'meta_guest' THEN
+            RAISE EXCEPTION 'extension DDL is disabled for meta_guest';
+        END IF;
+    END;
+    \$\$;
+    REVOKE ALL ON FUNCTION meta_guard.block_meta_guest_extension_ddl() FROM PUBLIC;
+    CREATE EVENT TRIGGER block_meta_guest_extension_ddl
+        ON ddl_command_start
+        WHEN TAG IN ('CREATE EXTENSION', 'ALTER EXTENSION', 'DROP EXTENSION')
+        EXECUTE FUNCTION meta_guard.block_meta_guest_extension_ddl();
+
+    \c postgres
+    REVOKE ALL ON TABLE pg_database FROM PUBLIC;
+EOSQL

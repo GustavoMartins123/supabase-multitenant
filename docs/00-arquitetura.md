@@ -152,6 +152,7 @@ postgres://supabase_storage_admin.projeto_x:senha@pooler:5432/postgres
 - **Supavisor (Pooler):** Pool de conexões global
 - **Realtime:** WebSocket global para todos os projetos
 - **Edge Functions:** Functions compartilhadas
+- **Postgres-Meta Global:** API de metadados compartilhada, acessada pela API Python com conexão dinâmica criptografada
 - **API Python (FastAPI):** Gerencia ciclo de vida dos projetos
 
 **Por Projeto:**
@@ -159,7 +160,6 @@ postgres://supabase_storage_admin.projeto_x:senha@pooler:5432/postgres
 - **GoTrue:** Autenticação de usuários finais
 - **PostgREST:** API REST do banco
 - **Storage:** Armazenamento de arquivos
-- **Meta (postgres-meta):** API de metadados do banco (usado exclusivamente pelo Studio)
 - **ImgProxy:** Processamento de imagens
 
 **Gateway:**
@@ -325,7 +325,7 @@ A maioria destes fluxos padronizam conexões HTTP simples (através do Supavisor
 
 ### Serviço em Destaque: Postgres-Meta
 
-**Um container por projeto.**
+**Um único container global atende todos os projetos.**
 
 **O que é:**
 - API que expõe metadados do PostgreSQL
@@ -345,7 +345,11 @@ GET /api/platform/pg-meta/default/tables
   ↓
 Nginx Studio injeta service_role
   ↓
-Proxy para: https://servidor/projeto_x/meta/tables
+Proxy para: /api/projects/projeto_x/meta/tables
+  ↓
+API Python valida membership e service_role do projeto
+  ↓
+API Python envia x-connection-encrypted para postgres-meta-global
   ↓
 Postgres-Meta consulta information_schema
   ↓
@@ -355,7 +359,9 @@ Retorna JSON com lista de tabelas
 **Conexão:**
 - Conecta direto no PostgreSQL (não usa Supavisor)
 - Precisa de acesso total ao information_schema
-- Cada projeto tem seu próprio container Meta
+- A string de conexão do projeto é criptografada no padrão OpenSSL/CryptoJS e enviada no header `x-connection-encrypted`
+- O container `postgres-meta-global` descriptografa usando `CRYPTO_KEY`/`FERNET_SECRET`
+- Se a conexão dinâmica falhar, o serviço cai no banco vazio `meta_trap` com o usuário restrito `meta_guest`
 
 ---
 
@@ -513,6 +519,22 @@ Na primeira vez que o PostgreSQL sobe, um script de inicialização cria a estru
    
    - is_template = true: Permite usar como template no CREATE DATABASE
    - datallowconn = false: Impede conexões diretas
+
+7. Cria fallback restrito para o Postgres-Meta Global
+   CREATE DATABASE meta_trap;
+   CREATE USER meta_guest WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
+     NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 5
+     PASSWORD '$META_GUEST_PASSWORD';
+   REVOKE CONNECT ON DATABASE postgres FROM PUBLIC;
+   REVOKE CONNECT ON DATABASE _supabase_template FROM PUBLIC;
+   GRANT CONNECT ON DATABASE meta_trap TO meta_guest;
+
+   - meta_trap: banco vazio usado se a conexão dinâmica criptografada falhar
+   - meta_guest: usuário restrito, com senha gerada automaticamente pelo setup.sh
+   - CONNECT revogado nos bancos sensíveis impede acesso mesmo que o fallback seja usado
+   - CREATE/TEMPORARY são revogados para impedir criação de objetos no fallback
+   - Um event trigger em meta_trap bloqueia CREATE/ALTER/DROP EXTENSION para meta_guest
+   - O checklist completo de validação fica em docs/10-hardening-postgres-meta.md
 ```
 
 ### O Que Está no Template
@@ -804,7 +826,7 @@ map $http_apikey $is_admin_key {
 
 O Nginx do projeto valida a chave de formas diferentes conforme o tipo de rota:
 
-1. **Rotas HTTP** (`/auth/v1/`, `/rest/v1/`, `/storage/v1/`, `/functions/v1/`, `/meta/`)
+1. **Rotas HTTP** (`/auth/v1/`, `/rest/v1/`, `/storage/v1/`, `/functions/v1/`)
    - Lê a chave no header `apikey` (`$http_apikey`)
    - Compara com `anon_key` e `service_role_key`
    - Se estiver ausente: retorna `401`
@@ -828,7 +850,6 @@ map "" $rest_upstream     { default "supabase-rest-{{project_id}}:3000"; }
 map "" $storage_upstream  { default "supabase-storage-{{project_id}}:5000"; }
 map "" $functions_upstream{ default "functions:9000"; }
 map "" $realtime_upstream { default "realtime-dev.supabase-realtime:4000"; }
-map "" $meta_upstream     { default "supabase-meta-{{project_id}}:{{meta_port}}"; }
 ```
 
 ### Rotas e Reescrita de Paths
@@ -938,26 +959,22 @@ location ^~ /realtime/v1/websocket {
 - Proxy: `ws://realtime-dev.supabase-realtime:4000/socket/websocket`
 - Realtime extrai tenant_id do Host header
 
-**5. Meta (Postgres-Meta)**
+**5. Meta (Postgres-Meta Global)**
 
 ```nginx
-location /meta/ {
-    # Apenas service_role pode acessar
-    if ($is_admin_key = 0) { return 401; }
-    if ($is_valid_key != 1) { return 403; }
-    
-    # Reescreve: /meta/tables → /tables
-    rewrite ^/meta/(.*)$ /$1 break;
-    
-    proxy_pass http://$meta_upstream;
+location ~ ^/api/platform/pg-meta/([^/]+)(/.*)?$ {
+    set_by_lua_file $project_ref /usr/local/openresty/lualib/utils/project_ref.lua;
+    access_by_lua_file /usr/local/openresty/lualib/auth/pg_meta_access.lua;
+    rewrite_by_lua_file /usr/local/openresty/lualib/api/rewrite_pg_meta.lua;
+    proxy_pass $server_domain/api/projects/$project_ref/meta$resource$is_args$args;
 }
 ```
 
 **Fluxo:**
-- Requisição: `GET /meta/tables`
-- Validação: Verifica se é service_role
-- Reescrita: `/meta/tables` → `/tables`
-- Proxy: `http://supabase-meta-projeto_x:8080/tables`
+- Requisição: `GET /api/platform/pg-meta/default/tables`
+- Nginx local valida a sessão Authelia, resolve `$project_ref` e encaminha `X-Shared-Token`/`X-User-Token`
+- API Python valida membership, confere a `service_role` do projeto e criptografa a conexão do banco
+- Proxy: `http://postgres-meta-global:8080/tables` com `x-connection-encrypted`
 
 **6. Functions (Edge Functions)**
 
@@ -1335,7 +1352,7 @@ docker restart nginx
     INSERT INTO projects (
       name, owner_id, 
       anon_key, service_role,  -- criptografados com Fernet
-      nginx_port, meta_port,
+      nginx_port,
       ...
     )
 
@@ -1456,7 +1473,7 @@ bash duplicate_project.sh projeto_original projeto_novo [with-data|schema-only]
     INSERT INTO projects (
       name, owner_id,
       anon_key, service_role,  -- criptografados com Fernet
-      nginx_port, meta_port,
+      nginx_port,
       ...
     )
 ```
@@ -1592,7 +1609,6 @@ A deleção de projeto requer autenticação em múltiplos níveis:
 - gotrue-meu_projeto
 - rest-meu_projeto
 - storage-meu_projeto
-- meta-meu_projeto
 - imgproxy-meu_projeto
 
 **Database PostgreSQL:**
