@@ -1,5 +1,24 @@
 http:
+  routers:
+    leaked-files:
+      rule: "PathRegexp(`(?i)^/(?:[^/]+/)*(?:\\.env[^/]*|\\.git|\\.svn|\\.hg|\\.bzr|\\.htaccess|\\.htpasswd)(?:/|$|[.?~_-].*)`)"
+      entryPoints:
+        - websecure
+      priority: 5000
+      middlewares:
+        - hide-deny-headers
+        - rate-limit-malicious
+        - fail2ban-malicious
+      service: forbidden-service
+      tls: {}
   middlewares:
+    hide-deny-headers:
+      headers:
+        customResponseHeaders:
+          Server: ""
+          X-Powered-By: ""
+          X-AspNet-Version: ""
+          X-AspNetMvc-Version: ""
     security-headers:
       headers:
         customResponseHeaders:
@@ -62,9 +81,14 @@ http:
           X-Block-Bad-Agents: "true"
         forceSTSHeader: true
 
-    block-paths:
+    block-sensitive-files:
       replacePathRegex:
-        regex: '^/(\.git|\.svn|\.hg|\.bzr|\.env|\.htaccess|\.htpasswd|config\.json|config\.yml|config\.php|\.vscode|\.idea|\.DS_Store|Thumbs\.db|admin|administrator|login|wp-admin|wp-login\.php|phpmyadmin|pma|mysql|setup|install|server-status|debug|debug/pprof|xmlrpc|cgi-bin|global-protect|ssl-vpn|phpinfo\.php|actuator|metrics|\.well-known/security\.txt|owa/auth|getcfg\.php|aws\.sh|vb\.env|env\.py).*'
+        regex: '(?i)^/.*(/|^)(\.env[^/]*|\.git|\.svn|\.hg|\.bzr|\.htaccess|\.htpasswd|config\.(json|ya?ml|php)|phpinfo\.php|info\.php|debug\.php|\.DS_Store|Thumbs\.db|aws\.sh|vb\.env|env\.py)(/|$|[.?~_-].*)'
+        replacement: "/blocked"
+
+    block-sensitive-prefixes:
+      replacePathRegex:
+        regex: '(?i)^/(admin|administrator|login|wp-admin|wp-login\.php|phpmyadmin|pma|mysql|setup|install|server-status|debug|debug/pprof|metrics|actuator|xmlrpc|cgi-bin|global-protect|ssl-vpn|owa/auth|getcfg\.php|remote/login|remote/logincheck|geoserver)(/|$|.*)'
         replacement: "/blocked"
 
     fail2ban-malicious:
@@ -115,4 +139,4 @@ http:
     forbidden-service:
       loadBalancer:
         servers:  
-          - url: "http://127.0.0.1:1" 
+          - url: "http://deny-service:8080"
