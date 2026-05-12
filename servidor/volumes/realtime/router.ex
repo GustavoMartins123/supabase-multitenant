@@ -171,14 +171,14 @@ defmodule RealtimeWeb.Router do
 
   defp authorize_request(conn, token, :api_jwt_secret, global_secret) do
     case tenant_auth_context(conn) do
-      nil ->
+      :none ->
         authorize_with_secret(token, global_secret)
 
-      context ->
-        case authorize_with_tenant_context(token, context) do
-          :ok -> :ok
-          {:error, _reason} -> authorize_with_secret(token, global_secret)
-        end
+      {:ok, context} ->
+        authorize_with_tenant_context(token, context)
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -214,7 +214,13 @@ defmodule RealtimeWeb.Router do
   end
 
   defp tenant_auth_context(conn) do
-    tenant_context_from_existing_tenant(conn) || tenant_context_from_payload(conn)
+    case tenant_context_from_existing_tenant(conn) || tenant_context_from_payload(conn) do
+      nil ->
+        if tenant_id_from_request(conn), do: {:error, :tenant_context_missing}, else: :none
+
+      context ->
+        {:ok, context}
+    end
   end
 
   defp tenant_context_from_existing_tenant(conn) do

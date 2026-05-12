@@ -1110,6 +1110,105 @@ Envia para nginx-meu_projeto:PORTA
 Nginx do projeto recebe: GET /rest/v1/tabela
 ```
 
+### Bloqueio Centralizado de Requisicoes Indevidas
+
+O Traefik tambem centraliza regras de protecao para requisicoes que nao devem chegar aos projetos. A ideia e cortar trafego malicioso ou fora do escopo antes que ele alcance o Nginx de um tenant, a API Python ou qualquer servico Supabase.
+
+**Componentes:**
+
+- `servidor/traefik/docker-compose.yml`: define os routers globais, o servico `geoip-api` e o container `deny-service`.
+- `servidor/traefik/middlewares.yml`: define middlewares de seguranca, geoblock, rate limit, fail2ban e o `forbidden-service`.
+- `servidor/traefik/deny/default.conf`: Nginx minimo usado como backend de negacao.
+- `servidor/traefik/geoip/main.py`: API interna que consulta o banco MaxMind GeoLite2.
+
+**Deny service:**
+
+O `deny-service` e um backend Nginx dedicado para responder requisicoes bloqueadas com `403`, sem encaminhar a tentativa para um projeto real.
+
+Ele substitui o padrao inseguro de apontar o servico bloqueado para um destino inexistente, como `localhost:1`. Com isso, os routers de bloqueio sempre tem um backend valido e previsivel:
+
+```yaml
+services:
+  forbidden-service:
+    loadBalancer:
+      servers:
+        - url: "http://deny-service:8080"
+```
+
+O container roda endurecido:
+
+- imagem `nginxinc/nginx-unprivileged`
+- filesystem somente leitura
+- `tmpfs` para diretorios de runtime
+- `cap_drop: ALL`
+- `no-new-privileges:true`
+- headers de versao removidos pelo middleware `hide-deny-headers`
+
+**Rotas bloqueadas:**
+
+O Traefik tem routers globais com prioridade alta para interceptar tentativas conhecidas antes das rotas dos projetos:
+
+- `leaked-files`: bloqueia acesso a arquivos e diretorios sensiveis como `.env`, `.git`, `.svn`, `.hg`, `.bzr`, `.htaccess` e `.htpasswd`.
+- `malicious-paths`: bloqueia prefixos comuns de scanners e paineis administrativos, como `/admin`, `/wp-admin`, `/phpmyadmin`, `/cgi-bin`, `/xmlrpc`, `/actuator`, `/global-protect`, `/ssl-vpn` e similares.
+- `block-bad-useragents`: bloqueia user agents suspeitos ou automatizados, como scanners, crawlers genericos, `curl`, `wget`, `masscan` e `nmap`.
+
+Essas rotas aplicam uma combinacao de:
+
+- `geoblock-global`
+- `rate-limit-malicious` ou `rate-limit-suspicious`
+- `fail2ban-malicious` ou `fail2ban-global`
+- `hide-deny-headers`, quando aplicavel
+
+**Fluxo de bloqueio:**
+
+```text
+GET /.env
+  ↓
+Traefik casa o router leaked-files
+  ↓
+Aplica middlewares de protecao
+  ↓
+Encaminha para forbidden-service
+  ↓
+deny-service responde 403
+```
+
+### GeoIP e Geoblock
+
+O geoblock do Traefik usa um plugin experimental (`github.com/PascalMinder/geoblock`) configurado em `servidor/traefik/traefik.yml`. Em vez de embutir o banco GeoIP no Traefik, o projeto sobe uma API interna simples:
+
+```text
+Traefik geoblock plugin
+  ↓
+GET http://geoip-api:8000/v1/ip/country/{ip}
+  ↓
+geoip-api consulta /data/GeoLite2-Country.mmdb
+  ↓
+retorna o codigo ISO do pais em texto puro
+```
+
+Configuracao principal:
+
+```yaml
+geoblock-global:
+  plugin:
+    geoblock:
+      cachesize: 2000
+      allowLocalRequests: true
+      api: http://geoip-api:8000/v1/ip/country/{ip}
+      apiTimeoutMs: 1000
+      allowUnknownCountries: false
+      countries: BR
+```
+
+Na pratica:
+
+- IPs locais sao permitidos por `allowLocalRequests: true`.
+- IPs sem pais identificado sao bloqueados por `allowUnknownCountries: false`.
+- O pais permitido atualmente e `BR`.
+- O banco `GeoLite2-Country.mmdb` fica montado somente leitura no container `geoip-api`.
+- `servidor/traefik/update_geoip.sh` deve ser usado para atualizar o banco quando necessario.
+
 ---
 
 
