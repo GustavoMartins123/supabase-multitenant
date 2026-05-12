@@ -130,7 +130,6 @@ http:
     security-chain-enhanced:
       chain:
         middlewares:
-          - block-paths
           - geoblock-global
           - rate-limit-global
           - fail2ban-global
