@@ -133,15 +133,15 @@ restore_slot() {
 }
 
 rollback_on_error() {
-  local status=$?
-  trap - ERR
+  local status="${1:-$?}"
+  trap - ERR TERM INT HUP
   set +e
   if [[ "$MUTATION_STARTED" -eq 0 ]]; then
     cleanup
     exit "$status"
   fi
 
-  local rollback_failed=0 code
+  local rollback_failed=0 code old_slot_exists
   echo "❌ Rename falhou; revertendo alteracoes..." >&2
 
   if [[ "$NEW_COMPOSE_STARTED" -eq 1 && -d "$NEW_DIR" ]]; then
@@ -184,9 +184,14 @@ rollback_on_error() {
       >/dev/null 2>&1 || rollback_failed=1
   fi
   if [[ "$RENAMED_SLOT" -eq 1 ]]; then
-    docker exec supabase-db psql -U supabase_admin -d "$OLD_DB" -c \
-      "SELECT pg_create_logical_replication_slot('$OLD_SLOT', '$SLOT_PLUGIN');" \
-      >/dev/null 2>&1 || rollback_failed=1
+    old_slot_exists=$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc \
+      "SELECT count(*) FROM pg_replication_slots WHERE slot_name = '$OLD_SLOT';" \
+      | tr -d '[:space:]')
+    if [[ "$old_slot_exists" == "0" ]]; then
+      docker exec supabase-db psql -U supabase_admin -d "$OLD_DB" -c \
+        "SELECT pg_create_logical_replication_slot('$OLD_SLOT', '$SLOT_PLUGIN');" \
+        >/dev/null 2>&1 || rollback_failed=1
+    fi
   fi
   if [[ "$OLD_COMPOSE_STOPPED" -eq 1 && -d "$OLD_DIR" ]]; then
     compose_old up -d >/dev/null 2>&1 || rollback_failed=1
@@ -202,6 +207,9 @@ rollback_on_error() {
 }
 
 trap rollback_on_error ERR
+trap 'rollback_on_error 143' TERM
+trap 'rollback_on_error 130' INT
+trap 'rollback_on_error 129' HUP
 trap cleanup EXIT
 
 NAME_RE='^[a-z_][a-z0-9_]{2,39}$'
@@ -296,8 +304,8 @@ RENAMED_DB=1
 if [[ "$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc "SELECT count(*) FROM pg_replication_slots WHERE slot_name = '$OLD_SLOT';" | tr -d '[:space:]')" == "1" ]]; then
   SLOT_PLUGIN=$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc \
     "SELECT plugin FROM pg_replication_slots WHERE slot_name = '$OLD_SLOT';" | tr -d '[:space:]')
-  restore_slot "$OLD_SLOT" "$NEW_SLOT" "$SLOT_PLUGIN" "$NEW_DB"
   RENAMED_SLOT=1
+  restore_slot "$OLD_SLOT" "$NEW_SLOT" "$SLOT_PLUGIN" "$NEW_DB"
 fi
 
 say "Atualizando tenant Realtime estavel $PROJECT_UUID..."
@@ -379,13 +387,13 @@ updated=$(docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "
   "WITH changed AS (UPDATE projects SET name = '$NEW_NAME' WHERE name = '$OLD_NAME' RETURNING name) SELECT count(*) FROM changed;" \
   | tr -d '[:space:]')
 [[ "$updated" == "1" ]] || die "Metadata nao atualizou exatamente um projeto"
+META_UPDATED=1
 docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$META_DB" -c \
   "UPDATE jobs SET project = '$NEW_NAME' WHERE project = '$OLD_NAME';" >/dev/null
-META_UPDATED=1
 
 say "Subindo stack com o novo slug..."
-compose_new up -d --wait --wait-timeout 180
 NEW_COMPOSE_STARTED=1
+compose_new up -d --wait --wait-timeout 180
 
 [[ "$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc "SELECT count(*) FROM pg_database WHERE datname = '$NEW_DB';" | tr -d '[:space:]')" == "1" ]] \
   || die "Verificacao final do database falhou"
@@ -394,7 +402,7 @@ NEW_COMPOSE_STARTED=1
 running_services=$(compose_new ps --status running --services | wc -l | tr -d '[:space:]')
 [[ "$running_services" -gt 0 ]] || die "Nenhum servico do novo projeto esta rodando"
 
-trap - ERR
+trap - ERR TERM INT HUP
 cleanup
 trap - EXIT
 ok "RENAMED ${OLD_NAME}=${NEW_NAME} path=/${OLD_NAME}->/${NEW_NAME} uuid=${PROJECT_UUID}"

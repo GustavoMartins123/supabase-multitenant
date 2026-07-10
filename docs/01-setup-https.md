@@ -115,7 +115,7 @@ Para produção, é crucial enviar o header `Strict-Transport-Security` (HSTS), 
 
 > ⚠️ **Atenção: Ajuste conforme suas regras de negócio!**
 > Os cabeçalhos (headers) de segurança padrão acima são rígidos e seguros, mas podem ser restritivos ("engessados") dependendo do seu projeto:
-> 
+>
 > * **`Content-Security-Policy` (CSP)**:
 >   * **O que faz:** Impede que o navegador carregue scripts, imagens, fontes ou faça requisições de/para domínios que não sejam o próprio (`'self'`).
 >   * **Quando ajustar:** Se o seu aplicativo usa APIs externas (ex: Stripe, Google Maps), fontes do Google Fonts, ou se você usa o Supabase Storage para exibir imagens hospedadas em outros buckets/domínios, o CSP bloqueará o carregamento. Você precisará adicionar os domínios permitidos nas diretivas apropriadas (ex: `img-src 'self' data: https://*.supabase.co; connect-src 'self' https://api.seuservico.com`). Se estiver na fase inicial de desenvolvimento ou testes, você pode desativar temporariamente este cabeçalho ou usar `Content-Security-Policy-Report-Only` para auditar os bloqueios sem impedir o funcionamento da aplicação.

@@ -6,3 +6,10 @@ servidor/docker/volumes/db/data/*
 
 studio/.env
 tarefas.md
+
+# Python runtime artifacts
+__pycache__/
+*.py[cod]
+
+# Local runtime logs
+*.log

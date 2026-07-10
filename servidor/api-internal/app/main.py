@@ -2107,13 +2107,70 @@ async def _rename_project_background(
         except asyncio.CancelledError:
             try:
                 os.killpg(proc.pid, signal.SIGTERM)
-                await asyncio.wait_for(proc.wait(), timeout=10)
+                # O shell trata SIGTERM executando rollback compensatório. O
+                # timeout precisa cobrir o Compose e as verificações do banco.
+                await asyncio.wait_for(proc.wait(), timeout=210)
             except (ProcessLookupError, asyncio.TimeoutError):
                 try:
                     os.killpg(proc.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
                 await proc.wait()
+            cancel_output = ""
+            if proc.stdout is not None:
+                cancel_output = (
+                    await proc.stdout.read()
+                ).decode(errors="replace").strip()
+            rolled_back = "ROLLBACK_COMPLETE" in cancel_output
+            history_status = "rolled_back" if rolled_back else "failed"
+            audit_action = (
+                "project_rename_rolled_back"
+                if rolled_back
+                else "project_rename_failed"
+            )
+            try:
+                async with pool.acquire() as conn:
+                    await _update_rename_history(
+                        conn,
+                        history_id,
+                        history_status,
+                        error=(
+                            "API shutdown durante o rename.\n"
+                            f"{cancel_output[-4000:]}"
+                        ),
+                    )
+                    await audit_studio_action(
+                        conn,
+                        project_id=project_id,
+                        actor_user_id=actor_user_id,
+                        action=audit_action,
+                        target_type="project",
+                        target_id=old_name,
+                        old_value={"name": old_name, "path": f"/{old_name}"},
+                        new_value={
+                            "name": new_name,
+                            "path": f"/{new_name}",
+                            "reason": "api_shutdown",
+                            "error_excerpt": cancel_output[-2000:],
+                        },
+                    )
+                await _set_job_status(
+                    job_id,
+                    "failed",
+                    message=(
+                        "Rename interrompido pelo shutdown da API; "
+                        + (
+                            "rollback concluído."
+                            if rolled_back
+                            else "rollback não confirmado."
+                        )
+                    ),
+                )
+            except Exception as exc:
+                print(
+                    f"[rename_project] falha ao registrar cancelamento "
+                    f"{old_name} -> {new_name}: {exc}"
+                )
             raise
         output = stdout.decode(errors="replace").strip()
 
@@ -4364,38 +4421,35 @@ async def stop_project(
     if not containers:
         raise HTTPException(404, "No containers found for this project")
 
-    if _containers_touch_project_nginx(containers):
-        job_id = await _create_project_job(
-            pool,
-            project_name,
-            auth_user["db_user_id"],
-            message="Parada enfileirada.",
-        )
-        position = await _enqueue_project_action(
-            project_name,
+    job_id = await _create_project_job(
+        pool,
+        project_name,
+        auth_user["db_user_id"],
+        message="Parada enfileirada.",
+    )
+    position = await _enqueue_project_action(
+        project_name,
+        job_id,
+        lambda: _stop_project_containers_background(
             job_id,
-            lambda: _stop_project_containers_background(
-                job_id,
-                project_name,
-                containers,
+            project_name,
+            containers,
+        ),
+    )
+    return JSONResponse(
+        status_code=202,
+        content={
+            "job_id": job_id,
+            "status": "queued",
+            "queue_position": position,
+            "message": (
+                "Parada enfileirada."
+                if position == 0
+                else f"Parada enfileirada. Existem {position} ações "
+                f"antes desta na fila para {project_name}."
             ),
-        )
-        return JSONResponse(
-            status_code=202,
-            content={
-                "job_id": job_id,
-                "status": "queued",
-                "queue_position": position,
-                "message": (
-                    "Parada enfileirada."
-                    if position == 0
-                    else f"Parada enfileirada. Existem {position} ações "
-                    f"antes desta na fila para {project_name}."
-                ),
-            },
-        )
-
-    return await _stop_project_containers(project_name, containers)
+        },
+    )
 
 @app.post("/api/projects/{project_name}/start", status_code=202)
 async def start_project(
@@ -5348,38 +5402,32 @@ async def recreate_project_services(
         raise HTTPException(400, "Nenhum serviço especificado")
 
     services = body.services
-    if _services_touch_project_nginx(services):
-        job_id = await _create_project_job(
-            pool,
-            project_name,
-            auth_user["db_user_id"],
-            message="Recriação enfileirada.",
-        )
-        position = await _enqueue_project_action(
-            project_name,
+    job_id = await _create_project_job(
+        pool,
+        project_name,
+        auth_user["db_user_id"],
+        message="Recriação enfileirada.",
+    )
+    position = await _enqueue_project_action(
+        project_name,
+        job_id,
+        lambda: _recreate_project_services_background(
             job_id,
-            lambda: _recreate_project_services_background(
-                job_id,
-                project_name,
-                services,
+            project_name,
+            services,
+        ),
+    )
+    return JSONResponse(
+        status_code=202,
+        content={
+            "job_id": job_id,
+            "status": "queued",
+            "queue_position": position,
+            "message": (
+                "Recriação enfileirada."
+                if position == 0
+                else f"Recriação enfileirada. Existem {position} ações "
+                f"antes desta na fila para {project_name}."
             ),
-        )
-        return JSONResponse(
-            status_code=202,
-            content={
-                "job_id": job_id,
-                "status": "queued",
-                "queue_position": position,
-                "message": (
-                    "Recriação enfileirada."
-                    if position == 0
-                    else f"Recriação enfileirada. Existem {position} ações "
-                    f"antes desta na fila para {project_name}."
-                ),
-            },
-        )
-
-    result = await _recreate_project_services_impl(project_name, services)
-    if result.get("success"):
-        _clear_project_pending_settings(project_name)
-    return result
+        },
+    )

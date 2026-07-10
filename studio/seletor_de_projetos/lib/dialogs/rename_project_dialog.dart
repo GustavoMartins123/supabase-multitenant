@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/project_repository.dart';
 import '../models/job.dart';
+import '../providers/favorites_provider.dart';
 import '../providers/project_list_provider.dart';
 import '../services/projectService.dart';
 import '../supabase_colors.dart';
@@ -83,7 +84,9 @@ class _RenameProjectDialogState extends ConsumerState<RenameProjectDialog> {
     });
 
     try {
-      final job = await ref.read(projectRepositoryProvider).renameProject(
+      final job = await ref
+          .read(projectRepositoryProvider)
+          .renameProject(
             widget.projectName,
             newName: newName,
             displayName: displayName.isEmpty ? null : displayName,
@@ -101,21 +104,29 @@ class _RenameProjectDialogState extends ConsumerState<RenameProjectDialog> {
         return;
       }
 
+      try {
+        await ref
+            .read(favoritesProvider.notifier)
+            .renameFavorite(widget.projectName, newName);
+      } catch (_) {
+        // O rename remoto já terminou; uma falha local de preferências não
+        // deve fazer a operação aparecer como malsucedida.
+        ref.invalidate(favoritesProvider);
+      }
+      if (!mounted) return;
       ref.invalidate(projectListProvider);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'Projeto renomeado: ${widget.projectName} -> $newName',
-          ),
+          content: Text('Projeto renomeado: ${widget.projectName} -> $newName'),
           backgroundColor: SupabaseColors.success,
           duration: const Duration(seconds: 6),
         ),
       );
 
-      Navigator.of(context).pop(
-        RenameProjectResult(oldName: widget.projectName, newName: newName),
-      );
+      Navigator.of(
+        context,
+      ).pop(RenameProjectResult(oldName: widget.projectName, newName: newName));
     } catch (e) {
       setState(() {
         _error = e.toString().replaceFirst('Exception: ', '');
@@ -396,9 +407,7 @@ class _RenameProjectDialogState extends ConsumerState<RenameProjectDialog> {
       decoration: BoxDecoration(
         color: SupabaseColors.error.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(
-          color: SupabaseColors.error.withValues(alpha: 0.4),
-        ),
+        border: Border.all(color: SupabaseColors.error.withValues(alpha: 0.4)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -412,10 +421,7 @@ class _RenameProjectDialogState extends ConsumerState<RenameProjectDialog> {
           Expanded(
             child: Text(
               message,
-              style: const TextStyle(
-                fontSize: 12,
-                color: SupabaseColors.error,
-              ),
+              style: const TextStyle(fontSize: 12, color: SupabaseColors.error),
             ),
           ),
         ],

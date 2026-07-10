@@ -6,6 +6,7 @@ services:
       context: .
       dockerfile: ./api-internal/Dockerfile
     restart: unless-stopped
+    stop_grace_period: 4m
     networks: [rede-supabase]                # mesma bridge do restante
     expose: ["18000"]                         # visível APENAS na rede Docker :contentReference[oaicite:4]{index=4}
     environment:

@@ -38,4 +38,16 @@ class FavoritesNotifier extends AsyncNotifier<Set<String>> {
     state = AsyncData(newFavs);
     await prefs.setStringList('project_favorites', newFavs.toList());
   }
+
+  Future<void> renameFavorite(String oldName, String newName) async {
+    final currentFavs = await future;
+    if (!currentFavs.contains(oldName)) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final newFavs = Set<String>.from(currentFavs)
+      ..remove(oldName)
+      ..add(newName);
+    state = AsyncData(newFavs);
+    await prefs.setStringList('project_favorites', newFavs.toList());
+  }
 }
