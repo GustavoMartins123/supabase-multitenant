@@ -6,13 +6,14 @@ import hmac
 import base64
 import binascii
 import hashlib
+import signal
 import time
 import asyncio, json, re
 import urllib.parse
 import httpx
-from fastapi import FastAPI, BackgroundTasks, Depends, Header, HTTPException, Query, Request
+from fastapi import FastAPI, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
-from app.schemas import NewProject, DuplicateProject, UserSyncPayload, AddMember, TransferBody, UpdateSettings, RecreateServices
+from app.schemas import NewProject, DuplicateProject, UserSyncPayload, AddMember, TransferBody, UpdateSettings, RecreateServices, ProjectNoteCreate, ProjectTagAssign, ProjectHintCreate, ProjectHintStatusUpdate, ProjectThreadMessageCreate, ProjectRenameRequest, ProjectDisplayNameUpdate, ProjectNotificationRead
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
@@ -24,6 +25,7 @@ SCRIPT = BASE_DIR / "scripts" / "generate_project.sh"
 DUPLICATE_SCRIPT = BASE_DIR / "scripts" / "duplicate_project.sh"
 ROTATE_SCRIPT = BASE_DIR / "scripts" / "rotate_key.sh"
 DELETE_SCRIPT = BASE_DIR / "scripts" / "delete_project.sh"
+RENAME_SCRIPT = BASE_DIR / "scripts" / "rename_project.sh"
 EXTRACTOR = BASE_DIR / "scripts" / "extract_token.sh"
 DB_DSN = os.getenv("DB_DSN")
 FERNET_SECRET = os.getenv("FERNET_SECRET")
@@ -31,6 +33,14 @@ DELETE_PASSWORD = os.getenv("PROJECT_DELETE_PASSWORD")
 NGINX_SHARED_TOKEN = os.getenv("NGINX_SHARED_TOKEN")
 NGINX_HMAC_SECRET = os.getenv("NGINX_HMAC_SECRET")
 USER_TOKEN_MAX_CLOCK_SKEW_SECONDS = int(os.getenv("USER_TOKEN_MAX_CLOCK_SKEW_SECONDS", "30"))
+SUPAVISOR_INTERNAL_URL = os.getenv(
+    "SUPAVISOR_INTERNAL_URL",
+    "http://supabase-pooler:4000",
+).rstrip("/")
+REALTIME_INTERNAL_URL = os.getenv(
+    "REALTIME_INTERNAL_URL",
+    "http://realtime-dev.supabase-realtime:4000",
+).rstrip("/")
 PG_META_ALLOWED_HOSTS = {
     host.strip().lower()
     for host in os.getenv("PG_META_ALLOWED_HOSTS", "postgres-meta-global").split(",")
@@ -218,6 +228,9 @@ async def ensure_identity_schema(pool: asyncpg.Pool) -> None:
             CREATE INDEX IF NOT EXISTS idx_project_members_audit_project_id ON project_members_audit(project_id);
             """
         )
+        await conn.execute(
+            "ALTER TABLE projects ADD COLUMN IF NOT EXISTS display_name TEXT"
+        )
 
 
 async def ensure_jobs_schema(pool: asyncpg.Pool) -> None:
@@ -235,6 +248,234 @@ async def ensure_jobs_schema(pool: asyncpg.Pool) -> None:
             """
         )
         await conn.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS message TEXT")
+
+
+async def ensure_collaboration_schema(pool: asyncpg.Pool) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS studio_project_tags (
+                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                name TEXT NOT NULL UNIQUE,
+                color TEXT NOT NULL DEFAULT '#3ECF8E',
+                category TEXT NOT NULL DEFAULT 'custom',
+                is_system BOOLEAN NOT NULL DEFAULT false,
+                created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+
+            CREATE TABLE IF NOT EXISTS studio_project_tag_assignments (
+                project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                tag_id UUID NOT NULL REFERENCES studio_project_tags(id) ON DELETE CASCADE,
+                assigned_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (project_id, tag_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS studio_project_notes (
+                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                author_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                visibility TEXT NOT NULL CHECK (visibility IN ('public', 'private')),
+                body TEXT NOT NULL,
+                is_encrypted BOOLEAN NOT NULL DEFAULT false,
+                encryption_key_id UUID,
+                encryption_version TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+
+            CREATE TABLE IF NOT EXISTS studio_project_hints (
+                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                author_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                target_user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+                body TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
+                is_encrypted BOOLEAN NOT NULL DEFAULT false,
+                encryption_key_id UUID,
+                encryption_version TEXT,
+                resolved_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                resolved_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+
+            CREATE TABLE IF NOT EXISTS studio_project_thread_messages (
+                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                author_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                body TEXT NOT NULL,
+                is_encrypted BOOLEAN NOT NULL DEFAULT false,
+                encryption_key_id UUID,
+                encryption_version TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+
+            CREATE TABLE IF NOT EXISTS studio_audit_log (
+                id BIGSERIAL PRIMARY KEY,
+                project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+                actor_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                action TEXT NOT NULL,
+                target_type TEXT NOT NULL,
+                target_id TEXT,
+                old_value JSONB,
+                new_value JSONB,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+
+            CREATE TABLE IF NOT EXISTS project_name_history (
+                id BIGSERIAL PRIMARY KEY,
+                project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                job_id UUID NOT NULL UNIQUE,
+                actor_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                old_name TEXT NOT NULL,
+                new_name TEXT NOT NULL,
+                old_path TEXT NOT NULL,
+                new_path TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'queued'
+                    CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'rolled_back')),
+                error TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                completed_at TIMESTAMPTZ
+            );
+
+            CREATE TABLE IF NOT EXISTS studio_project_notifications (
+                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                target_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                actor_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                kind TEXT NOT NULL,
+                target_type TEXT NOT NULL,
+                target_id TEXT,
+                payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                read_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_studio_project_notes_project_id
+                ON studio_project_notes(project_id);
+            CREATE INDEX IF NOT EXISTS idx_studio_project_notes_author_visibility
+                ON studio_project_notes(author_user_id, visibility);
+            CREATE INDEX IF NOT EXISTS idx_studio_project_hints_project_status
+                ON studio_project_hints(project_id, status);
+            CREATE INDEX IF NOT EXISTS idx_studio_project_hints_target_status
+                ON studio_project_hints(target_user_id, status);
+            CREATE INDEX IF NOT EXISTS idx_studio_project_thread_project_created
+                ON studio_project_thread_messages(project_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_studio_project_tag_assignments_project_id
+                ON studio_project_tag_assignments(project_id);
+            CREATE INDEX IF NOT EXISTS idx_studio_audit_log_project_id
+                ON studio_audit_log(project_id);
+            CREATE INDEX IF NOT EXISTS idx_project_name_history_project_created
+                ON project_name_history(project_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_studio_notifications_target_unread
+                ON studio_project_notifications(target_user_id, read_at, created_at DESC);
+
+            DELETE FROM studio_project_tags
+            WHERE name = 'Cliente crítico'
+              AND is_system = true;
+
+            INSERT INTO studio_project_tags(name, color, category, is_system)
+            VALUES
+                ('Produção', '#3ECF8E', 'ambiente', true),
+                ('Desenvolvimento', '#A78BFA', 'ambiente', true),
+                ('Teste 1', '#3B82F6', 'ambiente', true),
+                ('Teste 2', '#06B6D4', 'ambiente', true),
+                ('Homologação', '#22C55E', 'ambiente', true),
+                ('Staging', '#8B5CF6', 'ambiente', true),
+                ('Demo', '#EC4899', 'ambiente', true),
+                ('Sandbox', '#64748B', 'ambiente', true),
+                ('Manutenção', '#F97316', 'status', true),
+                ('Pausado', '#94A3B8', 'status', true),
+                ('Pendente', '#EF4444', 'status', true),
+                ('Revisar', '#F59E0B', 'status', true),
+                ('Monitorar', '#0EA5E9', 'operacao', true),
+                ('Migração', '#EAB308', 'operacao', true),
+                ('Backup', '#14B8A6', 'operacao', true),
+                ('Auth', '#10B981', 'area', true),
+                ('Storage', '#6366F1', 'area', true),
+                ('Database', '#84CC16', 'area', true),
+                ('Realtime', '#F43F5E', 'area', true),
+                ('Gateway', '#F97316', 'area', true)
+            ON CONFLICT (name) DO NOTHING;
+            """
+        )
+
+
+async def audit_studio_action(
+    conn: asyncpg.Connection,
+    *,
+    project_id: str | uuid.UUID | None,
+    actor_user_id: uuid.UUID | None,
+    action: str,
+    target_type: str,
+    target_id: str | None = None,
+    old_value: dict[str, Any] | None = None,
+    new_value: dict[str, Any] | None = None,
+) -> None:
+    await conn.execute(
+        """
+        INSERT INTO studio_audit_log(
+            project_id, actor_user_id, action, target_type, target_id, old_value, new_value
+        )
+        VALUES($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb)
+        """,
+        project_id,
+        actor_user_id,
+        action,
+        target_type,
+        target_id,
+        json.dumps(old_value) if old_value is not None else None,
+        json.dumps(new_value) if new_value is not None else None,
+    )
+
+
+async def create_studio_notification(
+    conn: asyncpg.Connection,
+    *,
+    project_id: uuid.UUID,
+    target_user_id: uuid.UUID,
+    actor_user_id: uuid.UUID | None,
+    kind: str,
+    target_type: str,
+    target_id: str | None,
+    payload: dict[str, Any] | None = None,
+) -> uuid.UUID:
+    notification_id = await conn.fetchval(
+        """
+        INSERT INTO studio_project_notifications(
+            project_id, target_user_id, actor_user_id, kind,
+            target_type, target_id, payload
+        )
+        VALUES($1, $2, $3, $4, $5, $6, $7::jsonb)
+        RETURNING id
+        """,
+        project_id,
+        target_user_id,
+        actor_user_id,
+        kind,
+        target_type,
+        target_id,
+        json.dumps(payload or {}),
+    )
+    await audit_studio_action(
+        conn,
+        project_id=project_id,
+        actor_user_id=actor_user_id,
+        action="project_notification_created",
+        target_type="studio_project_notification",
+        target_id=str(notification_id),
+        new_value={
+            "kind": kind,
+            "target_user_id": str(target_user_id),
+            "source_target_type": target_type,
+            "source_target_id": target_id,
+        },
+    )
+    return notification_id
 
 
 async def audit_user_group_change(
@@ -388,11 +629,194 @@ async def sync_user_record(
     }
 
 async def get_pool():
-    """Retorna o pool global de conexões"""
     global db_pool
     if db_pool is None:
         raise RuntimeError("Database pool not initialized")
     return db_pool
+
+
+
+class _QueuedAction:
+    __slots__ = ("job_id", "project_id", "project_name", "submitted_at", "runner")
+
+    def __init__(
+        self,
+        job_id: str,
+        project_id: uuid.UUID,
+        project_name: str,
+        runner,
+    ) -> None:
+        self.job_id = job_id
+        self.project_id = project_id
+        self.project_name = project_name
+        self.submitted_at = time.time()
+        self.runner = runner
+
+
+class ProjectActionQueue:
+    """Fila FIFO por projeto. Assegura serialização por chave de projeto."""
+
+    def __init__(self) -> None:
+        self._queues: dict[str, asyncio.Queue] = {}
+        self._workers: dict[str, asyncio.Task] = {}
+        self._current: dict[str, _QueuedAction] = {}
+        self._registry_lock = asyncio.Lock()
+        self._shutting_down: bool = False
+
+    async def _ensure_worker(self, project_name: str) -> asyncio.Queue:
+        async with self._registry_lock:
+            if self._shutting_down:
+                raise RuntimeError("action_queue está em shutdown")
+            queue = self._queues.get(project_name)
+            if queue is None:
+                queue = asyncio.Queue()
+                self._queues[project_name] = queue
+                self._workers[project_name] = asyncio.create_task(
+                    self._worker_loop(project_name, queue),
+                    name=f"project-queue:{project_name}",
+                )
+                print(
+                    f"[action_queue] worker iniciado para {project_name}"
+                )
+            return queue
+
+    async def _worker_loop(
+        self,
+        project_name: str,
+        queue: asyncio.Queue,
+    ) -> None:
+        try:
+            while True:
+                try:
+                    action = await queue.get()
+                except asyncio.CancelledError:
+                    return
+                self._current[project_name] = action
+                print(
+                    f"[action_queue] {project_name}: iniciando job "
+                    f"{action.job_id}"
+                )
+                try:
+                    await self._run_with_project_lock(action)
+                    print(
+                        f"[action_queue] {project_name}: job "
+                        f"{action.job_id} concluído"
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    print(
+                        f"[action_queue] {project_name}: job "
+                        f"{action.job_id} falhou: {exc}"
+                    )
+                except BaseException as exc:  # noqa: BLE001
+
+                    print(
+                        f"[action_queue] {project_name}: job "
+                        f"{action.job_id} erro grave: {exc!r}"
+                    )
+                    raise
+                finally:
+                    self._current.pop(project_name, None)
+                    queue.task_done()
+        except asyncio.CancelledError:
+            print(
+                f"[action_queue] worker de {project_name} cancelado"
+            )
+            raise
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"[action_queue] worker_loop de {project_name} morreu: {exc!r}"
+            )
+
+    async def _run_with_project_lock(self, action: _QueuedAction) -> None:
+        """Serializa a operacao tambem entre processos/replicas da API."""
+        lock_conn = await asyncpg.connect(DB_DSN)
+        lock_key = str(action.project_id)
+        acquired = False
+        try:
+            await lock_conn.execute(
+                "SELECT pg_advisory_lock(hashtextextended($1, 0))",
+                lock_key,
+            )
+            acquired = True
+            print(
+                f"[project_lock] {action.project_name}: adquirido "
+                f"para {action.job_id} ({lock_key})"
+            )
+            await action.runner()
+        finally:
+            if acquired:
+                try:
+                    await lock_conn.execute(
+                        "SELECT pg_advisory_unlock(hashtextextended($1, 0))",
+                        lock_key,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    print(
+                        f"[project_lock] falha ao liberar {lock_key}: {exc}"
+                    )
+            await lock_conn.close()
+
+    async def submit(
+        self,
+        project_name: str,
+        project_id: uuid.UUID,
+        job_id: str,
+        runner,
+    ) -> int:
+        """Enfileira uma ação. Retorna a posição na fila (0 = próximo a executar)."""
+        queue = await self._ensure_worker(project_name)
+        action = _QueuedAction(
+            job_id=job_id,
+            project_id=project_id,
+            project_name=project_name,
+            runner=runner,
+        )
+        position = queue.qsize()
+        await queue.put(action)
+        print(
+            f"[action_queue] {project_name}: job {job_id} enfileirado "
+            f"(posição {position})"
+        )
+        return position
+
+    def status(self, project_name: str) -> dict:
+        """Inspeção não-bloqueante da fila para um projeto."""
+        queue = self._queues.get(project_name)
+        current = self._current.get(project_name)
+        depth = queue.qsize() if queue is not None else 0
+        return {
+            "project": project_name,
+            "current_job_id": current.job_id if current else None,
+            "current_project": current.project_name if current else None,
+            "queued": depth,
+            "is_busy": current is not None,
+        }
+
+    def known_projects(self) -> list[str]:
+        return list(self._queues.keys())
+
+    async def shutdown(self) -> None:
+        self._shutting_down = True
+        workers = list(self._workers.values())
+        for task in workers:
+            task.cancel()
+        for task in workers:
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+        self._queues.clear()
+        self._workers.clear()
+        self._current.clear()
+
+
+action_queue = ProjectActionQueue()
+
+
+async def get_action_queue() -> ProjectActionQueue:
+    return action_queue
 
 
 async def _set_job_status(
@@ -441,8 +865,23 @@ async def _create_project_job(
         )
     return job_id
 
+
+async def _enqueue_project_action(
+    project_name: str,
+    job_id: str,
+    runner,
+) -> int:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        project_id = await conn.fetchval(
+            "SELECT id FROM projects WHERE name = $1",
+            project_name,
+        )
+    if project_id is None:
+        raise HTTPException(404, f"Projeto '{project_name}' nao encontrado")
+    return await action_queue.submit(project_name, project_id, job_id, runner)
+
 async def rollback_project_from_db(pool, project_name: str):
-    """Remove projeto do banco em caso de falha na criação/duplicação"""
     try:
         async with pool.acquire() as conn:
             await conn.execute("DELETE FROM projects WHERE name = $1", project_name)
@@ -488,30 +927,116 @@ def validate_service_name(raw: str) -> str:
 
 app = FastAPI()
 
+
+async def _recover_pending_jobs() -> None:
+    """Trata jobs em 'queued'/'running' deixados pelo startup anterior.
+
+    Política segura: jobs não idempotentes (criação, deleção, rename)
+    são marcados como 'failed' com mensagem clara para o operador.
+    Operador pode re-disparar manualmente após verificar o estado do
+    projeto no Docker/Postgres/Supavisor.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT job_id, project, status, message
+            FROM jobs
+            WHERE status IN ('queued', 'running')
+            ORDER BY updated_at ASC
+            """
+        )
+
+    if not rows:
+        return
+
+    print(
+        f"[recovery] {len(rows)} job(s) pendentes do startup anterior"
+    )
+    for r in rows:
+        job_id = str(r["job_id"])
+        project = r["project"]
+        old_status = r["status"]
+        if old_status == "running":
+            message = (
+                "API reiniciado durante a execução. O estado do projeto "
+                f"'{project}' pode estar inconsistente. Verifique "
+                "containers, banco e Supavisor antes de re-disparar."
+            )
+        else:
+            message = (
+                "API reiniciado antes da execução. Re-dispare a ação "
+                f"para o projeto '{project}' se ela ainda for necessária."
+            )
+        try:
+            await _set_job_status(
+                job_id,
+                "failed",
+                message=message,
+            )
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE project_name_history
+                    SET status = 'failed',
+                        error = $1,
+                        updated_at = now(),
+                        completed_at = now()
+                    WHERE job_id = $2
+                      AND status IN ('queued', 'running')
+                    """,
+                    message,
+                    r["job_id"],
+                )
+                project_row = await conn.fetchrow(
+                    "SELECT id FROM projects WHERE name = $1",
+                    project,
+                )
+                if project_row:
+                    await audit_studio_action(
+                        conn,
+                        project_id=project_row["id"],
+                        actor_user_id=None,
+                        action="project_recovery_failed",
+                        target_type="job",
+                        target_id=job_id,
+                        old_value={"status": old_status},
+                        new_value={
+                            "status": "failed",
+                            "reason": "api_restart",
+                        },
+                    )
+            print(
+                f"[recovery] job {job_id} ({project}, {old_status}) "
+                "marcado como failed"
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"[recovery] falha ao marcar job {job_id} como failed: {exc}"
+            )
+
+
 @app.on_event("startup")
 async def startup():
-    """Inicializa o pool de conexões no startup da aplicação"""
     global db_pool
     db_pool = await asyncpg.create_pool(DB_DSN, min_size=1, max_size=10)
     await ensure_identity_schema(db_pool)
     await ensure_jobs_schema(db_pool)
+    await ensure_collaboration_schema(db_pool)
     print("✅ Database pool initialized")
+    await _recover_pending_jobs()
+
 
 @app.on_event("shutdown")
 async def shutdown():
-    """Fecha o pool de conexões no shutdown da aplicação"""
     global db_pool
+    await action_queue.shutdown()
     if db_pool:
         await db_pool.close()
         print("✅ Database pool closed")
 
 @app.middleware("http")
 async def validate_shared_token(request: Request, call_next):
-    """
-    Valida que a requisição vem do Nginx através do token compartilhado.
-    Esta é uma camada adicional de segurança.
-    O Traefik já valida o header, mas validamos novamente aqui.
-    """
     token = request.headers.get("X-Shared-Token")
     
     if not token:
@@ -642,7 +1167,7 @@ async def require_synced_user_record(
 
 async def get_project_row(conn: asyncpg.Connection, project_name: str) -> asyncpg.Record:
     row = await conn.fetchrow(
-        "SELECT id, owner_id FROM projects WHERE name = $1",
+        "SELECT id, name, display_name, owner_id FROM projects WHERE name = $1",
         project_name,
     )
     if not row:
@@ -791,7 +1316,7 @@ async def list_projects(
 
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT p.name, p.anon_key, p.config_token
+            SELECT p.name, p.display_name, p.anon_key, p.config_token
             FROM projects p
             WHERE p.anon_key IS NOT NULL
               AND EXISTS (
@@ -807,7 +1332,8 @@ async def list_projects(
         anon_token = fernet.decrypt(r["anon_key"].encode()).decode()
         config_token = fernet.decrypt(r["config_token"].encode()).decode() if r["config_token"] else None
         result.append({
-            "name": r["name"], 
+            "name": r["name"],
+            "display_name": r["display_name"],
             "anon_token": anon_token,
             "config_token": config_token,
             "file_size_limit": _get_project_file_size_limit(r["name"]),
@@ -815,10 +1341,1463 @@ async def list_projects(
         })
     return result
 
+
+@app.get("/api/projects/{project_name}/collaboration")
+async def get_project_collaboration(
+    project_name: str,
+    request: Request,
+    pool=Depends(get_pool),
+):
+    project_name = validate_project_id(project_name)
+    auth_user = await resolve_authenticated_user(request, pool)
+
+    async with pool.acquire() as conn:
+        project = await get_project_row(conn, project_name)
+        project_id = project["id"]
+        await ensure_project_member_access(
+            conn,
+            project_id=project_id,
+            auth_user=auth_user,
+        )
+        project_role = await get_project_role(
+            conn,
+            project_id=project_id,
+            auth_user=auth_user,
+        )
+
+        tag_rows = await conn.fetch(
+            """
+            SELECT
+                t.id,
+                t.name,
+                t.color,
+                t.category,
+                t.is_system,
+                a.created_at AS assigned_at
+            FROM studio_project_tags t
+            LEFT JOIN studio_project_tag_assignments a
+              ON a.tag_id = t.id
+             AND a.project_id = $1
+            ORDER BY t.is_system DESC, t.category, t.name
+            """,
+            project_id,
+        )
+        notes = await conn.fetch(
+            """
+            SELECT
+                n.id,
+                n.visibility,
+                n.body,
+                n.is_encrypted,
+                n.created_at,
+                n.updated_at,
+                n.author_user_id,
+                COALESCE(u.display_name, u.authelia_username, 'Operador') AS author_name
+            FROM studio_project_notes n
+            LEFT JOIN users u ON u.id = n.author_user_id
+            WHERE n.project_id = $1
+              AND (
+                  n.visibility = 'public'
+                  OR n.author_user_id = $2
+              )
+            ORDER BY n.created_at DESC
+            LIMIT 20
+            """,
+            project_id,
+            auth_user["db_user_id"],
+        )
+        member_rows = await conn.fetch(
+            """
+            SELECT
+                u.id,
+                COALESCE(u.display_name, u.authelia_username, 'Operador') AS display_name,
+                u.authelia_username,
+                pm.role
+            FROM project_members pm
+            JOIN users u ON u.id = pm.user_id
+            WHERE pm.project_id = $1
+              AND u.is_active = true
+            ORDER BY pm.role = 'admin' DESC, display_name
+            """,
+            project_id,
+        )
+        hints = await conn.fetch(
+            """
+            SELECT
+                h.id,
+                h.body,
+                h.status,
+                h.created_at,
+                h.updated_at,
+                h.resolved_at,
+                h.author_user_id,
+                h.target_user_id,
+                COALESCE(author.display_name, author.authelia_username, 'Operador') AS author_name,
+                COALESCE(target.display_name, target.authelia_username, 'Operador') AS target_name,
+                COALESCE(resolver.display_name, resolver.authelia_username) AS resolved_by_name
+            FROM studio_project_hints h
+            LEFT JOIN users author ON author.id = h.author_user_id
+            LEFT JOIN users target ON target.id = h.target_user_id
+            LEFT JOIN users resolver ON resolver.id = h.resolved_by
+            WHERE h.project_id = $1
+            ORDER BY h.status = 'open' DESC, h.created_at DESC
+            LIMIT 40
+            """,
+            project_id,
+        )
+        thread_messages = await conn.fetch(
+            """
+            SELECT *
+            FROM (
+                SELECT
+                    m.id,
+                    m.body,
+                    m.created_at,
+                    m.updated_at,
+                    m.author_user_id,
+                    COALESCE(u.display_name, u.authelia_username, 'Operador') AS author_name
+                FROM studio_project_thread_messages m
+                LEFT JOIN users u ON u.id = m.author_user_id
+                WHERE m.project_id = $1
+                ORDER BY m.created_at DESC
+                LIMIT 50
+            ) recent
+            ORDER BY created_at ASC
+            """,
+            project_id,
+        )
+        notification_rows = await conn.fetch(
+            """
+            SELECT
+                n.id,
+                n.kind,
+                n.target_type,
+                n.target_id,
+                n.payload,
+                n.read_at,
+                n.created_at,
+                COALESCE(u.display_name, u.authelia_username, 'Sistema') AS actor_name
+            FROM studio_project_notifications n
+            LEFT JOIN users u ON u.id = n.actor_user_id
+            WHERE n.project_id = $1
+              AND n.target_user_id = $2
+            ORDER BY n.created_at DESC
+            LIMIT 50
+            """,
+            project_id,
+            auth_user["db_user_id"],
+        )
+
+    available_tags = [
+        {
+            "id": str(row["id"]),
+            "name": row["name"],
+            "color": row["color"],
+            "category": row["category"],
+            "is_system": row["is_system"],
+            "assigned": row["assigned_at"] is not None,
+        }
+        for row in tag_rows
+    ]
+
+    return {
+        "project": project_name,
+        "available_tags": available_tags,
+        "assigned_tags": [tag for tag in available_tags if tag["assigned"]],
+        "members": [
+            {
+                "id": str(row["id"]),
+                "display_name": row["display_name"],
+                "username": row["authelia_username"],
+                "role": row["role"],
+            }
+            for row in member_rows
+        ],
+        "notes": [
+            {
+                "id": str(row["id"]),
+                "visibility": row["visibility"],
+                "body": row["body"],
+                "is_encrypted": row["is_encrypted"],
+                "created_at": row["created_at"].isoformat(),
+                "updated_at": row["updated_at"].isoformat(),
+                "author_user_id": str(row["author_user_id"]) if row["author_user_id"] else None,
+                "author_name": row["author_name"],
+                "can_delete": (
+                    auth_user["is_global_admin"]
+                    or row["author_user_id"] == auth_user["db_user_id"]
+                    or project_role == "admin"
+                ),
+            }
+            for row in notes
+        ],
+        "hints": [
+            {
+                "id": str(row["id"]),
+                "body": row["body"],
+                "status": row["status"],
+                "created_at": row["created_at"].isoformat(),
+                "updated_at": row["updated_at"].isoformat(),
+                "resolved_at": row["resolved_at"].isoformat() if row["resolved_at"] else None,
+                "author_user_id": str(row["author_user_id"]) if row["author_user_id"] else None,
+                "author_name": row["author_name"],
+                "target_user_id": str(row["target_user_id"]) if row["target_user_id"] else None,
+                "target_name": row["target_name"],
+                "resolved_by_name": row["resolved_by_name"],
+                "can_update": (
+                    auth_user["is_global_admin"]
+                    or project_role == "admin"
+                    or row["author_user_id"] == auth_user["db_user_id"]
+                    or row["target_user_id"] == auth_user["db_user_id"]
+                ),
+            }
+            for row in hints
+        ],
+        "thread_messages": [
+            {
+                "id": str(row["id"]),
+                "body": row["body"],
+                "created_at": row["created_at"].isoformat(),
+                "updated_at": row["updated_at"].isoformat(),
+                "author_user_id": str(row["author_user_id"]) if row["author_user_id"] else None,
+                "author_name": row["author_name"],
+            }
+            for row in thread_messages
+        ],
+        "notifications": [
+            {
+                "id": str(row["id"]),
+                "kind": row["kind"],
+                "target_type": row["target_type"],
+                "target_id": row["target_id"],
+                "payload": row["payload"],
+                "actor_name": row["actor_name"],
+                "read_at": row["read_at"].isoformat() if row["read_at"] else None,
+                "created_at": row["created_at"].isoformat(),
+            }
+            for row in notification_rows
+        ],
+    }
+
+
+@app.post("/api/projects/{project_name}/notes", status_code=201)
+async def create_project_note(
+    project_name: str,
+    body: ProjectNoteCreate,
+    request: Request,
+    pool=Depends(get_pool),
+):
+    project_name = validate_project_id(project_name)
+    visibility = body.visibility.strip().lower()
+    note_body = body.body.strip()
+
+    if visibility not in {"public", "private"}:
+        raise HTTPException(400, "visibility deve ser public ou private")
+    if not note_body:
+        raise HTTPException(400, "body é obrigatório")
+    if len(note_body) > 4000:
+        raise HTTPException(400, "body deve ter no máximo 4000 caracteres")
+
+    auth_user = await resolve_authenticated_user(request, pool)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            project = await get_project_row(conn, project_name)
+            project_id = project["id"]
+            await ensure_project_member_access(
+                conn,
+                project_id=project_id,
+                auth_user=auth_user,
+            )
+            note = await conn.fetchrow(
+                """
+                INSERT INTO studio_project_notes(
+                    project_id, author_user_id, visibility, body
+                )
+                VALUES($1, $2, $3, $4)
+                RETURNING id, visibility, body, is_encrypted, created_at, updated_at
+                """,
+                project_id,
+                auth_user["db_user_id"],
+                visibility,
+                note_body,
+            )
+            await audit_studio_action(
+                conn,
+                project_id=project_id,
+                actor_user_id=auth_user["db_user_id"],
+                action="project_note_created",
+                target_type="studio_project_note",
+                target_id=str(note["id"]),
+                new_value={"visibility": visibility, "is_encrypted": False},
+            )
+
+    return {
+        "id": str(note["id"]),
+        "visibility": note["visibility"],
+        "body": note["body"],
+        "is_encrypted": note["is_encrypted"],
+        "created_at": note["created_at"].isoformat(),
+        "updated_at": note["updated_at"].isoformat(),
+        "author_user_id": str(auth_user["db_user_id"]),
+        "author_name": auth_user["display_name"] or auth_user["username"],
+    }
+
+
+@app.delete("/api/projects/{project_name}/notes/{note_id}")
+async def delete_project_note(
+    project_name: str,
+    note_id: str,
+    request: Request,
+    pool=Depends(get_pool),
+):
+    project_name = validate_project_id(project_name)
+    parsed_note_id = parse_uuid_value(note_id)
+    if parsed_note_id is None:
+        raise HTTPException(400, "note_id inválido")
+
+    auth_user = await resolve_authenticated_user(request, pool)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            project = await get_project_row(conn, project_name)
+            project_id = project["id"]
+            await ensure_project_member_access(
+                conn,
+                project_id=project_id,
+                auth_user=auth_user,
+            )
+
+            note = await conn.fetchrow(
+                """
+                SELECT id, author_user_id, visibility, body
+                FROM studio_project_notes
+                WHERE id = $1
+                  AND project_id = $2
+                """,
+                parsed_note_id,
+                project_id,
+            )
+            if not note:
+                raise HTTPException(404, "Anotação não encontrada")
+
+            role = await get_project_role(
+                conn,
+                project_id=project_id,
+                auth_user=auth_user,
+            )
+            can_delete = (
+                auth_user["is_global_admin"]
+                or note["author_user_id"] == auth_user["db_user_id"]
+                or role == "admin"
+            )
+            if not can_delete:
+                raise HTTPException(403, "Sem permissão para excluir esta anotação")
+
+            await conn.execute(
+                "DELETE FROM studio_project_notes WHERE id = $1",
+                parsed_note_id,
+            )
+            await audit_studio_action(
+                conn,
+                project_id=project_id,
+                actor_user_id=auth_user["db_user_id"],
+                action="project_note_deleted",
+                target_type="studio_project_note",
+                target_id=str(parsed_note_id),
+                old_value={
+                    "visibility": note["visibility"],
+                    "author_user_id": str(note["author_user_id"]) if note["author_user_id"] else None,
+                },
+            )
+
+    return {"status": "ok"}
+
+
+@app.post("/api/projects/{project_name}/hints", status_code=201)
+async def create_project_hint(
+    project_name: str,
+    body: ProjectHintCreate,
+    request: Request,
+    pool=Depends(get_pool),
+):
+    project_name = validate_project_id(project_name)
+    hint_body = body.body.strip()
+    if not hint_body:
+        raise HTTPException(400, "body é obrigatório")
+    if len(hint_body) > 2000:
+        raise HTTPException(400, "body deve ter no máximo 2000 caracteres")
+
+    auth_user = await resolve_authenticated_user(request, pool)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            project = await get_project_row(conn, project_name)
+            project_id = project["id"]
+            await ensure_project_member_access(
+                conn,
+                project_id=project_id,
+                auth_user=auth_user,
+            )
+            target_member = await get_project_member_row(
+                conn,
+                project_id=project_id,
+                user_id=body.target_user_id,
+            )
+            if not target_member:
+                raise HTTPException(400, "Usuário alvo não é membro deste projeto")
+
+            hint = await conn.fetchrow(
+                """
+                INSERT INTO studio_project_hints(
+                    project_id, author_user_id, target_user_id, body
+                )
+                VALUES($1, $2, $3, $4)
+                RETURNING id, status, created_at, updated_at
+                """,
+                project_id,
+                auth_user["db_user_id"],
+                body.target_user_id,
+                hint_body,
+            )
+            await audit_studio_action(
+                conn,
+                project_id=project_id,
+                actor_user_id=auth_user["db_user_id"],
+                action="project_hint_created",
+                target_type="studio_project_hint",
+                target_id=str(hint["id"]),
+                new_value={
+                    "target_user_id": str(body.target_user_id),
+                    "status": hint["status"],
+                    "body_length": len(hint_body),
+                },
+            )
+            await create_studio_notification(
+                conn,
+                project_id=project_id,
+                target_user_id=body.target_user_id,
+                actor_user_id=auth_user["db_user_id"],
+                kind="project_hint_created",
+                target_type="studio_project_hint",
+                target_id=str(hint["id"]),
+                payload={"status": hint["status"]},
+            )
+
+    return {
+        "id": str(hint["id"]),
+        "status": hint["status"],
+        "created_at": hint["created_at"].isoformat(),
+        "updated_at": hint["updated_at"].isoformat(),
+    }
+
+
+@app.put("/api/projects/{project_name}/hints/{hint_id}")
+async def update_project_hint_status(
+    project_name: str,
+    hint_id: str,
+    body: ProjectHintStatusUpdate,
+    request: Request,
+    pool=Depends(get_pool),
+):
+    project_name = validate_project_id(project_name)
+    parsed_hint_id = parse_uuid_value(hint_id)
+    if parsed_hint_id is None:
+        raise HTTPException(400, "hint_id inválido")
+
+    status = body.status.strip().lower()
+    if status not in {"open", "resolved"}:
+        raise HTTPException(400, "status deve ser open ou resolved")
+
+    auth_user = await resolve_authenticated_user(request, pool)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            project = await get_project_row(conn, project_name)
+            project_id = project["id"]
+            await ensure_project_member_access(
+                conn,
+                project_id=project_id,
+                auth_user=auth_user,
+            )
+            hint = await conn.fetchrow(
+                """
+                SELECT id, author_user_id, target_user_id, status
+                FROM studio_project_hints
+                WHERE id = $1
+                  AND project_id = $2
+                """,
+                parsed_hint_id,
+                project_id,
+            )
+            if not hint:
+                raise HTTPException(404, "Hint não encontrado")
+
+            project_role = await get_project_role(
+                conn,
+                project_id=project_id,
+                auth_user=auth_user,
+            )
+            can_update = (
+                auth_user["is_global_admin"]
+                or project_role == "admin"
+                or hint["author_user_id"] == auth_user["db_user_id"]
+                or hint["target_user_id"] == auth_user["db_user_id"]
+            )
+            if not can_update:
+                raise HTTPException(403, "Sem permissão para alterar este hint")
+
+            if status == "resolved":
+                await conn.execute(
+                    """
+                    UPDATE studio_project_hints
+                    SET status = 'resolved',
+                        resolved_by = $1,
+                        resolved_at = now(),
+                        updated_at = now()
+                    WHERE id = $2
+                    """,
+                    auth_user["db_user_id"],
+                    parsed_hint_id,
+                )
+            else:
+                await conn.execute(
+                    """
+                    UPDATE studio_project_hints
+                    SET status = 'open',
+                        resolved_by = NULL,
+                        resolved_at = NULL,
+                        updated_at = now()
+                    WHERE id = $1
+                    """,
+                    parsed_hint_id,
+                )
+            await audit_studio_action(
+                conn,
+                project_id=project_id,
+                actor_user_id=auth_user["db_user_id"],
+                action="project_hint_status_updated",
+                target_type="studio_project_hint",
+                target_id=str(parsed_hint_id),
+                old_value={"status": hint["status"]},
+                new_value={
+                    "status": status,
+                    "resolved_by": (
+                        str(auth_user["db_user_id"])
+                        if status == "resolved"
+                        else None
+                    ),
+                },
+            )
+
+    return {"status": status}
+
+
+@app.post("/api/projects/{project_name}/thread/messages", status_code=201)
+async def create_project_thread_message(
+    project_name: str,
+    body: ProjectThreadMessageCreate,
+    request: Request,
+    pool=Depends(get_pool),
+):
+    project_name = validate_project_id(project_name)
+    message_body = body.body.strip()
+    if not message_body:
+        raise HTTPException(400, "body é obrigatório")
+    if len(message_body) > 4000:
+        raise HTTPException(400, "body deve ter no máximo 4000 caracteres")
+
+    auth_user = await resolve_authenticated_user(request, pool)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            project = await get_project_row(conn, project_name)
+            project_id = project["id"]
+            await ensure_project_member_access(
+                conn,
+                project_id=project_id,
+                auth_user=auth_user,
+            )
+            message = await conn.fetchrow(
+                """
+                INSERT INTO studio_project_thread_messages(
+                    project_id, author_user_id, body
+                )
+                VALUES($1, $2, $3)
+                RETURNING id, created_at, updated_at
+                """,
+                project_id,
+                auth_user["db_user_id"],
+                message_body,
+            )
+            notification_targets = await conn.fetch(
+                """
+                SELECT user_id
+                FROM project_members
+                WHERE project_id = $1
+                  AND user_id <> $2
+                """,
+                project_id,
+                auth_user["db_user_id"],
+            )
+            for target in notification_targets:
+                await create_studio_notification(
+                    conn,
+                    project_id=project_id,
+                    target_user_id=target["user_id"],
+                    actor_user_id=auth_user["db_user_id"],
+                    kind="project_thread_message_created",
+                    target_type="studio_project_thread_message",
+                    target_id=str(message["id"]),
+                )
+            await audit_studio_action(
+                conn,
+                project_id=project_id,
+                actor_user_id=auth_user["db_user_id"],
+                action="project_thread_message_created",
+                target_type="studio_project_thread_message",
+                target_id=str(message["id"]),
+                new_value={
+                    "body_length": len(message_body),
+                    "notification_count": len(notification_targets),
+                },
+            )
+
+    return {
+        "id": str(message["id"]),
+        "created_at": message["created_at"].isoformat(),
+        "updated_at": message["updated_at"].isoformat(),
+    }
+
+
+@app.patch("/api/projects/{project_name}/notifications/{notification_id}")
+async def update_project_notification_read_state(
+    project_name: str,
+    notification_id: str,
+    body: ProjectNotificationRead,
+    request: Request,
+    pool=Depends(get_pool),
+):
+    project_name = validate_project_id(project_name)
+    parsed_notification_id = parse_uuid_value(notification_id)
+    if parsed_notification_id is None:
+        raise HTTPException(400, "notification_id invalido")
+
+    auth_user = await resolve_authenticated_user(request, pool)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            project = await get_project_row(conn, project_name)
+            project_id = project["id"]
+            notification = await conn.fetchrow(
+                """
+                SELECT id, read_at
+                FROM studio_project_notifications
+                WHERE id = $1
+                  AND project_id = $2
+                  AND target_user_id = $3
+                FOR UPDATE
+                """,
+                parsed_notification_id,
+                project_id,
+                auth_user["db_user_id"],
+            )
+            if not notification:
+                raise HTTPException(404, "Notificacao nao encontrada")
+
+            old_read = notification["read_at"] is not None
+            if old_read != body.read:
+                updated_at = await conn.fetchval(
+                    """
+                    UPDATE studio_project_notifications
+                    SET read_at = CASE WHEN $1 THEN now() ELSE NULL END
+                    WHERE id = $2
+                    RETURNING read_at
+                    """,
+                    body.read,
+                    parsed_notification_id,
+                )
+                await audit_studio_action(
+                    conn,
+                    project_id=project_id,
+                    actor_user_id=auth_user["db_user_id"],
+                    action="project_notification_read_state_changed",
+                    target_type="studio_project_notification",
+                    target_id=str(parsed_notification_id),
+                    old_value={"read": old_read},
+                    new_value={"read": body.read},
+                )
+            else:
+                updated_at = notification["read_at"]
+
+    return {
+        "id": str(parsed_notification_id),
+        "read": body.read,
+        "read_at": updated_at.isoformat() if updated_at else None,
+    }
+
+
+
+
+_RENAME_HISTORY_ACTIONS = (
+    "project_rename_started",
+    "project_rename_succeeded",
+    "project_rename_failed",
+    "project_rename_rolled_back",
+    "project_display_name_changed",
+)
+
+
+def _validate_rename_target(raw: str) -> str:
+    return validate_project_id(raw)
+
+
+async def _update_rename_history(
+    conn: asyncpg.Connection,
+    history_id: int,
+    status: str,
+    *,
+    error: str | None = None,
+) -> None:
+    await conn.execute(
+        """
+        UPDATE project_name_history
+        SET status = $1,
+            error = $2,
+            updated_at = now(),
+            completed_at = CASE
+                WHEN $1 IN ('succeeded', 'failed', 'rolled_back') THEN now()
+                ELSE NULL
+            END
+        WHERE id = $3
+        """,
+        status,
+        error,
+        history_id,
+    )
+
+
+async def _rename_project_background(
+    job_id: str,
+    project_id: uuid.UUID,
+    history_id: int,
+    old_name: str,
+    new_name: str,
+    actor_user_id: uuid.UUID,
+) -> None:
+    """Executa o script de rename em background e atualiza o job/audit."""
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            await _update_rename_history(conn, history_id, "running")
+        await _set_job_status(
+            job_id,
+            "running",
+            message=f"Renomeando {old_name} -> {new_name}...",
+        )
+
+        if not RENAME_SCRIPT.exists():
+            raise RuntimeError(f"Script de rename não encontrado: {RENAME_SCRIPT}")
+
+        proc = await asyncio.create_subprocess_exec(
+            "bash",
+            str(RENAME_SCRIPT),
+            old_name,
+            new_name,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            start_new_session=True,
+        )
+        try:
+            stdout, _ = await proc.communicate()
+        except asyncio.CancelledError:
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+                await asyncio.wait_for(proc.wait(), timeout=10)
+            except (ProcessLookupError, asyncio.TimeoutError):
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                await proc.wait()
+            raise
+        output = stdout.decode(errors="replace").strip()
+
+        if proc.returncode != 0:
+            rolled_back = "ROLLBACK_COMPLETE" in output
+            history_status = "rolled_back" if rolled_back else "failed"
+            audit_action = (
+                "project_rename_rolled_back"
+                if rolled_back
+                else "project_rename_failed"
+            )
+            async with pool.acquire() as conn:
+                await _update_rename_history(
+                    conn,
+                    history_id,
+                    history_status,
+                    error=output[-4000:],
+                )
+                await audit_studio_action(
+                    conn,
+                    project_id=project_id,
+                    actor_user_id=actor_user_id,
+                    action=audit_action,
+                    target_type="project",
+                    target_id=old_name,
+                    old_value={"name": old_name, "path": f"/{old_name}"},
+                    new_value={
+                        "name": new_name,
+                        "path": f"/{new_name}",
+                        "new_name": new_name,
+                        "returncode": proc.returncode,
+                        "error_excerpt": output[-2000:],
+                    },
+                )
+            await _set_job_status(
+                job_id,
+                "failed",
+                message=(
+                    "Falha no rename. Projeto pode estar em estado parcial."
+                    f"\n\n{output[-2000:]}"
+                ),
+            )
+            return
+
+        async with pool.acquire() as conn:
+            await _update_rename_history(conn, history_id, "succeeded")
+            await conn.execute(
+                "UPDATE jobs SET project = $1 WHERE job_id = $2",
+                new_name,
+                job_id,
+            )
+            await audit_studio_action(
+                conn,
+                project_id=project_id,
+                actor_user_id=actor_user_id,
+                action="project_rename_succeeded",
+                target_type="project",
+                target_id=old_name,
+                old_value={"name": old_name, "path": f"/{old_name}"},
+                new_value={"name": new_name, "path": f"/{new_name}"},
+            )
+            notification_targets = await conn.fetch(
+                """
+                SELECT user_id FROM project_members
+                WHERE project_id = $1 AND user_id <> $2
+                """,
+                project_id,
+                actor_user_id,
+            )
+            for target in notification_targets:
+                await create_studio_notification(
+                    conn,
+                    project_id=project_id,
+                    target_user_id=target["user_id"],
+                    actor_user_id=actor_user_id,
+                    kind="project_renamed",
+                    target_type="project",
+                    target_id=str(project_id),
+                    payload={
+                        "old_name": old_name,
+                        "new_name": new_name,
+                        "old_path": f"/{old_name}",
+                        "new_path": f"/{new_name}",
+                    },
+                )
+
+        await _set_job_status(
+            job_id,
+            "done",
+            message=f"Projeto renomeado: {old_name} -> {new_name}",
+        )
+    except Exception as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=f"Falha inesperada no rename: {exc}",
+        )
+        try:
+            async with pool.acquire() as conn:
+                await _update_rename_history(
+                    conn,
+                    history_id,
+                    "failed",
+                    error=str(exc),
+                )
+                await audit_studio_action(
+                    conn,
+                    project_id=project_id,
+                    actor_user_id=actor_user_id,
+                    action="project_rename_failed",
+                    target_type="project",
+                    target_id=old_name,
+                    old_value={"name": old_name, "path": f"/{old_name}"},
+                    new_value={
+                        "name": new_name,
+                        "path": f"/{new_name}",
+                        "exception": str(exc),
+                    },
+                )
+        except Exception:
+            pass
+        print(f"[rename_project] {old_name} -> {new_name}: {exc}")
+
+
+@app.post("/api/projects/{project_name}/rename", status_code=202)
+async def rename_project(
+    project_name: str,
+    body: ProjectRenameRequest,
+    request: Request,
+    pool=Depends(get_pool),
+):
+    """Renomeia o slug/path do projeto (migração completa em background).
+
+    O escopo inclui: nome interno na meta DB, banco Postgres, roles
+    por projeto, replication slots do Realtime, tenant Supavisor,
+    diretório físico e templates (nginx, docker-compose, .env).
+    """
+    project_name = validate_project_id(project_name)
+    new_name = _validate_rename_target(body.new_name)
+    if new_name == project_name:
+        raise HTTPException(400, "O novo nome deve ser diferente do atual")
+    display_name_raw = (
+        body.display_name.strip() if body.display_name is not None else None
+    )
+
+    auth_user = await resolve_authenticated_user(request, pool)
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            project_row = await get_project_row(conn, project_name)
+            project_id = project_row["id"]
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                str(project_id),
+            )
+            await ensure_project_admin_access(
+                conn,
+                project_id=project_id,
+                auth_user=auth_user,
+                message="Apenas admin do projeto ou admin global pode renomear",
+            )
+
+            collision = await conn.fetchval(
+                "SELECT 1 FROM projects WHERE name = $1",
+                new_name,
+            )
+            if collision:
+                raise HTTPException(409, f"Já existe um projeto com nome '{new_name}'")
+
+            active_rename = await conn.fetchval(
+                """
+                SELECT 1
+                FROM project_name_history
+                WHERE project_id = $1
+                  AND status IN ('queued', 'running')
+                LIMIT 1
+                """,
+                project_id,
+            )
+            if active_rename:
+                raise HTTPException(409, "Ja existe uma renomeacao ativa para este projeto")
+
+            job_id = str(uuid.uuid4())
+            await conn.execute(
+                """
+                INSERT INTO jobs(job_id, project, owner_id, status, message)
+                VALUES($1, $2, $3, 'queued', $4)
+                """,
+                job_id,
+                project_name,
+                auth_user["db_user_id"],
+                f"Rename iniciado: {project_name} -> {new_name}",
+            )
+            history_id = await conn.fetchval(
+                """
+                INSERT INTO project_name_history(
+                    project_id, job_id, actor_user_id,
+                    old_name, new_name, old_path, new_path
+                )
+                VALUES($1, $2, $3, $4, $5, $6, $7)
+                RETURNING id
+                """,
+                project_id,
+                job_id,
+                auth_user["db_user_id"],
+                project_name,
+                new_name,
+                f"/{project_name}",
+                f"/{new_name}",
+            )
+
+            await audit_studio_action(
+                conn,
+                project_id=project_id,
+                actor_user_id=auth_user["db_user_id"],
+                action="project_rename_started",
+                target_type="project",
+                target_id=project_name,
+                old_value={"name": project_name, "path": f"/{project_name}"},
+                new_value={"name": new_name, "path": f"/{new_name}"},
+            )
+
+            if display_name_raw:
+                current_display = project_row["display_name"]
+                if current_display != display_name_raw:
+                    await conn.execute(
+                        "UPDATE projects SET display_name = $1 WHERE id = $2",
+                        display_name_raw,
+                        project_id,
+                    )
+                    await audit_studio_action(
+                        conn,
+                        project_id=project_id,
+                        actor_user_id=auth_user["db_user_id"],
+                        action="project_display_name_changed",
+                        target_type="project",
+                        target_id=project_name,
+                        old_value={"display_name": current_display},
+                        new_value={"display_name": display_name_raw},
+                    )
+
+    try:
+        position = await _enqueue_project_action(
+            project_name,
+            job_id,
+            lambda: _rename_project_background(
+                job_id,
+                project_id,
+                history_id,
+                project_name,
+                new_name,
+                auth_user["db_user_id"],
+            ),
+        )
+    except Exception as exc:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    """
+                    UPDATE jobs
+                    SET status = 'failed', message = $1, updated_at = now()
+                    WHERE job_id = $2
+                    """,
+                    f"Falha ao enfileirar rename: {exc}",
+                    job_id,
+                )
+                await _update_rename_history(
+                    conn,
+                    history_id,
+                    "failed",
+                    error=f"queue_submit_failed: {exc}",
+                )
+        raise HTTPException(503, "Nao foi possivel enfileirar a renomeacao") from exc
+
+    return JSONResponse(
+        status_code=202,
+        content={
+            "job_id": job_id,
+            "old_name": project_name,
+            "new_name": new_name,
+            "status": "queued",
+            "queue_position": position,
+            "message": (
+                "Renomeação enfileirada. O projeto ficará indisponível "
+                "durante a migração."
+                if position == 0
+                else f"Renomeação enfileirada. Existem {position} ações "
+                f"na fila para {project_name}; este job é o próximo."
+            ),
+        },
+    )
+
+
+@app.patch("/api/projects/{project_name}/display-name")
+async def update_project_display_name(
+    project_name: str,
+    body: ProjectDisplayNameUpdate,
+    request: Request,
+    pool=Depends(get_pool),
+):
+    """Atualiza apenas o display_name do projeto (sem migrar infraestrutura)."""
+    project_name = validate_project_id(project_name)
+    new_display = body.display_name.strip()
+    if not new_display:
+        raise HTTPException(400, "display_name não pode ser vazio")
+
+    auth_user = await resolve_authenticated_user(request, pool)
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            project_row = await get_project_row(conn, project_name)
+            project_id = project_row["id"]
+            await ensure_project_admin_access(
+                conn,
+                project_id=project_id,
+                auth_user=auth_user,
+                message="Apenas admin do projeto ou admin global pode alterar o display_name",
+            )
+            current_display = await conn.fetchval(
+                "SELECT display_name FROM projects WHERE id = $1",
+                project_id,
+            )
+            if current_display == new_display:
+                return {
+                    "project": project_name,
+                    "display_name": new_display,
+                    "status": "noop",
+                }
+            await conn.execute(
+                "UPDATE projects SET display_name = $1 WHERE id = $2",
+                new_display,
+                project_id,
+            )
+            await audit_studio_action(
+                conn,
+                project_id=project_id,
+                actor_user_id=auth_user["db_user_id"],
+                action="project_display_name_changed",
+                target_type="project",
+                target_id=project_name,
+                old_value={"display_name": current_display},
+                new_value={"display_name": new_display},
+            )
+
+    return {
+        "project": project_name,
+        "display_name": new_display,
+        "status": "updated",
+    }
+
+
+@app.get("/api/projects/{project_name}/queue-status")
+async def get_project_queue_status(
+    project_name: str,
+    request: Request,
+    pool=Depends(get_pool),
+):
+    """Retorna o estado atual da fila de ações do projeto.
+
+    Inclui o job em execução (se houver), o tamanho da fila, e os jobs
+    pendentes/rodando do banco para fins de UI (polling).
+    """
+    project_name = validate_project_id(project_name)
+    auth_user = await resolve_authenticated_user(request, pool)
+
+    async with pool.acquire() as conn:
+        project_row = await get_project_row(conn, project_name)
+        project_id = project_row["id"]
+        await ensure_project_member_access(
+            conn,
+            project_id=project_id,
+            auth_user=auth_user,
+        )
+
+        in_flight_rows = await conn.fetch(
+            """
+            SELECT
+                job_id,
+                status,
+                message,
+                updated_at
+            FROM jobs
+            WHERE project = $1
+              AND status IN ('queued', 'running')
+            ORDER BY updated_at ASC
+            """,
+            project_name,
+        )
+
+    queue_state = action_queue.status(project_name)
+    in_flight = [
+        {
+            "job_id": str(r["job_id"]),
+            "status": r["status"],
+            "message": r["message"],
+            "updated_at": r["updated_at"].isoformat(),
+        }
+        for r in in_flight_rows
+    ]
+
+    return {
+        "project": project_name,
+        "is_busy": queue_state["is_busy"],
+        "current_job_id": queue_state["current_job_id"],
+        "queued": queue_state["queued"],
+        "in_flight": in_flight,
+        "message": (
+            "Projeto ocioso."
+            if not queue_state["is_busy"] and not in_flight
+            else (
+                f"Job atual: {queue_state['current_job_id']}."
+                if queue_state["is_busy"]
+                else f"{len(in_flight)} job(s) em fila no banco."
+            )
+        ),
+    }
+
+
+@app.get("/api/projects/{project_name}/rename-history")
+async def get_project_rename_history(
+    project_name: str,
+    request: Request,
+    pool=Depends(get_pool),
+    limit: int = Query(50, ge=1, le=500),
+):
+    """Retorna auditoria e historico duravel de nome/path do projeto."""
+    project_name = validate_project_id(project_name)
+
+    auth_user = await resolve_authenticated_user(request, pool)
+    async with pool.acquire() as conn:
+        project_row = await conn.fetchrow(
+            "SELECT id, name FROM projects WHERE name = $1",
+            project_name,
+        )
+        if not project_row:
+            project_row = await conn.fetchrow(
+                """
+                SELECT p.id, p.name
+                FROM project_name_history h
+                JOIN projects p ON p.id = h.project_id
+                WHERE h.old_name = $1 OR h.new_name = $1
+                ORDER BY h.created_at DESC
+                LIMIT 1
+                """,
+                project_name,
+            )
+        if not project_row:
+            raise HTTPException(404, "Project not found")
+        project_id = project_row["id"]
+        await ensure_project_member_access(
+            conn,
+            project_id=project_id,
+            auth_user=auth_user,
+        )
+
+        rows = await conn.fetch(
+            """
+            SELECT
+                a.id,
+                a.action,
+                a.target_id,
+                a.old_value,
+                a.new_value,
+                a.created_at,
+                a.actor_user_id,
+                COALESCE(u.display_name, u.authelia_username, 'Sistema') AS actor_name
+            FROM studio_audit_log a
+            LEFT JOIN users u ON u.id = a.actor_user_id
+            WHERE a.project_id = $1
+              AND a.action = ANY($2::text[])
+            ORDER BY a.created_at DESC
+            LIMIT $3
+            """,
+            project_id,
+            list(_RENAME_HISTORY_ACTIONS),
+            limit,
+        )
+        history_rows = await conn.fetch(
+            """
+            SELECT
+                h.id,
+                h.job_id,
+                h.old_name,
+                h.new_name,
+                h.old_path,
+                h.new_path,
+                h.status,
+                h.error,
+                h.created_at,
+                h.updated_at,
+                h.completed_at,
+                h.actor_user_id,
+                COALESCE(u.display_name, u.authelia_username, 'Sistema') AS actor_name
+            FROM project_name_history h
+            LEFT JOIN users u ON u.id = h.actor_user_id
+            WHERE h.project_id = $1
+            ORDER BY h.created_at DESC
+            LIMIT $2
+            """,
+            project_id,
+            limit,
+        )
+
+    return {
+        "project": project_row["name"],
+        "requested_name": project_name,
+        "events": [
+            {
+                "id": str(r["id"]),
+                "action": r["action"],
+                "actor_user_id": (
+                    str(r["actor_user_id"]) if r["actor_user_id"] else None
+                ),
+                "actor_name": r["actor_name"],
+                "target_id": r["target_id"],
+                "old_value": r["old_value"],
+                "new_value": r["new_value"],
+                "created_at": r["created_at"].isoformat(),
+            }
+            for r in rows
+        ],
+        "renames": [
+            {
+                "id": str(r["id"]),
+                "job_id": str(r["job_id"]),
+                "actor_user_id": (
+                    str(r["actor_user_id"]) if r["actor_user_id"] else None
+                ),
+                "actor_name": r["actor_name"],
+                "old_name": r["old_name"],
+                "new_name": r["new_name"],
+                "old_path": r["old_path"],
+                "new_path": r["new_path"],
+                "status": r["status"],
+                "error": r["error"],
+                "created_at": r["created_at"].isoformat(),
+                "updated_at": r["updated_at"].isoformat(),
+                "completed_at": (
+                    r["completed_at"].isoformat() if r["completed_at"] else None
+                ),
+            }
+            for r in history_rows
+        ],
+    }
+
+
+@app.post("/api/projects/{project_name}/tags", status_code=201)
+async def assign_project_tag(
+    project_name: str,
+    body: ProjectTagAssign,
+    request: Request,
+    pool=Depends(get_pool),
+):
+    project_name = validate_project_id(project_name)
+    auth_user = await resolve_authenticated_user(request, pool)
+
+    color = (body.color or "#3ECF8E").strip()
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+        raise HTTPException(400, "color deve estar no formato #RRGGBB")
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            project = await get_project_row(conn, project_name)
+            project_id = project["id"]
+            await ensure_project_member_access(
+                conn,
+                project_id=project_id,
+                auth_user=auth_user,
+            )
+
+            tag_id = body.tag_id
+            if tag_id is None:
+                tag_name = (body.name or "").strip()
+                if not tag_name:
+                    raise HTTPException(400, "tag_id ou name é obrigatório")
+                if len(tag_name) > 40:
+                    raise HTTPException(400, "name deve ter no máximo 40 caracteres")
+                if not auth_user["is_global_admin"]:
+                    raise HTTPException(403, "Apenas admin do sistema pode criar novas tags")
+
+                tag_id = await conn.fetchval(
+                    """
+                    INSERT INTO studio_project_tags(name, color, category, created_by)
+                    VALUES($1, $2, 'custom', $3)
+                    ON CONFLICT (name)
+                    DO UPDATE SET name = EXCLUDED.name
+                    RETURNING id
+                    """,
+                    tag_name,
+                    color,
+                    auth_user["db_user_id"],
+                )
+            else:
+                tag_exists = await conn.fetchval(
+                    "SELECT 1 FROM studio_project_tags WHERE id = $1",
+                    tag_id,
+                )
+                if not tag_exists:
+                    raise HTTPException(404, "Tag não encontrada")
+
+            await conn.execute(
+                """
+                INSERT INTO studio_project_tag_assignments(project_id, tag_id, assigned_by)
+                VALUES($1, $2, $3)
+                ON CONFLICT (project_id, tag_id) DO NOTHING
+                """,
+                project_id,
+                tag_id,
+                auth_user["db_user_id"],
+            )
+            await audit_studio_action(
+                conn,
+                project_id=project_id,
+                actor_user_id=auth_user["db_user_id"],
+                action="project_tag_assigned",
+                target_type="studio_project_tag",
+                target_id=str(tag_id),
+            )
+
+            tag = await conn.fetchrow(
+                """
+                SELECT id, name, color, category, is_system
+                FROM studio_project_tags
+                WHERE id = $1
+                """,
+                tag_id,
+            )
+
+    return {
+        "id": str(tag["id"]),
+        "name": tag["name"],
+        "color": tag["color"],
+        "category": tag["category"],
+        "is_system": tag["is_system"],
+        "assigned": True,
+    }
+
+
+@app.delete("/api/projects/{project_name}/tags/{tag_id}")
+async def unassign_project_tag(
+    project_name: str,
+    tag_id: str,
+    request: Request,
+    pool=Depends(get_pool),
+):
+    project_name = validate_project_id(project_name)
+    parsed_tag_id = parse_uuid_value(tag_id)
+    if parsed_tag_id is None:
+        raise HTTPException(400, "tag_id inválido")
+
+    auth_user = await resolve_authenticated_user(request, pool)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            project = await get_project_row(conn, project_name)
+            project_id = project["id"]
+            await ensure_project_member_access(
+                conn,
+                project_id=project_id,
+                auth_user=auth_user,
+            )
+            deleted = await conn.fetchval(
+                """
+                DELETE FROM studio_project_tag_assignments
+                WHERE project_id = $1 AND tag_id = $2
+                RETURNING tag_id
+                """,
+                project_id,
+                parsed_tag_id,
+            )
+            if deleted:
+                await audit_studio_action(
+                    conn,
+                    project_id=project_id,
+                    actor_user_id=auth_user["db_user_id"],
+                    action="project_tag_removed",
+                    target_type="studio_project_tag",
+                    target_id=str(parsed_tag_id),
+                )
+
+    return {"status": "ok"}
+
 @app.post("/api/projects", status_code=202)
 async def create_project(
     body: NewProject,
-    tasks: BackgroundTasks,
     request: Request,
     pool=Depends(get_pool),
 ):
@@ -858,14 +2837,28 @@ async def create_project(
                 job_id, name, auth_user["db_user_id"]
             )
 
-    tasks.add_task(_provision_and_store_keys, job_id, name, auth_user["db_user_id"])
-    return {"job_id": job_id, "status": "queued"}
+    position = await _enqueue_project_action(
+        name,
+        job_id,
+        lambda: _provision_and_store_keys(
+            job_id, name, auth_user["db_user_id"]
+        ),
+    )
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "queue_position": position,
+        "message": (
+            "Criação enfileirada."
+            if position == 0
+            else f"Criação enfileirada. Existem {position} ações antes desta na fila para {name}."
+        ),
+    }
 
 
 @app.post("/api/projects/duplicate", status_code=202)
 async def duplicate_project(
     body: DuplicateProject,
-    tasks: BackgroundTasks,
     request: Request,
     pool=Depends(get_pool),
 ):
@@ -912,16 +2905,28 @@ async def duplicate_project(
                 job_id, new_name, auth_user["db_user_id"]
             )
 
-    tasks.add_task(
-        _duplicate_and_store_keys,
-        job_id,
-        original,
+    position = await _enqueue_project_action(
         new_name,
-        auth_user["db_user_id"],
-        body.copy_data,
+        job_id,
+        lambda: _duplicate_and_store_keys(
+            job_id,
+            original,
+            new_name,
+            auth_user["db_user_id"],
+            body.copy_data,
+        ),
     )
 
-    return {"job_id": job_id, "status": "queued"}
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "queue_position": position,
+        "message": (
+            "Duplicação enfileirada."
+            if position == 0
+            else f"Duplicação enfileirada. Existem {position} ações antes desta na fila para {new_name}."
+        ),
+    }
 
 
 async def _duplicate_and_store_keys(
@@ -1024,6 +3029,183 @@ async def _run_command(*command: str) -> tuple[int, str, str]:
     return proc.returncode, stdout.decode().strip(), stderr.decode().strip()
 
 
+def _base64url_no_padding(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _create_hs256_jwt(payload: dict[str, Any], secret: str) -> str:
+    header = {"alg": "HS256", "typ": "JWT"}
+    header_b64 = _base64url_no_padding(
+        json.dumps(header, separators=(",", ":")).encode("utf-8")
+    )
+    payload_b64 = _base64url_no_padding(
+        json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    )
+    signature = hmac.new(
+        secret.encode("utf-8"),
+        f"{header_b64}.{payload_b64}".encode("ascii"),
+        hashlib.sha256,
+    ).digest()
+    return f"{header_b64}.{payload_b64}.{_base64url_no_padding(signature)}"
+
+
+def _get_global_jwt_secret() -> str:
+    env_secret = os.getenv("JWT_SECRET", "").strip()
+    if env_secret:
+        return env_secret
+
+    try:
+        return _read_env_file(_get_root_env_path()).get("JWT_SECRET", "").strip()
+    except Exception as exc:
+        print(f"[delete_project] falha ao ler JWT_SECRET do .env raiz: {exc}")
+        return ""
+
+
+def _build_short_lived_jwt(secret: str, issuer: str) -> str:
+    now = int(time.time())
+    return _create_hs256_jwt(
+        {
+            "role": "anon",
+            "iss": issuer,
+            "iat": now,
+            "exp": now + 3600,
+        },
+        secret,
+    )
+
+
+def _load_project_env(project_name: str) -> dict[str, str]:
+    env_path = pathlib.Path("/docker/projects") / project_name / ".env"
+    try:
+        return _read_env_file(env_path) if env_path.exists() else {}
+    except Exception as exc:
+        print(f"[delete_project] falha ao ler .env de {project_name}: {exc}")
+        return {}
+
+
+def _build_realtime_delete_token(
+    project_env: dict[str, str],
+    tenant_external_id: str,
+) -> str:
+    anon_token = project_env.get("ANON_KEY_PROJETO", "").strip()
+    if anon_token:
+        return anon_token
+
+    jwt_secret = project_env.get("JWT_SECRET_PROJETO", "").strip()
+    if jwt_secret:
+        return _build_short_lived_jwt(jwt_secret, tenant_external_id)
+
+    return ""
+
+
+def _build_global_delete_token(issuer: str) -> str:
+    secret = _get_global_jwt_secret()
+    return _build_short_lived_jwt(secret, issuer) if secret else ""
+
+
+def _parse_curl_status(stdout: str) -> tuple[int | None, str]:
+    body, separator, status_text = stdout.rpartition("\n")
+    if not separator:
+        return None, stdout
+    try:
+        return int(status_text.strip()), body.strip()
+    except ValueError:
+        return None, stdout
+
+
+def _sql_delete_count(status: str) -> int:
+    try:
+        command, count = status.rsplit(" ", 1)
+        return int(count) if command == "DELETE" else 0
+    except (ValueError, TypeError):
+        return 0
+
+
+async def _delete_tenant_api(
+    *,
+    service_label: str,
+    base_url: str,
+    fallback_container: str,
+    tenant_id: str,
+    token: str,
+) -> str | None:
+    if not token:
+        print(
+            f"[delete_project] {service_label}: token ausente; "
+            "seguindo com fallback SQL."
+        )
+        return None
+
+    encoded_tenant = urllib.parse.quote(tenant_id, safe="")
+    path = f"/api/tenants/{encoded_tenant}"
+    headers = {"Authorization": f"Bearer {token}"}
+    accepted_statuses = {200, 202, 204, 404}
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.delete(f"{base_url}{path}", headers=headers)
+        if response.status_code in accepted_statuses:
+            return None
+        direct_error = (
+            f"HTTP {response.status_code}: {response.text.strip()[:300]}"
+        )
+    except httpx.HTTPError as exc:
+        direct_error = str(exc)
+
+    code, stdout, stderr = await _run_command(
+        "docker",
+        "exec",
+        fallback_container,
+        "curl",
+        "-sS",
+        "-w",
+        "\n%{http_code}",
+        "-X",
+        "DELETE",
+        f"http://localhost:4000{path}",
+        "-H",
+        f"Authorization: Bearer {token}",
+    )
+    if code == 0:
+        status, body = _parse_curl_status(stdout)
+        if status in accepted_statuses:
+            return None
+        fallback_error = f"HTTP {status}: {body[:300]}" if status else stdout[:300]
+    else:
+        fallback_error = stderr or stdout or f"codigo {code}"
+
+    return (
+        f"{service_label}: falha ao remover tenant {tenant_id}; "
+        f"direto={direct_error}; docker_exec={fallback_error}"
+    )
+
+
+async def _drop_database_force_or_fallback(
+    conn: asyncpg.Connection,
+    db_name: str,
+) -> None:
+    quoted_db = '"' + db_name.replace('"', '""') + '"'
+    try:
+        await conn.execute(f"DROP DATABASE IF EXISTS {quoted_db} WITH (FORCE)")
+        return
+    except Exception as force_error:
+        await conn.execute(
+            """
+            SELECT pg_terminate_backend(pid)
+            FROM pg_stat_activity
+            WHERE datname = $1 AND pid <> pg_backend_pid()
+            """,
+            db_name,
+        )
+        await asyncio.sleep(1)
+        try:
+            await conn.execute(f"DROP DATABASE IF EXISTS {quoted_db}")
+        except Exception as drop_error:
+            raise RuntimeError(
+                f"{drop_error}; tentativa com FORCE: {force_error}"
+            ) from drop_error
+
+
 async def _delete_project_impl(
     project_name: str,
     pool,
@@ -1033,117 +3215,137 @@ async def _delete_project_impl(
     errors: list[str] = []
     db_name = f"_supabase_{project_name}"
 
-    project_uuid = get_project_uuid_from_env(project_name)
+    project_env = _load_project_env(project_name)
+    project_uuid = (
+        project_env.get("PROJECT_UUID", "").strip()
+        or get_project_uuid_from_env(project_name)
+    )
     tenant_external_id = project_uuid if project_uuid else project_name
 
     if project_uuid:
         print(f"Deletando projeto com UUID: {project_uuid}")
     else:
-        print(f"Deletando projeto antigo (sem UUID), usando project_name: {project_name}")
+        print(
+            "Deletando projeto antigo (sem UUID), "
+            f"usando project_name: {project_name}"
+        )
 
-    paused_services: list[str] = []
-    for service_name in ("realtime-dev.supabase-realtime", "supabase-pooler"):
-        code, _, stderr = await _run_command("docker", "pause", service_name)
-        if code == 0:
-            paused_services.append(service_name)
-        elif "already paused" not in stderr.lower():
+    containers = await get_project_containers(project_name)
+    for container in containers:
+        container_name = container.get("Names", "")
+        if not container_name:
+            continue
+
+        code, _, stderr = await _run_command(
+            "docker", "rm", "-f", container_name
+        )
+        if code != 0:
             errors.append(
-                f"Erro ao pausar {service_name}: {stderr or f'codigo {code}'}"
+                f"Erro ao remover {container_name}: {stderr or f'codigo {code}'}"
             )
 
-    try:
-        containers = await get_project_containers(project_name)
-        for container in containers:
-            container_name = container.get("Names", "")
-            if not container_name:
-                continue
+    realtime_error = await _delete_tenant_api(
+        service_label="Realtime",
+        base_url=REALTIME_INTERNAL_URL,
+        fallback_container="realtime-dev.supabase-realtime",
+        tenant_id=tenant_external_id,
+        token=_build_realtime_delete_token(project_env, tenant_external_id),
+    )
 
-            code, _, stderr = await _run_command(
-                "docker", "rm", "-f", container_name
-            )
-            if code != 0:
-                errors.append(
-                    f"Erro ao remover {container_name}: {stderr or f'codigo {code}'}"
-                )
+    supavisor_error = await _delete_tenant_api(
+        service_label="Supavisor",
+        base_url=SUPAVISOR_INTERNAL_URL,
+        fallback_container="supabase-pooler",
+        tenant_id=project_name,
+        token=_build_global_delete_token(tenant_external_id),
+    )
 
-        await asyncio.sleep(1)
+    await asyncio.sleep(1)
 
-        async with pool.acquire() as conn:
-            deleted_ext = await conn.execute(
-                'DELETE FROM _realtime.extensions WHERE tenant_external_id = $1',
-                tenant_external_id,
-            )
-            deleted_tenant = await conn.execute(
-                'DELETE FROM _realtime.tenants WHERE external_id = $1',
-                tenant_external_id,
-            )
+    async with pool.acquire() as conn:
+        deleted_ext = await conn.execute(
+            'DELETE FROM _realtime.extensions WHERE tenant_external_id = $1',
+            tenant_external_id,
+        )
+        deleted_tenant = await conn.execute(
+            'DELETE FROM _realtime.tenants WHERE external_id = $1',
+            tenant_external_id,
+        )
+        deleted_supavisor_users = await conn.execute(
+            'DELETE FROM _supavisor.users WHERE tenant_external_id = $1',
+            project_name,
+        )
+        deleted_supavisor_tenant = await conn.execute(
+            'DELETE FROM _supavisor.tenants WHERE external_id = $1',
+            project_name,
+        )
 
-            print(f"Realtime cleanup: extensions={deleted_ext}, tenants={deleted_tenant}")
+        print(
+            "Delete cleanup: "
+            f"realtime_extensions={deleted_ext}, "
+            f"realtime_tenants={deleted_tenant}, "
+            f"supavisor_users={deleted_supavisor_users}, "
+            f"supavisor_tenants={deleted_supavisor_tenant}"
+        )
 
-            await asyncio.sleep(10)
+        if realtime_error and (
+            _sql_delete_count(deleted_ext) or _sql_delete_count(deleted_tenant)
+        ):
+            errors.append(realtime_error)
+        elif realtime_error:
+            print(f"[delete_project] {realtime_error}")
 
+        if supavisor_error and (
+            _sql_delete_count(deleted_supavisor_users)
+            or _sql_delete_count(deleted_supavisor_tenant)
+        ):
+            errors.append(supavisor_error)
+        elif supavisor_error:
+            print(f"[delete_project] {supavisor_error}")
+
+        await conn.execute(
+            """
+            SELECT pg_terminate_backend(pid)
+            FROM pg_stat_activity
+            WHERE datname = $1 AND pid <> pg_backend_pid()
+            """,
+            db_name,
+        )
+
+        slot_errors = await drop_supabase_replication_slots(conn, project_name)
+        if slot_errors:
+            errors.extend(slot_errors)
+
+        try:
+            await _drop_database_force_or_fallback(conn, db_name)
+        except Exception as drop_error:
+            errors.append(f"Erro ao dropar banco {db_name}: {drop_error}")
+
+        project_id = await conn.fetchval(
+            "SELECT id FROM projects WHERE name = $1",
+            project_name,
+        )
+        if project_id:
             await conn.execute(
-                """
-                SELECT pg_terminate_backend(pid)
-                FROM pg_stat_activity
-                WHERE datname = $1 AND pid <> pg_backend_pid()
-                """,
-                db_name,
+                "DELETE FROM project_members WHERE project_id = $1",
+                project_id,
             )
-
-            await asyncio.sleep(2)
-            slot_errors = await drop_supabase_replication_slots(conn, project_name)
-            if slot_errors:
-                errors.extend(slot_errors)
-
-            try:
+            if current_job_id:
                 await conn.execute(
-                    'DROP DATABASE IF EXISTS ' + '"' + db_name.replace('"', '""') + '"'
+                    "DELETE FROM jobs WHERE project = $1 AND job_id <> $2",
+                    project_name,
+                    current_job_id,
                 )
-            except Exception as drop_error:
-                errors.append(f"Erro ao dropar banco {db_name}: {drop_error}")
-
-            project_id = await conn.fetchval(
-                "SELECT id FROM projects WHERE name = $1",
-                project_name,
-            )
-            if project_id:
-                await conn.execute(
-                    "DELETE FROM project_members WHERE project_id = $1",
-                    project_id,
-                )
-                if current_job_id:
-                    await conn.execute(
-                        "DELETE FROM jobs WHERE project = $1 AND job_id <> $2",
-                        project_name,
-                        current_job_id,
-                    )
-                else:
-                    await conn.execute(
-                        "DELETE FROM jobs WHERE project = $1",
-                        project_name,
-                    )
-                await conn.execute("DELETE FROM projects WHERE id = $1", project_id)
             else:
-                errors.append(
-                    f"Projeto {project_name} não encontrado para limpeza final."
+                await conn.execute(
+                    "DELETE FROM jobs WHERE project = $1",
+                    project_name,
                 )
-
-            await conn.execute(
-                'DELETE FROM _supavisor.users WHERE tenant_external_id = $1',
-                project_name,
+            await conn.execute("DELETE FROM projects WHERE id = $1", project_id)
+        else:
+            errors.append(
+                f"Projeto {project_name} não encontrado para limpeza final."
             )
-            await conn.execute(
-                'DELETE FROM _supavisor.tenants WHERE external_id = $1',
-                project_name,
-            )
-    finally:
-        for service_name in paused_services:
-            code, _, stderr = await _run_command("docker", "unpause", service_name)
-            if code != 0 and "not paused" not in stderr.lower():
-                errors.append(
-                    f"Erro ao despausar {service_name}: {stderr or f'codigo {code}'}"
-                )
 
     success, stdout, stderr = await execute_delete_script(project_name)
     if not success:
@@ -1197,12 +3399,6 @@ async def _delete_project_background(job_id: str, project_name: str) -> None:
         print(f"[delete_project] {project_name}: background task failed: {exc}")
 
 def get_project_uuid_from_env(project_name: str) -> Optional[str]:
-    """
-    Tenta ler o PROJECT_UUID do .env do projeto.
-    Retorna None se não encontrar (projeto antigo).
-    
-    Dentro do Docker, os projetos estão montados em /docker/projects
-    """
     try:
         env_path = pathlib.Path("/docker/projects") / project_name / ".env"
         
@@ -1282,7 +3478,6 @@ async def drop_supabase_replication_slots(
 @app.delete("/api/projects/{project_name}")
 async def delete_project(
     project_name: str,
-    tasks: BackgroundTasks,
     request: Request,
     x_delete_password: str = Header(..., alias="X-Delete-Password"),
     pool=Depends(get_pool)
@@ -1312,15 +3507,26 @@ async def delete_project(
         pool,
         project_name,
         auth_user["db_user_id"],
-        message="Exclusão iniciada em segundo plano.",
+        message="Exclusão enfileirada.",
     )
-    tasks.add_task(_delete_project_background, job_id, project_name)
+    position = await _enqueue_project_action(
+        project_name,
+        job_id,
+        lambda: _delete_project_background(job_id, project_name),
+    )
     return JSONResponse(
         status_code=202,
         content={
             "job_id": job_id,
             "status": "queued",
-            "message": "Exclusão iniciada em segundo plano.",
+            "queue_position": position,
+            "message": (
+                "Exclusão enfileirada. Será executada quando não houver "
+                "outras ações em andamento para este projeto."
+                if position == 0
+                else f"Exclusão enfileirada. Existem {position} ações "
+                f"antes desta na fila para {project_name}."
+            ),
         },
     )
 
@@ -1328,12 +3534,13 @@ async def delete_project(
 
 
 
-@app.post("/api/projects/{project_name}/rotate-key")
+@app.post("/api/projects/{project_name}/rotate-key", status_code=202)
 async def rotate_project_key(
     project_name: str,
     request: Request,
     pool=Depends(get_pool),
 ):
+    """Rotaciona anon/service_role via script. Enfileirado por projeto."""
     project_name = validate_project_id(project_name)
     auth_user = await resolve_authenticated_user(request, pool)
 
@@ -1346,40 +3553,109 @@ async def rotate_project_key(
             message="Only project admin or system admin can rotate keys",
         )
 
-    proc = await asyncio.create_subprocess_exec(
-        "bash", str(ROTATE_SCRIPT), project_name,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+    job_id = await _create_project_job(
+        pool,
+        project_name,
+        auth_user["db_user_id"],
+        message="Rotação de chaves enfileirada.",
     )
-    stdout, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        stdout_text = stdout.decode().strip()
-        stderr_text = stderr.decode().strip()
-        print(f"[rotate-key] stdout for {project_name}: {stdout_text}")
-        print(f"[rotate-key] stderr for {project_name}: {stderr_text}")
-        detail = stderr_text or stdout_text or "rotate script exited with no output"
-        raise HTTPException(500, f"Rotate failed: {detail}")
+    position = await _enqueue_project_action(
+        project_name,
+        job_id,
+        lambda: _rotate_project_key_background(
+            job_id, project_name, auth_user["db_user_id"]
+        ),
+    )
+    return JSONResponse(
+        status_code=202,
+        content={
+            "job_id": job_id,
+            "project": project_name,
+            "status": "queued",
+            "queue_position": position,
+            "message": (
+                "Rotação enfileirada."
+                if position == 0
+                else f"Rotação enfileirada. Existem {position} ações "
+                f"antes desta na fila para {project_name}."
+            ),
+        },
+    )
 
-    lines = stdout.decode().splitlines()
-    kv = {k: v for k, v in (line.split("=", 1) for line in lines if "=" in line)}
-    anon = kv.get("ANON_KEY_PROJETO")
-    service = kv.get("SERVICE_ROLE_KEY_PROJETO")
-    if not anon or not service:
-        raise HTTPException(500, "Keys not returned from script")
 
-    anon_enc = fernet.encrypt(anon.encode()).decode()
-    svc_enc  = fernet.encrypt(service.encode()).decode()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE projects SET anon_key=$1, service_role=$2 WHERE name=$3",
-            anon_enc, svc_enc, project_name
+async def _rotate_project_key_background(
+    job_id: str,
+    project_name: str,
+    actor_user_id: uuid.UUID,
+) -> None:
+    await _set_job_status(
+        job_id,
+        "running",
+        message="Rotacionando chaves...",
+    )
+    try:
+        if not ROTATE_SCRIPT.exists():
+            raise RuntimeError(f"Rotate script não encontrado: {ROTATE_SCRIPT}")
+
+        proc = await asyncio.create_subprocess_exec(
+            "bash", str(ROTATE_SCRIPT), project_name,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            stdout_text = stdout.decode().strip()
+            stderr_text = stderr.decode().strip()
+            print(f"[rotate-key] stdout for {project_name}: {stdout_text}")
+            print(f"[rotate-key] stderr for {project_name}: {stderr_text}")
+            detail = (
+                stderr_text or stdout_text or "rotate script exited with no output"
+            )
+            await _set_job_status(
+                job_id,
+                "failed",
+                message=f"Rotate failed: {detail}",
+            )
+            return
 
-    return {
-        "project": project_name,
-        "anon_key": anon,
-        "status": "rotated"
-    }
+        lines = stdout.decode().splitlines()
+        kv = {
+            k: v
+            for k, v in (line.split("=", 1) for line in lines if "=" in line)
+        }
+        anon = kv.get("ANON_KEY_PROJETO")
+        service = kv.get("SERVICE_ROLE_KEY_PROJETO")
+        if not anon or not service:
+            await _set_job_status(
+                job_id,
+                "failed",
+                message="Keys not returned from script",
+            )
+            return
+
+        anon_enc = fernet.encrypt(anon.encode()).decode()
+        svc_enc = fernet.encrypt(service.encode()).decode()
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE projects SET anon_key=$1, service_role=$2 WHERE name=$3",
+                anon_enc,
+                svc_enc,
+                project_name,
+            )
+
+        await _set_job_status(
+            job_id,
+            "done",
+            message="Chaves rotacionadas com sucesso.",
+        )
+    except Exception as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=f"Falha na rotação: {exc}",
+        )
+        print(f"[rotate-key] {project_name}: {exc}")
 
 
 @app.post("/api/projects/{project_name}/members")
@@ -2074,7 +4350,6 @@ async def get_project_docker_status(
 @app.post("/api/projects/{project_name}/stop")
 async def stop_project(
     project_name: str,
-    tasks: BackgroundTasks,
     request: Request,
     pool=Depends(get_pool)
 ):
@@ -2094,31 +4369,41 @@ async def stop_project(
             pool,
             project_name,
             auth_user["db_user_id"],
-            message="Parada iniciada em segundo plano.",
+            message="Parada enfileirada.",
         )
-        tasks.add_task(
-            _stop_project_containers_background,
-            job_id,
+        position = await _enqueue_project_action(
             project_name,
-            containers,
+            job_id,
+            lambda: _stop_project_containers_background(
+                job_id,
+                project_name,
+                containers,
+            ),
         )
         return JSONResponse(
             status_code=202,
             content={
                 "job_id": job_id,
                 "status": "queued",
-                "message": "Parada iniciada em segundo plano.",
+                "queue_position": position,
+                "message": (
+                    "Parada enfileirada."
+                    if position == 0
+                    else f"Parada enfileirada. Existem {position} ações "
+                    f"antes desta na fila para {project_name}."
+                ),
             },
         )
 
     return await _stop_project_containers(project_name, containers)
 
-@app.post("/api/projects/{project_name}/start")
+@app.post("/api/projects/{project_name}/start", status_code=202)
 async def start_project(
     project_name: str,
     request: Request,
     pool=Depends(get_pool)
 ):
+    """Inicia os containers do projeto. Enfileirado por projeto."""
     project_name = validate_project_id(project_name)
 
     async with pool.acquire() as conn:
@@ -2130,47 +4415,102 @@ async def start_project(
     if not containers:
         raise HTTPException(404, "No containers found for this project")
 
-    started_containers = []
-    errors = []
+    job_id = await _create_project_job(
+        pool,
+        project_name,
+        auth_user["db_user_id"],
+        message="Inicialização enfileirada.",
+    )
+    position = await _enqueue_project_action(
+        project_name,
+        job_id,
+        lambda: _start_project_containers_background(
+            job_id, project_name, containers, auth_user["db_user_id"]
+        ),
+    )
+    return JSONResponse(
+        status_code=202,
+        content={
+            "job_id": job_id,
+            "status": "queued",
+            "queue_position": position,
+            "message": (
+                "Inicialização enfileirada."
+                if position == 0
+                else f"Inicialização enfileirada. Existem {position} ações "
+                f"antes desta na fila para {project_name}."
+            ),
+        },
+    )
 
-    sorted_containers = _sort_project_containers(containers)
 
-    for container in sorted_containers:
-        container_name = container.get("Names", "")
-        container_status = container.get("State", "")
-
-        try:
-            if container_status != "running":
-                proc = await asyncio.create_subprocess_exec(
-                    "docker", "start", container_name,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                stdout, stderr = await proc.communicate()
-
-                if proc.returncode == 0:
-                    started_containers.append(container_name)
-                    await asyncio.sleep(2)
+async def _start_project_containers_background(
+    job_id: str,
+    project_name: str,
+    containers: list[dict],
+    actor_user_id: uuid.UUID,
+) -> None:
+    await _set_job_status(
+        job_id,
+        "running",
+        message="Iniciando containers...",
+    )
+    try:
+        sorted_containers = _sort_project_containers(containers)
+        started_containers: list[str] = []
+        errors: list[str] = []
+        for container in sorted_containers:
+            container_name = container.get("Names", "")
+            container_status = container.get("State", "")
+            try:
+                if container_status != "running":
+                    proc = await asyncio.create_subprocess_exec(
+                        "docker", "start", container_name,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    _, stderr = await proc.communicate()
+                    if proc.returncode == 0:
+                        started_containers.append(container_name)
+                        await asyncio.sleep(2)
+                    else:
+                        errors.append(
+                            f"Error starting {container_name}: "
+                            f"{stderr.decode().strip()}"
+                        )
                 else:
-                    errors.append(f"Error starting {container_name}: {stderr.decode()}")
-            else:
-                started_containers.append(f"{container_name} (already running)")
-        except Exception as e:
-            errors.append(f"Error starting {container_name}: {str(e)}")
+                    started_containers.append(f"{container_name} (already running)")
+            except Exception as exc:
+                errors.append(f"Error starting {container_name}: {exc}")
 
-    return {
-        "project": project_name,
-        "started_containers": started_containers,
-        "errors": errors,
-        "success": len(errors) == 0
-    }
+        if errors:
+            await _set_job_status(
+                job_id,
+                "failed",
+                message="\n".join(errors),
+            )
+            return
+        await _set_job_status(
+            job_id,
+            "done",
+            message=f"Iniciado: {', '.join(started_containers)}",
+        )
+    except Exception as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=f"Falha ao iniciar: {exc}",
+        )
+        print(f"[start_project] {project_name}: {exc}")
 
-@app.post("/api/projects/{project_name}/restart")
+
+@app.post("/api/projects/{project_name}/restart", status_code=202)
 async def restart_project(
     project_name: str,
     request: Request,
     pool=Depends(get_pool)
 ):
+    """Reinicia os containers do projeto. Enfileirado por projeto."""
     project_name = validate_project_id(project_name)
 
     async with pool.acquire() as conn:
@@ -2182,39 +4522,92 @@ async def restart_project(
     if not containers:
         raise HTTPException(404, "No containers found for this project")
 
-    sorted_containers = _sort_project_containers(containers)
+    job_id = await _create_project_job(
+        pool,
+        project_name,
+        auth_user["db_user_id"],
+        message="Reinicialização enfileirada.",
+    )
+    position = await _enqueue_project_action(
+        project_name,
+        job_id,
+        lambda: _restart_project_containers_background(
+            job_id, project_name, containers, auth_user["db_user_id"]
+        ),
+    )
+    return JSONResponse(
+        status_code=202,
+        content={
+            "job_id": job_id,
+            "status": "queued",
+            "queue_position": position,
+            "message": (
+                "Reinicialização enfileirada."
+                if position == 0
+                else f"Reinicialização enfileirada. Existem {position} ações "
+                f"antes desta na fila para {project_name}."
+            ),
+        },
+    )
 
-    restarted_containers: list[str] = []
-    errors: list[str] = []
 
-    for cont in sorted_containers:
-        name = cont.get("Names", "")
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "docker",
-                "restart",
-                "-t",
-                "30",
-                name,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+async def _restart_project_containers_background(
+    job_id: str,
+    project_name: str,
+    containers: list[dict],
+    actor_user_id: uuid.UUID,
+) -> None:
+    await _set_job_status(
+        job_id,
+        "running",
+        message="Reiniciando containers...",
+    )
+    try:
+        sorted_containers = _sort_project_containers(containers)
+        restarted_containers: list[str] = []
+        errors: list[str] = []
+        for cont in sorted_containers:
+            name = cont.get("Names", "")
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "docker",
+                    "restart",
+                    "-t",
+                    "30",
+                    name,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await proc.communicate()
+                if proc.returncode == 0:
+                    restarted_containers.append(name)
+                    await asyncio.sleep(2)
+                else:
+                    errors.append(
+                        f"Error restarting {name}: {stderr.decode().strip()}"
+                    )
+            except Exception as exc:
+                errors.append(f"Error restarting {name}: {exc}")
+
+        if errors:
+            await _set_job_status(
+                job_id,
+                "failed",
+                message="\n".join(errors),
             )
-            stdout, stderr = await proc.communicate()
-
-            if proc.returncode == 0:
-                restarted_containers.append(name)
-                await asyncio.sleep(2)
-            else:
-                errors.append(f"Error restarting {name}: {stderr.decode().strip()}")
-        except Exception as exc:
-            errors.append(f"Error restarting {name}: {exc}")
-
-    return {
-        "project": project_name,
-        "restarted_containers": restarted_containers,
-        "errors": errors,
-        "success": len(errors) == 0,
-    }
+            return
+        await _set_job_status(
+            job_id,
+            "done",
+            message=f"Reiniciado: {', '.join(restarted_containers)}",
+        )
+    except Exception as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=f"Falha ao reiniciar: {exc}",
+        )
+        print(f"[restart_project] {project_name}: {exc}")
 
 MAX_LOG_LINES = 1000
 
@@ -2290,7 +4683,7 @@ async def get_projects_for_user(
 
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT DISTINCT p.name
+            SELECT DISTINCT p.name, p.display_name
             FROM projects p
             JOIN project_members m ON p.id = m.project_id
             WHERE m.user_id = $1
@@ -2302,6 +4695,7 @@ async def get_projects_for_user(
             project_status = await get_project_status(r["name"])
             projects.append({
                 "name": r["name"],
+                "display_name": r["display_name"],
                 "status": project_status["status"],
                 "running_containers": project_status["running"],
                 "total_containers": project_status["total"],
@@ -2439,7 +4833,6 @@ async def transfer_project(
     }
 
 async def get_project_conn(project_ref: str):
-    """Creates a direct asyncpg connection to _supabase_{ref} using same credentials as main pool."""
     dsn = urllib.parse.urlparse(DB_DSN)
     db_name = f"_supabase_{project_ref}"
     return await asyncpg.connect(
@@ -2932,7 +5325,6 @@ ALLOWED_RECREATE_SERVICES = {"auth", "rest", "storage", "imgproxy", "nginx", "me
 async def recreate_project_services(
     project_name: str,
     body: RecreateServices,
-    tasks: BackgroundTasks,
     request: Request,
     pool=Depends(get_pool),
 ):
@@ -2961,20 +5353,29 @@ async def recreate_project_services(
             pool,
             project_name,
             auth_user["db_user_id"],
-            message="Recriacao iniciada em segundo plano.",
+            message="Recriação enfileirada.",
         )
-        tasks.add_task(
-            _recreate_project_services_background,
-            job_id,
+        position = await _enqueue_project_action(
             project_name,
-            services,
+            job_id,
+            lambda: _recreate_project_services_background(
+                job_id,
+                project_name,
+                services,
+            ),
         )
         return JSONResponse(
             status_code=202,
             content={
                 "job_id": job_id,
                 "status": "queued",
-                "message": "Recriacao iniciada em segundo plano.",
+                "queue_position": position,
+                "message": (
+                    "Recriação enfileirada."
+                    if position == 0
+                    else f"Recriação enfileirada. Existem {position} ações "
+                    f"antes desta na fila para {project_name}."
+                ),
             },
         )
 

@@ -414,7 +414,7 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
                 maxCrossAxisExtent: 380,
                 crossAxisSpacing: 16,
                 mainAxisSpacing: 16,
-                childAspectRatio: 1.6,
+                childAspectRatio: 1.35,
               ),
               itemCount: favProjects.length,
               itemBuilder: (_, i) =>
@@ -444,7 +444,7 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
                 maxCrossAxisExtent: 380,
                 crossAxisSpacing: 16,
                 mainAxisSpacing: 16,
-                childAspectRatio: 1.6,
+                childAspectRatio: 1.35,
               ),
               itemCount: otherProjects.length,
               itemBuilder: (_, i) =>
@@ -468,6 +468,7 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
       isLoading: project['is_loading'] == true,
       isFavorite: isFavorite,
       serverDomain: serverDomain,
+      displayName: project['display_name'] as String?,
       onTap: project['is_loading'] == true
           ? () {}
           : () => _openProject(

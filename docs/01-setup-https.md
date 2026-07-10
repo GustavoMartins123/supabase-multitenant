@@ -87,6 +87,8 @@ Este bloco garante que apenas cifras de criptografia modernas e seguras sejam ut
             - "secp384r1"
     ```
 
+> 💡 **Nota de compatibilidade**: Restringir a versão mínima para `VersionTLS12` e limitar as cifras garante excelente segurança e pontuação máxima em auditorias (como SSL Labs), mas pode impedir a conexão de clientes muito antigos ou dispositivos legados (como sistemas embarcados obsoletos). Se a sua regra de negócio exige suporte a esses dispositivos, você pode remover ou flexibilizar essa configuração.
+
 ---
 
 ### Passo 2: Ajustar Headers de Segurança no `middlewares.yml`
@@ -110,6 +112,19 @@ Para produção, é crucial enviar o header `Strict-Transport-Security` (HSTS), 
           Content-Security-Policy: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'"
           Referrer-Policy: "strict-origin-when-cross-origin"
     ```
+
+> ⚠️ **Atenção: Ajuste conforme suas regras de negócio!**
+> Os cabeçalhos (headers) de segurança padrão acima são rígidos e seguros, mas podem ser restritivos ("engessados") dependendo do seu projeto:
+> 
+> * **`Content-Security-Policy` (CSP)**:
+>   * **O que faz:** Impede que o navegador carregue scripts, imagens, fontes ou faça requisições de/para domínios que não sejam o próprio (`'self'`).
+>   * **Quando ajustar:** Se o seu aplicativo usa APIs externas (ex: Stripe, Google Maps), fontes do Google Fonts, ou se você usa o Supabase Storage para exibir imagens hospedadas em outros buckets/domínios, o CSP bloqueará o carregamento. Você precisará adicionar os domínios permitidos nas diretivas apropriadas (ex: `img-src 'self' data: https://*.supabase.co; connect-src 'self' https://api.seuservico.com`). Se estiver na fase inicial de desenvolvimento ou testes, você pode desativar temporariamente este cabeçalho ou usar `Content-Security-Policy-Report-Only` para auditar os bloqueios sem impedir o funcionamento da aplicação.
+> * **`Strict-Transport-Security` (HSTS)**:
+>   * **O que faz:** Obriga o navegador a sempre usar HTTPS para o domínio atual e todos os seus subdomínios (`includeSubDomains; preload`) durante 1 ano (`max-age=31536000`).
+>   * **Cuidado:** Uma vez ativo e enviado ao cabeçalho com `preload`, se você tiver subdomínios legados ou outros serviços que ainda precisem rodar sem HTTPS, eles se tornarão totalmente inacessíveis. Recomenda-se começar com um `max-age` menor e sem `preload` ou `includeSubDomains` durante a fase de testes e homologação (ex: `"max-age=63072000"`).
+> * **`X-Frame-Options`**:
+>   * **O que faz:** Evita ataques de clickjacking impedindo que seu site seja renderizado dentro de um `<iframe>`.
+>   * **Quando ajustar:** Se você planeja integrar o painel ou partes da sua aplicação dentro de outras plataformas suas via iframe, altere de `"DENY"` para `"SAMEORIGIN"`, ou use a diretiva `frame-ancestors` no CSP.
 
 ---
 
@@ -188,6 +203,10 @@ labels:
 ```
 
 Nota: troque 'seu_dominio' pelo dominio real que será usado.
+
+> ⚠️ **Nota sobre o middleware `lanonly`:**
+> A regra `- traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.20.0.0/16` limita o acesso à API de gerenciamento de projetos apenas para a sua rede local e o IP configurado.
+> * **Se você possui um IP dinâmico ou precisa acessar a API de outras redes** (ex: automações, CI/CD ou servidores externos), essa configuração restritiva causará bloqueios. Avalie alterar a lista de IPs permitidos ou remover o middleware `lanonly` caso adote outra forma de autenticação/segurança diretamente na API.
 
 ## Passo 4: Configurar os Roteadores dos Projetos para HTTPS
 

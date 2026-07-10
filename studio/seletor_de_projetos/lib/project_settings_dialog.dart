@@ -12,6 +12,8 @@ import 'providers/project_settings_provider.dart';
 import 'providers/project_list_provider.dart';
 import 'services/projectService.dart';
 import 'dialogs/transferProjectDialog.dart';
+import 'dialogs/rename_project_dialog.dart';
+import 'dialogs/rename_history_dialog.dart';
 
 import 'widgets/close_button_widget.dart';
 import 'widgets/icon_button_widget.dart';
@@ -31,11 +33,13 @@ class ProjectSettingsDialog extends ConsumerStatefulWidget {
     required this.ref,
     required this.anonKey,
     required this.configToken,
+    this.displayName,
   });
 
   final String ref;
   final String anonKey;
   final String configToken;
+  final String? displayName;
 
   @override
   ConsumerState<ProjectSettingsDialog> createState() =>
@@ -49,7 +53,10 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
 
   late String _currentAnonKey;
   late String _currentConfigToken;
+  String? _currentDisplayName;
+  late final TextEditingController _displayNameController;
   bool _rotatingKey = false;
+  bool _savingDisplayName = false;
 
   @override
   void initState() {
@@ -66,12 +73,62 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
 
     _currentAnonKey = widget.anonKey;
     _currentConfigToken = widget.configToken;
+    _currentDisplayName = widget.displayName;
+    _displayNameController = TextEditingController(
+      text: widget.displayName ?? '',
+    );
   }
 
   @override
   void dispose() {
+    _displayNameController.dispose();
     _animController.dispose();
     super.dispose();
+  }
+
+  Future<void> _saveDisplayName() async {
+    final newName = _displayNameController.text.trim();
+    if (newName == (_currentDisplayName ?? '')) {
+      return;
+    }
+    setState(() => _savingDisplayName = true);
+    try {
+      final saved = await ref
+          .read(projectRepositoryProvider)
+          .updateProjectDisplayName(widget.ref, newName);
+      setState(() {
+        _currentDisplayName = saved ?? newName;
+        _displayNameController.text = _currentDisplayName ?? '';
+      });
+      ref.invalidate(projectListProvider);
+      _showSnack('Nome de exibição atualizado.', SupabaseColors.success);
+    } catch (e) {
+      final msg = e.toString().replaceFirst('Exception: ', '');
+      _showSnack('Erro ao atualizar nome: $msg', SupabaseColors.error);
+    } finally {
+      if (mounted) setState(() => _savingDisplayName = false);
+    }
+  }
+
+  Future<void> _openRenameDialog() async {
+    final result = await showDialog<RenameProjectResult>(
+      context: context,
+      builder: (_) => RenameProjectDialog(
+        projectName: widget.ref,
+        currentDisplayName: _currentDisplayName,
+      ),
+    );
+    if (result == null) return;
+    if (!mounted) return;
+    ref.invalidate(projectListProvider);
+    Navigator.of(context).pop(result.newName);
+  }
+
+  void _openHistoryDialog() {
+    showDialog(
+      context: context,
+      builder: (_) => RenameHistoryDialog(projectName: widget.ref),
+    );
   }
 
   void _showSnack(String msg, Color color) {
@@ -130,9 +187,8 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
 
     setState(() => _rotatingKey = true);
     try {
-      final data = await ref
-          .read(projectRepositoryProvider)
-          .rotateKey(widget.ref);
+      final data =
+          await ref.read(projectRepositoryProvider).rotateKey(widget.ref);
       final newKey = data['anon_key'];
       setState(() => _currentAnonKey = newKey);
 
@@ -160,9 +216,8 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
   Widget build(BuildContext context) {
     final configAsync = ref.watch(configProvider);
     final serverDomain = configAsync.value?['server_domain'] as String? ?? '';
-    final projectUrl = serverDomain.isNotEmpty
-        ? '$serverDomain/${widget.ref}'
-        : widget.ref;
+    final projectUrl =
+        serverDomain.isNotEmpty ? '$serverDomain/${widget.ref}' : widget.ref;
 
     final membersAsync = ref.watch(projectMembersProvider(widget.ref));
     final myId = Session().myId;
@@ -204,6 +259,8 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
                       StatusSection(projectRef: widget.ref),
                       const SizedBox(height: 20),
                       _buildUrlSection(projectUrl),
+                      const SizedBox(height: 20),
+                      _buildIdentitySection(myRole),
                       const SizedBox(height: 20),
                       _buildAnonKeySection(myRole),
                       const SizedBox(height: 20),
@@ -391,6 +448,140 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildIdentitySection(String? myRole) {
+    final isAdmin = myRole == 'admin' || Session().isSysAdmin;
+    final hasDisplayChange =
+        _displayNameController.text.trim() != (_currentDisplayName ?? '');
+
+    return SectionWidget(
+      title: 'IDENTIDADE DO PROJETO',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: SupabaseColors.bg300,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: SupabaseColors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Text(
+                      'SLUG / PATH',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1,
+                        color: SupabaseColors.textMuted,
+                      ),
+                    ),
+                    const Spacer(),
+                    TextButton.icon(
+                      onPressed: () => _openHistoryDialog(),
+                      icon: const Icon(Icons.history_rounded, size: 14),
+                      label: const Text('Histórico'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: SupabaseColors.textSecondary,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(
+                      child: SelectableText(
+                        widget.ref,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontFamily: 'monospace',
+                          color: SupabaseColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                    if (isAdmin) ...[
+                      const SizedBox(width: 8),
+                      SecondaryButton(
+                        label: 'Renomear',
+                        icon: Icons.drive_file_rename_outline_rounded,
+                        onPressed:
+                            _savingDisplayName ? null : _openRenameDialog,
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: SupabaseColors.bg300,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: SupabaseColors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'NOME DE EXIBIÇÃO',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1,
+                    color: SupabaseColors.textMuted,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _displayNameController,
+                  enabled: isAdmin && !_savingDisplayName,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: SupabaseColors.textPrimary,
+                  ),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    hintText: 'Nome humano do projeto',
+                  ),
+                  onChanged: (_) {
+                    if (mounted) setState(() {});
+                  },
+                ),
+                if (isAdmin) ...[
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: SecondaryButton(
+                      onPressed: !hasDisplayChange || _savingDisplayName
+                          ? null
+                          : _saveDisplayName,
+                      icon: Icons.save_outlined,
+                      label: _savingDisplayName
+                          ? 'Salvando...'
+                          : 'Salvar display name',
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

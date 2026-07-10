@@ -68,6 +68,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
 CREATE TABLE IF NOT EXISTS projects (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL UNIQUE,
+  display_name TEXT,
   owner_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
   anon_key TEXT,
   service_role TEXT,
@@ -76,6 +77,11 @@ CREATE TABLE IF NOT EXISTS projects (
 
 COMMENT ON COLUMN projects.owner_id IS
   'UUID canonico do usuario dono do projeto.';
+
+COMMENT ON COLUMN projects.display_name IS
+  'Nome exibicao humano do projeto. O slug/path continua sendo a coluna name.';
+
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS display_name TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_projects_owner_id ON projects(owner_id);
 EOSQL

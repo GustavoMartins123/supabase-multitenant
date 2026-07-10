@@ -22,5 +22,7 @@ RUN chmod +x ./scripts/extract_token.sh
 RUN chmod +x ./scripts/generate_project.sh
 RUN chmod +x ./scripts/delete_project.sh
 RUN chmod +x ./scripts/duplicate_project.sh
+RUN chmod +x ./scripts/rename_project.sh
+RUN chmod +x ./scripts/rotate_key.sh
 EXPOSE 18000        
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "18000", "--proxy-headers"]

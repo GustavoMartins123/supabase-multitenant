@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/project_collaboration.dart';
+import '../project_collaboration_dialog.dart';
+import '../providers/project_collaboration_provider.dart';
 import '../providers/project_settings_provider.dart';
 import '../project_settings_dialog.dart';
 import '../supabase_colors.dart';
@@ -18,6 +21,7 @@ class ProjectCard extends ConsumerStatefulWidget {
     required this.onDuplicate,
     required this.onToggleFavorite,
     required this.isFavorite,
+    this.displayName,
     this.serverDomain,
     this.isLoading = false,
   });
@@ -25,6 +29,7 @@ class ProjectCard extends ConsumerStatefulWidget {
   final String refKey;
   final String anonKey;
   final String configToken;
+  final String? displayName;
   final String? serverDomain;
   final VoidCallback onTap;
   final VoidCallback onDeleted;
@@ -49,12 +54,21 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
         ref: widget.refKey,
         anonKey: widget.anonKey,
         configToken: widget.configToken,
+        displayName: widget.displayName,
       ),
     );
 
     if (deleted == widget.refKey) {
       widget.onDeleted();
     }
+  }
+
+  Future<void> _openCollaboration() async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => ProjectCollaborationDialog(projectRef: widget.refKey),
+    );
+    ref.invalidate(projectCollaborationProvider(widget.refKey));
   }
 
   String get _projectUrl {
@@ -71,8 +85,12 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
     }
 
     final statusAsync = ref.watch(projectStatusProvider(widget.refKey));
+    final collaborationAsync = ref.watch(
+      projectCollaborationProvider(widget.refKey),
+    );
     final isRunning = statusAsync.value?.status == 'running';
     final statusLoading = statusAsync.isLoading && !statusAsync.hasValue;
+    final tags = collaborationAsync.value?.assignedTags ?? [];
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
@@ -84,14 +102,12 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOut,
           decoration: BoxDecoration(
-            color: _hover
-                ? SupabaseColors.surface200
-                : SupabaseColors.surface100,
+            color:
+                _hover ? SupabaseColors.surface200 : SupabaseColors.surface100,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: _hover
-                  ? SupabaseColors.borderHover
-                  : SupabaseColors.border,
+              color:
+                  _hover ? SupabaseColors.borderHover : SupabaseColors.border,
               width: 1,
             ),
           ),
@@ -126,7 +142,8 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
                               Flexible(
                                 child: Tooltip(
                                   message: widget.refKey,
-                                  waitDuration: const Duration(milliseconds: 500),
+                                  waitDuration:
+                                      const Duration(milliseconds: 500),
                                   child: Text(
                                     widget.refKey,
                                     style: const TextStyle(
@@ -139,6 +156,23 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
                                   ),
                                 ),
                               ),
+                              if (widget.displayName != null &&
+                                  widget.displayName!.isNotEmpty &&
+                                  widget.displayName != widget.refKey) ...[
+                                const SizedBox(width: 8),
+                                Flexible(
+                                  child: Text(
+                                    '· ${widget.displayName!}',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.normal,
+                                      color: SupabaseColors.textSecondary,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
                               const SizedBox(width: 8),
                               Container(
                                 width: 8,
@@ -148,8 +182,8 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
                                   color: statusLoading
                                       ? SupabaseColors.textMuted
                                       : (isRunning
-                                            ? SupabaseColors.brand
-                                            : SupabaseColors.error),
+                                          ? SupabaseColors.brand
+                                          : SupabaseColors.error),
                                 ),
                               ),
                             ],
@@ -192,6 +226,14 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        IconBtn(
+                          icon: Icons.edit_note_rounded,
+                          color: tags.isNotEmpty
+                              ? SupabaseColors.brand
+                              : SupabaseColors.textSecondary,
+                          tooltip: 'Anotações e tags',
+                          onPressed: _openCollaboration,
+                        ),
                         IconBtn(
                           icon: widget.isFavorite
                               ? Icons.star_rounded
@@ -239,6 +281,10 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
                     ),
                   ],
                 ),
+                if (tags.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  _buildProjectTags(tags),
+                ],
                 const Spacer(),
                 const Text(
                   'CHAVE ANÔNIMA',
@@ -281,9 +327,8 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
                         icon: _keyVisible
                             ? Icons.visibility_off_outlined
                             : Icons.visibility_outlined,
-                        tooltip: _keyVisible
-                            ? 'Esconder chave'
-                            : 'Mostrar chave',
+                        tooltip:
+                            _keyVisible ? 'Esconder chave' : 'Mostrar chave',
                         onPressed: () =>
                             setState(() => _keyVisible = !_keyVisible),
                       ),
@@ -313,6 +358,84 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
     );
   }
 
+  Widget _buildProjectTags(List<ProjectTag> tags) {
+    final visibleTags = tags.take(3).toList();
+    final hiddenCount = tags.length - visibleTags.length;
+
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        ...visibleTags.map(
+          (tag) => Container(
+            constraints: const BoxConstraints(maxWidth: 120),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: _tagColor(tag.color).withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: _tagColor(tag.color).withValues(alpha: 0.42),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _tagColor(tag.color),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    tag.name,
+                    style: const TextStyle(
+                      color: SupabaseColors.textPrimary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (hiddenCount > 0)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: SupabaseColors.bg300,
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: SupabaseColors.border),
+            ),
+            child: Text(
+              '+$hiddenCount',
+              style: const TextStyle(
+                color: SupabaseColors.textSecondary,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Color _tagColor(String hex) {
+    final clean = hex.replaceFirst('#', '');
+    if (clean.length != 6) return SupabaseColors.brand;
+    try {
+      return Color(int.parse('FF$clean', radix: 16));
+    } on FormatException {
+      return SupabaseColors.brand;
+    }
+  }
+
   PopupMenuItem<String> _buildMenuItem(
     String value,
     IconData icon,
@@ -329,53 +452,6 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
             style: const TextStyle(
               color: SupabaseColors.textPrimary,
               fontSize: 13,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatusIndicator(bool isRunning, bool isLoading) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: isLoading
-            ? SupabaseColors.surface200
-            : (isRunning
-                  ? SupabaseColors.success.withValues(alpha: 0.1)
-                  : SupabaseColors.error.withValues(alpha: 0.1)),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isLoading
-              ? SupabaseColors.border
-              : (isRunning
-                    ? SupabaseColors.success.withValues(alpha: 0.2)
-                    : SupabaseColors.error.withValues(alpha: 0.2)),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: isLoading
-                  ? SupabaseColors.textMuted
-                  : (isRunning ? SupabaseColors.success : SupabaseColors.error),
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            isLoading ? 'Verificando...' : (isRunning ? 'Rodando' : 'Parado'),
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: isLoading
-                  ? SupabaseColors.textMuted
-                  : (isRunning ? SupabaseColors.success : SupabaseColors.error),
             ),
           ),
         ],

@@ -1,5 +1,6 @@
 worker_processes 1;
 worker_rlimit_nofile 16384;
+pid /tmp/nginx.pid;
 events {
     worker_connections 4096;
     use epoll;
@@ -8,6 +9,11 @@ events {
 
 http {
     server_tokens off;
+    client_body_temp_path /tmp/client_temp;
+    proxy_temp_path       /tmp/proxy_temp;
+    fastcgi_temp_path     /tmp/fastcgi_temp;
+    uwsgi_temp_path       /tmp/uwsgi_temp;
+    scgi_temp_path        /tmp/scgi_temp;
     resolver 127.0.0.11 valid=30s ipv6=off;
     map_hash_bucket_size 256;
     sendfile on;

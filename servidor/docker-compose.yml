@@ -222,7 +222,7 @@ services:
 
   supavisor:
     container_name: supabase-pooler
-    image: supabase/supavisor:2.7.4
+    image: supabase/supavisor:2.9.7
     env_file:
       - .env
     restart: unless-stopped
@@ -269,7 +269,7 @@ services:
         && /app/bin/server
   functions:
     container_name: supabase-edge-functions
-    image: supabase/edge-runtime:v1.73.0
+    image: supabase/edge-runtime:v1.74.2
     env_file:
       - .env
     restart: unless-stopped
@@ -294,7 +294,7 @@ services:
       "/home/deno/functions/main"
       ]
   vector:
-    image: timberio/vector:nightly-2026-03-20-debian
+    image: timberio/vector:nightly-2026-07-03-debian
     container_name: supabase-vector-global
     restart: unless-stopped
     volumes:

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/job.dart';
+import '../models/project_collaboration.dart';
 import '../models/user_models.dart';
 import '../session.dart';
 
@@ -394,5 +395,171 @@ class ProjectRepository {
       message: _extractMessage(resp),
       job: Job.fromResponse(resp),
     );
+  }
+
+  Future<ProjectCollaboration> fetchProjectCollaboration(String ref) async {
+    final resp = await http.get(Uri.parse('/api/projects/$ref/collaboration'));
+    if (resp.statusCode == 200) {
+      return ProjectCollaboration.fromJson(jsonDecode(resp.body));
+    }
+    throw Exception('Erro ao carregar colaboração: ${resp.body}');
+  }
+
+  Future<void> createProjectNote(
+    String ref, {
+    required String body,
+    required String visibility,
+  }) async {
+    final resp = await http.post(
+      Uri.parse('/api/projects/$ref/notes'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'body': body, 'visibility': visibility}),
+    );
+    _ensureCommandSucceeded(resp, allowedStatusCodes: const {201});
+  }
+
+  Future<void> deleteProjectNote(String ref, String noteId) async {
+    final resp = await http.delete(
+      Uri.parse('/api/projects/$ref/notes/$noteId'),
+    );
+    _ensureCommandSucceeded(resp);
+  }
+
+  Future<void> assignProjectTag(
+    String ref, {
+    String? tagId,
+    String? name,
+    String? color,
+  }) async {
+    final payload = <String, dynamic>{
+      if (tagId != null) 'tag_id': tagId,
+      if (name != null) 'name': name,
+      if (color != null) 'color': color,
+    };
+    final resp = await http.post(
+      Uri.parse('/api/projects/$ref/tags'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(payload),
+    );
+    _ensureCommandSucceeded(resp, allowedStatusCodes: const {201});
+  }
+
+  Future<void> removeProjectTag(String ref, String tagId) async {
+    final resp = await http.delete(Uri.parse('/api/projects/$ref/tags/$tagId'));
+    _ensureCommandSucceeded(resp);
+  }
+
+  Future<void> createProjectHint(
+    String ref, {
+    required String targetUserId,
+    required String body,
+  }) async {
+    final resp = await http.post(
+      Uri.parse('/api/projects/$ref/hints'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'target_user_id': targetUserId, 'body': body}),
+    );
+    _ensureCommandSucceeded(resp, allowedStatusCodes: const {201});
+  }
+
+  Future<void> updateProjectHintStatus(
+    String ref,
+    String hintId,
+    String status,
+  ) async {
+    final resp = await http.put(
+      Uri.parse('/api/projects/$ref/hints/$hintId'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'status': status}),
+    );
+    _ensureCommandSucceeded(resp);
+  }
+
+  Future<void> createProjectThreadMessage(
+    String ref, {
+    required String body,
+  }) async {
+    final resp = await http.post(
+      Uri.parse('/api/projects/$ref/thread/messages'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'body': body}),
+    );
+    _ensureCommandSucceeded(resp, allowedStatusCodes: const {201});
+  }
+
+  Future<void> updateProjectNotificationReadState(
+    String ref,
+    String notificationId, {
+    required bool read,
+  }) async {
+    final resp = await http.patch(
+      Uri.parse('/api/projects/$ref/notifications/$notificationId'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'read': read}),
+    );
+    _ensureCommandSucceeded(resp);
+  }
+
+  Future<Job> renameProject(
+    String ref, {
+    required String newName,
+    String? displayName,
+  }) async {
+    final payload = <String, dynamic>{
+      'new_name': newName,
+      if (displayName != null) 'display_name': displayName,
+    };
+    final resp = await http.post(
+      Uri.parse('/api/projects/$ref/rename'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(payload),
+    );
+    _ensureCommandSucceeded(resp, allowedStatusCodes: const {202});
+    final job = Job.fromResponse(resp);
+    if (job == null) {
+      throw Exception('Resposta de renomeacao sem job_id');
+    }
+    return job;
+  }
+
+  Future<String?> updateProjectDisplayName(
+    String ref,
+    String displayName,
+  ) async {
+    final resp = await http.patch(
+      Uri.parse('/api/projects/$ref/display-name'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'display_name': displayName}),
+    );
+    _ensureCommandSucceeded(resp);
+    if (resp.body.isEmpty) return displayName;
+    try {
+      final data = _tryDecodeObject(resp.body);
+      if (data != null && data['display_name'] is String) {
+        return data['display_name'] as String;
+      }
+    } on FormatException {
+      return null;
+    }
+    return displayName;
+  }
+
+  Future<List<ProjectRenameEvent>> fetchProjectRenameHistory(String ref) async {
+    final resp = await http.get(
+      Uri.parse('/api/projects/$ref/rename-history'),
+    );
+    if (resp.statusCode == 200) {
+      final data = jsonDecode(resp.body);
+      final raw = data is Map && data['events'] is List
+          ? data['events'] as List
+          : (data is List ? data : <dynamic>[]);
+      return raw
+          .map(
+            (e) => ProjectRenameEvent.fromJson(
+                Map<String, dynamic>.from(e as Map)),
+          )
+          .toList();
+    }
+    throw Exception('Erro ao carregar histórico: ${resp.body}');
   }
 }
