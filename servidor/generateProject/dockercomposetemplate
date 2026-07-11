@@ -14,9 +14,9 @@ services:
       - ${HOST_PROJECT_ROOT}/servidor/auth_template:/usr/share/nginx/html:ro
     read_only: true
     tmpfs:
-      - /tmp
-      - /var/cache/nginx
-      - /var/run
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /var/cache/nginx:rw,noexec,nosuid,size=32m
+      - /var/run:rw,noexec,nosuid,size=8m
     security_opt:
       - no-new-privileges:true
     cap_drop:

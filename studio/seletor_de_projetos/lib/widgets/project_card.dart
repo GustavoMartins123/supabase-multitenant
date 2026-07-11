@@ -22,6 +22,9 @@ class ProjectCard extends ConsumerStatefulWidget {
     required this.isFavorite,
     this.displayName,
     this.serverDomain,
+    this.keyExpiresAtEpoch,
+    this.keyExpiringSoon = false,
+    this.keyExpired = false,
     this.isLoading = false,
   });
 
@@ -29,6 +32,9 @@ class ProjectCard extends ConsumerStatefulWidget {
   final String anonKey;
   final String? displayName;
   final String? serverDomain;
+  final int? keyExpiresAtEpoch;
+  final bool keyExpiringSoon;
+  final bool keyExpired;
   final VoidCallback onTap;
   final VoidCallback onDeleted;
   final VoidCallback onDuplicate;
@@ -73,6 +79,24 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
       return widget.refKey;
     }
     return '${widget.serverDomain}/${widget.refKey}';
+  }
+
+  int? get _daysUntilKeyExpiry {
+    final expiry = widget.keyExpiresAtEpoch;
+    if (expiry == null) return null;
+    final remaining = DateTime.fromMillisecondsSinceEpoch(
+      expiry * 1000,
+      isUtc: true,
+    ).difference(DateTime.now().toUtc());
+    return (remaining.inHours / 24).ceil();
+  }
+
+  String get _keyExpiryMessage {
+    if (widget.keyExpired) return 'Keys expiradas — rotacione agora';
+    final days = _daysUntilKeyExpiry;
+    if (days == null) return 'Expiração das keys indisponível';
+    if (days <= 1) return 'Keys expiram em menos de 1 dia';
+    return 'Keys expiram em $days dias';
   }
 
   @override
@@ -183,6 +207,21 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
                                           : SupabaseColors.error),
                                 ),
                               ),
+                              if (widget.keyExpiringSoon) ...[
+                                const SizedBox(width: 8),
+                                Tooltip(
+                                  message: _keyExpiryMessage,
+                                  child: Icon(
+                                    widget.keyExpired
+                                        ? Icons.error_rounded
+                                        : Icons.warning_amber_rounded,
+                                    size: 17,
+                                    color: widget.keyExpired
+                                        ? SupabaseColors.error
+                                        : SupabaseColors.warning,
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                           const SizedBox(height: 4),
@@ -283,14 +322,30 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
                   _buildProjectTags(tags),
                 ],
                 const Spacer(),
-                const Text(
-                  'CHAVE ANÔNIMA',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: SupabaseColors.textMuted,
-                    letterSpacing: 1.0,
-                  ),
+                Row(
+                  children: [
+                    const Text(
+                      'CHAVE ANÔNIMA',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: SupabaseColors.textMuted,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                    const Spacer(),
+                    if (widget.keyExpiringSoon)
+                      Text(
+                        _keyExpiryMessage.toUpperCase(),
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: widget.keyExpired
+                              ? SupabaseColors.error
+                              : SupabaseColors.warning,
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 8),
                 Container(

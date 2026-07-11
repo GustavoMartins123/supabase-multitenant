@@ -34,7 +34,7 @@ from app.jobs import (
 )
 from app.runtime_config import (
     BASE_DIR, DB_DSN, DELETE_SCRIPT, DUPLICATE_SCRIPT, EXTRACTOR,
-    NGINX_HMAC_SECRET, NGINX_SHARED_TOKEN, PG_META_CRYPTO_KEY,
+    KEY_EXPIRY_WARNING_DAYS, NGINX_HMAC_SECRET, NGINX_SHARED_TOKEN, PG_META_CRYPTO_KEY,
     PG_META_INTERNAL_URL, REALTIME_INTERNAL_URL, RENAME_SCRIPT, ROTATE_SCRIPT,
     SCRIPT, SUPAVISOR_INTERNAL_URL, USER_TOKEN_MAX_CLOCK_SKEW_SECONDS,
     service_key_transport_fernet,
@@ -57,6 +57,7 @@ from app.project_settings import (
     _write_env_whitelisted,
 )
 from app.service_key_cache import invalidate_service_key_cache
+from app.jwt_metadata import get_unverified_jwt_expiry
 
 db_pool: Optional[asyncpg.Pool] = None
 
@@ -655,7 +656,7 @@ async def list_projects(
     async with pool.acquire() as conn:
         async with conn.transaction():
             rows = await conn.fetch("""
-                SELECT p.id, p.name, p.display_name, p.anon_key
+                SELECT p.id, p.name, p.display_name, p.anon_key, p.service_role
                 FROM projects p
                 WHERE p.anon_key IS NOT NULL
                   AND EXISTS (
@@ -674,12 +675,45 @@ async def list_projects(
                     column="anon_key",
                     ciphertext=r["anon_key"],
                 )
+                service_role_token = (
+                    await decrypt_project_secret(
+                        conn,
+                        project_id=r["id"],
+                        column="service_role",
+                        ciphertext=r["service_role"],
+                    )
+                    if r["service_role"]
+                    else ""
+                )
+                expiries = [
+                    expiry
+                    for expiry in (
+                        get_unverified_jwt_expiry(anon_token),
+                        get_unverified_jwt_expiry(service_role_token),
+                    )
+                    if expiry is not None
+                ]
+                key_expires_at = min(expiries) if expiries else None
+                seconds_remaining = (
+                    key_expires_at - int(time.time())
+                    if key_expires_at is not None
+                    else None
+                )
                 result.append({
                     "name": r["name"],
                     "display_name": r["display_name"],
                     "anon_token": anon_token,
                     "file_size_limit": _get_project_file_size_limit(r["name"]),
                     "storage_limit_token": _get_project_storage_limit_token(r["name"]),
+                    "key_expires_at": key_expires_at,
+                    "key_expired": (
+                        seconds_remaining is not None and seconds_remaining <= 0
+                    ),
+                    "key_expiring_soon": (
+                        seconds_remaining is not None
+                        and seconds_remaining <= KEY_EXPIRY_WARNING_DAYS * 86400
+                    ),
+                    "key_expiry_warning_days": KEY_EXPIRY_WARNING_DAYS,
                 })
     return result
 
@@ -3949,11 +3983,13 @@ def _sync_project_nginx_generated_files(project_name: str) -> None:
     script_dir = BASE_DIR / "scripts"
     replacements = _get_project_template_replacements(project_name)
 
+    nginx_config_path = project_dir / "nginx" / f"nginx_{project_name}.conf"
     _render_generated_template(
         script_dir / "nginxtemplate",
-        project_dir / "nginx" / f"nginx_{project_name}.conf",
+        nginx_config_path,
         replacements,
     )
+    nginx_config_path.chmod(0o600)
     _render_generated_template(
         script_dir / "Dockerfile",
         project_dir / "Dockerfile",

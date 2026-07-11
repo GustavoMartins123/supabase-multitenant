@@ -39,6 +39,7 @@ NGINX_HMAC_SECRET = os.getenv("NGINX_HMAC_SECRET")
 USER_TOKEN_MAX_CLOCK_SKEW_SECONDS = int(
     os.getenv("USER_TOKEN_MAX_CLOCK_SKEW_SECONDS", "30")
 )
+KEY_EXPIRY_WARNING_DAYS = max(1, int(os.getenv("KEY_EXPIRY_WARNING_DAYS", "14")))
 SUPAVISOR_INTERNAL_URL = os.getenv(
     "SUPAVISOR_INTERNAL_URL", "http://supabase-pooler:4000"
 ).rstrip("/")

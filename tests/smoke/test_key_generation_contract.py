@@ -97,6 +97,39 @@ class KeyGenerationContractTest(unittest.TestCase):
             source = (GENERATE / script_name).read_text(encoding="utf-8")
             self.assertIn("chmod 600", source, script_name)
 
+    def test_unprivileged_nginx_can_read_and_render_its_template(self):
+        dockerfile = (GENERATE / "Dockerfile").read_text(encoding="utf-8")
+        self.assertIn("--chown=101:101", dockerfile)
+        self.assertIn("--chmod=0400", dockerfile)
+        self.assertIn("ENTRYPOINT", dockerfile)
+        self.assertIn("envsubst '$FILE_SIZE_LIMIT'", dockerfile)
+        self.assertNotIn("/etc/nginx/templates/", dockerfile)
+
+    def test_key_expiry_and_collaboration_tabs_are_exposed(self):
+        main = (ROOT / "servidor" / "api-internal" / "app" / "main.py").read_text(
+            encoding="utf-8"
+        )
+        dialog = (
+            ROOT
+            / "studio"
+            / "seletor_de_projetos"
+            / "lib"
+            / "project_collaboration_dialog.dart"
+        ).read_text(encoding="utf-8")
+        card = (
+            ROOT
+            / "studio"
+            / "seletor_de_projetos"
+            / "lib"
+            / "widgets"
+            / "project_card.dart"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"key_expiring_soon"', main)
+        self.assertIn("length: 5", dialog)
+        self.assertIn("text: 'Tags'", dialog)
+        self.assertIn("_buildTagsTab(data)", dialog)
+        self.assertIn("Keys expiram", card)
+
 
 if __name__ == "__main__":
     unittest.main()

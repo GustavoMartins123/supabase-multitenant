@@ -240,7 +240,7 @@ class _ProjectCollaborationDialogState
 
   Widget _buildContent(ProjectCollaboration data) {
     return DefaultTabController(
-      length: 4,
+      length: 5,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -272,13 +272,13 @@ class _ProjectCollaborationDialogState
             ],
           ),
           const SizedBox(height: 18),
-          _buildTagSection(data),
-          const SizedBox(height: 16),
           const TabBar(
+            isScrollable: true,
             indicatorColor: SupabaseColors.brand,
             labelColor: SupabaseColors.textPrimary,
             unselectedLabelColor: SupabaseColors.textMuted,
             tabs: [
+              Tab(icon: Icon(Icons.sell_outlined), text: 'Tags'),
               Tab(icon: Icon(Icons.notes_rounded), text: 'Anotações'),
               Tab(icon: Icon(Icons.lightbulb_outline_rounded), text: 'Hints'),
               Tab(icon: Icon(Icons.forum_outlined), text: 'Thread'),
@@ -292,6 +292,7 @@ class _ProjectCollaborationDialogState
           Expanded(
             child: TabBarView(
               children: [
+                _buildTagsTab(data),
                 _buildNotesTab(data),
                 _buildHintsTab(data),
                 _buildThreadTab(data),
@@ -304,138 +305,135 @@ class _ProjectCollaborationDialogState
     );
   }
 
-  Widget _buildTagSection(ProjectCollaboration data) {
+  Widget _buildTagsTab(ProjectCollaboration data) {
     final tags = data.availableTags;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            const Text(
-              'TAGS',
-              style: TextStyle(
-                color: SupabaseColors.textMuted,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1,
-              ),
-            ),
-            const Spacer(),
-            if (Session().isSysAdmin)
-              TextButton.icon(
-                onPressed: () => setState(() => _creatingTag = !_creatingTag),
-                icon: Icon(
-                  _creatingTag ? Icons.close_rounded : Icons.add_rounded,
-                  size: 16,
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text(
+                'TAGS',
+                style: TextStyle(
+                  color: SupabaseColors.textMuted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1,
                 ),
-                label: Text(_creatingTag ? 'Cancelar' : 'Nova tag'),
               ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        if (_creatingTag) ...[
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: SupabaseColors.bg300.withValues(alpha: 0.65),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: SupabaseColors.border),
-            ),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _tagController,
-                        maxLength: 40,
-                        style: const TextStyle(
-                          color: SupabaseColors.textPrimary,
+              const Spacer(),
+              if (Session().isSysAdmin)
+                TextButton.icon(
+                  onPressed: () => setState(() => _creatingTag = !_creatingTag),
+                  icon: Icon(
+                    _creatingTag ? Icons.close_rounded : Icons.add_rounded,
+                    size: 16,
+                  ),
+                  label: Text(_creatingTag ? 'Cancelar' : 'Nova tag'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (_creatingTag) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: SupabaseColors.bg300.withValues(alpha: 0.65),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: SupabaseColors.border),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _tagController,
+                          maxLength: 40,
+                          style: const TextStyle(
+                            color: SupabaseColors.textPrimary,
+                          ),
+                          decoration: const InputDecoration(
+                            counterText: '',
+                            hintText: 'Nome da tag',
+                            prefixIcon: Icon(Icons.sell_outlined, size: 18),
+                          ),
+                          onSubmitted: (_) => _savingTag ? null : _createTag(),
                         ),
-                        decoration: const InputDecoration(
-                          counterText: '',
-                          hintText: 'Nome da tag',
-                          prefixIcon: Icon(Icons.sell_outlined, size: 18),
-                        ),
-                        onSubmitted: (_) => _savingTag ? null : _createTag(),
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    SupabaseButton(
-                      onPressed: _savingTag ? null : _createTag,
-                      icon: Icons.add_rounded,
-                      label: 'Criar',
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: _tagPalette.map((hex) {
-                      final selected = _tagColor == hex;
-                      final color = _parseTagColor(hex);
-                      return Tooltip(
-                        message: hex,
-                        child: InkWell(
-                          onTap: () => setState(() => _tagColor = hex),
-                          borderRadius: BorderRadius.circular(999),
-                          child: Container(
-                            width: 26,
-                            height: 26,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: color,
-                              border: Border.all(
-                                color: selected
-                                    ? SupabaseColors.textPrimary
-                                    : SupabaseColors.border,
-                                width: selected ? 2 : 1,
+                      const SizedBox(width: 10),
+                      SupabaseButton(
+                        onPressed: _savingTag ? null : _createTag,
+                        icon: Icons.add_rounded,
+                        label: 'Criar',
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: _tagPalette.map((hex) {
+                        final selected = _tagColor == hex;
+                        final color = _parseTagColor(hex);
+                        return Tooltip(
+                          message: hex,
+                          child: InkWell(
+                            onTap: () => setState(() => _tagColor = hex),
+                            borderRadius: BorderRadius.circular(999),
+                            child: Container(
+                              width: 26,
+                              height: 26,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: color,
+                                border: Border.all(
+                                  color: selected
+                                      ? SupabaseColors.textPrimary
+                                      : SupabaseColors.border,
+                                  width: selected ? 2 : 1,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      );
-                    }).toList(),
+                        );
+                      }).toList(),
+                    ),
                   ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: tags.map((tag) {
+              final color = _parseTagColor(tag.color);
+              return FilterChip(
+                selected: tag.assigned,
+                label: Text(tag.name),
+                avatar: CircleAvatar(backgroundColor: color, radius: 5),
+                onSelected: (_) => _toggleTag(tag),
+                backgroundColor: SupabaseColors.bg300,
+                selectedColor: color.withValues(alpha: 0.16),
+                checkmarkColor: color,
+                side: BorderSide(
+                  color: tag.assigned ? color : SupabaseColors.border,
                 ),
-              ],
-            ),
+                labelStyle: const TextStyle(
+                  color: SupabaseColors.textPrimary,
+                  fontSize: 12,
+                ),
+              );
+            }).toList(),
           ),
-          const SizedBox(height: 12),
         ],
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 128),
-          child: SingleChildScrollView(
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: tags.map((tag) {
-                final color = _parseTagColor(tag.color);
-                return FilterChip(
-                  selected: tag.assigned,
-                  label: Text(tag.name),
-                  avatar: CircleAvatar(backgroundColor: color, radius: 5),
-                  onSelected: (_) => _toggleTag(tag),
-                  backgroundColor: SupabaseColors.bg300,
-                  selectedColor: color.withValues(alpha: 0.16),
-                  checkmarkColor: color,
-                  side: BorderSide(
-                    color: tag.assigned ? color : SupabaseColors.border,
-                  ),
-                  labelStyle: const TextStyle(
-                    color: SupabaseColors.textPrimary,
-                    fontSize: 12,
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 

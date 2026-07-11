@@ -468,6 +468,9 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
       isFavorite: isFavorite,
       serverDomain: serverDomain,
       displayName: project['display_name'] as String?,
+      keyExpiresAtEpoch: project['key_expires_at'] as int?,
+      keyExpiringSoon: project['key_expiring_soon'] == true,
+      keyExpired: project['key_expired'] == true,
       onTap: project['is_loading'] == true
           ? () {}
           : () => _openProject(
