@@ -1,0 +1,47 @@
+* text=auto eol=lf
+
+# Source, configuration and templates must always remain LF.
+*.sh text eol=lf
+*.py text eol=lf
+*.lua text eol=lf
+*.dart text eol=lf
+*.js text eol=lf
+*.ts text eol=lf
+*.sql text eol=lf
+*.ex text eol=lf
+*.exs text eol=lf
+*.c text eol=lf
+*.h text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.conf text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.lock text eol=lf
+*.in text eol=lf
+*.rockspec text eol=lf
+Dockerfile text eol=lf
+*Dockerfile text eol=lf
+*template text eol=lf
+
+# Never apply line-ending conversion to binary assets or databases.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.tar binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.sqlite binary
+*.sqlite3 binary
+*.db binary
+*.mmdb binary

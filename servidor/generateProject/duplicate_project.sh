@@ -527,6 +527,7 @@ template_to_file "$SCRIPT_DIR/.envtemplate"       "$OUT_DIR/.env"
 template_to_file "$SCRIPT_DIR/dockercomposetemplate" "$OUT_DIR/docker-compose.yml"
 template_to_file "$SCRIPT_DIR/poolertemplate" "$OUT_DIR/pooler/pooler.exs"
 template_to_file "$SCRIPT_DIR/Dockerfile" "$OUT_DIR/Dockerfile"
+chmod 600 "$OUT_DIR/.env" "$OUT_DIR/nginx/nginx_${NEW_PROJECT}.conf"
 echo "✔️  Templates gerados"
 
 duplicate_db "$ORIGINAL_DB" "$NEW_DB" "$COPY_MODE"

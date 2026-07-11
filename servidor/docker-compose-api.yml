@@ -32,7 +32,7 @@ services:
     labels:
       - traefik.enable=true
       - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.50.0.0/16
-      - traefik.http.routers.projects.rule=PathPrefix(`/api/projects`) && (`X-Shared-Token`, `${NGINX_SHARED_TOKEN}`)
+      - traefik.http.routers.projects.rule=PathPrefix(`/api/projects`) && Header(`X-Shared-Token`, `${NGINX_SHARED_TOKEN}`)
       - traefik.http.routers.projects.middlewares=lanonly, api-security-chain@file
       - traefik.http.services.projects.loadbalancer.server.port=18000  
   postgres-meta-global:

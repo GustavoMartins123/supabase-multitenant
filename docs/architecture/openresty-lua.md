@@ -107,6 +107,32 @@ Contadores de `hit`, `miss`, `version_reload`, `invalidation`, `fetch_error` e
 ser consultados, com o token interno, em
 `GET /internal/cache/service-key-metrics`.
 
+### Credenciais e config token
+
+`service_role` é a credencial administrativa do tenant. Ela é gerada a partir
+de `JWT_SECRET_PROJETO`, armazenada criptografada no control plane e nunca deve
+ser entregue ao navegador. O gateway a obtém pelo endpoint interno `enc-key`,
+descriptografa com `STUDIO_SERVICE_KEY_ENCRYPTION_KEY` e injeta `apikey` apenas
+depois da autenticação e da autorização do usuário.
+
+`CONFIG_TOKEN_PROJETO` tem outro escopo: é um segredo compartilhado entre os
+membros do projeto para consultar o `/config` do Nginx do tenant. Ele não pode
+ser aceito como `apikey`, `Authorization` ou substituto da `service_role`.
+Rotação de anon/service role preserva esse token.
+
+Se PG Meta responder `apikey administrativa ausente`, valide a instalação sem
+imprimir segredos:
+
+```bash
+bash servidor/verify_key_config.sh
+```
+
+Em instalações antigas, confirme especialmente que
+`STUDIO_SERVICE_KEY_ENCRYPTION_KEY` é uma chave Fernet válida e idêntica em
+`servidor/.env` e `studio/.env`. Depois de corrigir os arquivos, recrie os
+containers `projects-api` e `nginx`; apenas reiniciar um container sem recriá-lo
+pode manter o ambiente antigo.
+
 ## Validação de mudanças
 
 Ao mover um módulo, atualize tanto os `require(...)` quanto todas as diretivas

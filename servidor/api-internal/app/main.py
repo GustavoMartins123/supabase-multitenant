@@ -1907,18 +1907,18 @@ async def get_project_config_token(
     request: Request,
     pool=Depends(get_pool),
 ):
-    """Entrega o segredo somente a administradores e registra a leitura."""
+    """Entrega o token compartilhado aos membros do projeto e registra a leitura."""
     project_name = validate_project_id(project_name)
     auth_user = await resolve_authenticated_user(request, pool)
 
     async with pool.acquire() as conn:
         async with conn.transaction():
             project = await get_project_row(conn, project_name)
-            await ensure_project_admin_access(
+            await ensure_project_member_access(
                 conn,
                 project_id=project["id"],
                 auth_user=auth_user,
-                message="Apenas admins podem acessar o config token",
+                message="Apenas membros podem acessar o config token",
             )
             encrypted_token = await conn.fetchval(
                 "SELECT config_token FROM projects WHERE id = $1",
@@ -3840,20 +3840,6 @@ def _get_project_storage_limit_token(project_name: str) -> str:
     return f"{payload}.{sig}"
 
 
-def _get_project_service_role_key(project_name: str) -> str:
-    env_path = _get_project_env_path(project_name)
-    project_env = _read_existing_env_file(
-        env_path,
-        f"Arquivo .env não encontrado para o projeto '{project_name}'",
-    )
-    service_role_key = str(project_env.get("SERVICE_ROLE_KEY_PROJETO", "")).strip()
-    if not service_role_key:
-        raise RuntimeError(
-            f".env do projeto '{project_name}' sem a chave SERVICE_ROLE_KEY_PROJETO"
-        )
-    return service_role_key
-
-
 def _extract_project_admin_apikey(request: Request) -> str:
     apikey = (request.headers.get("apikey") or "").strip()
     if apikey:
@@ -4835,16 +4821,28 @@ async def proxy_project_meta(
     auth_user = await resolve_authenticated_user(request, pool)
 
     async with pool.acquire() as conn:
-        project_row = await get_project_row(conn, ref)
-        await ensure_project_admin_access(
-            conn,
-            project_id=project_row["id"],
-            auth_user=auth_user,
-            message="Apenas admins podem acessar roles e metadados do banco",
-        )
+        async with conn.transaction():
+            project_row = await get_project_row(conn, ref)
+            await ensure_project_admin_access(
+                conn,
+                project_id=project_row["id"],
+                auth_user=auth_user,
+                message="Apenas admins podem acessar roles e metadados do banco",
+            )
+            encrypted_service_role = await conn.fetchval(
+                "SELECT service_role FROM projects WHERE id = $1",
+                project_row["id"],
+            )
+            if not encrypted_service_role:
+                raise HTTPException(409, "service_role administrativa não disponível")
+            expected_apikey = await decrypt_project_secret(
+                conn,
+                project_id=project_row["id"],
+                column="service_role",
+                ciphertext=encrypted_service_role,
+            )
 
     try:
-        expected_apikey = _get_project_service_role_key(ref)
         project_connection_string = get_project_meta_connection_string(ref)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))

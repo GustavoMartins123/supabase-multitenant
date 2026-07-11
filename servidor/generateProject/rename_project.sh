@@ -374,6 +374,7 @@ template_to_file "$SCRIPT_DIR/.envtemplate" "$NEW_DIR/.env"
 template_to_file "$SCRIPT_DIR/dockercomposetemplate" "$NEW_DIR/docker-compose.yml"
 template_to_file "$SCRIPT_DIR/poolertemplate" "$NEW_DIR/pooler/pooler.exs"
 template_to_file "$SCRIPT_DIR/Dockerfile" "$NEW_DIR/Dockerfile"
+chmod 600 "$NEW_DIR/.env" "$NEW_DIR/nginx/nginx_${NEW_NAME}.conf"
 
 grep -qx "PROJECT_ID=$NEW_NAME" "$NEW_DIR/.env" \
   || die "PROJECT_ID nao foi atualizado no .env"

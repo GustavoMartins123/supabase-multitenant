@@ -27,6 +27,18 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+assert_env_value() {
+    local file="$1"
+    local key="$2"
+    local expected="$3"
+    local actual
+    actual=$(grep -m1 "^${key}=" "$file" | cut -d= -f2- || true)
+    if [[ "$actual" != "$expected" ]]; then
+        print_error "Valor inconsistente para $key em $file"
+        return 1
+    fi
+}
+
 init_transaction() {
     mkdir -p "$TRANSACTION_DIR"
     print_status "Sistema de transação inicializado em $TRANSACTION_DIR"
@@ -319,10 +331,10 @@ main() {
     safe_sed "s|JWT_SECRET=pass|JWT_SECRET=$JWT_SECRET|g" servidor/.env
     safe_sed "s|PROJECT_SECRETS_MASTER_KEY=pass|PROJECT_SECRETS_MASTER_KEY=$PROJECT_SECRETS_MASTER_KEY|g" servidor/.env
     safe_sed "s|PG_META_CRYPTO_KEY=pass|PG_META_CRYPTO_KEY=$PG_META_CRYPTO_KEY|g" servidor/.env
-    safe_sed "s|STUDIO_SERVICE_KEY_ENCRYPTION_KEY=pass|STUDIO_SERVICE_KEY_ENCRYPTION_KEY=$STUDIO_SERVICE_KEY_ENCRYPTION_KEY|g" servidor/.env
-    safe_sed "s|NGINX_SHARED_TOKEN=pass|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" servidor/.env
-    safe_sed "s|NGINX_HMAC_SECRET=pass|NGINX_HMAC_SECRET=$SHARED_NGINX_HMAC_SECRET|g" servidor/.env
-    safe_sed "s|INTERNAL_HMAC_SECRET=pass|INTERNAL_HMAC_SECRET=$SHARED_INTERNAL_HMAC_SECRET|g" servidor/.env
+    safe_sed "s|^STUDIO_SERVICE_KEY_ENCRYPTION_KEY=.*|STUDIO_SERVICE_KEY_ENCRYPTION_KEY=$STUDIO_SERVICE_KEY_ENCRYPTION_KEY|g" servidor/.env
+    safe_sed "s|^NGINX_SHARED_TOKEN=.*|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" servidor/.env
+    safe_sed "s|^NGINX_HMAC_SECRET=.*|NGINX_HMAC_SECRET=$SHARED_NGINX_HMAC_SECRET|g" servidor/.env
+    safe_sed "s|^INTERNAL_HMAC_SECRET=.*|INTERNAL_HMAC_SECRET=$SHARED_INTERNAL_HMAC_SECRET|g" servidor/.env
     safe_sed "s|PROJECT_DELETE_PASSWORD=pass|PROJECT_DELETE_PASSWORD=$PROJECT_DELETE_PASSWORD|g" servidor/.env
     if [[ "$SERVER_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
     [[ "$SERVER_IP" =~ : ]]; then
@@ -350,14 +362,24 @@ main() {
     POSTGRES_NGINX_PASSWORD=$(generate_postgres_password)
 
     cp studio/.env.example studio/.env
-    safe_sed "s|STUDIO_SERVICE_KEY_ENCRYPTION_KEY=pass|STUDIO_SERVICE_KEY_ENCRYPTION_KEY=$STUDIO_SERVICE_KEY_ENCRYPTION_KEY|g" studio/.env
-    safe_sed "s|NGINX_SHARED_TOKEN=pass|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" studio/.env
-    safe_sed "s|NGINX_HMAC_SECRET=pass|NGINX_HMAC_SECRET=$SHARED_NGINX_HMAC_SECRET|g" studio/.env
-    safe_sed "s|INTERNAL_HMAC_SECRET=pass|INTERNAL_HMAC_SECRET=$SHARED_INTERNAL_HMAC_SECRET|g" studio/.env
+    safe_sed "s|^STUDIO_SERVICE_KEY_ENCRYPTION_KEY=.*|STUDIO_SERVICE_KEY_ENCRYPTION_KEY=$STUDIO_SERVICE_KEY_ENCRYPTION_KEY|g" studio/.env
+    safe_sed "s|^NGINX_SHARED_TOKEN=.*|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" studio/.env
+    safe_sed "s|^NGINX_HMAC_SECRET=.*|NGINX_HMAC_SECRET=$SHARED_NGINX_HMAC_SECRET|g" studio/.env
+    safe_sed "s|^INTERNAL_HMAC_SECRET=.*|INTERNAL_HMAC_SECRET=$SHARED_INTERNAL_HMAC_SECRET|g" studio/.env
     safe_sed "s|COOKIE_SIGN_SECRET=pass|COOKIE_SIGN_SECRET=$COOKIE_SIGN_SECRET|g" studio/.env
     safe_sed "s|POSTGRES_NGINX_PASSWORD=pass|POSTGRES_NGINX_PASSWORD=$POSTGRES_NGINX_PASSWORD|g" studio/.env
     safe_sed "s|^SERVER_DOMAIN=.*|SERVER_DOMAIN=${PROTO}://${SERVER_IP}|g" studio/.env
     safe_sed "s|BACKEND_PROTO=pass|BACKEND_PROTO=$PROTO|g" studio/.env
+
+    assert_env_value servidor/.env STUDIO_SERVICE_KEY_ENCRYPTION_KEY "$STUDIO_SERVICE_KEY_ENCRYPTION_KEY"
+    assert_env_value studio/.env STUDIO_SERVICE_KEY_ENCRYPTION_KEY "$STUDIO_SERVICE_KEY_ENCRYPTION_KEY"
+    assert_env_value servidor/.env NGINX_SHARED_TOKEN "$SHARED_NGINX_TOKEN"
+    assert_env_value studio/.env NGINX_SHARED_TOKEN "$SHARED_NGINX_TOKEN"
+    assert_env_value servidor/.env NGINX_HMAC_SECRET "$SHARED_NGINX_HMAC_SECRET"
+    assert_env_value studio/.env NGINX_HMAC_SECRET "$SHARED_NGINX_HMAC_SECRET"
+    assert_env_value servidor/.env INTERNAL_HMAC_SECRET "$SHARED_INTERNAL_HMAC_SECRET"
+    assert_env_value studio/.env INTERNAL_HMAC_SECRET "$SHARED_INTERNAL_HMAC_SECRET"
+    chmod 600 servidor/.env studio/.env
     print_success "Arquivo studio/.env configurado com sucesso!"
     
     echo ""
@@ -431,6 +453,8 @@ main() {
 
     backup_file "studio/docker-compose.yml"
     safe_sed "s|<SEU_IP>|$LOCAL_IP|g" studio/docker-compose.yml
+
+    bash servidor/verify_key_config.sh
     print_success "Api python configurada para permitir esse ip $LOCAL_IP a consultar ela."
     print_success "Script update_geoip.sh configurado com o caminho: $SCRIPT_DIR"
     
