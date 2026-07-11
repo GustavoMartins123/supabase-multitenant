@@ -593,6 +593,7 @@ async def ensure_project_member_access(
     *,
     project_id: str,
     auth_user: dict[str, Any],
+    message: str = "Acesso negado: você não é membro deste projeto",
 ) -> None:
     in_project = await conn.fetchval(
         """
@@ -606,7 +607,7 @@ async def ensure_project_member_access(
         auth_user["db_user_id"],
     )
     if not in_project and not auth_user["is_global_admin"]:
-        raise HTTPException(403, "Acesso negado: você não é membro deste projeto")
+        raise HTTPException(403, message)
 
 
 async def ensure_project_admin_access(
@@ -2701,14 +2702,6 @@ def _parse_curl_status(stdout: str) -> tuple[int | None, str]:
         return None, stdout
 
 
-def _sql_delete_count(status: str) -> int:
-    try:
-        command, count = status.rsplit(" ", 1)
-        return int(count) if command == "DELETE" else 0
-    except (ValueError, TypeError):
-        return 0
-
-
 async def _delete_tenant_api(
     *,
     service_label: str,
@@ -2768,6 +2761,101 @@ async def _delete_tenant_api(
     )
 
 
+async def _terminate_supavisor_pools(
+    *,
+    tenant_id: str,
+    token: str,
+) -> str | None:
+    """Solicita ao Supavisor que encerre pools antes do banco ser removido."""
+    if not token:
+        return "Supavisor: token ausente para encerrar os pools do tenant"
+
+    encoded_tenant = urllib.parse.quote(tenant_id, safe="")
+    path = f"/api/tenants/{encoded_tenant}/terminate"
+    headers = {"Authorization": f"Bearer {token}"}
+    accepted_statuses = {200, 204, 404}
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{SUPAVISOR_INTERNAL_URL}{path}",
+                headers=headers,
+            )
+        if response.status_code in accepted_statuses:
+            return None
+        direct_error = (
+            f"HTTP {response.status_code}: {response.text.strip()[:300]}"
+        )
+    except httpx.HTTPError as exc:
+        direct_error = str(exc)
+
+    code, stdout, stderr = await _run_command(
+        "docker",
+        "exec",
+        "supabase-pooler",
+        "curl",
+        "-sS",
+        "-w",
+        "\n%{http_code}",
+        f"http://localhost:4000{path}",
+        "-H",
+        f"Authorization: Bearer {token}",
+    )
+    if code == 0:
+        status, body = _parse_curl_status(stdout)
+        if status in accepted_statuses:
+            return None
+        fallback_error = (
+            f"HTTP {status}: {body[:300]}" if status else stdout[:300]
+        )
+    else:
+        fallback_error = stderr or stdout or f"codigo {code}"
+
+    return (
+        f"Supavisor: falha ao encerrar pools do tenant {tenant_id}; "
+        f"direto={direct_error}; docker_exec={fallback_error}"
+    )
+
+
+async def _drain_database_connections(
+    conn: asyncpg.Connection,
+    db_name: str,
+    *,
+    timeout_seconds: float = 10.0,
+) -> bool:
+    """Encerra conexões e detecta pools que continuam tentando reconectar."""
+    deadline = time.monotonic() + timeout_seconds
+    quiet_since: float | None = None
+    while True:
+        active_connections = await conn.fetchval(
+            """
+            SELECT count(*)
+            FROM pg_stat_activity
+            WHERE datname = $1 AND pid <> pg_backend_pid()
+            """,
+            db_name,
+        )
+        now = time.monotonic()
+        if active_connections:
+            quiet_since = None
+            await conn.execute(
+                """
+                SELECT pg_terminate_backend(pid)
+                FROM pg_stat_activity
+                WHERE datname = $1 AND pid <> pg_backend_pid()
+                """,
+                db_name,
+            )
+        elif quiet_since is None:
+            quiet_since = now
+        elif now - quiet_since >= 2.0:
+            return True
+
+        if now >= deadline:
+            return False
+        await asyncio.sleep(0.5)
+
+
 async def _drop_database_force_or_fallback(
     conn: asyncpg.Connection,
     db_name: str,
@@ -2802,6 +2890,7 @@ async def _delete_project_impl(
 ) -> dict:
     errors: list[str] = []
     db_name = f"_supabase_{project_name}"
+    database_removed = False
 
     async def report(progress: int, step: str, message: str) -> None:
         if current_job_id:
@@ -2846,6 +2935,11 @@ async def _delete_project_impl(
             )
 
     await report(30, "remove_tenants", "Removendo tenants globais...")
+    supavisor_token = _build_global_delete_token(tenant_external_id)
+    supavisor_terminate_error = await _terminate_supavisor_pools(
+        tenant_id=project_name,
+        token=supavisor_token,
+    )
     realtime_error = await _delete_tenant_api(
         service_label="Realtime",
         base_url=REALTIME_INTERNAL_URL,
@@ -2859,7 +2953,7 @@ async def _delete_project_impl(
         base_url=SUPAVISOR_INTERNAL_URL,
         fallback_container="supabase-pooler",
         tenant_id=project_name,
-        token=_build_global_delete_token(tenant_external_id),
+        token=supavisor_token,
     )
 
     await asyncio.sleep(1)
@@ -2891,65 +2985,61 @@ async def _delete_project_impl(
             f"supavisor_tenants={deleted_supavisor_tenant}"
         )
 
-        if realtime_error and (
-            _sql_delete_count(deleted_ext) or _sql_delete_count(deleted_tenant)
-        ):
-            errors.append(realtime_error)
-        elif realtime_error:
+        if realtime_error:
             print(f"[delete_project] {realtime_error}")
 
-        if supavisor_error and (
-            _sql_delete_count(deleted_supavisor_users)
-            or _sql_delete_count(deleted_supavisor_tenant)
-        ):
-            errors.append(supavisor_error)
-        elif supavisor_error:
+        if supavisor_terminate_error:
+            print(f"[delete_project] {supavisor_terminate_error}")
+        if supavisor_error:
             print(f"[delete_project] {supavisor_error}")
 
         await report(65, "drop_database", "Removendo slots e database...")
-        await conn.execute(
-            """
-            SELECT pg_terminate_backend(pid)
-            FROM pg_stat_activity
-            WHERE datname = $1 AND pid <> pg_backend_pid()
-            """,
-            db_name,
-        )
+        connections_drained = await _drain_database_connections(conn, db_name)
 
         slot_errors = await drop_supabase_replication_slots(conn, project_name)
         if slot_errors:
             errors.extend(slot_errors)
 
-        try:
-            await _drop_database_force_or_fallback(conn, db_name)
-        except Exception as drop_error:
-            errors.append(f"Erro ao dropar banco {db_name}: {drop_error}")
+        if not connections_drained:
+            errors.append(
+                "Supavisor continuou abrindo conexões após a remoção do "
+                f"tenant; o banco {db_name} foi preservado para evitar "
+                "estado inconsistente"
+            )
+        else:
+            try:
+                await _drop_database_force_or_fallback(conn, db_name)
+                database_removed = True
+            except Exception as drop_error:
+                errors.append(f"Erro ao dropar banco {db_name}: {drop_error}")
 
         await report(
             78,
             "remove_control_plane",
             "Removendo registros do control plane...",
         )
-        project_id = await conn.fetchval(
-            "SELECT id FROM projects WHERE name = $1",
-            project_name,
-        )
-        if project_id:
-            await conn.execute(
-                "DELETE FROM project_members WHERE project_id = $1",
-                project_id,
+        if database_removed:
+            project_id = await conn.fetchval(
+                "SELECT id FROM projects WHERE name = $1",
+                project_name,
             )
-            await conn.execute("DELETE FROM projects WHERE id = $1", project_id)
-        else:
-            errors.append(
-                f"Projeto {project_name} não encontrado para limpeza final."
-            )
+            if project_id:
+                await conn.execute(
+                    "DELETE FROM project_members WHERE project_id = $1",
+                    project_id,
+                )
+                await conn.execute("DELETE FROM projects WHERE id = $1", project_id)
+            else:
+                errors.append(
+                    f"Projeto {project_name} não encontrado para limpeza final."
+                )
 
     await report(90, "remove_files", "Removendo arquivos do projeto...")
-    success, stdout, stderr = await execute_delete_script(project_name)
-    if not success:
-        detail = stderr.strip() or stdout.strip() or "erro desconhecido"
-        errors.append(f"Erro ao excluir diretórios: {detail}")
+    if database_removed:
+        success, stdout, stderr = await execute_delete_script(project_name)
+        if not success:
+            detail = stderr.strip() or stdout.strip() or "erro desconhecido"
+            errors.append(f"Erro ao excluir diretórios: {detail}")
 
     await report(96, "verify_cleanup", "Verificando limpeza final...")
     async with pool.acquire() as conn:
@@ -2959,6 +3049,18 @@ async def _delete_project_impl(
         )
         if db_exists:
             errors.append(f"Banco {db_name} ainda existe")
+        supavisor_tenant_exists = await conn.fetchval(
+            "SELECT 1 FROM _supavisor.tenants WHERE external_id = $1",
+            project_name,
+        )
+        supavisor_user_exists = await conn.fetchval(
+            "SELECT 1 FROM _supavisor.users WHERE tenant_external_id = $1",
+            project_name,
+        )
+        if supavisor_tenant_exists or supavisor_user_exists:
+            errors.append(
+                f"Metadata do tenant {project_name} ainda existe no Supavisor"
+            )
 
     return {
         "project": project_name,
