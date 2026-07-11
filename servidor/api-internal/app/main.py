@@ -56,6 +56,7 @@ from app.project_settings import (
     _read_env_whitelisted,
     _write_env_whitelisted,
 )
+from app.service_key_cache import invalidate_service_key_cache
 
 db_pool: Optional[asyncpg.Pool] = None
 
@@ -3236,18 +3237,51 @@ async def _rotate_project_key_background(
         )
         pool = await get_pool()
         async with pool.acquire() as conn:
-            project_id = await conn.fetchval(
-                "SELECT id FROM projects WHERE name = $1",
-                project_name,
+            async with conn.transaction():
+                project_row = await conn.fetchrow(
+                    "SELECT id FROM projects WHERE name = $1 FOR UPDATE",
+                    project_name,
+                )
+                if project_row is None:
+                    raise RuntimeError("Projeto não encontrado ao rotacionar chaves")
+                await store_project_secrets(
+                    conn,
+                    project_id=project_row["id"],
+                    anon_key=anon,
+                    service_role=service,
+                )
+                key_version = await conn.fetchval(
+                    """
+                    UPDATE projects
+                    SET project_key_version = project_key_version + 1
+                    WHERE id = $1
+                    RETURNING project_key_version
+                    """,
+                    project_row["id"],
+                )
+
+        await _set_job_status(
+            job_id,
+            "running",
+            message="Invalidando cache da service key...",
+            progress=95,
+            current_step="invalidate_service_key_cache",
+        )
+        try:
+            await invalidate_service_key_cache(project_name, key_version)
+        except Exception as cache_exc:
+            await _set_job_status(
+                job_id,
+                "failed",
+                message=(
+                    "Chaves rotacionadas, mas a invalidação imediata do cache falhou. "
+                    "A verificação de versão corrigirá o cache dentro da janela configurada."
+                ),
+                current_step="invalidate_service_key_cache",
+                error_code="service_key_cache_invalidation_failed",
+                stderr_tail=str(cache_exc),
             )
-            if project_id is None:
-                raise RuntimeError("Projeto não encontrado ao rotacionar chaves")
-            await store_project_secrets(
-                conn,
-                project_id=project_id,
-                anon_key=anon,
-                service_role=service,
-            )
+            return
 
         await _set_job_status(
             job_id,
@@ -3532,7 +3566,10 @@ async def enc_key(
     async with pool.acquire() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
-                "SELECT id, service_role FROM projects WHERE name=$1",
+                """
+                SELECT id, service_role, project_key_version
+                FROM projects WHERE name=$1
+                """,
                 ref,
             )
             if not row or not row["service_role"]:
@@ -3547,8 +3584,27 @@ async def enc_key(
     return {
         "enc_service_key": service_key_transport_fernet.encrypt(
             service_key.encode()
-        ).decode()
+        ).decode(),
+        "project_key_version": row["project_key_version"],
     }
+
+
+@app.get("/api/projects/internal/key-version/{ref}")
+async def project_key_version(
+    ref: str,
+    request: Request,
+    pool=Depends(get_pool),
+):
+    ref = validate_project_id(ref)
+    if request.headers.get("X-Internal-Service") != "studio-nginx":
+        raise HTTPException(403, "Internal service access required")
+    version = await pool.fetchval(
+        "SELECT project_key_version FROM projects WHERE name = $1",
+        ref,
+    )
+    if version is None:
+        raise HTTPException(404, "Project not found")
+    return {"project_key_version": version}
 
 async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.UUID):
     pool = await get_pool()

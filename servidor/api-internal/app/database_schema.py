@@ -88,6 +88,14 @@ async def ensure_identity_schema(pool: asyncpg.Pool) -> None:
         await conn.execute(
             "ALTER TABLE projects ADD COLUMN IF NOT EXISTS display_name TEXT"
         )
+        await conn.execute(
+            """
+            ALTER TABLE projects
+                ADD COLUMN IF NOT EXISTS project_key_version BIGINT NOT NULL DEFAULT 1;
+            UPDATE projects SET project_key_version = 1
+            WHERE project_key_version IS NULL OR project_key_version < 1;
+            """
+        )
 
 
 async def ensure_collaboration_schema(pool: asyncpg.Pool) -> None:
@@ -243,5 +251,4 @@ async def ensure_collaboration_schema(pool: asyncpg.Pool) -> None:
             ON CONFLICT (name) DO NOTHING;
             """
         )
-
 

@@ -45,6 +45,12 @@ SUPAVISOR_INTERNAL_URL = os.getenv(
 REALTIME_INTERNAL_URL = os.getenv(
     "REALTIME_INTERNAL_URL", "http://realtime-dev.supabase-realtime:4000"
 ).rstrip("/")
+STUDIO_CACHE_INVALIDATION_URL = os.getenv(
+    "STUDIO_CACHE_INVALIDATION_URL", "https://nginx:443"
+).rstrip("/")
+STUDIO_CACHE_INVALIDATION_VERIFY_TLS = os.getenv(
+    "STUDIO_CACHE_INVALIDATION_VERIFY_TLS", "false"
+).strip().lower() in {"1", "true", "yes", "on"}
 PG_META_ALLOWED_HOSTS = {
     host.strip().lower()
     for host in os.getenv("PG_META_ALLOWED_HOSTS", "postgres-meta-global").split(",")

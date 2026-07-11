@@ -27,6 +27,7 @@ services:
     ports:
       - 9091:443
     restart: unless-stopped
+    networks: [default, rede-supabase]
     env_file:
       - .env
     volumes:
@@ -64,3 +65,7 @@ services:
   #     - "8999" 
 volumes:
   usersdb:
+
+networks:
+  rede-supabase:
+    external: true

@@ -21,10 +21,6 @@ local res = ngx.location.capture("/_internal_api/projects/" .. slug .. "/rotate-
     }
 })
 
-if res.status == ngx.HTTP_OK then
-    ngx.shared.service_keys:delete(slug)
-end
-
 ngx.status = res.status
 ngx.header.content_type = res.header["Content-Type"] or "application/json"
 

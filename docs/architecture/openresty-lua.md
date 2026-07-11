@@ -69,6 +69,44 @@ lista conhecida são rejeitados com HTTP 400.
 - Nunca registrar cookies, HMACs, JWTs, service keys ou corpos que possam
   conter segredos.
 
+## Cache de service role
+
+`security/get_service_key.lua` armazena a chave descriptografada no
+`lua_shared_dict service_keys`. As entradas usam namespace próprio e carregam
+o `project_key_version` persistido na tabela `projects`.
+
+Após uma rotação bem-sucedida, a API incrementa a versão na mesma transação
+que persiste as chaves e chama:
+
+`POST /internal/cache/service-key/{project_ref}`
+
+O endpoint exige `X-Shared-Token` e `X-Internal-Service: projects-api`, remove
+a chave anterior e publica a nova versão mínima no shared dictionary. A
+invalidação afeta todos os workers do OpenResty sem restart ou reload do Nginx.
+
+Antes de usar uma entrada, o cache compara sua versão com a versão requerida.
+Como proteção para perda da notificação ativa, a versão do banco é consultada
+periodicamente em `GET /api/projects/internal/key-version/{project_ref}`.
+Quando a versão persistida for maior, a chave antiga é descartada e recarregada.
+
+Os tempos são configuráveis:
+
+- `SERVICE_KEY_CACHE_TTL_SECONDS`: TTL da chave; padrão de 60 segundos;
+- `SERVICE_KEY_VERSION_CHECK_TTL_SECONDS`: intervalo máximo entre verificações
+  de versão; padrão de 5 segundos.
+
+Em operação normal, a consistência é imediata após a notificação. Se as três
+tentativas de invalidação falharem, o job termina com
+`service_key_cache_invalidation_failed`; o fallback de versão limita a janela
+usual de chave antiga ao intervalo de verificação. Se tanto a notificação
+quanto a API de versão estiverem indisponíveis, uma entrada existente pode ser
+usada até seu TTL expirar.
+
+Contadores de `hit`, `miss`, `version_reload`, `invalidation`, `fetch_error` e
+`version_check_error` ficam no `lua_shared_dict service_key_metrics` e podem
+ser consultados, com o token interno, em
+`GET /internal/cache/service-key-metrics`.
+
 ## Validação de mudanças
 
 Ao mover um módulo, atualize tanto os `require(...)` quanto todas as diretivas
