@@ -1,5 +1,5 @@
 local cjson = require("cjson.safe")
-local project_db = require("project_db_helper")
+local project_db = require("cache.project_db_helper")
 local ai_client = require("ai_client")
 
 local _M = {}

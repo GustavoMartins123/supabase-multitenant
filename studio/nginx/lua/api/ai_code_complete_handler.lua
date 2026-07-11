@@ -1,5 +1,5 @@
-local cjson = require "cjson.safe"
-local ai_code = require "ai_code_complete"
+local cjson = require("cjson.safe")
+local ai_code = require("ai_code_complete")
 
 ngx.req.read_body()
 local body = ngx.req.get_body_data()

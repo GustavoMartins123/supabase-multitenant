@@ -1,7 +1,7 @@
-local cjson = require "cjson.safe"
-local ai_generate = require "ai_sql_generate"
-local db_helper = require "db_helper"
-local user_identity = require "user_identity"
+local cjson = require("cjson.safe")
+local ai_generate = require("ai_sql_generate")
+local db_helper = require("cache.db_helper")
+local user_identity = require("project_context.user_identity")
 
 ngx.req.read_body()
 local body = ngx.req.get_body_data()

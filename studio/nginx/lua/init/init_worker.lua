@@ -1,8 +1,8 @@
-        local lyaml = require "lyaml"
-        local lfs = require "lfs"
-        local user_identity = require "user_identity"
-        local authelia_identifiers = require "authelia_identifiers"
-        local user_sync = require "user_sync"
+        local lyaml = require("lyaml")
+        local lfs = require("lfs")
+        local user_identity = require("project_context.user_identity")
+        local authelia_identifiers = require("admin_api.authelia_identifiers")
+        local user_sync = require("admin_api.user_sync")
         local cache = ngx.shared.users_cache
         local yaml = "/config/users_database.yml"
         local max_bootstrap_attempts = 20
@@ -26,7 +26,7 @@
                         local cache_key = payload.cache_key
                         local cached_json = cache:get(cache_key)
                         if cached_json and sync_result and sync_result.id then
-                            local cjson = require "cjson.safe"
+                            local cjson = require("cjson.safe")
                             local cached_user = cjson.decode(cached_json)
                             if cached_user then
                                 cached_user.user_uuid = sync_result.id
@@ -56,7 +56,7 @@
             cache:flush_all()
             ngx.log(ngx.INFO, "Carregando usuários do arquivo YAML…")
             local users_for_sync = {}
-            local cjson = require "cjson.safe"
+            local cjson = require("cjson.safe")
             local missing_identifiers = 0
             
             local function is_bootstrap_placeholder(uname, attr)

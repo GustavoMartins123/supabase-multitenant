@@ -1,8 +1,8 @@
-local aes = require "resty.aes"
-local bit = require "bit"
-local hmac_sha256 = require "utils.hmac_sha256"
-local random = require "resty.random"
-local str = require "resty.string"
+local aes = require("resty.aes")
+local bit = require("bit")
+local hmac_sha256 = require("security.hmac_sha256")
+local random = require("resty.random")
+local str = require("resty.string")
 
 local _M = { _VERSION = "0.1-openssl3" }
 local mt = { __index = _M }

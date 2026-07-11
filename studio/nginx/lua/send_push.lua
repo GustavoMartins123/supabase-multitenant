@@ -1,7 +1,7 @@
-local cjson = require "cjson.safe"
-local http = require "resty.http"
-local pkey = require "resty.openssl.pkey"
-local digest = require "resty.openssl.digest"
+local cjson = require("cjson.safe")
+local http = require("resty.http")
+local pkey = require("resty.openssl.pkey")
+local digest = require("resty.openssl.digest")
 
 local function b64url(str)
     local b = ngx.encode_base64(str)
