@@ -130,12 +130,17 @@ async def ensure_jobs_schema(pool: asyncpg.Pool) -> None:
                     ALTER TABLE jobs DROP CONSTRAINT jobs_project_uuid_fkey;
                 END IF;
                 IF EXISTS (
-                    SELECT 1 FROM pg_constraint WHERE conname = 'jobs_owner_id_fkey'
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'jobs_owner_id_fkey' AND confdeltype <> 'n'
                 ) THEN
                     ALTER TABLE jobs DROP CONSTRAINT jobs_owner_id_fkey;
                 END IF;
-                ALTER TABLE jobs ADD CONSTRAINT jobs_owner_id_fkey
-                    FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE SET NULL;
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'jobs_owner_id_fkey'
+                ) THEN
+                    ALTER TABLE jobs ADD CONSTRAINT jobs_owner_id_fkey
+                        FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE SET NULL;
+                END IF;
                 IF NOT EXISTS (
                     SELECT 1 FROM pg_constraint WHERE conname = 'jobs_created_by_fkey'
                 ) THEN
@@ -282,6 +287,12 @@ async def create_retry_job(
                 raise PermissionError("job_not_retryable")
 
             root_id = source["retry_of"] or source["job_id"]
+            # Serializa retries feitos a partir de tentativas diferentes da
+            # mesma arvore, evitando corrida entre o SELECT e o INSERT.
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                str(root_id),
+            )
             active_retry = await conn.fetchval(
                 """
                 SELECT job_id FROM jobs
