@@ -34,19 +34,13 @@ SLOT_PLUGIN=""
 cleanup() { rm -rf "$BACKUP_DIR"; }
 
 compose_old() {
-  docker compose -p "$OLD_NAME" \
-    --project-directory "$OLD_DIR" \
-    --env-file "$PROJECT_ROOT/.env" \
-    --env-file "$OLD_DIR/.env" \
-    -f "$OLD_DIR/docker-compose.yml" "$@"
+  ( cd "$OLD_DIR" && docker compose -p "$OLD_NAME" \
+      --env-file ../../.env --env-file .env "$@" )
 }
 
 compose_new() {
-  docker compose -p "$NEW_NAME" \
-    --project-directory "$NEW_DIR" \
-    --env-file "$PROJECT_ROOT/.env" \
-    --env-file "$NEW_DIR/.env" \
-    -f "$NEW_DIR/docker-compose.yml" "$@"
+  ( cd "$NEW_DIR" && docker compose -p "$NEW_NAME" \
+      --env-file ../../.env --env-file .env "$@" )
 }
 
 generate_jwt() {
