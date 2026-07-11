@@ -1,6 +1,6 @@
 import uuid
 from pydantic import BaseModel, Field
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Literal, Optional
 
 class NewProject(BaseModel):
     name: str
@@ -20,7 +20,7 @@ class UserSyncPayload(BaseModel):
 
 class AddMember(BaseModel):
     user_id: str
-    role: str = 'member'
+    role: Literal["admin", "member"] = "member"
 
 class TransferBody(BaseModel):
     new_owner_id: str

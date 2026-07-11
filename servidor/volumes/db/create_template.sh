@@ -91,7 +91,8 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
 CREATE TABLE IF NOT EXISTS project_members (
   project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  role TEXT DEFAULT 'member',
+  role TEXT NOT NULL DEFAULT 'member'
+    CONSTRAINT project_members_role_check CHECK (role IN ('admin', 'member')),
   PRIMARY KEY (project_id, user_id)
 );
 

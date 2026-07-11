@@ -356,6 +356,17 @@ class ProjectRepository {
     throw Exception('Erro ao carregar settings: ${resp.body}');
   }
 
+  Future<String> fetchProjectConfigToken(String ref) async {
+    final resp = await http.get(Uri.parse('/api/projects/$ref/config-token'));
+    _ensureCommandSucceeded(resp);
+    final data = _tryDecodeObject(resp.body);
+    final token = data?['config_token']?.toString() ?? '';
+    if (token.isEmpty) {
+      throw Exception('Resposta sem config token');
+    }
+    return token;
+  }
+
   Future<UpdateSettingsResult> updateProjectSettings(
     String ref,
     Map<String, String> settings,

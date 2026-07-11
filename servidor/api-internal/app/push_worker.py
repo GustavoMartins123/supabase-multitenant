@@ -1,15 +1,16 @@
 import asyncio
 import os
 import json
-import hashlib
-import hmac
-import secrets
-import time
 import urllib.request
 import urllib.error
 from urllib.parse import urlparse
 import asyncpg
 import ssl
+
+try:
+    from app.internal_hmac import build_internal_hmac_headers as sign_internal_request
+except ModuleNotFoundError:
+    from internal_hmac import build_internal_hmac_headers as sign_internal_request
 
 BASE_DSN = os.getenv("DB_DSN")
 API_URL = os.getenv("PUSH_API_URL", "https://<SEU_IP>:4000/api/internal/push")
@@ -24,30 +25,12 @@ if not INTERNAL_HMAC_SECRET:
 
 
 def build_internal_hmac_headers(method: str, url: str, body: bytes) -> dict[str, str]:
-    timestamp = str(int(time.time()))
-    nonce = secrets.token_hex(16)
-    path = urlparse(url).path or "/"
-    body_hash = hashlib.sha256(body).hexdigest()
-    canonical = "\n".join([
-        "push-v1",
-        method.upper(),
-        path,
-        timestamp,
-        nonce,
-        body_hash,
-    ])
-    signature = hmac.new(
-        INTERNAL_HMAC_SECRET.encode("utf-8"),
-        canonical.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
-
-    return {
-        "X-Internal-Service": "push-worker",
-        "X-Internal-Timestamp": timestamp,
-        "X-Internal-Nonce": nonce,
-        "X-Internal-Signature": signature,
-    }
+    return sign_internal_request(
+        INTERNAL_HMAC_SECRET,
+        method,
+        url,
+        body,
+    )
 
 def build_ssl_context() -> ssl.SSLContext:
     if not PUSH_VERIFY_TLS:

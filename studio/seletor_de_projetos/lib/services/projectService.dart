@@ -5,11 +5,21 @@ import 'dart:convert';
 import '../models/job.dart';
 
 class JobWaitResult {
-  const JobWaitResult({required this.ok, required this.status, this.message});
+  const JobWaitResult({
+    required this.ok,
+    required this.status,
+    this.message,
+    this.action,
+    this.progress,
+    this.currentStep,
+  });
 
   final bool ok;
   final String status;
   final String? message;
+  final String? action;
+  final int? progress;
+  final String? currentStep;
 }
 
 class ProjectService {
@@ -159,8 +169,7 @@ class ProjectService {
 
         await _showDeleteResultDialog(
           context,
-          message:
-              waited.message ??
+          message: waited.message ??
               (waited.ok
                   ? 'Projeto excluído com sucesso.'
                   : 'Falha ao excluir projeto.'),
@@ -214,9 +223,8 @@ class ProjectService {
     final icon = success
         ? (isWarning ? Icons.warning : Icons.check_circle)
         : Icons.error;
-    final color = success
-        ? (isWarning ? Colors.orange : Colors.green)
-        : Colors.red;
+    final color =
+        success ? (isWarning ? Colors.orange : Colors.green) : Colors.red;
 
     await showDialog(
       context: context,
@@ -243,6 +251,7 @@ class ProjectService {
     Duration every = const Duration(seconds: 3),
     int max = 100,
   }) async {
+    Map<String, dynamic> lastData = const {};
     for (var i = 0; i < max; i++) {
       await Future.delayed(every);
       final data = await http
@@ -252,18 +261,45 @@ class ProjectService {
 
       final st = data['status']?.toString() ?? 'unknown';
       final message = data['message']?.toString();
+      final action = data['action']?.toString();
+      final progress = data['progress'] as int?;
+      final currentStep = data['current_step']?.toString();
+      lastData = data;
 
       if (st == 'done') {
-        return JobWaitResult(ok: true, status: st, message: message);
+        return JobWaitResult(
+          ok: true,
+          status: st,
+          message: message,
+          action: action,
+          progress: progress,
+          currentStep: currentStep,
+        );
       }
       if (st == 'failed') {
-        return JobWaitResult(ok: false, status: st, message: message);
+        final diagnostic = [
+          if (message != null && message.isNotEmpty) message,
+          if (currentStep != null) 'Etapa: $currentStep (${progress ?? 0}%)',
+        ].join('\n');
+        return JobWaitResult(
+          ok: false,
+          status: st,
+          message: diagnostic.isEmpty ? null : diagnostic,
+          action: action,
+          progress: progress,
+          currentStep: currentStep,
+        );
       }
     }
-    return const JobWaitResult(
+    return JobWaitResult(
       ok: false,
       status: 'timeout',
-      message: 'Tempo limite excedido aguardando a operacao.',
+      message:
+          'Tempo limite excedido em ${lastData['current_step'] ?? 'etapa desconhecida'} '
+          '(${lastData['progress'] ?? 0}%).',
+      action: lastData['action']?.toString(),
+      progress: lastData['progress'] as int?,
+      currentStep: lastData['current_step']?.toString(),
     );
   }
 

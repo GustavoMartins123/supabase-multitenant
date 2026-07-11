@@ -32,13 +32,11 @@ class ProjectSettingsDialog extends ConsumerStatefulWidget {
     super.key,
     required this.ref,
     required this.anonKey,
-    required this.configToken,
     this.displayName,
   });
 
   final String ref;
   final String anonKey;
-  final String configToken;
   final String? displayName;
 
   @override
@@ -57,6 +55,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
   late final TextEditingController _displayNameController;
   bool _rotatingKey = false;
   bool _savingDisplayName = false;
+  bool _loadingConfigToken = false;
 
   @override
   void initState() {
@@ -72,7 +71,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     _animController.forward();
 
     _currentAnonKey = widget.anonKey;
-    _currentConfigToken = widget.configToken;
+    _currentConfigToken = '';
     _currentDisplayName = widget.displayName;
     _displayNameController = TextEditingController(
       text: widget.displayName ?? '',
@@ -204,6 +203,24 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     }
   }
 
+  Future<void> _loadConfigToken() async {
+    setState(() => _loadingConfigToken = true);
+    try {
+      final token = await ref
+          .read(projectRepositoryProvider)
+          .fetchProjectConfigToken(widget.ref);
+      if (!mounted) return;
+      setState(() => _currentConfigToken = token);
+    } catch (e) {
+      _showSnack(
+        'Erro ao carregar token: ${e.toString().replaceFirst('Exception: ', '')}',
+        SupabaseColors.error,
+      );
+    } finally {
+      if (mounted) setState(() => _loadingConfigToken = false);
+    }
+  }
+
   Future<void> _deleteProject() async {
     bool sucesso = await ProjectService.confirmAndDeleteProject(
       context,
@@ -264,8 +281,10 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
                       const SizedBox(height: 20),
                       _buildAnonKeySection(myRole),
                       const SizedBox(height: 20),
-                      _buildConfigTokenSection(),
-                      const SizedBox(height: 20),
+                      if (myRole == 'admin' || Session().isSysAdmin) ...[
+                        _buildConfigTokenSection(),
+                        const SizedBox(height: 20),
+                      ],
                       EnvSettingsSection(
                         projectRef: widget.ref,
                         isAdmin: myRole == 'admin' || Session().isSysAdmin,
@@ -689,8 +708,9 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
                 ),
                 const SizedBox(width: 8),
                 IconButtonWidget(
-                  icon: Icons.copy_rounded,
-                  tooltip: 'Copiar',
+                  icon:
+                      hasToken ? Icons.copy_rounded : Icons.visibility_outlined,
+                  tooltip: hasToken ? 'Copiar' : 'Carregar token',
                   onPressed: hasToken
                       ? () {
                           Clipboard.setData(
@@ -698,7 +718,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
                           );
                           _showSnack('Token copiado!', SupabaseColors.success);
                         }
-                      : null,
+                      : (_loadingConfigToken ? null : _loadConfigToken),
                 ),
               ],
             ),

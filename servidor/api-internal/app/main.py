@@ -4,7 +4,6 @@ import pathlib
 import asyncpg
 import hmac
 import base64
-import binascii
 import hashlib
 import signal
 import time
@@ -19,6 +18,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 from typing import Any, Optional, List, Dict
 from dotenv import dotenv_values
+from app.security_tokens import resolve_user_id_from_hmac_token as resolve_signed_user_id
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
 SCRIPT = BASE_DIR / "scripts" / "generate_project.sh"
@@ -116,60 +116,12 @@ def parse_uuid_value(raw: str | None) -> uuid.UUID | None:
         return None
 
 
-def decode_base64url_json(raw: str) -> dict[str, Any] | None:
-    try:
-        padded = raw + ("=" * (-len(raw) % 4))
-        decoded = base64.urlsafe_b64decode(padded.encode("ascii"))
-        payload = json.loads(decoded.decode("utf-8"))
-    except (ValueError, json.JSONDecodeError, UnicodeDecodeError, binascii.Error):
-        return None
-
-    return payload if isinstance(payload, dict) else None
-
-
 def resolve_user_id_from_hmac_token(request: Request) -> uuid.UUID:
-    token = (request.headers.get("X-User-Token") or "").strip()
-    if not token:
-        raise HTTPException(401, "X-User-Token ausente")
-
-    parts = token.split(".")
-    if len(parts) != 3 or parts[0] != "v1":
-        raise HTTPException(401, "X-User-Token inválido")
-
-    _, encoded_payload, signature = parts
-    try:
-        expected_signature = hmac.new(
-            NGINX_HMAC_SECRET.encode("utf-8"),
-            encoded_payload.encode("ascii"),
-            hashlib.sha256,
-        ).hexdigest()
-    except UnicodeEncodeError:
-        raise HTTPException(401, "X-User-Token inválido")
-
-    if not hmac.compare_digest(signature, expected_signature):
-        raise HTTPException(401, "X-User-Token com assinatura inválida")
-
-    payload = decode_base64url_json(encoded_payload)
-    if payload is None:
-        raise HTTPException(401, "X-User-Token com payload inválido")
-
-    now = int(time.time())
-    try:
-        exp = int(payload.get("exp", 0))
-        iat = int(payload.get("iat", 0))
-    except (TypeError, ValueError):
-        raise HTTPException(401, "X-User-Token com datas inválidas")
-
-    if exp <= now - USER_TOKEN_MAX_CLOCK_SKEW_SECONDS:
-        raise HTTPException(401, "X-User-Token expirado")
-    if iat > now + USER_TOKEN_MAX_CLOCK_SKEW_SECONDS:
-        raise HTTPException(401, "X-User-Token emitido no futuro")
-
-    user_id = parse_uuid_value(str(payload.get("sub") or ""))
-    if user_id is None:
-        raise HTTPException(401, "X-User-Token sem usuário válido")
-
-    return user_id
+    return resolve_signed_user_id(
+        request,
+        secret=NGINX_HMAC_SECRET,
+        max_clock_skew_seconds=USER_TOKEN_MAX_CLOCK_SKEW_SECONDS,
+    )
 
 
 async def ensure_identity_schema(pool: asyncpg.Pool) -> None:
@@ -229,6 +181,33 @@ async def ensure_identity_schema(pool: asyncpg.Pool) -> None:
             """
         )
         await conn.execute(
+            """
+            UPDATE project_members
+            SET role = 'member'
+            WHERE role IS NULL OR role NOT IN ('admin', 'member');
+
+            ALTER TABLE project_members
+                ALTER COLUMN role SET DEFAULT 'member';
+            ALTER TABLE project_members
+                ALTER COLUMN role SET NOT NULL;
+
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conrelid = 'project_members'::regclass
+                      AND conname = 'project_members_role_check'
+                ) THEN
+                    ALTER TABLE project_members
+                        ADD CONSTRAINT project_members_role_check
+                        CHECK (role IN ('admin', 'member'));
+                END IF;
+            END
+            $$;
+            """
+        )
+        await conn.execute(
             "ALTER TABLE projects ADD COLUMN IF NOT EXISTS display_name TEXT"
         )
 
@@ -243,11 +222,42 @@ async def ensure_jobs_schema(pool: asyncpg.Pool) -> None:
                 owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 status TEXT NOT NULL,
                 message TEXT,
+                action TEXT,
+                payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                progress SMALLINT NOT NULL DEFAULT 0
+                    CHECK (progress BETWEEN 0 AND 100),
+                current_step TEXT,
+                total_steps INTEGER NOT NULL DEFAULT 1
+                    CHECK (total_steps > 0),
+                started_at TIMESTAMPTZ,
+                finished_at TIMESTAMPTZ,
+                stdout_tail TEXT,
+                stderr_tail TEXT,
+                error_code TEXT,
                 updated_at TIMESTAMPTZ DEFAULT now()
             )
             """
         )
-        await conn.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS message TEXT")
+        await conn.execute(
+            """
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS message TEXT;
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS action TEXT;
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS payload JSONB NOT NULL DEFAULT '{}'::jsonb;
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress SMALLINT NOT NULL DEFAULT 0;
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS current_step TEXT;
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS total_steps INTEGER NOT NULL DEFAULT 1;
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ;
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS stdout_tail TEXT;
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS stderr_tail TEXT;
+            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS error_code TEXT;
+
+            CREATE INDEX IF NOT EXISTS idx_jobs_status_updated
+                ON jobs(status, updated_at);
+            CREATE INDEX IF NOT EXISTS idx_jobs_project_status
+                ON jobs(project, status, updated_at);
+            """
+        )
 
 
 async def ensure_collaboration_schema(pool: asyncpg.Pool) -> None:
@@ -709,6 +719,19 @@ class ProjectActionQueue:
                         f"[action_queue] {project_name}: job "
                         f"{action.job_id} falhou: {exc}"
                     )
+                    try:
+                        await _set_job_status(
+                            action.job_id,
+                            "failed",
+                            message="Falha interna ao executar a acao enfileirada.",
+                            current_step="queue_runner_failed",
+                            error_code="queue_runner_failed",
+                        )
+                    except Exception as status_exc:  # noqa: BLE001
+                        print(
+                            f"[action_queue] nao foi possivel persistir a falha "
+                            f"do job {action.job_id}: {status_exc}"
+                        )
                 except BaseException as exc:  # noqa: BLE001
 
                     print(
@@ -824,26 +847,56 @@ async def _set_job_status(
     new_status: str,
     *,
     message: str | None = None,
+    progress: int | None = None,
+    current_step: str | None = None,
+    total_steps: int | None = None,
+    stdout_tail: str | None = None,
+    stderr_tail: str | None = None,
+    error_code: str | None = None,
 ) -> None:
+    if progress is not None and not 0 <= progress <= 100:
+        raise ValueError("progress must be between 0 and 100")
+    if total_steps is not None and total_steps < 1:
+        raise ValueError("total_steps must be positive")
+
+    assignments = ["status=$1", "updated_at=now()"]
+    values: list[Any] = [new_status]
+
+    def add_value(column: str, value: Any) -> None:
+        values.append(value)
+        assignments.append(f"{column}=${len(values)}")
+
+    if message is not None:
+        add_value("message", message)
+    if progress is not None:
+        add_value("progress", progress)
+    if current_step is not None:
+        add_value("current_step", current_step)
+    if total_steps is not None:
+        add_value("total_steps", total_steps)
+    if stdout_tail is not None:
+        add_value("stdout_tail", stdout_tail[-8000:])
+    if stderr_tail is not None:
+        add_value("stderr_tail", stderr_tail[-8000:])
+    if error_code is not None:
+        add_value("error_code", error_code)
+    if new_status == "running":
+        assignments.append("started_at=COALESCE(started_at, now())")
+        assignments.append("finished_at=NULL")
+    elif new_status in {"done", "failed"}:
+        assignments.append("finished_at=now()")
+        if new_status == "done" and progress is None:
+            assignments.append("progress=100")
+
+    values.append(job_id)
+    query = (
+        "UPDATE jobs SET "
+        + ", ".join(assignments)
+        + f" WHERE job_id=${len(values)}"
+    )
     pool = await get_pool()
     async with pool.acquire() as conn:
-        if message is None:
-            await conn.execute(
-                "UPDATE jobs SET status=$1, updated_at=now() WHERE job_id=$2",
-                new_status,
-                job_id,
-            )
-        else:
-            await conn.execute(
-                """
-                UPDATE jobs
-                SET status=$1, message=$2, updated_at=now()
-                WHERE job_id=$3
-                """,
-                new_status,
-                message,
-                job_id,
-            )
+        await conn.execute(query, *values)
 
 
 async def _create_project_job(
@@ -852,16 +905,27 @@ async def _create_project_job(
     user: uuid.UUID,
     *,
     message: str | None = None,
+    action: str,
+    payload: dict[str, Any] | None = None,
+    total_steps: int = 1,
 ) -> str:
     job_id = str(uuid.uuid4())
     async with pool.acquire() as conn:
         await conn.execute(
-            """INSERT INTO jobs(job_id, project, owner_id, status, message)
-               VALUES($1, $2, $3, 'queued', $4)""",
+            """
+            INSERT INTO jobs(
+                job_id, project, owner_id, status, message,
+                action, payload, total_steps, progress, current_step
+            )
+            VALUES($1, $2, $3, 'queued', $4, $5, $6::jsonb, $7, 0, 'queued')
+            """,
             job_id,
             project_name,
             user,
             message,
+            action,
+            json.dumps(payload or {}),
+            total_steps,
         )
     return job_id
 
@@ -879,7 +943,17 @@ async def _enqueue_project_action(
         )
     if project_id is None:
         raise HTTPException(404, f"Projeto '{project_name}' nao encontrado")
-    return await action_queue.submit(project_name, project_id, job_id, runner)
+    try:
+        return await action_queue.submit(project_name, project_id, job_id, runner)
+    except Exception as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message="Nao foi possivel enfileirar a operacao.",
+            current_step="enqueue_failed",
+            error_code="queue_submit_failed",
+        )
+        raise RuntimeError("falha ao enfileirar operacao do projeto") from exc
 
 async def rollback_project_from_db(pool, project_name: str):
     try:
@@ -928,19 +1002,115 @@ def validate_service_name(raw: str) -> str:
 app = FastAPI()
 
 
-async def _recover_pending_jobs() -> None:
-    """Trata jobs em 'queued'/'running' deixados pelo startup anterior.
+RECOVERABLE_RUNNING_ACTIONS = {"start", "stop", "restart", "recreate_services"}
 
-    Política segura: jobs não idempotentes (criação, deleção, rename)
-    são marcados como 'failed' com mensagem clara para o operador.
-    Operador pode re-disparar manualmente após verificar o estado do
-    projeto no Docker/Postgres/Supavisor.
-    """
+
+async def _build_recovery_runner(row: asyncpg.Record):
+    action = row["action"]
+    job_id = str(row["job_id"])
+    project_name = row["project"]
+    payload = row["payload"] or {}
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    owner_id = row["owner_id"]
+
+    if action == "create":
+        return lambda: _provision_and_store_keys(job_id, project_name, owner_id)
+    if action == "duplicate":
+        original_name = validate_project_id(str(payload.get("original_name") or ""))
+        copy_data = bool(payload.get("copy_data"))
+        return lambda: _duplicate_and_store_keys(
+            job_id,
+            original_name,
+            project_name,
+            owner_id,
+            copy_data,
+        )
+    if action == "delete":
+        return lambda: _delete_project_background(job_id, project_name)
+    if action == "rotate_key":
+        return lambda: _rotate_project_key_background(
+            job_id,
+            project_name,
+            owner_id,
+        )
+    if action == "rename":
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            history = await conn.fetchrow(
+                """
+                SELECT id, project_id, actor_user_id, old_name, new_name
+                FROM project_name_history
+                WHERE job_id = $1
+                """,
+                row["job_id"],
+            )
+        if not history:
+            return None
+        actor_user_id = history["actor_user_id"] or owner_id
+        return lambda: _rename_project_background(
+            job_id,
+            history["project_id"],
+            history["id"],
+            history["old_name"],
+            history["new_name"],
+            actor_user_id,
+        )
+    if action in {"start", "stop", "restart"}:
+        async def run_container_action() -> None:
+            containers = await get_project_containers(project_name)
+            if not containers:
+                await _set_job_status(
+                    job_id,
+                    "failed",
+                    message="Retomada falhou: nenhum container do projeto foi encontrado.",
+                    error_code="recovery_containers_missing",
+                )
+                return
+            if action == "start":
+                await _start_project_containers_background(
+                    job_id,
+                    project_name,
+                    containers,
+                    owner_id,
+                )
+            elif action == "stop":
+                await _stop_project_containers_background(
+                    job_id,
+                    project_name,
+                    containers,
+                )
+            else:
+                await _restart_project_containers_background(
+                    job_id,
+                    project_name,
+                    containers,
+                    owner_id,
+                )
+
+        return run_container_action
+    if action == "recreate_services":
+        services = payload.get("services") or []
+        if not isinstance(services, list) or not services:
+            return None
+        normalized_services = [validate_service_name(str(item)) for item in services]
+        return lambda: _recreate_project_services_background(
+            job_id,
+            project_name,
+            normalized_services,
+        )
+    return None
+
+
+async def _recover_pending_jobs() -> None:
+    """Retoma jobs seguros e preserva o ponto de parada dos demais."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT job_id, project, status, message
+            SELECT
+                job_id, project, owner_id, status, message, action, payload,
+                progress, current_step, total_steps
             FROM jobs
             WHERE status IN ('queued', 'running')
             ORDER BY updated_at ASC
@@ -957,22 +1127,58 @@ async def _recover_pending_jobs() -> None:
         job_id = str(r["job_id"])
         project = r["project"]
         old_status = r["status"]
-        if old_status == "running":
-            message = (
-                "API reiniciado durante a execução. O estado do projeto "
-                f"'{project}' pode estar inconsistente. Verifique "
-                "containers, banco e Supavisor antes de re-disparar."
-            )
-        else:
-            message = (
-                "API reiniciado antes da execução. Re-dispare a ação "
-                f"para o projeto '{project}' se ela ainda for necessária."
-            )
+        action = r["action"]
+        can_resume = old_status == "queued" or action in RECOVERABLE_RUNNING_ACTIONS
         try:
+            runner = await _build_recovery_runner(r) if can_resume and action else None
+            if runner is not None:
+                message = (
+                    f"Job retomado após reinício da API em "
+                    f"{r['current_step'] or 'queued'} ({r['progress'] or 0}%)."
+                )
+                await _set_job_status(
+                    job_id,
+                    "queued",
+                    message=message,
+                    current_step=r["current_step"] or "queued",
+                )
+                await _enqueue_project_action(project, job_id, runner)
+                async with pool.acquire() as conn:
+                    project_id = await conn.fetchval(
+                        "SELECT id FROM projects WHERE name = $1",
+                        project,
+                    )
+                    if project_id:
+                        await audit_studio_action(
+                            conn,
+                            project_id=project_id,
+                            actor_user_id=None,
+                            action="project_recovery_resumed",
+                            target_type="job",
+                            target_id=job_id,
+                            old_value={
+                                "status": old_status,
+                                "current_step": r["current_step"],
+                                "progress": r["progress"],
+                            },
+                            new_value={"status": "queued", "action": action},
+                        )
+                print(
+                    f"[recovery] job {job_id} ({project}, {action}) retomado"
+                )
+                continue
+
+            message = (
+                "API reiniciada durante operação não idempotente. "
+                f"Ação={action or 'desconhecida'}, etapa="
+                f"{r['current_step'] or 'desconhecida'}, progresso="
+                f"{r['progress'] or 0}%. Revisão manual obrigatória."
+            )
             await _set_job_status(
                 job_id,
                 "failed",
                 message=message,
+                error_code="recovery_manual_review_required",
             )
             async with pool.acquire() as conn:
                 await conn.execute(
@@ -1004,6 +1210,9 @@ async def _recover_pending_jobs() -> None:
                         new_value={
                             "status": "failed",
                             "reason": "api_restart",
+                            "action": action,
+                            "current_step": r["current_step"],
+                            "progress": r["progress"],
                         },
                     )
             print(
@@ -1011,8 +1220,17 @@ async def _recover_pending_jobs() -> None:
                 "marcado como failed"
             )
         except Exception as exc:  # noqa: BLE001
+            try:
+                await _set_job_status(
+                    job_id,
+                    "failed",
+                    message=f"Falha ao reconstruir job após reinício: {exc}",
+                    error_code="recovery_dispatch_failed",
+                )
+            except Exception:
+                pass
             print(
-                f"[recovery] falha ao marcar job {job_id} como failed: {exc}"
+                f"[recovery] falha ao reconstruir job {job_id}: {exc}"
             )
 
 
@@ -1223,6 +1441,9 @@ async def upsert_project_member(
     user_id: uuid.UUID,
     role: str,
 ) -> str | None:
+    if role not in {"admin", "member"}:
+        raise ValueError("project member role must be 'admin' or 'member'")
+
     existing_role = await conn.fetchval(
         """
         SELECT role
@@ -1316,7 +1537,7 @@ async def list_projects(
 
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT p.name, p.display_name, p.anon_key, p.config_token
+            SELECT p.name, p.display_name, p.anon_key
             FROM projects p
             WHERE p.anon_key IS NOT NULL
               AND EXISTS (
@@ -1330,12 +1551,10 @@ async def list_projects(
     result = []
     for r in rows:
         anon_token = fernet.decrypt(r["anon_key"].encode()).decode()
-        config_token = fernet.decrypt(r["config_token"].encode()).decode() if r["config_token"] else None
         result.append({
             "name": r["name"],
             "display_name": r["display_name"],
             "anon_token": anon_token,
-            "config_token": config_token,
             "file_size_limit": _get_project_file_size_limit(r["name"]),
             "storage_limit_token": _get_project_storage_limit_token(r["name"]),
         })
@@ -2088,6 +2307,9 @@ async def _rename_project_background(
             job_id,
             "running",
             message=f"Renomeando {old_name} -> {new_name}...",
+            progress=5,
+            current_step="migrate_infrastructure",
+            total_steps=9,
         )
 
         if not RENAME_SCRIPT.exists():
@@ -2165,6 +2387,15 @@ async def _rename_project_background(
                             else "rollback não confirmado."
                         )
                     ),
+                    current_step=(
+                        "rollback_completed" if rolled_back else "rollback_unconfirmed"
+                    ),
+                    error_code=(
+                        "rename_cancelled_rolled_back"
+                        if rolled_back
+                        else "rename_cancelled"
+                    ),
+                    stdout_tail=cancel_output,
                 )
             except Exception as exc:
                 print(
@@ -2212,9 +2443,23 @@ async def _rename_project_background(
                     "Falha no rename. Projeto pode estar em estado parcial."
                     f"\n\n{output[-2000:]}"
                 ),
+                current_step=(
+                    "rollback_completed" if rolled_back else "rollback_unconfirmed"
+                ),
+                error_code=(
+                    "rename_rolled_back" if rolled_back else "rename_failed"
+                ),
+                stdout_tail=output,
             )
             return
 
+        await _set_job_status(
+            job_id,
+            "running",
+            message="Finalizando histórico e notificações do rename...",
+            progress=92,
+            current_step="finalize_control_plane",
+        )
         async with pool.acquire() as conn:
             await _update_rename_history(conn, history_id, "succeeded")
             await conn.execute(
@@ -2261,12 +2506,14 @@ async def _rename_project_background(
             job_id,
             "done",
             message=f"Projeto renomeado: {old_name} -> {new_name}",
+            current_step="completed",
         )
     except Exception as exc:
         await _set_job_status(
             job_id,
             "failed",
             message=f"Falha inesperada no rename: {exc}",
+            error_code="unexpected_rename_error",
         )
         try:
             async with pool.acquire() as conn:
@@ -2356,13 +2603,21 @@ async def rename_project(
             job_id = str(uuid.uuid4())
             await conn.execute(
                 """
-                INSERT INTO jobs(job_id, project, owner_id, status, message)
-                VALUES($1, $2, $3, 'queued', $4)
+                INSERT INTO jobs(
+                    job_id, project, owner_id, status, message,
+                    action, payload, total_steps, progress, current_step
+                )
+                VALUES($1, $2, $3, 'queued', $4, 'rename', $5::jsonb, 9, 0, 'queued')
                 """,
                 job_id,
                 project_name,
                 auth_user["db_user_id"],
                 f"Rename iniciado: {project_name} -> {new_name}",
+                json.dumps({
+                    "old_name": project_name,
+                    "new_name": new_name,
+                    "actor_user_id": str(auth_user["db_user_id"]),
+                }),
             )
             history_id = await conn.fetchval(
                 """
@@ -2431,7 +2686,12 @@ async def rename_project(
                 await conn.execute(
                     """
                     UPDATE jobs
-                    SET status = 'failed', message = $1, updated_at = now()
+                    SET status = 'failed',
+                        message = $1,
+                        current_step = 'enqueue_failed',
+                        error_code = 'queue_submit_failed',
+                        finished_at = now(),
+                        updated_at = now()
                     WHERE job_id = $2
                     """,
                     f"Falha ao enfileirar rename: {exc}",
@@ -2522,6 +2782,47 @@ async def update_project_display_name(
     }
 
 
+@app.get("/api/projects/{project_name}/config-token")
+async def get_project_config_token(
+    project_name: str,
+    request: Request,
+    pool=Depends(get_pool),
+):
+    """Entrega o segredo somente a administradores e registra a leitura."""
+    project_name = validate_project_id(project_name)
+    auth_user = await resolve_authenticated_user(request, pool)
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            project = await get_project_row(conn, project_name)
+            await ensure_project_admin_access(
+                conn,
+                project_id=project["id"],
+                auth_user=auth_user,
+                message="Apenas admins podem acessar o config token",
+            )
+            encrypted_token = await conn.fetchval(
+                "SELECT config_token FROM projects WHERE id = $1",
+                project["id"],
+            )
+            if not encrypted_token:
+                raise HTTPException(404, "Config token não disponível")
+            await audit_studio_action(
+                conn,
+                project_id=project["id"],
+                actor_user_id=auth_user["db_user_id"],
+                action="project_config_token_read",
+                target_type="project_secret",
+                target_id=project_name,
+            )
+
+    token = fernet.decrypt(encrypted_token.encode()).decode()
+    return JSONResponse(
+        content={"project": project_name, "config_token": token},
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.get("/api/projects/{project_name}/queue-status")
 async def get_project_queue_status(
     project_name: str,
@@ -2551,6 +2852,10 @@ async def get_project_queue_status(
                 job_id,
                 status,
                 message,
+                action,
+                progress,
+                current_step,
+                total_steps,
                 updated_at
             FROM jobs
             WHERE project = $1
@@ -2566,6 +2871,10 @@ async def get_project_queue_status(
             "job_id": str(r["job_id"]),
             "status": r["status"],
             "message": r["message"],
+            "action": r["action"],
+            "progress": r["progress"],
+            "current_step": r["current_step"],
+            "total_steps": r["total_steps"],
             "updated_at": r["updated_at"].isoformat(),
         }
         for r in in_flight_rows
@@ -2889,9 +3198,20 @@ async def create_project(
                     project_id, auth_user["db_user_id"]
                 )
             await conn.execute(
-                """INSERT INTO jobs(job_id, project, owner_id, status)
-                   VALUES($1, $2, $3, 'queued')""",
-                job_id, name, auth_user["db_user_id"]
+                """
+                INSERT INTO jobs(
+                    job_id, project, owner_id, status, action,
+                    payload, total_steps, progress, current_step
+                )
+                VALUES($1, $2, $3, 'queued', 'create', $4::jsonb, 3, 0, 'queued')
+                """,
+                job_id,
+                name,
+                auth_user["db_user_id"],
+                json.dumps({
+                    "project_name": name,
+                    "actor_user_id": str(auth_user["db_user_id"]),
+                }),
             )
 
     position = await _enqueue_project_action(
@@ -2957,9 +3277,22 @@ async def duplicate_project(
 
             job_id = str(uuid.uuid4())
             await conn.execute(
-                """INSERT INTO jobs(job_id, project, owner_id, status)
-                   VALUES($1, $2, $3, 'queued')""",
-                job_id, new_name, auth_user["db_user_id"]
+                """
+                INSERT INTO jobs(
+                    job_id, project, owner_id, status, action,
+                    payload, total_steps, progress, current_step
+                )
+                VALUES($1, $2, $3, 'queued', 'duplicate', $4::jsonb, 3, 0, 'queued')
+                """,
+                job_id,
+                new_name,
+                auth_user["db_user_id"],
+                json.dumps({
+                    "original_name": original,
+                    "new_name": new_name,
+                    "actor_user_id": str(auth_user["db_user_id"]),
+                    "copy_data": body.copy_data,
+                }),
             )
 
     position = await _enqueue_project_action(
@@ -2994,14 +3327,14 @@ async def _duplicate_and_store_keys(
     copy_data: bool,
 ):
     pool = await get_pool()
-    async def set_status(st: str):
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE jobs SET status=$1, updated_at=now() WHERE job_id=$2",
-                st, job_id
-            )
-
-    await set_status("running")
+    await _set_job_status(
+        job_id,
+        "running",
+        message="Duplicando infraestrutura e banco...",
+        progress=5,
+        current_step="duplicate_infrastructure",
+        total_steps=3,
+    )
 
     try:
         copy_mode = "with-data" if copy_data else "schema-only"
@@ -3015,11 +3348,25 @@ async def _duplicate_and_store_keys(
         )
         stdout, _ = await proc.communicate()
         if proc.returncode != 0:
-            await set_status("failed")
-            print(stdout.decode())
+            output = stdout.decode(errors="replace")
+            await _set_job_status(
+                job_id,
+                "failed",
+                message="Falha ao duplicar infraestrutura",
+                stdout_tail=output,
+                error_code="duplicate_failed",
+            )
+            print(output)
             await rollback_project_from_db(pool, new_name)
             return
 
+        await _set_job_status(
+            job_id,
+            "running",
+            message="Extraindo chaves do projeto duplicado...",
+            progress=70,
+            current_step="extract_keys",
+        )
         proc2 = await asyncio.create_subprocess_exec(
             "bash", str(EXTRACTOR), new_name,
             stdout=asyncio.subprocess.PIPE,
@@ -3027,8 +3374,15 @@ async def _duplicate_and_store_keys(
         )
         out2, err2 = await proc2.communicate()
         if proc2.returncode != 0:
-            await set_status("failed")
-            print(err2.decode())
+            error_output = err2.decode(errors="replace")
+            await _set_job_status(
+                job_id,
+                "failed",
+                message="Falha ao extrair chaves do projeto duplicado",
+                stderr_tail=error_output,
+                error_code="key_extraction_failed",
+            )
+            print(error_output)
             await rollback_project_from_db(pool, new_name)
             return
 
@@ -3038,7 +3392,12 @@ async def _duplicate_and_store_keys(
         service = kv.get("SERVICE_ROLE_KEY_PROJETO")
         config_token = kv.get("CONFIG_TOKEN_PROJETO")
         if not anon or not service or not config_token:
-            await set_status("failed")
+            await _set_job_status(
+                job_id,
+                "failed",
+                message="Chaves obrigatórias ausentes no projeto duplicado",
+                error_code="missing_keys",
+            )
             print("Missing tokens")
             await rollback_project_from_db(pool, new_name)
             return
@@ -3046,6 +3405,13 @@ async def _duplicate_and_store_keys(
         anon_enc = fernet.encrypt(anon.encode()).decode()
         svc_enc  = fernet.encrypt(service.encode()).decode()
         config_enc = fernet.encrypt(config_token.encode()).decode()
+        await _set_job_status(
+            job_id,
+            "running",
+            message="Persistindo chaves criptografadas...",
+            progress=90,
+            current_step="store_keys",
+        )
         async with pool.acquire() as conn:
             await conn.execute(
                 """UPDATE projects
@@ -3054,10 +3420,20 @@ async def _duplicate_and_store_keys(
                 anon_enc, svc_enc, config_enc, new_name, owner_id
             )
 
-        await set_status("done")
+        await _set_job_status(
+            job_id,
+            "done",
+            message="Projeto duplicado com sucesso.",
+            current_step="completed",
+        )
 
     except Exception as e:
-        await set_status("failed")
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=f"Falha inesperada ao duplicar projeto: {e}",
+            error_code="unexpected_duplicate_error",
+        )
         print(f"Worker error: {e}")
         await rollback_project_from_db(pool, new_name)
 
@@ -3272,6 +3648,18 @@ async def _delete_project_impl(
     errors: list[str] = []
     db_name = f"_supabase_{project_name}"
 
+    async def report(progress: int, step: str, message: str) -> None:
+        if current_job_id:
+            await _set_job_status(
+                current_job_id,
+                "running",
+                message=message,
+                progress=progress,
+                current_step=step,
+                total_steps=8,
+            )
+
+    await report(5, "load_project_state", "Carregando estado do projeto...")
     project_env = _load_project_env(project_name)
     project_uuid = (
         project_env.get("PROJECT_UUID", "").strip()
@@ -3287,6 +3675,7 @@ async def _delete_project_impl(
             f"usando project_name: {project_name}"
         )
 
+    await report(15, "remove_containers", "Removendo containers do projeto...")
     containers = await get_project_containers(project_name)
     for container in containers:
         container_name = container.get("Names", "")
@@ -3301,6 +3690,7 @@ async def _delete_project_impl(
                 f"Erro ao remover {container_name}: {stderr or f'codigo {code}'}"
             )
 
+    await report(30, "remove_tenants", "Removendo tenants globais...")
     realtime_error = await _delete_tenant_api(
         service_label="Realtime",
         base_url=REALTIME_INTERNAL_URL,
@@ -3319,6 +3709,7 @@ async def _delete_project_impl(
 
     await asyncio.sleep(1)
 
+    await report(50, "clean_global_metadata", "Limpando metadata global...")
     async with pool.acquire() as conn:
         deleted_ext = await conn.execute(
             'DELETE FROM _realtime.extensions WHERE tenant_external_id = $1',
@@ -3360,6 +3751,7 @@ async def _delete_project_impl(
         elif supavisor_error:
             print(f"[delete_project] {supavisor_error}")
 
+        await report(65, "drop_database", "Removendo slots e database...")
         await conn.execute(
             """
             SELECT pg_terminate_backend(pid)
@@ -3378,6 +3770,11 @@ async def _delete_project_impl(
         except Exception as drop_error:
             errors.append(f"Erro ao dropar banco {db_name}: {drop_error}")
 
+        await report(
+            78,
+            "remove_control_plane",
+            "Removendo registros do control plane...",
+        )
         project_id = await conn.fetchval(
             "SELECT id FROM projects WHERE name = $1",
             project_name,
@@ -3404,11 +3801,13 @@ async def _delete_project_impl(
                 f"Projeto {project_name} não encontrado para limpeza final."
             )
 
+    await report(90, "remove_files", "Removendo arquivos do projeto...")
     success, stdout, stderr = await execute_delete_script(project_name)
     if not success:
         detail = stderr.strip() or stdout.strip() or "erro desconhecido"
         errors.append(f"Erro ao excluir diretórios: {detail}")
 
+    await report(96, "verify_cleanup", "Verificando limpeza final...")
     async with pool.acquire() as conn:
         db_exists = await conn.fetchval(
             "SELECT 1 FROM pg_database WHERE datname = $1",
@@ -3435,6 +3834,9 @@ async def _delete_project_background(job_id: str, project_name: str) -> None:
         job_id,
         "running",
         message="Excluindo projeto...",
+        progress=1,
+        current_step="starting",
+        total_steps=8,
     )
 
     try:
@@ -3449,10 +3851,20 @@ async def _delete_project_background(job_id: str, project_name: str) -> None:
         if result["errors"]:
             message = message + "\n" + "\n".join(result["errors"])
 
-        await _set_job_status(job_id, "done", message=message)
+        await _set_job_status(
+            job_id,
+            "done",
+            message=message,
+            current_step="completed",
+        )
     except Exception as exc:
         message = f"Falha ao excluir projeto: {exc}"
-        await _set_job_status(job_id, "failed", message=message)
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=message,
+            error_code="delete_failed",
+        )
         print(f"[delete_project] {project_name}: background task failed: {exc}")
 
 def get_project_uuid_from_env(project_name: str) -> Optional[str]:
@@ -3565,6 +3977,9 @@ async def delete_project(
         project_name,
         auth_user["db_user_id"],
         message="Exclusão enfileirada.",
+        action="delete",
+        payload={"project_name": project_name},
+        total_steps=8,
     )
     position = await _enqueue_project_action(
         project_name,
@@ -3615,6 +4030,12 @@ async def rotate_project_key(
         project_name,
         auth_user["db_user_id"],
         message="Rotação de chaves enfileirada.",
+        action="rotate_key",
+        payload={
+            "project_name": project_name,
+            "actor_user_id": str(auth_user["db_user_id"]),
+        },
+        total_steps=4,
     )
     position = await _enqueue_project_action(
         project_name,
@@ -3649,6 +4070,9 @@ async def _rotate_project_key_background(
         job_id,
         "running",
         message="Rotacionando chaves...",
+        progress=10,
+        current_step="rotate_keys",
+        total_steps=4,
     )
     try:
         if not ROTATE_SCRIPT.exists():
@@ -3672,6 +4096,9 @@ async def _rotate_project_key_background(
                 job_id,
                 "failed",
                 message=f"Rotate failed: {detail}",
+                stdout_tail=stdout_text,
+                stderr_tail=stderr_text,
+                error_code="rotate_script_failed",
             )
             return
 
@@ -3687,11 +4114,19 @@ async def _rotate_project_key_background(
                 job_id,
                 "failed",
                 message="Keys not returned from script",
+                error_code="missing_keys",
             )
             return
 
         anon_enc = fernet.encrypt(anon.encode()).decode()
         svc_enc = fernet.encrypt(service.encode()).decode()
+        await _set_job_status(
+            job_id,
+            "running",
+            message="Persistindo novas chaves...",
+            progress=85,
+            current_step="store_keys",
+        )
         pool = await get_pool()
         async with pool.acquire() as conn:
             await conn.execute(
@@ -3705,12 +4140,14 @@ async def _rotate_project_key_background(
             job_id,
             "done",
             message="Chaves rotacionadas com sucesso.",
+            current_step="completed",
         )
     except Exception as exc:
         await _set_job_status(
             job_id,
             "failed",
             message=f"Falha na rotação: {exc}",
+            error_code="rotate_failed",
         )
         print(f"[rotate-key] {project_name}: {exc}")
 
@@ -3848,22 +4285,52 @@ async def remove_member_by_ref(
 
 
 @app.get("/api/projects/status/{job_id}")
-async def project_status(job_id: str, pool=Depends(get_pool)):
+async def project_status(
+    job_id: str,
+    request: Request,
+    pool=Depends(get_pool),
+):
+    parsed_job_id = parse_uuid_value(job_id)
+    if parsed_job_id is None:
+        raise HTTPException(400, "job_id inválido")
+    auth_user = await resolve_authenticated_user(request, pool)
     row = await pool.fetchrow(
-        "SELECT status, message FROM jobs WHERE job_id=$1", job_id
+        """
+        SELECT
+            owner_id, status, message, action, progress, current_step,
+            total_steps, started_at, finished_at, updated_at, error_code
+        FROM jobs
+        WHERE job_id=$1
+        """,
+        parsed_job_id,
     )
+    if not row:
+        raise HTTPException(404, "Job not found")
+    if row["owner_id"] != auth_user["db_user_id"] and not auth_user["is_global_admin"]:
+        raise HTTPException(403, "Acesso negado a este job")
     return {
         "job_id": job_id,
-        "status": row["status"] if row else "unknown",
-        "message": row["message"] if row else None,
+        "status": row["status"],
+        "message": row["message"],
+        "action": row["action"],
+        "progress": row["progress"],
+        "current_step": row["current_step"],
+        "total_steps": row["total_steps"],
+        "error_code": row["error_code"],
+        "started_at": row["started_at"].isoformat() if row["started_at"] else None,
+        "finished_at": row["finished_at"].isoformat() if row["finished_at"] else None,
+        "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
     }
 
 @app.get("/api/projects/internal/enc-key/{ref}")
 async def enc_key(
     ref: str,
+    request: Request,
     pool=Depends(get_pool)
 ):
     ref = validate_project_id(ref)
+    if request.headers.get("X-Internal-Service") != "studio-nginx":
+        raise HTTPException(403, "Internal service access required")
 
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -3876,13 +4343,14 @@ async def enc_key(
 
 async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.UUID):
     pool = await get_pool()
-    async def set_status(st: str):
-        await pool.execute(
-          "UPDATE jobs SET status=$1, updated_at=now() WHERE job_id=$2",
-          st, job_id
-        )
-
-    await set_status("running")
+    await _set_job_status(
+        job_id,
+        "running",
+        message="Provisionando infraestrutura do projeto...",
+        progress=5,
+        current_step="provision_infrastructure",
+        total_steps=3,
+    )
 
     try:
         project_uuid = str(uuid.uuid4())
@@ -3894,11 +4362,25 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
         )
         stdout, _ = await proc.communicate()
         if proc.returncode != 0:
-            await set_status("failed")
-            print(stdout.decode())
+            output = stdout.decode(errors="replace")
+            await _set_job_status(
+                job_id,
+                "failed",
+                message="Falha ao provisionar infraestrutura",
+                stdout_tail=output,
+                error_code="provision_failed",
+            )
+            print(output)
             await rollback_project_from_db(pool, project_name)
             return
 
+        await _set_job_status(
+            job_id,
+            "running",
+            message="Extraindo chaves do projeto...",
+            progress=70,
+            current_step="extract_keys",
+        )
         proc2 = await asyncio.create_subprocess_exec(
             "bash", str(EXTRACTOR), project_name,
             stdout=asyncio.subprocess.PIPE,
@@ -3906,8 +4388,15 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
         )
         out2, err2 = await proc2.communicate()
         if proc2.returncode != 0:
-            await set_status("failed")
-            print(err2.decode())
+            error_output = err2.decode(errors="replace")
+            await _set_job_status(
+                job_id,
+                "failed",
+                message="Falha ao extrair chaves",
+                stderr_tail=error_output,
+                error_code="key_extraction_failed",
+            )
+            print(error_output)
             await rollback_project_from_db(pool, project_name)
             return
 
@@ -3917,7 +4406,12 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
         service = kv.get("SERVICE_ROLE_KEY_PROJETO")
         config_token = kv.get("CONFIG_TOKEN_PROJETO")
         if not anon or not service or not config_token:
-            await set_status("failed")
+            await _set_job_status(
+                job_id,
+                "failed",
+                message="Chaves obrigatórias ausentes",
+                error_code="missing_keys",
+            )
             print("Missing tokens")
             await rollback_project_from_db(pool, project_name)
             return
@@ -3925,6 +4419,13 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
         anon_enc = fernet.encrypt(anon.encode()).decode()
         svc_enc  = fernet.encrypt(service.encode()).decode()
         config_enc = fernet.encrypt(config_token.encode()).decode()
+        await _set_job_status(
+            job_id,
+            "running",
+            message="Persistindo chaves criptografadas...",
+            progress=90,
+            current_step="store_keys",
+        )
         async with pool.acquire() as conn:
             await conn.execute(
                 """UPDATE projects
@@ -3933,10 +4434,20 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
                 anon_enc, svc_enc, config_enc, project_name, user
             )
 
-        await set_status("done")
+        await _set_job_status(
+            job_id,
+            "done",
+            message="Projeto criado com sucesso.",
+            current_step="completed",
+        )
 
     except Exception as e:
-        await set_status("failed")
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=f"Falha inesperada ao criar projeto: {e}",
+            error_code="unexpected_create_error",
+        )
         print(f"Worker error: {e}")
         await rollback_project_from_db(pool, project_name)
 
@@ -4202,11 +4713,14 @@ def _sync_project_nginx_generated_files(project_name: str) -> None:
 async def _stop_project_containers(
     project_name: str,
     containers: list[dict],
+    *,
+    job_id: str | None = None,
 ) -> dict:
     stopped_containers: list[str] = []
     errors: list[str] = []
 
-    for container in _sort_project_containers(containers):
+    sorted_containers = _sort_project_containers(containers)
+    for index, container in enumerate(sorted_containers, start=1):
         container_name = container.get("Names", "")
         container_status = container.get("State", "")
 
@@ -4232,6 +4746,16 @@ async def _stop_project_containers(
         except Exception as exc:
             errors.append(f"Error stopping {container_name}: {exc}")
 
+        if job_id:
+            await _set_job_status(
+                job_id,
+                "running",
+                message=f"Parando containers ({index}/{len(sorted_containers)})...",
+                progress=min(95, int(index * 95 / max(len(sorted_containers), 1))),
+                current_step=f"stop_container:{container_name}",
+                total_steps=max(len(sorted_containers), 1),
+            )
+
     return {
         "project": project_name,
         "stopped_containers": stopped_containers,
@@ -4249,12 +4773,23 @@ async def _stop_project_containers_background(
         job_id,
         "running",
         message="Parando servicos do projeto...",
+        progress=1,
+        current_step="load_containers",
     )
     try:
-        result = await _stop_project_containers(project_name, containers)
+        result = await _stop_project_containers(
+            project_name,
+            containers,
+            job_id=job_id,
+        )
         if result["errors"]:
             message = "\n".join(result["errors"])
-            await _set_job_status(job_id, "failed", message=message)
+            await _set_job_status(
+                job_id,
+                "failed",
+                message=message,
+                error_code="stop_failed",
+            )
             print(
                 f"[stop_project] {project_name}: "
                 + " | ".join(result["errors"])
@@ -4265,10 +4800,16 @@ async def _stop_project_containers_background(
             job_id,
             "done",
             message="Projeto parado com sucesso.",
+            current_step="completed",
         )
     except Exception as exc:
         message = f"Falha ao parar projeto: {exc}"
-        await _set_job_status(job_id, "failed", message=message)
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=message,
+            error_code="stop_failed",
+        )
         print(f"[stop_project] {project_name}: background task failed: {exc}")
 
 
@@ -4324,12 +4865,20 @@ async def _recreate_project_services_background(
         job_id,
         "running",
         message=f"Recriando servicos: {', '.join(services)}",
+        progress=10,
+        current_step="recreate_services",
+        total_steps=2,
     )
     try:
         result = await _recreate_project_services_impl(project_name, services)
         if result["errors"]:
             message = "\n".join(result["errors"])
-            await _set_job_status(job_id, "failed", message=message)
+            await _set_job_status(
+                job_id,
+                "failed",
+                message=message,
+                error_code="recreate_failed",
+            )
             print(
                 f"[recreate_project_services] {project_name}: "
                 + " | ".join(result["errors"])
@@ -4339,12 +4888,25 @@ async def _recreate_project_services_background(
         _clear_project_pending_settings(project_name)
         await _set_job_status(
             job_id,
+            "running",
+            message="Limpando configurações pendentes...",
+            progress=90,
+            current_step="clear_pending_settings",
+        )
+        await _set_job_status(
+            job_id,
             "done",
             message=f"Servicos recriados: {', '.join(services)}",
+            current_step="completed",
         )
     except Exception as exc:
         message = f"Falha ao recriar servicos: {exc}"
-        await _set_job_status(job_id, "failed", message=message)
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=message,
+            error_code="recreate_failed",
+        )
         print(
             f"[recreate_project_services] {project_name}: "
             f"background task failed: {exc}"
@@ -4399,9 +4961,20 @@ async def get_project_docker_status(
     async with pool.acquire() as conn:
         auth_user = await resolve_authenticated_user(request, pool)
         project_row = await get_project_row(conn, project_name)
-        await ensure_project_member_access(conn, project_id=project_row["id"], auth_user=auth_user)
+        await ensure_project_member_access(
+            conn,
+            project_id=project_row["id"],
+            auth_user=auth_user,
+        )
+        project_role = await get_project_role(
+            conn,
+            project_id=project_row["id"],
+            auth_user=auth_user,
+        )
 
     status_info = await get_project_status(project_name)
+    if project_role != "admin" and not auth_user["is_global_admin"]:
+        status_info.pop("containers", None)
     return status_info
 
 @app.post("/api/projects/{project_name}/stop")
@@ -4426,6 +4999,9 @@ async def stop_project(
         project_name,
         auth_user["db_user_id"],
         message="Parada enfileirada.",
+        action="stop",
+        payload={"project_name": project_name},
+        total_steps=max(len(containers), 1),
     )
     position = await _enqueue_project_action(
         project_name,
@@ -4474,6 +5050,12 @@ async def start_project(
         project_name,
         auth_user["db_user_id"],
         message="Inicialização enfileirada.",
+        action="start",
+        payload={
+            "project_name": project_name,
+            "actor_user_id": str(auth_user["db_user_id"]),
+        },
+        total_steps=max(len(containers), 1),
     )
     position = await _enqueue_project_action(
         project_name,
@@ -4508,12 +5090,15 @@ async def _start_project_containers_background(
         job_id,
         "running",
         message="Iniciando containers...",
+        progress=1,
+        current_step="load_containers",
+        total_steps=max(len(containers), 1),
     )
     try:
         sorted_containers = _sort_project_containers(containers)
         started_containers: list[str] = []
         errors: list[str] = []
-        for container in sorted_containers:
+        for index, container in enumerate(sorted_containers, start=1):
             container_name = container.get("Names", "")
             container_status = container.get("State", "")
             try:
@@ -4537,23 +5122,34 @@ async def _start_project_containers_background(
             except Exception as exc:
                 errors.append(f"Error starting {container_name}: {exc}")
 
+            await _set_job_status(
+                job_id,
+                "running",
+                message=f"Iniciando containers ({index}/{len(sorted_containers)})...",
+                progress=min(95, int(index * 95 / max(len(sorted_containers), 1))),
+                current_step=f"start_container:{container_name}",
+            )
+
         if errors:
             await _set_job_status(
                 job_id,
                 "failed",
                 message="\n".join(errors),
+                error_code="start_failed",
             )
             return
         await _set_job_status(
             job_id,
             "done",
             message=f"Iniciado: {', '.join(started_containers)}",
+            current_step="completed",
         )
     except Exception as exc:
         await _set_job_status(
             job_id,
             "failed",
             message=f"Falha ao iniciar: {exc}",
+            error_code="start_failed",
         )
         print(f"[start_project] {project_name}: {exc}")
 
@@ -4581,6 +5177,12 @@ async def restart_project(
         project_name,
         auth_user["db_user_id"],
         message="Reinicialização enfileirada.",
+        action="restart",
+        payload={
+            "project_name": project_name,
+            "actor_user_id": str(auth_user["db_user_id"]),
+        },
+        total_steps=max(len(containers), 1),
     )
     position = await _enqueue_project_action(
         project_name,
@@ -4615,12 +5217,15 @@ async def _restart_project_containers_background(
         job_id,
         "running",
         message="Reiniciando containers...",
+        progress=1,
+        current_step="load_containers",
+        total_steps=max(len(containers), 1),
     )
     try:
         sorted_containers = _sort_project_containers(containers)
         restarted_containers: list[str] = []
         errors: list[str] = []
-        for cont in sorted_containers:
+        for index, cont in enumerate(sorted_containers, start=1):
             name = cont.get("Names", "")
             try:
                 proc = await asyncio.create_subprocess_exec(
@@ -4643,23 +5248,34 @@ async def _restart_project_containers_background(
             except Exception as exc:
                 errors.append(f"Error restarting {name}: {exc}")
 
+            await _set_job_status(
+                job_id,
+                "running",
+                message=f"Reiniciando containers ({index}/{len(sorted_containers)})...",
+                progress=min(95, int(index * 95 / max(len(sorted_containers), 1))),
+                current_step=f"restart_container:{name}",
+            )
+
         if errors:
             await _set_job_status(
                 job_id,
                 "failed",
                 message="\n".join(errors),
+                error_code="restart_failed",
             )
             return
         await _set_job_status(
             job_id,
             "done",
             message=f"Reiniciado: {', '.join(restarted_containers)}",
+            current_step="completed",
         )
     except Exception as exc:
         await _set_job_status(
             job_id,
             "failed",
             message=f"Falha ao reiniciar: {exc}",
+            error_code="restart_failed",
         )
         print(f"[restart_project] {project_name}: {exc}")
 
@@ -4679,7 +5295,13 @@ async def get_container_logs(
     async with pool.acquire() as conn:
         auth_user = await resolve_authenticated_user(request, pool)
         project_row = await get_project_row(conn, project_name)
-        await ensure_project_member_access(conn, project_id=project_row["id"], auth_user=auth_user)
+        await ensure_project_admin_access(
+            conn,
+            project_id=project_row["id"],
+            auth_user=auth_user,
+            message="Apenas admins podem consultar logs do projeto",
+        )
+        project_id = project_row["id"]
 
     container_name = f"supabase-{service}-{project_name}"
 
@@ -4697,26 +5319,38 @@ async def get_container_logs(
         proc_logs = await asyncio.create_subprocess_exec(
             "docker", "logs", "--tail", str(lines), "--timestamps", container_name,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.STDOUT,
         )
-        stdout_logs, stderr_logs = await proc_logs.communicate()
+        stdout_logs, _ = await proc_logs.communicate()
 
         if proc_logs.returncode != 0:
-            raise HTTPException(500, f"Error getting logs: {stderr_logs.decode()}")
+            raise HTTPException(500, "Error getting container logs")
 
         container_info = json.loads(stdout_check.decode())[0]
         c_status = container_info.get("State", {}).get("Status", "unknown")
 
+        async with pool.acquire() as conn:
+            await audit_studio_action(
+                conn,
+                project_id=project_id,
+                actor_user_id=auth_user["db_user_id"],
+                action="project_logs_read",
+                target_type="container_logs",
+                target_id=container_name,
+                new_value={"service": service, "lines": lines},
+            )
+
         return {
             "container": container_name,
-            "logs": stdout_logs.decode('utf-8'),
+            "logs": stdout_logs.decode("utf-8", errors="replace"),
             "status": c_status
         }
 
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(500, f"Error accessing container: {str(e)}")
+    except Exception as exc:
+        print(f"[project_logs] {project_name}/{service}: {exc}")
+        raise HTTPException(500, "Error accessing container logs") from exc
 
 @app.post("/api/projects/admin/projects-info")
 async def get_projects_for_user(
@@ -4953,7 +5587,12 @@ async def proxy_project_meta(
 
     async with pool.acquire() as conn:
         project_row = await get_project_row(conn, ref)
-        await ensure_project_member_access(conn, project_id=project_row["id"], auth_user=auth_user)
+        await ensure_project_admin_access(
+            conn,
+            project_id=project_row["id"],
+            auth_user=auth_user,
+            message="Apenas admins podem acessar roles e metadados do banco",
+        )
 
     try:
         expected_apikey = _get_project_service_role_key(ref)
@@ -5017,6 +5656,7 @@ async def get_project_ai_functions(
         project_row = await get_project_row(conn, ref)
         await ensure_project_member_access(conn, project_id=project_row["id"], auth_user=auth_user)
 
+    proj_conn = None
     try:
         proj_conn = await get_project_conn(ref)
         rows = await proj_conn.fetch("""
@@ -5028,26 +5668,34 @@ async def get_project_ai_functions(
             FROM pg_proc p
             JOIN pg_namespace n ON n.oid = p.pronamespace
             WHERE n.nspname = 'public'
-              AND p.prokind IN ('f', 'p')
+              AND p.prokind = 'f'
+              AND p.proargmodes IS NULL
               AND obj_description(p.oid, 'pg_proc') ILIKE '%[AI]%'
-            ORDER BY p.proname
+            ORDER BY p.proname, p.oid
         """)
-        await proj_conn.close()
-    except Exception as e:
-        raise HTTPException(503, f"Cannot connect to project database: {str(e)}")
+    except Exception as exc:
+        raise HTTPException(503, "Cannot connect to project database") from exc
+    finally:
+        if proj_conn:
+            await proj_conn.close()
 
     functions = []
     for r in rows:
         comment = r["comment"] or ""
-        clean_desc = comment.replace("[AI]", "").strip()
+        clean_desc = re.sub(r"\[AI\]", "", comment, flags=re.IGNORECASE).strip()
         functions.append({
             "name": r["name"],
             "argument_types": r["argument_types"] or "",
             "return_type": r["return_type"] or "void",
-            "comment": comment,
+            "comment": clean_desc,
             "schema": "public",
         })
     return functions
+
+
+AI_TOOL_MAX_ROWS = 1000
+AI_TOOL_TIMEOUT_MS = 30000
+
 
 @app.post("/api/projects/{ref}/execute-function")
 async def execute_project_function(
@@ -5073,72 +5721,107 @@ async def execute_project_function(
     async with pool.acquire() as conn:
         auth_user = await resolve_authenticated_user(request, pool)
         project_row = await get_project_row(conn, ref)
-        await ensure_project_member_access(conn, project_id=project_row["id"], auth_user=auth_user)
+        await ensure_project_admin_access(
+            conn,
+            project_id=project_row["id"],
+            auth_user=auth_user,
+            message="Apenas admins podem executar AI tools",
+        )
+        project_id = project_row["id"]
 
     proj_conn = None
     try:
         proj_conn = await get_project_conn(ref)
-        
-        func_info = await proj_conn.fetchrow("""
-            SELECT 
-                p.proname as name,
-                pg_get_function_arguments(p.oid) as args,
-                obj_description(p.oid, 'pg_proc') as comment
+
+        candidates = await proj_conn.fetch("""
+            SELECT
+                p.oid,
+                p.proname AS name,
+                p.proargnames AS argument_names,
+                p.pronargs AS argument_count,
+                p.pronargdefaults AS default_count
             FROM pg_proc p
             JOIN pg_namespace n ON p.pronamespace = n.oid
-            WHERE n.nspname = 'public' 
+            WHERE n.nspname = 'public'
+              AND p.prokind = 'f'
+              AND p.proargmodes IS NULL
             AND p.proname = $1
+              AND obj_description(p.oid, 'pg_proc') ILIKE '%[AI]%'
+            ORDER BY p.oid
         """, function_name)
-        
-        if not func_info:
+
+        if not candidates:
             raise HTTPException(404, f"Function '{function_name}' not found in public schema")
-        
-        comment = func_info['comment'] or ""
-        ai_tags = ["[ai]", "@ai-tool", "@ai", "#ai"]
-        has_ai_tag = any(tag in comment.lower() for tag in ai_tags)
-        
-        if not has_ai_tag:
-            raise HTTPException(403, f"Function '{function_name}' is not tagged as [AI] and cannot be executed")
-        
-        func_args = func_info['args'] or ""
-        param_names = []
-        optional_params = []
+        if len(candidates) > 1:
+            raise HTTPException(
+                409,
+                "AI tool com overload ambíguo; mantenha uma única assinatura por nome",
+            )
 
-        for arg in func_args.split(','):
-            arg = arg.strip()
-            if not arg:
+        function = candidates[0]
+        argument_count = int(function["argument_count"] or 0)
+        default_count = int(function["default_count"] or 0)
+        argument_names = list(function["argument_names"] or [])[:argument_count]
+        if len(argument_names) != argument_count or any(
+            not name or not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", name)
+            for name in argument_names
+        ):
+            raise HTTPException(409, "AI tools exigem nomes em todos os argumentos")
+
+        unknown_arguments = set(arguments) - set(argument_names)
+        if unknown_arguments:
+            raise HTTPException(
+                400,
+                f"Unexpected parameters: {', '.join(sorted(unknown_arguments))}",
+            )
+        required_count = argument_count - default_count
+        missing = [name for name in argument_names[:required_count] if name not in arguments]
+        if missing:
+            raise HTTPException(400, f"Missing required parameter: {missing[0]}")
+
+        values: list[Any] = []
+        named_placeholders: list[str] = []
+        for name in argument_names:
+            if name not in arguments:
                 continue
-            parts = arg.split()
-            if not parts:
-                continue
-            param_name = parts[0]
-            if 'DEFAULT' in arg.upper():
-                optional_params.append(param_name)
-            else:
-                param_names.append(param_name)
+            values.append(arguments[name])
+            named_placeholders.append(f'"{name}" => ${len(values)}')
 
-        for param_name in param_names:
-            if param_name not in arguments:
-                raise HTTPException(400, f"Missing required parameter: {param_name}")
+        query = (
+            f'SELECT public."{function_name}"('
+            + ", ".join(named_placeholders)
+            + f") AS result LIMIT {AI_TOOL_MAX_ROWS}"
+        )
+        async with proj_conn.transaction():
+            await proj_conn.fetchval(
+                "SELECT set_config('statement_timeout', $1, true)",
+                str(AI_TOOL_TIMEOUT_MS),
+            )
+            rows = await proj_conn.fetch(query, *values)
 
-        ordered_args = []
-        for param_name in param_names:
-            ordered_args.append(arguments[param_name])
-        for param_name in optional_params:
-            if param_name in arguments:
-                ordered_args.append(arguments[param_name])
-        
-        placeholders = ", ".join(f"${i+1}" for i in range(len(ordered_args)))
-        query = f"SELECT {function_name}({placeholders}) as result"
-        
-        rows = await proj_conn.fetch(query, *ordered_args)
-        
-        return [dict(r) for r in rows]
-        
+        async with pool.acquire() as conn:
+            await audit_studio_action(
+                conn,
+                project_id=project_id,
+                actor_user_id=auth_user["db_user_id"],
+                action="project_ai_tool_executed",
+                target_type="database_function",
+                target_id=f"public.{function_name}",
+                new_value={
+                    "argument_names": sorted(arguments.keys()),
+                    "returned_rows": len(rows),
+                    "row_limit": AI_TOOL_MAX_ROWS,
+                },
+            )
+
+        return [dict(row) for row in rows]
+
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(400, f"Function execution error: {str(e)}")
+    except asyncpg.QueryCanceledError as exc:
+        raise HTTPException(504, "AI tool execution timed out") from exc
+    except Exception as exc:
+        raise HTTPException(400, "Function execution failed") from exc
     finally:
         if proj_conn:
             await proj_conn.close()
@@ -5407,6 +6090,9 @@ async def recreate_project_services(
         project_name,
         auth_user["db_user_id"],
         message="Recriação enfileirada.",
+        action="recreate_services",
+        payload={"project_name": project_name, "services": services},
+        total_steps=2,
     )
     position = await _enqueue_project_action(
         project_name,

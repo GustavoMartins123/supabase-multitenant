@@ -22,7 +22,6 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
       {
         'name': name,
         'anon_token': '',
-        'config_token': '',
         'file_size_limit': '',
         'storage_limit_token': '',
         'is_loading': true,
@@ -56,7 +55,6 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
       {
         'name': newName,
         'anon_token': '',
-        'config_token': '',
         'file_size_limit': '',
         'storage_limit_token': '',
         'is_loading': true,

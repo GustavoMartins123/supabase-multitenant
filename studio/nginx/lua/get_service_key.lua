@@ -3,10 +3,6 @@ local fernet = require "resty.fernet"
 local cjson = require "cjson"
 
 local DSN = os.getenv("SERVER_DOMAIN")
-local fernet = require "resty.fernet"
-local cjson = require "cjson"
-
-local DSN = os.getenv("SERVER_DOMAIN")
 local hostname = string.match(DSN, "//([^/:]+)") or "localhost"
 local TOKEN = os.getenv("NGINX_SHARED_TOKEN")
 local SEC = os.getenv("FERNET_SECRET")
@@ -44,6 +40,7 @@ local function get_service_key(ref)
         { 
             headers = {
                 ["X-Shared-Token"] = TOKEN,
+                ["X-Internal-Service"] = "studio-nginx",
                 ["Host"] = hostname,
             },
             ssl_verify = false, 

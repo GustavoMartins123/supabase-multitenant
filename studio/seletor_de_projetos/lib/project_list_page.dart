@@ -464,7 +464,6 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
     return ProjectCard(
       refKey: project['name'] as String,
       anonKey: project['anon_token'] ?? '',
-      configToken: project['config_token'] ?? '',
       isLoading: project['is_loading'] == true,
       isFavorite: isFavorite,
       serverDomain: serverDomain,

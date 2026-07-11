@@ -15,7 +15,6 @@ class ProjectCard extends ConsumerStatefulWidget {
     super.key,
     required this.refKey,
     required this.anonKey,
-    required this.configToken,
     required this.onTap,
     required this.onDeleted,
     required this.onDuplicate,
@@ -28,7 +27,6 @@ class ProjectCard extends ConsumerStatefulWidget {
 
   final String refKey;
   final String anonKey;
-  final String configToken;
   final String? displayName;
   final String? serverDomain;
   final VoidCallback onTap;
@@ -53,7 +51,6 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
       builder: (_) => ProjectSettingsDialog(
         ref: widget.refKey,
         anonKey: widget.anonKey,
-        configToken: widget.configToken,
         displayName: widget.displayName,
       ),
     );
