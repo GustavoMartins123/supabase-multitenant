@@ -1,244 +1,201 @@
-# supabase-multitenant Documentation
+# supabase-multitenant
 
-[Read this setup in Brazilian Portuguese 🇧🇷](./LEIAME.md)
+> Projeto não oficial e ainda em desenvolvimento ativo.
 
-## Overview
+Este repositório adapta a stack self-hosted do Supabase para executar e gerenciar múltiplos projetos isolados na mesma infraestrutura.
 
-The official Supabase self-hosting stack is designed for a single project. This repository solves that limitation by offering a multi-tenant architecture.
+A proposta não é transformar o Supabase em um SaaS multi-tenant por RLS. Cada projeto provisionado possui seu próprio database, JWT secret, tenant do Realtime, tenant do Supavisor e containers de Auth, REST, Storage, ImgProxy e Nginx.
 
-The solution provisions an isolated database for each new tenant and uses an orchestration API (FastAPI) to manage the project lifecycle. The key differentiator is a dynamic OpenResty/Lua gateway that allows a **single Supabase Studio instance** to securely and centrally manage all tenants, bypassing a fundamental limitation of the tool.
+O sistema também mantém um control plane próprio para criação, duplicação, renomeação, configuração, rotação de chaves, start/stop/restart e remoção dos projetos.
 
------
+## Estado do projeto
 
-## Table of Contents
+O projeto está em fase alpha e recebe mudanças frequentes. Antes de usar em produção, revise principalmente:
 
-  - [Overview](#overview)
-  - [Purpose](#purpose)
-  - [Architecture](#architecture)
-  - [Prerequisites](#prerequisites)
-  
-### How to Use
+- backup e restore;
+- política de atualização das imagens do Supabase;
+- exposição de rede do Studio e da API interna;
+- armazenamento das chaves mestras;
+- limites de PostgreSQL, Supavisor e Realtime;
+- testes de deleção, rename, rotação de chaves e recuperação de jobs.
 
-  - [1. Clone the Repository](#clone-the-repository)
-  - [2. Run the Setup Script](#run-the-setup-script)
-  - [3. Execution Order](#execution-order)
-  - [4. Verification](#verification)
+Não trate este repositório como um instalador pronto para qualquer ambiente. Ele parte de decisões específicas de arquitetura e segurança que precisam ser entendidas antes do deploy.
 
-### Maintenance and Important Notes
+## Quando usar
 
-  - [SSL Certificate Rotation](#ssl-certificate-rotation)
+Este projeto faz sentido quando você precisa:
 
-## Purpose
+- hospedar vários projetos Supabase em uma infraestrutura controlada por você;
+- manter databases separados por projeto;
+- reduzir a duplicação dos serviços globais mais pesados;
+- usar uma única instância do Supabase Studio para administrar os projetos;
+- operar em uma máquina ou separar o Studio local do servidor principal;
+- controlar o ciclo de vida dos projetos por uma API própria.
 
-To simplify the creation and management of new projects using the Supabase architecture as a foundation.
+## Quando não usar
 
------
+Não é a melhor escolha quando:
 
-## Architecture
+- um único projeto Supabase já atende o sistema;
+- isolamento por schema ou RLS é suficiente;
+- você precisa de suporte oficial e atualização transparente do Supabase Cloud;
+- não pretende manter patches no Realtime e na camada OpenResty/Lua;
+- precisa de alta disponibilidade horizontal pronta;
+- não consegue manter backup, monitoramento e rotação de segredos da infraestrutura.
+
+## Arquitetura resumida
 
 ```mermaid
-flowchart TB
- subgraph subGraph0["Local Studio - :9091"]
-        Authelia["🔐 Authelia\nAuthentication"]
-        Lan["🛜 Internet/Users/LAN"]
-        Nginx["🌐 Nginx/OpenResty :443\nLocal Manager"]
-        Flutter["📱 Flutter Web\nProject Selector"]
-        Studio["📊 Supabase Studio\nFinal Interface"]
-  end
- subgraph subGraph1["Local Server - Shared Services"]
-        DB["🗄️ PostgreSQL\nsupabase-db\nMain Database"]
-        Realtime["⚡ Realtime :4000\nGlobal"]
-        Pooler["🏊 Supavisor\nConnection Pooler\nGlobal"]
-        Functions["⚙️ Edge Functions\n/functions/main\nGlobal"]
-        MetaGlobal["🔧 Postgres Meta :8080\nGlobal"]
-  end
- subgraph subGraph2["Project A (project_id_a)"]
-        NginxA["🌐 Nginx A :port_a\n/project_id_a"]
-        AuthA["🔑 GoTrue A :9999"]
-        RestA["📡 PostgREST A :3000"]
-        StorageA["📦 Storage A :5000"]
-        ImgA["🖼️ ImgProxy A :5001"]
-  end
- subgraph subGraph3["Project B (project_id_b)"]
-        NginxB["🌐 Nginx B :port_b\n/project_id_b"]
-        AuthB["🔑 GoTrue B :9999"]
-        RestB["📡 PostgREST B :3000"]
-        StorageB["📦 Storage B :5000"]
-        ImgB["🖼️ ImgProxy B :5001"]
-  end
- subgraph subGraph4["Dynamic Projects"]
-    direction TB
-        subGraph2
-        subGraph3
-  end
- subgraph subGraph5["Docker Network"]
-        Network["🔗 rede-supabase\n172.50.0.0/16"]
-  end
-    World["🌐 Internet/Users"] -- World --> Traefik["🚦 Traefik :80/:443\nMain Gateway"]
-    Lan -- :9091 --> Nginx
-    Nginx -- "/auth" --> Authelia
-    Nginx --> Flutter
-    Flutter --> Studio
-    Nginx -. "LAN - Per-project requests via '/project_id'" .-> Traefik
-    Traefik -. LAN .-> API["🐍 Projects API :18000\nPython\nManages Projects"]
-    Pooler --> DB
-    MetaGlobal -. "Encrypted dynamic connection" .-> DB
-    NginxA --> AuthA & RestA & StorageA & Functions
-    StorageA --> ImgA
-    NginxB --> AuthB & RestB & StorageB & Functions
-    StorageB --> ImgB
-    Traefik --> NginxA
-    Traefik --> NginxB
-    AuthA -. via Pooler .-> Pooler
-    RestA -. via Pooler .-> Pooler
-    StorageA -. via Pooler .-> Pooler
-    AuthB -. via Pooler .-> Pooler
-    RestB -. via Pooler .-> Pooler
-    StorageB -. via Pooler .-> Pooler
-    NginxA -. WebSocket .-> Realtime
-    NginxB -. WebSocket .-> Realtime
-    Nginx -. "pg-meta via Projects API" .-> API
-    API -. "x-connection-encrypted" .-> MetaGlobal
-    API -. Creates/Manages .-> NginxA & NginxB
-    API -. Docker Socket .-> DockerSock["🐳 Docker Socket\nContainer Creation"]
-    Flutter -. "/set-project?ref=" .-> Nginx
-     Authelia:::studio
-     Nginx:::studio
-     Flutter:::studio
-     Studio:::studio
-     DB:::shared
-     Realtime:::shared
-     Pooler:::shared
-     Functions:::shared
-     MetaGlobal:::shared
-     NginxA:::project
-     AuthA:::project
-     RestA:::project
-     StorageA:::project
-     ImgA:::project
-     NginxB:::project
-     AuthB:::project
-     RestB:::project
-     StorageB:::project
-     ImgB:::project
-     World:::external
-     Traefik:::gateway
-     API:::api
-    classDef external fill:#e1f5fe
-    classDef gateway fill:#f3e5f5
-    classDef shared fill:#e8f5e8
-    classDef project fill:#fff3e0
-    classDef studio fill:#fce4ec
-    classDef api fill:#f1f8e9
+flowchart LR
+    User[Usuário] --> StudioGateway[Studio Gateway\nNginx/OpenResty :9091]
+    StudioGateway --> Authelia[Authelia]
+    StudioGateway --> Flutter[Seletor Flutter]
+    StudioGateway --> Studio[Supabase Studio]
+
+    StudioGateway --> Traefik[Traefik]
+    Traefik --> ProjectsAPI[Projects API\nFastAPI]
+    Traefik --> TenantGateway[Nginx do projeto]
+
+    ProjectsAPI --> PostgreSQL[(PostgreSQL)]
+    ProjectsAPI --> Docker[Docker Socket]
+    ProjectsAPI --> Realtime[Realtime global]
+    ProjectsAPI --> Supavisor[Supavisor global]
+
+    TenantGateway --> Auth[GoTrue]
+    TenantGateway --> Rest[PostgREST]
+    TenantGateway --> Storage[Storage]
+    TenantGateway --> ImgProxy[ImgProxy]
+    TenantGateway --> Functions[Edge Functions global]
+    TenantGateway --> Realtime
+
+    Auth --> Supavisor
+    Rest --> Supavisor
+    Storage --> Supavisor
+    Supavisor --> PostgreSQL
 ```
 
------
+### Serviços globais
 
-## Prerequisites
+- PostgreSQL;
+- Supavisor;
+- Realtime modificado;
+- Edge Functions;
+- Postgres-Meta global;
+- API Python de projetos;
+- Traefik;
+- Vector para logs globais.
 
-| Item | Description |
-|---|---|
-| Docker & Docker Compose | Installed and running. |
-| User    | With permission to run docker commands. 
------
+### Serviços por projeto
 
-## How to Use
+- Nginx do tenant;
+- GoTrue;
+- PostgREST;
+- Storage;
+- ImgProxy;
+- database `_supabase_<project_ref>`;
+- diretório de configuração e arquivos do projeto.
 
-### 1\. Clone the Repository
+## Identificadores importantes
+
+O sistema usa identificadores diferentes para finalidades diferentes:
+
+| Identificador | Exemplo | Uso |
+| --- | --- | --- |
+| `project UUID` | `0df3...` | identidade canônica do projeto e `external_id` do Realtime |
+| `project ref` | `cliente_a` | URL, diretório, nome do database e tenant do Supavisor |
+| database | `_supabase_cliente_a` | isolamento dos dados do projeto |
+| replication slot | `supabase_realtime_replication_slot_cliente_a` | CDC do database do projeto |
+
+Não use o nome do projeto como substituto do UUID em fluxos de identidade. O nome pode ser alterado; o UUID deve permanecer estável.
+
+## Topologias suportadas
+
+### Uma máquina
+
+Studio, Traefik, API, PostgreSQL e projetos rodam no mesmo host.
+
+É o modo mais simples para desenvolvimento, laboratório e validação da stack.
+
+### Duas máquinas
+
+- máquina local: Authelia, OpenResty, Flutter e Supabase Studio;
+- servidor principal: Traefik, API Python, PostgreSQL, Supavisor, Realtime e projetos.
+
+Essa separação existe porque o Studio e a camada Lua funcionam como uma interface administrativa local, enquanto o servidor principal concentra o data plane e as rotas dos projetos.
+
+## Início rápido
+
+### Pré-requisitos
+
+- Linux;
+- Docker;
+- Docker Compose;
+- usuário com acesso ao Docker;
+- `openssl`, `curl`, `jq`, `sed` e utilitários padrão de shell.
+
+### Configuração
 
 ```bash
-git clone git@github.com:GustavoMartins123/supabase-multitenant.git
+git clone https://github.com/GustavoMartins123/supabase-multitenant.git
 cd supabase-multitenant
+bash setup.sh
 ```
 
-### 2\. Run the Setup Script
+Durante o setup:
+
+- o endereço informado representa o servidor principal;
+- o IP local detectado é usado pelo Studio local;
+- informar o mesmo endereço prepara uma instalação em uma máquina;
+- informar endereços diferentes prepara a topologia separada.
+
+### Inicialização
 
 ```bash
-sudo bash setup.sh
-# The IP/domain requested by the script is the main server host (Traefik/API/projects).
-```
-
-Important:
-
-- During `setup.sh`, the typed IP/domain is treated as the **main server** host.
-- The script also detects the **local IP of the current machine**, which is used for the local Studio stack (`Authelia + Nginx/OpenResty`), the self-signed certificate, and the default `PUSH_API_URL`.
-- If you type the same IP as the local machine, the setup prepares a single-machine installation.
-
-### 3\. Starting the containers
-
-* You have two options for running the platform. Choose the one that best fits your needs.
-
-**Option 1: Automated Start (Recommended)**
-
-* For most use cases, especially for a first run, the provided script handles starting all services in the correct order.
-
-```bash
-# This will start the core services, the gateway, and the management UI
 bash start.sh
 ```
 
-> Do not run `start.sh` with `sudo`. Running the whole stack as root changes
-> environment variables, Docker Compose context, file ownership, and mounted
-> volume permissions. This can prevent Studio/Authelia from syncing user IDs
-> correctly. If Docker requires elevated permissions, add your user to the
-> `docker` group and log in again:
->
-> ```bash
-> sudo usermod -aG docker "$USER"
-> ```
+Não execute o `start.sh` inteiro com `sudo`. Isso altera contexto do Docker, ownership dos arquivos e variáveis de ambiente. Quando necessário, configure o usuário no grupo `docker`.
 
-**Option 2: Manual Start (For Control or Debugging)**
+O Studio fica disponível por padrão em:
 
-  1.  **Start the Base Services (Database):**
-
-      ```bash
-      # Starts PostgreSQL, the management API, etc.
-      cd servidor/
-      docker compose --env-file .env up -d
-      cd .. 
-      ```
-
-  2.  **Start the Edge Gateway (Traefik):**
-
-      ```bash
-      # Starts the reverse proxy that manages all external traffic.
-      cd traefik/
-      docker compose up -d
-      cd ..
-      ```
-
-  3.  **Start the Management Interface (Studio):**
-
-      ```bash
-      # Starts Nginx/Lua and the Flutter interface.
-      cd studio/
-      sudo docker compose up -d
-      cd ..
-      # Note: In the base architecture, the studio is intended to be used on a machine other than the server,
-      # but it should also work on a single machine, it's up to you.
-      ```
-
-### 4\. Verification
-
-After a few moments, check if all containers are running:
-
-```bash
-docker ps
+```text
+https://<ip-local>:9091
 ```
 
-If everything has the status `Up`, access the Studio endpoint at the IP you configured in `setup.sh` (e.g., `https://<your_local_ip>:9091`). On the first access, create the initial administrator account in the browser. After that, the app redirects you to the Authelia login flow.
+No primeiro acesso, a interface permite criar o administrador inicial. Depois do bootstrap, a autenticação passa pelo Authelia.
 
-Important about the Studio ports:
+## Documentação
 
-- `9091` is the single public Studio endpoint served by Nginx/OpenResty.
-- Plain HTTP requests to `:9091` are redirected to HTTPS on the same port.
-- Authelia is reached through the same origin under `/auth`.
-- The usual browser flow is: open `https://<your_local_ip>:9091`; if no admin exists, create the initial administrator, otherwise the app redirects unauthenticated users to Authelia.
-- Server-to-server integrations that target the Studio gateway, such as the `push-worker`, must also use port `9091`.
+O índice canônico fica em [`docs/README.md`](docs/README.md).
 
-## Maintenance and Important Notes
+Leituras principais:
 
-### SSL Certificate Rotation
+- [Visão geral da arquitetura](docs/00-arquitetura.md)
+- [Control plane](docs/architecture/control-plane.md)
+- [Lifecycle dos projetos](docs/architecture/project-lifecycle.md)
+- [OpenResty/Lua](docs/architecture/openresty-lua.md)
+- [Realtime multi-tenant](docs/09-autenticacao-multi-tenant-realtime.md)
+- [Hardening do Postgres-Meta](docs/10-hardening-postgres-meta.md)
+- [Criptografia e rotação de segredos](docs/11-rotacao-cripto-conexoes.md)
 
-  * The `setup.sh` script automatically generates a self-signed SSL certificate for Authelia and the Studio's Nginx, ensuring HTTPS communication on your local network.
-  * **Warning:** By default, this certificate is valid for **1 year**. After this period, it will stop working.
+## Desenvolvimento e validação
+
+As mudanças mais sensíveis devem ser acompanhadas pelos smoke tests em `tests/smoke/`.
+
+Antes de alterar lifecycle, autenticação, cache ou segredos, valide pelo menos:
+
+```bash
+python -m pytest tests/smoke
+```
+
+Também valide a sintaxe e a configuração dos componentes afetados, por exemplo:
+
+```bash
+nginx -t
+luac -p arquivo.lua
+bash -n script.sh
+```
+
+## Licença
+
+Este repositório mantém a licença Apache 2.0 e os avisos de copyright dos componentes derivados do Supabase.
