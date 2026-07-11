@@ -235,10 +235,8 @@ for file in .env docker-compose.yml Dockerfile pooler/pooler.exs; do
   [[ -f "$OLD_DIR/$file" ]] || die "Arquivo do projeto ausente: $file"
 done
 
-set -a
 source "$PROJECT_ROOT/.env"
 source "$OLD_DIR/.env"
-set +a
 
 for variable in POSTGRES_HOST POSTGRES_PASSWORD POSTGRES_PORT SERVER_URL \
   JWT_SECRET JWT_SECRET_PROJETO PROJECT_UUID ANON_KEY_PROJETO \
