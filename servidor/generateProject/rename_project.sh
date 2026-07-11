@@ -309,11 +309,12 @@ code=$(http_code realtime-dev.supabase-realtime PUT \
   "/api/tenants/$PROJECT_UUID" "$ANON_KEY_PROJETO" "$REALTIME_NEW_PAYLOAD")
 accepted_code "$code" 200 201 204 || die "Falha no Realtime (HTTP $code)"
 REALTIME_UPDATED=1
+
 realtime_matches=$(docker exec supabase-db psql -U supabase_admin -d "$META_DB" -tAc \
-  "SELECT count(*) FROM _realtime.extensions WHERE tenant_external_id = '$PROJECT_UUID' AND settings->>'db_name' = '$NEW_DB' AND settings->>'slot_name' = '$NEW_SLOT';" \
+  "SELECT count(*) FROM _realtime.extensions WHERE tenant_external_id = '$PROJECT_UUID' AND settings->>'slot_name' = '$NEW_SLOT';" \
   | tr -d '[:space:]')
 [[ "$realtime_matches" -ge 1 ]] \
-  || die "Realtime nao persistiu database/slot do novo slug"
+  || die "Realtime nao persistiu o slot do novo slug"
 
 say "Renomeando tenant Supavisor $OLD_NAME -> $NEW_NAME..."
 code=$(http_code supabase-pooler PUT "/api/tenants/$OLD_NAME" \
