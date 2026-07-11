@@ -401,7 +401,7 @@ docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$META_DB" 
 
 say "Subindo stack com o novo slug..."
 NEW_COMPOSE_STARTED=1
-compose_new up -d --wait --wait-timeout 180
+compose_new up --build -d
 
 [[ "$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc "SELECT count(*) FROM pg_database WHERE datname = '$NEW_DB';" | tr -d '[:space:]')" == "1" ]] \
   || die "Verificacao final do database falhou"
