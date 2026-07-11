@@ -23,6 +23,16 @@ from app.project_secrets import (
     ProjectSecretError,
     ProjectSecretManager,
 )
+from app.jobs import (
+    IDEMPOTENT_ACTIONS,
+    action_queue,
+    configure_jobs,
+    create_project_job as _create_project_job,
+    create_retry_job,
+    ensure_jobs_schema,
+    serialize_job,
+    set_job_status as _set_job_status,
+)
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
 SCRIPT = BASE_DIR / "scripts" / "generate_project.sh"
@@ -430,54 +440,6 @@ async def store_project_secrets(
     )
 
 
-async def ensure_jobs_schema(pool: asyncpg.Pool) -> None:
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS jobs (
-                job_id UUID PRIMARY KEY,
-                project TEXT NOT NULL,
-                owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                status TEXT NOT NULL,
-                message TEXT,
-                action TEXT,
-                payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-                progress SMALLINT NOT NULL DEFAULT 0
-                    CHECK (progress BETWEEN 0 AND 100),
-                current_step TEXT,
-                total_steps INTEGER NOT NULL DEFAULT 1
-                    CHECK (total_steps > 0),
-                started_at TIMESTAMPTZ,
-                finished_at TIMESTAMPTZ,
-                stdout_tail TEXT,
-                stderr_tail TEXT,
-                error_code TEXT,
-                updated_at TIMESTAMPTZ DEFAULT now()
-            )
-            """
-        )
-        await conn.execute(
-            """
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS message TEXT;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS action TEXT;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS payload JSONB NOT NULL DEFAULT '{}'::jsonb;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress SMALLINT NOT NULL DEFAULT 0;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS current_step TEXT;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS total_steps INTEGER NOT NULL DEFAULT 1;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS stdout_tail TEXT;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS stderr_tail TEXT;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS error_code TEXT;
-
-            CREATE INDEX IF NOT EXISTS idx_jobs_status_updated
-                ON jobs(status, updated_at);
-            CREATE INDEX IF NOT EXISTS idx_jobs_project_status
-                ON jobs(project, status, updated_at);
-            """
-        )
-
-
 async def ensure_collaboration_schema(pool: asyncpg.Pool) -> None:
     async with pool.acquire() as conn:
         await conn.execute(
@@ -863,8 +825,11 @@ async def get_pool():
     return db_pool
 
 
+configure_jobs(get_pool)
 
-class _QueuedAction:
+
+
+class _LegacyQueuedAction:
     __slots__ = ("job_id", "project_id", "project_name", "submitted_at", "runner")
 
     def __init__(
@@ -881,13 +846,13 @@ class _QueuedAction:
         self.runner = runner
 
 
-class ProjectActionQueue:
+class _LegacyProjectActionQueue:
     """Fila FIFO por projeto. Assegura serialização por chave de projeto."""
 
     def __init__(self) -> None:
         self._queues: dict[str, asyncio.Queue] = {}
         self._workers: dict[str, asyncio.Task] = {}
-        self._current: dict[str, _QueuedAction] = {}
+        self._current: dict[str, _LegacyQueuedAction] = {}
         self._registry_lock = asyncio.Lock()
         self._shutting_down: bool = False
 
@@ -970,7 +935,7 @@ class ProjectActionQueue:
                 f"[action_queue] worker_loop de {project_name} morreu: {exc!r}"
             )
 
-    async def _run_with_project_lock(self, action: _QueuedAction) -> None:
+    async def _run_with_project_lock(self, action: _LegacyQueuedAction) -> None:
         """Serializa a operacao tambem entre processos/replicas da API."""
         lock_conn = await asyncpg.connect(DB_DSN)
         lock_key = str(action.project_id)
@@ -1008,7 +973,7 @@ class ProjectActionQueue:
     ) -> int:
         """Enfileira uma ação. Retorna a posição na fila (0 = próximo a executar)."""
         queue = await self._ensure_worker(project_name)
-        action = _QueuedAction(
+        action = _LegacyQueuedAction(
             job_id=job_id,
             project_id=project_id,
             project_name=project_name,
@@ -1051,101 +1016,6 @@ class ProjectActionQueue:
         self._queues.clear()
         self._workers.clear()
         self._current.clear()
-
-
-action_queue = ProjectActionQueue()
-
-
-async def get_action_queue() -> ProjectActionQueue:
-    return action_queue
-
-
-async def _set_job_status(
-    job_id: str,
-    new_status: str,
-    *,
-    message: str | None = None,
-    progress: int | None = None,
-    current_step: str | None = None,
-    total_steps: int | None = None,
-    stdout_tail: str | None = None,
-    stderr_tail: str | None = None,
-    error_code: str | None = None,
-) -> None:
-    if progress is not None and not 0 <= progress <= 100:
-        raise ValueError("progress must be between 0 and 100")
-    if total_steps is not None and total_steps < 1:
-        raise ValueError("total_steps must be positive")
-
-    assignments = ["status=$1", "updated_at=now()"]
-    values: list[Any] = [new_status]
-
-    def add_value(column: str, value: Any) -> None:
-        values.append(value)
-        assignments.append(f"{column}=${len(values)}")
-
-    if message is not None:
-        add_value("message", message)
-    if progress is not None:
-        add_value("progress", progress)
-    if current_step is not None:
-        add_value("current_step", current_step)
-    if total_steps is not None:
-        add_value("total_steps", total_steps)
-    if stdout_tail is not None:
-        add_value("stdout_tail", stdout_tail[-8000:])
-    if stderr_tail is not None:
-        add_value("stderr_tail", stderr_tail[-8000:])
-    if error_code is not None:
-        add_value("error_code", error_code)
-    if new_status == "running":
-        assignments.append("started_at=COALESCE(started_at, now())")
-        assignments.append("finished_at=NULL")
-    elif new_status in {"done", "failed"}:
-        assignments.append("finished_at=now()")
-        if new_status == "done" and progress is None:
-            assignments.append("progress=100")
-
-    values.append(job_id)
-    query = (
-        "UPDATE jobs SET "
-        + ", ".join(assignments)
-        + f" WHERE job_id=${len(values)}"
-    )
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute(query, *values)
-
-
-async def _create_project_job(
-    pool,
-    project_name: str,
-    user: uuid.UUID,
-    *,
-    message: str | None = None,
-    action: str,
-    payload: dict[str, Any] | None = None,
-    total_steps: int = 1,
-) -> str:
-    job_id = str(uuid.uuid4())
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO jobs(
-                job_id, project, owner_id, status, message,
-                action, payload, total_steps, progress, current_step
-            )
-            VALUES($1, $2, $3, 'queued', $4, $5, $6::jsonb, $7, 0, 'queued')
-            """,
-            job_id,
-            project_name,
-            user,
-            message,
-            action,
-            json.dumps(payload or {}),
-            total_steps,
-        )
-    return job_id
 
 
 async def _enqueue_project_action(
@@ -1220,7 +1090,7 @@ def validate_service_name(raw: str) -> str:
 app = FastAPI()
 
 
-RECOVERABLE_RUNNING_ACTIONS = {"start", "stop", "restart", "recreate_services"}
+RECOVERABLE_RUNNING_ACTIONS = IDEMPOTENT_ACTIONS
 
 
 async def _build_recovery_runner(row: asyncpg.Record):
@@ -1328,7 +1198,8 @@ async def _recover_pending_jobs() -> None:
             """
             SELECT
                 job_id, project, owner_id, status, message, action, payload,
-                progress, current_step, total_steps
+                progress, current_step, total_steps, project_uuid, created_by,
+                is_idempotent, retryable, retry_of, attempt
             FROM jobs
             WHERE status IN ('queued', 'running')
             ORDER BY updated_at ASC
@@ -2825,24 +2696,20 @@ async def rename_project(
             if active_rename:
                 raise HTTPException(409, "Ja existe uma renomeacao ativa para este projeto")
 
-            job_id = str(uuid.uuid4())
-            await conn.execute(
-                """
-                INSERT INTO jobs(
-                    job_id, project, owner_id, status, message,
-                    action, payload, total_steps, progress, current_step
-                )
-                VALUES($1, $2, $3, 'queued', $4, 'rename', $5::jsonb, 9, 0, 'queued')
-                """,
-                job_id,
+            job_id = await _create_project_job(
+                pool,
                 project_name,
                 auth_user["db_user_id"],
-                f"Rename iniciado: {project_name} -> {new_name}",
-                json.dumps({
+                message=f"Rename iniciado: {project_name} -> {new_name}",
+                action="rename",
+                payload={
                     "old_name": project_name,
                     "new_name": new_name,
                     "actor_user_id": str(auth_user["db_user_id"]),
-                }),
+                },
+                total_steps=9,
+                project_uuid=project_id,
+                connection=conn,
             )
             history_id = await conn.fetchval(
                 """
@@ -3403,7 +3270,6 @@ async def create_project(
         raise HTTPException(400, "name required")
 
     auth_user = await resolve_authenticated_user(request, pool)
-    job_id = str(uuid.uuid4())
     async with pool.acquire() as conn:
         async with conn.transaction():
             existing = await conn.fetchval(
@@ -3427,21 +3293,18 @@ async def create_project(
                     """,
                     project_id, auth_user["db_user_id"]
                 )
-            await conn.execute(
-                """
-                INSERT INTO jobs(
-                    job_id, project, owner_id, status, action,
-                    payload, total_steps, progress, current_step
-                )
-                VALUES($1, $2, $3, 'queued', 'create', $4::jsonb, 3, 0, 'queued')
-                """,
-                job_id,
+            job_id = await _create_project_job(
+                pool,
                 name,
                 auth_user["db_user_id"],
-                json.dumps({
+                action="create",
+                payload={
                     "project_name": name,
                     "actor_user_id": str(auth_user["db_user_id"]),
-                }),
+                },
+                total_steps=3,
+                project_uuid=project_id,
+                connection=conn,
             )
 
     position = await _enqueue_project_action(
@@ -3505,24 +3368,20 @@ async def duplicate_project(
                 VALUES($1, $2, 'admin')
             """, project_id, auth_user["db_user_id"])
 
-            job_id = str(uuid.uuid4())
-            await conn.execute(
-                """
-                INSERT INTO jobs(
-                    job_id, project, owner_id, status, action,
-                    payload, total_steps, progress, current_step
-                )
-                VALUES($1, $2, $3, 'queued', 'duplicate', $4::jsonb, 3, 0, 'queued')
-                """,
-                job_id,
+            job_id = await _create_project_job(
+                pool,
                 new_name,
                 auth_user["db_user_id"],
-                json.dumps({
+                action="duplicate",
+                payload={
                     "original_name": original,
                     "new_name": new_name,
                     "actor_user_id": str(auth_user["db_user_id"]),
                     "copy_data": body.copy_data,
-                }),
+                },
+                total_steps=3,
+                project_uuid=project_id,
+                connection=conn,
             )
 
     position = await _enqueue_project_action(
@@ -4019,17 +3878,6 @@ async def _delete_project_impl(
                 "DELETE FROM project_members WHERE project_id = $1",
                 project_id,
             )
-            if current_job_id:
-                await conn.execute(
-                    "DELETE FROM jobs WHERE project = $1 AND job_id <> $2",
-                    project_name,
-                    current_job_id,
-                )
-            else:
-                await conn.execute(
-                    "DELETE FROM jobs WHERE project = $1",
-                    project_name,
-                )
             await conn.execute("DELETE FROM projects WHERE id = $1", project_id)
         else:
             errors.append(
@@ -4523,6 +4371,111 @@ async def remove_member_by_ref(
     return {"ok": True}
 
 
+@app.get("/api/jobs")
+async def list_job_history(
+    request: Request,
+    project_uuid: uuid.UUID | None = Query(default=None),
+    action: str | None = Query(default=None, max_length=80),
+    status: str | None = Query(default=None, max_length=32),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    pool=Depends(get_pool),
+):
+    """Lista o historico duravel de jobs visivel para o usuario autenticado."""
+    auth_user = await resolve_authenticated_user(request, pool)
+    filters: list[str] = []
+    values: list[Any] = []
+
+    def add_filter(expression: str, value: Any) -> None:
+        values.append(value)
+        filters.append(expression.format(index=len(values)))
+
+    if not auth_user["is_global_admin"]:
+        add_filter("created_by = ${index}", auth_user["db_user_id"])
+    if project_uuid is not None:
+        add_filter("project_uuid = ${index}", project_uuid)
+    if action:
+        add_filter("action = ${index}", action.strip())
+    if status:
+        add_filter("status = ${index}", status.strip())
+
+    where_sql = " WHERE " + " AND ".join(filters) if filters else ""
+    values.extend((limit, offset))
+    rows = await pool.fetch(
+        f"""
+        SELECT *
+        FROM jobs
+        {where_sql}
+        ORDER BY created_at DESC, job_id DESC
+        LIMIT ${len(values) - 1} OFFSET ${len(values)}
+        """,
+        *values,
+    )
+    return {
+        "items": [serialize_job(row) for row in rows],
+        "limit": limit,
+        "offset": offset,
+        "count": len(rows),
+    }
+
+
+@app.post("/api/jobs/{job_id}/retry", status_code=202)
+async def retry_project_job(
+    job_id: str,
+    request: Request,
+    pool=Depends(get_pool),
+):
+    """Cria uma nova tentativa apenas para acoes explicitamente idempotentes."""
+    parsed_job_id = parse_uuid_value(job_id)
+    if parsed_job_id is None:
+        raise HTTPException(400, "job_id invalido")
+    auth_user = await resolve_authenticated_user(request, pool)
+    source = await pool.fetchrow("SELECT * FROM jobs WHERE job_id = $1", parsed_job_id)
+    if source is None:
+        raise HTTPException(404, "Job not found")
+    if (
+        source["created_by"] != auth_user["db_user_id"]
+        and not auth_user["is_global_admin"]
+    ):
+        raise HTTPException(403, "Acesso negado a este job")
+
+    try:
+        retry_row = await create_retry_job(
+            pool, parsed_job_id, auth_user["db_user_id"]
+        )
+    except LookupError as exc:
+        raise HTTPException(404, "Job not found") from exc
+    except ValueError as exc:
+        if str(exc) == "job_not_failed":
+            raise HTTPException(409, "Somente jobs com falha podem ser reexecutados") from exc
+        raise
+    except PermissionError as exc:
+        raise HTTPException(
+            409,
+            "Este job nao e idempotente e foi marcado como nao-reexecutavel",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, f"Ja existe um retry ativo: {exc}") from exc
+
+    runner = await _build_recovery_runner(retry_row)
+    if runner is None:
+        await _set_job_status(
+            str(retry_row["job_id"]),
+            "failed",
+            message="Nao foi possivel reconstruir o runner para o retry.",
+            current_step="retry_dispatch_failed",
+            error_code="retry_runner_unavailable",
+        )
+        raise HTTPException(409, "Runner indisponivel para retry")
+
+    position = await _enqueue_project_action(
+        retry_row["project"], str(retry_row["job_id"]), runner
+    )
+    result = serialize_job(retry_row)
+    result["queue_position"] = position
+    return result
+
+
 @app.get("/api/projects/status/{job_id}")
 async def project_status(
     job_id: str,
@@ -4533,33 +4486,12 @@ async def project_status(
     if parsed_job_id is None:
         raise HTTPException(400, "job_id inválido")
     auth_user = await resolve_authenticated_user(request, pool)
-    row = await pool.fetchrow(
-        """
-        SELECT
-            owner_id, status, message, action, progress, current_step,
-            total_steps, started_at, finished_at, updated_at, error_code
-        FROM jobs
-        WHERE job_id=$1
-        """,
-        parsed_job_id,
-    )
+    row = await pool.fetchrow("SELECT * FROM jobs WHERE job_id=$1", parsed_job_id)
     if not row:
         raise HTTPException(404, "Job not found")
-    if row["owner_id"] != auth_user["db_user_id"] and not auth_user["is_global_admin"]:
+    if row["created_by"] != auth_user["db_user_id"] and not auth_user["is_global_admin"]:
         raise HTTPException(403, "Acesso negado a este job")
-    return {
-        "job_id": job_id,
-        "status": row["status"],
-        "message": row["message"],
-        "action": row["action"],
-        "progress": row["progress"],
-        "current_step": row["current_step"],
-        "total_steps": row["total_steps"],
-        "error_code": row["error_code"],
-        "started_at": row["started_at"].isoformat() if row["started_at"] else None,
-        "finished_at": row["finished_at"].isoformat() if row["finished_at"] else None,
-        "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
-    }
+    return serialize_job(row, include_output=True)
 
 @app.get("/api/projects/internal/enc-key/{ref}")
 async def enc_key(
