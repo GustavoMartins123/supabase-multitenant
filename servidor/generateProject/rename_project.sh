@@ -25,6 +25,7 @@ OLD_COMPOSE_STOPPED=0
 RENAMED_DB=0
 RENAMED_SLOT=0
 REALTIME_UPDATED=0
+SUPAVISOR_OLD_DELETED=0
 SUPAVISOR_UPDATED=0
 MOVED_DIR=0
 META_UPDATED=0
@@ -154,7 +155,12 @@ rollback_on_error() {
     cp -a "$BACKUP_DIR/." "$OLD_DIR/" 2>/dev/null || rollback_failed=1
   fi
   if [[ "$SUPAVISOR_UPDATED" -eq 1 ]]; then
-    code=$(http_code supabase-pooler PUT "/api/tenants/$NEW_NAME" \
+    docker exec supabase-db psql -U supabase_admin -d "$META_DB" -c \
+      "DELETE FROM _supavisor.users WHERE tenant_external_id = '$NEW_NAME'; DELETE FROM _supavisor.tenants WHERE external_id = '$NEW_NAME';" \
+      >/dev/null 2>&1 || rollback_failed=1
+  fi
+  if [[ "$SUPAVISOR_OLD_DELETED" -eq 1 ]]; then
+    code=$(http_code supabase-pooler PUT "/api/tenants/$OLD_NAME" \
       "$GLOBAL_ANON_TOKEN" "$SUPAVISOR_OLD_PAYLOAD" 2>/dev/null)
     accepted_code "$code" 200 201 204 || rollback_failed=1
   fi
@@ -316,8 +322,12 @@ realtime_matches=$(docker exec supabase-db psql -U supabase_admin -d "$META_DB" 
 [[ "$realtime_matches" -ge 1 ]] \
   || die "Realtime nao persistiu o slot do novo slug"
 
-say "Renomeando tenant Supavisor $OLD_NAME -> $NEW_NAME..."
-code=$(http_code supabase-pooler PUT "/api/tenants/$OLD_NAME" \
+say "Recriando tenant Supavisor $OLD_NAME -> $NEW_NAME..."
+docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$META_DB" -c \
+  "DELETE FROM _supavisor.users WHERE tenant_external_id = '$OLD_NAME'; DELETE FROM _supavisor.tenants WHERE external_id = '$OLD_NAME';" \
+  >/dev/null
+SUPAVISOR_OLD_DELETED=1
+code=$(http_code supabase-pooler PUT "/api/tenants/$NEW_NAME" \
   "$GLOBAL_ANON_TOKEN" "$SUPAVISOR_NEW_PAYLOAD")
 accepted_code "$code" 200 201 204 || die "Falha no Supavisor (HTTP $code)"
 SUPAVISOR_UPDATED=1
