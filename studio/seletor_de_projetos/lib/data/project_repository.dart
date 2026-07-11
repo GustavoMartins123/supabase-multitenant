@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/job.dart';
 import '../models/project_collaboration.dart';
 import '../models/user_models.dart';
+import '../models/project_user_telemetry.dart';
 import '../session.dart';
 
 final projectRepositoryProvider = Provider((ref) => ProjectRepository());
@@ -365,6 +366,30 @@ class ProjectRepository {
       throw Exception('Resposta sem config token');
     }
     return token;
+  }
+
+  Future<ProjectUserTelemetry> fetchProjectUserTelemetry(
+    String ref, {
+    required String period,
+    DateTime? start,
+    DateTime? end,
+  }) async {
+    final query = <String, String>{
+      'period': period,
+      if (start != null) 'start': start.toUtc().toIso8601String(),
+      if (end != null) 'end': end.toUtc().toIso8601String(),
+    };
+    final uri = Uri(
+      path: '/api/projects/$ref/telemetry/users',
+      queryParameters: query,
+    );
+    final resp = await http.get(uri);
+    _ensureCommandSucceeded(resp);
+    final data = _tryDecodeObject(resp.body);
+    if (data == null) {
+      throw Exception('Resposta de telemetria invalida');
+    }
+    return ProjectUserTelemetry.fromJson(data);
   }
 
   Future<UpdateSettingsResult> updateProjectSettings(

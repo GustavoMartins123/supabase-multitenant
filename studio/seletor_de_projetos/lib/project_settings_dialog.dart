@@ -24,6 +24,7 @@ import 'widgets/section_widget.dart';
 import 'widgets/project_settings/status_section.dart';
 import 'widgets/project_settings/members_section.dart';
 import 'widgets/project_settings/env_settings_section.dart';
+import 'widgets/project_settings/user_telemetry_section.dart';
 import 'models/project_member.dart';
 import 'models/AllUsers.dart';
 
@@ -282,6 +283,8 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
                       _buildAnonKeySection(myRole),
                       const SizedBox(height: 20),
                       if (myRole == 'admin' || Session().isSysAdmin) ...[
+                        UserTelemetrySection(projectRef: widget.ref),
+                        const SizedBox(height: 20),
                         _buildConfigTokenSection(),
                         const SizedBox(height: 20),
                       ],

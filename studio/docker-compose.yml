@@ -33,6 +33,7 @@ services:
     volumes:
       - ./nginx/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ./authelia:/config
+      - ./snippets:/app/snippets
   studio:
     container_name: supabase-studio
     image: supabase/studio:2026.06.29-sha-20290c7

@@ -13,3 +13,5 @@ __pycache__/
 
 # Local runtime logs
 *.log
+
+.tmp-appdata/

@@ -7,6 +7,7 @@ import base64
 import hashlib
 import signal
 import time
+import datetime as dt
 import asyncio, json, re
 import urllib.parse
 import httpx
@@ -57,7 +58,13 @@ from app.project_settings import (
     _write_env_whitelisted,
 )
 from app.service_key_cache import invalidate_service_key_cache
+from app.snippets_migration import rename_project_snippets
 from app.jwt_metadata import get_unverified_jwt_expiry
+from app.project_telemetry import (
+    TelemetryValidationError,
+    fetch_project_user_telemetry,
+    resolve_telemetry_period,
+)
 
 db_pool: Optional[asyncpg.Pool] = None
 
@@ -1611,6 +1618,19 @@ async def _rename_project_background(
             )
             return
 
+        # Migra as pastas de snippets SQL do usuario no Studio para o novo slug.
+        # Best-effort: o rename ja commitou; se falhar, os snippets ficam orfaos
+        # ate um retry manual, mas o projeto renomeado continua valido.
+        snippet_note = ""
+        try:
+            await rename_project_snippets(old_name, new_name)
+        except Exception as exc:  # noqa: BLE001
+            snippet_note = (
+                "\n\n⚠️ Snippets do Studio não migraram automaticamente "
+                f"({exc})."
+            )
+            print(f"[rename_project] snippets {old_name} -> {new_name}: {exc}")
+
         await _set_job_status(
             job_id,
             "running",
@@ -1663,7 +1683,7 @@ async def _rename_project_background(
         await _set_job_status(
             job_id,
             "done",
-            message=f"Projeto renomeado: {old_name} -> {new_name}",
+            message=f"Projeto renomeado: {old_name} -> {new_name}{snippet_note}",
             current_step="completed",
         )
     except Exception as exc:
@@ -1945,6 +1965,15 @@ async def get_project_config_token(
     """Entrega o token compartilhado aos membros do projeto e registra a leitura."""
     project_name = validate_project_id(project_name)
     auth_user = await resolve_authenticated_user(request, pool)
+
+    try:
+        telemetry_period = resolve_telemetry_period(
+            period,
+            start=start,
+            end=end,
+        )
+    except TelemetryValidationError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -4940,6 +4969,78 @@ def get_project_meta_connection_string(project_ref: str) -> str:
             fragment="",
         )
     )
+
+
+@app.get("/api/projects/{project_name}/telemetry/users")
+async def get_project_user_telemetry(
+    project_name: str,
+    request: Request,
+    response: Response,
+    period: str = Query("24h"),
+    start: dt.datetime | None = Query(None),
+    end: dt.datetime | None = Query(None),
+    pool=Depends(get_pool),
+):
+    project_name = validate_project_id(project_name)
+    auth_user = await resolve_authenticated_user(request, pool)
+
+    async with pool.acquire() as conn:
+        project_row = await get_project_row(conn, project_name)
+        project_role = await get_project_role(
+            conn,
+            project_id=project_row["id"],
+            auth_user=auth_user,
+        )
+        is_owner = project_row["owner_id"] == auth_user["db_user_id"]
+        if (
+            project_role != "admin"
+            and not is_owner
+            and not auth_user["is_global_admin"]
+        ):
+            raise HTTPException(
+                403,
+                "Acesso negado: telemetria exige owner ou admin do projeto",
+            )
+        await audit_studio_action(
+            conn,
+            project_id=project_row["id"],
+            actor_user_id=auth_user["db_user_id"],
+            action="project_auth_telemetry_read",
+            target_type="project_auth_telemetry",
+            target_id=project_name,
+            new_value={
+                "period": telemetry_period.key,
+                "start": telemetry_period.start.isoformat(),
+                "end": telemetry_period.end.isoformat(),
+            },
+        )
+
+    project_conn: asyncpg.Connection | None = None
+    try:
+        project_conn = await get_project_conn(project_name)
+        result = await fetch_project_user_telemetry(
+            project_conn,
+            telemetry_period,
+        )
+    except asyncpg.InvalidCatalogNameError as exc:
+        raise HTTPException(409, "Database do projeto nao esta disponivel") from exc
+    except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError) as exc:
+        raise HTTPException(
+            409,
+            "Schema Auth/GoTrue do projeto nao suporta esta telemetria",
+        ) from exc
+    except asyncpg.PostgresError as exc:
+        raise HTTPException(
+            502,
+            "Falha ao consultar a telemetria Auth/GoTrue do projeto",
+        ) from exc
+    finally:
+        if project_conn is not None:
+            await project_conn.close()
+
+    response.headers["Cache-Control"] = "no-store"
+    return {"project": project_name, **result}
+
 
 @app.api_route(
     "/api/projects/{ref}/meta",
