@@ -35,6 +35,7 @@ cleanup() { rm -rf "$BACKUP_DIR"; }
 
 compose_old() {
   docker compose -p "$OLD_NAME" \
+    --project-directory "$OLD_DIR" \
     --env-file "$PROJECT_ROOT/.env" \
     --env-file "$OLD_DIR/.env" \
     -f "$OLD_DIR/docker-compose.yml" "$@"
@@ -42,6 +43,7 @@ compose_old() {
 
 compose_new() {
   docker compose -p "$NEW_NAME" \
+    --project-directory "$NEW_DIR" \
     --env-file "$PROJECT_ROOT/.env" \
     --env-file "$NEW_DIR/.env" \
     -f "$NEW_DIR/docker-compose.yml" "$@"
