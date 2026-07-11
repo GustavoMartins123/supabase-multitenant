@@ -105,6 +105,10 @@ generate_logflare_api_key() {
     head -c 32 /dev/urandom | base64
 }
 
+generate_fernet_key() {
+    openssl rand -base64 32 | tr '/+' '_-' | tr -d '\n'
+}
+
 generate_cookie_sign_secret() {
     openssl rand -base64 32 | tr -d '\n'
 }
@@ -274,9 +278,11 @@ main() {
     fi
 
     print_success "IP local detectado: $LOCAL_IP"
-    print_status "Gerando chaves compartilhadas..."
+    print_status "Gerando chaves de criptografia e tokens..."
 
-    SHARED_FERNET_SECRET=$(generate_logflare_api_key)
+    PROJECT_SECRETS_MASTER_KEY=$(generate_fernet_key)
+    STUDIO_SERVICE_KEY_ENCRYPTION_KEY=$(generate_fernet_key)
+    PG_META_CRYPTO_KEY=$(generate_hmac_secret)
     SHARED_NGINX_TOKEN=$(generate_logflare_api_key)
     SHARED_NGINX_HMAC_SECRET=$(generate_hmac_secret)
     SHARED_INTERNAL_HMAC_SECRET=$(generate_hmac_secret)
@@ -311,7 +317,9 @@ main() {
     safe_sed "s|SECRET_KEY_BASE=pass|SECRET_KEY_BASE=$SECRET_KEY_BASE|g" servidor/.env
     safe_sed "s|LOGFLARE_API_KEY=pass|LOGFLARE_API_KEY=$LOGFLARE_API_KEY|g" servidor/.env
     safe_sed "s|JWT_SECRET=pass|JWT_SECRET=$JWT_SECRET|g" servidor/.env
-    safe_sed "s|FERNET_SECRET=pass|FERNET_SECRET=$SHARED_FERNET_SECRET|g" servidor/.env
+    safe_sed "s|PROJECT_SECRETS_MASTER_KEY=pass|PROJECT_SECRETS_MASTER_KEY=$PROJECT_SECRETS_MASTER_KEY|g" servidor/.env
+    safe_sed "s|PG_META_CRYPTO_KEY=pass|PG_META_CRYPTO_KEY=$PG_META_CRYPTO_KEY|g" servidor/.env
+    safe_sed "s|STUDIO_SERVICE_KEY_ENCRYPTION_KEY=pass|STUDIO_SERVICE_KEY_ENCRYPTION_KEY=$STUDIO_SERVICE_KEY_ENCRYPTION_KEY|g" servidor/.env
     safe_sed "s|NGINX_SHARED_TOKEN=pass|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" servidor/.env
     safe_sed "s|NGINX_HMAC_SECRET=pass|NGINX_HMAC_SECRET=$SHARED_NGINX_HMAC_SECRET|g" servidor/.env
     safe_sed "s|INTERNAL_HMAC_SECRET=pass|INTERNAL_HMAC_SECRET=$SHARED_INTERNAL_HMAC_SECRET|g" servidor/.env
@@ -342,7 +350,7 @@ main() {
     POSTGRES_NGINX_PASSWORD=$(generate_postgres_password)
 
     cp studio/.env.example studio/.env
-    safe_sed "s|FERNET_SECRET=pass|FERNET_SECRET=$SHARED_FERNET_SECRET|g" studio/.env
+    safe_sed "s|STUDIO_SERVICE_KEY_ENCRYPTION_KEY=pass|STUDIO_SERVICE_KEY_ENCRYPTION_KEY=$STUDIO_SERVICE_KEY_ENCRYPTION_KEY|g" studio/.env
     safe_sed "s|NGINX_SHARED_TOKEN=pass|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" studio/.env
     safe_sed "s|NGINX_HMAC_SECRET=pass|NGINX_HMAC_SECRET=$SHARED_NGINX_HMAC_SECRET|g" studio/.env
     safe_sed "s|INTERNAL_HMAC_SECRET=pass|INTERNAL_HMAC_SECRET=$SHARED_INTERNAL_HMAC_SECRET|g" studio/.env
@@ -359,8 +367,10 @@ main() {
     echo "  ✓ servidor/.env"
     echo "  ✓ studio/.env"
     echo ""
-    print_status "Chaves compartilhadas configuradas:"
-    echo "  - FERNET_SECRET (servidor e studio)"
+    print_status "Chaves de criptografia configuradas:"
+    echo "  - PROJECT_SECRETS_MASTER_KEY (somente servidor)"
+    echo "  - PG_META_CRYPTO_KEY (servidor e Postgres-Meta)"
+    echo "  - STUDIO_SERVICE_KEY_ENCRYPTION_KEY (servidor e Studio)"
     echo "  - NGINX_SHARED_TOKEN (servidor e studio)"
     echo "  - NGINX_HMAC_SECRET (servidor e studio)"
     echo "  - INTERNAL_HMAC_SECRET (servidor e studio)"

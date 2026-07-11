@@ -14,11 +14,15 @@ from fastapi import FastAPI, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from app.schemas import NewProject, DuplicateProject, UserSyncPayload, AddMember, TransferBody, UpdateSettings, RecreateServices, ProjectNoteCreate, ProjectTagAssign, ProjectHintCreate, ProjectHintStatusUpdate, ProjectThreadMessageCreate, ProjectRenameRequest, ProjectDisplayNameUpdate, ProjectNotificationRead
 from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.backends import default_backend
 from typing import Any, Optional, List, Dict
 from dotenv import dotenv_values
 from app.security_tokens import resolve_user_id_from_hmac_token as resolve_signed_user_id
+from app.pg_meta_crypto import encrypt_postgres_meta_uri
+from app.project_secrets import (
+    ProjectKeyEnvelope,
+    ProjectSecretError,
+    ProjectSecretManager,
+)
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
 SCRIPT = BASE_DIR / "scripts" / "generate_project.sh"
@@ -28,7 +32,20 @@ DELETE_SCRIPT = BASE_DIR / "scripts" / "delete_project.sh"
 RENAME_SCRIPT = BASE_DIR / "scripts" / "rename_project.sh"
 EXTRACTOR = BASE_DIR / "scripts" / "extract_token.sh"
 DB_DSN = os.getenv("DB_DSN")
-FERNET_SECRET = os.getenv("FERNET_SECRET")
+PROJECT_SECRETS_MASTER_KEY = os.getenv("PROJECT_SECRETS_MASTER_KEY")
+PROJECT_SECRETS_MASTER_KEY_ID = os.getenv(
+    "PROJECT_SECRETS_MASTER_KEY_ID",
+    "project-secrets-master-v1",
+)
+PROJECT_SECRETS_PREVIOUS_MASTER_KEYS = tuple(
+    key.strip()
+    for key in os.getenv("PROJECT_SECRETS_PREVIOUS_MASTER_KEYS", "").split(",")
+    if key.strip()
+)
+PG_META_CRYPTO_KEY = os.getenv("PG_META_CRYPTO_KEY")
+STUDIO_SERVICE_KEY_ENCRYPTION_KEY = os.getenv(
+    "STUDIO_SERVICE_KEY_ENCRYPTION_KEY"
+)
 DELETE_PASSWORD = os.getenv("PROJECT_DELETE_PASSWORD")
 NGINX_SHARED_TOKEN = os.getenv("NGINX_SHARED_TOKEN")
 NGINX_HMAC_SECRET = os.getenv("NGINX_HMAC_SECRET")
@@ -71,20 +88,38 @@ PG_META_INTERNAL_URL = _validate_pg_meta_internal_url(
     os.getenv("PG_META_INTERNAL_URL", "http://postgres-meta-global:8080")
 )
 
-if not FERNET_SECRET:
-    raise RuntimeError("Missing FERNET_SECRET environment variable")
+if not PROJECT_SECRETS_MASTER_KEY:
+    raise RuntimeError("Missing PROJECT_SECRETS_MASTER_KEY environment variable")
+if not PG_META_CRYPTO_KEY:
+    raise RuntimeError("Missing PG_META_CRYPTO_KEY environment variable")
+if not STUDIO_SERVICE_KEY_ENCRYPTION_KEY:
+    raise RuntimeError("Missing STUDIO_SERVICE_KEY_ENCRYPTION_KEY environment variable")
 if not NGINX_SHARED_TOKEN:
     raise RuntimeError("Missing NGINX_SHARED_TOKEN environment variable")
 if not NGINX_HMAC_SECRET:
     raise RuntimeError("Missing NGINX_HMAC_SECRET environment variable")
     
 try:
-    fernet = Fernet(FERNET_SECRET.encode())
-except ValueError:
-    raise RuntimeError(
-        "Invalid FERNET_SECRET: must be a 32-byte url-safe base64-encoded key, "
-        "generated via Fernet.generate_key()."
+    project_secret_manager = ProjectSecretManager(
+        PROJECT_SECRETS_MASTER_KEY,
+        wrapping_key_id=PROJECT_SECRETS_MASTER_KEY_ID,
+        previous_master_keys=PROJECT_SECRETS_PREVIOUS_MASTER_KEYS,
     )
+    service_key_transport_fernet = Fernet(
+        STUDIO_SERVICE_KEY_ENCRYPTION_KEY.encode()
+    )
+except (ProjectSecretError, ValueError) as exc:
+    raise RuntimeError(
+        "Invalid project-secret or Studio service-key encryption key. "
+        "Use Fernet.generate_key()."
+    ) from exc
+
+for key_name, key_value in {
+    "PG_META_CRYPTO_KEY": PG_META_CRYPTO_KEY,
+    "STUDIO_SERVICE_KEY_ENCRYPTION_KEY": STUDIO_SERVICE_KEY_ENCRYPTION_KEY,
+}.items():
+    if hmac.compare_digest(key_value, PROJECT_SECRETS_MASTER_KEY):
+        raise RuntimeError(f"{key_name} must be distinct from PROJECT_SECRETS_MASTER_KEY")
 
 db_pool: Optional[asyncpg.Pool] = None
 
@@ -210,6 +245,189 @@ async def ensure_identity_schema(pool: asyncpg.Pool) -> None:
         await conn.execute(
             "ALTER TABLE projects ADD COLUMN IF NOT EXISTS display_name TEXT"
         )
+
+
+PROJECT_SECRET_COLUMNS = {"anon_key", "service_role", "config_token"}
+
+
+async def ensure_project_secrets_schema(pool: asyncpg.Pool) -> None:
+    """Creates the per-tenant DEK envelope store used by project secrets."""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS project_key_envelopes (
+                project_id UUID PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+                key_id UUID NOT NULL UNIQUE,
+                wrapped_dek TEXT NOT NULL,
+                wrapping_key_id TEXT NOT NULL,
+                algorithm TEXT NOT NULL DEFAULT 'aes-256-gcm',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_project_key_envelopes_wrapping_key
+                ON project_key_envelopes(wrapping_key_id);
+            """
+        )
+
+
+def _project_secret_column(column: str) -> str:
+    if column not in PROJECT_SECRET_COLUMNS:
+        raise ValueError(f"unsupported project secret column: {column}")
+    return column
+
+
+def _record_to_project_key_envelope(row: asyncpg.Record) -> ProjectKeyEnvelope:
+    return ProjectKeyEnvelope(
+        key_id=str(row["key_id"]),
+        wrapped_dek=row["wrapped_dek"],
+        wrapping_key_id=row["wrapping_key_id"],
+        algorithm=row["algorithm"],
+    )
+
+
+async def _get_project_key_envelope(
+    conn: asyncpg.Connection,
+    project_id: uuid.UUID,
+) -> tuple[ProjectKeyEnvelope, bytes]:
+    row = await conn.fetchrow(
+        """
+        SELECT key_id, wrapped_dek, wrapping_key_id, algorithm
+        FROM project_key_envelopes
+        WHERE project_id = $1
+        FOR UPDATE
+        """,
+        project_id,
+    )
+    if row is None:
+        created, created_dek = project_secret_manager.create_envelope()
+        await conn.execute(
+            """
+            INSERT INTO project_key_envelopes(
+                project_id, key_id, wrapped_dek, wrapping_key_id, algorithm
+            )
+            VALUES($1, $2, $3, $4, $5)
+            ON CONFLICT (project_id) DO NOTHING
+            """,
+            project_id,
+            uuid.UUID(created.key_id),
+            created.wrapped_dek,
+            created.wrapping_key_id,
+            created.algorithm,
+        )
+        row = await conn.fetchrow(
+            """
+            SELECT key_id, wrapped_dek, wrapping_key_id, algorithm
+            FROM project_key_envelopes
+            WHERE project_id = $1
+            FOR UPDATE
+            """,
+            project_id,
+        )
+        if row is None:
+            raise RuntimeError("project key envelope was not persisted")
+        envelope = _record_to_project_key_envelope(row)
+        if envelope.key_id == created.key_id:
+            return envelope, created_dek
+    envelope = _record_to_project_key_envelope(row)
+    dek = project_secret_manager.unwrap_dek(envelope)
+
+    if envelope.wrapping_key_id != project_secret_manager.wrapping_key_id:
+        rewrapped = project_secret_manager.rewrap_dek(dek)
+        await conn.execute(
+            """
+            UPDATE project_key_envelopes
+            SET wrapped_dek = $1, wrapping_key_id = $2, updated_at = now()
+            WHERE project_id = $3
+            """,
+            rewrapped,
+            project_secret_manager.wrapping_key_id,
+            project_id,
+        )
+        envelope = ProjectKeyEnvelope(
+            key_id=envelope.key_id,
+            wrapped_dek=rewrapped,
+            wrapping_key_id=project_secret_manager.wrapping_key_id,
+            algorithm=envelope.algorithm,
+        )
+    return envelope, dek
+
+
+async def encrypt_project_secret(
+    conn: asyncpg.Connection,
+    *,
+    project_id: uuid.UUID,
+    column: str,
+    plaintext: str,
+) -> str:
+    column = _project_secret_column(column)
+    envelope, dek = await _get_project_key_envelope(conn, project_id)
+    return project_secret_manager.encrypt(
+        project_id=project_id,
+        purpose=column,
+        key_id=envelope.key_id,
+        dek=dek,
+        plaintext=plaintext,
+    )
+
+
+async def decrypt_project_secret(
+    conn: asyncpg.Connection,
+    *,
+    project_id: uuid.UUID,
+    column: str,
+    ciphertext: str,
+) -> str:
+    column = _project_secret_column(column)
+    if project_secret_manager.is_v2(ciphertext):
+        envelope, dek = await _get_project_key_envelope(conn, project_id)
+        return project_secret_manager.decrypt(
+            project_id=project_id,
+            purpose=column,
+            key_id=envelope.key_id,
+            dek=dek,
+            ciphertext=ciphertext,
+        )
+
+    raise ProjectSecretError(
+        "legacy project secret format is not supported by projects-api; "
+        "run app.migrate_project_secrets before deploying this version"
+    )
+
+
+async def store_project_secrets(
+    conn: asyncpg.Connection,
+    *,
+    project_id: uuid.UUID,
+    anon_key: str | None = None,
+    service_role: str | None = None,
+    config_token: str | None = None,
+) -> None:
+    values: dict[str, str] = {}
+    for column, plaintext in {
+        "anon_key": anon_key,
+        "service_role": service_role,
+        "config_token": config_token,
+    }.items():
+        if plaintext is not None:
+            values[column] = await encrypt_project_secret(
+                conn,
+                project_id=project_id,
+                column=column,
+                plaintext=plaintext,
+            )
+    if not values:
+        return
+
+    assignments = ", ".join(
+        f"{column} = ${index}"
+        for index, column in enumerate(values, start=1)
+    )
+    await conn.execute(
+        f"UPDATE projects SET {assignments} WHERE id = ${len(values) + 1}",
+        *values.values(),
+        project_id,
+    )
 
 
 async def ensure_jobs_schema(pool: asyncpg.Pool) -> None:
@@ -1239,6 +1457,7 @@ async def startup():
     global db_pool
     db_pool = await asyncpg.create_pool(DB_DSN, min_size=1, max_size=10)
     await ensure_identity_schema(db_pool)
+    await ensure_project_secrets_schema(db_pool)
     await ensure_jobs_schema(db_pool)
     await ensure_collaboration_schema(db_pool)
     print("✅ Database pool initialized")
@@ -1536,28 +1755,34 @@ async def list_projects(
     auth_user = await resolve_authenticated_user(request, pool)
 
     async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT p.name, p.display_name, p.anon_key
-            FROM projects p
-            WHERE p.anon_key IS NOT NULL
-              AND EXISTS (
-                  SELECT 1
-                  FROM project_members m
-                  WHERE m.project_id = p.id
-                    AND m.user_id = $1
-              )
-            ORDER BY p.name
-        """, auth_user["db_user_id"])
-    result = []
-    for r in rows:
-        anon_token = fernet.decrypt(r["anon_key"].encode()).decode()
-        result.append({
-            "name": r["name"],
-            "display_name": r["display_name"],
-            "anon_token": anon_token,
-            "file_size_limit": _get_project_file_size_limit(r["name"]),
-            "storage_limit_token": _get_project_storage_limit_token(r["name"]),
-        })
+        async with conn.transaction():
+            rows = await conn.fetch("""
+                SELECT p.id, p.name, p.display_name, p.anon_key
+                FROM projects p
+                WHERE p.anon_key IS NOT NULL
+                  AND EXISTS (
+                      SELECT 1
+                      FROM project_members m
+                      WHERE m.project_id = p.id
+                        AND m.user_id = $1
+                  )
+                ORDER BY p.name
+            """, auth_user["db_user_id"])
+            result = []
+            for r in rows:
+                anon_token = await decrypt_project_secret(
+                    conn,
+                    project_id=r["id"],
+                    column="anon_key",
+                    ciphertext=r["anon_key"],
+                )
+                result.append({
+                    "name": r["name"],
+                    "display_name": r["display_name"],
+                    "anon_token": anon_token,
+                    "file_size_limit": _get_project_file_size_limit(r["name"]),
+                    "storage_limit_token": _get_project_storage_limit_token(r["name"]),
+                })
     return result
 
 
@@ -2807,6 +3032,12 @@ async def get_project_config_token(
             )
             if not encrypted_token:
                 raise HTTPException(404, "Config token não disponível")
+            token = await decrypt_project_secret(
+                conn,
+                project_id=project["id"],
+                column="config_token",
+                ciphertext=encrypted_token,
+            )
             await audit_studio_action(
                 conn,
                 project_id=project["id"],
@@ -2816,7 +3047,6 @@ async def get_project_config_token(
                 target_id=project_name,
             )
 
-    token = fernet.decrypt(encrypted_token.encode()).decode()
     return JSONResponse(
         content={"project": project_name, "config_token": token},
         headers={"Cache-Control": "no-store"},
@@ -3402,9 +3632,6 @@ async def _duplicate_and_store_keys(
             await rollback_project_from_db(pool, new_name)
             return
 
-        anon_enc = fernet.encrypt(anon.encode()).decode()
-        svc_enc  = fernet.encrypt(service.encode()).decode()
-        config_enc = fernet.encrypt(config_token.encode()).decode()
         await _set_job_status(
             job_id,
             "running",
@@ -3413,11 +3640,19 @@ async def _duplicate_and_store_keys(
             current_step="store_keys",
         )
         async with pool.acquire() as conn:
-            await conn.execute(
-                """UPDATE projects
-                   SET anon_key=$1, service_role=$2, config_token=$3
-                   WHERE name=$4 AND owner_id=$5""",
-                anon_enc, svc_enc, config_enc, new_name, owner_id
+            project_id = await conn.fetchval(
+                "SELECT id FROM projects WHERE name = $1 AND owner_id = $2",
+                new_name,
+                owner_id,
+            )
+            if project_id is None:
+                raise RuntimeError("Projeto duplicado não encontrado ao persistir chaves")
+            await store_project_secrets(
+                conn,
+                project_id=project_id,
+                anon_key=anon,
+                service_role=service,
+                config_token=config_token,
             )
 
         await _set_job_status(
@@ -4118,8 +4353,6 @@ async def _rotate_project_key_background(
             )
             return
 
-        anon_enc = fernet.encrypt(anon.encode()).decode()
-        svc_enc = fernet.encrypt(service.encode()).decode()
         await _set_job_status(
             job_id,
             "running",
@@ -4129,11 +4362,17 @@ async def _rotate_project_key_background(
         )
         pool = await get_pool()
         async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE projects SET anon_key=$1, service_role=$2 WHERE name=$3",
-                anon_enc,
-                svc_enc,
+            project_id = await conn.fetchval(
+                "SELECT id FROM projects WHERE name = $1",
                 project_name,
+            )
+            if project_id is None:
+                raise RuntimeError("Projeto não encontrado ao rotacionar chaves")
+            await store_project_secrets(
+                conn,
+                project_id=project_id,
+                anon_key=anon,
+                service_role=service,
             )
 
         await _set_job_status(
@@ -4333,13 +4572,25 @@ async def enc_key(
         raise HTTPException(403, "Internal service access required")
 
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT service_role FROM projects WHERE name=$1", ref
-        )
-    if not row:
-        raise HTTPException(status_code=404, detail="Project not found")
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT id, service_role FROM projects WHERE name=$1",
+                ref,
+            )
+            if not row or not row["service_role"]:
+                raise HTTPException(status_code=404, detail="Project not found")
+            service_key = await decrypt_project_secret(
+                conn,
+                project_id=row["id"],
+                column="service_role",
+                ciphertext=row["service_role"],
+            )
 
-    return {"enc_service_key": row["service_role"]}
+    return {
+        "enc_service_key": service_key_transport_fernet.encrypt(
+            service_key.encode()
+        ).decode()
+    }
 
 async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.UUID):
     pool = await get_pool()
@@ -4416,9 +4667,6 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
             await rollback_project_from_db(pool, project_name)
             return
 
-        anon_enc = fernet.encrypt(anon.encode()).decode()
-        svc_enc  = fernet.encrypt(service.encode()).decode()
-        config_enc = fernet.encrypt(config_token.encode()).decode()
         await _set_job_status(
             job_id,
             "running",
@@ -4427,11 +4675,19 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
             current_step="store_keys",
         )
         async with pool.acquire() as conn:
-            await conn.execute(
-                """UPDATE projects
-                   SET anon_key=$1, service_role=$2, config_token=$3
-                   WHERE name=$4 AND owner_id=$5""",
-                anon_enc, svc_enc, config_enc, project_name, user
+            project_id = await conn.fetchval(
+                "SELECT id FROM projects WHERE name = $1 AND owner_id = $2",
+                project_name,
+                user,
+            )
+            if project_id is None:
+                raise RuntimeError("Projeto não encontrado ao persistir chaves")
+            await store_project_secrets(
+                conn,
+                project_id=project_id,
+                anon_key=anon,
+                service_role=service,
+                config_token=config_token,
             )
 
         await _set_job_status(
@@ -5547,27 +5803,6 @@ def get_project_meta_connection_string(project_ref: str) -> str:
         )
     )
 
-def encrypt_postgres_meta_uri(uri: str, passphrase: str) -> str:
-    salt = os.urandom(8)
-    data = passphrase.encode('utf-8') + salt
-    key_iv = b''
-    last_hash = b''
-    while len(key_iv) < 48:
-        last_hash = hashlib.md5(last_hash + data).digest()
-        key_iv += last_hash
-    key = key_iv[:32]
-    iv = key_iv[32:48]
-
-    cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
-    encryptor = cipher.encryptor()
-
-    pad_len = 16 - (len(uri) % 16)
-    padded_uri = uri.encode('utf-8') + bytes([pad_len] * pad_len)
-
-    ciphertext = encryptor.update(padded_uri) + encryptor.finalize()
-    return base64.b64encode(b"Salted__" + salt + ciphertext).decode('utf-8')
-
-
 @app.api_route(
     "/api/projects/{ref}/meta",
     methods=["GET", "POST", "PATCH", "DELETE"],
@@ -5608,7 +5843,12 @@ async def proxy_project_meta(
 
     target_path = meta_path.lstrip("/")
     target_url = f"{PG_META_INTERNAL_URL}/{target_path}" if target_path else PG_META_INTERNAL_URL
-    upstream_headers = {"x-connection-encrypted": encrypt_postgres_meta_uri(project_connection_string, FERNET_SECRET)}
+    upstream_headers = {
+        "x-connection-encrypted": encrypt_postgres_meta_uri(
+            project_connection_string,
+            PG_META_CRYPTO_KEY,
+        )
+    }
 
     content_type = request.headers.get("content-type")
     if content_type:

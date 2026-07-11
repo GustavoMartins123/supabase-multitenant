@@ -92,7 +92,7 @@ http {
         }
        
         location /recovery.html {
-            allow 172.20.0.0/16;
+            allow 172.50.0.0/16;
             deny all;
             root /usr/share/nginx/html;
             add_header Content-Type text/html;
@@ -101,7 +101,7 @@ http {
         }
 
         location /invite.html {
-            allow 172.20.0.0/16;
+            allow 172.50.0.0/16;
             deny all;
             root /usr/share/nginx/html;
             add_header Content-Type text/html;
@@ -110,7 +110,7 @@ http {
         }
 
         location /magiclink.html {
-            allow 172.20.0.0/16;
+            allow 172.50.0.0/16;
             deny all;
             root /usr/share/nginx/html;
             add_header Content-Type text/html;
@@ -119,7 +119,7 @@ http {
         }
 
         location /confirmation.html {
-            allow 172.20.0.0/16;
+            allow 172.50.0.0/16;
             deny all;
             root /usr/share/nginx/html;
             add_header Content-Type text/html;
@@ -128,7 +128,7 @@ http {
         }
 
         location /email_change.html {
-            allow 172.20.0.0/16;
+            allow 172.50.0.0/16;
             deny all;
             root /usr/share/nginx/html;
             add_header Content-Type text/html;

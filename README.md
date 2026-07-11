@@ -72,7 +72,7 @@ flowchart TB
         subGraph3
   end
  subgraph subGraph5["Docker Network"]
-        Network["🔗 rede-supabase\n172.20.0.0/16"]
+        Network["🔗 rede-supabase\n172.50.0.0/16"]
   end
     World["🌐 Internet/Users"] -- World --> Traefik["🚦 Traefik :80/:443\nMain Gateway"]
     Lan -- :9091 --> Nginx

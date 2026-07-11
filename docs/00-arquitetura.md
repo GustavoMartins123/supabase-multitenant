@@ -360,7 +360,8 @@ Retorna JSON com lista de tabelas
 - Conecta direto no PostgreSQL (não usa Supavisor)
 - Precisa de acesso total ao information_schema
 - A string de conexão do projeto é criptografada no padrão OpenSSL/CryptoJS e enviada no header `x-connection-encrypted`
-- O container `postgres-meta-global` descriptografa usando `CRYPTO_KEY`/`FERNET_SECRET`
+- O container `postgres-meta-global` descriptografa com a `CRYPTO_KEY` definida a partir de `PG_META_CRYPTO_KEY`, separada das chaves de segredos de projeto
+- O header é efêmero e gerado novamente a cada requisição; os segredos persistidos usam envelope encryption por tenant
 - Se a conexão dinâmica falhar, o serviço cai no banco vazio `meta_trap` com o usuário restrito `meta_guest`
 
 ---
@@ -1802,9 +1803,9 @@ Traefik → Projetos (Máquina 2)
 **Configuração:**
 ```
 Driver: bridge
-Subnet: 172.20.0.0/16
-IP Range: 172.20.0.0/18
-Gateway: 172.20.0.1
+Subnet: 172.50.0.0/16
+IP Range: 172.50.0.0/18
+Gateway: 172.50.0.1
 ```
 
 **Todos os containers estão na mesma rede:**

@@ -183,7 +183,7 @@ Para garantir que a api que gerencia os projetos responda a partir do dominio fa
 ```yml
 labels:
   - traefik.enable=true
-  - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.20.0.0/16
+  - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.50.0.0/16
   - traefik.http.routers.projects.rule=PathPrefix(`/api/projects`)
   - traefik.http.routers.projects.middlewares=lanonly, api-security-chain@file
   - traefik.http.services.projects.loadbalancer.server.port=18000  
@@ -192,7 +192,7 @@ labels:
 DEPOIS:
 ```yml
 labels:
-  - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.20.0.0/16
+  - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.50.0.0/16
   - traefik.http.routers.projects.rule=Host(`seu_dominio`) && PathPrefix(`/api/projects`)
   - traefik.http.routers.projects.priority=100
   - traefik.http.routers.projects.entrypoints=websecure
@@ -205,7 +205,7 @@ labels:
 Nota: troque 'seu_dominio' pelo dominio real que será usado.
 
 > ⚠️ **Nota sobre o middleware `lanonly`:**
-> A regra `- traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.20.0.0/16` limita o acesso à API de gerenciamento de projetos apenas para a sua rede local e o IP configurado.
+> A regra `- traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.50.0.0/16` limita o acesso à API de gerenciamento de projetos apenas para a sua rede local e o IP configurado.
 > * **Se você possui um IP dinâmico ou precisa acessar a API de outras redes** (ex: automações, CI/CD ou servidores externos), essa configuração restritiva causará bloqueios. Avalie alterar a lista de IPs permitidos ou remover o middleware `lanonly` caso adote outra forma de autenticação/segurança diretamente na API.
 
 ## Passo 4: Configurar os Roteadores dos Projetos para HTTPS

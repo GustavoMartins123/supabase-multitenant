@@ -5,7 +5,7 @@ local cjson = require "cjson"
 local DSN = os.getenv("SERVER_DOMAIN")
 local hostname = string.match(DSN, "//([^/:]+)") or "localhost"
 local TOKEN = os.getenv("NGINX_SHARED_TOKEN")
-local SEC = os.getenv("FERNET_SECRET")
+local SEC = os.getenv("STUDIO_SERVICE_KEY_ENCRYPTION_KEY")
 local cache = ngx.shared.service_keys
 
 local function get_service_key(ref)
@@ -28,7 +28,7 @@ local function get_service_key(ref)
     end
     
     if not SEC or SEC == "" then
-        ngx.log(ngx.ERR, "FERNET_SECRET não definido")
+        ngx.log(ngx.ERR, "STUDIO_SERVICE_KEY_ENCRYPTION_KEY não definido")
         return ""
     end
     

@@ -83,9 +83,9 @@ docker network ls | grep rede-supabase
 
 docker network create rede-supabase \
   --driver bridge \
-  --subnet 172.20.0.0/16 \
-  --ip-range 172.20.0.0/18 \
-  --gateway 172.20.0.1
+  --subnet 172.50.0.0/16 \
+  --ip-range 172.50.0.0/18 \
+  --gateway 172.50.0.1
 
 docker restart traefik-traefik-1
 docker restart nome_do_projeto-nginx-1
@@ -202,26 +202,9 @@ SELECT name, anon_key, service_role FROM projects WHERE name = 'nome_projeto';
    bash extract_token.sh nome_projeto
    ```
 
-2. **Criptografe as chaves:**
-   ```python
-   from cryptography.fernet import Fernet
-   
-   fernet = Fernet(b'SEU_FERNET_SECRET_AQUI')
-   
-   anon_encrypted = fernet.encrypt(b'ANON_KEY_AQUI').decode()
-   service_encrypted = fernet.encrypt(b'SERVICE_KEY_AQUI').decode()
-   
-   print(f"Anon: {anon_encrypted}")
-   print(f"Service: {service_encrypted}")
-   ```
-
-3. **Atualize o banco:**
-   ```sql
-   UPDATE projects 
-   SET anon_key = 'ANON_ENCRYPTED', 
-       service_role = 'SERVICE_ENCRYPTED'
-   WHERE name = 'nome_projeto';
-   ```
+2. **Reexecute o job de criação ou duplicação:** ele persiste as chaves no
+   envelope criptográfico correto do tenant. Não grave ciphertext manualmente
+   na tabela `projects`.
 
 **Como Prevenir:**
 - Verifique os logs da API durante criação de projetos
@@ -527,9 +510,9 @@ A rede Docker foi removida ou não foi criada.
 ```bash
 docker network create rede-supabase \
   --driver bridge \
-  --subnet 172.20.0.0/16 \
-  --ip-range 172.20.0.0/18 \
-  --gateway 172.20.0.1
+  --subnet 172.50.0.0/16 \
+  --ip-range 172.50.0.0/18 \
+  --gateway 172.50.0.1
 
 bash start.sh
 ```
@@ -723,9 +706,9 @@ docker system prune -a --volumes
 
 docker network create rede-supabase \
   --driver bridge \
-  --subnet 172.20.0.0/16 \
-  --ip-range 172.20.0.0/18 \
-  --gateway 172.20.0.1
+  --subnet 172.50.0.0/16 \
+  --ip-range 172.50.0.0/18 \
+  --gateway 172.50.0.1
 
 bash start.sh
 ```

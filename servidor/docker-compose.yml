@@ -228,7 +228,7 @@ services:
     restart: unless-stopped
     networks:
         rede-supabase:
-          ipv4_address: 172.20.200.11
+          ipv4_address: 172.50.200.11
     volumes:
       - ./volumes/pooler/pooler.exs:/etc/pooler/pooler.exs:ro
     depends_on:
@@ -317,8 +317,8 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.20.0.0/16
-          ip_range: 172.20.0.0/18
-          gateway: 172.20.0.1
+        - subnet: 172.50.0.0/16
+          ip_range: 172.50.0.0/18
+          gateway: 172.50.0.1
 volumes:
   db-config:

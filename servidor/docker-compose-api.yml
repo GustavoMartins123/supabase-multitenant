@@ -11,7 +11,11 @@ services:
     expose: ["18000"]                         # visível APENAS na rede Docker :contentReference[oaicite:4]{index=4}
     environment:
       DB_DSN: postgres://supabase_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/postgres
-      FERNET_SECRET: ${FERNET_SECRET}
+      PROJECT_SECRETS_MASTER_KEY: ${PROJECT_SECRETS_MASTER_KEY}
+      PROJECT_SECRETS_MASTER_KEY_ID: ${PROJECT_SECRETS_MASTER_KEY_ID:-project-secrets-master-v1}
+      PROJECT_SECRETS_PREVIOUS_MASTER_KEYS: ${PROJECT_SECRETS_PREVIOUS_MASTER_KEYS:-}
+      PG_META_CRYPTO_KEY: ${PG_META_CRYPTO_KEY}
+      STUDIO_SERVICE_KEY_ENCRYPTION_KEY: ${STUDIO_SERVICE_KEY_ENCRYPTION_KEY}
       PROJECT_DELETE_PASSWORD: ${PROJECT_DELETE_PASSWORD}
       NGINX_SHARED_TOKEN: ${NGINX_SHARED_TOKEN}
       NGINX_HMAC_SECRET: ${NGINX_HMAC_SECRET:-}
@@ -25,8 +29,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     labels:
       - traefik.enable=true
-      - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.20.0.0/16
-      - traefik.http.routers.projects.rule=PathPrefix(`/api/projects`) && Header(`X-Shared-Token`, `${NGINX_SHARED_TOKEN}`)
+      - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.50.0.0/16
+      - traefik.http.routers.projects.rule=PathPrefix(`/api/projects`) && (`X-Shared-Token`, `${NGINX_SHARED_TOKEN}`)
       - traefik.http.routers.projects.middlewares=lanonly, api-security-chain@file
       - traefik.http.services.projects.loadbalancer.server.port=18000  
   postgres-meta-global:
@@ -42,7 +46,7 @@ services:
       PG_META_DB_NAME: meta_trap
       PG_META_DB_USER: meta_guest
       PG_META_DB_PASSWORD: ${META_GUEST_PASSWORD}
-      CRYPTO_KEY: ${FERNET_SECRET}
+      CRYPTO_KEY: ${PG_META_CRYPTO_KEY}
   # push-worker:
   #   container_name: push-worker
   #   build:
