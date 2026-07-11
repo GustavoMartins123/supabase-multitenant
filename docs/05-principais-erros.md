@@ -1,720 +1,387 @@
-# Principais Erros e Soluções
+# Principais erros e diagnóstico
 
-Este documento lista os erros mais comuns que podem ocorrer no sistema e como resolvê-los.
+Este documento é um runbook curto para falhas comuns.
 
----
+A arquitetura, os fluxos de lifecycle e o comportamento do cache não são repetidos aqui. Quando o diagnóstico depender desses assuntos, use as fontes canônicas:
 
-## Índice
+- [Arquitetura do sistema](00-arquitetura.md)
+- [Control plane](architecture/control-plane.md)
+- [Lifecycle dos projetos](architecture/project-lifecycle.md)
+- [OpenResty/Lua](architecture/openresty-lua.md)
+- [Realtime multi-tenant](09-autenticacao-multi-tenant-realtime.md)
 
-### Erros Críticos
-- [1. Erro 502 Bad Gateway ao acessar projeto](#1-erro-502-bad-gateway-ao-acessar-projeto)
-- [2. Porta já em uso ao criar projeto](#2-erro-ao-criar-projeto-porta-já-em-uso)
-- [3. Usuário não consegue fazer login no Authelia](#3-usuário-não-consegue-fazer-login-no-authelia)
-- [4. Projeto criado mas não aparece na lista](#4-projeto-criado-mas-não-aparece-na-lista)
+## Antes de alterar qualquer coisa
 
-### Erros Comuns
-- [5. Problemas com storage após duplicação](#5-problemas-com-storage-após-duplicação-de-projeto)
-- [6. Erro de permissões no storage](#6-erro-de-permissões-no-storage)
-- [7. Replication slot travado](#7-replication-slot-travado)
-- [8. "too many clients already" no PostgreSQL](#8-too-many-clients-already-no-postgresql)
-- [9. Cookie de projeto inválido (erro 403)](#9-cookie-de-projeto-inválido-erro-403)
-- [10. "network not found" ao iniciar containers](#10-erro-ao-iniciar-containers-network-not-found)
-- [11. Projeto não responde após restart](#11-projeto-não-responde-após-restart)
+Colete primeiro:
 
-### Referência Rápida
-- [Comandos úteis para diagnóstico](#comandos-úteis-para-diagnóstico)
-- [Reportando novos erros](#reportando-novos-erros)
-- [Troubleshooting avançado](#troubleshooting-avançado)
-
----
-
-## Erros Críticos
-
-### 1. Erro 502 Bad Gateway ao Acessar Projeto
-
-**Sintoma:**
-- Ao tentar acessar um projeto pelo Studio, aparece erro 502
-- Página em branco ou mensagem "Bad Gateway"
-
-**Causa:**
-O Nginx do Studio não consegue se comunicar com o Traefik, ou o Traefik não consegue encontrar o container do projeto.
-
-**Como Diagnosticar:**
-
-1. **Verifique os logs do Traefik:**
-   ```bash
-   docker logs traefik-traefik-1
-   ```
-
-2. **Procure por mensagens como:**
-   - `"backend not found"`
-   - `"no server available"`
-   - Mensagens mostrando o UUID do container do projeto
-
-3. **Verifique se o container do projeto está rodando:**
-   ```bash
-   docker ps | grep nome_do_projeto
-   ```
-
-**Soluções:**
-
-**Solução 1: Container do projeto não está rodando**
-```bash
-docker ps -a | grep nome_do_projeto
-
-cd servidor/projects/nome_do_projeto
-docker compose -p nome_do_projeto \
-  --env-file ../../.env \
-  --env-file .env \
-  up -d
-```
-
-**Solução 2: Traefik não está rodando**
-```bash
-docker ps | grep traefik
-
-cd servidor/traefik
-docker compose up -d
-```
-
-**Solução 3: Problema de rede Docker**
-```bash
-docker network ls | grep rede-supabase
-
-docker network create rede-supabase \
-  --driver bridge \
-  --subnet 172.50.0.0/16 \
-  --ip-range 172.50.0.0/18 \
-  --gateway 172.50.0.1
-
-docker restart traefik-traefik-1
-docker restart nome_do_projeto-nginx-1
-```
-
-**Solução 4: Labels do Traefik incorretos**
-
-Verifique se o `docker-compose.yml` do projeto tem os labels corretos:
-```bash
-cd servidor/projects/nome_do_projeto
-cat docker-compose.yml | grep -A 5 "traefik.enable"
-```
-
-Deve ter algo como:
-```yaml
-labels:
-  - "traefik.enable=true"
-  - "traefik.http.routers.supabase-nginx-nome_projeto.rule=PathPrefix(`/nome_projeto`)"
-  - "traefik.http.services.supabase-nginx-nome_projeto.loadbalancer.server.port=PORTA"
-```
-
-**Como Prevenir:**
-- Use a interface do Studio para gerenciar projetos (start/stop)
-- Monitore os logs do Traefik regularmente
-- Configure alertas para containers parados
-
----
-
-### 2. Usuário Não Consegue Fazer Login no Authelia
-
-**Sintoma:**
-- Credenciais corretas, mas login falha
-- Mensagem: "Invalid credentials" ou similar
-
-**Causas Possíveis:**
-
-**Causa 1: Usuário desativado**
-
-Verifique o arquivo de usuários:
-```bash
-cat studio/authelia/users_database.yml | grep -A 20 "nome_usuario:"
-```
-
-Procure por:
-```yaml
-disabled: true
-```
-
-**Solução:**
-```yaml
-disabled: false
-```
-
-**Causa 2: Grupo "active" ausente**
-
-Verifique se o usuário tem o grupo `active`:
-```yaml
-groups:
-  - active
-```
-
-**Solução:**
-Adicione o grupo `active` se estiver faltando.
-
-**Causa 3: Hash de senha incorreto**
-
-Gere um novo hash:
-```bash
-echo -n "senha_correta" | argon2 $(openssl rand -base64 32) -id -t 3 -m 16 -p 4 -l 32 -e
-```
-
-Substitua no arquivo `users_database.yml`.
-
-**Causa 4: Certificado SSL inválido**
-
-Se o certificado SSL do Authelia expirou (válido por 1 ano):
-
-```bash
-openssl x509 -in studio/authelia/ssl/ca.pem -noout -dates
-
-sudo bash authelia.sh
-```
-
-**Como Diagnosticar:**
-```bash
-docker logs authelia
-
-docker logs authelia | grep -i "authentication"
-```
-
----
-
-### 3. Projeto Criado Mas Não Aparece na Lista
-
-**Sintoma:**
-- Projeto foi criado (job status = "done")
-- Mas não aparece na lista de projetos do usuário
-
-**Causa:**
-As chaves (anon_key, service_role) não foram armazenadas no banco.
-
-**Como Diagnosticar:**
-```bash
-docker exec -it supabase-db psql -U supabase_admin -d postgres
-
-SELECT name, anon_key, service_role FROM projects WHERE name = 'nome_projeto';
-```
-
-**Solução:**
-
-1. **Extraia as chaves do projeto:**
-   ```bash
-   cd servidor/generateProject
-   bash extract_token.sh nome_projeto
-   ```
-
-2. **Reexecute o job de criação ou duplicação:** ele persiste as chaves no
-   envelope criptográfico correto do tenant. Não grave ciphertext manualmente
-   na tabela `projects`.
-
-**Como Prevenir:**
-- Verifique os logs da API durante criação de projetos
-- Monitore o status dos jobs
-
----
-
-## Erros Comuns
-
-### 4. Problemas com Storage Após Duplicação de Projeto
-
-Este erro pode se manifestar de diferentes formas, mas todas relacionadas à cópia incorreta dos arquivos do storage.
-
-**Sintomas Possíveis:**
-
-**A) Arquivos não aparecem no projeto duplicado**
-- Storage vazio mesmo após duplicação com dados
-- Erro ao listar arquivos
-
-**B) Arquivos listados mas não carregam (tela cinza)**
-- Arquivo aparece na lista do Storage
-- Ao clicar, apenas tela cinza com nome do arquivo
-- Imagem não carrega
-
-**C) Erro ao acessar arquivo**
-- Logs mostram: `ENOENT: no such file or directory`
-
-**Causas Raiz:**
-
-1. **xattr perdidos:** O comando `tar` dentro do container não preserva extended attributes (xattr). O Storage usa xattr para armazenar metadados vitais (Content-Type, Cache-Control, etc.) diretamente no arquivo físico.
-
-2. **Arquivo físico ausente:** Registro existe no banco (`storage.objects`) mas arquivo não existe no host. Acontece quando:
-   - Duplicação copiou apenas o banco, não os arquivos
-   - Arquivo deletado manualmente do host
-   - Falha na cópia durante migração
-
-**Como Diagnosticar:**
-
-1. **Verifique se os arquivos existem no host:**
-```bash
-cd servidor/projects/projeto_duplicado/storage/stub/stub
-ls -la bucket/
-```
-
-2. **Verifique se os xattr estão presentes:**
-```bash
-getfattr -d -m - bucket/path/arquivo.jpg
-```
-
-Deve mostrar atributos como:
-```
-user.content_type="image/jpeg"
-user.cache_control="max-age=3600"
-```
-
-3. **Compare banco vs host:**
-```bash
-cd servidor/projects/nome_projeto
-
-docker exec -it supabase-db psql -U supabase_admin -d nome_projeto -c \
-  "SELECT name FROM storage.objects" > /tmp/db_files.txt
-
-find storage/stub/stub -type f > /tmp/host_files.txt
-
-diff /tmp/db_files.txt /tmp/host_files.txt
-```
-
-4. **Verifique logs do Storage:**
-```bash
-docker logs nome_projeto-storage-1 | grep ENOENT
-```
-
-**Solução Completa:**
-
-**Passo 1: Limpe o storage corrompido**
-```bash
-cd servidor/projects
-
-sudo rm -rf projeto_duplicado/storage/stub/stub/*
-```
-
-**Passo 2: Copie corretamente do projeto original**
-
-**Opção A: Usar rsync (RECOMENDADO)**
-```bash
-sudo rsync -aAX projeto_original/storage/stub/stub/ \
-  projeto_duplicado/storage/stub/stub/
-
-sudo chown -R $(id -u):$(id -g) projeto_duplicado/storage/
-```
-
-**Opção B: Usar tar do host**
-```bash
-sudo tar -C projeto_original/storage/stub/stub -cpf - . | \
-  sudo tar -C projeto_duplicado/storage/stub/stub -xpf -
-
-sudo chown -R $(id -u):$(id -g) projeto_duplicado/storage/
-```
-
-**Passo 3: Verifique se funcionou**
-```bash
-cd servidor/projects/projeto_duplicado/storage/stub/stub
-
-getfattr -d -m - bucket/path/arquivo.jpg
-
-ls -la bucket/
-```
-
-**Passo 4: Teste no Studio**
-- Acesse o projeto duplicado
-- Vá em Storage
-- Clique em um arquivo
-- Deve carregar normalmente
-
-**Solução Alternativa: Restaurar Apenas Arquivos Específicos**
-
-Se apenas alguns arquivos estão com problema:
-
-```bash
-cd servidor/projects/nome_projeto/storage/stub/stub
-
-sudo cp /caminho/backup/bucket/path/file.jpg bucket/path/
-
-sudo chown $(id -u):$(id -g) bucket/path/file.jpg
-
-setfattr -n user.content_type -v "image/jpeg" bucket/path/file.jpg
-```
-
-**Solução Drástica: Limpar Registros Órfãos**
-
-Se não conseguir recuperar os arquivos:
-
-```sql
-DELETE FROM storage.objects 
-WHERE name = 'bucket/path/file.jpg';
-```
-
-**Como Prevenir:**
-- Sempre use `rsync -aAX` para copiar storage (preserva xattr automaticamente)
-- Teste o acesso aos arquivos no Studio após duplicação
-- Faça backup regular do storage
-- Não delete arquivos manualmente do host
-
----
-
-### 5. Erro de Permissões no Storage
-
-**Sintoma:**
-- Erro "Permission denied" ao acessar storage
-- Duplicação falha por permissões
-
-**Causa:**
-Permissões incorretas nos arquivos do storage.
-
-**Solução:**
-```bash
-cd servidor/projects/projeto
-sudo chown -R $(id -u):$(id -g) storage/
-sudo chmod -R 755 storage/
-```
-
----
-
-### 6. Replication Slot Travado
-
-**Sintoma:**
-- Erro ao deletar projeto
-- Mensagem: "replication slot is active" ou "replication slot already exists"
-
-**Causa:**
-O Realtime ainda está usando o slot de replicação.
-
-**Como Diagnosticar:**
-```bash
-docker exec -it supabase-db psql -U supabase_admin -d postgres
-
-SELECT slot_name, active, active_pid 
-FROM pg_replication_slots 
-WHERE slot_name LIKE '%nome_projeto%';
-```
-
-**Solução:**
-
-1. **Pause o Realtime temporariamente:**
-   ```bash
-   docker pause realtime-dev.supabase-realtime
-   ```
-
-2. **Termine o processo que está usando o slot:**
-   ```sql
-   -- No psql
-   SELECT pg_terminate_backend(active_pid) 
-   FROM pg_replication_slots 
-   WHERE slot_name = 'supabase_realtime_replication_slot_nome_projeto';
-   ```
-
-3. **Aguarde alguns segundos e tente deletar o slot:**
-   ```sql
-   SELECT pg_drop_replication_slot('supabase_realtime_replication_slot_nome_projeto');
-   ```
-
-4. **Despause o Realtime:**
-   ```bash
-   docker unpause realtime-dev.supabase-realtime
-   ```
-
-**Como Prevenir:**
-- Use a interface do Studio para deletar projetos (faz isso automaticamente)
-- Não delete slots manualmente
-
----
-
-### 7. "too many clients already" no PostgreSQL
-
-**Sintoma:**
-- Aplicações não conseguem conectar ao banco
-- Erro: `FATAL: sorry, too many clients already`
-
-**Causa:**
-Número de conexões excedeu o `max_connections` configurado.
-
-**Como Diagnosticar:**
-```bash
-docker exec -it supabase-db psql -U supabase_admin -d postgres
-
-SELECT count(*) FROM pg_stat_activity;
-
-SHOW max_connections;
-```
-
-**Solução Imediata:**
-```sql
--- Termine conexões ociosas
-SELECT pg_terminate_backend(pid) 
-FROM pg_stat_activity 
-WHERE state = 'idle' 
-  AND state_change < now() - interval '10 minutes';
-```
-
-**Solução Permanente:**
-
-Aumente o limite de conexões (veja `docs/02-Como-aumentar-o-limite-conexoes-postgres.md`):
-
-```yaml
-command:
-  - postgres
-  - -c
-  - max_connections=1500
-```
-
-Reinicie o banco:
-```bash
-cd servidor
-docker compose --env-file .env up -d --force-recreate db
-```
-
----
-
-### 8. Cookie de Projeto Inválido (Erro 403)
-
-**Sintoma:**
-- Ao acessar projeto, erro 403
-- Logs do Nginx: "Assinatura de cookie inválida"
-
-**Causa:**
-O cookie `supabase_project` expirou (24h) ou foi corrompido.
-
-**Solução:**
-
-1. **Limpe os cookies do navegador** para o domínio do Studio
-
-2. **Ou force a seleção de projeto novamente:**
-   - Volte para a tela de seleção de projetos
-   - Clique no projeto desejado
-
-3. **Se o problema persistir, verifique o COOKIE_SIGN_SECRET:**
-   ```bash
-   # Verifique se está configurado
-   cat studio/.env | grep COOKIE_SIGN_SECRET
-   
-   # Se estiver vazio, regenere:
-   openssl rand -base64 32 | tr -d '\n'
-   
-   # Adicione ao studio/.env
-   COOKIE_SIGN_SECRET=VALOR_GERADO
-   
-   # Reinicie o Nginx
-   docker restart nginx
-   ```
-
----
-
-### 9. Erro ao Iniciar Containers: "network not found"
-
-**Sintoma:**
-- Containers não iniciam
-- Erro: `network rede-supabase not found`
-
-**Causa:**
-A rede Docker foi removida ou não foi criada.
-
-**Solução:**
-```bash
-docker network create rede-supabase \
-  --driver bridge \
-  --subnet 172.50.0.0/16 \
-  --ip-range 172.50.0.0/18 \
-  --gateway 172.50.0.1
-
-bash start.sh
-```
-
----
-
-### 10. Projeto Não Responde Após Restart
-
-**Sintoma:**
-- Projeto foi reiniciado mas não responde
-- Containers estão "running" mas não funcionam
-
-**Causa:**
-Ordem de inicialização incorreta ou serviços não prontos.
-
-**Solução:**
-
-1. **Verifique os healthchecks:**
-   ```bash
-   docker ps | grep nome_projeto
-   # Procure por "(healthy)" ou "(unhealthy)"
-   ```
-
-2. **Verifique os logs de cada serviço:**
-   ```bash
-   docker logs nome_projeto-auth-1
-   docker logs nome_projeto-rest-1
-   docker logs nome_projeto-storage-1
-   docker logs postgres-meta-global
-   ```
-
-3. **Reinicie na ordem correta:**
-   ```bash
-   # Para todos
-   docker stop $(docker ps -q --filter "name=nome_projeto")
-   
-   # Aguarde 5 segundos
-   sleep 5
-   
-   # Inicie via interface do Studio (ordem correta automática)
-   # Ou manualmente:
-   docker start nome_projeto-auth-1
-   sleep 2
-   docker start nome_projeto-rest-1
-   sleep 2
-   docker start nome_projeto-imgproxy-1
-   sleep 2
-   docker start nome_projeto-storage-1
-   sleep 2
-   docker start nome_projeto-nginx-1
-   ```
-
----
-
-### 11. `Tenant or user not found` no Auth, Rest ou Storage
-
-**Sintoma:**
-- Storage falha com `Tenant or user not found`
-- PostgREST falha ao carregar schema cache
-- GoTrue/Auth reinicia com erro de conexão no Supavisor
-- Logs do `supabase-pooler` mostram `permission denied for database "_supabase_nome_projeto"`
-
-**Causa provável:**
-O tenant do Supavisor não foi criado ou falhou durante a criação. Se `CONNECT` foi removido de `PUBLIC` nos bancos de projeto, o role `pgbouncer` também precisa ter `CONNECT` no banco para o Supavisor resolver os usuários do tenant.
-
-**Verificação:**
-```bash
-docker exec supabase-db psql -U supabase_admin -d postgres -c "
-SELECT
-  has_database_privilege('pgbouncer', '_supabase_nome_projeto', 'CONNECT') AS pgbouncer_connect,
-  has_database_privilege('meta_guest', '_supabase_nome_projeto', 'CONNECT') AS meta_guest_connect;
-"
-```
-
-**Correção:**
-```bash
-docker exec supabase-db psql -U supabase_admin -d postgres -c "
-GRANT CONNECT, TEMPORARY ON DATABASE _supabase_nome_projeto TO pgbouncer;
-"
-```
-
-Depois recrie o tenant do Supavisor pelo fluxo normal de criação do projeto ou rode novamente a etapa que chama `PUT /api/tenants/<nome_projeto>`. Se o tenant já foi recriado, os serviços costumam recuperar sozinhos; caso contrário, reinicie os containers do projeto.
-
----
-
-## Comandos Úteis para Diagnóstico
-
-### Verificar Status Geral
 ```bash
 docker ps -a
-
-docker ps | grep -E "traefik|authelia|nginx|supabase-db|realtime|pooler"
-
-docker ps | grep nome_projeto
+docker network inspect rede-supabase
+docker logs projects-api --tail 200
+docker logs nginx --tail 200
+docker logs traefik-traefik-1 --tail 200
 ```
 
-### Logs
-```bash
-docker logs traefik-traefik-1 --tail 100 -f
-
-docker logs authelia --tail 100 -f
-
-docker logs nginx --tail 100 -f
-
-docker logs projects-api --tail 100 -f
-
-docker logs supabase-db --tail 100 -f
-```
-
-### Verificar Conectividade
-```bash
-docker exec traefik-traefik-1 ping supabase-nginx-nome_projeto
-
-docker exec nginx ping traefik-traefik-1
-
-docker exec -it supabase-db psql -U supabase_admin -d postgres -c "SELECT 1;"
-```
-
-### Limpeza
-```bash
-docker container prune
-
-docker image prune
-
-docker volume prune
-
-docker network prune
-```
-
----
-
-## Reportando Novos Erros
-
-Se você encontrou um erro que não está listado aqui:
-
-1. **Colete informações:**
-   - Mensagem de erro completa
-   - Logs relevantes
-   - Passos para reproduzir
-
-2. **Verifique os logs:**
-   ```bash
-   # Salve os logs em um arquivo
-   docker logs CONTAINER > erro.log 2>&1
-   ```
-
-3. **Abra uma issue no GitHub** com:
-   - Descrição do problema
-   - Logs (remova informações sensíveis)
-   - Ambiente (versões, sistema operacional)
-
----
-
-## Troubleshooting Avançado
-
-### Modo Debug do Nginx
-
-Para ver mais detalhes nos logs do Nginx:
+Para um projeto específico:
 
 ```bash
-nano studio/nginx/nginx.conf
-
-error_log /var/log/studio_error.log debug;
-
-docker restart nginx
-
-docker exec nginx tail -f /var/log/studio_error.log
+docker ps -a --filter "name=<project_ref>"
+cd servidor/projects/<project_ref>
+docker compose --env-file ../../.env --env-file .env ps
 ```
 
-### Cache de Service Keys
+Não remova database, tenant, slot ou diretório manualmente antes de identificar a etapa que falhou. Operações de lifecycle distribuem estado entre PostgreSQL, Docker, Realtime, Supavisor e Studio.
 
-O Nginx mantém um cache em memória (`lua_shared_dict service_keys`, 10MB) 
-com TTL de 10 minutos. Quando um projeto é acessado, a `service_role` é 
-buscada uma vez na API e armazenada — as requisições seguintes usam o cache.
+## 1. `502 Bad Gateway` ao acessar um projeto
 
-**Para limpar o cache manualmente:**
-```bash
-docker restart nginx
-```
-
-> ⚠️ Reiniciar o Nginx derruba todos os projetos por alguns segundos.
-
-### Resetar Tudo (Último Recurso)
-
-⚠️ **ATENÇÃO:** Isso vai parar todos os containers e limpar caches.
+### Verifique o container do Nginx
 
 ```bash
-docker stop $(docker ps -q)
-
-docker system prune -a --volumes
-
-docker network create rede-supabase \
-  --driver bridge \
-  --subnet 172.50.0.0/16 \
-  --ip-range 172.50.0.0/18 \
-  --gateway 172.50.0.1
-
-bash start.sh
+docker ps -a --filter "name=supabase-nginx-<project_ref>"
+docker logs supabase-nginx-<project_ref> --tail 200
 ```
 
----
+### Verifique a rota do Traefik
 
-**Última atualização:** Abril 2026
+```bash
+docker logs traefik-traefik-1 --tail 200 | grep -F '<project_ref>'
+```
 
-**Contribuições:** Se você resolveu um erro de forma diferente ou encontrou um novo, por favor contribua atualizando este documento!
+### Verifique a rede
+
+```bash
+docker network inspect rede-supabase
+docker inspect supabase-nginx-<project_ref> --format '{{json .NetworkSettings.Networks}}'
+```
+
+Se o projeto existe no control plane, mas os containers estão ausentes, prefira a ação de recriação/start pelo Studio ou pela Projects API. Subir manualmente o compose pode esconder um job incompleto.
+
+## 2. Projeto criado ou duplicado não aparece no Studio
+
+Consulte o job:
+
+```bash
+docker exec supabase-db psql -U supabase_admin -d postgres -c "
+SELECT job_id, project, action, status, progress, current_step, error_code, message
+FROM jobs
+WHERE project = '<project_ref>'
+ORDER BY created_at DESC
+LIMIT 5;
+"
+```
+
+Confirme o projeto:
+
+```bash
+docker exec supabase-db psql -U supabase_admin -d postgres -c "
+SELECT id, name, display_name, owner_id, project_key_version
+FROM projects
+WHERE name = '<project_ref>';
+"
+```
+
+Não grave `anon_key`, `service_role` ou `config_token` manualmente. Os valores persistidos usam envelope encryption e precisam ser salvos pelo fluxo da API.
+
+## 3. Job ficou em `queued` ou `running`
+
+A API tenta recuperar no startup apenas ações conhecidas como seguras.
+
+Consulte os detalhes:
+
+```bash
+docker exec supabase-db psql -U supabase_admin -d postgres -c "
+SELECT job_id, action, status, current_step, progress,
+       is_idempotent, retryable, retry_of, attempt,
+       error_code, stdout_tail, stderr_tail
+FROM jobs
+WHERE job_id = '<job_uuid>';
+"
+```
+
+Interpretação:
+
+- `queued`: pode ainda estar aguardando a fila do projeto;
+- `running`: confirme se o `projects-api` continua executando;
+- `failed` com revisão manual: a API foi reiniciada durante uma operação não idempotente;
+- `retryable = true`: use o endpoint/UI de retry em vez de repetir scripts manualmente.
+
+## 4. Erro durante rename
+
+O rename pode alterar:
+
+- diretório;
+- database;
+- containers;
+- tenant do Supavisor;
+- slot principal do Realtime;
+- rota do Traefik;
+- snippets do Studio.
+
+Consulte o histórico:
+
+```bash
+docker exec supabase-db psql -U supabase_admin -d postgres -c "
+SELECT job_id, old_name, new_name, status, error,
+       created_at, completed_at
+FROM project_name_history
+ORDER BY created_at DESC
+LIMIT 20;
+"
+```
+
+O UUID e o `external_id` do Realtime não devem mudar.
+
+Se o projeto foi renomeado, mas os snippets não apareceram, verifique o aviso do job e os logs:
+
+```bash
+docker logs projects-api --tail 200 | grep -i snippet
+docker logs nginx --tail 200 | grep -i snippet
+```
+
+Falha na migração dos snippets é best-effort e não invalida o rename já concluído.
+
+## 5. Chave rotacionada, mas o Studio usa a chave antiga
+
+O cache atual é versionado. A rotação deve:
+
+1. atualizar os segredos;
+2. incrementar `project_key_version`;
+3. chamar a invalidação ativa no OpenResty;
+4. manter verificação periódica de versão como fallback.
+
+Consulte a versão:
+
+```bash
+docker exec supabase-db psql -U supabase_admin -d postgres -c "
+SELECT name, project_key_version
+FROM projects
+WHERE name = '<project_ref>';
+"
+```
+
+Verifique os logs:
+
+```bash
+docker logs projects-api --tail 200 | grep -i 'service.key\|cache'
+docker logs nginx --tail 200 | grep -i 'service.key\|cache'
+```
+
+Reiniciar o Nginx limpa o cache, mas não é o mecanismo normal de consistência. Antes disso, valide:
+
+- `STUDIO_CACHE_INVALIDATION_URL`;
+- `NGINX_SHARED_TOKEN` nos dois lados;
+- `X-Internal-Service: projects-api`;
+- conectividade entre Projects API e Studio;
+- endpoint de versão da chave.
+
+Detalhes: [Arquitetura OpenResty/Lua](architecture/openresty-lua.md).
+
+## 6. Realtime retorna `403`
+
+Confirme primeiro os identificadores:
+
+- `external_id` do Realtime: UUID do projeto;
+- issuer do JWT: mesmo UUID;
+- database e slot principal: baseados no project ref;
+- Host do WebSocket: `<project_uuid>.localhost`.
+
+Consulte o tenant:
+
+```bash
+docker exec supabase-db psql -U supabase_admin -d postgres -c "
+SELECT external_id
+FROM _realtime.tenants
+WHERE external_id = '<project_uuid>';
+"
+```
+
+Quando uma requisição identifica um tenant, falha do JWT específico não cai para o secret global. O `403` pode indicar:
+
+- issuer diferente do UUID;
+- tenant ausente;
+- JWT assinado com outro secret;
+- Nginx injetando o Host antigo/incorreto;
+- API key inválida antes do proxy WebSocket.
+
+Detalhes: [Realtime multi-tenant](09-autenticacao-multi-tenant-realtime.md).
+
+## 7. Replication slot ativo ou travado
+
+Liste os slots:
+
+```bash
+docker exec supabase-db psql -U supabase_admin -d postgres -c "
+SELECT slot_name, database, active, active_pid
+FROM pg_replication_slots
+ORDER BY slot_name;
+"
+```
+
+Existem dois formatos relevantes:
+
+```text
+supabase_realtime_replication_slot_<project_ref>
+supabase_realtime_messages_replication_slot_<hash_do_project_uuid>
+```
+
+Não procure o slot temporário apenas pelo nome do projeto; ele usa hash do UUID.
+
+Durante delete, a Projects API remove o tenant/pools, drena conexões e valida reconexões antes de remover o database. Prefira corrigir e repetir o job de deleção.
+
+Para intervenção manual, confirme que o projeto não está em uso e termine apenas o PID associado ao slot correto:
+
+```sql
+SELECT pg_terminate_backend(active_pid)
+FROM pg_replication_slots
+WHERE slot_name = '<slot_exato>'
+  AND active_pid IS NOT NULL;
+```
+
+Evite pausar o Realtime global, pois isso afeta todos os tenants.
+
+## 8. Database não pode ser removido
+
+Liste as conexões:
+
+```bash
+docker exec supabase-db psql -U supabase_admin -d postgres -c "
+SELECT pid, usename, application_name, client_addr, state
+FROM pg_stat_activity
+WHERE datname = '_supabase_<project_ref>';
+"
+```
+
+Se novas conexões reaparecem, verifique o tenant e os pools do Supavisor antes de executar `DROP DATABASE`.
+
+A deleção atual falha de propósito quando o pooler continua reconectando. Isso preserva o database em vez de produzir uma remoção parcial.
+
+Detalhes: [Lifecycle dos projetos](architecture/project-lifecycle.md#deleção).
+
+## 9. `too many clients already`
+
+```bash
+docker exec supabase-db psql -U supabase_admin -d postgres -c "
+SELECT count(*) FROM pg_stat_activity;
+SHOW max_connections;
+"
+```
+
+Agrupe por database e aplicação:
+
+```sql
+SELECT datname, application_name, state, count(*)
+FROM pg_stat_activity
+GROUP BY datname, application_name, state
+ORDER BY count(*) DESC;
+```
+
+Antes de aumentar `max_connections`, valide:
+
+- pool size do Supavisor;
+- limite de clientes por tenant;
+- pool do PostgREST;
+- serviços em loop de reconexão;
+- jobs de delete/rename incompletos.
+
+Guias:
+
+- [PostgreSQL](02-Como-aumentar-o-limite-conexoes-postgres.md)
+- [Supavisor](03-Como-aumentar-o-limite-conexoes-pooler.md)
+- [Realtime](04-Como-aumentar-o-limite-conexoes-realtime.md)
+
+## 10. Storage quebrado após duplicação
+
+Confirme se a duplicação foi `schema-only` ou `with-data`.
+
+No modo com dados, valide:
+
+- registros em `storage.objects`;
+- arquivos no diretório do projeto;
+- ownership e permissões;
+- extended attributes quando usados pela versão atual do Storage;
+- histórico de migrations de Auth e Storage.
+
+Não copie apenas o database e espere que os objetos físicos apareçam.
+
+## 11. Usuário não consegue entrar no Studio
+
+Verifique:
+
+```bash
+docker logs authelia --tail 200
+docker logs nginx --tail 200
+```
+
+Confirme no arquivo do Authelia:
+
+- usuário não desativado;
+- grupo `active`;
+- hash Argon2id válido;
+- sintaxe YAML;
+- certificado ainda válido.
+
+A identidade do control plane é sincronizada depois da autenticação. Se o login funciona, mas o usuário recebe acesso negado, consulte `users`, `user_groups` e os logs da sincronização.
+
+Detalhes: [Gerenciamento de usuários no Authelia](07-gerenciamento-usuarios-authelia.md).
+
+## 12. Postgres-Meta falha ou retorna database incorreto
+
+Execute a validação sem imprimir segredos:
+
+```bash
+bash servidor/verify_key_config.sh
+```
+
+Confirme:
+
+- `PG_META_CRYPTO_KEY` igual na API e no Postgres-Meta;
+- `STUDIO_SERVICE_KEY_ENCRYPTION_KEY` igual na API e no Studio;
+- `PG_META_INTERNAL_URL` apontando para host permitido;
+- fallback usando `meta_trap` e `meta_guest`;
+- membership e service role do projeto válidas.
+
+Guias:
+
+- [Hardening do Postgres-Meta](10-hardening-postgres-meta.md)
+- [Rotação de segredos e conexões](11-rotacao-cripto-conexoes.md)
+
+## Comandos úteis
+
+### Logs globais
+
+```bash
+docker logs projects-api --tail 200 -f
+docker logs nginx --tail 200 -f
+docker logs traefik-traefik-1 --tail 200 -f
+docker logs realtime-dev.supabase-realtime --tail 200 -f
+docker logs supabase-pooler --tail 200 -f
+docker logs supabase-db --tail 200 -f
+```
+
+### Estado do control plane
+
+```sql
+SELECT id, name, owner_id, project_key_version FROM projects ORDER BY name;
+SELECT job_id, project, action, status, current_step FROM jobs ORDER BY created_at DESC;
+SELECT * FROM project_name_history ORDER BY created_at DESC;
+```
+
+### Rede
+
+```bash
+docker network inspect rede-supabase
+docker inspect <container> --format '{{json .NetworkSettings.Networks}}'
+```
+
+## Ao abrir uma issue
+
+Inclua:
+
+- versão/commit usado;
+- topologia de uma ou duas máquinas;
+- operação executada;
+- `project_ref` anonimizado, quando necessário;
+- etapa e código de erro do job;
+- logs sem JWTs, cookies, HMACs, senhas ou connection strings;
+- estado dos containers e da rede;
+- passos para reproduzir.
