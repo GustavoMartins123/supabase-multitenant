@@ -1,49 +1,38 @@
-# supabase-multitenant
+# supabase-multitenant Documentation
 
-> Projeto não oficial e ainda em desenvolvimento ativo.
+[Read this setup in Brazilian Portuguese 🇧🇷](./LEIAME.md)
 
-Este repositório adapta a stack self-hosted do Supabase para executar e gerenciar múltiplos projetos isolados na mesma infraestrutura.
+## Overview
 
-A proposta não é transformar o Supabase em um SaaS multi-tenant por RLS. Cada projeto provisionado possui seu próprio database, JWT secret, tenant do Realtime, tenant do Supavisor e containers de Auth, REST, Storage, ImgProxy e Nginx.
+The official Supabase self-hosting stack is designed for a single project. This repository extends that architecture to manage multiple isolated projects in the same infrastructure.
 
-O sistema também mantém um control plane próprio para criação, duplicação, renomeação, configuração, rotação de chaves, start/stop/restart e remoção dos projetos.
+Each project receives its own PostgreSQL database, JWT secret, Realtime tenant, Supavisor tenant and containers for Auth, REST, Storage, ImgProxy and Nginx. A FastAPI control plane manages the project lifecycle, while a dynamic OpenResty/Lua gateway allows a **single Supabase Studio instance** to manage every project.
 
-## Estado do projeto
+> This is an unofficial project under active development.
 
-O projeto está em fase alpha e recebe mudanças frequentes. Antes de usar em produção, revise principalmente:
+---
 
-- backup e restore;
-- política de atualização das imagens do Supabase;
-- exposição de rede do Studio e da API interna;
-- armazenamento das chaves mestras;
-- limites de PostgreSQL, Supavisor e Realtime;
-- testes de deleção, rename, rotação de chaves e recuperação de jobs.
+## Table of Contents
 
-Não trate este repositório como um instalador pronto para qualquer ambiente. Ele parte de decisões específicas de arquitetura e segurança que precisam ser entendidas antes do deploy.
+- [Overview](#overview)
+- [Purpose](#purpose)
+- [Architecture](#architecture)
+- [Prerequisites](#prerequisites)
+- [How to Use](#how-to-use)
+  - [1. Clone the Repository](#1-clone-the-repository)
+  - [2. Run the Setup Script](#2-run-the-setup-script)
+  - [3. Start the Platform](#3-start-the-platform)
+  - [4. Verification](#4-verification)
+- [Documentation](#documentation)
+- [Maintenance](#maintenance)
 
-## Quando usar
+## Purpose
 
-Este projeto faz sentido quando você precisa:
+Simplify the creation and management of multiple isolated Supabase projects on infrastructure controlled by you.
 
-- hospedar vários projetos Supabase em uma infraestrutura controlada por você;
-- manter databases separados por projeto;
-- reduzir a duplicação dos serviços globais mais pesados;
-- usar uma única instância do Supabase Studio para administrar os projetos;
-- operar em uma máquina ou separar o Studio local do servidor principal;
-- controlar o ciclo de vida dos projetos por uma API própria.
+---
 
-## Quando não usar
-
-Não é a melhor escolha quando:
-
-- um único projeto Supabase já atende o sistema;
-- isolamento por schema ou RLS é suficiente;
-- você precisa de suporte oficial e atualização transparente do Supabase Cloud;
-- não pretende manter patches no Realtime e na camada OpenResty/Lua;
-- precisa de alta disponibilidade horizontal pronta;
-- não consegue manter backup, monitoramento e rotação de segredos da infraestrutura.
-
-## Arquitetura resumida
+## Architecture
 
 ```mermaid
 flowchart LR
@@ -74,128 +63,179 @@ flowchart LR
     Supavisor --> PostgreSQL
 ```
 
-### Serviços globais
+The platform supports two deployment layouts:
+
+- **Single machine:** Studio, Traefik, API, PostgreSQL and project services run on the same host.
+- **Two machines:** Studio, Authelia and OpenResty run on a local administrative machine, while Traefik, the API and project services run on the main server.
+
+Applications access the project routes through Traefik. The Studio gateway is an administrative interface and does not need to be exposed as part of the public data path.
+
+### Shared services
 
 - PostgreSQL;
 - Supavisor;
-- Realtime modificado;
+- modified Realtime;
 - Edge Functions;
-- Postgres-Meta global;
-- API Python de projetos;
+- Postgres Meta;
+- Projects API;
 - Traefik;
-- Vector para logs globais.
+- Supabase Analytics/Logflare and Vector.
 
-### Serviços por projeto
+### Services created per project
 
-- Nginx do tenant;
+- Nginx;
 - GoTrue;
 - PostgREST;
 - Storage;
 - ImgProxy;
 - database `_supabase_<project_ref>`;
-- diretório de configuração e arquivos do projeto.
+- project configuration directory.
 
-## Identificadores importantes
+For implementation details, see the [architecture documentation](docs/00-arquitetura.md).
 
-O sistema usa identificadores diferentes para finalidades diferentes:
+---
 
-| Identificador | Exemplo | Uso |
-| --- | --- | --- |
-| `project UUID` | `0df3...` | identidade canônica do projeto e `external_id` do Realtime |
-| `project ref` | `cliente_a` | URL, diretório, nome do database e tenant do Supavisor |
-| database | `_supabase_cliente_a` | isolamento dos dados do projeto |
-| replication slot | `supabase_realtime_replication_slot_cliente_a` | CDC do database do projeto |
+## Prerequisites
 
-Não use o nome do projeto como substituto do UUID em fluxos de identidade. O nome pode ser alterado; o UUID deve permanecer estável.
+| Item | Description |
+| --- | --- |
+| Linux | Host system used by the setup scripts. |
+| Docker and Docker Compose | Installed and running. |
+| User | Permission to run Docker commands. |
+| Utilities | `openssl`, `curl`, `jq`, `sed` and standard shell tools. |
 
-## Topologias suportadas
+---
 
-### Uma máquina
+## How to Use
 
-Studio, Traefik, API, PostgreSQL e projetos rodam no mesmo host.
-
-É o modo mais simples para desenvolvimento, laboratório e validação da stack.
-
-### Duas máquinas
-
-- máquina local: Authelia, OpenResty, Flutter e Supabase Studio;
-- servidor principal: Traefik, API Python, PostgreSQL, Supavisor, Realtime e projetos.
-
-Essa separação existe porque o Studio e a camada Lua funcionam como uma interface administrativa local, enquanto o servidor principal concentra o data plane e as rotas dos projetos.
-
-## Início rápido
-
-### Pré-requisitos
-
-- Linux;
-- Docker;
-- Docker Compose;
-- usuário com acesso ao Docker;
-- `openssl`, `curl`, `jq`, `sed` e utilitários padrão de shell.
-
-### Configuração
+### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/GustavoMartins123/supabase-multitenant.git
+git clone git@github.com:GustavoMartins123/supabase-multitenant.git
 cd supabase-multitenant
+```
+
+### 2. Run the Setup Script
+
+```bash
 bash setup.sh
 ```
 
-Durante o setup:
+The IP or domain requested by the script represents the **main server**, where Traefik, the Projects API and project services run.
 
-- o endereço informado representa o servidor principal;
-- o IP local detectado é usado pelo Studio local;
-- informar o mesmo endereço prepara uma instalação em uma máquina;
-- informar endereços diferentes prepara a topologia separada.
+The script also detects the IP of the current machine, used by the local Studio, Authelia, the self-signed certificate and internal integrations.
 
-### Inicialização
+- Enter the local machine IP to prepare a single-machine installation.
+- Enter another server IP or domain to prepare the two-machine layout.
+
+The setup generates the server and Studio environment files, including the separate Analytics credentials in `servidor/.analytics.env` and `studio/.analytics.env`.
+
+### 3. Start the Platform
+
+#### Automated start — recommended
 
 ```bash
 bash start.sh
 ```
 
-Não execute o `start.sh` inteiro com `sudo`. Isso altera contexto do Docker, ownership dos arquivos e variáveis de ambiente. Quando necessário, configure o usuário no grupo `docker`.
+The script starts the shared services and Projects API, waits for PostgreSQL and Supavisor, starts Traefik and existing projects, and finally starts Studio.
 
-O Studio fica disponível por padrão em:
+> Do not run `start.sh` with `sudo`. Running the whole stack as root changes environment variables, Docker context, file ownership and mounted-volume permissions. If Docker requires elevated permissions, add your user to the `docker` group and log in again:
+>
+> ```bash
+> sudo usermod -aG docker "$USER"
+> ```
+
+#### Manual start — control or debugging
+
+Start the shared services and Projects API:
+
+```bash
+cd servidor
+
+docker compose -f docker-compose.yml --env-file .env up --build -d
+docker compose -f docker-compose-api.yml --env-file .env up --build -d
+```
+
+Start Traefik:
+
+```bash
+docker compose -f traefik/docker-compose.yml up -d
+```
+
+Start existing projects:
+
+```bash
+for project_dir in projects/*/; do
+  project_name=$(basename "$project_dir")
+
+  [ -f "$project_dir/docker-compose.yml" ] || continue
+
+  docker compose -p "$project_name" \
+    -f "$project_dir/docker-compose.yml" \
+    --env-file .env \
+    --env-file "$project_dir/.env" \
+    up --build -d
+done
+```
+
+Start Studio:
+
+```bash
+cd ../studio
+docker compose up --build -d
+```
+
+### 4. Verification
+
+Check whether the containers are running:
+
+```bash
+docker ps
+```
+
+Open the Studio endpoint:
 
 ```text
-https://<ip-local>:9091
+https://<your_local_ip>:9091
 ```
 
-No primeiro acesso, a interface permite criar o administrador inicial. Depois do bootstrap, a autenticação passa pelo Authelia.
+On the first access, create the initial administrator account in the browser. After the bootstrap, unauthenticated users are redirected to Authelia.
 
-## Documentação
+Important Studio details:
 
-O índice canônico fica em [`docs/README.md`](docs/README.md).
+- `9091` is the single public endpoint for Studio and Authelia;
+- plain HTTP requests to `:9091` are redirected to HTTPS on the same port;
+- server-to-server integrations that target the Studio gateway must also use port `9091`.
 
-Leituras principais:
+---
 
-- [Visão geral da arquitetura](docs/00-arquitetura.md)
+## Documentation
+
+The README is focused on understanding and starting the platform quickly. Detailed documentation is available in [`docs/README.md`](docs/README.md).
+
+Main references:
+
+- [Architecture overview](docs/00-arquitetura.md)
 - [Control plane](docs/architecture/control-plane.md)
-- [Lifecycle dos projetos](docs/architecture/project-lifecycle.md)
+- [Project lifecycle](docs/architecture/project-lifecycle.md)
 - [OpenResty/Lua](docs/architecture/openresty-lua.md)
-- [Realtime multi-tenant](docs/09-autenticacao-multi-tenant-realtime.md)
-- [Hardening do Postgres-Meta](docs/10-hardening-postgres-meta.md)
-- [Criptografia e rotação de segredos](docs/11-rotacao-cripto-conexoes.md)
+- [Supabase Analytics](docs/architecture/supabase-analytics.md)
+- [Multi-tenant Realtime](docs/09-autenticacao-multi-tenant-realtime.md)
+- [Postgres Meta hardening](docs/10-hardening-postgres-meta.md)
+- [Secret rotation and encryption](docs/11-rotacao-cripto-conexoes.md)
+- [Troubleshooting](docs/05-principais-erros.md)
 
-## Desenvolvimento e validação
+---
 
-As mudanças mais sensíveis devem ser acompanhadas pelos smoke tests em `tests/smoke/`.
+## Maintenance
 
-Antes de alterar lifecycle, autenticação, cache ou segredos, valide pelo menos:
+### SSL Certificate Rotation
 
-```bash
-python -m pytest tests/smoke
-```
+The setup script generates a self-signed certificate for Authelia and the Studio gateway.
 
-Também valide a sintaxe e a configuração dos componentes afetados, por exemplo:
+By default, the certificate is valid for **one year**. Regenerate it before expiration to avoid losing access to the management interface.
 
-```bash
-nginx -t
-luac -p arquivo.lua
-bash -n script.sh
-```
+## License
 
-## Licença
-
-Este repositório mantém a licença Apache 2.0 e os avisos de copyright dos componentes derivados do Supabase.
+Apache License 2.0. See [`LICENSE`](LICENSE).
