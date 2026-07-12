@@ -31,6 +31,19 @@ PROFILE_FIELDS = {
     "country",
 }
 
+
+def decode_json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str) and value:
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return dict(decoded) if isinstance(decoded, dict) else {}
+    return {}
+
+
 async def audit_studio_action(
     conn: asyncpg.Connection,
     *,
@@ -189,7 +202,7 @@ async def sync_user_record(
         """,
         user_id,
     )
-    old_profile = dict(row["profile_data"] or {}) if row else {}
+    old_profile = decode_json_object(row["profile_data"]) if row else {}
     old_email = row["email"] if row else None
     old_picture = row["picture_url"] if row else None
     old_display_name = row["display_name"] if row else None
@@ -345,7 +358,7 @@ async def sync_user_record(
         "is_active": is_active,
         "email": projection["email"] if projection else None,
         "picture_url": projection["picture_url"] if projection else None,
-        "profile": dict(projection["profile_data"] or {}) if projection else {},
+        "profile": decode_json_object(projection["profile_data"]) if projection else {},
         "profile_version": projection["profile_version"] if projection else 1,
         "profile_updated_at": (
             projection["profile_updated_at"].isoformat()
