@@ -32,6 +32,17 @@ services:
       - "traefik.http.routers.supabase-nginx-{{project_id}}.rule=PathPrefix(`/{{project_id}}`)"
       - "traefik.http.routers.supabase-nginx-{{project_id}}.entrypoints=web"
       - "traefik.http.services.supabase-nginx-{{project_id}}.loadbalancer.server.port=8080"
+      - "traefik.http.middlewares.supabase-guard-{{project_id}}.plugin.supabaseguard.profile=project"
+      - "traefik.http.middlewares.supabase-guard-{{project_id}}.plugin.supabaseguard.mode=${TRAEFIK_GUARD_PROJECT_MODE:-observe}"
+      - "traefik.http.middlewares.supabase-guard-{{project_id}}.plugin.supabaseguard.scope={{project_uuid}}"
+      - "traefik.http.middlewares.supabase-guard-{{project_id}}.plugin.supabaseguard.maxTrackedClients=${TRAEFIK_GUARD_MAX_TRACKED_CLIENTS:-10000}"
+      - "traefik.http.middlewares.supabase-guard-{{project_id}}.plugin.supabaseguard.cleanupInterval=${TRAEFIK_GUARD_CLEANUP_INTERVAL:-5m}"
+      - "traefik.http.middlewares.supabase-guard-{{project_id}}.plugin.supabaseguard.authThreshold=${TRAEFIK_GUARD_AUTH_THRESHOLD:-12}"
+      - "traefik.http.middlewares.supabase-guard-{{project_id}}.plugin.supabaseguard.authWindow=${TRAEFIK_GUARD_AUTH_WINDOW:-10m}"
+      - "traefik.http.middlewares.supabase-guard-{{project_id}}.plugin.supabaseguard.authBanTime=${TRAEFIK_GUARD_AUTH_BAN_TIME:-15m}"
+      - "traefik.http.middlewares.supabase-guard-{{project_id}}.plugin.supabaseguard.scannerThreshold=${TRAEFIK_GUARD_SCANNER_THRESHOLD:-2}"
+      - "traefik.http.middlewares.supabase-guard-{{project_id}}.plugin.supabaseguard.scannerWindow=${TRAEFIK_GUARD_SCANNER_WINDOW:-2m}"
+      - "traefik.http.middlewares.supabase-guard-{{project_id}}.plugin.supabaseguard.scannerBanTime=${TRAEFIK_GUARD_SCANNER_BAN_TIME:-1h}"
       - "traefik.http.middlewares.nginx-{{project_id}}-stripprefix.stripprefix.prefixes=/{{project_id}}"
 
 
@@ -48,7 +59,7 @@ services:
       #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.unknownCountryApiResponse=nil"
 
       #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.countries=BR"
-      - "traefik.http.routers.supabase-nginx-{{project_id}}.middlewares=rate-limit@file,security-headers@file, nginx-{{project_id}}-stripprefix@docker"
+      - "traefik.http.routers.supabase-nginx-{{project_id}}.middlewares=rate-limit@file,supabase-guard-{{project_id}}@docker,security-headers@file,nginx-{{project_id}}-stripprefix@docker"
       #- "traefik.http.routers.supabase-nginx-{{project_id}}.middlewares=rate-limit@file,security-headers@file,geoblock-{{project_id}}@docker, nginx-{{project_id}}-stripprefix@docker"
   auth:
     container_name: supabase-auth-{{project_id}}
