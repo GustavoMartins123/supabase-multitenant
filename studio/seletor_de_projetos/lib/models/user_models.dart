@@ -13,9 +13,8 @@ class UserListResponse {
     List<UserInfo> usersList = [];
     if (json['users'] != null) {
       if (json['users'] is List) {
-        usersList = (json['users'] as List)
-            .map((u) => UserInfo.fromJson(u))
-            .toList();
+        usersList =
+            (json['users'] as List).map((u) => UserInfo.fromJson(u)).toList();
       }
     }
 
@@ -33,6 +32,7 @@ class UserInfo {
   final String username;
   final String displayName;
   final bool isActive;
+  final bool isAdmin;
   final String status;
   final String emailHint;
 
@@ -42,6 +42,7 @@ class UserInfo {
     required this.username,
     required this.displayName,
     required this.isActive,
+    required this.isAdmin,
     required this.status,
     required this.emailHint,
   });
@@ -53,6 +54,7 @@ class UserInfo {
       username: json['username'] ?? '',
       displayName: json['display_name'] ?? '',
       isActive: json['is_active'] ?? false,
+      isAdmin: json['is_admin'] ?? false,
       status: json['status'] ?? 'unknown',
       emailHint: json['email_hint'] ?? '',
     );

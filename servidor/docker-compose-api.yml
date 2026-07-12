@@ -7,7 +7,9 @@ services:
       dockerfile: ./api-internal/Dockerfile
     restart: unless-stopped
     stop_grace_period: 4m
-    networks: [rede-supabase]                # mesma bridge do restante
+    env_file:
+      - .analytics.env
+    networks: [rede-supabase, analytics-internal]
     expose: ["18000"]                         # visível APENAS na rede Docker :contentReference[oaicite:4]{index=4}
     environment:
       DB_DSN: postgres://supabase_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/postgres
@@ -25,6 +27,7 @@ services:
       STUDIO_CACHE_INVALIDATION_VERIFY_TLS: ${STUDIO_CACHE_INVALIDATION_VERIFY_TLS:-false}
       PG_META_INTERNAL_URL: http://postgres-meta-global:8080
       PG_META_ALLOWED_HOSTS: postgres-meta-global
+      ANALYTICS_INTERNAL_URL: http://analytics:4000
     volumes:
       - ./projects:/docker/projects:rw        # bind-mount relativo  :contentReference[oaicite:0]{index=0}
       - ./certs:/docker/push-certs:ro
@@ -33,7 +36,7 @@ services:
     labels:
       - traefik.enable=true
       - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.50.0.0/16
-      - traefik.http.routers.projects.rule=PathPrefix(`/api/projects`) && Header(`X-Shared-Token`, `${NGINX_SHARED_TOKEN}`)
+      - traefik.http.routers.projects.rule=(PathPrefix(`/api/projects`) || PathPrefix(`/api/internal/analytics`)) && Header(`X-Shared-Token`, `${NGINX_SHARED_TOKEN}`)
       - traefik.http.routers.projects.middlewares=lanonly, api-security-chain@file
       - traefik.http.services.projects.loadbalancer.server.port=18000  
   postgres-meta-global:
@@ -71,4 +74,7 @@ services:
 
 networks:
   rede-supabase:
+    external: true
+  analytics-internal:
+    name: supabase-analytics-internal
     external: true

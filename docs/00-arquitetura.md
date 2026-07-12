@@ -119,7 +119,7 @@ Um único cluster hospeda:
 - database `_supabase_template`;
 - um database `_supabase_<project_ref>` por projeto;
 - schemas internos do Realtime e Supavisor;
-- database `logs_db`;
+- database `_supabase`, com schema `_analytics`, para o backend minimo do Logflare;
 - fallback `meta_trap` do Postgres-Meta.
 
 As roles de serviço são globais ao cluster PostgreSQL. O isolamento não depende de criar uma cópia da role para cada database, mas das permissões, credenciais, tenants e databases usados por cada serviço.
@@ -161,9 +161,14 @@ Detalhes:
 - [Hardening do Postgres-Meta](10-hardening-postgres-meta.md)
 - [Rotação de chaves e conexões](11-rotacao-cripto-conexoes.md)
 
-### Vector
+### Supabase Analytics e Vector
 
-O Vector coleta logs dos serviços globais e grava no `logs_db`. Os containers de cada projeto não fazem parte do filtro global padrão.
+O Logflare/Supabase Analytics global persiste no schema `_analytics` do database
+`_supabase`. O Vector coleta os containers globais e os serviços com sufixo de
+projeto, normaliza o formato esperado pelo Studio e envia os eventos ao Logflare.
+A interface e os endpoints de Analytics são exclusivos de admins globais.
+
+Detalhes: [Supabase Analytics global](architecture/supabase-analytics.md).
 
 ## Serviços por projeto
 

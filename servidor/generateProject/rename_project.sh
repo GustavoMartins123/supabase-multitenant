@@ -369,7 +369,6 @@ template_to_file() {
     -e "s|{{project_public_url}}|$(escape_sed_replacement "$PROJECT_PUBLIC_URL")|g" \
     -e "s|{{project_auth_external_url}}|$(escape_sed_replacement "$PROJECT_AUTH_EXTERNAL_URL")|g" \
     -e "s|{{project_root}}|$(escape_sed_replacement "${HOST_PROJECT_ROOT:-}")|g" \
-    -e "s|{{logflare_api_key}}|$(escape_sed_replacement "${LOGFLARE_API_KEY:-}")|g" \
     "$template" > "$output"
 }
 

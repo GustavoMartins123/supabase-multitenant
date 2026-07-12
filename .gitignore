@@ -5,6 +5,7 @@ servidor/docker/.env
 servidor/docker/volumes/db/data/*
 
 studio/.env
+servidor/.analytics.env
 tarefas.md
 
 # Python runtime artifacts

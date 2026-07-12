@@ -1,46 +1,241 @@
-# Caminho: ./volumes/logs/vector.yaml
+# Pipeline global adaptado do Vector oficial do Supabase self-hosted.
+# O projeto e inferido pelo sufixo dos containers multi-tenant.
 
-# --- Fontes (Inputs) ---
+api:
+  enabled: true
+  address: 0.0.0.0:9001
+
 sources:
-  docker_logs:
-    type: "docker_logs"
+  docker_host:
+    type: docker_logs
     exclude_containers:
-      - "supabase-vector-global"
+      - supabase-vector-global
+      - supabase-analytics
 
-# --- Transformações ---
 transforms:
-  filter_global_services:
-    type: "filter"
-    inputs:
-      - "docker_logs"
-    # Filtra e permite passar APENAS os logs dos seus serviços globais
-    condition: >-
-      includes([
-        "supabase-db",
-        "supabase-pooler",
-        "realtime-dev.supabase-realtime",
-        "supabase-edge-functions",
-        "projects-api",
-        "traefik-traefik-1"
-      ], .container_name)
+  project_logs:
+    type: remap
+    inputs: [docker_host]
+    source: |-
+      .event_message = del(.message)
+      .appname = del(.container_name)
+      .project = "default"
+      .tenant_project = "global"
 
-# --- Saídas ---
+      project_match, project_err = parse_regex(
+        string!(.appname),
+        r'^supabase-(?:auth|rest|storage|nginx|imgproxy)-(?P<ref>.+)$'
+      )
+      if project_err == null && project_match.ref != null {
+        .tenant_project = project_match.ref
+      }
+
+      del(.container_created_at)
+      del(.container_id)
+      del(.source_type)
+      del(.stream)
+      del(.label)
+      del(.image)
+      del(.host)
+
+  router:
+    type: route
+    inputs: [project_logs]
+    route:
+      auth: 'starts_with(string!(.appname), "supabase-auth-")'
+      rest: 'starts_with(string!(.appname), "supabase-rest-")'
+      storage: 'starts_with(string!(.appname), "supabase-storage-")'
+      realtime: '.appname == "realtime-dev.supabase-realtime"'
+      functions: '.appname == "supabase-edge-functions"'
+      db: '.appname == "supabase-db"'
+      gateway: >-
+        starts_with(string!(.appname), "supabase-nginx-") ||
+        starts_with(string!(.appname), "traefik") ||
+        includes([
+          "nginx",
+          "authelia",
+          "projects-api",
+          "supabase-studio",
+          "supabase-pooler",
+          "traefik-deny-service"
+        ], string!(.appname))
+
+  auth_logs:
+    type: remap
+    inputs: [router.auth]
+    source: |-
+      parsed, err = parse_json(.event_message)
+      if err == null {
+        .metadata = parsed
+        .metadata.project = .project
+        .metadata.tenant_project = .tenant_project
+      } else {
+        .metadata.project = .project
+        .metadata.tenant_project = .tenant_project
+      }
+
+  rest_logs:
+    type: remap
+    inputs: [router.rest]
+    source: |-
+      .metadata.host = .project
+      .metadata.tenant_project = .tenant_project
+      parsed, err = parse_regex(.event_message, r'^(?P<time>.*): (?P<msg>.*)$')
+      if err == null {
+        .event_message = parsed.msg
+        timestamp, timestamp_err = parse_timestamp(
+          parsed.time,
+          format: "%d/%b/%Y:%H:%M:%S %z"
+        )
+        if timestamp_err == null {
+          .timestamp = timestamp
+        }
+      }
+
+  storage_logs:
+    type: remap
+    inputs: [router.storage]
+    source: |-
+      .metadata.project = .project
+      .metadata.tenant_project = .tenant_project
+      .metadata.tenantId = .tenant_project
+      parsed, err = parse_json(.event_message)
+      if err == null {
+        if parsed.msg != null {
+          .event_message = parsed.msg
+        }
+        .metadata.level = parsed.level
+        .metadata.timestamp = parsed.time
+      }
+
+  realtime_logs:
+    type: remap
+    inputs: [router.realtime]
+    source: |-
+      .metadata.project = .project
+      .metadata.tenant_project = .tenant_project
+      .metadata.external_id = .tenant_project
+      parsed, err = parse_regex(
+        .event_message,
+        r'^(?P<time>\d+:\d+:\d+\.\d+) \[(?P<level>\w+)\] (?P<msg>.*)$'
+      )
+      if err == null {
+        .event_message = parsed.msg
+        .metadata.level = parsed.level
+      }
+
+  functions_logs:
+    type: remap
+    inputs: [router.functions]
+    source: |-
+      .metadata.project_ref = .project
+      .metadata.tenant_project = .tenant_project
+
+  db_logs:
+    type: remap
+    inputs: [router.db]
+    source: |-
+      .metadata.host = "db-global"
+      .metadata.parsed.timestamp = .timestamp
+      parsed, err = parse_regex(
+        .event_message,
+        r'.*(?P<level>INFO|NOTICE|WARNING|ERROR|LOG|FATAL|PANIC?):.*'
+      )
+      if err == null && parsed.level != null {
+        .metadata.parsed.error_severity = upcase!(parsed.level)
+      } else {
+        .metadata.parsed.error_severity = "LOG"
+      }
+
+  gateway_logs:
+    type: remap
+    inputs: [router.gateway]
+    source: |-
+      .metadata.project = .project
+      .metadata.tenant_project = .tenant_project
+      .metadata.service = .appname
+
 sinks:
-  postgresql_logs:
-    type: "postgres"
-    # Recebe os logs JÁ FILTRADOS
-    inputs:
-      - "filter_global_services"
-    # Pega a URI do banco do seu docker-compose.yml
-    endpoint: "${PG_URI}"
-    # Nome da tabela no banco 'logs_db'
-    table: "public.logs"
-    batch:
-      max_events: 100
-      timeout_secs: 1
-    # encoding:
-    #   # Salva o log inteiro como um objeto JSON
-    #   codec: "json"
-    #   # Remove campos desnecessários
-    #   except_fields:
-    #     - "source_type"
+  logflare_auth:
+    type: http
+    inputs: [auth_logs]
+    encoding: { codec: json }
+    method: post
+    request:
+      retry_max_duration_secs: 30
+      retry_initial_backoff_secs: 1
+    headers:
+      x-api-key: ${LOGFLARE_PUBLIC_ACCESS_TOKEN?LOGFLARE_PUBLIC_ACCESS_TOKEN is required}
+    uri: http://analytics:4000/api/logs?source_name=gotrue.logs.prod
+
+  logflare_rest:
+    type: http
+    inputs: [rest_logs]
+    encoding: { codec: json }
+    method: post
+    request:
+      retry_max_duration_secs: 30
+      retry_initial_backoff_secs: 1
+    headers:
+      x-api-key: ${LOGFLARE_PUBLIC_ACCESS_TOKEN?LOGFLARE_PUBLIC_ACCESS_TOKEN is required}
+    uri: http://analytics:4000/api/logs?source_name=postgREST.logs.prod
+
+  logflare_storage:
+    type: http
+    inputs: [storage_logs]
+    encoding: { codec: json }
+    method: post
+    request:
+      retry_max_duration_secs: 30
+      retry_initial_backoff_secs: 1
+    headers:
+      x-api-key: ${LOGFLARE_PUBLIC_ACCESS_TOKEN?LOGFLARE_PUBLIC_ACCESS_TOKEN is required}
+    uri: http://analytics:4000/api/logs?source_name=storage.logs.prod.2
+
+  logflare_realtime:
+    type: http
+    inputs: [realtime_logs]
+    encoding: { codec: json }
+    method: post
+    request:
+      retry_max_duration_secs: 30
+      retry_initial_backoff_secs: 1
+    headers:
+      x-api-key: ${LOGFLARE_PUBLIC_ACCESS_TOKEN?LOGFLARE_PUBLIC_ACCESS_TOKEN is required}
+    uri: http://analytics:4000/api/logs?source_name=realtime.logs.prod
+
+  logflare_functions:
+    type: http
+    inputs: [functions_logs]
+    encoding: { codec: json }
+    method: post
+    request:
+      retry_max_duration_secs: 30
+      retry_initial_backoff_secs: 1
+    headers:
+      x-api-key: ${LOGFLARE_PUBLIC_ACCESS_TOKEN?LOGFLARE_PUBLIC_ACCESS_TOKEN is required}
+    uri: http://analytics:4000/api/logs?source_name=deno-relay-logs
+
+  logflare_db:
+    type: http
+    inputs: [db_logs]
+    encoding: { codec: json }
+    method: post
+    request:
+      retry_max_duration_secs: 30
+      retry_initial_backoff_secs: 1
+    headers:
+      x-api-key: ${LOGFLARE_PUBLIC_ACCESS_TOKEN?LOGFLARE_PUBLIC_ACCESS_TOKEN is required}
+    uri: http://analytics:4000/api/logs?source_name=postgres.logs
+
+  logflare_gateway:
+    type: http
+    inputs: [gateway_logs]
+    encoding: { codec: json }
+    method: post
+    request:
+      retry_max_duration_secs: 30
+      retry_initial_backoff_secs: 1
+    headers:
+      x-api-key: ${LOGFLARE_PUBLIC_ACCESS_TOKEN?LOGFLARE_PUBLIC_ACCESS_TOKEN is required}
+    uri: http://analytics:4000/api/logs?source_name=cloudflare.logs.prod

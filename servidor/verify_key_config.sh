@@ -4,7 +4,9 @@ set -euo pipefail
 SERVER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SERVER_DIR")"
 SERVER_ENV="$SERVER_DIR/.env"
+ANALYTICS_ENV="$SERVER_DIR/.analytics.env"
 STUDIO_ENV="$ROOT_DIR/studio/.env"
+STUDIO_ANALYTICS_ENV="$ROOT_DIR/studio/.analytics.env"
 
 fail() { echo "ERRO: $*" >&2; exit 1; }
 ok() { echo "OK: $*"; }
@@ -15,7 +17,9 @@ env_value() {
 }
 
 [[ -f "$SERVER_ENV" ]] || fail "servidor/.env não encontrado"
+[[ -f "$ANALYTICS_ENV" ]] || fail "servidor/.analytics.env não encontrado"
 [[ -f "$STUDIO_ENV" ]] || fail "studio/.env não encontrado"
+[[ -f "$STUDIO_ANALYTICS_ENV" ]] || fail "studio/.analytics.env não encontrado"
 
 server_transport_key="$(env_value "$SERVER_ENV" STUDIO_SERVICE_KEY_ENCRYPTION_KEY)"
 studio_transport_key="$(env_value "$STUDIO_ENV" STUDIO_SERVICE_KEY_ENCRYPTION_KEY)"
@@ -33,6 +37,22 @@ for key in NGINX_SHARED_TOKEN NGINX_HMAC_SECRET INTERNAL_HMAC_SECRET; do
     || fail "$key ausente ou divergente entre servidor e Studio"
 done
 ok "segredos compartilhados estão presentes e consistentes"
+
+logflare_public="$(env_value "$ANALYTICS_ENV" LOGFLARE_PUBLIC_ACCESS_TOKEN)"
+logflare_private="$(env_value "$ANALYTICS_ENV" LOGFLARE_PRIVATE_ACCESS_TOKEN)"
+logflare_encryption="$(env_value "$ANALYTICS_ENV" LOGFLARE_DB_ENCRYPTION_KEY)"
+studio_logflare_private="$(env_value "$STUDIO_ANALYTICS_ENV" LOGFLARE_PRIVATE_ACCESS_TOKEN)"
+[[ ${#logflare_public} -ge 32 ]] \
+  || fail "LOGFLARE_PUBLIC_ACCESS_TOKEN ausente ou curto"
+[[ ${#logflare_private} -ge 32 ]] \
+  || fail "LOGFLARE_PRIVATE_ACCESS_TOKEN ausente ou curto"
+[[ "$logflare_public" != "$logflare_private" ]] \
+  || fail "tokens publico e privado do Logflare devem ser distintos"
+[[ "$logflare_private" == "$studio_logflare_private" ]] \
+  || fail "LOGFLARE_PRIVATE_ACCESS_TOKEN diverge entre servidor e Studio"
+[[ "$logflare_encryption" =~ ^[A-Za-z0-9+/]{43}=$ ]] \
+  || fail "LOGFLARE_DB_ENCRYPTION_KEY deve ser uma chave Base64 de 32 bytes"
+ok "tokens do Supabase Analytics estao presentes, distintos e consistentes"
 
 shopt -s nullglob
 for project_env in "$SERVER_DIR"/projects/*/.env; do

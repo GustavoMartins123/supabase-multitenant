@@ -53,9 +53,8 @@ class _AdminUsersPageState extends ConsumerState<AdminUsersPage>
       builder: (ctx) => ConfirmDialog(
         title: user.isActive ? 'Desativar usuário?' : 'Ativar usuário?',
         icon: user.isActive ? Icons.block_rounded : Icons.check_circle_rounded,
-        iconColor: user.isActive
-            ? SupabaseColors.error
-            : SupabaseColors.success,
+        iconColor:
+            user.isActive ? SupabaseColors.error : SupabaseColors.success,
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -81,18 +80,16 @@ class _AdminUsersPageState extends ConsumerState<AdminUsersPage>
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color:
-                    (user.isActive
-                            ? SupabaseColors.error
-                            : SupabaseColors.success)
-                        .withValues(alpha: 0.1),
+                color: (user.isActive
+                        ? SupabaseColors.error
+                        : SupabaseColors.success)
+                    .withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(6),
                 border: Border.all(
-                  color:
-                      (user.isActive
-                              ? SupabaseColors.error
-                              : SupabaseColors.success)
-                          .withValues(alpha: 0.2),
+                  color: (user.isActive
+                          ? SupabaseColors.error
+                          : SupabaseColors.success)
+                      .withValues(alpha: 0.2),
                 ),
               ),
               child: Row(
@@ -122,9 +119,8 @@ class _AdminUsersPageState extends ConsumerState<AdminUsersPage>
           ],
         ),
         confirmLabel: user.isActive ? 'Desativar' : 'Ativar',
-        confirmColor: user.isActive
-            ? SupabaseColors.error
-            : SupabaseColors.success,
+        confirmColor:
+            user.isActive ? SupabaseColors.error : SupabaseColors.success,
       ),
     );
 
@@ -366,9 +362,10 @@ class _AdminUsersPageState extends ConsumerState<AdminUsersPage>
                               user: user,
                               onToggle: () => _toggleUserStatus(user),
                               isLoading: _isToggling,
-                              isMe: (user.userUuid ?? user.id) == Session().myId,
-                              canToggle:
-                                  Session().isSysAdmin &&
+                              isMe:
+                                  (user.userUuid ?? user.id) == Session().myId,
+                              canToggle: Session().isSysAdmin &&
+                                  !user.isAdmin &&
                                   (user.userUuid ?? user.id) != Session().myId,
                             ),
                           )

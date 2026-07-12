@@ -10,7 +10,8 @@ A regra é simples: cada assunto deve ter uma fonte canônica. O `00-arquitetura
 2. [Control plane](architecture/control-plane.md)
 3. [Lifecycle dos projetos](architecture/project-lifecycle.md)
 4. [Arquitetura OpenResty/Lua](architecture/openresty-lua.md)
-5. [Autenticação multi-tenant no Realtime](09-autenticacao-multi-tenant-realtime.md)
+5. [Supabase Analytics global](architecture/supabase-analytics.md)
+6. [Autenticação multi-tenant no Realtime](09-autenticacao-multi-tenant-realtime.md)
 
 ## Instalação e configuração
 
@@ -41,6 +42,7 @@ A regra é simples: cada assunto deve ter uma fonte canônica. O `00-arquitetura
 | API Python, schema central e autorização | `architecture/control-plane.md` |
 | criação, duplicação, rename, rotação e deleção | `architecture/project-lifecycle.md` |
 | módulos Lua, rewrites e cache de service key | `architecture/openresty-lua.md` |
+| Logflare, Vector, fontes e acesso aos logs | `architecture/supabase-analytics.md` |
 | JWT, UUID do tenant e replication slots | `09-autenticacao-multi-tenant-realtime.md` |
 | fallback seguro do Postgres-Meta | `10-hardening-postgres-meta.md` |
 | envelope encryption e rotação | `11-rotacao-cripto-conexoes.md` |

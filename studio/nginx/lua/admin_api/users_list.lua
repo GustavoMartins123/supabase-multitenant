@@ -13,6 +13,15 @@ local active_count = 0
 local inactive_count = 0
 local seen_ids = {}
 
+local function mask_email(email)
+    local local_part, domain = tostring(email or ""):match("^([^@]+)@(.+)$")
+    if not local_part or not domain then
+        return "unknown"
+    end
+
+    return local_part:sub(1, 1) .. "***@" .. domain:sub(1, 1) .. "***"
+end
+
 for _, key in ipairs(keys) do
     if key ~= "__mtime" and not key:match("^email:") then
         local user_data = cache:get(key)
@@ -22,7 +31,7 @@ for _, key in ipairs(keys) do
                 local canonical_id = user.user_uuid or key
                 local is_primary_user = canonical_id == key
 
-                if not user.is_admin and is_primary_user and not seen_ids[canonical_id] then
+                if is_primary_user and not seen_ids[canonical_id] then
                     seen_ids[canonical_id] = true
                     local safe_user = {
                         id = canonical_id,
@@ -30,11 +39,9 @@ for _, key in ipairs(keys) do
                         username = user.username,
                         display_name = user.display_name,
                         is_active = user.is_active,
+                        is_admin = user.is_admin == true,
                         status = user.is_active and "active" or "inactive",
-                        email_hint = user.email and (
-                            user.email:sub(1,1) .. "***@" .. 
-                            user.email:match("@(.+)$"):gsub("^(.)", "%1***")
-                        ) or "unknown"
+                        email_hint = mask_email(user.email)
                     }
                     
                     table.insert(users, safe_user)

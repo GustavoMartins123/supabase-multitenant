@@ -87,7 +87,11 @@ class KeyGenerationContractTest(unittest.TestCase):
 
     def test_generated_secret_files_are_restricted(self):
         setup = (ROOT / "setup.sh").read_text(encoding="utf-8")
-        self.assertIn("chmod 600 servidor/.env studio/.env", setup)
+        self.assertIn(
+            "chmod 600 servidor/.env servidor/.analytics.env "
+            "studio/.env studio/.analytics.env",
+            setup,
+        )
         for script_name in {
             "generate_project.sh",
             "duplicate_project.sh",

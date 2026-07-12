@@ -117,6 +117,10 @@ generate_logflare_api_key() {
     head -c 32 /dev/urandom | base64
 }
 
+generate_logflare_encryption_key() {
+    openssl rand -base64 32 | tr -d '\n'
+}
+
 generate_fernet_key() {
     openssl rand -base64 32 | tr '/+' '_-' | tr -d '\n'
 }
@@ -312,7 +316,13 @@ main() {
     DB_ENC_KEY=$(generate_db_enc_key)
     VAULT_ENC_KEY=$(generate_vault_enc_key)
     SECRET_KEY_BASE=$(generate_secret_key_base)
-    LOGFLARE_API_KEY=$(generate_logflare_api_key)
+    LOGFLARE_PUBLIC_ACCESS_TOKEN=$(generate_logflare_api_key)
+    LOGFLARE_PRIVATE_ACCESS_TOKEN=$(generate_logflare_api_key)
+    LOGFLARE_DB_ENCRYPTION_KEY=$(generate_logflare_encryption_key)
+    if [[ "$LOGFLARE_PUBLIC_ACCESS_TOKEN" == "$LOGFLARE_PRIVATE_ACCESS_TOKEN" ]]; then
+        print_error "Tokens publico e privado do Logflare nao podem ser iguais"
+        return 1
+    fi
     PROJECT_DELETE_PASSWORD=$(generate_jwt_secret)
     DASHBOARD_USER=$(generate_user_realtime)
     DASHBOARD_PASSWORD=$(generate_realtime_dashboard_pass)
@@ -321,13 +331,16 @@ main() {
     META_GUEST_PASSWORD=$(generate_postgres_password)
 
     cp servidor/.env.example servidor/.env
+    cp servidor/.analytics.env.example servidor/.analytics.env
 
     safe_sed "s|POSTGRES_PASSWORD=pass|POSTGRES_PASSWORD=$POSTGRES_PASSWORD|g" servidor/.env
     safe_sed "s|META_GUEST_PASSWORD=pass|META_GUEST_PASSWORD=$META_GUEST_PASSWORD|g" servidor/.env
     safe_sed "s|DB_ENC_KEY=pass|DB_ENC_KEY=$DB_ENC_KEY|g" servidor/.env
     safe_sed "s|VAULT_ENC_KEY=pass|VAULT_ENC_KEY=$VAULT_ENC_KEY|g" servidor/.env
     safe_sed "s|SECRET_KEY_BASE=pass|SECRET_KEY_BASE=$SECRET_KEY_BASE|g" servidor/.env
-    safe_sed "s|LOGFLARE_API_KEY=pass|LOGFLARE_API_KEY=$LOGFLARE_API_KEY|g" servidor/.env
+    safe_sed "s|LOGFLARE_PUBLIC_ACCESS_TOKEN=pass|LOGFLARE_PUBLIC_ACCESS_TOKEN=$LOGFLARE_PUBLIC_ACCESS_TOKEN|g" servidor/.analytics.env
+    safe_sed "s|LOGFLARE_PRIVATE_ACCESS_TOKEN=pass|LOGFLARE_PRIVATE_ACCESS_TOKEN=$LOGFLARE_PRIVATE_ACCESS_TOKEN|g" servidor/.analytics.env
+    safe_sed "s|LOGFLARE_DB_ENCRYPTION_KEY=pass|LOGFLARE_DB_ENCRYPTION_KEY=$LOGFLARE_DB_ENCRYPTION_KEY|g" servidor/.analytics.env
     safe_sed "s|JWT_SECRET=pass|JWT_SECRET=$JWT_SECRET|g" servidor/.env
     safe_sed "s|PROJECT_SECRETS_MASTER_KEY=pass|PROJECT_SECRETS_MASTER_KEY=$PROJECT_SECRETS_MASTER_KEY|g" servidor/.env
     safe_sed "s|PG_META_CRYPTO_KEY=pass|PG_META_CRYPTO_KEY=$PG_META_CRYPTO_KEY|g" servidor/.env
@@ -362,10 +375,12 @@ main() {
     POSTGRES_NGINX_PASSWORD=$(generate_postgres_password)
 
     cp studio/.env.example studio/.env
+    cp studio/.analytics.env.example studio/.analytics.env
     safe_sed "s|^STUDIO_SERVICE_KEY_ENCRYPTION_KEY=.*|STUDIO_SERVICE_KEY_ENCRYPTION_KEY=$STUDIO_SERVICE_KEY_ENCRYPTION_KEY|g" studio/.env
     safe_sed "s|^NGINX_SHARED_TOKEN=.*|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" studio/.env
     safe_sed "s|^NGINX_HMAC_SECRET=.*|NGINX_HMAC_SECRET=$SHARED_NGINX_HMAC_SECRET|g" studio/.env
     safe_sed "s|^INTERNAL_HMAC_SECRET=.*|INTERNAL_HMAC_SECRET=$SHARED_INTERNAL_HMAC_SECRET|g" studio/.env
+    safe_sed "s|^LOGFLARE_PRIVATE_ACCESS_TOKEN=.*|LOGFLARE_PRIVATE_ACCESS_TOKEN=$LOGFLARE_PRIVATE_ACCESS_TOKEN|g" studio/.analytics.env
     safe_sed "s|COOKIE_SIGN_SECRET=pass|COOKIE_SIGN_SECRET=$COOKIE_SIGN_SECRET|g" studio/.env
     safe_sed "s|POSTGRES_NGINX_PASSWORD=pass|POSTGRES_NGINX_PASSWORD=$POSTGRES_NGINX_PASSWORD|g" studio/.env
     safe_sed "s|^SERVER_DOMAIN=.*|SERVER_DOMAIN=${PROTO}://${SERVER_IP}|g" studio/.env
@@ -379,7 +394,11 @@ main() {
     assert_env_value studio/.env NGINX_HMAC_SECRET "$SHARED_NGINX_HMAC_SECRET"
     assert_env_value servidor/.env INTERNAL_HMAC_SECRET "$SHARED_INTERNAL_HMAC_SECRET"
     assert_env_value studio/.env INTERNAL_HMAC_SECRET "$SHARED_INTERNAL_HMAC_SECRET"
-    chmod 600 servidor/.env studio/.env
+    assert_env_value servidor/.analytics.env LOGFLARE_PUBLIC_ACCESS_TOKEN "$LOGFLARE_PUBLIC_ACCESS_TOKEN"
+    assert_env_value servidor/.analytics.env LOGFLARE_PRIVATE_ACCESS_TOKEN "$LOGFLARE_PRIVATE_ACCESS_TOKEN"
+    assert_env_value servidor/.analytics.env LOGFLARE_DB_ENCRYPTION_KEY "$LOGFLARE_DB_ENCRYPTION_KEY"
+    assert_env_value studio/.analytics.env LOGFLARE_PRIVATE_ACCESS_TOKEN "$LOGFLARE_PRIVATE_ACCESS_TOKEN"
+    chmod 600 servidor/.env servidor/.analytics.env studio/.env studio/.analytics.env
     print_success "Arquivo studio/.env configurado com sucesso!"
     
     echo ""
@@ -387,7 +406,9 @@ main() {
     echo ""
     print_status "Arquivos configurados:"
     echo "  ✓ servidor/.env"
+    echo "  ✓ servidor/.analytics.env"
     echo "  ✓ studio/.env"
+    echo "  ✓ studio/.analytics.env"
     echo ""
     print_status "Chaves de criptografia configuradas:"
     echo "  - PROJECT_SECRETS_MASTER_KEY (somente servidor)"

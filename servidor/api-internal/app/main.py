@@ -34,9 +34,9 @@ from app.jobs import (
     set_job_status as _set_job_status,
 )
 from app.runtime_config import (
-    BASE_DIR, DB_DSN, DELETE_SCRIPT, DUPLICATE_SCRIPT, EXTRACTOR,
+    ANALYTICS_INTERNAL_URL, BASE_DIR, DB_DSN, DELETE_SCRIPT, DUPLICATE_SCRIPT, EXTRACTOR,
     KEY_EXPIRY_WARNING_DAYS, NGINX_HMAC_SECRET, NGINX_SHARED_TOKEN, PG_META_CRYPTO_KEY,
-    PG_META_INTERNAL_URL, REALTIME_INTERNAL_URL, RENAME_SCRIPT, ROTATE_SCRIPT,
+    LOGFLARE_PRIVATE_ACCESS_TOKEN, PG_META_INTERNAL_URL, REALTIME_INTERNAL_URL, RENAME_SCRIPT, ROTATE_SCRIPT,
     SCRIPT, SUPAVISOR_INTERNAL_URL, USER_TOKEN_MAX_CLOCK_SKEW_SECONDS,
     service_key_transport_fernet,
 )
@@ -396,6 +396,56 @@ async def validate_shared_token(request: Request, call_next):
     
     response = await call_next(request)
     return response
+
+
+@app.api_route(
+    "/api/internal/analytics/{analytics_path:path}",
+    methods=["GET", "POST"],
+)
+async def proxy_global_analytics(
+    analytics_path: str,
+    request: Request,
+):
+    if not analytics_path.startswith("api/") or ".." in analytics_path:
+        raise HTTPException(404, "Analytics path not allowed")
+
+    provided_token = request.headers.get("x-api-key", "")
+    authorization = request.headers.get("authorization", "")
+    if not provided_token and authorization.lower().startswith("bearer "):
+        provided_token = authorization[7:].strip()
+    if not provided_token or not hmac.compare_digest(
+        provided_token,
+        LOGFLARE_PRIVATE_ACCESS_TOKEN,
+    ):
+        raise HTTPException(403, "Invalid Analytics token")
+
+    upstream_headers = {"x-api-key": LOGFLARE_PRIVATE_ACCESS_TOKEN}
+    content_type = request.headers.get("content-type")
+    if content_type:
+        upstream_headers["content-type"] = content_type
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(60.0, connect=5.0)
+        ) as client:
+            upstream = await client.request(
+                request.method,
+                f"{ANALYTICS_INTERNAL_URL}/{analytics_path}",
+                params=list(request.query_params.multi_items()),
+                headers=upstream_headers,
+                content=await request.body(),
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, "Analytics service unavailable") from exc
+
+    response_headers = {"Cache-Control": "no-store"}
+    if upstream.headers.get("content-type"):
+        response_headers["Content-Type"] = upstream.headers["content-type"]
+    return Response(
+        content=upstream.content,
+        status_code=upstream.status_code,
+        headers=response_headers,
+    )
 
 
 
@@ -4102,7 +4152,6 @@ def _get_project_template_replacements(project_name: str) -> dict[str, str]:
         "project_public_url": project_public_url,
         "project_auth_external_url": project_auth_external_url,
         "project_root": host_project_root,
-        "logflare_api_key": root_env.get("LOGFLARE_API_KEY", ""),
     }
 
 

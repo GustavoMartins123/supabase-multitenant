@@ -7,7 +7,7 @@ Esta instalação usa um `postgres-meta-global` compartilhado entre projetos. Qu
 Se alguém obtiver apenas a senha do `meta_guest`, o impacto esperado é:
 
 - conseguir conectar somente no banco `meta_trap`;
-- não conseguir conectar em `postgres`, `_supabase`, `_supabase_template`, `logs_db`, `template0`, `template1` ou bancos `_supabase_*`;
+- não conseguir conectar em `postgres`, `_supabase`, `_supabase_template`, `template0`, `template1` ou bancos `_supabase_*`;
 - não conseguir criar tabelas, tabelas temporárias, schemas, funções ou extensões;
 - não conseguir assumir roles administrativas;
 - não conseguir ler arquivos do servidor nem executar comandos via `COPY PROGRAM`.

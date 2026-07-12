@@ -70,9 +70,8 @@ class UserCard extends StatelessWidget {
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
                       fontSize: 14,
-                      decoration: user.isActive
-                          ? null
-                          : TextDecoration.lineThrough,
+                      decoration:
+                          user.isActive ? null : TextDecoration.lineThrough,
                       color: SupabaseColors.textPrimary,
                     ),
                   ),
@@ -112,43 +111,26 @@ class UserCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: user.isActive
-                          ? SupabaseColors.success.withValues(alpha: 0.15)
-                          : SupabaseColors.error.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          user.isActive
-                              ? Icons.check_circle_rounded
-                              : Icons.block_rounded,
-                          size: 12,
-                          color: user.isActive
-                              ? SupabaseColors.success
-                              : SupabaseColors.error,
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: [
+                      _StatusBadge(
+                        label: user.status.toUpperCase(),
+                        icon: user.isActive
+                            ? Icons.check_circle_rounded
+                            : Icons.block_rounded,
+                        color: user.isActive
+                            ? SupabaseColors.success
+                            : SupabaseColors.error,
+                      ),
+                      if (user.isAdmin)
+                        const _StatusBadge(
+                          label: 'ADMIN GLOBAL',
+                          icon: Icons.admin_panel_settings_rounded,
+                          color: SupabaseColors.info,
                         ),
-                        const SizedBox(width: 4),
-                        Text(
-                          user.status.toUpperCase(),
-                          style: TextStyle(
-                            color: user.isActive
-                                ? SupabaseColors.success
-                                : SupabaseColors.error,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 10,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                      ],
-                    ),
+                    ],
                   ),
                 ],
               ),
@@ -169,7 +151,7 @@ class UserCard extends StatelessWidget {
                   ),
                 ),
               )
-            else if (canToggle)
+            else if (!isMe)
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -189,21 +171,62 @@ class UserCard extends StatelessWidget {
                       );
                     },
                   ),
-                  const SizedBox(width: 6),
-                  _IconBtn(
-                    icon: user.isActive
-                        ? Icons.block_rounded
-                        : Icons.check_circle_rounded,
-                    tooltip: user.isActive ? 'Desativar' : 'Ativar',
-                    color: user.isActive
-                        ? SupabaseColors.error
-                        : SupabaseColors.success,
-                    onPressed: onToggle,
-                  ),
+                  if (canToggle) ...[
+                    const SizedBox(width: 6),
+                    _IconBtn(
+                      icon: user.isActive
+                          ? Icons.block_rounded
+                          : Icons.check_circle_rounded,
+                      tooltip: user.isActive ? 'Desativar' : 'Ativar',
+                      color: user.isActive
+                          ? SupabaseColors.error
+                          : SupabaseColors.success,
+                      onPressed: onToggle,
+                    ),
+                  ],
                 ],
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _StatusBadge extends StatelessWidget {
+  const _StatusBadge({
+    required this.label,
+    required this.icon,
+    required this.color,
+  });
+
+  final String label;
+  final IconData icon;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w600,
+              fontSize: 10,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ],
       ),
     );
   }

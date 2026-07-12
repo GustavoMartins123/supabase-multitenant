@@ -20,6 +20,7 @@ services:
     networks:
       rede-supabase:
         ipv4_address: ${POSTGRES_HOST}
+      analytics-internal:
     volumes:
       - ./volumes/db/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql:Z
       # Must be superuser to create event trigger
@@ -40,7 +41,6 @@ services:
       # create database template
       - ./volumes/db/create_template.sh://docker-entrypoint-initdb.d/zzz-create_template.sh:Z
       #################################
-      - ./volumes/db/vector_logs.sql:/docker-entrypoint-initdb.d/migrations/98-vector-logs.sql:Z
       # Use named volume to persist pgsodium decryption key between restarts
       - db-config:/etc/postgresql-custom
     healthcheck:
@@ -293,23 +293,60 @@ services:
       "--main-service",
       "/home/deno/functions/main"
       ]
+  analytics:
+    image: supabase/logflare:1.47.1
+    container_name: supabase-analytics
+    restart: unless-stopped
+    env_file:
+      - .analytics.env
+    networks:
+      - analytics-internal
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sSfL -o /dev/null http://localhost:4000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    environment:
+      LOGFLARE_NODE_HOST: 127.0.0.1
+      DB_USERNAME: supabase_admin
+      DB_DATABASE: _supabase
+      DB_HOSTNAME: db
+      DB_PORT: ${POSTGRES_PORT}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_SCHEMA: _analytics
+      LOGFLARE_SINGLE_TENANT: "true"
+      LOGFLARE_SUPABASE_MODE: "true"
+      LOGFLARE_FEATURE_FLAG_OVERRIDE: multibackend=true
+      LOGFLARE_LOG_LEVEL: warn
+      POSTGRES_BACKEND_URL: postgresql://supabase_admin:${POSTGRES_PASSWORD}@db:${POSTGRES_PORT}/_supabase
+      POSTGRES_BACKEND_SCHEMA: _analytics
+
   vector:
-    image: timberio/vector:nightly-2026-07-03-debian
+    image: timberio/vector:0.53.0-alpine
     container_name: supabase-vector-global
     restart: unless-stopped
     volumes:
-      - ./volumes/logs/vector.yml:/etc/vector/vector.yaml:ro,z
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./volumes/logs/vector.yml:/etc/vector/vector.yml:ro,z
+      - ${DOCKER_SOCKET_LOCATION:-/var/run/docker.sock}:/var/run/docker.sock:ro,z
+    env_file:
+      - .analytics.env
     networks:
-      - rede-supabase
-    environment:
-      LOGFLARE_API_KEY: ${LOGFLARE_API_KEY}
-      PG_URI: postgres://vector_writer:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/logs_db
+      - analytics-internal
+    depends_on:
+      analytics:
+        condition: service_healthy
+    command: ["--config", "/etc/vector/vector.yml"]
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8686/health | grep -q running"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9001/health"]
       interval: 5s
       timeout: 5s
-      retries: 3    
+      retries: 3
 
 networks:
   rede-supabase:
@@ -320,5 +357,9 @@ networks:
         - subnet: 172.50.0.0/16
           ip_range: 172.50.0.0/18
           gateway: 172.50.0.1
+  analytics-internal:
+    name: supabase-analytics-internal
+    driver: bridge
+    internal: true
 volumes:
   db-config:

@@ -51,7 +51,6 @@ ENABLE_IMAGE_TRANSFORMATION=true
 # SMTP_PASS='supersecretpassword'
 # SMTP_SENDER_NAME="Supabase"
 
-LOGFLARE_API_KEY={{logflare_api_key}}
 ANON_KEY_PROJETO={{anon_key}}
 SERVICE_ROLE_KEY_PROJETO={{service_role_key}}
 CONFIG_TOKEN_PROJETO={{config_token}}
