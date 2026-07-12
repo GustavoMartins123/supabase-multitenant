@@ -4473,8 +4473,9 @@ async def get_project_docker_status(
 ):
     project_name = validate_project_id(project_name)
 
+    auth_user = await resolve_authenticated_user(request, pool)
+
     async with pool.acquire() as conn:
-        auth_user = await resolve_authenticated_user(request, pool)
         project_row = await get_project_row(conn, project_name)
         await ensure_project_member_access(
             conn,
