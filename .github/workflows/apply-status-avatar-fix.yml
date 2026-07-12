@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/fix-project-reads-avatar
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
