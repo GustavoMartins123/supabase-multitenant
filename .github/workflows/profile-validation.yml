@@ -1,0 +1,35 @@
+name: Profile validation
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          python -m py_compile servidor/api-internal/app/schemas.py servidor/api-internal/app/database_schema.py servidor/api-internal/app/control_plane_service.py
+          python tests/smoke/test_user_profile_contract.py
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.1
+          luac5.1 -p studio/nginx/lua/admin_api/user_profile_store.lua
+          luac5.1 -p studio/nginx/lua/admin_api/user_profile_handler.lua
+          luac5.1 -p studio/nginx/lua/admin_api/user_avatar_handler.lua
+          luac5.1 -p studio/nginx/lua/security/user_me.lua
+          luac5.1 -p studio/nginx/lua/studio_compat/user_me_content.lua
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.0'
+          channel: stable
+          cache: true
+      - working-directory: studio/seletor_de_projetos
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter build web --release
