@@ -18,14 +18,8 @@ jobs:
           ref: agent/fix-studio-api-contract-user-activity
           fetch-depth: 0
 
-      - name: Extract and run patch
-        run: |
-          awk '
-            /python - <<.PY./ { capture=1; next }
-            capture && /^          PY$/ { capture=0; exit }
-            capture { sub(/^          /, ""); print }
-          ' .github/workflows/apply-studio-api-contract.yml > /tmp/apply.py
-          python /tmp/apply.py
+      - name: Apply changes
+        run: python .github/scripts/apply_studio_api_contract.py
 
       - name: Validate Python and contracts
         run: |
