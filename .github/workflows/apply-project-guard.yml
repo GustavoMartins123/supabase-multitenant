@@ -65,37 +65,44 @@ jobs:
                   - web
                 middlewares:
                   - guard-test
-                service: unavailable
+                service: whoami
             middlewares:
               guard-test:
                 plugin:
                   supabaseguard:
                     profile: project
-                    mode: observe
+                    mode: enforce
                     scope: test-project
             services:
-              unavailable:
+              whoami:
                 loadBalancer:
                   servers:
-                    - url: http://127.0.0.1:9
+                    - url: http://supabaseguard-whoami:80
           YAML
 
+          cleanup() {
+            docker logs supabaseguard-traefik-test || true
+            docker rm -f supabaseguard-traefik-test supabaseguard-whoami >/dev/null 2>&1 || true
+            docker network rm supabaseguard-test >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker network create supabaseguard-test
+          docker run -d --name supabaseguard-whoami --network supabaseguard-test traefik/whoami
           docker run -d --name supabaseguard-traefik-test \
+            --network supabaseguard-test \
             -p 18080:8080 \
             -v "$PWD/servidor/traefik/plugins-local:/plugins-local:ro" \
             -v /tmp/guard-static.yml:/etc/traefik/traefik.yml:ro \
             -v /tmp/guard-dynamic.yml:/etc/traefik/dynamic.yml:ro \
             traefik:v3.7.6 --configFile=/etc/traefik/traefik.yml
 
-          cleanup() {
-            docker logs supabaseguard-traefik-test || true
-            docker rm -f supabaseguard-traefik-test >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
           sleep 6
           docker ps --filter name=supabaseguard-traefik-test --filter status=running --format '{{.Names}}' | grep -qx supabaseguard-traefik-test
-          status=$(curl -sS -o /tmp/guard-response -w '%{http_code}' http://127.0.0.1:18080/)
-          test "$status" = "502"
+          for attempt in 1 2 3; do
+            status=$(curl -sS -o /tmp/guard-response -w '%{http_code}' http://127.0.0.1:18080/)
+            test "$status" = "200"
+          done
           ! docker logs supabaseguard-traefik-test 2>&1 | grep -Eiq 'unknown plugin|failed to load plugin|error.*supabaseguard'
 
       - name: Commit integration
