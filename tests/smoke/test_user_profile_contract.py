@@ -24,7 +24,9 @@ class UserProfileContractTests(unittest.TestCase):
         ):
             self.assertIn(column, schema)
         self.assertIn("normalize_user_sync_source", service)
+        self.assertIn("decode_json_object", service)
         self.assertIn('action="user_profile_updated"', service)
+        self.assertIn('"changed_fields": changed_fields', service)
         self.assertIn("PROFILE_FIELDS", service)
 
     def test_authelia_store_keeps_immutable_identity_and_atomic_writes(self) -> None:
@@ -37,6 +39,9 @@ class UserProfileContractTests(unittest.TestCase):
         self.assertIn("lock_dict:add(LOCK_KEY, token, 8)", source)
         self.assertIn("authelia_identifiers.ensure_identifier(username)", source)
         self.assertIn("user.picture = value", source)
+        self.assertIn('local address = type(user.address) == "table"', source)
+        self.assertIn("user.address = has_value and address or lyaml.null", source)
+        self.assertNotIn('street_address = "street_address"', source)
 
     def test_avatar_endpoint_validates_content_and_size(self) -> None:
         source = (
