@@ -3,6 +3,8 @@ local cjson = require("cjson")
 local cjson_safe = require("cjson.safe")
 local http = require("resty.http")
 local user_identity = require("project_context.user_identity")
+local content_project_identity = require("studio_compat.content_project_identity")
+local content_namespace_migration = require("studio_compat.content_namespace_migration")
 
 local _M = {}
 
@@ -34,24 +36,39 @@ local function get_project_ref()
     return ngx.var.uri:match("^/api/platform/projects/([^/]+)/content")
 end
 
-local function get_project_scope()
+local function get_selected_project_ref()
     local project_ref = ngx.var.project_ref
     if project_ref and project_ref ~= "" and project_ref ~= "default" then
         return project_ref
     end
-
     return nil
 end
 
 local function require_project_scope()
-    local project_scope = get_project_scope()
-    if project_scope then
-        return project_scope
+    local selected_ref = get_selected_project_ref()
+    if not selected_ref then
+        return respond_json(403, {
+            error = {
+                message = "Selecione um projeto antes de acessar snippets.",
+            },
+        })
     end
 
-    return respond_json(403, {
+    local identity, identity_err = content_project_identity.resolve(selected_ref)
+    if identity then
+        return identity.project_id
+    end
+
+    ngx.log(
+        ngx.ERR,
+        "[CONTENT-PROXY] Failed to resolve stable project identity for ",
+        selected_ref,
+        ": ",
+        identity_err or "unknown error"
+    )
+    return respond_json(502, {
         error = {
-            message = "Selecione um projeto antes de acessar snippets.",
+            message = "Failed to resolve stable project identity",
         },
     })
 end
@@ -396,6 +413,15 @@ local function build_folder_aliases(user_id, project_scope, folder, visible_name
     local seen = {}
 
     append_unique(aliases, seen, virtual_folder_id(user_id, project_scope, visible_name))
+
+    local selected_ref = get_selected_project_ref()
+    local identity = selected_ref and content_project_identity.resolve(selected_ref) or nil
+    for _, legacy_scope in ipairs((identity and identity.aliases) or {}) do
+        if legacy_scope ~= project_scope then
+            append_unique(aliases, seen, virtual_folder_id(user_id, legacy_scope, visible_name))
+        end
+    end
+
     append_unique(aliases, seen, virtual_folder_id(user_id, "default", visible_name))
     append_unique(aliases, seen, deterministic_uuid({ visible_name }))
 
@@ -422,7 +448,7 @@ local function to_virtual_snippet(snippet, virtual_id, virtual_folder_id)
     return cloned
 end
 
-local function resolve_virtual_snippet_id(project_ref, user_id, snippet, virtual_folder_id)
+local function resolve_virtual_snippet_id(project_ref, user_id, snippet, virtual_folder_id, id_namespace)
     if type(snippet) ~= "table" or not snippet.id or snippet.id == "" then
         return nil
     end
@@ -433,7 +459,7 @@ local function resolve_virtual_snippet_id(project_ref, user_id, snippet, virtual
         return preferred
     end
 
-    local canonical = virtual_snippet_id(snippet.name or "", virtual_folder_id)
+    local canonical = virtual_snippet_id(snippet.name or "", id_namespace or virtual_folder_id)
     set_mapped_actual_id(project_ref, user_id, canonical, snippet.id, false)
     return canonical
 end
@@ -563,6 +589,17 @@ local function load_namespace_state(project_ref, user_id, project_scope)
 end
 
 local function resolve_namespace_root_folder(project_ref, user_id, project_scope, create_if_missing)
+    local selected_ref = get_selected_project_ref()
+    local identity, identity_err = content_project_identity.resolve(selected_ref)
+    if not identity or identity.project_id ~= project_scope then
+        return nil, nil, identity_err or "stable project identity mismatch"
+    end
+
+    local migrated, migration_err = content_namespace_migration.ensure(user_id, identity)
+    if not migrated then
+        return nil, nil, "legacy namespace migration failed: " .. (migration_err or "unknown error")
+    end
+
     local state, state_err = load_namespace_state(project_ref, user_id, project_scope)
     if not state then
         return nil, nil, state_err
@@ -725,7 +762,18 @@ end
 
 local function virtualize_snippet(scope_key, user_id, namespace_state, snippet, forced_virtual_id)
     local virtual_folder = resolve_virtual_folder_id_for_snippet(namespace_state, snippet)
-    local virtual_id = forced_virtual_id or resolve_virtual_snippet_id(scope_key, user_id, snippet, virtual_folder)
+    local id_namespace = virtual_folder
+    if not id_namespace and namespace_state.root_folder then
+        id_namespace = namespace_state.root_folder.id
+    end
+    local virtual_id = forced_virtual_id
+        or resolve_virtual_snippet_id(
+            scope_key,
+            user_id,
+            snippet,
+            virtual_folder,
+            id_namespace
+        )
     return to_virtual_snippet(snippet, virtual_id, virtual_folder)
 end
 
@@ -790,10 +838,36 @@ local function find_actual_snippet_in_collection(scope_key, user_id, request_id,
 
     for _, snippet in ipairs(snippets or {}) do
         local virtual_folder = resolve_virtual_folder_id_for_snippet(namespace_state, snippet)
-        local canonical_id = virtual_snippet_id(snippet.name, virtual_folder)
-        local visible_id = resolve_virtual_snippet_id(scope_key, user_id, snippet, virtual_folder)
+        local id_namespace = virtual_folder
+        if not id_namespace and namespace_state.root_folder then
+            id_namespace = namespace_state.root_folder.id
+        end
 
-        if snippet.id == request_id or canonical_id == request_id or visible_id == request_id then
+        local canonical_id = virtual_snippet_id(snippet.name, id_namespace)
+        local visible_id = resolve_virtual_snippet_id(
+            scope_key,
+            user_id,
+            snippet,
+            virtual_folder,
+            id_namespace
+        )
+        local legacy_id = virtual_snippet_id(snippet.name, virtual_folder)
+        local matches = snippet.id == request_id
+            or canonical_id == request_id
+            or visible_id == request_id
+            or legacy_id == request_id
+
+        if not matches and snippet.folder_id and snippet.folder_id ~= cjson.null then
+            local folder_entry = namespace_state.child_by_actual_id[snippet.folder_id]
+            for _, alias in ipairs((folder_entry and folder_entry.aliases) or {}) do
+                if virtual_snippet_id(snippet.name, alias) == request_id then
+                    matches = true
+                    break
+                end
+            end
+        end
+
+        if matches then
             set_mapped_actual_id(scope_key, user_id, request_id, snippet.id, visible_id == request_id)
             return snippet
         end
@@ -981,7 +1055,7 @@ function _M.handle_content()
         end
 
         local root_folder, namespace_state, folder_err =
-            resolve_namespace_root_folder(api_project_ref, user_id, project_scope, true)
+            resolve_namespace_root_folder(api_project_ref, user_id, project_scope, false)
         if not root_folder then
             ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to resolve user folder: ", folder_err or "unknown error")
             return respond_json(500, { error = { message = "Failed to resolve user folder" } })
@@ -1038,7 +1112,21 @@ function _M.handle_content()
 
         local incoming_id = payload.id
         local requested_virtual_folder_id = payload.folder_id
-        local canonical_virtual_id = virtual_snippet_id(payload.name or "", requested_virtual_folder_id)
+        local target_folder = resolve_actual_folder(
+            project_scope,
+            user_id,
+            namespace_state,
+            requested_virtual_folder_id
+        )
+        if not target_folder then
+            return respond_json(404, { error = { message = "Folder not found" } })
+        end
+
+        local id_namespace = requested_virtual_folder_id
+        if id_namespace == nil or id_namespace == cjson.null or id_namespace == "" then
+            id_namespace = target_folder.id
+        end
+        local canonical_virtual_id = virtual_snippet_id(payload.name or "", id_namespace)
         local existing = resolve_actual_snippet(
             api_project_ref,
             namespace_state,
@@ -1054,11 +1142,6 @@ function _M.handle_content()
                 user_id,
                 canonical_virtual_id
             )
-        end
-
-        local target_folder = resolve_actual_folder(project_scope, user_id, namespace_state, requested_virtual_folder_id)
-        if not target_folder then
-            return respond_json(404, { error = { message = "Folder not found" } })
         end
 
         if existing then
@@ -1186,7 +1269,7 @@ function _M.handle_folders()
         end
 
         local root_folder, namespace_state, folder_err =
-            resolve_namespace_root_folder(api_project_ref, user_id, project_scope, true)
+            resolve_namespace_root_folder(api_project_ref, user_id, project_scope, false)
         if not root_folder then
             ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to resolve user folder for folders route: ", folder_err or "unknown error")
             return respond_json(500, { error = { message = "Failed to resolve user folder" } })
@@ -1374,7 +1457,7 @@ function _M.handle_count()
     end
 
     local _, namespace_state, folder_err =
-        resolve_namespace_root_folder(api_project_ref, user_id, project_scope, true)
+        resolve_namespace_root_folder(api_project_ref, user_id, project_scope, false)
     if not namespace_state then
         ngx.log(ngx.ERR, "[CONTENT-PROXY] Failed to resolve user folder for count route: ", folder_err or "unknown error")
         return respond_json(500, { error = { message = "Failed to resolve user folder" } })

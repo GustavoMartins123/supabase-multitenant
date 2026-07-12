@@ -704,6 +704,58 @@ async def audit_project_member_change(
         actor_user_id,
     )
 
+@app.get("/api/projects/internal/content-identity/{project_name}")
+async def get_content_project_identity(
+    project_name: str,
+    request: Request,
+    pool=Depends(get_pool),
+):
+    """Resolve o slug mutável para o UUID estável usado apenas por content."""
+    project_name = validate_project_id(project_name)
+    if request.headers.get("X-Internal-Service") != "studio-nginx":
+        raise HTTPException(403, "Internal service access required")
+
+    async with pool.acquire() as conn:
+        project = await conn.fetchrow(
+            "SELECT id, name FROM projects WHERE name = $1",
+            project_name,
+        )
+        if not project:
+            raise HTTPException(404, "Project not found")
+
+        history = await conn.fetch(
+            """
+            SELECT old_name, new_name
+            FROM project_name_history
+            WHERE project_id = $1
+              AND status = 'succeeded'
+            ORDER BY created_at ASC
+            """,
+            project["id"],
+        )
+
+    aliases: list[str] = []
+    seen: set[str] = set()
+    candidates = (
+        [project["name"]]
+        + [row["old_name"] for row in history]
+        + [row["new_name"] for row in history]
+    )
+    for candidate in candidates:
+        if candidate and candidate not in seen:
+            seen.add(candidate)
+            aliases.append(candidate)
+
+    return JSONResponse(
+        content={
+            "project_id": str(project["id"]),
+            "current_ref": project["name"],
+            "aliases": aliases,
+        },
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.get("/api/projects")
 async def list_projects(
     request: Request,
