@@ -19,7 +19,7 @@ jobs:
           fetch-depth: 0
 
       - name: Apply changes
-        run: python .github/scripts/apply_user_avatar_thumbnails.py
+        run: python .github/scripts/run_user_avatar_thumbnail_patch.py
 
       - name: Validate Lua and contracts
         run: |
@@ -42,7 +42,7 @@ jobs:
       - name: Validate Flutter
         working-directory: studio/seletor_de_projetos
         run: |
-          dart format --output=none --set-exit-if-changed lib/models/user_models.dart lib/models/AllUsers.dart lib/models/project_member.dart lib/widgets/user_avatar_thumbnail.dart lib/widgets/admin_users/user_card.dart lib/dialogs/addMemberDialog.dart lib/widgets/project_settings/members_section.dart || dart format lib/models/user_models.dart lib/models/AllUsers.dart lib/models/project_member.dart lib/widgets/user_avatar_thumbnail.dart lib/widgets/admin_users/user_card.dart lib/dialogs/addMemberDialog.dart lib/widgets/project_settings/members_section.dart
+          dart format lib/models/user_models.dart lib/models/AllUsers.dart lib/models/project_member.dart lib/widgets/user_avatar_thumbnail.dart lib/widgets/admin_users/user_card.dart lib/dialogs/addMemberDialog.dart lib/widgets/project_settings/members_section.dart
           flutter pub get
           flutter analyze
           flutter build web --release
