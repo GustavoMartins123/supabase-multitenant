@@ -5,8 +5,44 @@ import uuid
 from typing import Any
 
 import asyncpg
+from fastapi import HTTPException
 
 from app.validation import normalize_groups
+
+PROFILE_FIELDS = {
+    "display_name",
+    "given_name",
+    "family_name",
+    "middle_name",
+    "nickname",
+    "picture",
+    "website",
+    "profile",
+    "gender",
+    "birthdate",
+    "zoneinfo",
+    "locale",
+    "phone_number",
+    "phone_extension",
+    "street_address",
+    "locality",
+    "region",
+    "postal_code",
+    "country",
+}
+
+
+def decode_json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str) and value:
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return dict(decoded) if isinstance(decoded, dict) else {}
+    return {}
+
 
 async def audit_studio_action(
     conn: asyncpg.Connection,
@@ -105,6 +141,26 @@ async def audit_user_group_change(
     )
 
 
+def normalize_user_sync_source(
+    source: str | dict[str, Any] | None,
+) -> tuple[str, str | None, dict[str, str] | None]:
+    if not isinstance(source, dict):
+        return (str(source or "studio_sync"), None, None)
+
+    source_name = str(source.get("name") or "studio_sync").strip() or "studio_sync"
+    email_value = source.get("email")
+    email = str(email_value).strip().lower() if email_value else None
+    raw_profile = source.get("profile")
+    if not isinstance(raw_profile, dict):
+        return source_name, email, None
+
+    profile: dict[str, str] = {}
+    for field in PROFILE_FIELDS:
+        value = raw_profile.get(field)
+        profile[field] = "" if value is None else str(value).strip()
+    return source_name, email, profile
+
+
 async def sync_user_record(
     conn: asyncpg.Connection,
     *,
@@ -113,10 +169,13 @@ async def sync_user_record(
     display_name: str | None,
     groups: list[str] | tuple[str, ...] | str | None,
     is_active: bool,
-    source: str,
+    source: str | dict[str, Any],
 ) -> dict[str, Any]:
     normalized_username = (username or "").strip()
     normalized_groups = normalize_groups(groups)
+    source_name, email, profile_data = normalize_user_sync_source(source)
+    profile_supplied = profile_data is not None
+    picture_url = (profile_data or {}).get("picture") or None
 
     if not normalized_username:
         raise HTTPException(400, "username é obrigatório")
@@ -137,12 +196,37 @@ async def sync_user_record(
 
     row = await conn.fetchrow(
         """
-        SELECT id
+        SELECT id, display_name, email, picture_url, profile_data, profile_version
         FROM users
         WHERE id = $1
         """,
         user_id,
     )
+    old_profile = decode_json_object(row["profile_data"]) if row else {}
+    old_email = row["email"] if row else None
+    old_picture = row["picture_url"] if row else None
+    old_display_name = row["display_name"] if row else None
+    changed_fields: list[str] = []
+    if profile_supplied:
+        keys = set(old_profile) | set(profile_data or {})
+        changed_fields.extend(
+            sorted(
+                field
+                for field in keys
+                if old_profile.get(field, "") != (profile_data or {}).get(field, "")
+            )
+        )
+        if old_email != email:
+            changed_fields.append("email")
+        if old_picture != picture_url and "picture" not in changed_fields:
+            changed_fields.append("picture")
+        if old_display_name != display_name and "display_name" not in changed_fields:
+            changed_fields.append("display_name")
+    changed_fields = sorted(set(changed_fields))
+    profile_changed = bool(changed_fields)
+    serialized_profile = json.dumps(profile_data or {})
+    previous_version = int(row["profile_version"] or 1) if row else 0
+    next_version = previous_version + 1 if row else 1
 
     if row:
         await conn.execute(
@@ -152,14 +236,24 @@ async def sync_user_record(
                 display_name = $2,
                 is_active = $3,
                 source = $4,
+                email = CASE WHEN $5 THEN $6 ELSE email END,
+                picture_url = CASE WHEN $5 THEN $7 ELSE picture_url END,
+                profile_data = CASE WHEN $5 THEN $8::jsonb ELSE profile_data END,
+                profile_version = CASE WHEN $9 THEN profile_version + 1 ELSE profile_version END,
+                profile_updated_at = CASE WHEN $9 THEN now() ELSE profile_updated_at END,
                 last_sync_at = now(),
                 updated_at = now()
-            WHERE id = $5
+            WHERE id = $10
             """,
             normalized_username,
             display_name,
             is_active,
-            source,
+            source_name,
+            profile_supplied,
+            email,
+            picture_url,
+            serialized_profile,
+            profile_changed,
             user_id,
         )
     else:
@@ -167,17 +261,26 @@ async def sync_user_record(
             """
             INSERT INTO users(
                 id, authelia_username, display_name,
-                is_active, source
+                is_active, source, email, picture_url,
+                profile_data, profile_version, profile_updated_at
             )
-            VALUES($1, $2, $3, $4, $5)
+            VALUES($1, $2, $3, $4, $5, $6, $7, $8::jsonb, 1,
+                   CASE WHEN $9 THEN now() ELSE NULL END)
             RETURNING id
             """,
             user_id,
             normalized_username,
             display_name,
             is_active,
-            source,
+            source_name,
+            email,
+            picture_url,
+            serialized_profile,
+            profile_supplied,
         )
+        profile_changed = profile_supplied
+        if profile_supplied and not changed_fields:
+            changed_fields = sorted(profile_data or {})
 
     current_groups = {
         r["group_name"]
@@ -198,7 +301,7 @@ async def sync_user_record(
             action="removed",
             old_value={"present": True},
             new_value={"present": False},
-            actor_type=source,
+            actor_type=source_name,
         )
 
     for group_name in desired_groups:
@@ -211,7 +314,7 @@ async def sync_user_record(
             """,
             user_id,
             group_name,
-            source,
+            source_name,
         )
         if group_name not in current_groups:
             await audit_user_group_change(
@@ -221,13 +324,45 @@ async def sync_user_record(
                 action="added",
                 old_value={"present": False},
                 new_value={"present": True},
-                actor_type=source,
+                actor_type=source_name,
             )
+
+    if profile_changed:
+        await audit_studio_action(
+            conn,
+            project_id=None,
+            actor_user_id=user_id,
+            action="user_profile_updated",
+            target_type="user",
+            target_id=str(user_id),
+            old_value={"profile_version": previous_version or None},
+            new_value={
+                "profile_version": next_version,
+                "changed_fields": changed_fields,
+            },
+        )
+
+    projection = await conn.fetchrow(
+        """
+        SELECT email, picture_url, profile_data, profile_version, profile_updated_at
+        FROM users
+        WHERE id = $1
+        """,
+        user_id,
+    )
 
     return {
         "id": str(user_id),
         "username": normalized_username,
         "groups": normalized_groups,
         "is_active": is_active,
+        "email": projection["email"] if projection else None,
+        "picture_url": projection["picture_url"] if projection else None,
+        "profile": decode_json_object(projection["profile_data"]) if projection else {},
+        "profile_version": projection["profile_version"] if projection else 1,
+        "profile_updated_at": (
+            projection["profile_updated_at"].isoformat()
+            if projection and projection["profile_updated_at"]
+            else None
+        ),
     }
-

@@ -5,6 +5,7 @@ servidor/docker/.env
 servidor/docker/volumes/db/data/*
 
 studio/.env
+studio/authelia/profile-pictures/
 servidor/.analytics.env
 tarefas.md
 

@@ -58,4 +58,10 @@ else
     echo "[entrypoint] WARN: diretório de snippets ausente: $SNIPPETS_DIR"
 fi
 
+PROFILE_PICTURES_DIR="/config/profile-pictures"
+mkdir -p "$PROFILE_PICTURES_DIR"
+chown -R 65534:65534 "$PROFILE_PICTURES_DIR" 2>/dev/null || true
+find "$PROFILE_PICTURES_DIR" -type d -exec chmod 700 {} +
+find "$PROFILE_PICTURES_DIR" -type f -exec chmod 600 {} +
+
 exec openresty -g "daemon off;"
