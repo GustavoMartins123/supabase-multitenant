@@ -38,7 +38,7 @@ echo -e "\n✅ Supavisor está pronto."
 
 echo "▶️  Iniciando o Traefik..."
 
-docker compose -f traefik/docker-compose.yml up -d
+docker compose -f traefik/docker-compose.yml --env-file .env up -d
 echo "✅ Traefik iniciado."
 
 echo "▶️  Iniciando projetos Supabase..."

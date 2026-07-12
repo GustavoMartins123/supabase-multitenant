@@ -499,8 +499,12 @@ async def resolve_authenticated_user(
             await conn.execute(
                 """
                 UPDATE users
-                SET last_login_at = now(), updated_at = now()
+                SET last_seen_at = now(), updated_at = now()
                 WHERE id = $1
+                  AND (
+                      last_seen_at IS NULL
+                      OR last_seen_at < now() - interval '5 minutes'
+                  )
                 """,
                 user_row["id"],
             )
