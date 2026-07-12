@@ -1,0 +1,62 @@
+Resolving dependencies...
+Downloading packages...
+  _fe_analyzer_shared 99.0.0 (104.0.0 available)
+  analyzer 12.1.0 (14.0.0 available)
+  cli_util 0.4.2 (0.5.1 available)
+  matcher 0.12.19 (0.12.20 available)
+  meta 1.18.0 (1.19.0 available)
+  package_config 2.2.0 (3.0.0 available)
+  test 1.31.0 (1.31.2 available)
+  test_api 0.7.11 (0.7.13 available)
+  test_core 0.6.17 (0.6.19 available)
+  vector_math 2.2.0 (2.4.0 available)
+Got dependencies!
+10 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+Analyzing seletor_de_projetos...                                
+
+   info • 'dart:html' is deprecated and shouldn't be used. Use package:web and dart:js_interop instead. Try replacing the use of the deprecated member with the replacement • lib/bootstrap_admin_page.dart:1:1 • deprecated_member_use
+   info • Don't use web-only libraries outside Flutter web plugins. Try finding a different library for your needs • lib/bootstrap_admin_page.dart:1:1 • avoid_web_libraries_in_flutter
+   info • The file name 'createUserDialog.dart' isn't a lower_case_with_underscores identifier. Try changing the name to follow the lower_case_with_underscores style • lib/createUserDialog.dart:1:1 • file_names
+   info • Statements in an if should be enclosed in a block. Try wrapping the statement in a block • lib/data/project_repository.dart:194:11 • curly_braces_in_flow_control_structures
+   info • The file name 'addMemberDialog.dart' isn't a lower_case_with_underscores identifier. Try changing the name to follow the lower_case_with_underscores style • lib/dialogs/addMemberDialog.dart:1:1 • file_names
+   info • 'groupValue' is deprecated and shouldn't be used. Use a RadioGroup ancestor to manage group value instead. This feature was deprecated after v3.32.0-0.0.pre. Try replacing the use of the deprecated member with the replacement • lib/dialogs/addMemberDialog.dart:404:31 • deprecated_member_use
+   info • 'onChanged' is deprecated and shouldn't be used. Use RadioGroup to handle value change instead. This feature was deprecated after v3.32.0-0.0.pre. Try replacing the use of the deprecated member with the replacement • lib/dialogs/addMemberDialog.dart:405:31 • deprecated_member_use
+   info • The file name 'transferProjectDialog.dart' isn't a lower_case_with_underscores identifier. Try changing the name to follow the lower_case_with_underscores style • lib/dialogs/transferProjectDialog.dart:1:1 • file_names
+   info • Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check. Guard a 'State.context' use with a 'mounted' check on the State, and other BuildContext use with a 'mounted' check on the BuildContext • lib/dialogs/transferProjectDialog.dart:200:60 • use_build_context_synchronously
+   info • 'groupValue' is deprecated and shouldn't be used. Use a RadioGroup ancestor to manage group value instead. This feature was deprecated after v3.32.0-0.0.pre. Try replacing the use of the deprecated member with the replacement • lib/dialogs/transferProjectDialog.dart:486:31 • deprecated_member_use
+   info • 'onChanged' is deprecated and shouldn't be used. Use RadioGroup to handle value change instead. This feature was deprecated after v3.32.0-0.0.pre. Try replacing the use of the deprecated member with the replacement • lib/dialogs/transferProjectDialog.dart:487:31 • deprecated_member_use
+   info • The file name 'duplicateProjectDialog.dart' isn't a lower_case_with_underscores identifier. Try changing the name to follow the lower_case_with_underscores style • lib/duplicateProjectDialog.dart:1:1 • file_names
+   info • Statements in an if should be enclosed in a block. Try wrapping the statement in a block • lib/duplicateProjectDialog.dart:120:7 • curly_braces_in_flow_control_structures
+   info • Statements in an if should be enclosed in a block. Try wrapping the statement in a block • lib/duplicateProjectDialog.dart:123:7 • curly_braces_in_flow_control_structures
+   info • 'dart:html' is deprecated and shouldn't be used. Use package:web and dart:js_interop instead. Try replacing the use of the deprecated member with the replacement • lib/main.dart:2:1 • deprecated_member_use
+   info • Don't use web-only libraries outside Flutter web plugins. Try finding a different library for your needs • lib/main.dart:2:1 • avoid_web_libraries_in_flutter
+   info • The file name 'AllUsers.dart' isn't a lower_case_with_underscores identifier. Try changing the name to follow the lower_case_with_underscores style • lib/models/AllUsers.dart:1:1 • file_names
+   info • The file name 'ProjectInfo.dart' isn't a lower_case_with_underscores identifier. Try changing the name to follow the lower_case_with_underscores style • lib/models/ProjectInfo.dart:1:1 • file_names
+   info • The file name 'adminProjectInfo.dart' isn't a lower_case_with_underscores identifier. Try changing the name to follow the lower_case_with_underscores style • lib/models/adminProjectInfo.dart:1:1 • file_names
+   info • The file name 'projectDockerStatus.dart' isn't a lower_case_with_underscores identifier. Try changing the name to follow the lower_case_with_underscores style • lib/models/projectDockerStatus.dart:1:1 • file_names
+   info • The variable name 'user_id' isn't a lowerCamelCase identifier. Try changing the name to follow the lowerCamelCase style • lib/models/project_member.dart:2:16 • non_constant_identifier_names
+   info • The variable name 'user_id' isn't a lowerCamelCase identifier. Try changing the name to follow the lowerCamelCase style • lib/models/project_member.dart:9:19 • non_constant_identifier_names
+   info • The file name 'newProjectDialog.dart' isn't a lower_case_with_underscores identifier. Try changing the name to follow the lower_case_with_underscores style • lib/newProjectDialog.dart:1:1 • file_names
+   info • Statements in an if should be enclosed in a block. Try wrapping the statement in a block • lib/newProjectDialog.dart:221:7 • curly_braces_in_flow_control_structures
+   info • 'dart:html' is deprecated and shouldn't be used. Use package:web and dart:js_interop instead. Try replacing the use of the deprecated member with the replacement • lib/project_list_page.dart:1:1 • deprecated_member_use
+   info • Don't use web-only libraries outside Flutter web plugins. Try finding a different library for your needs • lib/project_list_page.dart:1:1 • avoid_web_libraries_in_flutter
+   info • The import of 'package:flutter/services.dart' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/material.dart'. Try removing the import directive • lib/project_list_page.dart:3:8 • unnecessary_import
+   info • Statements in an if should be enclosed in a block. Try wrapping the statement in a block • lib/project_settings_dialog.dart:779:15 • curly_braces_in_flow_control_structures
+   info • The file name 'projectService.dart' isn't a lower_case_with_underscores identifier. Try changing the name to follow the lower_case_with_underscores style • lib/services/projectService.dart:1:1 • file_names
+   info • Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check • lib/services/projectService.dart:33:48 • use_build_context_synchronously
+   info • Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check • lib/services/projectService.dart:36:42 • use_build_context_synchronously
+   info • Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check • lib/services/projectService.dart:171:11 • use_build_context_synchronously
+   info • Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check • lib/services/projectService.dart:195:11 • use_build_context_synchronously
+   info • Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check • lib/services/projectService.dart:207:28 • use_build_context_synchronously
+   info • 'dialogBackgroundColor' is deprecated and shouldn't be used. Use DialogThemeData.backgroundColor instead. This feature was deprecated after v3.27.0-0.1.pre. Try replacing the use of the deprecated member with the replacement • lib/supabase_colors.dart:57:5 • deprecated_member_use
+   info • The file name 'userProjectsAdminScreen.dart' isn't a lower_case_with_underscores identifier. Try changing the name to follow the lower_case_with_underscores style • lib/userProjectsAdminScreen.dart:1:1 • file_names
+   info • 'dart:html' is deprecated and shouldn't be used. Use package:web and dart:js_interop instead. Try replacing the use of the deprecated member with the replacement • lib/userProjectsAdminScreen.dart:12:1 • deprecated_member_use
+   info • Don't use web-only libraries outside Flutter web plugins. Try finding a different library for your needs • lib/userProjectsAdminScreen.dart:12:1 • avoid_web_libraries_in_flutter
+   info • 'dart:html' is deprecated and shouldn't be used. Use package:web and dart:js_interop instead. Try replacing the use of the deprecated member with the replacement • lib/user_profile_dialog.dart:3:1 • deprecated_member_use
+   info • Don't use web-only libraries outside Flutter web plugins. Try finding a different library for your needs • lib/user_profile_dialog.dart:3:1 • avoid_web_libraries_in_flutter
+warning • The declaration '_value' isn't referenced. Try removing the declaration of '_value' • lib/user_profile_dialog.dart:138:10 • unused_element
+warning • The dev dependency on flutter_launcher_icons is unnecessary because there is also a normal dependency on that package. Try removing the dev dependency • pubspec.yaml:46:3 • unnecessary_dev_dependency
+   info • Can't use a relative path to import a library in 'lib'. Try fixing the relative path or changing the import to a 'package:' import • test/favorites_provider_test.dart:5:8 • avoid_relative_lib_imports
+
+43 issues found. (ran in 9.8s)
