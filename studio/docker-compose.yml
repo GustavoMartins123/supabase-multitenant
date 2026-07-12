@@ -30,6 +30,8 @@ services:
     networks: [default, rede-supabase]
     env_file:
       - .env
+    environment:
+      SNIPPETS_MANAGEMENT_FOLDER: /app/snippets
     volumes:
       - ./nginx/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ./authelia:/config
