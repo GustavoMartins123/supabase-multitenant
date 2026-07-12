@@ -29,6 +29,9 @@ services:
     ports:
       - "${STUDIO_HTTPS_PORT}:443"
     restart: unless-stopped
+    depends_on:
+      studio:
+        condition: service_started
     networks: [default, rede-supabase]
     env_file:
       - .env
