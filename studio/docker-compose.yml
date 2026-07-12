@@ -12,7 +12,7 @@ services:
     restart: "no"
   authelia:
     image: ${AUTHELIA_IMAGE}
-    container_name: ${AUTHELIA_CONTAINER_NAME}
+    container_name: authelia
     volumes:
       - ./authelia:/config
     environment:
@@ -23,7 +23,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile 
-    container_name: ${NGINX_CONTAINER_NAME}
+      args:
+        AUTHELIA_IMAGE: ${AUTHELIA_IMAGE}
+    container_name: nginx
     ports:
       - "${STUDIO_HTTPS_PORT}:443"
     restart: unless-stopped
@@ -37,21 +39,21 @@ services:
       - ./authelia:/config
       - ./snippets:/app/snippets
   studio:
-    container_name: ${STUDIO_CONTAINER_NAME}
+    container_name: supabase-studio
     image: ${STUDIO_IMAGE}
     restart: unless-stopped
     env_file:
       - .analytics.env
     networks: [default, rede-supabase]
     environment:
-      STUDIO_PG_META_URL: ${STUDIO_PG_META_URL}
+      STUDIO_PG_META_URL: https://nginx:443/api/platform/pg-meta
       DEFAULT_ORGANIZATION_NAME: ${DEFAULT_ORGANIZATION_NAME}
-      DEFAULT_PROJECT_NAME: ${DEFAULT_PROJECT_NAME}
+      DEFAULT_PROJECT_NAME: postgres
       SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
-      LOGFLARE_URL: ${LOGFLARE_URL}
-      NEXT_PUBLIC_ENABLE_LOGS: ${NEXT_PUBLIC_ENABLE_LOGS}
-      ENABLED_FEATURES_LOGS_ALL: ${ENABLED_FEATURES_LOGS_ALL}
-      NEXT_ANALYTICS_BACKEND_PROVIDER: ${NEXT_ANALYTICS_BACKEND_PROVIDER}
+      LOGFLARE_URL: https://nginx:443/_internal/logflare
+      NEXT_PUBLIC_ENABLE_LOGS: "true"
+      ENABLED_FEATURES_LOGS_ALL: "true"
+      NEXT_ANALYTICS_BACKEND_PROVIDER: postgres
       SNIPPETS_MANAGEMENT_FOLDER: ${SNIPPETS_MANAGEMENT_FOLDER}
     volumes:
       - ./snippets:/app/snippets

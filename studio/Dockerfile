@@ -1,3 +1,5 @@
+ARG AUTHELIA_IMAGE
+
 FROM ghcr.io/cirruslabs/flutter:3.44.0 AS builder
 
 WORKDIR /app
@@ -10,7 +12,7 @@ COPY seletor_de_projetos/ .
 
 RUN flutter build web --release
 
-FROM authelia/authelia:4.39 AS authelia-cli
+FROM ${AUTHELIA_IMAGE} AS authelia-cli
 
 FROM openresty/openresty:1.31.1.1-1-bookworm-fat
 

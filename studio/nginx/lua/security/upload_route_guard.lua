@@ -6,7 +6,7 @@ if method ~= "POST" and method ~= "PUT" and method ~= "PATCH" then
 end
 
 local uri = ngx.var.uri or ""
-if uri:find("^/storage/v1") or uri:find("^/api/platform/storage") then
+if uri:find("^/storage/v1") or uri:find("^/api/platform/storage") or uri:find("^/api/user/me/avatar$") then
     return
 end
 

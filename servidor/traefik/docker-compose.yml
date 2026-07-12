@@ -53,7 +53,7 @@ services:
     restart: unless-stopped  
   deny-service:
     image: ${TRAEFIK_DENY_IMAGE}
-    container_name: ${TRAEFIK_DENY_CONTAINER_NAME}
+    container_name: traefik-deny-service
     networks:
       - rede-supabase
     volumes:
