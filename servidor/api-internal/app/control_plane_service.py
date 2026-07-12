@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from app.validation import normalize_groups
 
 PROFILE_FIELDS = {
+    "display_name",
     "given_name",
     "family_name",
     "middle_name",
@@ -17,7 +18,6 @@ PROFILE_FIELDS = {
     "picture",
     "website",
     "profile",
-    "bio",
     "gender",
     "birthdate",
     "zoneinfo",
@@ -183,7 +183,7 @@ async def sync_user_record(
 
     row = await conn.fetchrow(
         """
-        SELECT id, email, picture_url, profile_data, profile_version
+        SELECT id, display_name, email, picture_url, profile_data, profile_version
         FROM users
         WHERE id = $1
         """,
@@ -192,12 +192,28 @@ async def sync_user_record(
     old_profile = dict(row["profile_data"] or {}) if row else {}
     old_email = row["email"] if row else None
     old_picture = row["picture_url"] if row else None
-    profile_changed = profile_supplied and (
-        old_profile != profile_data
-        or old_email != email
-        or old_picture != picture_url
-    )
+    old_display_name = row["display_name"] if row else None
+    changed_fields: list[str] = []
+    if profile_supplied:
+        keys = set(old_profile) | set(profile_data or {})
+        changed_fields.extend(
+            sorted(
+                field
+                for field in keys
+                if old_profile.get(field, "") != (profile_data or {}).get(field, "")
+            )
+        )
+        if old_email != email:
+            changed_fields.append("email")
+        if old_picture != picture_url and "picture" not in changed_fields:
+            changed_fields.append("picture")
+        if old_display_name != display_name and "display_name" not in changed_fields:
+            changed_fields.append("display_name")
+    changed_fields = sorted(set(changed_fields))
+    profile_changed = bool(changed_fields)
     serialized_profile = json.dumps(profile_data or {})
+    previous_version = int(row["profile_version"] or 1) if row else 0
+    next_version = previous_version + 1 if row else 1
 
     if row:
         await conn.execute(
@@ -250,6 +266,8 @@ async def sync_user_record(
             profile_supplied,
         )
         profile_changed = profile_supplied
+        if profile_supplied and not changed_fields:
+            changed_fields = sorted(profile_data or {})
 
     current_groups = {
         r["group_name"]
@@ -304,8 +322,11 @@ async def sync_user_record(
             action="user_profile_updated",
             target_type="user",
             target_id=str(user_id),
-            old_value={"email": old_email, "profile": old_profile},
-            new_value={"email": email, "profile": profile_data},
+            old_value={"profile_version": previous_version or None},
+            new_value={
+                "profile_version": next_version,
+                "changed_fields": changed_fields,
+            },
         )
 
     projection = await conn.fetchrow(
