@@ -25,7 +25,8 @@ async def ensure_identity_schema(pool: asyncpg.Pool) -> None:
                 ADD COLUMN IF NOT EXISTS picture_url TEXT,
                 ADD COLUMN IF NOT EXISTS profile_data JSONB NOT NULL DEFAULT '{}'::jsonb,
                 ADD COLUMN IF NOT EXISTS profile_version BIGINT NOT NULL DEFAULT 1,
-                ADD COLUMN IF NOT EXISTS profile_updated_at TIMESTAMPTZ;
+                ADD COLUMN IF NOT EXISTS profile_updated_at TIMESTAMPTZ,
+                ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
 
             CREATE TABLE IF NOT EXISTS user_groups (
                 user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -59,6 +60,7 @@ async def ensure_identity_schema(pool: asyncpg.Pool) -> None:
             );
 
             CREATE INDEX IF NOT EXISTS idx_users_last_sync_at ON users(last_sync_at);
+            CREATE INDEX IF NOT EXISTS idx_users_last_seen_at ON users(last_seen_at);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique
                 ON users(lower(email))
                 WHERE email IS NOT NULL AND email <> '';
