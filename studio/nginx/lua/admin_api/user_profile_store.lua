@@ -44,11 +44,14 @@ local yaml_fields = {
     locale = "locale",
     phone_number = "phone_number",
     phone_extension = "phone_extension",
-    street_address = "street_address",
-    locality = "locality",
-    region = "region",
-    postal_code = "postal_code",
-    country = "country",
+}
+
+local address_fields = {
+    "street_address",
+    "locality",
+    "region",
+    "postal_code",
+    "country",
 }
 
 local function trim(value)
@@ -175,6 +178,7 @@ end
 
 local function profile_from_user(username, user_id, user)
     local active_group, admin = group_state(user.groups)
+    local address = type(user.address) == "table" and user.address or {}
     local profile = {
         user_id = user_id,
         username = username,
@@ -193,11 +197,11 @@ local function profile_from_user(username, user_id, user)
         locale = trim(user.locale),
         phone_number = trim(user.phone_number),
         phone_extension = trim(user.phone_extension),
-        street_address = trim(user.street_address),
-        locality = trim(user.locality),
-        region = trim(user.region),
-        postal_code = trim(user.postal_code),
-        country = trim(user.country),
+        street_address = trim(address.street_address),
+        locality = trim(address.locality),
+        region = trim(address.region),
+        postal_code = trim(address.postal_code),
+        country = trim(address.country),
         groups = user.groups or {},
         is_active = user.disabled ~= true and active_group,
         is_admin = admin,
@@ -214,10 +218,11 @@ local function cache_profile(profile)
     if not cache or not profile.user_id or profile.user_id == "" then
         return
     end
+    local normalized_email = user_identity.normalize_email(profile.email)
     local payload = {
         username = profile.username,
         display_name = profile.display_name,
-        email = user_identity.normalize_email(profile.email),
+        email = normalized_email,
         user_uuid = profile.user_id,
         is_active = profile.is_active,
         is_admin = profile.is_admin,
@@ -226,7 +231,9 @@ local function cache_profile(profile)
     local encoded = cjson.encode(payload)
     if encoded then
         cache:set(profile.user_id, encoded)
-        cache:set("email:" .. payload.email, profile.user_id)
+        if normalized_email ~= "" then
+            cache:set("email:" .. normalized_email, profile.user_id)
+        end
     end
 end
 
@@ -234,10 +241,36 @@ local function validate_url(value, field)
     if value == "" then
         return true
     end
-    if not value:match("^https?://") then
-        return nil, field .. " must use http or https"
+    local _, rest = value:match("^(https?)://(.+)$")
+    if not rest or rest:find("%s") then
+        return nil, field .. " must use an absolute http or https URL"
+    end
+    local authority = rest:match("^([^/%?#]+)")
+    if not authority or authority == "" or authority:find("@", 1, true) then
+        return nil, field .. " must use an absolute http or https URL"
     end
     return true
+end
+
+local function validate_locale(value)
+    if value == "" then
+        return true
+    end
+    if value:sub(1, 1) == "-" or value:sub(-1) == "-" or value:find("--", 1, true) then
+        return false
+    end
+    local index = 0
+    for part in value:gmatch("[^%-]+") do
+        index = index + 1
+        if index == 1 then
+            if #part < 2 or #part > 3 or not part:match("^%a+$") then
+                return false
+            end
+        elseif #part < 2 or #part > 8 or not part:match("^%w+$") then
+            return false
+        end
+    end
+    return index > 0
 end
 
 local function validate_payload(payload)
@@ -271,7 +304,7 @@ local function validate_payload(payload)
     if normalized.birthdate and normalized.birthdate ~= "" and not normalized.birthdate:match("^%d%d%d%d%-%d%d%-%d%d$") then
         return nil, "birthdate must use YYYY-MM-DD"
     end
-    if normalized.locale and normalized.locale ~= "" and not normalized.locale:match("^[%a][%a][%a]?[%w%-]*$") then
+    if normalized.locale and not validate_locale(normalized.locale) then
         return nil, "locale is invalid"
     end
     if normalized.zoneinfo and normalized.zoneinfo ~= "" and not normalized.zoneinfo:match("^[%w%+%-%._/]+$") then
@@ -322,7 +355,7 @@ local function mutate(email, apply, syncer)
         if not synced then
             local restored, restore_err = write_raw(original)
             release_lock(token)
-            return nil, sync_err or restore_err or "profile synchronization failed"
+            return nil, "profile synchronization failed: " .. tostring(sync_err or restore_err or "unknown error")
         end
     end
 
@@ -360,6 +393,26 @@ function M.update(email, payload, syncer)
                 user[yaml_field] = normalized[field]
             end
         end
+
+        local address_changed = false
+        local address = type(user.address) == "table" and user.address or {}
+        for _, field in ipairs(address_fields) do
+            if normalized[field] ~= nil then
+                address[field] = normalized[field]
+                address_changed = true
+            end
+        end
+        if address_changed then
+            local has_value = false
+            for _, field in ipairs(address_fields) do
+                if trim(address[field]) ~= "" then
+                    has_value = true
+                    break
+                end
+            end
+            user.address = has_value and address or lyaml.null
+        end
+
         return true
     end, syncer)
 end
