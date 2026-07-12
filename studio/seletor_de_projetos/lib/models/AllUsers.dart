@@ -73,6 +73,7 @@ class AvailableUser {
   final String status;
   final String? projectRole;
   final String? note;
+  final String? pictureUrl;
 
   AvailableUser({
     required this.userId,
@@ -83,6 +84,7 @@ class AvailableUser {
     required this.status,
     this.projectRole,
     this.note,
+    this.pictureUrl,
   });
 
   factory AvailableUser.fromJson(Map<String, dynamic> json) {
@@ -95,6 +97,7 @@ class AvailableUser {
       status: json['status'] ?? 'available',
       projectRole: json['project_role'],
       note: json['note'],
+      pictureUrl: json['picture_url'] as String?,
     );
   }
 
@@ -108,6 +111,7 @@ class AvailableUser {
       'status': status,
       if (projectRole != null) 'project_role': projectRole,
       if (note != null) 'note': note,
+      if (pictureUrl != null) 'picture_url': pictureUrl,
     };
   }
 
@@ -119,11 +123,13 @@ class AvailableUserShort {
   final String userId;
   final String? userHash;
   final String displayName;
+  final String? pictureUrl;
 
   AvailableUserShort({
     required this.userId,
     this.userHash,
     required this.displayName,
+    this.pictureUrl,
   });
 
   factory AvailableUserShort.fromJson(Map<String, dynamic> j) =>
@@ -131,5 +137,6 @@ class AvailableUserShort {
         userId: j['user_id'] as String,
         userHash: j['user_hash'] as String?,
         displayName: j['display_name'] as String,
+        pictureUrl: j['picture_url'] as String?,
       );
 }

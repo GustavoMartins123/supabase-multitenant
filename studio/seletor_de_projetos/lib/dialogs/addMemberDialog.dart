@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:seletor_de_projetos/models/AllUsers.dart';
 import 'package:seletor_de_projetos/providers/project_settings_provider.dart';
 import 'package:seletor_de_projetos/supabase_colors.dart';
+import 'package:seletor_de_projetos/widgets/user_avatar_thumbnail.dart';
 
 class AddMemberDialog extends ConsumerStatefulWidget {
   final String projectRef;
@@ -43,9 +44,11 @@ class _AddMemberDialogState extends ConsumerState<AddMemberDialog>
   }
 
   void _filter() {
-    final availableUsersAsync = ref.read(availableUsersProvider(widget.projectRef));
+    final availableUsersAsync = ref.read(
+      availableUsersProvider(widget.projectRef),
+    );
     final users = availableUsersAsync.value ?? [];
-    
+
     final q = _searchCtl.text.toLowerCase();
     setState(() {
       _shown = q.isEmpty
@@ -65,8 +68,10 @@ class _AddMemberDialogState extends ConsumerState<AddMemberDialog>
 
   @override
   Widget build(BuildContext context) {
-    final availableUsersAsync = ref.watch(availableUsersProvider(widget.projectRef));
-    
+    final availableUsersAsync = ref.watch(
+      availableUsersProvider(widget.projectRef),
+    );
+
     return ScaleTransition(
       scale: _scaleAnimation,
       child: Dialog(
@@ -133,7 +138,9 @@ class _AddMemberDialogState extends ConsumerState<AddMemberDialog>
               Expanded(
                 child: availableUsersAsync.when(
                   data: (users) {
-                    if (_searchCtl.text.isEmpty && _shown.isEmpty && users.isNotEmpty) {
+                    if (_searchCtl.text.isEmpty &&
+                        _shown.isEmpty &&
+                        users.isNotEmpty) {
                       WidgetsBinding.instance.addPostFrameCallback((_) {
                         setState(() => _shown = users);
                       });
@@ -358,25 +365,21 @@ class _AddMemberDialogState extends ConsumerState<AddMemberDialog>
                       ),
                       child: Row(
                         children: [
-                          Container(
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color: sel
-                                  ? SupabaseColors.brand.withValues(alpha: 0.2)
-                                  : SupabaseColors.surface200,
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Center(
-                              child: Text(
-                                u.displayName[0].toUpperCase(),
-                                style: TextStyle(
-                                  color: sel
-                                      ? SupabaseColors.brand
-                                      : SupabaseColors.textSecondary,
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 14,
-                                ),
+                          UserAvatarThumbnail(
+                            pictureUrl: u.pictureUrl,
+                            size: 36,
+                            borderRadius: BorderRadius.circular(6),
+                            backgroundColor: sel
+                                ? SupabaseColors.brand.withValues(alpha: 0.2)
+                                : SupabaseColors.surface200,
+                            fallback: Text(
+                              u.displayName[0].toUpperCase(),
+                              style: TextStyle(
+                                color: sel
+                                    ? SupabaseColors.brand
+                                    : SupabaseColors.textSecondary,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 14,
                               ),
                             ),
                           ),

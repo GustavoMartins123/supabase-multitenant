@@ -217,10 +217,14 @@ function M.handle()
     local uri = ngx.var.uri or ""
     local requested_user_id = uri:match("^/api/user/me/avatar/([0-9a-fA-F%-]+)$")
     if method == "GET" then
-        if requested_user_id and requested_user_id ~= profile.user_id then
-            return respond_json(403, { error = "avatar access denied" })
+        local requested_path = path_or_err
+        if requested_user_id then
+            requested_path = avatar_path(requested_user_id)
+            if not requested_path then
+                return respond_json(400, { error = "invalid user identifier" })
+            end
         end
-        return serve(path_or_err)
+        return serve(requested_path)
     end
     if uri ~= "/api/user/me/avatar" then
         return respond_json(405, { error = "method not allowed" })

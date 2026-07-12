@@ -26,6 +26,7 @@ for _, m in ipairs(members) do
         m.username = ud.username
         m.is_active = ud.is_active
         m.status = ud.is_active and "active" or "inactive"
+        m.picture_url = type(ud.profile) == "table" and ud.profile.picture or ud.picture or ""
     else
         -- Usuário não encontrado no cache (removido completamente)
         m.display_name = "Usuário Removido"
