@@ -16,7 +16,7 @@ class UserSyncPayload(BaseModel):
     display_name: Optional[str] = None
     groups: List[str] = Field(default_factory=list)
     is_active: bool = True
-    source: str = "studio_sync"
+    source: str | Dict[str, Any] = "studio_sync"
 
 class AddMember(BaseModel):
     user_id: str
