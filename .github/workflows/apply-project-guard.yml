@@ -39,6 +39,19 @@ jobs:
             --env-file servidor/.env.example \
             config >/tmp/traefik-compose.yml
 
+      - name: Commit integration
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add \
+            servidor/traefik/traefik.yml \
+            servidor/traefik/middlewares.yml \
+            servidor/traefik/docker-compose.yml \
+            servidor/generateProject/dockercomposetemplate \
+            servidor/.env.example
+          git commit -m "feat(traefik): integrate project-aware Supabase Guard"
+          git push origin HEAD:agent/project-aware-traefik-guard
+
       - name: Validate plugin in Traefik
         run: |
           cat >/tmp/guard-static.yml <<'YAML'
@@ -81,7 +94,7 @@ jobs:
           YAML
 
           cleanup() {
-            docker logs supabaseguard-traefik-test || true
+            docker logs supabaseguard-traefik-test >/tmp/supabaseguard-traefik.log 2>&1 || true
             docker rm -f supabaseguard-traefik-test supabaseguard-whoami >/dev/null 2>&1 || true
             docker network rm supabaseguard-test >/dev/null 2>&1 || true
           }
@@ -98,22 +111,31 @@ jobs:
             traefik:v3.7.6 --configFile=/etc/traefik/traefik.yml
 
           sleep 6
-          docker ps --filter name=supabaseguard-traefik-test --filter status=running --format '{{.Names}}' | grep -qx supabaseguard-traefik-test
-          for attempt in 1 2 3; do
-            status=$(curl -sS -o /tmp/guard-response -w '%{http_code}' http://127.0.0.1:18080/)
-            test "$status" = "200"
-          done
-          ! docker logs supabaseguard-traefik-test 2>&1 | grep -Eiq 'unknown plugin|failed to load plugin|error.*supabaseguard'
+          runtime_status=ok
+          if ! docker ps --filter name=supabaseguard-traefik-test --filter status=running --format '{{.Names}}' | grep -qx supabaseguard-traefik-test; then
+            runtime_status=container-stopped
+          else
+            for attempt in 1 2 3; do
+              status=$(curl -sS -o /tmp/guard-response -w '%{http_code}' http://127.0.0.1:18080/ || true)
+              if [ "$status" != "200" ]; then
+                runtime_status="http-$status"
+                break
+              fi
+            done
+          fi
+          docker logs supabaseguard-traefik-test >/tmp/supabaseguard-traefik.log 2>&1 || true
+          if grep -Eiq 'unknown plugin|failed to load plugin|error.*supabaseguard' /tmp/supabaseguard-traefik.log; then
+            runtime_status=plugin-error
+          fi
+          echo "$runtime_status" >/tmp/supabaseguard-runtime-status
 
-      - name: Commit integration
-        run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add \
-            servidor/traefik/traefik.yml \
-            servidor/traefik/middlewares.yml \
-            servidor/traefik/docker-compose.yml \
-            servidor/generateProject/dockercomposetemplate \
-            servidor/.env.example
-          git commit -m "feat(traefik): integrate project-aware Supabase Guard"
-          git push origin HEAD:agent/project-aware-traefik-guard
+      - uses: actions/upload-artifact@v4
+        with:
+          name: supabaseguard-runtime
+          path: |
+            /tmp/supabaseguard-traefik.log
+            /tmp/supabaseguard-runtime-status
+            /tmp/guard-response
+
+      - name: Require successful runtime validation
+        run: test "$(cat /tmp/supabaseguard-runtime-status)" = "ok"
