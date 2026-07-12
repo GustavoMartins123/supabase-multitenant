@@ -10,9 +10,11 @@ class StudioRuntimeContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         compose = (ROOT / "studio/docker-compose.yml").read_text(encoding="utf-8")
-        start = compose.index("  studio:\n")
-        end = compose.index("  # postgres:", start)
-        cls.studio = compose[start:end]
+        nginx_start = compose.index("  nginx:\n")
+        studio_start = compose.index("  studio:\n", nginx_start)
+        cls.nginx = compose[nginx_start:studio_start]
+        studio_end = compose.index("  # postgres:", studio_start)
+        cls.studio = compose[studio_start:studio_end]
 
     def test_studio_listens_on_the_docker_interface(self) -> None:
         self.assertIn('HOSTNAME: "0.0.0.0"', self.studio)
@@ -21,6 +23,11 @@ class StudioRuntimeContractTests(unittest.TestCase):
         self.assertIn("http://localhost:3000/api/platform/profile", self.studio)
         self.assertIn("start_period: 20s", self.studio)
         self.assertIn("timeout: 10s", self.studio)
+
+    def test_gateway_starts_after_the_studio_container_exists(self) -> None:
+        self.assertIn("depends_on:", self.nginx)
+        self.assertIn("studio:", self.nginx)
+        self.assertIn("condition: service_started", self.nginx)
 
 
 if __name__ == "__main__":
