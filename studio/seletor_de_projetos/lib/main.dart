@@ -5,9 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
 import 'bootstrap_admin_page.dart';
+import 'models/user_profile.dart';
+import 'project_list_page.dart';
 import 'session.dart';
 import 'supabase_colors.dart';
-import 'project_list_page.dart';
+import 'user_profile_dialog.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,24 +25,18 @@ Future<void> main() async {
   }
 
   if (!needsBootstrapAdmin) {
-    final r = await http.get(Uri.parse('/api/user/me'));
+    final response = await http.get(Uri.parse('/api/user/me'));
     try {
-      if (r.statusCode == 403) {
+      if (response.statusCode == 403) {
         accessDenied = true;
         throw const _AccessDeniedException();
       }
-      if (r.statusCode != 200) {
+      if (response.statusCode != 200) {
         throw const FormatException('Sessao ausente');
       }
-      final data = jsonDecode(r.body) as Map<String, dynamic>;
-      final s = Session();
-      s.myId = data['user_id'];
-      s.myUsername = data['username'];
-      s.myDisplayName = data['display_name'];
-      s.isSysAdmin = data['is_admin'];
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      Session().setProfile(UserProfile.fromJson(data));
     } on _AccessDeniedException {
-      // Usuário autenticado, mas sem autorização no Authelia. Não redireciona
-      // para login para evitar loop quando a conta foi desativada.
     } on FormatException {
       redirectingToLogin = true;
       html.window.location.href = _loginUrl();
@@ -111,7 +107,17 @@ class ProjectInitApp extends StatelessWidget {
                 ? const _AccessDeniedPage()
                 : redirectingToLogin
                     ? const _RedirectingPage()
-                    : const ProjectListPage(),
+                    : const Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          ProjectListPage(),
+                          Positioned(
+                            left: 24,
+                            bottom: 24,
+                            child: UserProfileLauncher(),
+                          ),
+                        ],
+                      ),
       );
 }
 
