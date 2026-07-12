@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../supabase_colors.dart';
 import '../../models/user_models.dart';
 import '../../userProjectsAdminScreen.dart';
+import '../user_avatar_thumbnail.dart';
 
 class UserCard extends StatelessWidget {
   const UserCard({
@@ -38,25 +39,21 @@ class UserCard extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Row(
           children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: user.isActive
-                    ? SupabaseColors.success.withValues(alpha: 0.2)
-                    : SupabaseColors.error.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Center(
-                child: Text(
-                  isMe ? 'EU' : user.displayName.substring(0, 1).toUpperCase(),
-                  style: TextStyle(
-                    color: user.isActive
-                        ? SupabaseColors.success
-                        : SupabaseColors.error,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
+            UserAvatarThumbnail(
+              pictureUrl: user.pictureUrl,
+              size: 44,
+              borderRadius: BorderRadius.circular(8),
+              backgroundColor: user.isActive
+                  ? SupabaseColors.success.withValues(alpha: 0.2)
+                  : SupabaseColors.error.withValues(alpha: 0.2),
+              fallback: Text(
+                isMe ? 'EU' : user.displayName.substring(0, 1).toUpperCase(),
+                style: TextStyle(
+                  color: user.isActive
+                      ? SupabaseColors.success
+                      : SupabaseColors.error,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
                 ),
               ),
             ),
@@ -70,8 +67,9 @@ class UserCard extends StatelessWidget {
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
                       fontSize: 14,
-                      decoration:
-                          user.isActive ? null : TextDecoration.lineThrough,
+                      decoration: user.isActive
+                          ? null
+                          : TextDecoration.lineThrough,
                       color: SupabaseColors.textPrimary,
                     ),
                   ),

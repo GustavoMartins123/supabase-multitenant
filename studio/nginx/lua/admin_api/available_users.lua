@@ -36,6 +36,13 @@ end
 local current = cjson.decode(res.body) or {}
 local cache = ngx.shared.users_cache
 
+local function picture_url(user)
+    if type(user.profile) == "table" and user.profile.picture and user.profile.picture ~= "" then
+        return user.profile.picture
+    end
+    return user.picture or ""
+end
+
 if include_members then
     local admin_ids = {}
     local member_ids = {}
@@ -75,7 +82,8 @@ if include_members then
                             display_name = ud.display_name,
                             username = ud.username,
                             is_active = true,
-                            status = "active"
+                            status = "active",
+                            picture_url = picture_url(ud)
                         })
                     end
                 end
@@ -108,7 +116,8 @@ if include_members then
                                 display_name = ud.display_name,
                                 username = ud.username,
                                 is_active = true,
-                                status = "member"
+                                status = "member",
+                                picture_url = picture_url(ud)
                             })
                         end
                     end
@@ -138,7 +147,8 @@ if include_members then
                                 display_name = ud.display_name,
                                 username = ud.username,
                                 is_active = true,
-                                status = "available"
+                                status = "available",
+                                picture_url = picture_url(ud)
                             })
                         end
                     end
@@ -189,7 +199,8 @@ else
                         display_name = ud.display_name,
                         username = ud.username,
                         is_active = true,
-                        status = "active"
+                        status = "active",
+                        picture_url = picture_url(ud)
                     })
                     else
                         ngx.log(ngx.INFO, "[AVAILABLE][CONTENT] Skipping inactive user: ", ud.username, " (", h, ")")

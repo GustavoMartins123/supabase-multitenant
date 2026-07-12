@@ -13,8 +13,9 @@ class UserListResponse {
     List<UserInfo> usersList = [];
     if (json['users'] != null) {
       if (json['users'] is List) {
-        usersList =
-            (json['users'] as List).map((u) => UserInfo.fromJson(u)).toList();
+        usersList = (json['users'] as List)
+            .map((u) => UserInfo.fromJson(u))
+            .toList();
       }
     }
 
@@ -35,6 +36,7 @@ class UserInfo {
   final bool isAdmin;
   final String status;
   final String emailHint;
+  final String? pictureUrl;
 
   UserInfo({
     required this.id,
@@ -45,6 +47,7 @@ class UserInfo {
     required this.isAdmin,
     required this.status,
     required this.emailHint,
+    this.pictureUrl,
   });
 
   factory UserInfo.fromJson(Map<String, dynamic> json) {
@@ -57,6 +60,7 @@ class UserInfo {
       isAdmin: json['is_admin'] ?? false,
       status: json['status'] ?? 'unknown',
       emailHint: json['email_hint'] ?? '',
+      pictureUrl: json['picture_url'] as String?,
     );
   }
 }

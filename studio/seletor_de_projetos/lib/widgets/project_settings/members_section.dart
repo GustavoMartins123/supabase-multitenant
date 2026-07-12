@@ -12,6 +12,7 @@ import '../danger_button.dart';
 import '../../session.dart';
 import '../../dialogs/addMemberDialog.dart';
 import '../../models/project_member.dart';
+import '../user_avatar_thumbnail.dart';
 
 class MembersSection extends ConsumerWidget {
   final String projectRef;
@@ -111,16 +112,14 @@ class MembersSection extends ConsumerWidget {
       ),
       child: Row(
         children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: member.role == 'admin'
-                  ? SupabaseColors.warning.withValues(alpha: 0.2)
-                  : SupabaseColors.info.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Icon(
+          UserAvatarThumbnail(
+            pictureUrl: member.pictureUrl,
+            size: 36,
+            borderRadius: BorderRadius.circular(6),
+            backgroundColor: member.role == 'admin'
+                ? SupabaseColors.warning.withValues(alpha: 0.2)
+                : SupabaseColors.info.withValues(alpha: 0.2),
+            fallback: Icon(
               member.role == 'admin'
                   ? Icons.admin_panel_settings_rounded
                   : Icons.person_rounded,

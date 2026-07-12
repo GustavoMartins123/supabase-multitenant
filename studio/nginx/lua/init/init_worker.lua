@@ -95,6 +95,7 @@
                         is_active = is_active,
                         is_admin = is_admin,
                         user_uuid = user_uuid,
+                        picture = attr.picture or "",
                     }
                     local encoded_payload = cjson.encode(cache_payload)
 

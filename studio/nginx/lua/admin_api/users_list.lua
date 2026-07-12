@@ -41,7 +41,8 @@ for _, key in ipairs(keys) do
                         is_active = user.is_active,
                         is_admin = user.is_admin == true,
                         status = user.is_active and "active" or "inactive",
-                        email_hint = mask_email(user.email)
+                        email_hint = mask_email(user.email),
+                        picture_url = type(user.profile) == "table" and user.profile.picture or user.picture or ""
                     }
                     
                     table.insert(users, safe_user)
