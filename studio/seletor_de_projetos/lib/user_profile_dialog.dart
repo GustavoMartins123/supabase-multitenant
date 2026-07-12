@@ -180,7 +180,9 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
     final completer = Completer<Uint8List>();
     reader.onLoad.listen((_) {
       final result = reader.result;
-      if (result is ByteBuffer) {
+      if (result is Uint8List) {
+        completer.complete(result);
+      } else if (result is ByteBuffer) {
         completer.complete(Uint8List.view(result));
       } else {
         completer.completeError(StateError('Arquivo inválido'));
