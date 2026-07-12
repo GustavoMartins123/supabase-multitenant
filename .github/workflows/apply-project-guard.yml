@@ -19,7 +19,12 @@ jobs:
           fetch-depth: 0
 
       - name: Apply repository integration
-        run: python .github/scripts/apply_project_guard_repo.py
+        run: |
+          if grep -q 'github.com/GustavoMartins123/supabaseguard' servidor/traefik/traefik.yml; then
+            echo 'integration already applied'
+          else
+            python .github/scripts/apply_project_guard_repo.py
+          fi
 
       - name: Run Go tests
         working-directory: servidor/traefik/plugins-local/src/github.com/GustavoMartins123/supabaseguard
@@ -41,6 +46,15 @@ jobs:
 
       - name: Commit integration
         run: |
+          if git diff --quiet -- \
+            servidor/traefik/traefik.yml \
+            servidor/traefik/middlewares.yml \
+            servidor/traefik/docker-compose.yml \
+            servidor/generateProject/dockercomposetemplate \
+            servidor/.env.example; then
+            echo 'no integration changes to commit'
+            exit 0
+          fi
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add \
