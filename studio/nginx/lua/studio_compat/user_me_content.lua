@@ -1,13 +1,7 @@
-local cjson = require("cjson.safe")
+local uri = ngx.var.uri or ""
 
-local response = {
-    is_admin = ngx.var.myrole == "true",
-    username = ngx.var.username or "",
-    display_name = ngx.var.display_name or "",
-    user_id = ngx.var.user_id or ""
-}
+if uri == "/api/user/me/avatar" then
+    return require("admin_api.user_avatar_handler").handle()
+end
 
-ngx.header.content_type = "application/json"
-ngx.say(cjson.encode(response))
-
-ngx.log(ngx.INFO, "[USER_ME] Resposta enviada: " .. cjson.encode(response))
+return require("admin_api.user_profile_handler").handle()
