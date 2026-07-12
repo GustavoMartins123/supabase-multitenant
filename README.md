@@ -160,7 +160,7 @@ docker compose -f docker-compose-api.yml --env-file .env up --build -d
 Start Traefik:
 
 ```bash
-docker compose -f traefik/docker-compose.yml up -d
+docker compose -f traefik/docker-compose.yml --env-file .env up -d
 ```
 
 Start existing projects:
