@@ -11,7 +11,7 @@
 
 services:
   db:
-    container_name: supabase-db
+    container_name: ${DB_CONTAINER_NAME}
     build:
       context: ./volumes/db
     restart: unless-stopped
@@ -57,7 +57,7 @@ services:
       timeout: 5s
       retries: 10
     environment:
-      POSTGRES_HOST: /var/run/postgresql
+      POSTGRES_HOST: ${POSTGRES_SOCKET_DIR}
       PGPORT: ${POSTGRES_PORT}
       POSTGRES_PORT: ${POSTGRES_PORT}
       PGPASSWORD: ${POSTGRES_PASSWORD}
@@ -65,10 +65,10 @@ services:
       PGDATABASE: ${POSTGRES_DB}
       POSTGRES_DB: ${POSTGRES_DB}
       JWT_SECRET: ${JWT_SECRET}
-      JWT_EXP: 3600
-    mem_limit: 24g
-    memswap_limit: 24g
-    shm_size: 4gb
+      JWT_EXP: ${JWT_EXPIRY}
+    mem_limit: ${POSTGRES_MEM_LIMIT}
+    memswap_limit: ${POSTGRES_MEMSWAP_LIMIT}
+    shm_size: ${POSTGRES_SHM_SIZE}
     command:
       - postgres
       - -c
@@ -175,7 +175,7 @@ services:
       context: .
       dockerfile: volumes/realtime/Dockerfile
     #This container name looks inconsistent but is correct because realtime constructs tenant id by parsing the subdomain
-    container_name: realtime-dev.supabase-realtime
+    container_name: ${REALTIME_CONTAINER_NAME}
     #image: supabase/realtime:v2.34.41
     restart: unless-stopped
     env_file:
@@ -188,47 +188,47 @@ services:
         condition: service_healthy
     environment:
       # SLOT_NAME_SUFFIX: "_repl"
-      PORT: 4000
+      PORT: ${REALTIME_PORT}
       DB_HOST: ${POSTGRES_HOST}
       #DB_PORT: 6543
       DB_PORT: ${POSTGRES_PORT}
       DB_USER: ${POSTGRES_USER}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
       DB_NAME: ${POSTGRES_DB}
-      DB_AFTER_CONNECT_QUERY: 'SET search_path TO _realtime'
+      DB_AFTER_CONNECT_QUERY: ${REALTIME_DB_AFTER_CONNECT_QUERY}
       DB_ENC_KEY: ${DB_ENC_KEY}
       API_JWT_SECRET: ${JWT_SECRET}
       METRICS_JWT_SECRET: ${JWT_SECRET}
       SECRET_KEY_BASE: ${SECRET_KEY_BASE}
       #Set to either "-proto_dist inet_tcp" or "-proto_dist inet6_tcp" depending on whether or not your network uses IPv4 or IPv6 respectively.
-      ERL_AFLAGS: -proto_dist inet_tcp
-      DNS_NODES: "''"
-      RLIMIT_NOFILE: "100000"
-      APP_NAME: realtime
-      SEED_SELF_HOST: true
-      SELF_HOST_TENANT_NAME: realtime-dev
-      RUN_JANITOR: true
+      ERL_AFLAGS: ${REALTIME_ERL_AFLAGS}
+      DNS_NODES: ${REALTIME_DNS_NODES}
+      RLIMIT_NOFILE: ${REALTIME_RLIMIT_NOFILE}
+      APP_NAME: ${REALTIME_APP_NAME}
+      SEED_SELF_HOST: ${REALTIME_SEED_SELF_HOST}
+      SELF_HOST_TENANT_NAME: ${POOLER_TENANT_ID}
+      RUN_JANITOR: ${REALTIME_RUN_JANITOR}
       NUM_ACCEPTORS: ${NUM_ACCEPTORS}
-      TENANT_MAX_BYTES_PER_SECOND: "500000"
-      TENANT_MAX_CHANNELS_PER_CLIENT: "200"
-      TENANT_MAX_CONCURRENT_USERS: "1000"
-      TENANT_MAX_EVENTS_PER_SECOND: "500"
-      TENANT_MAX_JOINS_PER_SECOND: "30"
-      LOG_LEVEL: "warning"
-      METRICS_ENABLED: "false"
-      DASHBOARD_AUTH: basic_auth
+      TENANT_MAX_BYTES_PER_SECOND: ${REALTIME_TENANT_MAX_BYTES_PER_SECOND}
+      TENANT_MAX_CHANNELS_PER_CLIENT: ${REALTIME_TENANT_MAX_CHANNELS_PER_CLIENT}
+      TENANT_MAX_CONCURRENT_USERS: ${MAX_CONCURRENT_USERS}
+      TENANT_MAX_EVENTS_PER_SECOND: ${REALTIME_TENANT_MAX_EVENTS_PER_SECOND}
+      TENANT_MAX_JOINS_PER_SECOND: ${REALTIME_TENANT_MAX_JOINS_PER_SECOND}
+      LOG_LEVEL: ${REALTIME_LOG_LEVEL}
+      METRICS_ENABLED: ${REALTIME_METRICS_ENABLED}
+      DASHBOARD_AUTH: ${REALTIME_DASHBOARD_AUTH}
       DASHBOARD_USER: ${DASHBOARD_USER}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
 
   supavisor:
-    container_name: supabase-pooler
-    image: supabase/supavisor:2.9.7
+    container_name: ${POOLER_CONTAINER_NAME}
+    image: ${POOLER_IMAGE}
     env_file:
       - .env
     restart: unless-stopped
     networks:
         rede-supabase:
-          ipv4_address: 172.50.200.11
+          ipv4_address: ${POSTGRES_POOLER}
     volumes:
       - ./volumes/pooler/pooler.exs:/etc/pooler/pooler.exs:ro
     depends_on:
@@ -236,25 +236,25 @@ services:
         condition: service_healthy
     ulimits:
       nofile:
-        soft: 100000
-        hard: 100000
+        soft: ${POOLER_NOFILE_SOFT}
+        hard: ${POOLER_NOFILE_HARD}
     environment:
-      PORT: 4000
+      PORT: ${POOLER_INTERNAL_PORT}
       POSTGRES_HOST: ${POSTGRES_HOST}
       POSTGRES_PORT: ${POSTGRES_PORT}
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       DATABASE_URL: ecto://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
-      CLUSTER_POSTGRES: true
+      CLUSTER_POSTGRES: ${POOLER_CLUSTER_POSTGRES}
       SECRET_KEY_BASE: ${SECRET_KEY_BASE}
       VAULT_ENC_KEY: ${VAULT_ENC_KEY}
       API_JWT_SECRET: ${JWT_SECRET}
       METRICS_JWT_SECRET: ${JWT_SECRET}
-      REGION: local
-      ERL_AFLAGS: -proto_dist inet_tcp
+      REGION: ${POOLER_REGION}
+      ERL_AFLAGS: ${POOLER_ERL_AFLAGS}
       POOLER_DEFAULT_POOL_SIZE: ${POOLER_DEFAULT_POOL_SIZE}
       POOLER_MAX_CLIENT_CONN: ${POOLER_MAX_CLIENT_CONN}
-      POOLER_POOL_MODE: transaction
+      POOLER_POOL_MODE: ${POOLER_POOL_MODE}
     command:
       - /bin/sh
       - -c
@@ -268,8 +268,8 @@ services:
         && /app/bin/supavisor eval "$$(cat /etc/pooler/pooler.exs)" \
         && /app/bin/server
   functions:
-    container_name: supabase-edge-functions
-    image: supabase/edge-runtime:v1.74.2
+    container_name: ${FUNCTIONS_CONTAINER_NAME}
+    image: ${FUNCTIONS_IMAGE}
     env_file:
       - .env
     restart: unless-stopped
@@ -282,10 +282,10 @@ services:
         condition: service_healthy  
     environment:
       JWT_SECRET: ${JWT_SECRET}
-      SUPABASE_URL: http://studio.local
-      SUPABASE_ANON_KEY: ''
-      SUPABASE_SERVICE_ROLE_KEY: ''
-      SUPABASE_DB_URL: postgresql://postgres.postgres:${POSTGRES_PASSWORD}@${POSTGRES_POOLER}:6543/${POSTGRES_DB}
+      SUPABASE_URL: ${FUNCTIONS_SUPABASE_URL}
+      SUPABASE_ANON_KEY: ${FUNCTIONS_SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${FUNCTIONS_SUPABASE_SERVICE_ROLE_KEY}
+      SUPABASE_DB_URL: postgresql://${FUNCTIONS_DB_USER}:${POSTGRES_PASSWORD}@${POSTGRES_POOLER}:${POOLER_PROXY_PORT_TRANSACTION}/${POSTGRES_DB}
       VERIFY_JWT: "${FUNCTIONS_VERIFY_JWT}"
     command:
       [
@@ -294,8 +294,8 @@ services:
       "/home/deno/functions/main"
       ]
   analytics:
-    image: supabase/logflare:1.47.1
-    container_name: supabase-analytics
+    image: ${ANALYTICS_IMAGE}
+    container_name: ${ANALYTICS_CONTAINER_NAME}
     restart: unless-stopped
     env_file:
       - .analytics.env
@@ -311,27 +311,27 @@ services:
       retries: 10
       start_period: 30s
     environment:
-      LOGFLARE_NODE_HOST: 127.0.0.1
-      DB_USERNAME: supabase_admin
-      DB_DATABASE: _supabase
-      DB_HOSTNAME: db
+      LOGFLARE_NODE_HOST: ${LOGFLARE_NODE_HOST}
+      DB_USERNAME: ${POSTGRES_USER}
+      DB_DATABASE: ${ANALYTICS_DB_DATABASE}
+      DB_HOSTNAME: ${ANALYTICS_DB_HOSTNAME}
       DB_PORT: ${POSTGRES_PORT}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
-      DB_SCHEMA: _analytics
-      LOGFLARE_SINGLE_TENANT: "true"
-      LOGFLARE_SUPABASE_MODE: "true"
-      LOGFLARE_FEATURE_FLAG_OVERRIDE: multibackend=true
-      LOGFLARE_LOG_LEVEL: warn
-      POSTGRES_BACKEND_URL: postgresql://supabase_admin:${POSTGRES_PASSWORD}@db:${POSTGRES_PORT}/_supabase
-      POSTGRES_BACKEND_SCHEMA: _analytics
+      DB_SCHEMA: ${ANALYTICS_DB_SCHEMA}
+      LOGFLARE_SINGLE_TENANT: ${LOGFLARE_SINGLE_TENANT}
+      LOGFLARE_SUPABASE_MODE: ${LOGFLARE_SUPABASE_MODE}
+      LOGFLARE_FEATURE_FLAG_OVERRIDE: ${LOGFLARE_FEATURE_FLAG_OVERRIDE}
+      LOGFLARE_LOG_LEVEL: ${LOGFLARE_LOG_LEVEL}
+      POSTGRES_BACKEND_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${ANALYTICS_DB_HOSTNAME}:${POSTGRES_PORT}/${ANALYTICS_DB_DATABASE}
+      POSTGRES_BACKEND_SCHEMA: ${ANALYTICS_DB_SCHEMA}
 
   vector:
-    image: timberio/vector:0.53.0-alpine
-    container_name: supabase-vector-global
+    image: ${VECTOR_IMAGE}
+    container_name: ${VECTOR_CONTAINER_NAME}
     restart: unless-stopped
     volumes:
       - ./volumes/logs/vector.yml:/etc/vector/vector.yml:ro,z
-      - ${DOCKER_SOCKET_LOCATION:-/var/run/docker.sock}:/var/run/docker.sock:ro,z
+      - ${DOCKER_SOCKET_LOCATION}:/var/run/docker.sock:ro,z
     env_file:
       - .analytics.env
     networks:
@@ -350,15 +350,15 @@ services:
 
 networks:
   rede-supabase:
-    name: rede-supabase
+    name: ${SUPABASE_NETWORK_NAME}
     driver: bridge
     ipam:
       config:
-        - subnet: 172.50.0.0/16
-          ip_range: 172.50.0.0/18
-          gateway: 172.50.0.1
+        - subnet: ${SUPABASE_NETWORK_SUBNET}
+          ip_range: ${SUPABASE_NETWORK_IP_RANGE}
+          gateway: ${SUPABASE_NETWORK_GATEWAY}
   analytics-internal:
-    name: supabase-analytics-internal
+    name: ${ANALYTICS_NETWORK_NAME}
     driver: bridge
     internal: true
 volumes:

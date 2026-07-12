@@ -1,12 +1,12 @@
 services:
   traefik:
-    image: traefik:v3.7.6
+    image: ${TRAEFIK_IMAGE}
     ports:
-      - "80:80"   
-      - "443:443"
+      - "${TRAEFIK_HTTP_PORT}:80"
+      - "${TRAEFIK_HTTPS_PORT}:443"
       # - "8082:8082"
     environment:
-      - TZ=America/Sao_Paulo
+      - TZ=${TZ}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  
       - ./traefik.yml:/etc/traefik/traefik.yml
@@ -15,7 +15,7 @@ services:
       - ./middlewares.yml:/etc/traefik/dynamic/middlewares.yml
       - ./plugins-storage:/plugins-storage
     labels:  
-      - "traefik.enable=true"
+      - "traefik.enable=${TRAEFIK_ENABLED}"
 
       # Router para paths maliciosos
       - "traefik.http.routers.malicious-paths.rule=PathPrefix(`/admin`) || PathPrefix(`/wp-admin`) || PathPrefix(`/phpmyadmin`) || PathPrefix(`/cgi-bin`) || PathPrefix(`/.env`) || PathPrefix(`/.git`) || PathPrefix(`/xmlrpc`) || PathPrefix(`/server-status`) || PathPrefix(`/phpinfo.php`) || PathPrefix(`/actuator`) || PathPrefix(`/global-protect`) || PathPrefix(`/ssl-vpn`) || PathPrefix(`/+CSCOE+`) || PathPrefix(`/login.htm`) || PathPrefix(`/login.html`) || PathPrefix(`/login.jsp`) || PathPrefix(`/remote/login`) || PathPrefix(`/manage/account`) || PathPrefix(`/webpages/login`) || PathPrefix(`/doc/index.html`) || PathPrefix(`/owa/auth`) || PathPrefix(`/getcfg.php`) || PathPrefix(`/aws.sh`) || PathPrefix(`/vb.env`) || PathPrefix(`/env.py`)"
@@ -52,8 +52,8 @@ services:
       - rede-supabase
     restart: unless-stopped  
   deny-service:
-    image: nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim
-    container_name: traefik-deny-service
+    image: ${TRAEFIK_DENY_IMAGE}
+    container_name: ${TRAEFIK_DENY_CONTAINER_NAME}
     networks:
       - rede-supabase
     volumes:

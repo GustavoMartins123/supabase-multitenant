@@ -1,56 +1,56 @@
 #docker compose -f docker-compose-api.yml --env-file .env up --build -d
 services:
   projects-api:
-    container_name: projects-api
+    container_name: ${PROJECTS_API_CONTAINER_NAME}
     build: 
       context: .
       dockerfile: ./api-internal/Dockerfile
     restart: unless-stopped
-    stop_grace_period: 4m
+    stop_grace_period: ${PROJECTS_API_STOP_GRACE_PERIOD}
     env_file:
       - .analytics.env
     networks: [rede-supabase, analytics-internal]
-    expose: ["18000"]                         # visível APENAS na rede Docker :contentReference[oaicite:4]{index=4}
+    expose: ["${PROJECTS_API_PORT}"]
     environment:
-      DB_DSN: postgres://supabase_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/postgres
+      DB_DSN: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
       PROJECT_SECRETS_MASTER_KEY: ${PROJECT_SECRETS_MASTER_KEY}
-      PROJECT_SECRETS_MASTER_KEY_ID: ${PROJECT_SECRETS_MASTER_KEY_ID:-project-secrets-master-v1}
-      PROJECT_SECRETS_PREVIOUS_MASTER_KEYS: ${PROJECT_SECRETS_PREVIOUS_MASTER_KEYS:-}
+      PROJECT_SECRETS_MASTER_KEY_ID: ${PROJECT_SECRETS_MASTER_KEY_ID}
+      PROJECT_SECRETS_PREVIOUS_MASTER_KEYS: ${PROJECT_SECRETS_PREVIOUS_MASTER_KEYS}
       PG_META_CRYPTO_KEY: ${PG_META_CRYPTO_KEY}
       STUDIO_SERVICE_KEY_ENCRYPTION_KEY: ${STUDIO_SERVICE_KEY_ENCRYPTION_KEY}
       PROJECT_DELETE_PASSWORD: ${PROJECT_DELETE_PASSWORD}
       NGINX_SHARED_TOKEN: ${NGINX_SHARED_TOKEN}
-      NGINX_HMAC_SECRET: ${NGINX_HMAC_SECRET:-}
-      USER_TOKEN_MAX_CLOCK_SKEW_SECONDS: ${USER_TOKEN_MAX_CLOCK_SKEW_SECONDS:-30}
-      KEY_EXPIRY_WARNING_DAYS: ${KEY_EXPIRY_WARNING_DAYS:-14}
-      STUDIO_CACHE_INVALIDATION_URL: ${STUDIO_CACHE_INVALIDATION_URL:-https://nginx:443}
-      STUDIO_CACHE_INVALIDATION_VERIFY_TLS: ${STUDIO_CACHE_INVALIDATION_VERIFY_TLS:-false}
-      PG_META_INTERNAL_URL: http://postgres-meta-global:8080
-      PG_META_ALLOWED_HOSTS: postgres-meta-global
-      ANALYTICS_INTERNAL_URL: http://analytics:4000
+      NGINX_HMAC_SECRET: ${NGINX_HMAC_SECRET}
+      USER_TOKEN_MAX_CLOCK_SKEW_SECONDS: ${USER_TOKEN_MAX_CLOCK_SKEW_SECONDS}
+      KEY_EXPIRY_WARNING_DAYS: ${KEY_EXPIRY_WARNING_DAYS}
+      STUDIO_CACHE_INVALIDATION_URL: ${STUDIO_CACHE_INVALIDATION_URL}
+      STUDIO_CACHE_INVALIDATION_VERIFY_TLS: ${STUDIO_CACHE_INVALIDATION_VERIFY_TLS}
+      PG_META_INTERNAL_URL: ${PG_META_INTERNAL_URL}
+      PG_META_ALLOWED_HOSTS: ${PG_META_ALLOWED_HOSTS}
+      ANALYTICS_INTERNAL_URL: ${ANALYTICS_INTERNAL_URL}
     volumes:
       - ./projects:/docker/projects:rw        # bind-mount relativo  :contentReference[oaicite:0]{index=0}
       - ./certs:/docker/push-certs:ro
       - ./.env:/docker/.env:ro
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ${DOCKER_SOCKET_LOCATION}:/var/run/docker.sock
     labels:
-      - traefik.enable=true
-      - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.50.0.0/16
+      - traefik.enable=${PROJECTS_API_TRAEFIK_ENABLED}
+      - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=${PROJECTS_API_ALLOWED_IP_RANGES}
       - traefik.http.routers.projects.rule=(PathPrefix(`/api/projects`) || PathPrefix(`/api/internal/analytics`)) && Header(`X-Shared-Token`, `${NGINX_SHARED_TOKEN}`)
-      - traefik.http.routers.projects.middlewares=lanonly, api-security-chain@file
-      - traefik.http.services.projects.loadbalancer.server.port=18000  
+      - traefik.http.routers.projects.middlewares=${PROJECTS_API_MIDDLEWARES}
+      - traefik.http.services.projects.loadbalancer.server.port=${PROJECTS_API_PORT}
   postgres-meta-global:
-    container_name: postgres-meta-global
-    image: supabase/postgres-meta:v0.96.1
+    container_name: ${PG_META_CONTAINER_NAME}
+    image: ${PG_META_IMAGE}
     restart: unless-stopped
     networks: [rede-supabase]
-    expose: ["8080"]
+    expose: ["${PG_META_PORT}"]
     environment:
-      PG_META_PORT: 8080
+      PG_META_PORT: ${PG_META_PORT}
       PG_META_DB_HOST: ${POSTGRES_HOST}
       PG_META_DB_PORT: ${POSTGRES_PORT}
-      PG_META_DB_NAME: meta_trap
-      PG_META_DB_USER: meta_guest
+      PG_META_DB_NAME: ${PG_META_DB_NAME}
+      PG_META_DB_USER: ${PG_META_DB_USER}
       PG_META_DB_PASSWORD: ${META_GUEST_PASSWORD}
       CRYPTO_KEY: ${PG_META_CRYPTO_KEY}
   # push-worker:
@@ -76,5 +76,5 @@ networks:
   rede-supabase:
     external: true
   analytics-internal:
-    name: supabase-analytics-internal
+    name: ${ANALYTICS_NETWORK_NAME}
     external: true

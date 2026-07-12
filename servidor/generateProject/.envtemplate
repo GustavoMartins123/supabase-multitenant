@@ -3,6 +3,37 @@ PROJECT_UUID={{project_uuid}}
 POSTGRES_DATABASE=_supabase_{{project_id}}
 PROJECT_ROOT={{project_root}}
 
+AUTH_IMAGE=supabase/gotrue:v2.193.0-rc.3
+GOTRUE_API_HOST=0.0.0.0
+GOTRUE_API_PORT=9999
+GOTRUE_DB_DRIVER=postgres
+GOTRUE_JWT_ADMIN_ROLES=service_role
+GOTRUE_JWT_AUD=authenticated
+GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated
+AUTH_DB_USER=supabase_auth_admin
+GOTRUE_MAILER_TEMPLATES_BASE_URL=http://supabase-nginx-{{project_id}}:8080
+POSTGREST_IMAGE=postgrest/postgrest:v14.14
+POSTGREST_DB_USER=authenticator
+PGRST_DB_SCHEMA_CACHE_DURATION=20
+PGRST_DB_ANON_ROLE=anon
+PGRST_DB_USE_LEGACY_GUCS=false
+PGRST_DB_PREPARED_STATEMENTS=true
+STORAGE_IMAGE=supabase/storage-api:v1.61.12
+STORAGE_DB_USER=supabase_storage_admin
+STORAGE_POSTGREST_URL=http://rest:3000
+STORAGE_BACKEND=file
+REQUEST_ALLOW_X_FORWARDED_PATH=true
+TUS_URL_PATH=/storage/v1/upload/resumable
+FILE_STORAGE_BACKEND_PATH=/var/lib/storage
+STORAGE_TENANT_ID=stub
+STORAGE_REGION=stub
+GLOBAL_S3_BUCKET=stub
+IMGPROXY_URL=http://imgproxy:5001
+IMGPROXY_IMAGE=darthsim/imgproxy:v4.0.11
+IMGPROXY_BIND=:5001
+IMGPROXY_LOCAL_FILESYSTEM_ROOT=/
+IMGPROXY_USE_ETAG=true
+
 
 
 SITE_URL={{project_public_url}}/verify-success.html

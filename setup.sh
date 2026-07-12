@@ -39,6 +39,12 @@ assert_env_value() {
     fi
 }
 
+read_env_value() {
+    local file="$1"
+    local key="$2"
+    grep -m1 "^${key}=" "$file" | cut -d= -f2-
+}
+
 init_transaction() {
     mkdir -p "$TRANSACTION_DIR"
     print_status "Sistema de transação inicializado em $TRANSACTION_DIR"
@@ -294,6 +300,8 @@ main() {
     fi
 
     print_success "IP local detectado: $LOCAL_IP"
+    STUDIO_HTTPS_PORT=$(read_env_value studio/.env.example STUDIO_HTTPS_PORT)
+    SUPABASE_NETWORK_SUBNET=$(read_env_value servidor/.env.example SUPABASE_NETWORK_SUBNET)
     print_status "Gerando chaves de criptografia e tokens..."
 
     PROJECT_SECRETS_MASTER_KEY=$(generate_fernet_key)
@@ -357,7 +365,8 @@ main() {
     fi
     safe_sed "s|SERVER_URL=pass|SERVER_URL=${SERVER_IP}|g" servidor/.env
     safe_sed "s|SERVER_PROTO=pass|SERVER_PROTO=${PROTO}|g" servidor/.env
-    safe_sed "s|^PUSH_API_URL=.*|PUSH_API_URL=https://${LOCAL_IP}:9091/api/internal/push|g" servidor/.env
+    safe_sed "s|^PUSH_API_URL=.*|PUSH_API_URL=https://${LOCAL_IP}:${STUDIO_HTTPS_PORT}/api/internal/push|g" servidor/.env
+    safe_sed "s|^PROJECTS_API_ALLOWED_IP_RANGES=.*|PROJECTS_API_ALLOWED_IP_RANGES=${LOCAL_IP}/32,${SUPABASE_NETWORK_SUBNET}|g" servidor/.env
     safe_sed "s|PUSH_VERIFY_TLS=true|PUSH_VERIFY_TLS=true|g" servidor/.env
     safe_sed "s|PUSH_CA_FILE=/docker/push-certs/ca.pem|PUSH_CA_FILE=/docker/push-certs/ca.pem|g" servidor/.env
     safe_sed "s|DASHBOARD_USER=pass|DASHBOARD_USER=${DASHBOARD_USER}|g" servidor/.env
@@ -385,6 +394,7 @@ main() {
     safe_sed "s|POSTGRES_NGINX_PASSWORD=pass|POSTGRES_NGINX_PASSWORD=$POSTGRES_NGINX_PASSWORD|g" studio/.env
     safe_sed "s|^SERVER_DOMAIN=.*|SERVER_DOMAIN=${PROTO}://${SERVER_IP}|g" studio/.env
     safe_sed "s|BACKEND_PROTO=pass|BACKEND_PROTO=$PROTO|g" studio/.env
+    safe_sed "s|^SUPABASE_PUBLIC_URL=.*|SUPABASE_PUBLIC_URL=https://${LOCAL_IP}:${STUDIO_HTTPS_PORT}|g" studio/.env
 
     assert_env_value servidor/.env STUDIO_SERVICE_KEY_ENCRYPTION_KEY "$STUDIO_SERVICE_KEY_ENCRYPTION_KEY"
     assert_env_value studio/.env STUDIO_SERVICE_KEY_ENCRYPTION_KEY "$STUDIO_SERVICE_KEY_ENCRYPTION_KEY"
@@ -463,17 +473,11 @@ main() {
     else
         print_warning "Arquivo de configuração do Authelia ($authelia_config) não encontrado."
     fi
-    print_status "Configurando a whitelist da api python "
-    backup_file "servidor/docker-compose-api.yml"
-    safe_sed "s|<SEU_IP>/32|$LOCAL_IP/32|g" servidor/docker-compose-api.yml
     print_status "Configurando update_geoip.sh com o caminho real..."
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     backup_file "servidor/traefik/update_geoip.sh"
     safe_sed "s|seucaminho|$SCRIPT_DIR|g" servidor/traefik/update_geoip.sh
     safe_sed "s|HOST_PROJECT_ROOT=\"pass\"|HOST_PROJECT_ROOT=\"$SCRIPT_DIR\"|g" servidor/.env
-
-    backup_file "studio/docker-compose.yml"
-    safe_sed "s|<SEU_IP>|$LOCAL_IP|g" studio/docker-compose.yml
 
     bash servidor/verify_key_config.sh
     print_success "Api python configurada para permitir esse ip $LOCAL_IP a consultar ela."
