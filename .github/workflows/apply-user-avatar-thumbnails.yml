@@ -1,0 +1,68 @@
+name: Apply user avatar thumbnails
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/user-avatar-thumbnails
+          fetch-depth: 0
+
+      - name: Apply changes
+        run: python .github/scripts/apply_user_avatar_thumbnails.py
+
+      - name: Validate Lua and contracts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.1
+          luac5.1 -p studio/nginx/lua/init/init_worker.lua
+          luac5.1 -p studio/nginx/lua/admin_api/user_avatar_handler.lua
+          luac5.1 -p studio/nginx/lua/admin_api/users_list.lua
+          luac5.1 -p studio/nginx/lua/admin_api/available_users.lua
+          luac5.1 -p studio/nginx/lua/admin_api/project_members.lua
+          python tests/smoke/test_user_avatar_thumbnails.py
+          python tests/smoke/test_user_profile_contract.py
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.0'
+          channel: stable
+          cache: true
+
+      - name: Validate Flutter
+        working-directory: studio/seletor_de_projetos
+        run: |
+          dart format --output=none --set-exit-if-changed lib/models/user_models.dart lib/models/AllUsers.dart lib/models/project_member.dart lib/widgets/user_avatar_thumbnail.dart lib/widgets/admin_users/user_card.dart lib/dialogs/addMemberDialog.dart lib/widgets/project_settings/members_section.dart || dart format lib/models/user_models.dart lib/models/AllUsers.dart lib/models/project_member.dart lib/widgets/user_avatar_thumbnail.dart lib/widgets/admin_users/user_card.dart lib/dialogs/addMemberDialog.dart lib/widgets/project_settings/members_section.dart
+          flutter pub get
+          flutter analyze
+          flutter build web --release
+
+      - name: Commit implementation
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add studio/nginx/lua/init/init_worker.lua \
+            studio/nginx/lua/admin_api/user_avatar_handler.lua \
+            studio/nginx/lua/admin_api/users_list.lua \
+            studio/nginx/lua/admin_api/available_users.lua \
+            studio/nginx/lua/admin_api/project_members.lua \
+            studio/seletor_de_projetos/lib/models/user_models.dart \
+            studio/seletor_de_projetos/lib/models/AllUsers.dart \
+            studio/seletor_de_projetos/lib/models/project_member.dart \
+            studio/seletor_de_projetos/lib/widgets/user_avatar_thumbnail.dart \
+            studio/seletor_de_projetos/lib/widgets/admin_users/user_card.dart \
+            studio/seletor_de_projetos/lib/dialogs/addMemberDialog.dart \
+            studio/seletor_de_projetos/lib/widgets/project_settings/members_section.dart \
+            tests/smoke/test_user_avatar_thumbnails.py
+          git commit -m "feat: show user avatars in administrative lists"
+          git push origin HEAD:agent/user-avatar-thumbnails
