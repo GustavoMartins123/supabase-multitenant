@@ -67,6 +67,28 @@ class UserProfileContractTests(unittest.TestCase):
         self.assertIn("user_profile_handler", content)
         self.assertNotIn('request_method ~= "GET"', access)
 
+    def test_profile_reads_do_not_call_the_python_api(self) -> None:
+        handler = (
+            ROOT / "studio/nginx/lua/admin_api/user_profile_handler.lua"
+        ).read_text(encoding="utf-8")
+        get_block = handler[
+            handler.index('if method == "GET" then'):
+            handler.index('if method == "PATCH" then')
+        ]
+
+        self.assertIn("store.get(email)", get_block)
+        self.assertNotIn("sync_profile", get_block)
+
+    def test_user_sync_prefers_direct_api_and_keeps_remote_fallback(self) -> None:
+        source = (
+            ROOT / "studio/nginx/lua/admin_api/user_sync.lua"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('os.getenv("PROJECTS_API_INTERNAL_URL")', source)
+        self.assertIn('INTERNAL_DSN = "http://projects-api:18000"', source)
+        self.assertIn("table.insert(origins, EXTERNAL_DSN)", source)
+        self.assertIn('"User-Agent"] = "studio-nginx-internal/1.0"', source)
+
     def test_flutter_loads_profile_and_exposes_editor(self) -> None:
         main = (
             ROOT / "studio/seletor_de_projetos/lib/main.dart"
