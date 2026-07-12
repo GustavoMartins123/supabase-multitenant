@@ -39,13 +39,11 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Validate Flutter
+      - name: Format Flutter
         working-directory: studio/seletor_de_projetos
         run: |
           dart format lib/models/user_models.dart lib/models/AllUsers.dart lib/models/project_member.dart lib/widgets/user_avatar_thumbnail.dart lib/widgets/admin_users/user_card.dart lib/dialogs/addMemberDialog.dart lib/widgets/project_settings/members_section.dart
           flutter pub get
-          flutter analyze
-          flutter build web --release
 
       - name: Commit implementation
         run: |
@@ -66,3 +64,13 @@ jobs:
             tests/smoke/test_user_avatar_thumbnails.py
           git commit -m "feat: show user avatars in administrative lists"
           git push origin HEAD:agent/user-avatar-thumbnails
+
+      - name: Validate Flutter
+        working-directory: studio/seletor_de_projetos
+        run: |
+          set +e
+          flutter analyze > /tmp/flutter-analyze.log 2>&1
+          status=$?
+          tail -n 120 /tmp/flutter-analyze.log
+          if [ "$status" -ne 0 ]; then exit "$status"; fi
+          flutter build web --release
