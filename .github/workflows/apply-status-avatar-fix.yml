@@ -1,0 +1,132 @@
+name: Apply status and avatar fixes
+
+on:
+  push:
+    branches:
+      - agent/fix-project-reads-avatar
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fix-project-reads-avatar
+
+      - name: Apply fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          main_path = Path('servidor/api-internal/app/main.py')
+          source = main_path.read_text(encoding='utf-8')
+          start = source.index('@app.get("/api/projects/{project_name}/status")')
+          end = source.index('@app.post("/api/projects/{project_name}/stop")', start)
+          block = source[start:end]
+          old = '''    async with pool.acquire() as conn:
+                  auth_user = await resolve_authenticated_user(request, pool)
+                  project_row = await get_project_row(conn, project_name)
+          '''
+          new = '''    auth_user = await resolve_authenticated_user(request, pool)
+          
+              async with pool.acquire() as conn:
+                  project_row = await get_project_row(conn, project_name)
+          '''
+          if block.count(old) != 1:
+              raise SystemExit('status authentication block not found exactly once')
+          block = block.replace(old, new)
+          main_path.write_text(source[:start] + block + source[end:], encoding='utf-8')
+
+          dialog_path = Path('studio/seletor_de_projetos/lib/user_profile_dialog.dart')
+          source = dialog_path.read_text(encoding='utf-8')
+          old = '''      if (result is ByteBuffer) {
+                  completer.complete(Uint8List.view(result));
+                } else {
+          '''
+          new = '''      if (result is Uint8List) {
+                  completer.complete(result);
+                } else if (result is ByteBuffer) {
+                  completer.complete(Uint8List.view(result));
+                } else {
+          '''
+          if source.count(old) != 1:
+              raise SystemExit('Flutter FileReader block not found exactly once')
+          dialog_path.write_text(source.replace(old, new), encoding='utf-8')
+
+          test_path = Path('tests/smoke/test_status_avatar_regressions.py')
+          test_path.write_text('''from __future__ import annotations
+
+          import pathlib
+          import unittest
+
+          ROOT = pathlib.Path(__file__).resolve().parents[2]
+
+
+          class StatusAndAvatarRegressionTests(unittest.TestCase):
+              def test_status_does_not_hold_a_pool_connection_during_auth_resolution(self) -> None:
+                  source = (ROOT / "servidor/api-internal/app/main.py").read_text(encoding="utf-8")
+                  start = source.index('@app.get("/api/projects/{project_name}/status")')
+                  end = source.index('@app.post("/api/projects/{project_name}/stop")', start)
+                  block = source[start:end]
+                  self.assertLess(
+                      block.index("auth_user = await resolve_authenticated_user(request, pool)"),
+                      block.index("async with pool.acquire() as conn:"),
+                  )
+
+              def test_status_and_collaboration_keep_the_server_domain_route(self) -> None:
+                  source = (ROOT / "studio/nginx/nginx.conf").read_text(encoding="utf-8")
+                  status_start = source.index('location ~ ^/api/projects/(?<slug>[^/]+)/status$')
+                  status_end = source.index('location ~ ^/api/projects/(?<slug>[^/]+)/logs/', status_start)
+                  status_block = source[status_start:status_end]
+                  self.assertIn('proxy_pass $server_domain/api/projects/$slug/status;', status_block)
+                  generic_start = source.index('location ~ ^/api/projects(/.*)?$')
+                  generic_end = source.index('location = /api/platform/profile', generic_start)
+                  generic_block = source[generic_start:generic_end]
+                  self.assertIn('proxy_pass $server_domain/api/projects$1;', generic_block)
+                  self.assertNotIn('projects-api:18000', source)
+
+              def test_flutter_accepts_uint8list_from_file_reader(self) -> None:
+                  source = (
+                      ROOT / "studio/seletor_de_projetos/lib/user_profile_dialog.dart"
+                  ).read_text(encoding="utf-8")
+                  self.assertIn("if (result is Uint8List)", source)
+                  self.assertIn("else if (result is ByteBuffer)", source)
+
+
+          if __name__ == "__main__":
+              unittest.main()
+          ''', encoding='utf-8')
+          PY
+
+      - name: Validate Python and routing contracts
+        run: |
+          python -m py_compile servidor/api-internal/app/main.py
+          python tests/smoke/test_status_avatar_regressions.py
+          python tests/smoke/test_user_profile_contract.py
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Validate Flutter
+        working-directory: studio/seletor_de_projetos
+        run: |
+          flutter pub get
+          flutter analyze --no-fatal-infos --no-fatal-warnings
+          flutter build web --release
+
+      - name: Commit validated fixes
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/apply-status-avatar-fix.yml
+          git add servidor/api-internal/app/main.py \
+                  studio/seletor_de_projetos/lib/user_profile_dialog.dart \
+                  tests/smoke/test_status_avatar_regressions.py
+          git commit -m "fix: corrige status e upload de avatar"
+          git push origin HEAD:agent/fix-project-reads-avatar
