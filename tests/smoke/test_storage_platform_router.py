@@ -39,13 +39,10 @@ class StoragePlatformRouterTests(unittest.TestCase):
     def test_existing_bucket_and_object_routes_are_described_by_the_router(self) -> None:
         router = ROUTER.read_text(encoding="utf-8")
 
-        for upstream in (
-            '/storage/v1/bucket',
-            '/storage/v1/object/list/',
-            '/storage/v1/object/sign/',
-            '/storage/v1/object/move/',
-        ):
-            self.assertIn(upstream, router)
+        self.assertIn('/storage/v1/bucket', router)
+        for action in ('list = "list"', 'sign = "sign"', 'move = "move"'):
+            self.assertIn(action, router)
+        self.assertIn('"/storage/v1/object/" .. upstream_action .. "/" .. object_bucket', router)
 
     def test_unmapped_platform_routes_fail_with_a_diagnostic_error(self) -> None:
         router = ROUTER.read_text(encoding="utf-8")
