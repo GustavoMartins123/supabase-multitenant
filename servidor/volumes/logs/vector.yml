@@ -1,6 +1,3 @@
-# Pipeline global adaptado do Vector oficial do Supabase self-hosted.
-# O projeto e inferido pelo sufixo dos containers multi-tenant.
-
 api:
   enabled: true
   address: 0.0.0.0:9001
@@ -83,12 +80,12 @@ transforms:
       parsed, err = parse_regex(.event_message, r'^(?P<time>.*): (?P<msg>.*)$')
       if err == null {
         .event_message = parsed.msg
-        timestamp, timestamp_err = parse_timestamp(
+        parsed_ts, parsed_ts_err = parse_timestamp(
           parsed.time,
           format: "%d/%b/%Y:%H:%M:%S %z"
         )
-        if timestamp_err == null {
-          .timestamp = timestamp
+        if parsed_ts_err == null {
+          .timestamp = parsed_ts
         }
       }
 
