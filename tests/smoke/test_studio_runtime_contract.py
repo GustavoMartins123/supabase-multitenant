@@ -11,7 +11,7 @@ class StudioRuntimeContractTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         compose = (ROOT / "studio/docker-compose.yml").read_text(encoding="utf-8")
         nginx_start = compose.index("  nginx:\n")
-        studio_start = compose.index("  studio:\n", nginx_start)
+        studio_start = compose.index("\n  studio:\n", nginx_start) + 1
         cls.nginx = compose[nginx_start:studio_start]
         studio_end = compose.index("  # postgres:", studio_start)
         cls.studio = compose[studio_start:studio_end]
