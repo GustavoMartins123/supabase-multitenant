@@ -50,6 +50,26 @@ local function read_json_body()
     return payload
 end
 
+local function update_error_status(message)
+    local value = tostring(message or "")
+    if value:find("immutable", 1, true) then
+        return 409
+    end
+    local validation_markers = {
+        "invalid",
+        "required",
+        "exceeds",
+        "must use",
+        "must have",
+    }
+    for _, marker in ipairs(validation_markers) do
+        if value:find(marker, 1, true) then
+            return 400
+        end
+    end
+    return 502
+end
+
 function M.handle()
     local email = ngx.var.authelia_email or ""
     if email == "" then
@@ -76,11 +96,10 @@ function M.handle()
         end
         local profile, update_err = store.update(email, payload, sync_profile)
         if not profile then
-            local status = update_err and update_err:find("immutable", 1, true) and 409 or 400
-            if update_err and update_err:find("synchron", 1, true) then
-                status = 502
-            end
-            return respond(status, { error = update_err or "failed to update profile" })
+            return respond(
+                update_error_status(update_err),
+                { error = update_err or "failed to update profile" }
+            )
         end
         return respond(200, profile)
     end
