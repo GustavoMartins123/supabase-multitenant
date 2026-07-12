@@ -30,6 +30,18 @@ class StoragePlatformRouterTests(unittest.TestCase):
         self.assertIn('ngx.req.set_method(ngx.HTTP_POST)', rewrite)
         self.assertIn('set_json_body({})', rewrite)
 
+    def test_json_body_is_initialized_before_replacing_a_get_body(self) -> None:
+        rewrite = REWRITE.read_text(encoding="utf-8")
+        function_start = rewrite.index("local function set_json_body")
+        function_end = rewrite.index("\nend\n", function_start)
+        set_json_body = rewrite[function_start:function_end]
+
+        self.assertIn("ngx.req.read_body()", set_json_body)
+        self.assertLess(
+            set_json_body.index("ngx.req.read_body()"),
+            set_json_body.index("ngx.req.set_body_data(encoded)"),
+        )
+
     def test_create_renames_the_studio_bucket_field(self) -> None:
         rewrite = REWRITE.read_text(encoding="utf-8")
 
