@@ -1,37 +1,17 @@
-name: Apply user avatar thumbnails
+name: Diagnose user avatar thumbnails
 
 on:
   pull_request:
     branches:
       - main
 
-permissions:
-  contents: write
-
 jobs:
-  apply:
-    if: github.actor != 'github-actions[bot]'
+  analyze:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: agent/user-avatar-thumbnails
-          fetch-depth: 0
-
-      - name: Apply changes
-        run: python .github/scripts/run_user_avatar_thumbnail_patch.py
-
-      - name: Validate Lua and contracts
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y lua5.1
-          luac5.1 -p studio/nginx/lua/init/init_worker.lua
-          luac5.1 -p studio/nginx/lua/admin_api/user_avatar_handler.lua
-          luac5.1 -p studio/nginx/lua/admin_api/users_list.lua
-          luac5.1 -p studio/nginx/lua/admin_api/available_users.lua
-          luac5.1 -p studio/nginx/lua/admin_api/project_members.lua
-          python tests/smoke/test_user_avatar_thumbnails.py
-          python tests/smoke/test_user_profile_contract.py
 
       - uses: subosito/flutter-action@v2
         with:
@@ -39,38 +19,12 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Format Flutter
+      - name: Analyze Flutter
         working-directory: studio/seletor_de_projetos
         run: |
-          dart format lib/models/user_models.dart lib/models/AllUsers.dart lib/models/project_member.dart lib/widgets/user_avatar_thumbnail.dart lib/widgets/admin_users/user_card.dart lib/dialogs/addMemberDialog.dart lib/widgets/project_settings/members_section.dart
-          flutter pub get
-
-      - name: Commit implementation
-        run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add studio/nginx/lua/init/init_worker.lua \
-            studio/nginx/lua/admin_api/user_avatar_handler.lua \
-            studio/nginx/lua/admin_api/users_list.lua \
-            studio/nginx/lua/admin_api/available_users.lua \
-            studio/nginx/lua/admin_api/project_members.lua \
-            studio/seletor_de_projetos/lib/models/user_models.dart \
-            studio/seletor_de_projetos/lib/models/AllUsers.dart \
-            studio/seletor_de_projetos/lib/models/project_member.dart \
-            studio/seletor_de_projetos/lib/widgets/user_avatar_thumbnail.dart \
-            studio/seletor_de_projetos/lib/widgets/admin_users/user_card.dart \
-            studio/seletor_de_projetos/lib/dialogs/addMemberDialog.dart \
-            studio/seletor_de_projetos/lib/widgets/project_settings/members_section.dart \
-            tests/smoke/test_user_avatar_thumbnails.py
-          git commit -m "feat: show user avatars in administrative lists"
-          git push origin HEAD:agent/user-avatar-thumbnails
-
-      - name: Validate Flutter
-        working-directory: studio/seletor_de_projetos
-        run: |
+          flutter pub get >/dev/null
           set +e
           flutter analyze > /tmp/flutter-analyze.log 2>&1
           status=$?
-          tail -n 120 /tmp/flutter-analyze.log
-          if [ "$status" -ne 0 ]; then exit "$status"; fi
-          flutter build web --release
+          grep -E '(^| )((error|warning|info) •|[0-9]+ issues? found)' /tmp/flutter-analyze.log | tail -n 80 || true
+          exit "$status"
