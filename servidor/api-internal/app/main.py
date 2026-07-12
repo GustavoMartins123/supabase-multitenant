@@ -2016,15 +2016,6 @@ async def get_project_config_token(
     project_name = validate_project_id(project_name)
     auth_user = await resolve_authenticated_user(request, pool)
 
-    try:
-        telemetry_period = resolve_telemetry_period(
-            period,
-            start=start,
-            end=end,
-        )
-    except TelemetryValidationError as exc:
-        raise HTTPException(422, str(exc)) from exc
-
     async with pool.acquire() as conn:
         async with conn.transaction():
             project = await get_project_row(conn, project_name)
@@ -5032,6 +5023,15 @@ async def get_project_user_telemetry(
 ):
     project_name = validate_project_id(project_name)
     auth_user = await resolve_authenticated_user(request, pool)
+
+    try:
+        telemetry_period = resolve_telemetry_period(
+            period,
+            start=start,
+            end=end,
+        )
+    except TelemetryValidationError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
     async with pool.acquire() as conn:
         project_row = await get_project_row(conn, project_name)

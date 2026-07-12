@@ -104,5 +104,37 @@ class ProjectTelemetryTest(unittest.TestCase):
         self.assertIn('response.headers["Cache-Control"] = "no-store"', route_source)
 
 
+    def test_telemetry_route_resolves_period_before_use(self) -> None:
+        main_source = (APP_ROOT / "app" / "main.py").read_text(encoding="utf-8")
+        route_start = main_source.index(
+            '@app.get("/api/projects/{project_name}/telemetry/users")'
+        )
+        route_end = main_source.index("\n@app.api_route(", route_start)
+        route_source = main_source[route_start:route_end]
+
+        resolve_index = route_source.index(
+            "telemetry_period = resolve_telemetry_period("
+        )
+        first_use_index = route_source.index(
+            '"period": telemetry_period.key'
+        )
+        self.assertLess(resolve_index, first_use_index)
+        self.assertIn("except TelemetryValidationError as exc", route_source)
+
+    def test_config_token_route_has_no_telemetry_period_logic(self) -> None:
+        main_source = (APP_ROOT / "app" / "main.py").read_text(encoding="utf-8")
+        route_start = main_source.index(
+            '@app.get("/api/projects/{project_name}/config-token")'
+        )
+        route_end = main_source.index(
+            '\n@app.get("/api/projects/{project_name}/queue-status")',
+            route_start,
+        )
+        route_source = main_source[route_start:route_end]
+
+        self.assertNotIn("resolve_telemetry_period", route_source)
+        self.assertNotIn("telemetry_period", route_source)
+
+
 if __name__ == "__main__":
     unittest.main()
