@@ -1,0 +1,8 @@
+displayName: Supabase Guard
+type: middleware
+import: github.com/GustavoMartins123/supabaseguard
+summary: Project-aware abuse protection for Supabase routes.
+testData:
+  profile: project
+  mode: observe
+  scope: test-project
