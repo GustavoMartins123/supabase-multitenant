@@ -3,14 +3,13 @@ http:
     leaked-files:
       rule: "PathRegexp(`(?i)^/(?:[^/]+/)*(?:\\.env[^/]*|\\.git|\\.svn|\\.hg|\\.bzr|\\.htaccess|\\.htpasswd)(?:/|$|[.?~_-].*)`)"
       entryPoints:
-        - websecure
+        - web
       priority: 5000
       middlewares:
         - hide-deny-headers
         - rate-limit-malicious
-        - fail2ban-malicious
+        - supabase-guard-malicious
       service: forbidden-service
-      tls: {}
   middlewares:
     hide-deny-headers:
       headers:
@@ -91,22 +90,17 @@ http:
         regex: '(?i)^/(admin|administrator|login|wp-admin|wp-login\.php|phpmyadmin|pma|mysql|setup|install|server-status|debug|debug/pprof|metrics|actuator|xmlrpc|cgi-bin|global-protect|ssl-vpn|owa/auth|getcfg\.php|remote/login|remote/logincheck|geoserver)(/|$|.*)'
         replacement: "/blocked"
 
-    fail2ban-malicious:
+    supabase-guard-malicious:
       plugin:
-        fail2ban:
-          rules:
-            maxretry: 2
-            findtime: "120s"
-            bantime: "3600s"
-            monitoredStatusCodes: ["400-599"]
-    fail2ban-global:
-      plugin:
-        fail2ban:
-          rules:
-            maxretry: 3
-            findtime: "300s"
-            bantime: "7200s"
-            monitoredStatusCodes: ["400-599"]
+        supabaseguard:
+          profile: malicious
+          mode: enforce
+          scope: global-malicious
+          maxTrackedClients: 50000
+          cleanupInterval: 5m
+          scannerThreshold: 2
+          scannerWindow: 2m
+          scannerBanTime: 1h
 
     api-security-chain:
       chain:
@@ -119,20 +113,20 @@ http:
           - block-bad-agents
           - geoblock-global
           - rate-limit-malicious
-          - fail2ban-malicious
+          - supabase-guard-malicious
     suspicious-paths-chain:
       chain:
         middlewares:
           - block-bad-agents
           - geoblock-global
           - rate-limit-suspicious
-          - fail2ban-global
+          - supabase-guard-malicious
     security-chain-enhanced:
       chain:
         middlewares:
           - geoblock-global
           - rate-limit-global
-          - fail2ban-global
+          - supabase-guard-malicious
           - security-headers
   services:
     forbidden-service:
