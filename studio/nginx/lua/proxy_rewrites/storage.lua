@@ -37,6 +37,10 @@ local function read_json_body()
 end
 
 local function set_json_body(body)
+    -- ngx.req.set_body_data exige que o corpo tenha sido inicializado antes,
+    -- inclusive quando a requisicao original era GET e nao tinha payload.
+    ngx.req.read_body()
+
     local encoded, err = cjson.encode(body)
     if not encoded then
         return nil, err
