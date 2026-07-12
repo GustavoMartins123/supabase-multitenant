@@ -52,6 +52,9 @@ end
 
 local function read_upload()
     local declared = tonumber(ngx.var.content_length or "0") or 0
+    if declared <= 0 then
+        return nil, "Content-Length is required"
+    end
     if declared > MAX_BYTES then
         return nil, "avatar exceeds 2 MB"
     end
@@ -122,13 +125,13 @@ local function serve(path)
     end
     local attributes = lfs.attributes(path) or {}
     local etag = string.format('"%s-%s"', tostring(attributes.modification or 0), tostring(attributes.size or #data))
+    ngx.header["ETag"] = etag
+    ngx.header["Cache-Control"] = "private, max-age=3600"
     if ngx.var.http_if_none_match == etag then
         ngx.status = 304
         return ngx.exit(304)
     end
     ngx.header.content_type = mime
-    ngx.header["Cache-Control"] = "private, max-age=3600"
-    ngx.header["ETag"] = etag
     ngx.header["X-Content-Type-Options"] = "nosniff"
     ngx.print(data)
     return ngx.exit(200)
@@ -173,7 +176,11 @@ local function upload(email, profile, path)
         return respond_json(500, { error = install_err or "failed to install avatar" })
     end
     local origin = ngx.var.studio_public_origin or (ngx.var.scheme .. "://" .. ngx.var.http_host)
-    local picture = origin .. "/api/user/me/avatar?v=" .. tostring(math.floor(ngx.now() * 1000))
+    local picture = origin
+        .. "/api/user/me/avatar/"
+        .. profile.user_id
+        .. "?v="
+        .. tostring(math.floor(ngx.now() * 1000))
     local updated, update_err = store.set_picture(email, picture, sync_profile)
     if not updated then
         os.remove(path)
@@ -207,8 +214,16 @@ function M.handle()
         return respond_json(500, { error = path_or_err or "failed to load profile" })
     end
     local method = ngx.req.get_method()
+    local uri = ngx.var.uri or ""
+    local requested_user_id = uri:match("^/api/user/me/avatar/([0-9a-fA-F%-]+)$")
     if method == "GET" then
+        if requested_user_id and requested_user_id ~= profile.user_id then
+            return respond_json(403, { error = "avatar access denied" })
+        end
         return serve(path_or_err)
+    end
+    if uri ~= "/api/user/me/avatar" then
+        return respond_json(405, { error = "method not allowed" })
     end
     if method == "PUT" then
         return upload(email, profile, path_or_err)
