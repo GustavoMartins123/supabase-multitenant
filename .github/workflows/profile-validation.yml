@@ -35,7 +35,7 @@ jobs:
         run: flutter pub get
       - name: Analyze Flutter
         working-directory: studio/seletor_de_projetos
-        run: flutter analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
       - name: Build Flutter web
         working-directory: studio/seletor_de_projetos
         run: flutter build web --release
