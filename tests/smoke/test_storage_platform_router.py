@@ -33,7 +33,7 @@ class StoragePlatformRouterTests(unittest.TestCase):
     def test_json_body_is_initialized_before_replacing_a_get_body(self) -> None:
         rewrite = REWRITE.read_text(encoding="utf-8")
         function_start = rewrite.index("local function set_json_body")
-        function_end = rewrite.index("\nend\n", function_start)
+        function_end = rewrite.index("local original_uri", function_start)
         set_json_body = rewrite[function_start:function_end]
 
         self.assertIn("ngx.req.read_body()", set_json_body)
