@@ -26,20 +26,19 @@ Future<void> main() async {
 
   if (!needsBootstrapAdmin) {
     final response = await http.get(Uri.parse('/api/user/me'));
-    try {
-      if (response.statusCode == 403) {
-        accessDenied = true;
-        throw const _AccessDeniedException();
-      }
-      if (response.statusCode != 200) {
-        throw const FormatException('Sessao ausente');
-      }
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      Session().setProfile(UserProfile.fromJson(data));
-    } on _AccessDeniedException {
-    } on FormatException {
+    if (response.statusCode == 403) {
+      accessDenied = true;
+    } else if (response.statusCode != 200) {
       redirectingToLogin = true;
       html.window.location.href = _loginUrl();
+    } else {
+      try {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        Session().setProfile(UserProfile.fromJson(data));
+      } on FormatException {
+        redirectingToLogin = true;
+        html.window.location.href = _loginUrl();
+      }
     }
   }
 
@@ -62,10 +61,6 @@ String _loginUrl() {
 String _logoutUrl() {
   final location = html.window.location;
   return '${location.protocol}//${location.hostname}:9091/logout';
-}
-
-class _AccessDeniedException implements Exception {
-  const _AccessDeniedException();
 }
 
 class ProjectInitApp extends StatelessWidget {
