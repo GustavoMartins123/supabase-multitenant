@@ -20,6 +20,13 @@ async def ensure_identity_schema(pool: asyncpg.Pool) -> None:
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
             );
 
+            ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS email TEXT,
+                ADD COLUMN IF NOT EXISTS picture_url TEXT,
+                ADD COLUMN IF NOT EXISTS profile_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+                ADD COLUMN IF NOT EXISTS profile_version BIGINT NOT NULL DEFAULT 1,
+                ADD COLUMN IF NOT EXISTS profile_updated_at TIMESTAMPTZ;
+
             CREATE TABLE IF NOT EXISTS user_groups (
                 user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 group_name TEXT NOT NULL,
@@ -52,6 +59,9 @@ async def ensure_identity_schema(pool: asyncpg.Pool) -> None:
             );
 
             CREATE INDEX IF NOT EXISTS idx_users_last_sync_at ON users(last_sync_at);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique
+                ON users(lower(email))
+                WHERE email IS NOT NULL AND email <> '';
             CREATE INDEX IF NOT EXISTS idx_user_groups_user_id ON user_groups(user_id);
             CREATE INDEX IF NOT EXISTS idx_projects_owner_id ON projects(owner_id);
             CREATE INDEX IF NOT EXISTS idx_project_members_user_id ON project_members(user_id);
@@ -251,4 +261,3 @@ async def ensure_collaboration_schema(pool: asyncpg.Pool) -> None:
             ON CONFLICT (name) DO NOTHING;
             """
         )
-
