@@ -32,7 +32,7 @@ done
 echo "✅ Todos os projetos parados."
 
 echo "⏹️  Parando o Traefik..."
-docker compose -f traefik/docker-compose.yml down
+docker compose -f traefik/docker-compose.yml --env-file .env down
 echo "✅ Traefik parado."
 
 echo "⏹️  Parando a base de dados e serviços Supabase..."
