@@ -82,10 +82,6 @@ function M.handle()
         if not profile then
             return respond(500, { error = err or "failed to load profile" })
         end
-        local _, sync_err = sync_profile(profile)
-        if sync_err then
-            ngx.log(ngx.WARN, "[USER_PROFILE] profile projection sync failed: ", sync_err)
-        end
         return respond(200, profile)
     end
 
