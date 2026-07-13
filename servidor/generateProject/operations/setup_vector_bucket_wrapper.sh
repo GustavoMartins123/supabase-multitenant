@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OPERATION_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(dirname "$OPERATION_DIR")"
 SERVER_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
 
 fail() {
   echo "❌ $*" >&2
@@ -32,10 +36,6 @@ POSTGRES_DATABASE="_supabase_$PROJECT_ID"
 command -v docker >/dev/null 2>&1 || fail "docker nao esta instalado"
 command -v python3 >/dev/null 2>&1 || fail "python3 nao esta instalado"
 
-# Garante o provider pgvector, as migrations oficiais e um par SigV4 exclusivo
-# do projeto antes de criar o FDW que consulta o endpoint vetorial.
-"$SCRIPT_DIR/enable_vector_storage.sh" "$PROJECT_ID"
-
 set -a
 # shellcheck disable=SC1090
 source "$GLOBAL_ENV"
@@ -45,13 +45,9 @@ set +a
 
 POSTGRES_USER="${POSTGRES_USER:-supabase_admin}"
 STORAGE_REGION="${STORAGE_REGION:-us-east-1}"
-S3_PROTOCOL_ACCESS_KEY_ID="${S3_PROTOCOL_ACCESS_KEY_ID:-}"
-S3_PROTOCOL_ACCESS_KEY_SECRET="${S3_PROTOCOL_ACCESS_KEY_SECRET:-}"
 
-[[ "$S3_PROTOCOL_ACCESS_KEY_ID" =~ ^[0-9a-fA-F]{32}$ ]] \
-  || fail "S3_PROTOCOL_ACCESS_KEY_ID ausente ou invalido"
-[[ "$S3_PROTOCOL_ACCESS_KEY_SECRET" =~ ^[0-9a-fA-F]{64}$ ]] \
-  || fail "S3_PROTOCOL_ACCESS_KEY_SECRET ausente ou invalido"
+vector_validate_s3_credentials || exit 1
+vector_validate_database "$POSTGRES_DATABASE" || exit 1
 
 docker inspect supabase-db >/dev/null 2>&1 || fail "Container supabase-db nao encontrado"
 docker inspect "$STORAGE_CONTAINER" >/dev/null 2>&1 \

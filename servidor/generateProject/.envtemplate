@@ -33,11 +33,11 @@ VECTOR_BUCKET_PROVIDER=pgvector
 VECTOR_DATABASE_URL=postgres://${STORAGE_DB_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DATABASE}
 VECTOR_DATABASE_CREATE=false
 VECTOR_STORE_MIGRATIONS_ENABLED=true
-# Preenchidas automaticamente por enable_vector_storage.sh. Elas autenticam o
-# protocolo S3 Vectors usado pelo Wrappers FDW; nao sao as chaves JWT do projeto.
+# Credenciais SigV4 exclusivas do projeto. Generate e duplicate criam um par
+# novo; rename preserva o par atual para manter os FDWs existentes funcionais.
 S3_PROTOCOL_ENABLED=true
-S3_PROTOCOL_ACCESS_KEY_ID=
-S3_PROTOCOL_ACCESS_KEY_SECRET=
+S3_PROTOCOL_ACCESS_KEY_ID={{s3_protocol_access_key_id}}
+S3_PROTOCOL_ACCESS_KEY_SECRET={{s3_protocol_access_key_secret}}
 IMGPROXY_URL=http://imgproxy:5001
 IMGPROXY_IMAGE=darthsim/imgproxy:v4.0.11
 IMGPROXY_BIND=:5001
