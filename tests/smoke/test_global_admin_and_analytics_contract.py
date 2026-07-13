@@ -65,9 +65,10 @@ class SupabaseAnalyticsContractTest(unittest.TestCase):
             "realtime.logs.prod",
             "deno-relay-logs",
             "postgres.logs",
-            "cloudflare.logs.prod",
+            "edge_logs",
         }:
             self.assertIn(f"source_name={source_name}", self.vector)
+        self.assertNotIn("source_name=cloudflare.logs.prod", self.vector)
         self.assertIn("metadata.tenant_project", self.vector)
         self.assertNotIn("PG_URI", self.server_compose)
 

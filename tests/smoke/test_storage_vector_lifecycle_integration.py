@@ -99,6 +99,46 @@ class StorageVectorLifecycleIntegrationTests(unittest.TestCase):
         )
         self.assertNotIn("host.docker.internal", pg_meta)
 
+    def test_project_ref_resolver_rejects_all_refs_without_lua_pattern_bug(self) -> None:
+        resolver = (
+            STUDIO_LUA / "project_context/project_ref_resolver.lua"
+        ).read_text(encoding="utf-8")
+        pg_meta = (STUDIO_LUA / "proxy_rewrites/pg_meta.lua").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn("{2,39}", resolver)
+        self.assertNotIn("{2,39}", pg_meta)
+        self.assertIn('ref:match("^[a-z_][a-z0-9_]*$")', resolver)
+        self.assertIn('project_ref:match("^[a-z_][a-z0-9_]*$")', pg_meta)
+
+    def test_project_ref_resolver_accepts_a_valid_signed_ref_at_runtime(self) -> None:
+        runtime = shutil.which("lua5.1") or shutil.which("lua") or shutil.which("resty")
+        if runtime is None:
+            self.skipTest("runtime Lua nao esta instalado")
+
+        lua_root = STUDIO_LUA.as_posix()
+        script = f'''
+package.path = "{lua_root}/?.lua;{lua_root}/?/init.lua;" .. package.path
+package.loaded["security.hmac_sha256"] = {{
+    hex = function(key, message) return "deadbeef" end
+}}
+_G.COOKIE_SECRET = "test-secret"
+_G.ngx = {{
+    var = {{ uri = "/", cookie_supabase_project = "meu_projeto.1000000.deadbeef" }},
+    time = function() return 1000000 end,
+    log = function(...) end,
+    header = {{}},
+    WARN = "WARN",
+    INFO = "INFO",
+    ERR = "ERR",
+}}
+local resolver = require("project_context.project_ref_resolver")
+local ref = resolver.resolve()
+assert(ref == "meu_projeto", "esperava meu_projeto, obteve " .. tostring(ref))
+'''
+        subprocess.run([runtime, "-e", script], check=True)
+
     def test_python_and_shell_syntax(self) -> None:
         asgi_path = ROOT / "servidor/api-internal/app/asgi.py"
         ast.parse(asgi_path.read_text(encoding="utf-8"), filename=str(asgi_path))

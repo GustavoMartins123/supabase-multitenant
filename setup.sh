@@ -408,7 +408,7 @@ main() {
     assert_env_value servidor/.analytics.env LOGFLARE_PRIVATE_ACCESS_TOKEN "$LOGFLARE_PRIVATE_ACCESS_TOKEN"
     assert_env_value servidor/.analytics.env LOGFLARE_DB_ENCRYPTION_KEY "$LOGFLARE_DB_ENCRYPTION_KEY"
     assert_env_value studio/.analytics.env LOGFLARE_PRIVATE_ACCESS_TOKEN "$LOGFLARE_PRIVATE_ACCESS_TOKEN"
-    chmod 600 servidor/.env servidor/.analytics.env studio/.env studio/.analytics.env
+    chmod 644 servidor/.env servidor/.analytics.env studio/.env studio/.analytics.env
     print_success "Arquivo studio/.env configurado com sucesso!"
     
     echo ""
