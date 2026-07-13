@@ -41,7 +41,18 @@ STORAGE_DB_USER="${STORAGE_DB_USER:-supabase_storage_admin}"
 
 command -v docker >/dev/null 2>&1 || fail "docker nao esta instalado"
 command -v python3 >/dev/null 2>&1 || fail "python3 nao esta instalado"
+command -v openssl >/dev/null 2>&1 || fail "openssl nao esta instalado"
 docker inspect supabase-db >/dev/null 2>&1 || fail "Container supabase-db nao encontrado"
+
+# Credenciais independentes das chaves JWT. O protocolo S3/S3 Vectors usa
+# assinatura AWS SigV4 e o Wrappers FDW precisa desse par para acessar /vector.
+S3_PROTOCOL_ACCESS_KEY_ID="${S3_PROTOCOL_ACCESS_KEY_ID:-$(openssl rand -hex 16)}"
+S3_PROTOCOL_ACCESS_KEY_SECRET="${S3_PROTOCOL_ACCESS_KEY_SECRET:-$(openssl rand -hex 32)}"
+
+[[ "$S3_PROTOCOL_ACCESS_KEY_ID" =~ ^[0-9a-fA-F]{32}$ ]] \
+  || fail "S3_PROTOCOL_ACCESS_KEY_ID deve conter 32 caracteres hexadecimais"
+[[ "$S3_PROTOCOL_ACCESS_KEY_SECRET" =~ ^[0-9a-fA-F]{64}$ ]] \
+  || fail "S3_PROTOCOL_ACCESS_KEY_SECRET deve conter 64 caracteres hexadecimais"
 
 # O Storage API executa as migrations de storage_vectors com o usuario restrito.
 # A instalacao da extensao exige o administrador do Postgres e ocorre antes de
@@ -79,7 +90,10 @@ PY
 # Usa referencias Compose em vez de copiar a senha global para o arquivo do
 # projeto. O comando padrao carrega ../../.env antes de .env, portanto essas
 # referencias sao resolvidas pelo proprio Docker Compose.
-python3 - "$PROJECT_ENV" <<'PY'
+python3 - \
+  "$PROJECT_ENV" \
+  "$S3_PROTOCOL_ACCESS_KEY_ID" \
+  "$S3_PROTOCOL_ACCESS_KEY_SECRET" <<'PY'
 from pathlib import Path
 import sys
 
@@ -90,6 +104,9 @@ updates = {
     "VECTOR_DATABASE_URL": "postgres://${STORAGE_DB_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DATABASE}",
     "VECTOR_DATABASE_CREATE": "false",
     "VECTOR_STORE_MIGRATIONS_ENABLED": "true",
+    "S3_PROTOCOL_ENABLED": "true",
+    "S3_PROTOCOL_ACCESS_KEY_ID": sys.argv[2],
+    "S3_PROTOCOL_ACCESS_KEY_SECRET": sys.argv[3],
 }
 
 lines = path.read_text(encoding="utf-8").splitlines()
@@ -111,13 +128,15 @@ for key, value in updates.items():
 path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 PY
 
+chmod 600 "$PROJECT_ENV"
+
 echo "▶ Validando configuracao Compose..."
 (
   cd "$PROJECT_DIR"
   docker compose -p "$PROJECT_ID" --env-file ../../.env --env-file .env config >/dev/null
 )
 
-echo "▶ Recriando o Storage API com backend pgvector..."
+echo "▶ Recriando o Storage API com backend pgvector e protocolo S3 Vectors..."
 (
   cd "$PROJECT_DIR"
   docker compose -p "$PROJECT_ID" --env-file ../../.env --env-file .env \
@@ -143,6 +162,17 @@ STATUS="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}
   docker logs --tail 200 "$STORAGE_CONTAINER" >&2 || true
   fail "Storage nao ficou healthy dentro do prazo"
 }
+
+# Garante que o env_file realmente chegou ao processo que valida assinaturas
+# SigV4. Os valores nao sao impressos.
+docker exec "$STORAGE_CONTAINER" node -e '
+const access = process.env.S3_PROTOCOL_ACCESS_KEY_ID || "";
+const secret = process.env.S3_PROTOCOL_ACCESS_KEY_SECRET || "";
+if (!/^[0-9a-fA-F]{32}$/.test(access) || !/^[0-9a-fA-F]{64}$/.test(secret)) {
+  console.error("Credenciais S3 Protocol ausentes ou invalidas no Storage API");
+  process.exit(2);
+}
+'
 
 # Consulta o endpoint real do Storage API. Nenhuma resposta vazia e fabricada
 # pelo gateway e aceita: falhas de provider, migration ou banco encerram o script.
@@ -177,3 +207,4 @@ fetch("http://127.0.0.1:5000/vector/ListVectorBuckets", {
 '
 
 echo "✅ Storage Vectors habilitado para $PROJECT_ID usando o banco $POSTGRES_DATABASE (pgvector $VECTOR_VERSION)."
+echo "✅ Credenciais SigV4 por projeto instaladas sem serem exibidas."
