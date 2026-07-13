@@ -1,7 +1,12 @@
 local cjson = require("cjson.safe")
+local cjson_raw = require("cjson")
 local platform_router = require("proxy_rewrites.storage_platform_router")
 
 local storage_prefix = "/storage/v1"
+
+local function json_array(items)
+    return setmetatable(items or {}, cjson_raw.array_mt)
+end
 
 local function reject(problem)
     local status = problem.status or ngx.HTTP_BAD_REQUEST
@@ -107,6 +112,7 @@ local function set_route_body(route)
         if type(metadata_keys) ~= "table" then
             metadata_keys = {}
         end
+        metadata_keys = json_array(metadata_keys)
 
         return set_json_body({
             vectorBucketName = route.vector_bucket_name,
