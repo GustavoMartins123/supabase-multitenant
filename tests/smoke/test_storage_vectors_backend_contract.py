@@ -6,8 +6,11 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 ENV_TEMPLATE = ROOT / "servidor/generateProject/.envtemplate"
-ENABLE_SCRIPT = ROOT / "servidor/generateProject/enable_vector_storage.sh"
 CREATE_TEMPLATE_SCRIPT = ROOT / "servidor/volumes/db/create_template.sh"
+VECTOR_LIBRARY = ROOT / "servidor/generateProject/lib/vector_lifecycle.sh"
+GENERATE_IMPL = ROOT / "servidor/generateProject/lib/generate_project_impl.sh"
+DUPLICATE_IMPL = ROOT / "servidor/generateProject/lib/duplicate_project_impl.sh"
+RENAME_IMPL = ROOT / "servidor/generateProject/lib/rename_project_impl.sh"
 
 
 class StorageVectorsBackendContractTests(unittest.TestCase):
@@ -23,6 +26,8 @@ class StorageVectorsBackendContractTests(unittest.TestCase):
             "@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DATABASE}",
             env,
         )
+        self.assertIn("S3_PROTOCOL_ACCESS_KEY_ID={{s3_protocol_access_key_id}}", env)
+        self.assertIn("S3_PROTOCOL_ACCESS_KEY_SECRET={{s3_protocol_access_key_secret}}", env)
 
     def test_database_template_installs_vector_before_it_is_created(self) -> None:
         script = CREATE_TEMPLATE_SCRIPT.read_text(encoding="utf-8")
@@ -38,28 +43,40 @@ class StorageVectorsBackendContractTests(unittest.TestCase):
     def test_database_template_validates_the_inherited_extension(self) -> None:
         script = CREATE_TEMPLATE_SCRIPT.read_text(encoding="utf-8")
 
-        self.assertIn('--dbname _supabase_template', script)
+        self.assertIn("--dbname _supabase_template", script)
         self.assertIn("_supabase_template was created without pgvector", script)
         self.assertIn("installed_schema <> 'public'", script)
         self.assertIn("_supabase_template requires pgvector >= 0.7.0", script)
 
-    def test_existing_project_upgrade_installs_extension_as_postgres_admin(self) -> None:
-        script = ENABLE_SCRIPT.read_text(encoding="utf-8")
+    def test_generate_duplicate_and_rename_share_the_vector_contract(self) -> None:
+        library = VECTOR_LIBRARY.read_text(encoding="utf-8")
+        generate = GENERATE_IMPL.read_text(encoding="utf-8")
+        duplicate = DUPLICATE_IMPL.read_text(encoding="utf-8")
+        rename = RENAME_IMPL.read_text(encoding="utf-8")
 
-        self.assertIn("CREATE EXTENSION IF NOT EXISTS vector SCHEMA public", script)
-        self.assertIn("pgvector >= 0.7.0 obrigatorio", script)
-        self.assertIn('STORAGE_DB_USER="${STORAGE_DB_USER:-supabase_storage_admin}"', script)
+        self.assertIn("openssl rand -hex 16", library)
+        self.assertIn("openssl rand -hex 32", library)
+        self.assertIn("vector_ensure_s3_credentials", generate)
+        self.assertIn("vector_validate_database", generate)
+        self.assertIn("unset S3_PROTOCOL_ACCESS_KEY_ID S3_PROTOCOL_ACCESS_KEY_SECRET", duplicate)
+        self.assertIn("vector_strip_copied_wrappers", duplicate)
+        self.assertIn("vector_sync_project_wrappers", duplicate)
+        self.assertIn("vector_ensure_s3_credentials", rename)
+        self.assertIn("vector_sync_project_wrappers", rename)
 
-    def test_upgrade_validates_the_real_storage_api_response(self) -> None:
-        script = ENABLE_SCRIPT.read_text(encoding="utf-8")
-
-        self.assertIn("/vector/ListVectorBuckets", script)
-        self.assertIn("Array.isArray(payload.vectorBuckets)", script)
-        self.assertNotIn('vectorBuckets: []', script)
-        self.assertNotIn('vectorBuckets = {}', script)
+    def test_obsolete_manual_bootstrap_was_removed(self) -> None:
+        self.assertFalse((ROOT / "servidor/generateProject/enable_vector_storage.sh").exists())
+        self.assertFalse((ROOT / "servidor/generateProject/setup_vector_bucket_wrapper.sh").exists())
 
     def test_shell_syntax(self) -> None:
-        for script in (ENABLE_SCRIPT, CREATE_TEMPLATE_SCRIPT):
+        scripts = (
+            CREATE_TEMPLATE_SCRIPT,
+            VECTOR_LIBRARY,
+            GENERATE_IMPL,
+            DUPLICATE_IMPL,
+            RENAME_IMPL,
+        )
+        for script in scripts:
             subprocess.run(["bash", "-n", str(script)], check=True)
 
 
