@@ -169,10 +169,13 @@ local body_data = ngx.req.get_body_data()
 if body_data then
     local body, decode_err = cjson.decode(body_data)
     if body and type(body) == "table" then
+        local body_changed = false
+
         if ngx.var.request_method == "POST" and path == "/bucket" then
             if body.id then
                 body.name = body.id
                 body.id = nil
+                body_changed = true
             end
         end
 
@@ -180,6 +183,7 @@ if body_data then
             if body.path then
                 body.prefix = body.path
                 body.path = nil
+                body_changed = true
             end
         end
 
@@ -187,6 +191,7 @@ if body_data then
             if body.paths then
                 body.prefixes = body.paths
                 body.paths = nil
+                body_changed = true
             end
         end
 
@@ -195,6 +200,7 @@ if body_data then
                 local clean_path = ngx.re.gsub(body.path, "^/", "", "jo")
                 body.paths = { clean_path }
                 body.path = nil
+                body_changed = true
             end
         end
 
@@ -216,6 +222,7 @@ if body_data then
                         destinationBucket = bucket_id,
                         destinationKey = body.to,
                     }
+                    body_changed = true
                     ngx.req.set_uri("/storage/v1/object/move", false)
                 else
                     ngx.log(ngx.ERR, "Nao foi possivel extrair bucketId da URL: ", ngx.var.request_uri)
@@ -223,11 +230,13 @@ if body_data then
             end
         end
 
-        local encoded, encode_err = cjson.encode(body)
-        if encoded then
-            ngx.req.set_body_data(encoded)
-        else
-            ngx.log(ngx.ERR, "Falha ao codificar o corpo da requisicao do Storage: ", encode_err)
+        if body_changed then
+            local encoded, encode_err = cjson.encode(body)
+            if encoded then
+                ngx.req.set_body_data(encoded)
+            else
+                ngx.log(ngx.ERR, "Falha ao codificar o corpo da requisicao do Storage: ", encode_err)
+            end
         end
     elseif decode_err then
         ngx.log(ngx.DEBUG, "Corpo do Storage nao e JSON; mantendo payload original: ", decode_err)
