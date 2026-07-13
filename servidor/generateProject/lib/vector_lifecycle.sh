@@ -115,6 +115,31 @@ $drop_vector_secrets$;
 SQL
 }
 
+vector_wait_storage() {
+  local project_id="$1"
+  local attempts="${2:-60}"
+  local storage_container="supabase-storage-$project_id"
+  local status=""
+
+  for _ in $(seq 1 "$attempts"); do
+    status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$storage_container" 2>/dev/null || true)"
+    case "$status" in
+      healthy)
+        return 0
+        ;;
+      unhealthy|exited|dead)
+        docker logs --tail 200 "$storage_container" >&2 || true
+        vector_fail "Storage $storage_container terminou com status $status"
+        return 1
+        ;;
+    esac
+    sleep 2
+  done
+
+  docker logs --tail 200 "$storage_container" >&2 || true
+  vector_fail "Storage $storage_container nao ficou healthy dentro do prazo"
+}
+
 vector_list_buckets() {
   local project_id="$1"
   local storage_container="supabase-storage-$project_id"
@@ -156,6 +181,12 @@ fetch("http://127.0.0.1:5000/vector/ListVectorBuckets", {
   process.exit(6);
 });
 '
+}
+
+vector_validate_storage_api() {
+  local project_id="$1"
+  vector_wait_storage "$project_id"
+  vector_list_buckets "$project_id" >/dev/null
 }
 
 vector_sync_project_wrappers() {

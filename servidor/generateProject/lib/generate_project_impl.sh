@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 die() { echo "❌  $*" >&2; return 1; }
 
@@ -32,7 +32,7 @@ commit_transaction() {
 
 rollback_transaction() {
   local status="${1:-$?}"
-  trap - ERR
+  trap - ERR TERM INT HUP
   set +e
   echo "❌ Erro detectado! Revertendo alterações..."
 
@@ -62,6 +62,9 @@ rollback_transaction() {
   exit "$status"
 }
 trap rollback_transaction ERR
+trap 'rollback_transaction 143' TERM
+trap 'rollback_transaction 130' INT
+trap 'rollback_transaction 129' HUP
 
 set -a
 source "$PROJECT_ROOT/.env"
@@ -199,6 +202,7 @@ ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":
 SERVICE_TOKEN=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now_epoch,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
 GLOBAL_ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now_epoch,\"exp\":$exp}" "$JWT_SECRET")
 CONFIG_TOKEN_PROJETO=$(openssl rand -hex 32 | tr -d '\n\r')
+unset S3_PROTOCOL_ACCESS_KEY_ID S3_PROTOCOL_ACCESS_KEY_SECRET
 vector_ensure_s3_credentials || die "Falha ao gerar credenciais SigV4 do projeto"
 
 init_transaction
@@ -221,6 +225,7 @@ COMPOSE_STARTED=1
   cd "$OUT_DIR"
   docker compose -p "$PROJECT_ID" --env-file ../../.env --env-file .env up --build -d
 )
+vector_validate_storage_api "$PROJECT_ID" || die "Storage Vectors nao iniciou corretamente"
 
 echo "✅  Projeto $PROJECT_ID configurado com Storage Vectors e SigV4"
 commit_transaction
