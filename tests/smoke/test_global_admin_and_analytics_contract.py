@@ -45,10 +45,14 @@ class SupabaseAnalyticsContractTest(unittest.TestCase):
         self.vector = (
             ROOT / "servidor" / "volumes" / "logs" / "vector.yml"
         ).read_text(encoding="utf-8")
+        self.analytics_dockerfile = (
+            ROOT / "servidor" / "volumes" / "analytics" / "Dockerfile"
+        ).read_text(encoding="utf-8")
 
-    def test_analytics_uses_official_pinned_images_and_private_network(self) -> None:
-        self.assertIn("image: supabase/logflare:1.43.1", self.server_compose)
-        self.assertIn("image: timberio/vector:0.53.0-alpine", self.server_compose)
+    def test_analytics_uses_pinned_source_build_and_private_network(self) -> None:
+        self.assertIn("dockerfile: volumes/analytics/Dockerfile", self.server_compose)
+        self.assertIn("ARG LOGFLARE_VER=v1.47.1", self.analytics_dockerfile)
+        self.assertIn("image: ${VECTOR_IMAGE}", self.server_compose)
         analytics_block = self.server_compose.split("  analytics:", 1)[1].split(
             "\n  vector:", 1
         )[0]
@@ -65,12 +69,19 @@ class SupabaseAnalyticsContractTest(unittest.TestCase):
             "realtime.logs.prod",
             "deno-relay-logs",
             "postgres.logs",
-            "edge_logs",
+            "cloudflare.logs.prod",
         }:
             self.assertIn(f"source_name={source_name}", self.vector)
-        self.assertNotIn("source_name=cloudflare.logs.prod", self.vector)
         self.assertIn("metadata.tenant_project", self.vector)
         self.assertNotIn("PG_URI", self.server_compose)
+
+    def test_vector_assigns_dedicated_containers_and_database_logs_to_project(self) -> None:
+        self.assertIn(".project = project_match.ref", self.vector)
+        self.assertIn(".tenant_project = project_match.ref", self.vector)
+        self.assertIn("db=(?P<database_name>[^,]*)", self.vector)
+        self.assertIn(".project = project_db.ref", self.vector)
+        self.assertIn(".tenant_project = project_db.ref", self.vector)
+        self.assertIn("parse_nginx_log(.event_message, \"combined\")", self.vector)
 
     def test_setup_generates_distinct_tokens_and_studio_is_admin_only(self) -> None:
         setup = (ROOT / "setup.sh").read_text(encoding="utf-8")
@@ -114,6 +125,17 @@ class SupabaseAnalyticsContractTest(unittest.TestCase):
             "security/check_admin.lua",
             nginx[analytics_route:generic_route],
         )
+        self.assertIn(
+            "proxy_rewrites/analytics.lua",
+            nginx[analytics_route:generic_route],
+        )
+
+        analytics_rewrite = (
+            ROOT / "studio" / "nginx" / "lua" / "proxy_rewrites" / "analytics.lua"
+        ).read_text(encoding="utf-8")
+        self.assertIn("local project_ref = ngx.var.project_ref", analytics_rewrite)
+        self.assertIn("ngx.req.set_uri(project_uri, false)", analytics_rewrite)
+        self.assertIn('ngx.req.set_header("X-Project-Ref", project_ref)', analytics_rewrite)
 
     def test_legacy_direct_postgres_pipeline_is_not_wired(self) -> None:
         self.assertNotIn("vector_logs.sql", self.server_compose)

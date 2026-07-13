@@ -35,6 +35,14 @@ Nginx usam o caminho absoluto sob `/usr/local/openresty/lualib`.
 
 ## Rewrites que exigem cuidado
 
+### Analytics
+
+`proxy_rewrites/analytics.lua` troca o `default` do path self-hosted pelo
+`project_ref` validado do cookie antes de encaminhar a requisição ao Studio. O
+backend do Studio reutiliza esse segmento como parâmetro `project` ao consultar
+o Logflare. Sem esse rewrite, todos os painéis consultariam o contexto
+single-tenant `default`, independentemente do projeto selecionado.
+
 ### PG Meta
 
 `proxy_rewrites/pg_meta.lua` converte campos recursivamente de camelCase para

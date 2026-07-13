@@ -163,12 +163,14 @@ Detalhes:
 
 ### Supabase Analytics e Vector
 
-O Logflare/Supabase Analytics global persiste no schema `_analytics` do database
-`_supabase`. O Vector coleta os containers globais e os serviços com sufixo de
-projeto, normaliza o formato esperado pelo Studio e envia os eventos ao Logflare.
-A interface e os endpoints de Analytics são exclusivos de admins globais.
+O serviço global Logflare/Supabase Analytics persiste no schema `_analytics` do
+database `_supabase`. O Vector classifica os eventos pelo sufixo dos containers
+dedicados ou pelo database `_supabase_<project_ref>` do PostgreSQL compartilhado.
+O Lua entrega o ref selecionado ao Studio, e as consultas do Logflare retornam
+somente os eventos classificados para esse projeto. A interface e os endpoints
+de Analytics são exclusivos de admins globais.
 
-Detalhes: [Supabase Analytics global](architecture/supabase-analytics.md).
+Detalhes: [Supabase Analytics por projeto](architecture/supabase-analytics.md).
 
 ## Serviços por projeto
 

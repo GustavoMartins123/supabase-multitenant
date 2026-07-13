@@ -1,4 +1,4 @@
-# Supabase Analytics global
+# Supabase Analytics por contexto de projeto
 
 ## Objetivo
 
@@ -13,7 +13,8 @@ do setup novo. O Logflare persiste seus metadados e tabelas no schema
 
 ## Componentes
 
-- `supabase-analytics`: `supabase/logflare:1.43.1`;
+- `supabase-analytics`: Logflare `v1.47.1`, compilado pelo Dockerfile local com
+  as adaptacoes SQL em `servidor/volumes/analytics`;
 - `supabase-vector-global`: `timberio/vector:0.53.0-alpine`;
 - `supabase-studio`: consulta o Logflare internamente em `http://analytics:4000`;
 - PostgreSQL global: backend minimo do Logflare em `_supabase._analytics`.
@@ -44,22 +45,35 @@ para `LOGFLARE_DB_ENCRYPTION_KEY_RETIRED`, gere a nova chave e reinicie o
 Analytics. Remova a chave aposentada somente depois de o Logflare confirmar a
 migracao.
 
-## Isolamento e autorizacao
+## Contexto, isolamento e autorizacao
 
-O Analytics e global. O Nginx do Studio intercepta
+O servico e o armazenamento do Analytics sao globais, mas cada consulta e
+obrigatoriamente contextualizada pelo projeto selecionado. O Nginx do Studio
+intercepta
 `/api/platform/projects/<ref>/analytics/...` e exige grupo Authelia `admin` antes
-de encaminhar a requisicao ao backend do Studio. Membros e admins apenas de
-projeto nao podem consultar o Logflare global.
+de encaminhar a requisicao ao backend do Studio. O rewrite Lua substitui o
+`default` usado pelo Studio self-hosted pelo `project_ref` validado do cookie. O
+Studio envia esse valor ao endpoint do Logflare como parametro `project`, usado
+pelas CTEs nativas de `logs.all` para filtrar os eventos. Membros e admins apenas
+de projeto nao podem consultar o Logflare global.
 
 Uma rede Docker interna dedicada conecta PostgreSQL, Analytics, Vector e a API
 Python do servidor. O Studio permanece fora dessa rede: seu backend chama o
 Nginx local, que encaminha para a API Python remota, e somente a API acessa o
 Logflare. Os containers de projeto permanecem fora da rede interna.
 
-Os eventos usam `project=default` para manter compatibilidade com as fontes
-single-tenant criadas pelo Logflare. Quando o nome do container possui um sufixo
-de projeto, o Vector preserva esse ref em `metadata.tenant_project`. Esse campo e
-informativo; ele nao substitui autorizacao no gateway.
+As fontes continuam globais e usam os nomes single-tenant esperados pelo
+Logflare. Para Auth, PostgREST, Storage e Nginx, o Vector extrai o ref do sufixo
+do container e grava o valor tanto em `project` quanto em
+`metadata.tenant_project`. Para PostgreSQL, que e compartilhado, o ref e extraido
+do database `_supabase_<project_ref>` presente no `log_line_prefix`. Assim, a
+consulta de um projeto retorna somente seus containers dedicados e as linhas do
+seu database.
+
+O backend PostgreSQL do Logflare permanece em `_supabase._analytics`; ele e o
+armazenamento central dos eventos e nao deve ser confundido com o database da
+aplicacao. A selecao do database do projeto acontece na classificacao de cada
+evento de log, nao trocando a conexao de metadados do Logflare por requisicao.
 
 ## Fontes encaminhadas
 
@@ -71,12 +85,19 @@ O Vector usa os nomes de fonte esperados pelo Logs Explorer:
 - `realtime.logs.prod`;
 - `deno-relay-logs`;
 - `postgres.logs`;
-- `cloudflare.logs.prod` para gateways e servicos globais sem painel proprio.
+- `cloudflare.logs.prod` para os Nginx de projeto e gateways globais.
 
-Auth, PostgREST, Storage e Nginx usam o sufixo do container para preencher
-`metadata.tenant_project`. Realtime, Supavisor, Edge Functions, API interna,
-Postgres-Meta e banco sao compartilhados; nem toda linha emitida por esses
-servicos contem contexto suficiente para atribuir com seguranca um projeto.
+Auth, PostgREST, Storage e Nginx usam o sufixo do container. O banco compartilhado
+usa o nome do database registrado no prefixo da linha. Realtime usa um
+`external_id` UUID estavel, e Edge Functions, Supavisor, API interna e
+Postgres-Meta tambem sao compartilhados; linhas desses servicos que nao carregam
+um ref verificavel permanecem classificadas como globais em vez de serem
+atribuidas ao projeto errado.
+
+Somente eventos novos recebem a classificacao por projeto. Instalacoes que ja
+tenham historico gravado com `project=default` precisam manter esse historico
+como legado ou executar uma migracao de dados especifica antes de esperar que as
+linhas antigas aparecam nas consultas contextualizadas.
 
 ## Operacao
 

@@ -21,10 +21,11 @@ transforms:
 
       project_match, project_err = parse_regex(
         string!(.appname),
-        r'^supabase-(?:auth|rest|storage|nginx|imgproxy)-(?P<ref>.+)$'
+        r'^supabase-(?:auth|rest|storage|nginx|imgproxy)-(?P<ref>[a-z_][a-z0-9_]{2,39})$'
       )
       if project_err == null && project_match.ref != null {
         .tenant_project = project_match.ref
+        .project = project_match.ref
       }
 
       del(.container_created_at)
@@ -132,11 +133,32 @@ transforms:
     type: remap
     inputs: [router.db]
     source: |-
-      .metadata.host = "db-global"
       .metadata.parsed.timestamp = .timestamp
+
+      db_context, db_context_err = parse_regex(
+        string!(.event_message),
+        r'user=(?P<user_name>[^,]*),db=(?P<database_name>[^,]*),app=(?P<application_name>[^,]*),client=(?P<client>[^ ]*)'
+      )
+      if db_context_err == null {
+        .metadata.parsed.user_name = db_context.user_name
+        .metadata.parsed.database_name = db_context.database_name
+        .metadata.parsed.application_name = db_context.application_name
+        .metadata.parsed.client = db_context.client
+
+        project_db, project_db_err = parse_regex(
+          string!(db_context.database_name),
+          r'^_supabase_(?P<ref>[a-z_][a-z0-9_]{2,39})$'
+        )
+        if project_db_err == null && project_db.ref != null {
+          .project = project_db.ref
+          .tenant_project = project_db.ref
+        }
+      }
+
+      .metadata.host = "db-" + string!(.tenant_project)
       parsed, err = parse_regex(
         .event_message,
-        r'.*(?P<level>INFO|NOTICE|WARNING|ERROR|LOG|FATAL|PANIC?):.*'
+        r'.*(?P<level>INFO|NOTICE|WARNING|ERROR|LOG|FATAL|PANIC):.*'
       )
       if err == null && parsed.level != null {
         .metadata.parsed.error_severity = upcase!(parsed.level)
@@ -151,6 +173,30 @@ transforms:
       .metadata.project = .project
       .metadata.tenant_project = .tenant_project
       .metadata.service = .appname
+
+      request, request_err = parse_nginx_log(.event_message, "combined")
+      if request_err == null {
+        .timestamp = request.timestamp
+        .metadata.request.headers.referer = request.referer
+        .metadata.request.headers.user_agent = request.agent
+        .metadata.request.headers.x_real_ip = request.client
+        .metadata.response.status_code = request.status
+
+        request_parts, request_parts_err = split(request.request, " ")
+        if request_parts_err == null && length(request_parts) == 3 {
+          .metadata.request.method = request_parts[0]
+          .metadata.request.protocol = request_parts[2]
+
+          request_target, request_target_err = parse_regex(
+            request_parts[1],
+            r'^(?P<path>[^?]*)(?:\?(?P<search>.*))?$'
+          )
+          if request_target_err == null {
+            .metadata.request.path = request_target.path
+            .metadata.request.search = request_target.search
+          }
+        }
+      }
 
 sinks:
   logflare_auth:
@@ -235,4 +281,4 @@ sinks:
       retry_initial_backoff_secs: 1
     headers:
       x-api-key: ${LOGFLARE_PUBLIC_ACCESS_TOKEN?LOGFLARE_PUBLIC_ACCESS_TOKEN is required}
-    uri: http://analytics:4000/api/logs?source_name=edge_logs
+    uri: http://analytics:4000/api/logs?source_name=cloudflare.logs.prod
