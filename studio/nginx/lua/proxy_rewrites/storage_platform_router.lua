@@ -6,6 +6,15 @@ local function target(uri, options)
     return options
 end
 
+local function method_not_allowed(resource, allow)
+    return nil, {
+        status = 405,
+        code = "storage_platform_method_not_allowed",
+        message = "Metodo nao suportado para " .. resource,
+        allow = allow,
+    }
+end
+
 local function platform_path(uri)
     if type(uri) ~= "string" then
         return nil
@@ -69,9 +78,8 @@ function _M.resolve(uri, method)
         return target("/storage/v1/object/" .. object_bucket)
     end
 
-    -- O Studio expõe GET/POST em /vector-buckets, enquanto o Storage API usa
-    -- operações POST no namespace /vector. A adaptação fica concentrada aqui,
-    -- sem adicionar mais um rewrite específico no nginx.conf.
+    -- O Studio usa endpoints REST de plataforma, mas o Storage API implementa
+    -- Vector Buckets como operacoes POST no namespace /vector.
     if path == "/vector-buckets" then
         if method == "GET" then
             return target("/storage/v1/vector/ListVectorBuckets", {
@@ -89,12 +97,71 @@ function _M.resolve(uri, method)
             })
         end
 
-        return nil, {
-            status = 405,
-            code = "storage_platform_method_not_allowed",
-            message = "Metodo nao suportado para vector-buckets",
-            allow = "GET, POST",
-        }
+        return method_not_allowed("vector-buckets", "GET, POST")
+    end
+
+    local vector_bucket_name, index_name = path:match(
+        "^/vector-buckets/([^/]+)/indexes/([^/]+)$"
+    )
+    if vector_bucket_name and index_name then
+        if method == "DELETE" then
+            return target("/storage/v1/vector/DeleteIndex", {
+                method = "POST",
+                body_mode = "vector_index_identity",
+                route_name = "vector_index_delete",
+                vector_bucket_name = vector_bucket_name,
+                index_name = index_name,
+            })
+        end
+
+        return method_not_allowed("vector bucket index", "DELETE")
+    end
+
+    vector_bucket_name = path:match("^/vector-buckets/([^/]+)/indexes$")
+    if vector_bucket_name then
+        if method == "GET" then
+            return target("/storage/v1/vector/ListIndexes", {
+                method = "POST",
+                body_mode = "vector_indexes_list",
+                route_name = "vector_indexes_list",
+                vector_bucket_name = vector_bucket_name,
+            })
+        end
+
+        if method == "POST" then
+            return target("/storage/v1/vector/CreateIndex", {
+                method = "POST",
+                body_mode = "vector_index_create",
+                route_name = "vector_index_create",
+                vector_bucket_name = vector_bucket_name,
+            })
+        end
+
+        return method_not_allowed("vector bucket indexes", "GET, POST")
+    end
+
+    vector_bucket_name = path:match("^/vector-buckets/([^/]+)$")
+    if vector_bucket_name then
+        if method == "GET" then
+            return target("/storage/v1/vector/GetVectorBucket", {
+                method = "POST",
+                body_mode = "vector_bucket_identity",
+                response_mode = "unwrap_vector_bucket",
+                route_name = "vector_bucket_get",
+                vector_bucket_name = vector_bucket_name,
+            })
+        end
+
+        if method == "DELETE" then
+            return target("/storage/v1/vector/DeleteVectorBucket", {
+                method = "POST",
+                body_mode = "vector_bucket_identity",
+                route_name = "vector_bucket_delete",
+                vector_bucket_name = vector_bucket_name,
+            })
+        end
+
+        return method_not_allowed("vector bucket", "GET, DELETE")
     end
 
     return nil, {
