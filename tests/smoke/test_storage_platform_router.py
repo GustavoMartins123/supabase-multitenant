@@ -66,6 +66,43 @@ class StoragePlatformRouterTests(unittest.TestCase):
         self.assertIn('ngx.header.content_length = nil', header_filter)
         self.assertIn('cjson.encode(response_data.vectorBucket)', body_filter)
 
+    def test_vector_bucket_patterns_escape_the_lua_hyphen_quantifier(self) -> None:
+        router = ROUTER.read_text(encoding="utf-8")
+
+        self.assertIn('^/vector%-buckets/([^/]+)$', router)
+        self.assertIn('^/vector%-buckets/([^/]+)/indexes$', router)
+        self.assertIn('^/vector%-buckets/([^/]+)/indexes/([^/]+)$', router)
+        self.assertNotIn('^/vector-buckets/([^/]+)$', router)
+        self.assertNotIn('^/vector-buckets/([^/]+)/indexes$', router)
+
+    def test_vector_bucket_patterns_resolve_at_runtime_when_lua_is_available(self) -> None:
+        runtime = shutil.which("lua5.1") or shutil.which("lua") or shutil.which("resty")
+        if runtime is None:
+            self.skipTest("runtime Lua nao esta instalado")
+
+        lua_root = (ROOT / "studio/nginx/lua").as_posix()
+        script = f'''
+package.path = "{lua_root}/?.lua;{lua_root}/?/init.lua;" .. package.path
+local router = require("proxy_rewrites.storage_platform_router")
+
+local detail, detail_err = router.resolve(
+    "/api/platform/storage/default/vector-buckets/rrrr",
+    "GET"
+)
+assert(detail, detail_err and detail_err.message or "detail route missing")
+assert(detail.route_name == "vector_bucket_get", detail.route_name)
+assert(detail.vector_bucket_name == "rrrr", detail.vector_bucket_name)
+
+local indexes, indexes_err = router.resolve(
+    "/api/platform/storage/default/vector-buckets/rrrr/indexes",
+    "GET"
+)
+assert(indexes, indexes_err and indexes_err.message or "indexes route missing")
+assert(indexes.route_name == "vector_indexes_list", indexes.route_name)
+assert(indexes.vector_bucket_name == "rrrr", indexes.vector_bucket_name)
+'''
+        subprocess.run([runtime, "-e", script], check=True)
+
     def test_vector_bucket_indexes_match_the_studio_contract(self) -> None:
         router = ROUTER.read_text(encoding="utf-8")
         rewrite = REWRITE.read_text(encoding="utf-8")

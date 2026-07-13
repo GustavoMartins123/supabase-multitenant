@@ -100,8 +100,10 @@ function _M.resolve(uri, method)
         return method_not_allowed("vector-buckets", "GET, POST")
     end
 
+    -- '-' e um quantificador especial em patterns Lua. Ele precisa ser escapado
+    -- como '%-' quando a familia /vector-buckets e reconhecida por string.match.
     local vector_bucket_name, index_name = path:match(
-        "^/vector-buckets/([^/]+)/indexes/([^/]+)$"
+        "^/vector%-buckets/([^/]+)/indexes/([^/]+)$"
     )
     if vector_bucket_name and index_name then
         if method == "DELETE" then
@@ -117,7 +119,7 @@ function _M.resolve(uri, method)
         return method_not_allowed("vector bucket index", "DELETE")
     end
 
-    vector_bucket_name = path:match("^/vector-buckets/([^/]+)/indexes$")
+    vector_bucket_name = path:match("^/vector%-buckets/([^/]+)/indexes$")
     if vector_bucket_name then
         if method == "GET" then
             return target("/storage/v1/vector/ListIndexes", {
@@ -140,7 +142,7 @@ function _M.resolve(uri, method)
         return method_not_allowed("vector bucket indexes", "GET, POST")
     end
 
-    vector_bucket_name = path:match("^/vector-buckets/([^/]+)$")
+    vector_bucket_name = path:match("^/vector%-buckets/([^/]+)$")
     if vector_bucket_name then
         if method == "GET" then
             return target("/storage/v1/vector/GetVectorBucket", {
