@@ -26,7 +26,7 @@ function _M.resolve()
         return "default"
     end
 
-    if not ref:match("^[a-z_][a-z0-9_]{2,39}$") then
+    if not ref:match("^[a-z_][a-z0-9_]*$") or #ref < 3 or #ref > 40 then
         if should_log_invalid_cookie() then
             ngx.log(ngx.WARN, "Project ref invalido no cookie; limpando cookie")
         end

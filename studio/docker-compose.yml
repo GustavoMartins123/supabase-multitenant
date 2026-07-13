@@ -60,6 +60,7 @@ services:
     networks: [default, rede-supabase]
     environment:
       HOSTNAME: "0.0.0.0"
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
       STUDIO_PG_META_URL: https://nginx:443/api/platform/pg-meta
       DEFAULT_ORGANIZATION_NAME: ${DEFAULT_ORGANIZATION_NAME}
       DEFAULT_PROJECT_NAME: postgres

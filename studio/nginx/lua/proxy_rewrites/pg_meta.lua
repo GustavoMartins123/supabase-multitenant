@@ -66,7 +66,8 @@ local function patch_s3_vectors_wrapper_query(body)
 
     local project_ref = ngx.var.project_ref
     if type(project_ref) ~= "string"
-        or not project_ref:match("^[a-z_][a-z0-9_]{2,39}$")
+        or not project_ref:match("^[a-z_][a-z0-9_]*$")
+        or #project_ref < 3 or #project_ref > 40
     then
         ngx.log(ngx.ERR, "Nao foi possivel resolver o projeto para o S3 Vectors Wrapper")
         return body
