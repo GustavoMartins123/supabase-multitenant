@@ -1,9 +1,39 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 echo "Criando schema _analytics..."
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
   CREATE SCHEMA IF NOT EXISTS _analytics AUTHORIZATION "$POSTGRES_USER";
+EOSQL
+
+# O Storage API com VECTOR_BUCKET_PROVIDER=pgvector executa suas migrations em
+# cada banco de projeto. Como os projetos nascem de _supabase_template, a
+# extensao precisa existir no banco base antes do pg_dump que forma o template.
+# Isso evita que cada projeto dependa de um bootstrap manual posterior.
+echo "Habilitando pgvector no banco base antes de criar _supabase_template..."
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'EOSQL'
+CREATE EXTENSION IF NOT EXISTS vector SCHEMA public;
+
+DO $vector_check$
+DECLARE
+  installed_version text;
+BEGIN
+  SELECT extversion
+    INTO installed_version
+    FROM pg_extension
+   WHERE extname = 'vector';
+
+  IF installed_version IS NULL THEN
+    RAISE EXCEPTION 'pgvector extension is not installed';
+  END IF;
+
+  IF string_to_array(installed_version, '.')::int[] < ARRAY[0, 7, 0]::int[] THEN
+    RAISE EXCEPTION
+      'pgvector >= 0.7.0 required for Storage Vectors, found %',
+      installed_version;
+  END IF;
+END
+$vector_check$;
 EOSQL
 
 echo "Criando database _supabase_template..."
@@ -16,7 +46,42 @@ pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
   --exclude-schema=cron \
   | grep -v "CREATE EXTENSION.*pg_cron" \
   | grep -v "COMMENT ON EXTENSION pg_cron" \
-  | psql -U "$POSTGRES_USER" -d _supabase_template
+  | psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d _supabase_template
+
+# Falha durante a inicializacao do Postgres caso o dump deixe de transportar a
+# extensao. Assim nenhum projeto pode ser criado a partir de um template sem
+# suporte ao backend vetorial.
+echo "Validando pgvector dentro de _supabase_template..."
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname _supabase_template <<-'EOSQL'
+DO $template_vector_check$
+DECLARE
+  installed_version text;
+  installed_schema text;
+BEGIN
+  SELECT e.extversion, n.nspname
+    INTO installed_version, installed_schema
+    FROM pg_extension e
+    JOIN pg_namespace n ON n.oid = e.extnamespace
+   WHERE e.extname = 'vector';
+
+  IF installed_version IS NULL THEN
+    RAISE EXCEPTION '_supabase_template was created without pgvector';
+  END IF;
+
+  IF installed_schema <> 'public' THEN
+    RAISE EXCEPTION
+      'pgvector must be installed in public for Storage Vectors, found schema %',
+      installed_schema;
+  END IF;
+
+  IF string_to_array(installed_version, '.')::int[] < ARRAY[0, 7, 0]::int[] THEN
+    RAISE EXCEPTION
+      '_supabase_template requires pgvector >= 0.7.0, found %',
+      installed_version;
+  END IF;
+END
+$template_vector_check$;
+EOSQL
 
 echo "Criando tabelas de identidade..."
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
@@ -113,7 +178,7 @@ CREATE TABLE IF NOT EXISTS project_members_audit (
   new_role TEXT,
   action TEXT NOT NULL,
   actor_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_project_members_audit_project_id ON project_members_audit(project_id);
 EOSQL
@@ -139,7 +204,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
   UPDATE pg_database SET datallowconn = false WHERE datname = '_supabase_template';
 EOSQL
 
-echo "Template _supabase_template criado com sucesso."
+echo "Template _supabase_template criado com pgvector e validado com sucesso."
 
 echo "Criando banco e usuário restrito para fallback do pg-meta..."
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
