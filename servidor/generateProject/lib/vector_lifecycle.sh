@@ -163,8 +163,8 @@ vector_sync_project_wrappers() {
   local buckets
   local operation="$VECTOR_SCRIPTS_DIR/operations/setup_vector_bucket_wrapper.sh"
 
-  [[ -x "$operation" ]] \
-    || vector_fail "Operacao de wrapper ausente ou sem permissao: $operation"
+  [[ -f "$operation" ]] \
+    || vector_fail "Operacao de wrapper ausente: $operation"
 
   buckets="$(vector_list_buckets "$project_id")"
   if [[ -z "$buckets" ]]; then
@@ -174,6 +174,6 @@ vector_sync_project_wrappers() {
 
   while IFS= read -r bucket_name; do
     [[ -n "$bucket_name" ]] || continue
-    "$operation" "$project_id" "$bucket_name"
+    bash "$operation" "$project_id" "$bucket_name"
   done <<< "$buckets"
 }
