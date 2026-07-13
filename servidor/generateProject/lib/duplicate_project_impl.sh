@@ -190,8 +190,9 @@ docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$NEW_DB" <
 CREATE EXTENSION IF NOT EXISTS vector SCHEMA public;
 UPDATE auth.schema_migrations SET dirty = false WHERE dirty = true;
 UPDATE storage.migrations SET dirty = false WHERE dirty = true;
-ALTER DATABASE current_database() SET search_path TO public, auth, storage, extensions;
 SQL
+docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
+  "ALTER DATABASE \"$NEW_DB\" SET search_path TO public, auth, storage, extensions;"
 
 vector_validate_database "$NEW_DB" || die "Clone sem pgvector valido"
 vector_strip_copied_wrappers "$NEW_DB" || die "Falha ao remover wrappers/segredos copiados"
