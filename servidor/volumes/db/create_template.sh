@@ -178,7 +178,7 @@ CREATE TABLE IF NOT EXISTS project_members_audit (
   new_role TEXT,
   action TEXT NOT NULL,
   actor_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
-  created_at TIMESTAMPTZ DEFAULT now()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_project_members_audit_project_id ON project_members_audit(project_id);
 EOSQL
