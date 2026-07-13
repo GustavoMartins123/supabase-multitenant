@@ -51,46 +51,90 @@ local function set_json_body(body)
     return true
 end
 
-local original_uri = ngx.var.uri or ""
-local route, route_error = platform_router.resolve(original_uri, ngx.req.get_method())
+local function set_route_body(route)
+    if route.body_mode == nil then
+        return true
+    end
 
-if route then
     if route.body_mode == "empty_json_object" then
-        local ok, err = set_json_body({})
-        if not ok then
-            return reject({
-                status = ngx.HTTP_INTERNAL_SERVER_ERROR,
-                code = "storage_platform_body_encode_failed",
-                message = "Falha ao preparar requisicao do Storage: " .. tostring(err),
-            })
-        end
-    elseif route.body_mode == "vector_bucket_create" then
+        return set_json_body({})
+    end
+
+    if route.body_mode == "vector_bucket_identity" then
+        return set_json_body({
+            vectorBucketName = route.vector_bucket_name,
+        })
+    end
+
+    if route.body_mode == "vector_indexes_list" then
+        return set_json_body({
+            vectorBucketName = route.vector_bucket_name,
+            maxResults = 100,
+        })
+    end
+
+    if route.body_mode == "vector_index_identity" then
+        return set_json_body({
+            vectorBucketName = route.vector_bucket_name,
+            indexName = route.index_name,
+        })
+    end
+
+    if route.body_mode == "vector_bucket_create" then
         local body, err = read_json_body()
         if not body then
-            return reject({
-                status = ngx.HTTP_BAD_REQUEST,
-                code = "storage_platform_invalid_json",
-                message = "Corpo JSON invalido: " .. tostring(err),
-            })
+            return nil, "Corpo JSON invalido: " .. tostring(err), ngx.HTTP_BAD_REQUEST,
+                "storage_platform_invalid_json"
         end
 
         local vector_bucket_name = body.vectorBucketName or body.bucketName
         if type(vector_bucket_name) ~= "string" or vector_bucket_name == "" then
-            return reject({
-                status = ngx.HTTP_BAD_REQUEST,
-                code = "storage_platform_bucket_name_missing",
-                message = "bucketName e obrigatorio para criar um vector bucket",
-            })
+            return nil, "bucketName e obrigatorio para criar um vector bucket",
+                ngx.HTTP_BAD_REQUEST, "storage_platform_bucket_name_missing"
         end
 
-        local ok, encode_err = set_json_body({ vectorBucketName = vector_bucket_name })
-        if not ok then
-            return reject({
-                status = ngx.HTTP_INTERNAL_SERVER_ERROR,
-                code = "storage_platform_body_encode_failed",
-                message = "Falha ao preparar requisicao do Storage: " .. tostring(encode_err),
-            })
+        return set_json_body({ vectorBucketName = vector_bucket_name })
+    end
+
+    if route.body_mode == "vector_index_create" then
+        local body, err = read_json_body()
+        if not body then
+            return nil, "Corpo JSON invalido: " .. tostring(err), ngx.HTTP_BAD_REQUEST,
+                "storage_platform_invalid_json"
         end
+
+        local metadata_keys = body.metadataKeys
+        if type(metadata_keys) ~= "table" then
+            metadata_keys = {}
+        end
+
+        return set_json_body({
+            vectorBucketName = route.vector_bucket_name,
+            indexName = body.indexName,
+            dataType = body.dataType,
+            dimension = body.dimension,
+            distanceMetric = body.distanceMetric,
+            metadataConfiguration = {
+                nonFilterableMetadataKeys = metadata_keys,
+            },
+        })
+    end
+
+    return nil, "Modo de corpo do Storage nao reconhecido: " .. tostring(route.body_mode),
+        ngx.HTTP_INTERNAL_SERVER_ERROR, "storage_platform_body_mode_unknown"
+end
+
+local original_uri = ngx.var.uri or ""
+local route, route_error = platform_router.resolve(original_uri, ngx.req.get_method())
+
+if route then
+    local ok, err, status, code = set_route_body(route)
+    if not ok then
+        return reject({
+            status = status or ngx.HTTP_INTERNAL_SERVER_ERROR,
+            code = code or "storage_platform_body_encode_failed",
+            message = err or "Falha ao preparar requisicao do Storage",
+        })
     end
 
     if route.method == "POST" then
@@ -102,6 +146,10 @@ if route then
     end
 
     ngx.ctx.storage_platform_route = route.route_name
+    ngx.ctx.storage_platform_response_mode = route.response_mode
+    ngx.ctx.storage_platform_vector_bucket_name = route.vector_bucket_name
+    ngx.ctx.storage_platform_index_name = route.index_name
+    ngx.ctx.storage_platform_original_uri = original_uri
     ngx.req.set_uri(route.uri, false)
 elseif route_error then
     return reject(route_error)
