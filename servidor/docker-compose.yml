@@ -295,7 +295,10 @@ services:
       "/home/deno/functions/main"
       ]
   analytics:
-    image: ${ANALYTICS_IMAGE}
+    build:
+      context: .
+      dockerfile: volumes/analytics/Dockerfile
+    #image: ${ANALYTICS_IMAGE}
     container_name: supabase-analytics
     restart: unless-stopped
     env_file:
