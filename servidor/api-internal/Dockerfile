@@ -20,4 +20,4 @@ COPY ./api-internal/app ./app
 COPY /generateProject ./scripts/
 RUN find ./scripts -type f -name '*.sh' -exec chmod +x {} +
 EXPOSE 18000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "18000", "--proxy-headers"]
+CMD ["uvicorn", "app.asgi:app", "--host", "0.0.0.0", "--port", "18000", "--proxy-headers"]
