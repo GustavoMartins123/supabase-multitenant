@@ -328,19 +328,44 @@ services:
       POSTGRES_BACKEND_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:${POSTGRES_PORT}/_supabase
       POSTGRES_BACKEND_SCHEMA: _analytics
 
+  vector-docker-proxy:
+    image: ${DOCKER_SOCKET_PROXY_IMAGE:-ghcr.io/tecnativa/docker-socket-proxy:v0.4.2}
+    container_name: supabase-vector-docker-proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: "1"
+      EVENTS: "1"
+      PING: "1"
+      VERSION: "1"
+      POST: "0"
+      LOG_LEVEL: warning
+    volumes:
+      - ${DOCKER_SOCKET_LOCATION:-/var/run/docker.sock}:/var/run/docker.sock:ro,z
+    networks:
+      - vector-docker-api
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:2375/_ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   vector:
     image: ${VECTOR_IMAGE}
     container_name: supabase-vector-global
     restart: unless-stopped
     volumes:
       - ./volumes/logs/vector.yml:/etc/vector/vector.yml:ro,z
-      - ${DOCKER_SOCKET_LOCATION}:/var/run/docker.sock:ro,z
     env_file:
       - .analytics.env
     networks:
       - analytics-internal
+      - vector-docker-api
     depends_on:
       analytics:
+        condition: service_healthy
+      vector-docker-proxy:
         condition: service_healthy
     command: ["--config", "/etc/vector/vector.yml"]
     security_opt:
@@ -362,6 +387,10 @@ networks:
           gateway: ${SUPABASE_NETWORK_GATEWAY}
   analytics-internal:
     name: supabase-analytics-internal
+    driver: bridge
+    internal: true
+  vector-docker-api:
+    name: supabase-vector-docker-api
     driver: bridge
     internal: true
 volumes:

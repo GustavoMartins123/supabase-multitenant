@@ -1,4 +1,27 @@
 services:
+  traefik-docker-proxy:
+    image: ${DOCKER_SOCKET_PROXY_IMAGE:-ghcr.io/tecnativa/docker-socket-proxy:v0.4.2}
+    container_name: supabase-traefik-docker-proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: "1"
+      EVENTS: "1"
+      PING: "1"
+      VERSION: "1"
+      POST: "0"
+      LOG_LEVEL: warning
+    volumes:
+      - ${DOCKER_SOCKET_LOCATION:-/var/run/docker.sock}:/var/run/docker.sock:ro
+    networks:
+      - traefik-docker-api
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:2375/_ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   traefik:
     image: ${TRAEFIK_IMAGE}
     working_dir: /
@@ -8,8 +31,10 @@ services:
       # - "8082:8082"
     environment:
       - TZ=${TZ}
+    depends_on:
+      traefik-docker-proxy:
+        condition: service_healthy
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock  
       - ./traefik.yml:/etc/traefik/traefik.yml
       - ./acme.json:/acme.json 
       - ./access.log:/var/log/traefik/access.log
@@ -45,6 +70,7 @@ services:
       - "traefik.http.routers.http-catchall.service=noop@internal"
     networks:
       - rede-supabase
+      - traefik-docker-api
     restart: unless-stopped
   geoip-api:
     build: ./geoip
@@ -74,3 +100,7 @@ services:
 networks:
   rede-supabase:
     external: true
+  traefik-docker-api:
+    name: supabase-traefik-docker-api
+    driver: bridge
+    internal: true

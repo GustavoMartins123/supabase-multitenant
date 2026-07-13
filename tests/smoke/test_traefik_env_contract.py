@@ -14,7 +14,9 @@ class TraefikEnvContractTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         example = (ROOT / "servidor/.env.example").read_text(encoding="utf-8")
 
-        compose_variables = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*)\}", compose))
+        compose_variables = set(
+            re.findall(r"\$\{([A-Z][A-Z0-9_]*)(?::-[^}]*)?\}", compose)
+        )
         example_variables = {
             line.split("=", 1)[0]
             for line in example.splitlines()

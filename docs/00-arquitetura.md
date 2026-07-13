@@ -24,10 +24,15 @@ flowchart TB
     Traefik --> ProjectNginx[Nginx do projeto]
 
     ProjectsAPI --> PostgreSQL[(PostgreSQL)]
-    ProjectsAPI --> Docker[Docker Socket]
+    ProjectsAPI --> Docker[(Docker daemon)]
     ProjectsAPI --> Realtime[Realtime global]
     ProjectsAPI --> Supavisor[Supavisor global]
     ProjectsAPI --> StudioGateway
+
+    Traefik --> TraefikDockerProxy[Docker proxy\nsomente leitura]
+    TraefikDockerProxy --> Docker
+    Vector[Vector] --> VectorDockerProxy[Docker proxy\nsomente leitura]
+    VectorDockerProxy --> Docker
 
     ProjectNginx --> Auth[GoTrue]
     ProjectNginx --> Rest[PostgREST]
@@ -236,6 +241,18 @@ Detalhes: [Arquitetura OpenResty/Lua](architecture/openresty-lua.md).
 
 Integrações como push worker e invalidação de cache usam contratos internos próprios, incluindo identificação do serviço e assinatura ou shared token conforme a rota.
 
+### Acesso ao Docker daemon
+
+Traefik e Vector não recebem o Docker socket diretamente. Cada processo usa um
+proxy exclusivo, conectado por uma rede Docker interna que não publica portas.
+Os proxies aceitam somente `GET` e `HEAD` para `version`, `ping`, `events` e
+`containers`; operações de build, exec, images, networks, volumes e system
+permanecem bloqueadas.
+
+A Projects API ainda acessa o socket diretamente porque executa o lifecycle
+completo dos projetos. A remoção desse acesso exige um host agent com operações
+de domínio restritas e permanece uma etapa separada de hardening.
+
 ### Segredos de projeto
 
 Os valores persistidos usam envelope encryption:
@@ -302,6 +319,8 @@ A topologia não deve ser representada por branches permanentes diferentes. A di
 ## Limitações atuais
 
 - serviços globais ainda representam pontos compartilhados de falha;
+- a Projects API ainda controla o Docker daemon diretamente enquanto o host
+  agent de lifecycle não for implementado;
 - não existe escalabilidade horizontal completa do control plane;
 - Storage distribuído não faz parte da configuração padrão;
 - updates do Supabase podem exigir adaptação dos patches de Realtime e dos rewrites do Studio;

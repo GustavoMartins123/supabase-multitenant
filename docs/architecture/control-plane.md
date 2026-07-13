@@ -9,7 +9,8 @@ Os componentes principais são:
 - Projects API em FastAPI;
 - database `postgres`;
 - scripts de lifecycle;
-- Docker Socket;
+- Docker Socket direto, restrito a este componente até a extração de um host
+  agent;
 - integrações internas com Realtime, Supavisor, Postgres-Meta e Studio.
 
 ## Responsabilidades
@@ -197,6 +198,18 @@ O OpenResty encaminha chamadas do Studio para a Projects API. A API:
 O cliente não controla host, usuário, database ou header de conexão.
 
 ## Integrações internas
+
+### Projects API para Docker
+
+Traefik e Vector usam proxies Docker separados e somente leitura. A Projects
+API permanece com acesso direto ao socket porque seus jobs executam create,
+build, compose, start, stop, rename e delete. Um socket proxy que liberasse
+essas operações teria privilégios quase equivalentes ao socket original.
+
+A fronteira futura é um host agent local que exponha operações de domínio
+validadas por project ref, em vez de comandos Docker arbitrários. Até essa
+migração, qualquer mudança no lifecycle deve preservar validação de nomes,
+paths permitidos, serialização dos jobs e auditoria.
 
 ### OpenResty para Projects API
 
