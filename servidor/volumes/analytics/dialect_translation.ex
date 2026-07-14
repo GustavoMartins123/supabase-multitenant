@@ -780,9 +780,20 @@ defmodule Logflare.Sql.DialectTranslation do
   end
 
   defp select_json_operator(data, is_complex_path) do
+    # A bare projected leaf field (e.g. `request.path`) is a scalar STRING in
+    # BigQuery, so it must be extracted as text. Emitting jsonb (`->`/`#>`) here
+    # breaks UNION queries that combine such a column with text literals or with
+    # text-cast columns — Postgres raises "UNION types text and jsonb cannot be
+    # matched" (Studio's log facets query). Fields inside a CAST/function or a
+    # comparison already resolve to text elsewhere; a direct projection needs the
+    # same treatment.
+    bare_projection? =
+      Map.get(data, :in_projection_tree, false) and
+        not Map.get(data, :in_function_or_cast, false)
+
     need_text =
-      Map.get(data, :in_between, false) or Map.get(data, :in_binaryop, false) or
-        Map.get(data, :in_inlist, false)
+      bare_projection? or Map.get(data, :in_between, false) or
+        Map.get(data, :in_binaryop, false) or Map.get(data, :in_inlist, false)
 
     case {is_complex_path, need_text} do
       {true, true} -> "HashLongArrow"

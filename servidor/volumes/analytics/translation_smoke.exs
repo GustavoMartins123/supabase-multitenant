@@ -81,6 +81,39 @@ defmodule AnalyticsTranslationSmoke do
     assert_contains!(facets, "to_jsonb(level)")
     refute_contains!(facets, "cast(log_type as jsonb)")
     refute_contains!(facets, "cast(level as jsonb)")
+
+    # Regression: bare projected leaf fields (request.path / request.method) must
+    # be extracted as text, not jsonb. When a UNION combines these columns with
+    # text literals, jsonb (`#>`) makes Postgres raise
+    # "UNION types text and jsonb cannot be matched".
+    union_facets =
+      translate!("""
+      WITH unified_logs AS (
+        SELECT
+          'postgrest' AS log_type,
+          CAST(edge_logs_response.status_code AS STRING) AS status,
+          edge_logs_request.path AS pathname,
+          edge_logs_request.method AS method
+        FROM `edge.logs` AS el
+        CROSS JOIN UNNEST(metadata) AS edge_logs_metadata
+        CROSS JOIN UNNEST(edge_logs_metadata.request) AS edge_logs_request
+        CROSS JOIN UNNEST(edge_logs_metadata.response) AS edge_logs_response
+      ),
+      method_count AS (
+        SELECT 'method' AS dimension, method AS value, COUNT(*) AS count
+        FROM unified_logs WHERE method IS NOT NULL GROUP BY method
+      ),
+      pathname_count AS (
+        SELECT 'pathname' AS dimension, pathname AS value, COUNT(*) AS count
+        FROM unified_logs WHERE pathname IS NOT NULL GROUP BY pathname
+      )
+      SELECT 'total' AS dimension, 'all' AS value, 0 AS count
+      UNION ALL SELECT dimension, value, count FROM method_count
+      UNION ALL SELECT dimension, value, count FROM pathname_count
+      """)
+
+    assert_contains!(union_facets, "#>> '{metadata,request,path}'")
+    assert_contains!(union_facets, "#>> '{metadata,request,method}'")
   end
 
   defp translate!(query) do
