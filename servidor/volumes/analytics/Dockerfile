@@ -33,6 +33,8 @@ COPY volumes/analytics/dialect_translation.ex \
      lib/logflare/sql/dialect_translation.ex
 COPY volumes/analytics/sql.ex \
      lib/logflare/sql.ex
+COPY volumes/analytics/translation_smoke.exs \
+     /tmp/analytics_translation_smoke.exs
 
 # rust bin path and release optimizations
 ENV PATH="/root/.cargo/bin:${PATH}"
@@ -40,6 +42,8 @@ ENV CARGO_PROFILE_RELEASE_LTO="thin"
 ENV CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
 
 RUN cargo version
+
+RUN mix run --no-start /tmp/analytics_translation_smoke.exs
 
 RUN mix release && \
     npm run --prefix assets deploy && \

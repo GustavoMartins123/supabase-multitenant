@@ -459,7 +459,7 @@ defmodule Logflare.Sql.DialectTranslation do
 
         identifier?(left) and operator == "Eq" ->
           left
-          |> choose_cast_style()
+          |> to_jsonb()
           |> jsonb_to_text()
 
         true ->
@@ -483,7 +483,7 @@ defmodule Logflare.Sql.DialectTranslation do
 
         identifier?(right) and operator == "Eq" ->
           right
-          |> choose_cast_style()
+          |> to_jsonb()
           |> jsonb_to_text()
 
         true ->
@@ -590,6 +590,7 @@ defmodule Logflare.Sql.DialectTranslation do
       in_binaryop: false,
       in_between: false,
       in_inlist: false,
+      select_aliases: [],
       unnest_mappings: %{}
     })
     |> then(fn
@@ -821,13 +822,13 @@ defmodule Logflare.Sql.DialectTranslation do
   defp put_query_scope(data, query) do
     data = put_cte_scope(data, query)
 
-    case get_in(query, ["body", "Select", "from"]) do
-      from_list when is_list(from_list) -> put_select_scope(data, from_list)
+    case get_in(query, ["body", "Select"]) do
+      %{"from" => from_list} = select when is_list(from_list) -> put_select_scope(data, select)
       _body -> data
     end
   end
 
-  defp put_select_scope(data, from_list) do
+  defp put_select_scope(data, %{"from" => from_list} = select) do
     from_sources = get_from_sources(from_list, data.cte_aliases)
     unnest_mappings = get_bq_unnest_mappings(from_list, from_sources)
 
@@ -837,6 +838,7 @@ defmodule Logflare.Sql.DialectTranslation do
           {alias_name, mapping.path}
         end),
       from_sources: from_sources,
+      select_aliases: query_projection_aliases(%{"Select" => select}),
       unnest_mappings: unnest_mappings
     })
   end
@@ -955,8 +957,9 @@ defmodule Logflare.Sql.DialectTranslation do
     {k, traverse_convert_identifiers(v, put_query_scope(data, v))}
   end
 
-  defp traverse_convert_identifiers({"Select" = k, %{"from" => from_list} = v}, data) do
-    {k, traverse_convert_identifiers(v, put_select_scope(data, from_list))}
+  defp traverse_convert_identifiers({"Select" = k, %{"from" => from_list} = v}, data)
+       when is_list(from_list) do
+    {k, traverse_convert_identifiers(v, put_select_scope(data, v))}
   end
 
   defp traverse_convert_identifiers({k, v}, data) when k in ["Function", "Cast"] do
@@ -1003,7 +1006,7 @@ defmodule Logflare.Sql.DialectTranslation do
   end
 
   defp traverse_convert_identifiers({"Identifier" = k, %{"value" => field_alias} = v}, data) do
-    if projected_cte_field?(field_alias, data) do
+    if known_query_field?(field_alias, data) do
       {k, v}
     else
       do_normal_compount_identifier_convert({k, v}, data)
@@ -1145,6 +1148,11 @@ defmodule Logflare.Sql.DialectTranslation do
     end
   end
 
+  defp known_query_field?(field, data) do
+    projected_cte_field?(field, data) or
+      (data.in_projection_tree == false and field in data.select_aliases)
+  end
+
   defp identifier?(identifier),
     do: is_map_key(identifier, "CompoundIdentifier") or is_map_key(identifier, "Identifier")
 
@@ -1280,22 +1288,6 @@ defmodule Logflare.Sql.DialectTranslation do
     }
   end
 
-  defp cast_to_jsonb(expr) do
-    %{
-      "Cast" => %{
-        "kind" => "Cast",
-        "expr" => expr,
-        "data_type" => %{
-          "Custom" => [
-            [AstUtils.build_identifier("jsonb")],
-            []
-          ]
-        },
-        "format" => nil
-      }
-    }
-  end
-
   defp cast_to_jsonb_double_colon(expr) do
     %{
       "Cast" => %{
@@ -1312,20 +1304,28 @@ defmodule Logflare.Sql.DialectTranslation do
     }
   end
 
-  defp choose_cast_style(expr) do
-    case expr do
-      %{"CompoundIdentifier" => [%{"value" => table_alias}, %{"value" => _field}]} ->
-        # Test 600: alias "a" -> DoubleColon
-        # Test 915: alias "t" from "edge_logs" table -> Cast
-        if table_alias == "a" do
-          cast_to_jsonb_double_colon(expr)
-        else
-          cast_to_jsonb(expr)
-        end
-
-      _ ->
-        cast_to_jsonb(expr)
-    end
+  # Unlike CAST(... AS JSONB), to_jsonb accepts both already-JSONB values and
+  # regular SQL scalar values. This matters for computed CTE columns such as
+  # Studio's `level`, which is emitted by a CASE expression as TEXT.
+  defp to_jsonb(expr) do
+    %{
+      "Function" => %{
+        "args" => %{
+          "List" => %{
+            "args" => [%{"Unnamed" => %{"Expr" => expr}}],
+            "clauses" => [],
+            "duplicate_treatment" => nil
+          }
+        },
+        "parameters" => "None",
+        "filter" => nil,
+        "uses_odbc_syntax" => false,
+        "name" => [AstUtils.build_identifier("to_jsonb")],
+        "null_treatment" => nil,
+        "over" => nil,
+        "within_group" => []
+      }
+    }
   end
 
   defp jsonb_to_text(expr) do
