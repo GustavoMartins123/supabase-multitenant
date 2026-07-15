@@ -47,12 +47,16 @@ class DockerSocketRemovalContractTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
     def test_traefik_uses_only_file_provider(self) -> None:
+        watcher = service_block(self.traefik_compose, "traefik-config-watcher")
         traefik = service_block(self.traefik_compose, "traefik")
         self.assertNotIn("/var/run/docker.sock", self.traefik_compose)
         self.assertNotIn("traefik-docker-proxy", self.traefik_compose)
         self.assertNotIn("  docker:", self.traefik_config)
         self.assertIn("directory: /etc/traefik/dynamic", self.traefik_config)
         self.assertIn("./dynamic:/etc/traefik/dynamic:ro", traefik)
+        self.assertNotIn("./middlewares.yml:/etc/traefik/dynamic", traefik)
+        self.assertIn("./middlewares.yml:/config/middlewares.yml:ro", watcher)
+        self.assertIn("--middlewares-file", watcher)
         self.assertNotIn("labels:", traefik)
 
     def test_vector_receives_fluent_logs_without_docker_api(self) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import pathlib
 import unittest
+from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -14,6 +15,47 @@ spec.loader.exec_module(module)
 
 
 class FileProviderRendererTests(unittest.TestCase):
+    def test_cli_stages_middlewares_inside_the_dynamic_directory(self) -> None:
+        root = ROOT / ".tmp-traefik-middleware-stage-test"
+        root_env = root / "server.env"
+        projects = root / "projects"
+        middlewares = root / "middlewares.yml"
+        output = root / "dynamic" / "routes.yml"
+        projects.mkdir(parents=True, exist_ok=True)
+        root_env.write_text(
+            "NGINX_SHARED_TOKEN=test-token\nPROJECTS_API_PORT=18000\n",
+            encoding="utf-8",
+        )
+        middlewares.write_text("http:\n  middlewares: {}\n", encoding="utf-8")
+        try:
+            arguments = [
+                "render_dynamic_config.py",
+                "--root-env",
+                str(root_env),
+                "--projects-dir",
+                str(projects),
+                "--middlewares-file",
+                str(middlewares),
+                "--output",
+                str(output),
+            ]
+            with mock.patch("sys.argv", arguments):
+                self.assertEqual(0, module.main())
+
+            self.assertEqual(
+                middlewares.read_text(encoding="utf-8"),
+                (output.parent / "00-middlewares.yml").read_text(encoding="utf-8"),
+            )
+            self.assertTrue(output.is_file())
+        finally:
+            output.unlink(missing_ok=True)
+            (output.parent / "00-middlewares.yml").unlink(missing_ok=True)
+            output.parent.rmdir()
+            middlewares.unlink(missing_ok=True)
+            root_env.unlink(missing_ok=True)
+            projects.rmdir()
+            root.rmdir()
+
     def test_renderer_discovers_valid_projects_and_uses_uuid_scope(self) -> None:
         fixture_root = ROOT / ".tmp-traefik-render-test"
         projects = fixture_root / "projects"

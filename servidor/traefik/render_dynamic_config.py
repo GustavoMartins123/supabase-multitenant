@@ -191,12 +191,17 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root-env", type=pathlib.Path, required=True)
     parser.add_argument("--projects-dir", type=pathlib.Path, required=True)
+    parser.add_argument("--middlewares-file", type=pathlib.Path, required=True)
     parser.add_argument("--output", type=pathlib.Path, required=True)
     parser.add_argument("--watch", action="store_true")
     parser.add_argument("--interval", type=float, default=2.0)
     args = parser.parse_args()
 
     while True:
+        write_atomic(
+            args.output.parent / "00-middlewares.yml",
+            args.middlewares_file.read_text(encoding="utf-8"),
+        )
         write_atomic(args.output, render(args.root_env, args.projects_dir))
         if not args.watch:
             return 0
