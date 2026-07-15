@@ -22,6 +22,26 @@ def _decode_base64url_json(raw: str) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def resolve_user_claims_from_hmac_token(
+    request: Request,
+    *,
+    secret: str,
+    max_clock_skew_seconds: int,
+    now: int | None = None,
+) -> tuple[uuid.UUID, dict[str, Any]]:
+    user_id = resolve_user_id_from_hmac_token(
+        request,
+        secret=secret,
+        max_clock_skew_seconds=max_clock_skew_seconds,
+        now=now,
+    )
+    token = (request.headers.get("X-User-Token") or "").strip()
+    payload = _decode_base64url_json(token.split(".", 2)[1])
+    if payload is None:
+        raise HTTPException(401, "Invalid X-User-Token payload")
+    return user_id, payload
+
+
 def resolve_user_id_from_hmac_token(
     request: Request,
     *,

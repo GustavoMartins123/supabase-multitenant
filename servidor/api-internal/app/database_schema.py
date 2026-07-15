@@ -26,7 +26,8 @@ async def ensure_identity_schema(pool: asyncpg.Pool) -> None:
                 ADD COLUMN IF NOT EXISTS profile_data JSONB NOT NULL DEFAULT '{}'::jsonb,
                 ADD COLUMN IF NOT EXISTS profile_version BIGINT NOT NULL DEFAULT 1,
                 ADD COLUMN IF NOT EXISTS profile_updated_at TIMESTAMPTZ,
-                ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
+                ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ,
+                ADD COLUMN IF NOT EXISTS last_login_session_hash TEXT;
 
             CREATE TABLE IF NOT EXISTS user_groups (
                 user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

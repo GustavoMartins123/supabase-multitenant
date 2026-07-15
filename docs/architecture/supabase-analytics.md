@@ -16,8 +16,8 @@ do setup novo. O Logflare persiste seus metadados e tabelas no schema
 - `supabase-analytics`: Logflare `v1.47.1`, compilado pelo Dockerfile local com
   as adaptacoes SQL em `servidor/volumes/analytics`;
 - `supabase-vector-global`: `timberio/vector:0.53.0-alpine`;
-- `supabase-vector-docker-proxy`: acesso somente leitura as secoes `containers`
-  e `events` da API Docker usadas para descobrir containers e acompanhar logs;
+- logging driver Fluent: envia nome, stream e mensagem de cada container para
+  a porta de ingestao do Vector sem acesso a API Docker;
 - `supabase-studio`: consulta o Logflare internamente em `http://analytics:4000`;
 - PostgreSQL global: backend minimo do Logflare em `_supabase._analytics`.
 
@@ -64,10 +64,9 @@ Python do servidor. O Studio permanece fora dessa rede: seu backend chama o
 Nginx local, que encaminha para a API Python remota, e somente a API acessa o
 Logflare. Os containers de projeto permanecem fora da rede interna.
 
-O Vector nao monta o Docker socket. Ele acessa
-`http://vector-docker-proxy:2375` por uma rede interna exclusiva. O proxy nao
-publica portas, bloqueia `POST` e libera apenas as secoes `containers`, `events`,
-`ping` e `version` da API Docker.
+O Vector nao monta o Docker socket nem consulta a API Docker. Os servicos usam
+o logging driver `fluentd` com conexao assincrona; o daemon envia os eventos ao
+source `fluent` do Vector. O bind padrao e `127.0.0.1:24224` no node servidor.
 
 As fontes continuam globais e usam os nomes single-tenant esperados pelo
 Logflare. Para Auth, PostgREST, Storage e Nginx, o Vector extrai o ref do sufixo
@@ -113,7 +112,7 @@ recrie os stacks na ordem servidor e Studio:
 
 ```bash
 cd servidor
-docker compose --env-file .env up -d analytics vector-docker-proxy vector
+docker compose --env-file .env up -d analytics vector
 
 cd ../studio
 docker compose --env-file .env up -d --force-recreate studio nginx
@@ -122,7 +121,7 @@ docker compose --env-file .env up -d --force-recreate studio nginx
 Verificacoes uteis:
 
 ```bash
-docker compose --env-file servidor/.env -f servidor/docker-compose.yml ps analytics vector-docker-proxy vector
+docker compose --env-file servidor/.env -f servidor/docker-compose.yml ps analytics vector
 docker logs --tail 100 supabase-analytics
 docker logs --tail 100 supabase-vector-global
 ```
@@ -140,10 +139,8 @@ backup previo.
 
 ## Limitacoes e producao
 
-- O proxy reduz o alcance de uma falha no Vector, mas ainda permite leitura de
-  toda a secao `containers`, pois a politica da imagem e definida por prefixo da
-  API, nao por endpoint individual. Ele deve permanecer em rede exclusiva e sem
-  porta publicada.
+- A porta Fluent deve permanecer limitada ao host ou a rede administrativa. No
+  split-node, publique-a somente entre os nodes e aplique firewall.
 - O backend minimo usa o mesmo cluster PostgreSQL observado. Se o banco falhar,
   o Analytics tambem falha; para producao critica, use um PostgreSQL separado.
 - Retencao e limites de disco do Logflare precisam ser definidos conforme a

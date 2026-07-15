@@ -4,6 +4,17 @@ local user_hmac_token = require("security.user_hmac_token")
 
 local M = {}
 
+local function login_session_fingerprint()
+    local session_cookie = ngx.var.cookie_authelia_session or ""
+    if session_cookie == "" then
+        return nil
+    end
+    return ngx.encode_base64(ngx.sha256_bin(session_cookie))
+        :gsub("%+", "-")
+        :gsub("/", "_")
+        :gsub("=+$", "")
+end
+
 function M.apply(email, groups)
     local normalized_email = user_identity.normalize_email(email)
     local cache = ngx.shared.users_cache
@@ -41,6 +52,7 @@ function M.apply(email, groups)
             username = user_data and user_data.username or nil,
             display_name = user_data and user_data.display_name or nil,
             groups = groups or "",
+            login_session = login_session_fingerprint(),
         })
         if token then
             ngx.req.set_header("X-User-Token", token)

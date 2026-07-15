@@ -44,7 +44,14 @@ class KeyGenerationContractTest(unittest.TestCase):
         self.assertEqual(sorted(references - root_env - project_env), [])
 
     def test_every_template_placeholder_is_rendered(self):
-        generator = (GENERATE / "generate_project.sh").read_text(encoding="utf-8")
+        generator = "\n".join(
+            (
+                (GENERATE / "generate_project.sh").read_text(encoding="utf-8"),
+                (GENERATE / "lib/generate_project_impl.sh").read_text(
+                    encoding="utf-8"
+                ),
+            )
+        )
         placeholders = set()
         for name in {
             ".envtemplate",

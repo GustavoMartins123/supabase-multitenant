@@ -17,6 +17,11 @@ Os componentes principais são:
 
 ### Identidade
 
+`last_login_at` muda somente quando o token HMAC carrega um fingerprint de uma
+nova sessao Authelia. O fingerprint e derivado por SHA-256 e o cookie nunca sai
+do gateway. Requisicoes normais atualizam `last_seen_at` com amostragem de cinco
+minutos.
+
 O Authelia autentica o usuário, mas a autorização interna usa um UUID estável salvo na tabela `users`.
 
 O OpenResty resolve e sincroniza a identidade, depois envia para a API:
@@ -201,6 +206,15 @@ O cliente não controla host, usuário, database ou header de conexão.
 
 ### Projects API para Docker
 
+A Projects API nao monta o Docker socket. O Docker CLI usa `DOCKER_HOST` para
+acessar o proxy de lifecycle na rede interna `supabase-lifecycle-docker-api`.
+Somente esse proxy monta o socket no servidor e ele nao publica portas.
+
+Traefik usa exclusivamente o File Provider. Vector recebe logs pelo logging
+driver Fluent. Nenhum dos dois consulta a API Docker.
+
+<!-- Descricao historica anterior ao File Provider definitivo:
+
 Traefik e Vector usam proxies Docker separados e somente leitura. A Projects
 API permanece com acesso direto ao socket porque seus jobs executam create,
 build, compose, start, stop, rename e delete. Um socket proxy que liberasse
@@ -210,6 +224,8 @@ A fronteira futura é um host agent local que exponha operações de domínio
 validadas por project ref, em vez de comandos Docker arbitrários. Até essa
 migração, qualquer mudança no lifecycle deve preservar validação de nomes,
 paths permitidos, serialização dos jobs e auditoria.
+
+-->
 
 ### OpenResty para Projects API
 

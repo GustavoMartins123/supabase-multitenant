@@ -138,6 +138,10 @@ O setup gera os arquivos de ambiente do servidor e do Studio, incluindo as crede
 bash start.sh
 ```
 
+`single-node` e o perfil explicito padrao. Para duas maquinas, execute
+`bash start.sh split-node-server` no servidor principal e
+`bash start.sh split-node-studio` na maquina administrativa do Studio.
+
 O script inicia os serviços compartilhados e a Projects API, espera PostgreSQL e Supavisor, inicia Traefik e os projetos existentes e, por último, inicia o Studio.
 
 > Não execute o `start.sh` com `sudo`. Rodar a stack inteira como root altera variáveis de ambiente, contexto do Docker, ownership dos arquivos e permissões dos volumes. Se o Docker exigir privilégio, adicione seu usuário ao grupo `docker` e entre novamente na sessão:
@@ -154,7 +158,7 @@ Inicie os serviços compartilhados e a Projects API:
 cd servidor
 
 docker compose -f docker-compose.yml --env-file .env up --build -d
-docker compose -f docker-compose-api.yml --env-file .env up --build -d
+docker compose -f docker-compose-api.yml -f docker-compose.single-node.yml --env-file .env up --build -d
 ```
 
 Inicie o Traefik:

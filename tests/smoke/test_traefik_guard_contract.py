@@ -24,17 +24,19 @@ class TraefikGuardContractTests(unittest.TestCase):
         self.assertIn("./plugins-local:/plugins-local:ro", compose)
 
     def test_project_router_has_uuid_scoped_guard_before_strip_prefix(self) -> None:
+        renderer = (
+            ROOT / "servidor/traefik/render_dynamic_config.py"
+        ).read_text(encoding="utf-8")
         template = (
             ROOT / "servidor/generateProject/dockercomposetemplate"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("plugin.supabaseguard.scope={{project_uuid}}", template)
-        self.assertIn("plugin.supabaseguard.profile=project", template)
-        self.assertIn("TRAEFIK_GUARD_PROJECT_MODE:-observe", template)
-        self.assertIn(
-            "middlewares=rate-limit@file,supabase-guard-{{project_id}}@docker,security-headers@file,nginx-{{project_id}}-stripprefix@docker",
-            template,
-        )
+        self.assertIn('"          profile: project"', renderer)
+        self.assertIn('f"          scope: {yaml_quote(project_uuid)}"', renderer)
+        self.assertIn('f"        - project-guard-{project_id}"', renderer)
+        self.assertIn('f"        - project-strip-{project_id}"', renderer)
+        self.assertNotIn("traefik.", template)
+        self.assertNotIn("labels:", template)
 
     def test_project_defaults_are_declared(self) -> None:
         env_example = (ROOT / "servidor/.env.example").read_text(encoding="utf-8")

@@ -2,11 +2,8 @@ entryPoints:
   web:
     address: ":80"
 providers:
-  docker:
-    endpoint: tcp://traefik-docker-proxy:2375
-    exposedByDefault: false
   file:
-    filename: /etc/traefik/dynamic/middlewares.yml
+    directory: /etc/traefik/dynamic
     watch: true
 
 experimental:

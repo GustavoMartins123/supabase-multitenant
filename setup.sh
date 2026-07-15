@@ -367,6 +367,9 @@ main() {
     safe_sed "s|SERVER_PROTO=pass|SERVER_PROTO=${PROTO}|g" servidor/.env
     safe_sed "s|^PUSH_API_URL=.*|PUSH_API_URL=https://${LOCAL_IP}:${STUDIO_HTTPS_PORT}/api/internal/push|g" servidor/.env
     safe_sed "s|^PROJECTS_API_ALLOWED_IP_RANGES=.*|PROJECTS_API_ALLOWED_IP_RANGES=${LOCAL_IP}/32,${SUPABASE_NETWORK_SUBNET}|g" servidor/.env
+    if [[ "$SERVER_IP" != "$LOCAL_IP" ]]; then
+        safe_sed "s|^VECTOR_FLUENTD_BIND=.*|VECTOR_FLUENTD_BIND=0.0.0.0|g" servidor/.env
+    fi
     safe_sed "s|PUSH_VERIFY_TLS=true|PUSH_VERIFY_TLS=true|g" servidor/.env
     safe_sed "s|PUSH_CA_FILE=/docker/push-certs/ca.pem|PUSH_CA_FILE=/docker/push-certs/ca.pem|g" servidor/.env
     safe_sed "s|DASHBOARD_USER=pass|DASHBOARD_USER=${DASHBOARD_USER}|g" servidor/.env
@@ -393,6 +396,9 @@ main() {
     safe_sed "s|COOKIE_SIGN_SECRET=pass|COOKIE_SIGN_SECRET=$COOKIE_SIGN_SECRET|g" studio/.env
     safe_sed "s|POSTGRES_NGINX_PASSWORD=pass|POSTGRES_NGINX_PASSWORD=$POSTGRES_NGINX_PASSWORD|g" studio/.env
     safe_sed "s|^SERVER_DOMAIN=.*|SERVER_DOMAIN=${PROTO}://${SERVER_IP}|g" studio/.env
+    if [[ "$SERVER_IP" != "$LOCAL_IP" ]]; then
+        safe_sed "s|^VECTOR_FLUENTD_ADDRESS=.*|VECTOR_FLUENTD_ADDRESS=${SERVER_IP}:24224|g" studio/.env
+    fi
     safe_sed "s|BACKEND_PROTO=pass|BACKEND_PROTO=$PROTO|g" studio/.env
     safe_sed "s|^SUPABASE_PUBLIC_URL=.*|SUPABASE_PUBLIC_URL=https://${LOCAL_IP}:${STUDIO_HTTPS_PORT}|g" studio/.env
 

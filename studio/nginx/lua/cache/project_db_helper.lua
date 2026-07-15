@@ -9,7 +9,8 @@ local _M = {}
 
 local functions_cache = ngx.shared.service_keys
 
-local SERVER_DOMAIN = os.getenv("SERVER_DOMAIN") or "http://localhost"
+local SERVER_DOMAIN = (os.getenv("SERVER_DOMAIN") or ""):gsub("/+$", "")
+local SERVER_HOSTNAME = string.match(SERVER_DOMAIN, "//([^/:]+)") or "localhost"
 local NGINX_SHARED_TOKEN = os.getenv("NGINX_SHARED_TOKEN")
 local get_service_key = require("security.get_service_key")
 local user_identity = require("project_context.user_identity")
@@ -40,6 +41,9 @@ local function current_user_token(user_id)
 end
 
 function _M.get_available_functions(project_ref)
+    if SERVER_DOMAIN == "" then
+        return {}, "SERVER_DOMAIN ausente"
+    end
     if not project_ref or project_ref == "" or project_ref == "default" then
         ngx.log(ngx.WARN, "[PROJECT-DB] Invalid project_ref: ", project_ref)
         return {}, nil
@@ -68,7 +72,8 @@ function _M.get_available_functions(project_ref)
         headers = {
             ["X-User-Token"] = user_token,
             ["Content-Type"] = "application/json",
-            ["X-Shared-Token"] = NGINX_SHARED_TOKEN
+            ["X-Shared-Token"] = NGINX_SHARED_TOKEN,
+            ["Host"] = SERVER_HOSTNAME
         },
         ssl_verify = false
     })
@@ -218,6 +223,9 @@ function _M.functions_to_tools(functions)
 end
 
 function _M.execute_function(project_ref, func_name, arguments)
+    if SERVER_DOMAIN == "" then
+        return nil, "SERVER_DOMAIN ausente"
+    end
     if not project_ref or project_ref == "" or project_ref == "default" then
         return nil, "Invalid project reference"
     end
@@ -255,7 +263,8 @@ function _M.execute_function(project_ref, func_name, arguments)
         headers = {
             ["X-User-Token"] = exec_user_token,
             ["Content-Type"] = "application/json",
-            ["X-Shared-Token"] = NGINX_SHARED_TOKEN
+            ["X-Shared-Token"] = NGINX_SHARED_TOKEN,
+            ["Host"] = SERVER_HOSTNAME
         },
         body = cjson.encode({ 
             function_name = safe_name,

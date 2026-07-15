@@ -1,23 +1,42 @@
+x-vector-logging: &vector-logging
+  driver: fluentd
+  options:
+    fluentd-address: ${VECTOR_FLUENTD_ADDRESS:-127.0.0.1:24224}
+    fluentd-async: "true"
+    fluentd-sub-second-precision: "true"
+
 services:
-  traefik-docker-proxy:
-    image: ${DOCKER_SOCKET_PROXY_IMAGE:-ghcr.io/tecnativa/docker-socket-proxy:v0.4.2}
-    container_name: supabase-traefik-docker-proxy
+  traefik-config-watcher:
+    image: ${TRAEFIK_CONFIG_IMAGE}
+    container_name: supabase-traefik-config-watcher
     restart: unless-stopped
-    environment:
-      CONTAINERS: "1"
-      EVENTS: "1"
-      PING: "1"
-      VERSION: "1"
-      POST: "0"
-      LOG_LEVEL: warning
+    logging: *vector-logging
+    command:
+      - python
+      - /app/render_dynamic_config.py
+      - --watch
+      - --root-env
+      - /config/server.env
+      - --projects-dir
+      - /projects
+      - --output
+      - /dynamic/routes.yml
     volumes:
-      - ${DOCKER_SOCKET_LOCATION:-/var/run/docker.sock}:/var/run/docker.sock:ro
+      - ./render_dynamic_config.py:/app/render_dynamic_config.py:ro
+      - ../.env:/config/server.env:ro
+      - ../projects:/projects:ro
+      - ./dynamic:/dynamic
     networks:
-      - traefik-docker-api
+      - rede-supabase
+    read_only: true
+    tmpfs:
+      - /tmp
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:2375/_ping"]
+      test: ["CMD", "python", "-c", "from pathlib import Path; raise SystemExit(0 if Path('/dynamic/routes.yml').is_file() else 1)"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -28,57 +47,33 @@ services:
     ports:
       - "${TRAEFIK_HTTP_PORT}:80"
       - "${TRAEFIK_HTTPS_PORT}:443"
-      # - "8082:8082"
     environment:
       - TZ=${TZ}
     depends_on:
-      traefik-docker-proxy:
+      traefik-config-watcher:
         condition: service_healthy
     volumes:
-      - ./traefik.yml:/etc/traefik/traefik.yml
-      - ./acme.json:/acme.json 
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./acme.json:/acme.json
       - ./access.log:/var/log/traefik/access.log
-      - ./middlewares.yml:/etc/traefik/dynamic/middlewares.yml
+      - ./middlewares.yml:/etc/traefik/dynamic/00-middlewares.yml:ro
+      - ./dynamic:/etc/traefik/dynamic:ro
       - ./plugins-local:/plugins-local:ro
       - ./plugins-storage:/plugins-storage
-    labels:  
-      - "traefik.enable=${TRAEFIK_ENABLED}"
-
-      # Router para paths maliciosos
-      - "traefik.http.routers.malicious-paths.rule=PathPrefix(`/admin`) || PathPrefix(`/wp-admin`) || PathPrefix(`/phpmyadmin`) || PathPrefix(`/cgi-bin`) || PathPrefix(`/.env`) || PathPrefix(`/.git`) || PathPrefix(`/xmlrpc`) || PathPrefix(`/server-status`) || PathPrefix(`/phpinfo.php`) || PathPrefix(`/actuator`) || PathPrefix(`/global-protect`) || PathPrefix(`/ssl-vpn`) || PathPrefix(`/+CSCOE+`) || PathPrefix(`/login.htm`) || PathPrefix(`/login.html`) || PathPrefix(`/login.jsp`) || PathPrefix(`/remote/login`) || PathPrefix(`/manage/account`) || PathPrefix(`/webpages/login`) || PathPrefix(`/doc/index.html`) || PathPrefix(`/owa/auth`) || PathPrefix(`/getcfg.php`) || PathPrefix(`/aws.sh`) || PathPrefix(`/vb.env`) || PathPrefix(`/env.py`)"
-      # - "traefik.http.routers.malicious-paths.entrypoints=web,websecure"
-      - "traefik.http.routers.malicious-paths.entrypoints=web"
-      - "traefik.http.routers.malicious-paths.priority=2000"
-      - "traefik.http.routers.malicious-paths.middlewares=malicious-paths-chain@file"
-      - "traefik.http.routers.malicious-paths.service=forbidden-service@file"
-      # - "traefik.http.routers.malicious-paths.tls=true"
-
-      # Router para User-Agents suspeitos
-      - "traefik.http.routers.block-bad-useragents.rule=HeaderRegexp(`User-Agent`, `.*[Bb]ot.*|.*[Ss]canner.*|.*[Cc]rawler.*|.*[Ss]pider.*|.*[Cc]url.*|.*[Ww]get.*|.*ruby.*|.*perl.*|.*masscan.*|.*nmap.*|^-?$`)"
-      # - "traefik.http.routers.block-bad-useragents.entrypoints=web,websecure"
-      - "traefik.http.routers.block-bad-useragents.entrypoints=web"
-      - "traefik.http.routers.block-bad-useragents.priority=1900"
-      - "traefik.http.routers.block-bad-useragents.middlewares=suspicious-paths-chain@file"
-      - "traefik.http.routers.block-bad-useragents.service=forbidden-service@file"
-      # - "traefik.http.routers.block-bad-useragents.tls=true"
-
-      #http
-      - "traefik.http.routers.http-catchall.rule=HostRegexp(`{host:.+}`)"
-      - "traefik.http.routers.http-catchall.entrypoints=web"
-      - "traefik.http.routers.http-catchall.priority=100"
-      - "traefik.http.routers.http-catchall.middlewares=security-chain-enhanced@file"
-      - "traefik.http.routers.http-catchall.service=noop@internal"
     networks:
       - rede-supabase
-      - traefik-docker-api
     restart: unless-stopped
+    logging: *vector-logging
+
   geoip-api:
     build: ./geoip
     volumes:
       - ./geoip/GeoLite2-Country.mmdb:/data/GeoLite2-Country.mmdb:ro
     networks:
       - rede-supabase
-    restart: unless-stopped  
+    restart: unless-stopped
+    logging: *vector-logging
+
   deny-service:
     image: ${TRAEFIK_DENY_IMAGE}
     container_name: traefik-deny-service
@@ -95,12 +90,9 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    restart: unless-stopped  
+    restart: unless-stopped
+    logging: *vector-logging
 
 networks:
   rede-supabase:
     external: true
-  traefik-docker-api:
-    name: supabase-traefik-docker-api
-    driver: bridge
-    internal: true

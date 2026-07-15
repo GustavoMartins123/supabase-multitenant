@@ -32,13 +32,19 @@ class StudioSnippetsPermissionsTests(unittest.TestCase):
         compose = (ROOT / "studio" / "docker-compose.yml").read_text(
             encoding="utf-8"
         )
-        nginx_start = compose.index("  nginx:\n")
-        studio_start = compose.index("  studio:\n", nginx_start)
+        nginx_start = compose.index("\n  nginx:\n") + 1
+        studio_start = compose.index("\n  studio:\n", nginx_start) + 1
         nginx_block = compose[nginx_start:studio_start]
         studio_block = compose[studio_start:]
 
-        self.assertIn("SNIPPETS_MANAGEMENT_FOLDER: /app/snippets", nginx_block)
-        self.assertIn("SNIPPETS_MANAGEMENT_FOLDER: /app/snippets", studio_block)
+        self.assertIn(
+            "SNIPPETS_MANAGEMENT_FOLDER: ${SNIPPETS_MANAGEMENT_FOLDER}",
+            nginx_block,
+        )
+        self.assertIn(
+            "SNIPPETS_MANAGEMENT_FOLDER: ${SNIPPETS_MANAGEMENT_FOLDER}",
+            studio_block,
+        )
         self.assertIn("- ./snippets:/app/snippets", nginx_block)
         self.assertIn("- ./snippets:/app/snippets", studio_block)
 

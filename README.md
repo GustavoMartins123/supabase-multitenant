@@ -138,6 +138,10 @@ The setup generates the server and Studio environment files, including the separ
 bash start.sh
 ```
 
+`single-node` is the default explicit profile. For two machines, run
+`bash start.sh split-node-server` on the main server and
+`bash start.sh split-node-studio` on the administrative Studio machine.
+
 The script starts the shared services and Projects API, waits for PostgreSQL and Supavisor, starts Traefik and existing projects, and finally starts Studio.
 
 > Do not run `start.sh` with `sudo`. Running the whole stack as root changes environment variables, Docker context, file ownership and mounted-volume permissions. If Docker requires elevated permissions, add your user to the `docker` group and log in again:
@@ -154,7 +158,7 @@ Start the shared services and Projects API:
 cd servidor
 
 docker compose -f docker-compose.yml --env-file .env up --build -d
-docker compose -f docker-compose-api.yml --env-file .env up --build -d
+docker compose -f docker-compose-api.yml -f docker-compose.single-node.yml --env-file .env up --build -d
 ```
 
 Start Traefik:

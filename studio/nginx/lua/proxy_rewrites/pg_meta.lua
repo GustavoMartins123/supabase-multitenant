@@ -47,9 +47,9 @@ local function convert_fields(value)
     return value
 end
 
--- O SQL gerado pelo Studio self-hosted pressupoe um unico Storage em
--- host.docker.internal. Neste projeto o Studio e compartilhado e cada tenant tem
--- seu proprio Storage na rede Docker. O patch e estritamente limitado ao SQL de
+-- O SQL gerado pelo Studio self-hosted pressupoe um unico Storage local. Neste
+-- projeto o Studio e compartilhado e cada tenant tem seu proprio Storage na
+-- rede Docker. O patch e estritamente limitado ao SQL de
 -- criacao do S3 Vectors Wrapper e nunca toca consultas SQL comuns.
 local function patch_s3_vectors_wrapper_query(body)
     if type(body) ~= "table" or type(body.query) ~= "string" then

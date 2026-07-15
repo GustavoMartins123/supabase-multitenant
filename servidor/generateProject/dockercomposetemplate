@@ -1,6 +1,13 @@
 #para subir estando no diretorio do projeto -> docker/projects/{{project_id}}
 #docker compose -p {{project_id}} --env-file ../../.env --env-file .env up --build -d
 name: supabase
+x-vector-logging: &vector-logging
+  driver: fluentd
+  options:
+    fluentd-address: ${VECTOR_FLUENTD_ADDRESS:-127.0.0.1:24224}
+    fluentd-async: "true"
+    fluentd-sub-second-precision: "true"
+
 services:
   nginx:
     build:
@@ -8,6 +15,7 @@ services:
       dockerfile: Dockerfile
     container_name: supabase-nginx-{{project_id}}
     restart: unless-stopped
+    logging: *vector-logging
     environment:
       FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT}
     volumes:
@@ -23,48 +31,11 @@ services:
       - ALL
     networks:
       - rede-supabase
-    labels:
-      - "traefik.enable=true"
-      # - "traefik.http.routers.supabase-nginx-{{project_id}}.rule=Host(`seu_dominio`) && PathPrefix(`/{{project_id}}`)"
-      # - "traefik.http.routers.supabase-nginx-{{project_id}}.entrypoints=websecure"
-      # - "traefik.http.routers.supabase-nginx-{{project_id}}.tls=true"
-      # - "traefik.http.routers.supabase-nginx-{{project_id}}.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.supabase-nginx-{{project_id}}.rule=PathPrefix(`/{{project_id}}`)"
-      - "traefik.http.routers.supabase-nginx-{{project_id}}.entrypoints=web"
-      - "traefik.http.services.supabase-nginx-{{project_id}}.loadbalancer.server.port=8080"
-      - "traefik.http.middlewares.supabase-guard-{{project_id}}.plugin.supabaseguard.profile=project"
-      - "traefik.http.middlewares.supabase-guard-{{project_id}}.plugin.supabaseguard.mode=${TRAEFIK_GUARD_PROJECT_MODE:-observe}"
-      - "traefik.http.middlewares.supabase-guard-{{project_id}}.plugin.supabaseguard.scope={{project_uuid}}"
-      - "traefik.http.middlewares.supabase-guard-{{project_id}}.plugin.supabaseguard.maxTrackedClients=${TRAEFIK_GUARD_MAX_TRACKED_CLIENTS:-10000}"
-      - "traefik.http.middlewares.supabase-guard-{{project_id}}.plugin.supabaseguard.cleanupInterval=${TRAEFIK_GUARD_CLEANUP_INTERVAL:-5m}"
-      - "traefik.http.middlewares.supabase-guard-{{project_id}}.plugin.supabaseguard.authThreshold=${TRAEFIK_GUARD_AUTH_THRESHOLD:-12}"
-      - "traefik.http.middlewares.supabase-guard-{{project_id}}.plugin.supabaseguard.authWindow=${TRAEFIK_GUARD_AUTH_WINDOW:-10m}"
-      - "traefik.http.middlewares.supabase-guard-{{project_id}}.plugin.supabaseguard.authBanTime=${TRAEFIK_GUARD_AUTH_BAN_TIME:-15m}"
-      - "traefik.http.middlewares.supabase-guard-{{project_id}}.plugin.supabaseguard.scannerThreshold=${TRAEFIK_GUARD_SCANNER_THRESHOLD:-2}"
-      - "traefik.http.middlewares.supabase-guard-{{project_id}}.plugin.supabaseguard.scannerWindow=${TRAEFIK_GUARD_SCANNER_WINDOW:-2m}"
-      - "traefik.http.middlewares.supabase-guard-{{project_id}}.plugin.supabaseguard.scannerBanTime=${TRAEFIK_GUARD_SCANNER_BAN_TIME:-1h}"
-      - "traefik.http.middlewares.nginx-{{project_id}}-stripprefix.stripprefix.prefixes=/{{project_id}}"
-
-
-      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.silentStartUp=true"
-      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.allowLocalRequests=true"
-      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.logLocalRequests=false"
-      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.logAllowedRequests=false"
-      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.logApiRequests=true"
-      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.api=http://geoip-api:8000/v1/ip/country/{ip}"
-      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.apiTimeoutMs=2000"
-      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.cacheSize=100"
-      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.forceMonthlyUpdate=true"
-      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.allowUnknownCountries=false"
-      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.unknownCountryApiResponse=nil"
-
-      #- "traefik.http.middlewares.geoblock-{{project_id}}.plugin.geoblock.countries=BR"
-      - "traefik.http.routers.supabase-nginx-{{project_id}}.middlewares=rate-limit@file,supabase-guard-{{project_id}}@docker,security-headers@file,nginx-{{project_id}}-stripprefix@docker"
-      #- "traefik.http.routers.supabase-nginx-{{project_id}}.middlewares=rate-limit@file,security-headers@file,geoblock-{{project_id}}@docker, nginx-{{project_id}}-stripprefix@docker"
   auth:
     container_name: supabase-auth-{{project_id}}
     image: ${AUTH_IMAGE}
     restart: unless-stopped
+    logging: *vector-logging
     env_file:
       - ../../.env
       - .env
@@ -164,6 +135,7 @@ services:
     container_name: supabase-rest-{{project_id}}
     image: ${POSTGREST_IMAGE}
     restart: unless-stopped
+    logging: *vector-logging
     env_file:
       - ../../.env
       - .env
@@ -198,6 +170,7 @@ services:
     container_name: supabase-storage-{{project_id}}
     image: ${STORAGE_IMAGE}
     restart: unless-stopped
+    logging: *vector-logging
     env_file:
       - ../../.env
       - .env
@@ -249,6 +222,7 @@ services:
     container_name: supabase-imgproxy-{{project_id}}
     image: ${IMGPROXY_IMAGE}
     restart: unless-stopped
+    logging: *vector-logging
     networks:
       - rede-supabase
     volumes:

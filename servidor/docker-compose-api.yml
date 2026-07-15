@@ -1,4 +1,11 @@
-#docker compose -f docker-compose-api.yml --env-file .env up --build -d
+# docker compose -f docker-compose-api.yml -f docker-compose.single-node.yml --env-file .env up --build -d
+x-vector-logging: &vector-logging
+  driver: fluentd
+  options:
+    fluentd-address: ${VECTOR_FLUENTD_ADDRESS:-127.0.0.1:24224}
+    fluentd-async: "true"
+    fluentd-sub-second-precision: "true"
+
 services:
   projects-api:
     container_name: projects-api
@@ -6,12 +13,16 @@ services:
       context: .
       dockerfile: ./api-internal/Dockerfile
     restart: unless-stopped
+    logging: *vector-logging
     stop_grace_period: ${PROJECTS_API_STOP_GRACE_PERIOD}
     env_file:
       - .analytics.env
     networks: [rede-supabase, analytics-internal]
     expose: ["${PROJECTS_API_PORT}"]
     environment:
+      DOCKER_HOST: ${DOCKER_HOST}
+      DOCKER_TLS_VERIFY: ${DOCKER_TLS_VERIFY:-}
+      DOCKER_CERT_PATH: ${DOCKER_CERT_PATH:-}
       DB_DSN: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
       PROJECT_SECRETS_MASTER_KEY: ${PROJECT_SECRETS_MASTER_KEY}
       PROJECT_SECRETS_MASTER_KEY_ID: ${PROJECT_SECRETS_MASTER_KEY_ID}
@@ -32,18 +43,11 @@ services:
       - ./projects:/docker/projects:rw        # bind-mount relativo  :contentReference[oaicite:0]{index=0}
       - ./certs:/docker/push-certs:ro
       - ./.env:/docker/.env:ro
-      - ${DOCKER_SOCKET_LOCATION}:/var/run/docker.sock
-    labels:
-      - traefik.enable=${PROJECTS_API_TRAEFIK_ENABLED}
-      - traefik.docker.network=rede-supabase
-      - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=${PROJECTS_API_ALLOWED_IP_RANGES}
-      - traefik.http.routers.projects.rule=(PathPrefix(`/api/projects`) || PathPrefix(`/api/internal/analytics`)) && Header(`X-Shared-Token`, `${NGINX_SHARED_TOKEN}`)
-      - traefik.http.routers.projects.middlewares=${PROJECTS_API_MIDDLEWARES}
-      - traefik.http.services.projects.loadbalancer.server.port=${PROJECTS_API_PORT}
   postgres-meta-global:
     container_name: postgres-meta-global
     image: ${PG_META_IMAGE}
     restart: unless-stopped
+    logging: *vector-logging
     networks: [rede-supabase]
     expose: ["${PG_META_PORT}"]
     environment:

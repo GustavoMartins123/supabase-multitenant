@@ -9,12 +9,20 @@
 # sudo chown -R 105:106 ./volumes/db/wal_archives/
 # sudo chmod -R 755 ./volumes/db/wal_archives/
 
+x-vector-logging: &vector-logging
+  driver: fluentd
+  options:
+    fluentd-address: ${VECTOR_FLUENTD_ADDRESS:-127.0.0.1:24224}
+    fluentd-async: "true"
+    fluentd-sub-second-precision: "true"
+
 services:
   db:
     container_name: supabase-db
     build:
       context: ./volumes/db
     restart: unless-stopped
+    logging: *vector-logging
     env_file:
       - .env
     networks:
@@ -178,6 +186,7 @@ services:
     container_name: realtime-dev.supabase-realtime
     #image: supabase/realtime:v2.34.41
     restart: unless-stopped
+    logging: *vector-logging
     env_file:
       - .env
     networks:
@@ -226,6 +235,7 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+    logging: *vector-logging
     networks:
         rede-supabase:
           ipv4_address: ${POSTGRES_POOLER}
@@ -273,6 +283,7 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+    logging: *vector-logging
     networks:
       - rede-supabase
     volumes:
@@ -328,29 +339,6 @@ services:
       POSTGRES_BACKEND_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:${POSTGRES_PORT}/_supabase
       POSTGRES_BACKEND_SCHEMA: _analytics
 
-  vector-docker-proxy:
-    image: ${DOCKER_SOCKET_PROXY_IMAGE:-ghcr.io/tecnativa/docker-socket-proxy:v0.4.2}
-    container_name: supabase-vector-docker-proxy
-    restart: unless-stopped
-    environment:
-      CONTAINERS: "1"
-      EVENTS: "1"
-      PING: "1"
-      VERSION: "1"
-      POST: "0"
-      LOG_LEVEL: warning
-    volumes:
-      - ${DOCKER_SOCKET_LOCATION:-/var/run/docker.sock}:/var/run/docker.sock:ro,z
-    networks:
-      - vector-docker-api
-    security_opt:
-      - no-new-privileges:true
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:2375/_ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
   vector:
     image: ${VECTOR_IMAGE}
     container_name: supabase-vector-global
@@ -359,13 +347,12 @@ services:
       - ./volumes/logs/vector.yml:/etc/vector/vector.yml:ro,z
     env_file:
       - .analytics.env
+    ports:
+      - "${VECTOR_FLUENTD_BIND:-127.0.0.1}:${VECTOR_FLUENTD_PORT:-24224}:24224"
     networks:
       - analytics-internal
-      - vector-docker-api
     depends_on:
       analytics:
-        condition: service_healthy
-      vector-docker-proxy:
         condition: service_healthy
     command: ["--config", "/etc/vector/vector.yml"]
     security_opt:
@@ -387,10 +374,6 @@ networks:
           gateway: ${SUPABASE_NETWORK_GATEWAY}
   analytics-internal:
     name: supabase-analytics-internal
-    driver: bridge
-    internal: true
-  vector-docker-api:
-    name: supabase-vector-docker-api
     driver: bridge
     internal: true
 volumes:

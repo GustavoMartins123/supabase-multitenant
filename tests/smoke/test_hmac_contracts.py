@@ -53,6 +53,31 @@ class UserHmacContractTest(unittest.TestCase):
         )
         self.assertEqual(resolved, self.user_id)
 
+    def test_verified_claims_preserve_login_session(self) -> None:
+        login_session = "a" * 43
+        payload = {
+            "sub": str(self.user_id),
+            "iat": self.now,
+            "exp": self.now + 300,
+            "login_session": login_session,
+        }
+        encoded = base64.urlsafe_b64encode(
+            json.dumps(payload, separators=(",", ":")).encode()
+        ).decode().rstrip("=")
+        signature = hmac.new(
+            USER_SECRET.encode(), encoded.encode(), hashlib.sha256
+        ).hexdigest()
+        token = f"v1.{encoded}.{signature}"
+
+        resolved, claims = security_tokens.resolve_user_claims_from_hmac_token(
+            request_with_user_token(token),
+            secret=USER_SECRET,
+            max_clock_skew_seconds=30,
+            now=self.now,
+        )
+        self.assertEqual(self.user_id, resolved)
+        self.assertEqual(login_session, claims["login_session"])
+
     def test_rejects_tampering_and_expiration(self) -> None:
         token = build_user_token(USER_SECRET, str(self.user_id), now=self.now)
         encoded = token.split(".")[1]

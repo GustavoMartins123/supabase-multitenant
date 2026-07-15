@@ -14,7 +14,6 @@ def service_block(compose: str, service: str) -> str:
         start = lines.index(marker) + 1
     except ValueError as exc:
         raise AssertionError(f"Service not found: {service}") from exc
-
     body: list[str] = []
     for line in lines[start:]:
         if line.startswith("  ") and not line.startswith("    ") and line.strip():
@@ -23,83 +22,82 @@ def service_block(compose: str, service: str) -> str:
     return "\n".join(body)
 
 
-class DockerSocketProxyContractTest(unittest.TestCase):
+class DockerSocketRemovalContractTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.server_compose = (
-            ROOT / "servidor" / "docker-compose.yml"
+        self.server_compose = (ROOT / "servidor/docker-compose.yml").read_text(
+            encoding="utf-8"
+        )
+        self.api_compose = (ROOT / "servidor/docker-compose-api.yml").read_text(
+            encoding="utf-8"
+        )
+        self.single_node = (
+            ROOT / "servidor/docker-compose.single-node.yml"
+        ).read_text(encoding="utf-8")
+        self.split_node = (
+            ROOT / "servidor/docker-compose.split-node.yml"
         ).read_text(encoding="utf-8")
         self.traefik_compose = (
-            ROOT / "servidor" / "traefik" / "docker-compose.yml"
+            ROOT / "servidor/traefik/docker-compose.yml"
         ).read_text(encoding="utf-8")
         self.traefik_config = (
-            ROOT / "servidor" / "traefik" / "traefik.yml"
+            ROOT / "servidor/traefik/traefik.yml"
         ).read_text(encoding="utf-8")
         self.vector_config = (
-            ROOT / "servidor" / "volumes" / "logs" / "vector.yml"
+            ROOT / "servidor/volumes/logs/vector.yml"
         ).read_text(encoding="utf-8")
 
-    def assert_read_only_permissions(self, proxy: str) -> None:
-        for permission in ("CONTAINERS", "EVENTS", "PING", "VERSION"):
-            self.assertIn(f'{permission}: "1"', proxy)
-        self.assertIn('POST: "0"', proxy)
-        for permission in (
-            "AUTH",
-            "BUILD",
-            "EXEC",
-            "IMAGES",
-            "INFO",
-            "NETWORKS",
-            "SECRETS",
-            "SYSTEM",
-            "VOLUMES",
-        ):
-            self.assertNotIn(f'{permission}: "1"', proxy)
-
-    def test_traefik_uses_its_own_read_only_proxy(self) -> None:
-        proxy = service_block(self.traefik_compose, "traefik-docker-proxy")
+    def test_traefik_uses_only_file_provider(self) -> None:
         traefik = service_block(self.traefik_compose, "traefik")
+        self.assertNotIn("/var/run/docker.sock", self.traefik_compose)
+        self.assertNotIn("traefik-docker-proxy", self.traefik_compose)
+        self.assertNotIn("  docker:", self.traefik_config)
+        self.assertIn("directory: /etc/traefik/dynamic", self.traefik_config)
+        self.assertIn("./dynamic:/etc/traefik/dynamic:ro", traefik)
+        self.assertNotIn("labels:", traefik)
 
-        self.assertIn("/var/run/docker.sock:ro", proxy)
-        self.assertNotIn("/var/run/docker.sock", traefik)
-        self.assert_read_only_permissions(proxy)
-        self.assertNotIn("ports:", proxy)
-        self.assertIn("traefik-docker-api", proxy)
-        self.assertIn("traefik-docker-api", traefik)
-        self.assertNotIn("rede-supabase", proxy)
-        self.assertIn(
-            "endpoint: tcp://traefik-docker-proxy:2375",
-            self.traefik_config,
-        )
-
-    def test_vector_uses_its_own_read_only_proxy(self) -> None:
-        proxy = service_block(self.server_compose, "vector-docker-proxy")
+    def test_vector_receives_fluent_logs_without_docker_api(self) -> None:
         vector = service_block(self.server_compose, "vector")
+        self.assertNotIn("/var/run/docker.sock", self.server_compose)
+        self.assertNotIn("vector-docker-proxy", self.server_compose)
+        self.assertNotIn("vector-docker-api", self.server_compose)
+        self.assertIn("type: fluent", self.vector_config)
+        self.assertIn("address: 0.0.0.0:24224", self.vector_config)
+        self.assertNotIn("type: docker_logs", self.vector_config)
+        self.assertNotIn("docker_host:", self.vector_config.split("sources:", 1)[1])
+        self.assertIn("VECTOR_FLUENTD_PORT", vector)
 
-        self.assertIn("/var/run/docker.sock:ro,z", proxy)
-        self.assertNotIn("/var/run/docker.sock", vector)
-        self.assert_read_only_permissions(proxy)
+    def test_projects_api_has_no_socket_or_traefik_labels(self) -> None:
+        projects_api = service_block(self.api_compose, "projects-api")
+        self.assertNotIn("/var/run/docker.sock", projects_api)
+        self.assertNotIn("labels:", projects_api)
+        self.assertIn("DOCKER_HOST: ${DOCKER_HOST}", projects_api)
+
+    def test_single_node_is_explicit_and_isolates_lifecycle_proxy(self) -> None:
+        projects_api = service_block(self.single_node, "projects-api")
+        proxy = service_block(self.single_node, "lifecycle-docker-proxy")
+        network = service_block(self.single_node, "lifecycle-docker-api")
+        self.assertIn("tcp://lifecycle-docker-proxy:2375", projects_api)
+        self.assertIn("lifecycle-docker-api", projects_api)
+        self.assertIn("/var/run/docker.sock", proxy)
         self.assertNotIn("ports:", proxy)
-        self.assertIn("vector-docker-api", proxy)
-        self.assertIn("vector-docker-api", vector)
-        self.assertNotIn("analytics-internal", proxy)
-        self.assertIn(
-            "docker_host: http://vector-docker-proxy:2375",
-            self.vector_config,
-        )
+        self.assertIn("internal: true", network)
 
-    def test_proxy_networks_are_internal_and_not_shared(self) -> None:
-        traefik_network = service_block(
-            self.traefik_compose,
-            "traefik-docker-api",
-        )
-        vector_network = service_block(self.server_compose, "vector-docker-api")
+    def test_split_node_keeps_lifecycle_socket_out_of_api(self) -> None:
+        projects_api = service_block(self.split_node, "projects-api")
+        proxy = service_block(self.split_node, "lifecycle-docker-proxy")
+        self.assertIn("tcp://lifecycle-docker-proxy:2375", projects_api)
+        self.assertNotIn("/var/run/docker.sock", projects_api)
+        self.assertIn("/var/run/docker.sock", proxy)
+        self.assertNotIn("ports:", proxy)
 
-        self.assertIn("name: supabase-traefik-docker-api", traefik_network)
-        self.assertIn("internal: true", traefik_network)
-        self.assertIn("name: supabase-vector-docker-api", vector_network)
-        self.assertIn("internal: true", vector_network)
-        self.assertNotIn("vector-docker-api", self.traefik_compose)
-        self.assertNotIn("traefik-docker-api", self.server_compose)
+    def test_startup_profiles_separate_server_and_studio_nodes(self) -> None:
+        start = (ROOT / "start.sh").read_text(encoding="utf-8")
+        stop = (ROOT / "stop_containers.sh").read_text(encoding="utf-8")
+        for profile in ("single-node", "split-node-server", "split-node-studio"):
+            self.assertIn(profile, start)
+            self.assertIn(profile, stop)
+        self.assertIn('API_OVERRIDE="docker-compose.${SERVER_TOPOLOGY}.yml"', start)
+        self.assertIn('if [ "$DEPLOYMENT_PROFILE" = "single-node" ]', start)
 
 
 if __name__ == "__main__":

@@ -24,15 +24,14 @@ flowchart TB
     Traefik --> ProjectNginx[Nginx do projeto]
 
     ProjectsAPI --> PostgreSQL[(PostgreSQL)]
-    ProjectsAPI --> Docker[(Docker daemon)]
+    ProjectsAPI --> LifecycleProxy[Proxy de lifecycle]
+    LifecycleProxy --> Docker[(Docker daemon)]
     ProjectsAPI --> Realtime[Realtime global]
     ProjectsAPI --> Supavisor[Supavisor global]
     ProjectsAPI --> StudioGateway
 
-    Traefik --> TraefikDockerProxy[Docker proxy\nsomente leitura]
-    TraefikDockerProxy --> Docker
-    Vector[Vector] --> VectorDockerProxy[Docker proxy\nsomente leitura]
-    VectorDockerProxy --> Docker
+    DynamicConfig[File Provider] --> Traefik
+    Docker -->|logging driver Fluent| Vector[Vector]
 
     ProjectNginx --> Auth[GoTrue]
     ProjectNginx --> Rest[PostgREST]
@@ -243,6 +242,13 @@ Integrações como push worker e invalidação de cache usam contratos internos 
 
 ### Acesso ao Docker daemon
 
+Traefik, Vector e Projects API nao montam o Docker socket. Traefik observa
+somente arquivos dinamicos; Vector recebe eventos pelo protocolo Fluent; e a
+Projects API usa `DOCKER_HOST` na rede interna do proxy de lifecycle. O unico
+mount do socket fica nesse proxy, sem portas publicadas.
+
+<!-- Descricao historica anterior ao File Provider definitivo:
+
 Traefik e Vector não recebem o Docker socket diretamente. Cada processo usa um
 proxy exclusivo, conectado por uma rede Docker interna que não publica portas.
 Os proxies aceitam somente `GET` e `HEAD` para `version`, `ping`, `events` e
@@ -252,6 +258,8 @@ permanecem bloqueadas.
 A Projects API ainda acessa o socket diretamente porque executa o lifecycle
 completo dos projetos. A remoção desse acesso exige um host agent com operações
 de domínio restritas e permanece uma etapa separada de hardening.
+
+-->
 
 ### Segredos de projeto
 
@@ -305,6 +313,16 @@ Flutter
 Detalhes: [Lifecycle dos projetos](architecture/project-lifecycle.md).
 
 ## Topologias
+
+Os perfis operacionais sao explicitos:
+
+- `./start.sh single-node` inicia servidor e Studio no mesmo host;
+- `./start.sh split-node-server` inicia o servidor principal;
+- `./start.sh split-node-studio` inicia Studio, OpenResty e Authelia no node
+  administrativo.
+
+Os mesmos perfis sao aceitos por `stop_containers.sh`. No split-node, todas as
+chamadas do Studio para a Projects API usam `SERVER_DOMAIN`.
 
 ### Uma máquina
 

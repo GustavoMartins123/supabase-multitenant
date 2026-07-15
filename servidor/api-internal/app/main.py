@@ -16,7 +16,10 @@ from fastapi.responses import JSONResponse, Response
 from app.schemas import NewProject, DuplicateProject, UserSyncPayload, AddMember, TransferBody, UpdateSettings, RecreateServices, ProjectNoteCreate, ProjectTagAssign, ProjectHintCreate, ProjectHintStatusUpdate, ProjectThreadMessageCreate, ProjectRenameRequest, ProjectDisplayNameUpdate, ProjectNotificationRead
 from typing import Any, Optional, List, Dict
 from dotenv import dotenv_values
-from app.security_tokens import resolve_user_id_from_hmac_token as resolve_signed_user_id
+from app.security_tokens import (
+    resolve_user_claims_from_hmac_token as resolve_signed_user_claims,
+    resolve_user_id_from_hmac_token as resolve_signed_user_id,
+)
 from app.pg_meta_crypto import encrypt_postgres_meta_uri
 from app.project_secret_service import (
     decrypt_project_secret,
@@ -71,6 +74,16 @@ db_pool: Optional[asyncpg.Pool] = None
 
 def resolve_user_id_from_hmac_token(request: Request) -> uuid.UUID:
     return resolve_signed_user_id(
+        request,
+        secret=NGINX_HMAC_SECRET,
+        max_clock_skew_seconds=USER_TOKEN_MAX_CLOCK_SKEW_SECONDS,
+    )
+
+
+def resolve_user_claims_from_hmac_token(
+    request: Request,
+) -> tuple[uuid.UUID, dict[str, Any]]:
+    return resolve_signed_user_claims(
         request,
         secret=NGINX_HMAC_SECRET,
         max_clock_skew_seconds=USER_TOKEN_MAX_CLOCK_SKEW_SECONDS,
@@ -473,7 +486,10 @@ async def resolve_authenticated_user(
     request: Request,
     pool: asyncpg.Pool,
 ) -> dict[str, Any]:
-    signed_user_id = resolve_user_id_from_hmac_token(request)
+    signed_user_id, token_claims = resolve_user_claims_from_hmac_token(request)
+    login_session = str(token_claims.get("login_session") or "")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{43}", login_session):
+        login_session = ""
 
     async with pool.acquire() as conn:
         user_row = await conn.fetchrow(
@@ -496,6 +512,19 @@ async def resolve_authenticated_user(
         )
 
         if user_row:
+            if login_session:
+                await conn.execute(
+                    """
+                    UPDATE users
+                    SET last_login_at = now(),
+                        last_login_session_hash = $2,
+                        updated_at = now()
+                    WHERE id = $1
+                      AND last_login_session_hash IS DISTINCT FROM $2
+                    """,
+                    user_row["id"],
+                    login_session,
+                )
             await conn.execute(
                 """
                 UPDATE users

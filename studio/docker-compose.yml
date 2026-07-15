@@ -1,4 +1,11 @@
 #docker compose up --build -d
+x-vector-logging: &vector-logging
+  driver: fluentd
+  options:
+    fluentd-address: ${VECTOR_FLUENTD_ADDRESS:-127.0.0.1:24224}
+    fluentd-async: "true"
+    fluentd-sub-second-precision: "true"
+
 services:
   usersdb-init:
     image: ${USERSDB_INIT_IMAGE}
@@ -10,6 +17,7 @@ services:
       - ./authelia:/seed:ro 
       - usersdb:/config 
     restart: "no"
+    logging: *vector-logging
   authelia:
     image: ${AUTHELIA_IMAGE}
     container_name: authelia
@@ -18,6 +26,7 @@ services:
     environment:
       - TZ=${TZ}
     restart: unless-stopped
+    logging: *vector-logging
 
   nginx:
     build:
@@ -29,6 +38,7 @@ services:
     ports:
       - "${STUDIO_HTTPS_PORT}:443"
     restart: unless-stopped
+    logging: *vector-logging
     depends_on:
       studio:
         condition: service_started
@@ -45,6 +55,7 @@ services:
     container_name: supabase-studio
     image: ${STUDIO_IMAGE}
     restart: unless-stopped
+    logging: *vector-logging
     healthcheck:
       test:
         [
