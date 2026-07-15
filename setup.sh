@@ -227,12 +227,13 @@ get_server_ip() {
 confirm_network_topology() {
     local local_ip="$1"
     local server_ip="$2"
+    local require_confirmation="${3:-true}"
     local answer
 
     echo ""
     print_status "Resumo da topologia detectada:"
     echo "  - IP local desta maquina (Studio/Authelia/Nginx): $local_ip"
-    echo "  - IP ou dominio digitado para o servidor principal: $server_ip"
+    echo "  - IP ou dominio configurado para o servidor principal: $server_ip"
     echo ""
     echo "Como o setup usa esses valores:"
     echo "  - O valor digitado vai para SERVER_URL e SERVER_DOMAIN"
@@ -241,12 +242,16 @@ confirm_network_topology() {
     echo ""
 
     if [[ "$server_ip" == "$local_ip" ]]; then
-        print_warning "Voce digitou o mesmo IP da maquina local."
+        print_warning "O servidor principal usa o mesmo IP da maquina local."
         echo "  Isso prepara o ambiente para rodar servidor principal e Studio na mesma maquina."
         echo "  Se depois voce mover o Studio ou o servidor para outra maquina, normalmente basta ajustar os arquivos .env e recriar os containers envolvidos."
     else
         print_status "Voce esta configurando uma topologia com Studio local e servidor principal em outro host."
         echo "  Isso e o esperado quando a interface administrativa roda em uma maquina e os projetos/API em outra."
+    fi
+
+    if [[ "$require_confirmation" != "true" ]]; then
+        return 0
     fi
 
     echo ""
@@ -269,7 +274,47 @@ confirm_network_topology() {
     done
 }
 
+print_setup_usage() {
+    cat <<'EOF'
+Uso:
+  bash setup.sh single-node
+  bash setup.sh split-node [IP_OU_DOMINIO_DO_SERVIDOR]
+  bash setup.sh
+
+Perfis:
+  single-node  Configura servidor principal e Studio nesta maquina.
+  split-node   Configura o Studio local para acessar o servidor informado.
+
+Sem perfil, o setup mantem o fluxo interativo por compatibilidade.
+EOF
+}
+
 main() {
+    local topology_profile="${1:-interactive}"
+    local configured_server="${2:-}"
+    local validation_result
+
+    if [[ "$topology_profile" == "-h" || "$topology_profile" == "--help" ]]; then
+        print_setup_usage
+        return 0
+    fi
+
+    if [[ $# -gt 2 ]]; then
+        print_error "Argumentos demais."
+        print_setup_usage
+        return 1
+    fi
+
+    case "$topology_profile" in
+        interactive|single-node|split-node)
+            ;;
+        *)
+            print_error "Perfil desconhecido: $topology_profile"
+            print_setup_usage
+            return 1
+            ;;
+    esac
+
     init_transaction
     
     print_status "Iniciando configuração do ambiente..."
@@ -311,9 +356,45 @@ main() {
     SHARED_NGINX_HMAC_SECRET=$(generate_hmac_secret)
     SHARED_INTERNAL_HMAC_SECRET=$(generate_hmac_secret)
 
-    SERVER_IP=$(get_server_ip)
-    SERVER_IP=$(echo "$SERVER_IP" | xargs)
-    confirm_network_topology "$LOCAL_IP" "$SERVER_IP"
+    case "$topology_profile" in
+        single-node)
+            if [[ -n "$configured_server" ]]; then
+                print_error "O perfil single-node usa automaticamente o IP local e nao aceita um servidor separado."
+                return 1
+            fi
+            SERVER_IP="$LOCAL_IP"
+            confirm_network_topology "$LOCAL_IP" "$SERVER_IP" false
+            ;;
+        split-node)
+            if [[ -n "$configured_server" ]]; then
+                SERVER_IP=$(echo "$configured_server" | xargs)
+                if [[ "$SERVER_IP" == "127.0.0.1" || "$SERVER_IP" == "localhost" ]]; then
+                    print_error "split-node exige um IP de rede ou dominio do servidor principal."
+                    return 1
+                fi
+                validation_result=$(validate_input "$SERVER_IP")
+                if [[ "$validation_result" == "invalid" ]] || \
+                   { [[ "$validation_result" == "ip" ]] && ! validate_ip "$SERVER_IP"; } || \
+                   [[ "$SERVER_IP" =~ \.$ ]]; then
+                    print_error "Servidor invalido: $SERVER_IP"
+                    return 1
+                fi
+            else
+                SERVER_IP=$(get_server_ip)
+                SERVER_IP=$(echo "$SERVER_IP" | xargs)
+            fi
+            if [[ "$SERVER_IP" == "$LOCAL_IP" ]]; then
+                print_error "split-node exige que o servidor principal seja diferente desta maquina. Use single-node."
+                return 1
+            fi
+            confirm_network_topology "$LOCAL_IP" "$SERVER_IP" false
+            ;;
+        interactive)
+            SERVER_IP=$(get_server_ip)
+            SERVER_IP=$(echo "$SERVER_IP" | xargs)
+            confirm_network_topology "$LOCAL_IP" "$SERVER_IP"
+            ;;
+    esac
     print_status "Configurando servidor principal..."
     
     if [[ ! -f "servidor/.env.example" ]]; then
@@ -491,6 +572,6 @@ main() {
     
     commit_transaction
 }
-main
+main "$@"
 
 print_success "Script finalizado com sucesso!"

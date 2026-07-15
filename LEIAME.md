@@ -118,12 +118,18 @@ cd supabase-multitenant
 ### 2. Executar o setup
 
 ```bash
-bash setup.sh
+bash setup.sh single-node
 ```
+
+Para instalar tudo em uma unica maquina, `single-node` usa o IP local detectado para o servidor principal e o Studio, sem perguntar a topologia.
+
+Para duas maquinas, use `bash setup.sh split-node <ip-ou-dominio-do-servidor>`. Executar `bash setup.sh` sem perfil mantem o fluxo interativo anterior.
 
 O IP ou domínio solicitado pelo script representa o **servidor principal**, onde rodam Traefik, Projects API e os serviços dos projetos.
 
 O script também detecta o IP da máquina atual, usado pelo Studio local, Authelia, certificado autoassinado e integrações internas.
+
+No modo interativo:
 
 - Informe o IP da máquina local para preparar uma instalação em uma máquina.
 - Informe outro IP ou domínio para preparar a topologia com duas máquinas.
@@ -135,7 +141,7 @@ O setup gera os arquivos de ambiente do servidor e do Studio, incluindo as crede
 #### Início automatizado — recomendado
 
 ```bash
-bash start.sh
+bash start.sh single-node
 ```
 
 `single-node` e o perfil explicito padrao. Para duas maquinas, execute
