@@ -38,6 +38,8 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    cap_add:
+      - DAC_OVERRIDE
     healthcheck:
       test: ["CMD", "python", "-c", "from pathlib import Path; raise SystemExit(0 if Path('/dynamic/routes.yml').is_file() and Path('/dynamic/00-middlewares.yml').is_file() else 1)"]
       interval: 5s

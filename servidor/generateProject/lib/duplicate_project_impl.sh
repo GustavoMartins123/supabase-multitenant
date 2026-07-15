@@ -194,6 +194,14 @@ SQL
 docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
   "ALTER DATABASE \"$NEW_DB\" SET search_path TO public, auth, storage, extensions;"
 
+# supabase_storage_admin tem search_path=storage fixado em nivel de role pela
+# imagem base do Postgres, o que tem precedencia sobre o ALTER DATABASE acima.
+# Sem este override por role+banco, o Storage API nao enxerga o schema public
+# onde o pgvector foi instalado e toda operacao de Vector Buckets (halfvec)
+# falha com "type halfvec does not exist".
+docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
+  "ALTER ROLE supabase_storage_admin IN DATABASE \"$NEW_DB\" SET search_path = storage, public;"
+
 vector_validate_database "$NEW_DB" || die "Clone sem pgvector valido"
 vector_strip_copied_wrappers "$NEW_DB" || die "Falha ao remover wrappers/segredos copiados"
 

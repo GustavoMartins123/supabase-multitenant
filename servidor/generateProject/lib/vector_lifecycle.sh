@@ -67,6 +67,21 @@ BEGIN
 END
 $vector_check$;
 SQL
+
+  docker exec -i supabase-db psql \
+    -X -q -v ON_ERROR_STOP=1 \
+    -U "${POSTGRES_USER:-supabase_admin}" \
+    -d "$database" <<'SQL'
+DO $storage_admin_search_path_check$
+BEGIN
+  SET LOCAL search_path = storage, public;
+  IF to_regtype('halfvec') IS NULL THEN
+    RAISE EXCEPTION
+      'halfvec nao resolve sob search_path=storage,public; supabase_storage_admin nao vai conseguir criar Vector Buckets';
+  END IF;
+END
+$storage_admin_search_path_check$;
+SQL
 }
 
 # A duplicacao de banco pode carregar FDWs, endpoints e segredos Vault do projeto
