@@ -1,18 +1,38 @@
 local cjson = require("cjson.safe")
+local digest = require("resty.openssl.digest")
 local user_identity = require("project_context.user_identity")
 local user_hmac_token = require("security.user_hmac_token")
 
 local M = {}
+
+local function sha256_bin(value)
+    local ctx, err = digest.new("sha256")
+    if not ctx then
+        return nil, err
+    end
+
+    local ok, update_err = ctx:update(value)
+    if not ok then
+        return nil, update_err
+    end
+
+    return ctx:final()
+end
 
 local function login_session_fingerprint()
     local session_cookie = ngx.var.cookie_authelia_session or ""
     if session_cookie == "" then
         return nil
     end
-    return ngx.encode_base64(ngx.sha256_bin(session_cookie))
+    local hash, err = sha256_bin(session_cookie)
+    if not hash then
+        ngx.log(ngx.ERR, "[AUTH] Falha ao calcular fingerprint da sessao: ", err or "erro desconhecido")
+        return nil
+    end
+    return (ngx.encode_base64(hash)
         :gsub("%+", "-")
         :gsub("/", "_")
-        :gsub("=+$", "")
+        :gsub("=+$", ""))
 end
 
 function M.apply(email, groups)
