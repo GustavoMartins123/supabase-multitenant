@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/job.dart';
 import '../models/project_collaboration.dart';
+import '../models/restore_point.dart';
 import '../models/user_models.dart';
 import '../models/project_user_telemetry.dart';
 import '../session.dart';
@@ -578,6 +579,72 @@ class ProjectRepository {
       return null;
     }
     return displayName;
+  }
+
+  Future<RestorePointList> fetchRestorePoints(String ref) async {
+    final resp = await http.get(Uri.parse('/api/projects/$ref/restore-points'));
+    if (resp.statusCode == 200) {
+      final data = jsonDecode(resp.body) as Map<String, dynamic>;
+      final raw = data['points'] as List<dynamic>? ?? [];
+      return RestorePointList(
+        limit: (data['limit'] as num?)?.toInt() ?? 15,
+        points: raw
+            .map(
+              (e) => RestorePoint.fromJson(Map<String, dynamic>.from(e as Map)),
+            )
+            .toList(),
+      );
+    }
+    if (resp.statusCode == 403) {
+      throw Exception('Acesso negado');
+    }
+    throw Exception('Erro ao carregar pontos de restauração: ${resp.body}');
+  }
+
+  Future<Job> createRestorePoint(
+    String ref, {
+    String? title,
+    String? description,
+  }) async {
+    final resp = await http.post(
+      Uri.parse('/api/projects/$ref/restore-points'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        if (title != null && title.trim().isNotEmpty) 'title': title.trim(),
+        if (description != null && description.trim().isNotEmpty)
+          'description': description.trim(),
+      }),
+    );
+    _ensureCommandSucceeded(resp, allowedStatusCodes: const {202});
+    final job = Job.fromResponse(resp);
+    if (job == null) {
+      throw Exception('Resposta de criação de ponto sem job_id');
+    }
+    return job;
+  }
+
+  Future<Job> restoreRestorePoint(String ref, String pointId) async {
+    final resp = await http.post(
+      Uri.parse('/api/projects/$ref/restore-points/$pointId/restore'),
+    );
+    _ensureCommandSucceeded(resp, allowedStatusCodes: const {202});
+    final job = Job.fromResponse(resp);
+    if (job == null) {
+      throw Exception('Resposta de restauração sem job_id');
+    }
+    return job;
+  }
+
+  Future<Job> deleteRestorePoint(String ref, String pointId) async {
+    final resp = await http.delete(
+      Uri.parse('/api/projects/$ref/restore-points/$pointId'),
+    );
+    _ensureCommandSucceeded(resp, allowedStatusCodes: const {202});
+    final job = Job.fromResponse(resp);
+    if (job == null) {
+      throw Exception('Resposta de exclusão sem job_id');
+    }
+    return job;
   }
 
   Future<List<ProjectRenameEvent>> fetchProjectRenameHistory(String ref) async {

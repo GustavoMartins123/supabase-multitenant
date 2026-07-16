@@ -15,6 +15,7 @@ import hmac as hmac_module
 import json
 import os
 import re
+import shutil
 import signal
 import time
 import urllib.parse
@@ -30,7 +31,12 @@ from .host_agent_protocol import (
     DEFAULT_TERM_GRACE,
     sanitize_output,
 )
-from .security import PathConfinementError, resolve_project_dir
+from .security import (
+    PathConfinementError,
+    resolve_backup_dir,
+    resolve_backup_project_dir,
+    resolve_project_dir,
+)
 from .templates import sync_project_generated_files
 
 PROJECT_SERVICE_ORDER = ["meta", "auth", "rest", "imgproxy", "storage", "nginx"]
@@ -95,6 +101,7 @@ class CommandContext:
     state: RunningCommandState
     timeout_seconds: int
     command: str
+    project_uuid: str | None = None
 
 
 @dataclass
@@ -500,6 +507,12 @@ async def handle_delete_project_files(ctx: CommandContext, project: str, args: d
         [project],
         error_code="delete_files_failed",
     )
+    project_uuid = str(args.get("project_uuid") or "").strip()
+    if outcome.status == "done" and project_uuid:
+        removed = await _remove_backup_tree(
+            resolve_backup_project_dir(ctx.config.backups_root, project_uuid)
+        )
+        outcome.result = {**(outcome.result or {}), "backups_removed": removed}
     return outcome
 
 
@@ -532,6 +545,145 @@ async def handle_rename_project(ctx: CommandContext, project: str, args: dict[st
     if outcome.status == "failed" and outcome.error_code == "rename_failed" and rolled_back:
         outcome.error_code = "rename_rolled_back"
     return outcome
+
+
+def _dir_size_bytes(path: Path) -> int:
+    total = 0
+    if not path.is_dir():
+        return total
+    for entry in path.rglob("*"):
+        try:
+            if entry.is_file() and not entry.is_symlink():
+                total += entry.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+async def _remove_backup_tree(path: Path) -> bool:
+    if not path.exists():
+        return False
+    await asyncio.to_thread(shutil.rmtree, path, True)
+    return not path.exists()
+
+
+def _resolve_backup_context(
+    ctx: CommandContext, project: str
+) -> tuple[str, None] | tuple[None, CommandOutcome]:
+    expected = (ctx.project_uuid or "").strip().lower()
+    if not expected:
+        return None, CommandOutcome(
+            status="failed",
+            error_code="project_uuid_missing",
+            message="Intencao sem project_uuid; impossivel localizar backups.",
+        )
+    env_uuid = _load_project_env(ctx, project).get("PROJECT_UUID", "").strip().lower()
+    if env_uuid != expected:
+        return None, CommandOutcome(
+            status="failed",
+            error_code="project_uuid_mismatch",
+            message="PROJECT_UUID do .env difere da intencao assinada.",
+        )
+    return expected, None
+
+
+async def handle_backup_project(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
+    resolve_project_dir(ctx.config.projects_root, project, must_exist=True)
+    project_uuid, failure = _resolve_backup_context(ctx, project)
+    if failure is not None:
+        return failure
+    backup_id = str(args["backup_id"]).lower()
+    backup_dir = resolve_backup_dir(ctx.config.backups_root, project_uuid, backup_id)
+    if backup_dir.exists():
+        return CommandOutcome(
+            status="failed",
+            error_code="backup_exists",
+            message=f"Ponto de restauracao {backup_id} ja existe.",
+        )
+    ctx.state.report(
+        progress=5,
+        step="capture_backup",
+        message="Capturando banco e storage do projeto...",
+    )
+    outcome, _ = await _run_lifecycle_script(
+        ctx,
+        "backup_project.sh",
+        [project, backup_id],
+        error_code="backup_failed",
+    )
+    if outcome.status == "done":
+        size = await asyncio.to_thread(_dir_size_bytes, backup_dir)
+        outcome.result = {**(outcome.result or {}), "size_bytes": size}
+    return outcome
+
+
+async def handle_restore_project(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
+    resolve_project_dir(ctx.config.projects_root, project, must_exist=True)
+    project_uuid, failure = _resolve_backup_context(ctx, project)
+    if failure is not None:
+        return failure
+    backup_id = str(args["backup_id"]).lower()
+    safety_backup_id = str(args["safety_backup_id"]).lower()
+    backup_dir = resolve_backup_dir(
+        ctx.config.backups_root, project_uuid, backup_id, must_exist=True
+    )
+    if not (backup_dir / "manifest.json").is_file():
+        return CommandOutcome(
+            status="failed",
+            error_code="backup_manifest_missing",
+            message=f"Ponto {backup_id} sem manifest.json; backup invalido.",
+        )
+    safety_dir = resolve_backup_dir(
+        ctx.config.backups_root, project_uuid, safety_backup_id
+    )
+    if safety_dir.exists():
+        return CommandOutcome(
+            status="failed",
+            error_code="safety_backup_exists",
+            message=f"Ponto de seguranca {safety_backup_id} ja existe.",
+        )
+    ctx.state.report(
+        progress=5,
+        step="restore_project",
+        message=f"Restaurando {project} para o ponto {backup_id}...",
+    )
+    outcome, process = await _run_lifecycle_script(
+        ctx,
+        "restore_project.sh",
+        [project, backup_id, safety_backup_id],
+        error_code="restore_failed",
+        markers=("SAFETY_BACKUP_COMPLETE", "ROLLBACK_COMPLETE"),
+    )
+    safety_completed = "SAFETY_BACKUP_COMPLETE" in process.markers_seen
+    rolled_back = "ROLLBACK_COMPLETE" in process.markers_seen
+    result = {
+        "rolled_back": rolled_back,
+        "safety_backup_completed": safety_completed,
+    }
+    if safety_completed:
+        result["safety_backup_size_bytes"] = await asyncio.to_thread(
+            _dir_size_bytes, safety_dir
+        )
+    outcome.result = {**(outcome.result or {}), **result}
+    if outcome.status == "failed" and outcome.error_code == "restore_failed" and rolled_back:
+        outcome.error_code = "restore_rolled_back"
+    return outcome
+
+
+async def handle_delete_restore_point(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
+    project_uuid, failure = _resolve_backup_context(ctx, project)
+    if failure is not None:
+        return failure
+    backup_id = str(args["backup_id"]).lower()
+    backup_dir = resolve_backup_dir(ctx.config.backups_root, project_uuid, backup_id)
+    removed = await _remove_backup_tree(backup_dir)
+    if backup_dir.exists():
+        return CommandOutcome(
+            status="failed",
+            error_code="delete_backup_failed",
+            message=f"Nao foi possivel remover o ponto {backup_id}.",
+        )
+    return CommandOutcome(status="done", result={"removed": removed})
 
 
 async def handle_container_logs(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
@@ -660,6 +812,9 @@ COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "delete_project_files": handle_delete_project_files,
     "rotate_keys": handle_rotate_keys,
     "rename_project": handle_rename_project,
+    "backup_project": handle_backup_project,
+    "restore_project": handle_restore_project,
+    "delete_restore_point": handle_delete_restore_point,
     "container_logs": handle_container_logs,
     "terminate_supavisor_tenant": handle_terminate_supavisor_tenant,
     "delete_supavisor_tenant": handle_delete_supavisor_tenant,

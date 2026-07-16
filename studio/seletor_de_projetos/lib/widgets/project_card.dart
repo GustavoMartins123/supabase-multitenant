@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../dialogs/restore_points_dialog.dart';
 import '../models/project_collaboration.dart';
 import '../project_collaboration_dialog.dart';
 import '../providers/project_collaboration_provider.dart';
+import '../providers/restore_points_provider.dart';
 import '../providers/project_settings_provider.dart';
 import '../project_settings_dialog.dart';
 import '../supabase_colors.dart';
@@ -72,6 +74,14 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
       builder: (_) => ProjectCollaborationDialog(projectRef: widget.refKey),
     );
     ref.invalidate(projectCollaborationProvider(widget.refKey));
+  }
+
+  Future<void> _openRestorePoints() async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => RestorePointsDialog(projectRef: widget.refKey),
+    );
+    ref.invalidate(restorePointsProvider(widget.refKey));
   }
 
   String get _projectUrl {
@@ -299,6 +309,7 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
                           onSelected: (val) {
                             if (val == 'settings') _openSettings();
                             if (val == 'duplicate') widget.onDuplicate();
+                            if (val == 'restore_points') _openRestorePoints();
                           },
                           itemBuilder: (ctx) => [
                             _buildMenuItem(
@@ -310,6 +321,11 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
                               'duplicate',
                               Icons.copy_outlined,
                               'Duplicar projeto e dados',
+                            ),
+                            _buildMenuItem(
+                              'restore_points',
+                              Icons.settings_backup_restore_rounded,
+                              'Pontos de restauração',
                             ),
                           ],
                         ),

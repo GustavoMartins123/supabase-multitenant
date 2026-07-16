@@ -12,7 +12,7 @@ import urllib.parse
 import httpx
 from fastapi import FastAPI, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
-from app.schemas import NewProject, DuplicateProject, UserSyncPayload, AddMember, TransferBody, UpdateSettings, RecreateServices, ProjectNoteCreate, ProjectTagAssign, ProjectHintCreate, ProjectHintStatusUpdate, ProjectThreadMessageCreate, ProjectRenameRequest, ProjectDisplayNameUpdate, ProjectNotificationRead
+from app.schemas import NewProject, DuplicateProject, UserSyncPayload, AddMember, TransferBody, UpdateSettings, RecreateServices, ProjectNoteCreate, ProjectTagAssign, ProjectHintCreate, ProjectHintStatusUpdate, ProjectThreadMessageCreate, ProjectRenameRequest, ProjectDisplayNameUpdate, ProjectNotificationRead, RestorePointCreate
 from typing import Any, Optional, List, Dict
 from dotenv import dotenv_values
 from app.security_tokens import (
@@ -56,7 +56,11 @@ from app.validation import (
     normalize_groups, parse_uuid_value, validate_project_id,
     validate_service_name,
 )
-from app.database_schema import ensure_collaboration_schema, ensure_identity_schema
+from app.database_schema import (
+    ensure_collaboration_schema,
+    ensure_identity_schema,
+    ensure_restore_points_schema,
+)
 from app.control_plane_service import (
     audit_studio_action,
     create_studio_notification,
@@ -259,6 +263,41 @@ async def _build_recovery_runner(row: asyncpg.Record):
             history["new_name"],
             actor_user_id,
         )
+    if action == "backup":
+        point_id = parse_uuid_value(str(payload.get("restore_point_id") or ""))
+        if point_id is None:
+            return None
+        actor = parse_uuid_value(str(payload.get("actor_user_id") or "")) or owner_id
+        return lambda: _create_restore_point_background(
+            job_id,
+            project_name,
+            actor,
+            point_id,
+        )
+    if action == "restore":
+        point_id = parse_uuid_value(str(payload.get("restore_point_id") or ""))
+        safety_id = parse_uuid_value(str(payload.get("safety_point_id") or ""))
+        if point_id is None or safety_id is None:
+            return None
+        actor = parse_uuid_value(str(payload.get("actor_user_id") or "")) or owner_id
+        return lambda: _restore_project_background(
+            job_id,
+            project_name,
+            actor,
+            point_id,
+            safety_id,
+        )
+    if action == "delete_restore_point":
+        point_id = parse_uuid_value(str(payload.get("restore_point_id") or ""))
+        if point_id is None:
+            return None
+        actor = parse_uuid_value(str(payload.get("actor_user_id") or "")) or owner_id
+        return lambda: _delete_restore_point_background(
+            job_id,
+            project_name,
+            actor,
+            point_id,
+        )
     if action in {"start", "stop", "restart"}:
         async def run_container_action() -> None:
             if action == "start":
@@ -321,13 +360,13 @@ async def _recover_pending_jobs() -> None:
         project = r["project"]
         old_status = r["status"]
         action = r["action"]
-        # Rename volta a ser retomavel: o runner religa no comando que o
-        # host-agent continua executando (ou reusa o resultado terminal),
-        # em vez de reexecutar o script.
+        # Rename, backup, restore e delete de ponto sao retomaveis: o
+        # runner religa no comando que o host-agent continua executando
+        # (ou reusa o resultado terminal), em vez de reexecutar o script.
         can_resume = (
             old_status == "queued"
             or action in RECOVERABLE_RUNNING_ACTIONS
-            or action == "rename"
+            or action in {"rename", "backup", "restore", "delete_restore_point"}
         )
         try:
             runner = await _build_recovery_runner(r) if can_resume and action else None
@@ -394,6 +433,24 @@ async def _recover_pending_jobs() -> None:
                     message,
                     r["job_id"],
                 )
+                await conn.execute(
+                    """
+                    UPDATE project_restore_points
+                    SET status = 'failed', error = $1, updated_at = now()
+                    WHERE job_id = $2 AND status IN ('creating', 'deleting')
+                    """,
+                    message,
+                    r["job_id"],
+                )
+                await conn.execute(
+                    """
+                    UPDATE project_restore_points
+                    SET status = 'ready', error = $1, updated_at = now()
+                    WHERE job_id = $2 AND status = 'restoring'
+                    """,
+                    message,
+                    r["job_id"],
+                )
                 project_row = await conn.fetchrow(
                     "SELECT id FROM projects WHERE name = $1",
                     project,
@@ -443,6 +500,7 @@ async def startup():
     await ensure_jobs_schema(db_pool)
     await ensure_host_agent_schema(db_pool)
     await ensure_collaboration_schema(db_pool)
+    await ensure_restore_points_schema(db_pool)
     print("✅ Database pool initialized")
     await _recover_pending_jobs()
 
@@ -2334,6 +2392,753 @@ async def get_project_rename_history(
     }
 
 
+RESTORE_POINT_LIMIT = 15
+
+
+def _serialize_restore_point(row: asyncpg.Record) -> dict[str, Any]:
+    def iso(column: str) -> str | None:
+        value = row[column]
+        return value.isoformat() if value else None
+
+    return {
+        "id": str(row["id"]),
+        "title": row["title"],
+        "description": row["description"],
+        "status": row["status"],
+        "is_automatic": row["is_automatic"],
+        "job_id": str(row["job_id"]) if row["job_id"] else None,
+        "created_by": str(row["created_by"]) if row["created_by"] else None,
+        "created_by_name": row["created_by_name"],
+        "project_ref_at_creation": row["project_ref_at_creation"],
+        "size_bytes": row["size_bytes"],
+        "last_restored_at": iso("last_restored_at"),
+        "restore_count": row["restore_count"],
+        "error": row["error"],
+        "created_at": iso("created_at"),
+        "completed_at": iso("completed_at"),
+    }
+
+
+async def _fetch_restore_point_locked(
+    conn: asyncpg.Connection,
+    project_id: uuid.UUID,
+    point_id: uuid.UUID,
+) -> asyncpg.Record:
+    row = await conn.fetchrow(
+        """
+        SELECT * FROM project_restore_points
+        WHERE id = $1 AND project_id = $2
+        FOR UPDATE
+        """,
+        point_id,
+        project_id,
+    )
+    if not row:
+        raise HTTPException(404, "Ponto de restauração não encontrado")
+    return row
+
+
+async def _count_active_restore_points(
+    conn: asyncpg.Connection,
+    project_id: uuid.UUID,
+) -> int:
+    return await conn.fetchval(
+        """
+        SELECT count(*) FROM project_restore_points
+        WHERE project_id = $1 AND status <> 'failed'
+        """,
+        project_id,
+    )
+
+
+@app.get("/api/projects/{project_name}/restore-points")
+async def list_project_restore_points(
+    project_name: str,
+    request: Request,
+    pool=Depends(get_pool),
+):
+    project_name = validate_project_id(project_name)
+    auth_user = await resolve_authenticated_user(request, pool)
+
+    async with pool.acquire() as conn:
+        project_row = await get_project_row(conn, project_name)
+        await ensure_project_member_access(
+            conn,
+            project_id=project_row["id"],
+            auth_user=auth_user,
+        )
+        rows = await conn.fetch(
+            """
+            SELECT
+                p.*,
+                COALESCE(u.display_name, u.authelia_username, 'Sistema') AS created_by_name
+            FROM project_restore_points p
+            LEFT JOIN users u ON u.id = p.created_by
+            WHERE p.project_id = $1
+            ORDER BY p.created_at DESC
+            """,
+            project_row["id"],
+        )
+
+    return {
+        "project": project_name,
+        "limit": RESTORE_POINT_LIMIT,
+        "points": [_serialize_restore_point(row) for row in rows],
+    }
+
+
+@app.post("/api/projects/{project_name}/restore-points", status_code=202)
+async def create_project_restore_point(
+    project_name: str,
+    body: RestorePointCreate,
+    request: Request,
+    pool=Depends(get_pool),
+):
+    project_name = validate_project_id(project_name)
+    auth_user = await resolve_authenticated_user(request, pool)
+    title = (body.title or "").strip() or dt.datetime.now().strftime("%d/%m/%Y %H:%M")
+    description = (body.description or "").strip() or None
+    point_id = uuid.uuid4()
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            project_row = await get_project_row(conn, project_name)
+            project_id = project_row["id"]
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                str(project_id),
+            )
+            await ensure_project_member_access(
+                conn,
+                project_id=project_id,
+                auth_user=auth_user,
+            )
+            active = await _count_active_restore_points(conn, project_id)
+            if active >= RESTORE_POINT_LIMIT:
+                raise HTTPException(
+                    409,
+                    f"Limite de {RESTORE_POINT_LIMIT} pontos de restauração "
+                    "atingido; exclua um ponto antes de criar outro.",
+                )
+            job_id = await _create_project_job(
+                pool,
+                project_name,
+                auth_user["db_user_id"],
+                message="Criação de ponto de restauração enfileirada.",
+                action="backup",
+                payload={
+                    "project_name": project_name,
+                    "actor_user_id": str(auth_user["db_user_id"]),
+                    "restore_point_id": str(point_id),
+                },
+                total_steps=2,
+                project_uuid=project_id,
+                connection=conn,
+            )
+            await conn.execute(
+                """
+                INSERT INTO project_restore_points(
+                    id, project_id, title, description, status, is_automatic,
+                    job_id, created_by, project_ref_at_creation
+                )
+                VALUES($1, $2, $3, $4, 'creating', false, $5, $6, $7)
+                """,
+                point_id,
+                project_id,
+                title,
+                description,
+                uuid.UUID(job_id),
+                auth_user["db_user_id"],
+                project_name,
+            )
+
+    position = await _enqueue_project_action(
+        project_name,
+        job_id,
+        lambda: _create_restore_point_background(
+            job_id, project_name, auth_user["db_user_id"], point_id
+        ),
+    )
+    return JSONResponse(
+        status_code=202,
+        content={
+            "job_id": job_id,
+            "restore_point_id": str(point_id),
+            "status": "queued",
+            "queue_position": position,
+            "message": (
+                "Criação do ponto de restauração enfileirada."
+                if position == 0
+                else f"Criação enfileirada. Existem {position} ações antes "
+                f"desta na fila para {project_name}."
+            ),
+        },
+    )
+
+
+@app.post(
+    "/api/projects/{project_name}/restore-points/{point_id}/restore",
+    status_code=202,
+)
+async def restore_project_restore_point(
+    project_name: str,
+    point_id: str,
+    request: Request,
+    pool=Depends(get_pool),
+):
+    project_name = validate_project_id(project_name)
+    parsed_point = parse_uuid_value(point_id)
+    if parsed_point is None:
+        raise HTTPException(400, "Id do ponto de restauração inválido")
+    auth_user = await resolve_authenticated_user(request, pool)
+    safety_point_id = uuid.uuid4()
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            project_row = await get_project_row(conn, project_name)
+            project_id = project_row["id"]
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                str(project_id),
+            )
+            await ensure_project_member_access(
+                conn,
+                project_id=project_id,
+                auth_user=auth_user,
+            )
+            point = await _fetch_restore_point_locked(conn, project_id, parsed_point)
+            if point["status"] != "ready":
+                raise HTTPException(
+                    409,
+                    f"Ponto de restauração em estado '{point['status']}'; "
+                    "apenas pontos prontos podem ser restaurados.",
+                )
+            active = await _count_active_restore_points(conn, project_id)
+            if active >= RESTORE_POINT_LIMIT:
+                raise HTTPException(
+                    409,
+                    "A restauração cria um ponto automático de segurança e o "
+                    f"limite de {RESTORE_POINT_LIMIT} pontos foi atingido; "
+                    "exclua um ponto antes de restaurar.",
+                )
+            safety_title = f"Automático — antes de restaurar '{point['title']}'"[:80]
+            job_id = await _create_project_job(
+                pool,
+                project_name,
+                auth_user["db_user_id"],
+                message="Restauração enfileirada.",
+                action="restore",
+                payload={
+                    "project_name": project_name,
+                    "actor_user_id": str(auth_user["db_user_id"]),
+                    "restore_point_id": str(parsed_point),
+                    "safety_point_id": str(safety_point_id),
+                },
+                total_steps=3,
+                project_uuid=project_id,
+                connection=conn,
+            )
+            await conn.execute(
+                """
+                INSERT INTO project_restore_points(
+                    id, project_id, title, description, status, is_automatic,
+                    job_id, created_by, project_ref_at_creation
+                )
+                VALUES($1, $2, $3, NULL, 'creating', true, $4, $5, $6)
+                """,
+                safety_point_id,
+                project_id,
+                safety_title,
+                uuid.UUID(job_id),
+                auth_user["db_user_id"],
+                project_name,
+            )
+            await conn.execute(
+                """
+                UPDATE project_restore_points
+                SET status = 'restoring', job_id = $2, error = NULL, updated_at = now()
+                WHERE id = $1
+                """,
+                parsed_point,
+                uuid.UUID(job_id),
+            )
+
+    position = await _enqueue_project_action(
+        project_name,
+        job_id,
+        lambda: _restore_project_background(
+            job_id,
+            project_name,
+            auth_user["db_user_id"],
+            parsed_point,
+            safety_point_id,
+        ),
+    )
+    return JSONResponse(
+        status_code=202,
+        content={
+            "job_id": job_id,
+            "restore_point_id": str(parsed_point),
+            "safety_point_id": str(safety_point_id),
+            "status": "queued",
+            "queue_position": position,
+            "message": (
+                "Restauração enfileirada. O projeto ficará indisponível "
+                "durante o processo."
+                if position == 0
+                else f"Restauração enfileirada. Existem {position} ações "
+                f"antes desta na fila para {project_name}."
+            ),
+        },
+    )
+
+
+@app.delete(
+    "/api/projects/{project_name}/restore-points/{point_id}",
+    status_code=202,
+)
+async def delete_project_restore_point(
+    project_name: str,
+    point_id: str,
+    request: Request,
+    pool=Depends(get_pool),
+):
+    project_name = validate_project_id(project_name)
+    parsed_point = parse_uuid_value(point_id)
+    if parsed_point is None:
+        raise HTTPException(400, "Id do ponto de restauração inválido")
+    auth_user = await resolve_authenticated_user(request, pool)
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            project_row = await get_project_row(conn, project_name)
+            project_id = project_row["id"]
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                str(project_id),
+            )
+            await ensure_project_member_access(
+                conn,
+                project_id=project_id,
+                auth_user=auth_user,
+            )
+            point = await _fetch_restore_point_locked(conn, project_id, parsed_point)
+            if point["status"] not in ("ready", "failed"):
+                raise HTTPException(
+                    409,
+                    f"Ponto de restauração em estado '{point['status']}'; "
+                    "aguarde a operação atual terminar.",
+                )
+            job_id = await _create_project_job(
+                pool,
+                project_name,
+                auth_user["db_user_id"],
+                message="Exclusão de ponto de restauração enfileirada.",
+                action="delete_restore_point",
+                payload={
+                    "project_name": project_name,
+                    "actor_user_id": str(auth_user["db_user_id"]),
+                    "restore_point_id": str(parsed_point),
+                },
+                total_steps=1,
+                project_uuid=project_id,
+                connection=conn,
+            )
+            await conn.execute(
+                """
+                UPDATE project_restore_points
+                SET status = 'deleting', job_id = $2, updated_at = now()
+                WHERE id = $1
+                """,
+                parsed_point,
+                uuid.UUID(job_id),
+            )
+
+    position = await _enqueue_project_action(
+        project_name,
+        job_id,
+        lambda: _delete_restore_point_background(
+            job_id, project_name, auth_user["db_user_id"], parsed_point
+        ),
+    )
+    return JSONResponse(
+        status_code=202,
+        content={
+            "job_id": job_id,
+            "restore_point_id": str(parsed_point),
+            "status": "queued",
+            "queue_position": position,
+            "message": "Exclusão do ponto de restauração enfileirada.",
+        },
+    )
+
+
+async def _create_restore_point_background(
+    job_id: str,
+    project_name: str,
+    actor_user_id: uuid.UUID,
+    point_id: uuid.UUID,
+) -> None:
+    pool = await get_pool()
+    try:
+        await _set_job_status(
+            job_id,
+            "running",
+            message="Criando ponto de restauração...",
+            progress=5,
+            current_step="capture_backup",
+            total_steps=2,
+        )
+        record = await run_host_agent_command_for_job(
+            pool,
+            job_id=job_id,
+            command="backup_project",
+            project=project_name,
+            project_uuid=await _get_job_project_uuid(pool, job_id),
+            requested_by=actor_user_id,
+            args={"backup_id": str(point_id)},
+            reuse_terminal=True,
+            on_progress=_job_progress_mirror(job_id),
+        )
+        if record["status"] != "done":
+            detail = record["message"] or record["error_code"] or "erro desconhecido"
+            await pool.execute(
+                """
+                UPDATE project_restore_points
+                SET status = 'failed', error = $2, updated_at = now()
+                WHERE id = $1
+                """,
+                point_id,
+                str(detail)[:2000],
+            )
+            await _fail_job_from_command(
+                job_id,
+                record,
+                default_error="backup_failed",
+                message_prefix="Falha ao criar ponto de restauração",
+            )
+            return
+
+        size_bytes = command_result(record).get("size_bytes")
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE project_restore_points
+                SET status = 'ready', size_bytes = $2, error = NULL,
+                    completed_at = now(), updated_at = now()
+                WHERE id = $1
+                RETURNING project_id, title
+                """,
+                point_id,
+                size_bytes,
+            )
+            if row:
+                await audit_studio_action(
+                    conn,
+                    project_id=row["project_id"],
+                    actor_user_id=actor_user_id,
+                    action="restore_point_created",
+                    target_type="restore_point",
+                    target_id=str(point_id),
+                    new_value={"title": row["title"], "size_bytes": size_bytes},
+                )
+        await _set_job_status(
+            job_id,
+            "done",
+            message="Ponto de restauração criado.",
+            current_step="completed",
+        )
+    except Exception as exc:
+        try:
+            await pool.execute(
+                """
+                UPDATE project_restore_points
+                SET status = 'failed', error = $2, updated_at = now()
+                WHERE id = $1 AND status = 'creating'
+                """,
+                point_id,
+                str(exc)[:2000],
+            )
+        except Exception:
+            pass
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=f"Falha inesperada ao criar ponto de restauração: {exc}",
+            error_code="unexpected_backup_error",
+        )
+        print(f"[restore_point] backup {project_name}: {exc}")
+
+
+async def _restore_project_background(
+    job_id: str,
+    project_name: str,
+    actor_user_id: uuid.UUID,
+    point_id: uuid.UUID,
+    safety_point_id: uuid.UUID,
+) -> None:
+    pool = await get_pool()
+    try:
+        await _set_job_status(
+            job_id,
+            "running",
+            message="Restaurando projeto para o ponto selecionado...",
+            progress=5,
+            current_step="restore_project",
+            total_steps=3,
+        )
+        record = await run_host_agent_command_for_job(
+            pool,
+            job_id=job_id,
+            command="restore_project",
+            project=project_name,
+            project_uuid=await _get_job_project_uuid(pool, job_id),
+            requested_by=actor_user_id,
+            args={
+                "backup_id": str(point_id),
+                "safety_backup_id": str(safety_point_id),
+            },
+            reuse_terminal=True,
+            on_progress=_job_progress_mirror(job_id),
+        )
+        result = command_result(record)
+        safety_completed = bool(result.get("safety_backup_completed"))
+        async with pool.acquire() as conn:
+            if safety_completed:
+                await conn.execute(
+                    """
+                    UPDATE project_restore_points
+                    SET status = 'ready', size_bytes = $2, error = NULL,
+                        completed_at = now(), updated_at = now()
+                    WHERE id = $1
+                    """,
+                    safety_point_id,
+                    result.get("safety_backup_size_bytes"),
+                )
+            else:
+                await conn.execute(
+                    "DELETE FROM project_restore_points WHERE id = $1",
+                    safety_point_id,
+                )
+
+        if record["status"] != "done":
+            output = (record["stdout_tail"] or record["message"] or "").strip()
+            rolled_back = (
+                bool(result.get("rolled_back")) or "ROLLBACK_COMPLETE" in output
+            )
+            detail = record["message"] or record["error_code"] or "erro desconhecido"
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    UPDATE project_restore_points
+                    SET status = 'ready', error = $2, updated_at = now()
+                    WHERE id = $1
+                    RETURNING project_id, title
+                    """,
+                    point_id,
+                    str(detail)[:2000],
+                )
+                if row:
+                    await audit_studio_action(
+                        conn,
+                        project_id=row["project_id"],
+                        actor_user_id=actor_user_id,
+                        action="restore_point_restore_failed",
+                        target_type="restore_point",
+                        target_id=str(point_id),
+                        new_value={
+                            "title": row["title"],
+                            "rolled_back": rolled_back,
+                            "error_code": record["error_code"],
+                        },
+                    )
+            await _set_job_status(
+                job_id,
+                "failed",
+                message=(
+                    "Falha na restauração."
+                    + (
+                        " O estado anterior foi restaurado (rollback)."
+                        if rolled_back
+                        else " O projeto pode estar em estado parcial."
+                    )
+                    + f"\n\n{output[-2000:]}"
+                ),
+                current_step=(
+                    "rollback_completed" if rolled_back else "rollback_unconfirmed"
+                ),
+                error_code=(
+                    "restore_rolled_back" if rolled_back else "restore_failed"
+                ),
+                stdout_tail=record["stdout_tail"],
+                stderr_tail=record["stderr_tail"],
+            )
+            return
+
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE project_restore_points
+                SET status = 'ready', last_restored_at = now(),
+                    restore_count = restore_count + 1, error = NULL,
+                    updated_at = now()
+                WHERE id = $1
+                RETURNING project_id, title
+                """,
+                point_id,
+            )
+            if row:
+                await audit_studio_action(
+                    conn,
+                    project_id=row["project_id"],
+                    actor_user_id=actor_user_id,
+                    action="restore_point_restored",
+                    target_type="restore_point",
+                    target_id=str(point_id),
+                    new_value={
+                        "title": row["title"],
+                        "safety_point_id": str(safety_point_id)
+                        if safety_completed
+                        else None,
+                    },
+                )
+        safety_note = (
+            " Um ponto automático com o estado anterior foi criado."
+            if safety_completed
+            else ""
+        )
+        await _set_job_status(
+            job_id,
+            "done",
+            message=f"Projeto restaurado para o ponto selecionado.{safety_note}",
+            current_step="completed",
+        )
+    except Exception as exc:
+        try:
+            await pool.execute(
+                """
+                UPDATE project_restore_points
+                SET status = 'ready', error = $2, updated_at = now()
+                WHERE id = $1 AND status = 'restoring'
+                """,
+                point_id,
+                str(exc)[:2000],
+            )
+            await pool.execute(
+                """
+                UPDATE project_restore_points
+                SET status = 'failed', error = $2, updated_at = now()
+                WHERE id = $1 AND status = 'creating'
+                """,
+                safety_point_id,
+                str(exc)[:2000],
+            )
+        except Exception:
+            pass
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=f"Falha inesperada na restauração: {exc}",
+            error_code="unexpected_restore_error",
+        )
+        print(f"[restore_point] restore {project_name}: {exc}")
+
+
+async def _delete_restore_point_background(
+    job_id: str,
+    project_name: str,
+    actor_user_id: uuid.UUID,
+    point_id: uuid.UUID,
+) -> None:
+    pool = await get_pool()
+    try:
+        await _set_job_status(
+            job_id,
+            "running",
+            message="Excluindo ponto de restauração...",
+            progress=10,
+            current_step="delete_restore_point",
+            total_steps=1,
+        )
+        record = await run_host_agent_command_for_job(
+            pool,
+            job_id=job_id,
+            command="delete_restore_point",
+            project=project_name,
+            project_uuid=await _get_job_project_uuid(pool, job_id),
+            requested_by=actor_user_id,
+            args={"backup_id": str(point_id)},
+            reuse_terminal=True,
+            on_progress=_job_progress_mirror(job_id),
+        )
+        if record["status"] != "done":
+            detail = record["message"] or record["error_code"] or "erro desconhecido"
+            await pool.execute(
+                """
+                UPDATE project_restore_points
+                SET status = 'failed', error = $2, updated_at = now()
+                WHERE id = $1
+                """,
+                point_id,
+                str(detail)[:2000],
+            )
+            await _fail_job_from_command(
+                job_id,
+                record,
+                default_error="delete_backup_failed",
+                message_prefix="Falha ao excluir ponto de restauração",
+            )
+            return
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                DELETE FROM project_restore_points
+                WHERE id = $1
+                RETURNING project_id, title, is_automatic
+                """,
+                point_id,
+            )
+            if row:
+                await audit_studio_action(
+                    conn,
+                    project_id=row["project_id"],
+                    actor_user_id=actor_user_id,
+                    action="restore_point_deleted",
+                    target_type="restore_point",
+                    target_id=str(point_id),
+                    old_value={
+                        "title": row["title"],
+                        "is_automatic": row["is_automatic"],
+                    },
+                )
+        await _set_job_status(
+            job_id,
+            "done",
+            message="Ponto de restauração excluído.",
+            current_step="completed",
+        )
+    except Exception as exc:
+        try:
+            await pool.execute(
+                """
+                UPDATE project_restore_points
+                SET status = 'failed', error = $2, updated_at = now()
+                WHERE id = $1 AND status = 'deleting'
+                """,
+                point_id,
+                str(exc)[:2000],
+            )
+        except Exception:
+            pass
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=f"Falha inesperada ao excluir ponto de restauração: {exc}",
+            error_code="unexpected_delete_backup_error",
+        )
+        print(f"[restore_point] delete {project_name}: {exc}")
+
+
 @app.post("/api/projects/{project_name}/tags", status_code=201)
 async def assign_project_tag(
     project_name: str,
@@ -3043,7 +3848,11 @@ async def _delete_project_impl(
                 total_steps=8,
             )
 
-    async def agent_step(command: str, project_uuid: uuid.UUID | None):
+    async def agent_step(
+        command: str,
+        project_uuid: uuid.UUID | None,
+        args: dict[str, Any] | None = None,
+    ):
         if current_job_id:
             return await run_host_agent_command_for_job(
                 pool,
@@ -3052,6 +3861,7 @@ async def _delete_project_impl(
                 project=project_name,
                 project_uuid=project_uuid,
                 requested_by=job_requested_by,
+                args=args,
                 reuse_terminal=True,
             )
         return await run_host_agent_command(
@@ -3060,6 +3870,7 @@ async def _delete_project_impl(
             project=project_name,
             project_uuid=project_uuid,
             requested_by=job_requested_by,
+            args=args,
         )
 
     await report(5, "load_project_state", "Carregando estado do projeto...")
@@ -3202,7 +4013,12 @@ async def _delete_project_impl(
 
     await report(90, "remove_files", "Removendo arquivos do projeto...")
     if database_removed:
-        files_record = await agent_step("delete_project_files", None)
+        files_args = (
+            {"project_uuid": project_uuid}
+            if project_uuid and parse_uuid_value(project_uuid)
+            else None
+        )
+        files_record = await agent_step("delete_project_files", None, files_args)
         if files_record["status"] != "done":
             detail = (
                 (files_record["stderr_tail"] or "").strip()

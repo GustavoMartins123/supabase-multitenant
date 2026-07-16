@@ -59,3 +59,7 @@ class ProjectDisplayNameUpdate(BaseModel):
 
 class ProjectNotificationRead(BaseModel):
     read: bool = True
+
+class RestorePointCreate(BaseModel):
+    title: Optional[str] = Field(default=None, max_length=80)
+    description: Optional[str] = Field(default=None, max_length=400)

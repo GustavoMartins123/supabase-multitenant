@@ -42,6 +42,9 @@ COMMAND_TIMEOUTS: dict[str, int] = {
     "delete_project_files": 300,
     "rotate_keys": 900,
     "rename_project": 3_600,
+    "backup_project": 1_800,
+    "restore_project": 3_600,
+    "delete_restore_point": 120,
     "container_logs": 60,
     "terminate_supavisor_tenant": 60,
     "delete_supavisor_tenant": 60,
@@ -50,10 +53,11 @@ COMMAND_TIMEOUTS: dict[str, int] = {
 
 HOST_AGENT_COMMANDS = frozenset(COMMAND_TIMEOUTS)
 
-# Tempo extra concedido apos SIGTERM antes do SIGKILL. O rename trata TERM
-# executando rollback compensatorio (Compose + verificacoes de banco).
+# Tempo extra concedido apos SIGTERM antes do SIGKILL. O rename e o restore
+# tratam TERM executando rollback compensatorio (Compose + verificacoes de banco).
 COMMAND_TERM_GRACE: dict[str, int] = {
     "rename_project": 240,
+    "restore_project": 240,
 }
 DEFAULT_TERM_GRACE = 30
 
@@ -66,6 +70,14 @@ GLOBAL_ADMIN_COMMANDS = frozenset(
         "terminate_supavisor_tenant",
         "delete_supavisor_tenant",
         "delete_realtime_tenant",
+    }
+)
+
+PROJECT_MEMBER_COMMANDS = frozenset(
+    {
+        "backup_project",
+        "restore_project",
+        "delete_restore_point",
     }
 )
 
@@ -144,13 +156,16 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
         "stop_project",
         "restart_project",
         "delete_project_containers",
-        "delete_project_files",
         "rotate_keys",
         "terminate_supavisor_tenant",
         "delete_supavisor_tenant",
         "delete_realtime_tenant",
     }:
         reject_unknown(set())
+    elif command == "delete_project_files":
+        reject_unknown({"project_uuid"})
+        if "project_uuid" in args and not is_valid_uuid(args.get("project_uuid")):
+            errors.append("invalid_project_uuid")
     elif command == "recreate_services":
         reject_unknown({"services"})
         services = args.get("services")
@@ -176,6 +191,21 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
         require_project_field("new_name")
         if args.get("new_name") == project:
             errors.append("new_name_equals_project")
+    elif command == "backup_project":
+        reject_unknown({"backup_id"})
+        if not is_valid_uuid(args.get("backup_id")):
+            errors.append("invalid_backup_id")
+    elif command == "restore_project":
+        reject_unknown({"backup_id", "safety_backup_id"})
+        for field in ("backup_id", "safety_backup_id"):
+            if not is_valid_uuid(args.get(field)):
+                errors.append(f"invalid_{field}")
+        if args.get("backup_id") == args.get("safety_backup_id"):
+            errors.append("backup_id_equals_safety_backup_id")
+    elif command == "delete_restore_point":
+        reject_unknown({"backup_id"})
+        if not is_valid_uuid(args.get("backup_id")):
+            errors.append("invalid_backup_id")
     elif command == "container_logs":
         reject_unknown({"service", "lines"})
         service = args.get("service")
@@ -304,6 +334,13 @@ def evaluate_authorization(
     if command in GLOBAL_ADMIN_COMMANDS:
         if not is_global_admin:
             return "global_admin_required"
+    elif command in PROJECT_MEMBER_COMMANDS:
+        if not (
+            is_global_admin
+            or is_owner
+            or member_role in ("admin", "member")
+        ):
+            return "project_member_required"
     else:
         if not (is_global_admin or is_owner or member_role == "admin"):
             return "project_admin_required"

@@ -182,6 +182,64 @@ Exemplos:
 
 A recriação é executada como job idempotente conhecido.
 
+## Pontos de restauração
+
+Um ponto de restauração captura **dados, não identidade**: o dump do
+database `_supabase_<project_ref>` (sem o schema `realtime`, que é
+capturado à parte como no duplicate) e o tar do diretório `storage/`,
+mais um `manifest.json` com UUID, ref na época, versão do Postgres e as
+tabelas da publication do Realtime.
+
+Ficam fora do ponto: `.env`, JWT secret, anon/service keys, config token,
+tenants do Realtime/Supavisor e configuração de containers. Por isso um
+ponto continua restaurável depois de rotação de chaves e de rename — os
+arquivos vivem em `servidor/backups/<project_uuid>/<point_id>/`, chaveados
+pelo UUID imutável.
+
+### Captura (fria)
+
+O backup é frio por decisão de produto: o script para os serviços do
+projeto (o Postgres compartilhado continua de pé), encerra os pools do
+tenant no Supavisor, captura banco + storage de forma atômica
+(`<id>.tmp` + rename) e religa somente os containers que estavam rodando.
+
+### Restauração
+
+1. para os serviços do projeto, shutdown do tenant Realtime e terminate
+   dos pools do Supavisor;
+2. captura um **ponto automático de segurança** com o estado atual e emite
+   `SAFETY_BACKUP_COMPLETE`;
+3. dropa os replication slots, renomeia o database atual para
+   `_supabase_<ref>_prerestore` (é o plano de rollback, não um DROP);
+4. cria o database novo, restaura o dump e reaplica as correções
+   conhecidas do duplicate: partições de `realtime.messages`, publications
+   (com as tabelas do manifest), `TRUNCATE realtime.subscription`,
+   `search_path`, override do `supabase_storage_admin`, grants e validação
+   do contrato pgvector;
+5. recria o slot principal, troca o diretório `storage/`
+   (`storage.prerestore` como fallback), religa os containers, espera o
+   Storage ficar healthy e sincroniza os wrappers vetoriais;
+6. só então remove `_supabase_<ref>_prerestore` e `storage.prerestore`.
+
+Falhas disparam rollback compensatório com marker `ROLLBACK_COMPLETE`,
+como no rename. O ponto de segurança sobrevive à falha e vira um ponto
+normal na listagem.
+
+A restauração reverte também os usuários e sessões do Auth (o schema
+`auth` faz parte do banco). Keys e URL do projeto não mudam.
+
+### Control plane
+
+A tabela `project_restore_points` guarda título (default: data/hora),
+descrição, status (`creating`, `ready`, `restoring`, `deleting`,
+`failed`), flag de ponto automático, tamanho, contadores de restauração e
+o job associado. Limite de 15 pontos ativos por projeto; a restauração
+exige uma vaga livre para o ponto automático. Todas as operações são
+auditadas em `studio_audit_log` e acessíveis a qualquer membro do projeto
+ou admin global. `backup` e `restore` não são idempotentes: o recovery da
+API religa na intenção existente do host-agent em vez de reexecutar. O
+delete do projeto remove `servidor/backups/<uuid>/` junto com os arquivos.
+
 ## Start, stop e restart
 
 Essas operações:
@@ -257,6 +315,7 @@ O job é marcado com erro de revisão manual, preservando:
 
 - `tests/smoke/test_tenant_lifecycle.py`
 - `tests/smoke/test_jobs_contract.py`
+- `tests/smoke/test_restore_points_contract.py`
 - `tests/smoke/test_project_access_and_deletion_contract.py`
 - `tests/smoke/test_service_key_cache_contract.py`
 - `tests/smoke/test_key_generation_contract.py`

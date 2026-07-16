@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .host_agent_protocol import is_valid_project_name
+from .host_agent_protocol import is_valid_project_name, is_valid_uuid
 
 
 class PathConfinementError(RuntimeError):
@@ -54,4 +54,37 @@ def ensure_inside(root: Path, target: Path) -> Path:
     resolved = target.resolve(strict=False)
     if not resolved.is_relative_to(resolved_root):
         raise PathConfinementError("path_escapes_root", str(resolved))
+    return resolved
+
+
+def _resolve_child(root: Path, name: str) -> Path:
+    candidate = root / name
+    if candidate.is_symlink():
+        raise PathConfinementError("symlink_rejected", str(candidate))
+    resolved = candidate.resolve(strict=False)
+    if resolved.parent != root or resolved.name != name:
+        raise PathConfinementError("path_escapes_root", str(resolved))
+    return resolved
+
+
+def resolve_backup_project_dir(backups_root: Path, project_uuid: str) -> Path:
+    if not is_valid_uuid(project_uuid):
+        raise PathConfinementError("invalid_project_uuid", str(project_uuid))
+    root = backups_root.resolve(strict=True)
+    return _resolve_child(root, project_uuid.lower())
+
+
+def resolve_backup_dir(
+    backups_root: Path,
+    project_uuid: str,
+    backup_id: str,
+    *,
+    must_exist: bool = False,
+) -> Path:
+    if not is_valid_uuid(backup_id):
+        raise PathConfinementError("invalid_backup_id", str(backup_id))
+    project_dir = resolve_backup_project_dir(backups_root, project_uuid)
+    resolved = _resolve_child(project_dir, backup_id.lower())
+    if must_exist and not resolved.is_dir():
+        raise PathConfinementError("backup_dir_missing", str(resolved))
     return resolved

@@ -111,6 +111,38 @@ async def ensure_identity_schema(pool: asyncpg.Pool) -> None:
         )
 
 
+async def ensure_restore_points_schema(pool: asyncpg.Pool) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS project_restore_points (
+                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                description TEXT,
+                status TEXT NOT NULL DEFAULT 'creating'
+                    CHECK (status IN ('creating', 'ready', 'restoring', 'deleting', 'failed')),
+                is_automatic BOOLEAN NOT NULL DEFAULT false,
+                job_id UUID,
+                created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                project_ref_at_creation TEXT,
+                size_bytes BIGINT,
+                last_restored_at TIMESTAMPTZ,
+                restore_count INTEGER NOT NULL DEFAULT 0,
+                error TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                completed_at TIMESTAMPTZ
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_project_restore_points_project_created
+                ON project_restore_points(project_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_project_restore_points_job
+                ON project_restore_points(job_id);
+            """
+        )
+
+
 async def ensure_collaboration_schema(pool: asyncpg.Pool) -> None:
     async with pool.acquire() as conn:
         await conn.execute(

@@ -43,11 +43,19 @@ verificadas por teste):
 | `delete_project_files` | `delete_project.sh` | 300s |
 | `rotate_keys` | `rotate_key.sh` | 900s |
 | `rename_project` | `rename_project.sh` (TERM grace de 240s p/ rollback) | 3600s |
+| `backup_project` | `backup_project.sh` (ponto de restauração frio: para os serviços do projeto, captura banco + storage em `servidor/backups/<uuid>/<id>/`, religa) | 1800s |
+| `restore_project` | `restore_project.sh` (cria ponto de segurança, troca banco e storage; TERM grace de 240s p/ rollback) | 3600s |
+| `delete_restore_point` | remoção confinada do diretório do ponto | 120s |
 | `container_logs` | docker inspect + logs, saída sanitizada | 60s |
 | `terminate_supavisor_tenant` / `delete_supavisor_tenant` / `delete_realtime_tenant` | curl dentro do container do serviço, token construído localmente | 60s |
 
-Não existe comando que aceite argv, path ou SQL arbitrário. `backup_project`
-e `restore_project` estão reservados para quando backup/restore existirem.
+Não existe comando que aceite argv, path ou SQL arbitrário. Os comandos de
+ponto de restauração recebem apenas UUIDs validados nos dois lados; o path
+resolvido fica confinado a `servidor/backups/<project_uuid>/` e o
+`project_uuid` vem da própria intenção assinada, conferido contra o `.env`
+do projeto. Diferente do restante do lifecycle, eles são autorizados para
+qualquer membro do projeto (`PROJECT_MEMBER_COMMANDS`), além de owner e
+admin global.
 
 ## Segurança
 

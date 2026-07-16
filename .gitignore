@@ -1,6 +1,7 @@
 servidor/docker/projects/**
 !servidor/docker/projects/**/.gitkeep
 servidor/docker/.env
+servidor/backups/
 
 servidor/docker/volumes/db/data/*
 

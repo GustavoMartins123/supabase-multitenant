@@ -80,6 +80,17 @@ class ClosedCommandSetTest(unittest.TestCase):
             ("container_logs", "meuprojeto", {"service": "auth", "lines": 100000}),
             ("container_logs", "meuprojeto", {"service": "auth/../db", "lines": 10}),
             ("start_project", "meuprojeto", {"extra": True}),
+            ("backup_project", "meuprojeto", {"backup_id": "../escape"}),
+            ("backup_project", "meuprojeto", {}),
+            ("restore_project", "meuprojeto", {
+                "backup_id": "9c8ce9f0-3b4e-4bcb-a739-2c1e8ad0e9aa",
+                "safety_backup_id": "9c8ce9f0-3b4e-4bcb-a739-2c1e8ad0e9aa",
+            }),
+            ("restore_project", "meuprojeto", {
+                "backup_id": "9c8ce9f0-3b4e-4bcb-a739-2c1e8ad0e9aa",
+            }),
+            ("delete_restore_point", "meuprojeto", {"backup_id": "x; rm -rf /"}),
+            ("delete_project_files", "meuprojeto", {"project_uuid": "nao-e-uuid"}),
         ]
         for command, project, args in cases:
             with self.subTest(command=command, project=project, args=args):
@@ -98,6 +109,14 @@ class ClosedCommandSetTest(unittest.TestCase):
             }),
             ("rename_project", "meuprojeto", {"new_name": "novo_nome"}),
             ("container_logs", "meuprojeto", {"service": "auth", "lines": 100}),
+            ("backup_project", "meuprojeto", {"backup_id": tenant_uuid}),
+            ("restore_project", "meuprojeto", {
+                "backup_id": tenant_uuid,
+                "safety_backup_id": "1b671a64-40d5-491e-99b0-da01ff1f3341",
+            }),
+            ("delete_restore_point", "meuprojeto", {"backup_id": tenant_uuid}),
+            ("delete_project_files", "meuprojeto", {}),
+            ("delete_project_files", "meuprojeto", {"project_uuid": tenant_uuid}),
         ]
         for command, project, args in cases:
             with self.subTest(command=command):
@@ -226,6 +245,15 @@ class AuthorizationMatrixTest(unittest.TestCase):
         self.assertIsNone(self.check("start_project", is_owner=True))
         self.assertIsNone(self.check("start_project", member_role="admin"))
         self.assertIsNone(self.check("start_project", is_global_admin=True))
+
+    def test_restore_point_commands_allow_any_project_member(self) -> None:
+        for command in sorted(protocol.PROJECT_MEMBER_COMMANDS):
+            with self.subTest(command=command):
+                self.assertEqual(self.check(command), "project_member_required")
+                self.assertIsNone(self.check(command, member_role="member"))
+                self.assertIsNone(self.check(command, member_role="admin"))
+                self.assertIsNone(self.check(command, is_owner=True))
+                self.assertIsNone(self.check(command, is_global_admin=True))
 
     def test_project_row_and_uuid_are_revalidated(self) -> None:
         self.assertEqual(

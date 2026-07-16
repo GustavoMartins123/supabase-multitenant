@@ -21,6 +21,7 @@ class AgentConfig:
     root: Path
     projects_root: Path
     scripts_dir: Path
+    backups_root: Path
     dsn: str
     hmac_secret: str
     worker_id: str
@@ -51,10 +52,12 @@ def load_config(root: str | Path) -> AgentConfig:
 
     projects_root = (root_path / "projects").resolve()
     scripts_dir = (root_path / "generateProject").resolve()
+    backups_root = (root_path / "backups").resolve()
     if not projects_root.is_dir():
         raise ConfigError(f"diretorio de projetos ausente: {projects_root}")
     if not scripts_dir.is_dir():
         raise ConfigError(f"diretorio de scripts ausente: {scripts_dir}")
+    backups_root.mkdir(exist_ok=True)
 
     hmac_secret = (
         os.environ.get("HOST_AGENT_HMAC_SECRET")
@@ -88,6 +91,7 @@ def load_config(root: str | Path) -> AgentConfig:
         root=root_path,
         projects_root=projects_root,
         scripts_dir=scripts_dir,
+        backups_root=backups_root,
         dsn=dsn,
         hmac_secret=hmac_secret,
         worker_id=worker_id,

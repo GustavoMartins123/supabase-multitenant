@@ -92,7 +92,8 @@ O control plane também mantém recursos administrativos que não pertencem aos 
 - `studio_project_thread_messages`;
 - `studio_project_notifications`;
 - `studio_audit_log`;
-- `project_name_history`.
+- `project_name_history`;
+- `project_restore_points`.
 
 Esses recursos usam o UUID do projeto como referência. Um rename não cria um novo projeto e não deve quebrar notas, tags, histórico ou auditoria.
 

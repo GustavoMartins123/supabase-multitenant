@@ -250,6 +250,7 @@ class ProjectService {
     String jobId, {
     Duration every = const Duration(seconds: 3),
     int max = 100,
+    void Function(Map<String, dynamic> data)? onUpdate,
   }) async {
     Map<String, dynamic> lastData = const {};
     for (var i = 0; i < max; i++) {
@@ -258,6 +259,7 @@ class ProjectService {
           .get(Uri.parse('/api/projects/status/$jobId'))
           .then((r) => jsonDecode(r.body) as Map<String, dynamic>)
           .catchError((_) => <String, dynamic>{});
+      if (data.isNotEmpty) onUpdate?.call(data);
 
       final st = data['status']?.toString() ?? 'unknown';
       final message = data['message']?.toString();
