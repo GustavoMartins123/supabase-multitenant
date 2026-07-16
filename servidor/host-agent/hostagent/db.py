@@ -86,8 +86,8 @@ async def lease_next_command(
                 UPDATE host_agent_commands
                 SET status = 'running',
                     worker_id = $2,
-                    lease_seconds = $3,
-                    lease_expires_at = now() + make_interval(secs => $3),
+                    lease_seconds = $3::integer,
+                    lease_expires_at = now() + make_interval(secs => $3::integer),
                     heartbeat_at = now(),
                     started_at = COALESCE(started_at, now()),
                     updated_at = now()
@@ -115,7 +115,7 @@ async def heartbeat_command(
     await pool.execute(
         """
         UPDATE host_agent_commands
-        SET lease_expires_at = now() + make_interval(secs => $3),
+        SET lease_expires_at = now() + make_interval(secs => $3::integer),
             heartbeat_at = now(),
             stdout_tail = COALESCE($4, stdout_tail),
             stderr_tail = COALESCE($5, stderr_tail),

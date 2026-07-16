@@ -106,6 +106,19 @@ class ClosedCommandSetTest(unittest.TestCase):
                 )
 
 
+class LeaseSqlTypingTest(unittest.TestCase):
+    def test_lease_duration_has_an_explicit_integer_type(self) -> None:
+        source = (
+            AGENT_ROOT / "hostagent" / "db.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("lease_seconds = $3::integer", source)
+        self.assertEqual(
+            source.count("make_interval(secs => $3::integer)"),
+            2,
+            "Lease e heartbeat devem tipar a duracao como integer.",
+        )
+
+
 class HmacSignatureTest(unittest.TestCase):
     FIELDS = dict(
         command_id="9c8ce9f0-3b4e-4bcb-a739-2c1e8ad0e9aa",
