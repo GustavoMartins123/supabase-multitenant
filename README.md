@@ -127,6 +127,12 @@ For two machines, use `bash setup.sh split-node <server-ip-or-domain>`. Running 
 
 The script also detects the IP of the current machine, used by the local Studio, Authelia, the self-signed certificate and internal integrations.
 
+After the setup, install the **host-agent** on the main server. It is the systemd service that executes the physical project lifecycle (Docker and scripts) — the Projects API only writes signed intents to the database and no longer touches Docker:
+
+```bash
+sudo bash servidor/host-agent/install.sh
+```
+
 In interactive mode:
 
 - Enter the local machine IP to prepare a single-machine installation.

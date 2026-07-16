@@ -127,6 +127,12 @@ Para duas maquinas, use `bash setup.sh split-node <ip-ou-dominio-do-servidor>`. 
 
 O IP ou domínio solicitado pelo script representa o **servidor principal**, onde rodam Traefik, Projects API e os serviços dos projetos.
 
+Depois do setup, instale o **host-agent** no servidor principal. Ele é o serviço systemd que executa o lifecycle físico dos projetos (Docker e scripts) — a Projects API apenas grava intenções assinadas no banco e não toca mais no Docker:
+
+```bash
+sudo bash servidor/host-agent/install.sh
+```
+
 O script também detecta o IP da máquina atual, usado pelo Studio local, Authelia, certificado autoassinado e integrações internas.
 
 No modo interativo:

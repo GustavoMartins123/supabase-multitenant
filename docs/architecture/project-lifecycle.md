@@ -1,6 +1,6 @@
 # Lifecycle dos projetos
 
-O lifecycle é executado pela Projects API e por scripts em `servidor/generateProject/`.
+O lifecycle é orquestrado pela Projects API, mas a execução física (Docker e os scripts em `servidor/generateProject/`) acontece no [host-agent](host-agent.md): a API grava a intenção assinada no banco e aguarda o agent executar o comando fechado.
 
 Operações longas são representadas por jobs persistentes. O endpoint HTTP normalmente cria o job e retorna seu identificador; a execução continua na fila serializada do projeto.
 

@@ -8,9 +8,8 @@ Os componentes principais são:
 - OpenResty/Lua;
 - Projects API em FastAPI;
 - database `postgres`;
-- scripts de lifecycle;
-- Docker Socket direto, restrito a este componente até a extração de um host
-  agent;
+- host-agent no servidor, que executa os scripts de lifecycle e o Docker
+  (ver [host-agent](host-agent.md));
 - integrações internas com Realtime, Supavisor, Postgres-Meta e Studio.
 
 ## Responsabilidades
@@ -204,28 +203,21 @@ O cliente não controla host, usuário, database ou header de conexão.
 
 ## Integrações internas
 
-### Projects API para Docker
+### Projects API para o host-agent
 
-A Projects API nao monta o Docker socket. O Docker CLI usa `DOCKER_HOST` para
-acessar o proxy de lifecycle na rede interna `supabase-lifecycle-docker-api`.
-Somente esse proxy monta o socket no servidor e ele nao publica portas.
+A Projects API nao executa Docker nem shell. Ela grava intencoes assinadas
+com `HOST_AGENT_HMAC_SECRET` na tabela `host_agent_commands` e o host-agent
+(servico systemd no host) faz o lease, revalida assinatura, argumentos e
+autorizacao e executa o comando fechado. O contrato completo (comandos,
+lease/heartbeat/timeout, confinamento de paths e sanitizacao de saida) esta
+em [host-agent](host-agent.md).
+
+O proxy Docker de lifecycle foi removido junto com o `DOCKER_HOST` da API.
+O estado dos containers exibido nos endpoints de status vem do snapshot
+`project_container_state`, mantido pelo agent.
 
 Traefik usa exclusivamente o File Provider. Vector recebe logs pelo logging
-driver Fluent. Nenhum dos dois consulta a API Docker.
-
-<!-- Descricao historica anterior ao File Provider definitivo:
-
-Traefik e Vector usam proxies Docker separados e somente leitura. A Projects
-API permanece com acesso direto ao socket porque seus jobs executam create,
-build, compose, start, stop, rename e delete. Um socket proxy que liberasse
-essas operações teria privilégios quase equivalentes ao socket original.
-
-A fronteira futura é um host agent local que exponha operações de domínio
-validadas por project ref, em vez de comandos Docker arbitrários. Até essa
-migração, qualquer mudança no lifecycle deve preservar validação de nomes,
-paths permitidos, serialização dos jobs e auditoria.
-
--->
+driver Fluent. Nenhum componente em container consulta a API Docker.
 
 ### OpenResty para Projects API
 

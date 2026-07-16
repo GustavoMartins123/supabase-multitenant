@@ -5,7 +5,6 @@ import asyncpg
 import hmac
 import base64
 import hashlib
-import signal
 import time
 import datetime as dt
 import asyncio, json, re
@@ -37,11 +36,21 @@ from app.jobs import (
     set_job_status as _set_job_status,
 )
 from app.runtime_config import (
-    ANALYTICS_INTERNAL_URL, BASE_DIR, DB_DSN, DELETE_SCRIPT, DUPLICATE_SCRIPT, EXTRACTOR,
+    ANALYTICS_INTERNAL_URL, BASE_DIR, DB_DSN,
     KEY_EXPIRY_WARNING_DAYS, NGINX_HMAC_SECRET, NGINX_SHARED_TOKEN, PG_META_CRYPTO_KEY,
-    LOGFLARE_PRIVATE_ACCESS_TOKEN, PG_META_INTERNAL_URL, REALTIME_INTERNAL_URL, RENAME_SCRIPT, ROTATE_SCRIPT,
-    SCRIPT, SUPAVISOR_INTERNAL_URL, USER_TOKEN_MAX_CLOCK_SKEW_SECONDS,
+    LOGFLARE_PRIVATE_ACCESS_TOKEN, PG_META_INTERNAL_URL, REALTIME_INTERNAL_URL,
+    SUPAVISOR_INTERNAL_URL, USER_TOKEN_MAX_CLOCK_SKEW_SECONDS,
     service_key_transport_fernet,
+)
+from app.host_agent import (
+    HostAgentError,
+    HostAgentOffline,
+    command_result,
+    ensure_host_agent_schema,
+    fetch_project_containers,
+    run_command as run_host_agent_command,
+    run_command_for_job as run_host_agent_command_for_job,
+    worker_alive as host_agent_alive,
 )
 from app.validation import (
     normalize_groups, parse_uuid_value, validate_project_id,
@@ -135,6 +144,64 @@ async def rollback_project_from_db(pool, project_name: str):
         print(f"Erro no rollback do banco: {e}")
 
 
+async def _get_job_project_uuid(pool, job_id: str) -> uuid.UUID | None:
+    return await pool.fetchval(
+        "SELECT project_uuid FROM jobs WHERE job_id = $1", uuid.UUID(str(job_id))
+    )
+
+
+def _job_progress_mirror(job_id: str):
+    """Espelha progresso do comando do host-agent no job correspondente."""
+
+    async def on_progress(command_row) -> None:
+        try:
+            progress = command_row["progress"]
+            await _set_job_status(
+                job_id,
+                "running",
+                message=command_row["message"],
+                progress=max(1, min(95, progress)) if progress else None,
+                current_step=command_row["current_step"],
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[host_agent] falha ao espelhar progresso do job {job_id}: {exc}")
+
+    return on_progress
+
+
+async def _fail_job_from_command(
+    job_id: str,
+    command_row,
+    *,
+    default_error: str,
+    message_prefix: str,
+) -> None:
+    """Propaga a falha de um comando do host-agent para o job."""
+    detail = command_row["message"] or command_row["error_code"] or "erro desconhecido"
+    await _set_job_status(
+        job_id,
+        "failed",
+        message=f"{message_prefix}: {detail}",
+        stdout_tail=command_row["stdout_tail"],
+        stderr_tail=command_row["stderr_tail"],
+        error_code=command_row["error_code"] or default_error,
+    )
+
+
+def _read_project_secret_keys(project_name: str) -> dict[str, str]:
+    """Le as chaves do projeto direto do .env gerado pelos scripts.
+
+    Substitui o antigo extract_token.sh: as chaves nunca mais passam por
+    stdout de subprocesso (que agora e sanitizado pelo host-agent).
+    """
+    env_values = _read_env_file(_get_project_env_path(project_name))
+    return {
+        "anon_key": (env_values.get("ANON_KEY_PROJETO") or "").strip(),
+        "service_role": (env_values.get("SERVICE_ROLE_KEY_PROJETO") or "").strip(),
+        "config_token": (env_values.get("CONFIG_TOKEN_PROJETO") or "").strip(),
+    }
+
+
 app = FastAPI()
 
 
@@ -194,33 +261,22 @@ async def _build_recovery_runner(row: asyncpg.Record):
         )
     if action in {"start", "stop", "restart"}:
         async def run_container_action() -> None:
-            containers = await get_project_containers(project_name)
-            if not containers:
-                await _set_job_status(
-                    job_id,
-                    "failed",
-                    message="Retomada falhou: nenhum container do projeto foi encontrado.",
-                    error_code="recovery_containers_missing",
-                )
-                return
             if action == "start":
                 await _start_project_containers_background(
                     job_id,
                     project_name,
-                    containers,
                     owner_id,
                 )
             elif action == "stop":
                 await _stop_project_containers_background(
                     job_id,
                     project_name,
-                    containers,
+                    owner_id,
                 )
             else:
                 await _restart_project_containers_background(
                     job_id,
                     project_name,
-                    containers,
                     owner_id,
                 )
 
@@ -265,7 +321,14 @@ async def _recover_pending_jobs() -> None:
         project = r["project"]
         old_status = r["status"]
         action = r["action"]
-        can_resume = old_status == "queued" or action in RECOVERABLE_RUNNING_ACTIONS
+        # Rename volta a ser retomavel: o runner religa no comando que o
+        # host-agent continua executando (ou reusa o resultado terminal),
+        # em vez de reexecutar o script.
+        can_resume = (
+            old_status == "queued"
+            or action in RECOVERABLE_RUNNING_ACTIONS
+            or action == "rename"
+        )
         try:
             runner = await _build_recovery_runner(r) if can_resume and action else None
             if runner is not None:
@@ -378,6 +441,7 @@ async def startup():
     await ensure_identity_schema(db_pool)
     await ensure_project_secrets_schema(db_pool)
     await ensure_jobs_schema(db_pool)
+    await ensure_host_agent_schema(db_pool)
     await ensure_collaboration_schema(db_pool)
     print("✅ Database pool initialized")
     await _recover_pending_jobs()
@@ -1598,7 +1662,12 @@ async def _rename_project_background(
     new_name: str,
     actor_user_id: uuid.UUID,
 ) -> None:
-    """Executa o script de rename em background e atualiza o job/audit."""
+    """Delegar o rename ao host-agent e finalizar o control plane.
+
+    Em caso de shutdown da API o comando segue executando no host-agent;
+    o recovery do startup religa neste job e finaliza o rename (ou o
+    rollback) com o resultado persistido pelo agent.
+    """
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
@@ -1612,101 +1681,24 @@ async def _rename_project_background(
             total_steps=9,
         )
 
-        if not RENAME_SCRIPT.exists():
-            raise RuntimeError(f"Script de rename não encontrado: {RENAME_SCRIPT}")
-
-        proc = await asyncio.create_subprocess_exec(
-            "bash",
-            str(RENAME_SCRIPT),
-            old_name,
-            new_name,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            start_new_session=True,
+        record = await run_host_agent_command_for_job(
+            pool,
+            job_id=job_id,
+            command="rename_project",
+            project=old_name,
+            project_uuid=project_id,
+            requested_by=actor_user_id,
+            args={"new_name": new_name},
+            reuse_terminal=True,
+            on_progress=_job_progress_mirror(job_id),
         )
-        try:
-            stdout, _ = await proc.communicate()
-        except asyncio.CancelledError:
-            try:
-                os.killpg(proc.pid, signal.SIGTERM)
-                # O shell trata SIGTERM executando rollback compensatório. O
-                # timeout precisa cobrir o Compose e as verificações do banco.
-                await asyncio.wait_for(proc.wait(), timeout=210)
-            except (ProcessLookupError, asyncio.TimeoutError):
-                try:
-                    os.killpg(proc.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                await proc.wait()
-            cancel_output = ""
-            if proc.stdout is not None:
-                cancel_output = (
-                    await proc.stdout.read()
-                ).decode(errors="replace").strip()
-            rolled_back = "ROLLBACK_COMPLETE" in cancel_output
-            history_status = "rolled_back" if rolled_back else "failed"
-            audit_action = (
-                "project_rename_rolled_back"
-                if rolled_back
-                else "project_rename_failed"
-            )
-            try:
-                async with pool.acquire() as conn:
-                    await _update_rename_history(
-                        conn,
-                        history_id,
-                        history_status,
-                        error=(
-                            "API shutdown durante o rename.\n"
-                            f"{cancel_output[-4000:]}"
-                        ),
-                    )
-                    await audit_studio_action(
-                        conn,
-                        project_id=project_id,
-                        actor_user_id=actor_user_id,
-                        action=audit_action,
-                        target_type="project",
-                        target_id=old_name,
-                        old_value={"name": old_name, "path": f"/{old_name}"},
-                        new_value={
-                            "name": new_name,
-                            "path": f"/{new_name}",
-                            "reason": "api_shutdown",
-                            "error_excerpt": cancel_output[-2000:],
-                        },
-                    )
-                await _set_job_status(
-                    job_id,
-                    "failed",
-                    message=(
-                        "Rename interrompido pelo shutdown da API; "
-                        + (
-                            "rollback concluído."
-                            if rolled_back
-                            else "rollback não confirmado."
-                        )
-                    ),
-                    current_step=(
-                        "rollback_completed" if rolled_back else "rollback_unconfirmed"
-                    ),
-                    error_code=(
-                        "rename_cancelled_rolled_back"
-                        if rolled_back
-                        else "rename_cancelled"
-                    ),
-                    stdout_tail=cancel_output,
-                )
-            except Exception as exc:
-                print(
-                    f"[rename_project] falha ao registrar cancelamento "
-                    f"{old_name} -> {new_name}: {exc}"
-                )
-            raise
-        output = stdout.decode(errors="replace").strip()
 
-        if proc.returncode != 0:
-            rolled_back = "ROLLBACK_COMPLETE" in output
+        if record["status"] != "done":
+            output = (record["stdout_tail"] or record["message"] or "").strip()
+            rolled_back = (
+                bool(command_result(record).get("rolled_back"))
+                or "ROLLBACK_COMPLETE" in output
+            )
             history_status = "rolled_back" if rolled_back else "failed"
             audit_action = (
                 "project_rename_rolled_back"
@@ -1732,7 +1724,8 @@ async def _rename_project_background(
                         "name": new_name,
                         "path": f"/{new_name}",
                         "new_name": new_name,
-                        "returncode": proc.returncode,
+                        "returncode": record["exit_code"],
+                        "error_code": record["error_code"],
                         "error_excerpt": output[-2000:],
                     },
                 )
@@ -1749,7 +1742,8 @@ async def _rename_project_background(
                 error_code=(
                     "rename_rolled_back" if rolled_back else "rename_failed"
                 ),
-                stdout_tail=output,
+                stdout_tail=record["stdout_tail"],
+                stderr_tail=record["stderr_tail"],
             )
             return
 
@@ -2644,60 +2638,42 @@ async def _duplicate_and_store_keys(
 
     try:
         copy_mode = "with-data" if copy_data else "schema-only"
-        
-        project_uuid = str(uuid.uuid4())
+        tenant_uuid = str(uuid.uuid4())
 
-        proc = await asyncio.create_subprocess_exec(
-            "bash", str(DUPLICATE_SCRIPT), original_name, new_name, copy_mode, project_uuid,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
+        record = await run_host_agent_command_for_job(
+            pool,
+            job_id=job_id,
+            command="duplicate_project",
+            project=new_name,
+            project_uuid=await _get_job_project_uuid(pool, job_id),
+            requested_by=owner_id,
+            args={
+                "original_name": original_name,
+                "copy_mode": copy_mode,
+                "tenant_uuid": tenant_uuid,
+            },
+            reuse_terminal=True,
+            on_progress=_job_progress_mirror(job_id),
         )
-        stdout, _ = await proc.communicate()
-        if proc.returncode != 0:
-            output = stdout.decode(errors="replace")
-            await _set_job_status(
+        if record["status"] != "done":
+            await _fail_job_from_command(
                 job_id,
-                "failed",
-                message="Falha ao duplicar infraestrutura",
-                stdout_tail=output,
-                error_code="duplicate_failed",
+                record,
+                default_error="duplicate_failed",
+                message_prefix="Falha ao duplicar infraestrutura",
             )
-            print(output)
             await rollback_project_from_db(pool, new_name)
             return
 
         await _set_job_status(
             job_id,
             "running",
-            message="Extraindo chaves do projeto duplicado...",
+            message="Lendo chaves do projeto duplicado...",
             progress=70,
             current_step="extract_keys",
         )
-        proc2 = await asyncio.create_subprocess_exec(
-            "bash", str(EXTRACTOR), new_name,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        out2, err2 = await proc2.communicate()
-        if proc2.returncode != 0:
-            error_output = err2.decode(errors="replace")
-            await _set_job_status(
-                job_id,
-                "failed",
-                message="Falha ao extrair chaves do projeto duplicado",
-                stderr_tail=error_output,
-                error_code="key_extraction_failed",
-            )
-            print(error_output)
-            await rollback_project_from_db(pool, new_name)
-            return
-
-        lines = out2.decode().splitlines()
-        kv = {k: v for k, v in (line.split("=", 1) for line in lines if "=" in line)}
-        anon = kv.get("ANON_KEY_PROJETO")
-        service = kv.get("SERVICE_ROLE_KEY_PROJETO")
-        config_token = kv.get("CONFIG_TOKEN_PROJETO")
-        if not anon or not service or not config_token:
+        keys = _read_project_secret_keys(new_name)
+        if not keys["anon_key"] or not keys["service_role"] or not keys["config_token"]:
             await _set_job_status(
                 job_id,
                 "failed",
@@ -2726,9 +2702,9 @@ async def _duplicate_and_store_keys(
             await store_project_secrets(
                 conn,
                 project_id=project_id,
-                anon_key=anon,
-                service_role=service,
-                config_token=config_token,
+                anon_key=keys["anon_key"],
+                service_role=keys["service_role"],
+                config_token=keys["config_token"],
             )
 
         await _set_job_status(
@@ -2738,6 +2714,14 @@ async def _duplicate_and_store_keys(
             current_step="completed",
         )
 
+    except HostAgentError as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=str(exc),
+            error_code=exc.error_code,
+        )
+        await rollback_project_from_db(pool, new_name)
     except Exception as e:
         await _set_job_status(
             job_id,
@@ -2747,30 +2731,6 @@ async def _duplicate_and_store_keys(
         )
         print(f"Worker error: {e}")
         await rollback_project_from_db(pool, new_name)
-
-
-async def execute_delete_script(project_name: str):
-    if not DELETE_SCRIPT.exists():
-        raise RuntimeError(f"Script não encontrado em: {DELETE_SCRIPT}")
-
-    proc = await asyncio.create_subprocess_exec(
-        "bash", str(DELETE_SCRIPT), project_name,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate()
-    success = proc.returncode == 0
-    return success, stdout.decode(), stderr.decode()
-
-
-async def _run_command(*command: str) -> tuple[int, str, str]:
-    proc = await asyncio.create_subprocess_exec(
-        *command,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate()
-    return proc.returncode, stdout.decode().strip(), stderr.decode().strip()
 
 
 def _base64url_no_padding(raw: bytes) -> str:
@@ -2847,23 +2807,57 @@ def _build_global_delete_token(issuer: str) -> str:
     return _build_short_lived_jwt(secret, issuer) if secret else ""
 
 
-def _parse_curl_status(stdout: str) -> tuple[int | None, str]:
-    body, separator, status_text = stdout.rpartition("\n")
-    if not separator:
-        return None, stdout
+async def _tenant_api_fallback(
+    *,
+    pool,
+    job_id: str | None,
+    project_name: str,
+    requested_by: uuid.UUID | None,
+    command: str,
+) -> str | None:
+    """Fallback do host-agent quando a chamada HTTP direta falha.
+
+    O agent constroi o token localmente a partir dos .env do host e chama
+    a API do tenant com curl dentro do proprio container do servico, no
+    lugar do acesso que a Projects API tinha antes da migracao.
+    """
     try:
-        return int(status_text.strip()), body.strip()
-    except ValueError:
-        return None, stdout
+        if job_id:
+            record = await run_host_agent_command_for_job(
+                pool,
+                job_id=job_id,
+                command=command,
+                project=project_name,
+                project_uuid=None,
+                requested_by=requested_by,
+                reuse_terminal=True,
+            )
+        else:
+            record = await run_host_agent_command(
+                pool,
+                command=command,
+                project=project_name,
+                project_uuid=None,
+                requested_by=requested_by,
+            )
+    except HostAgentError as exc:
+        return f"{command}: {exc}"
+    if record["status"] == "done":
+        return None
+    return record["message"] or record["error_code"] or f"{command} falhou"
 
 
 async def _delete_tenant_api(
     *,
     service_label: str,
     base_url: str,
-    fallback_container: str,
+    fallback_command: str,
     tenant_id: str,
     token: str,
+    pool,
+    job_id: str | None,
+    project_name: str,
+    requested_by: uuid.UUID | None,
 ) -> str | None:
     if not token:
         print(
@@ -2888,31 +2882,19 @@ async def _delete_tenant_api(
     except httpx.HTTPError as exc:
         direct_error = str(exc)
 
-    code, stdout, stderr = await _run_command(
-        "docker",
-        "exec",
-        fallback_container,
-        "curl",
-        "-sS",
-        "-w",
-        "\n%{http_code}",
-        "-X",
-        "DELETE",
-        f"http://localhost:4000{path}",
-        "-H",
-        f"Authorization: Bearer {token}",
+    fallback_error = await _tenant_api_fallback(
+        pool=pool,
+        job_id=job_id,
+        project_name=project_name,
+        requested_by=requested_by,
+        command=fallback_command,
     )
-    if code == 0:
-        status, body = _parse_curl_status(stdout)
-        if status in accepted_statuses:
-            return None
-        fallback_error = f"HTTP {status}: {body[:300]}" if status else stdout[:300]
-    else:
-        fallback_error = stderr or stdout or f"codigo {code}"
+    if fallback_error is None:
+        return None
 
     return (
         f"{service_label}: falha ao remover tenant {tenant_id}; "
-        f"direto={direct_error}; docker_exec={fallback_error}"
+        f"direto={direct_error}; host_agent={fallback_error}"
     )
 
 
@@ -2920,6 +2902,10 @@ async def _terminate_supavisor_pools(
     *,
     tenant_id: str,
     token: str,
+    pool,
+    job_id: str | None,
+    project_name: str,
+    requested_by: uuid.UUID | None,
 ) -> str | None:
     """Solicita ao Supavisor que encerre pools antes do banco ser removido."""
     if not token:
@@ -2944,31 +2930,19 @@ async def _terminate_supavisor_pools(
     except httpx.HTTPError as exc:
         direct_error = str(exc)
 
-    code, stdout, stderr = await _run_command(
-        "docker",
-        "exec",
-        "supabase-pooler",
-        "curl",
-        "-sS",
-        "-w",
-        "\n%{http_code}",
-        f"http://localhost:4000{path}",
-        "-H",
-        f"Authorization: Bearer {token}",
+    fallback_error = await _tenant_api_fallback(
+        pool=pool,
+        job_id=job_id,
+        project_name=project_name,
+        requested_by=requested_by,
+        command="terminate_supavisor_tenant",
     )
-    if code == 0:
-        status, body = _parse_curl_status(stdout)
-        if status in accepted_statuses:
-            return None
-        fallback_error = (
-            f"HTTP {status}: {body[:300]}" if status else stdout[:300]
-        )
-    else:
-        fallback_error = stderr or stdout or f"codigo {code}"
+    if fallback_error is None:
+        return None
 
     return (
         f"Supavisor: falha ao encerrar pools do tenant {tenant_id}; "
-        f"direto={direct_error}; docker_exec={fallback_error}"
+        f"direto={direct_error}; host_agent={fallback_error}"
     )
 
 
@@ -3047,6 +3021,17 @@ async def _delete_project_impl(
     db_name = f"_supabase_{project_name}"
     database_removed = False
 
+    job_requested_by: uuid.UUID | None = None
+    job_project_uuid: uuid.UUID | None = None
+    if current_job_id:
+        job_row = await pool.fetchrow(
+            "SELECT created_by, project_uuid FROM jobs WHERE job_id = $1",
+            uuid.UUID(str(current_job_id)),
+        )
+        if job_row:
+            job_requested_by = job_row["created_by"]
+            job_project_uuid = job_row["project_uuid"]
+
     async def report(progress: int, step: str, message: str) -> None:
         if current_job_id:
             await _set_job_status(
@@ -3057,6 +3042,25 @@ async def _delete_project_impl(
                 current_step=step,
                 total_steps=8,
             )
+
+    async def agent_step(command: str, project_uuid: uuid.UUID | None):
+        if current_job_id:
+            return await run_host_agent_command_for_job(
+                pool,
+                job_id=current_job_id,
+                command=command,
+                project=project_name,
+                project_uuid=project_uuid,
+                requested_by=job_requested_by,
+                reuse_terminal=True,
+            )
+        return await run_host_agent_command(
+            pool,
+            command=command,
+            project=project_name,
+            project_uuid=project_uuid,
+            requested_by=job_requested_by,
+        )
 
     await report(5, "load_project_state", "Carregando estado do projeto...")
     project_env = _load_project_env(project_name)
@@ -3075,40 +3079,47 @@ async def _delete_project_impl(
         )
 
     await report(15, "remove_containers", "Removendo containers do projeto...")
-    containers = await get_project_containers(project_name)
-    for container in containers:
-        container_name = container.get("Names", "")
-        if not container_name:
-            continue
-
-        code, _, stderr = await _run_command(
-            "docker", "rm", "-f", container_name
-        )
-        if code != 0:
-            errors.append(
-                f"Erro ao remover {container_name}: {stderr or f'codigo {code}'}"
-            )
+    containers_record = await agent_step("delete_project_containers", job_project_uuid)
+    if containers_record["status"] != "done":
+        container_errors = command_result(containers_record).get("errors") or [
+            containers_record["message"]
+            or containers_record["error_code"]
+            or "falha ao remover containers"
+        ]
+        errors.extend(str(item) for item in container_errors)
 
     await report(30, "remove_tenants", "Removendo tenants globais...")
     supavisor_token = _build_global_delete_token(tenant_external_id)
     supavisor_terminate_error = await _terminate_supavisor_pools(
         tenant_id=project_name,
         token=supavisor_token,
+        pool=pool,
+        job_id=current_job_id,
+        project_name=project_name,
+        requested_by=job_requested_by,
     )
     realtime_error = await _delete_tenant_api(
         service_label="Realtime",
         base_url=REALTIME_INTERNAL_URL,
-        fallback_container="realtime-dev.supabase-realtime",
+        fallback_command="delete_realtime_tenant",
         tenant_id=tenant_external_id,
         token=_build_realtime_delete_token(project_env, tenant_external_id),
+        pool=pool,
+        job_id=current_job_id,
+        project_name=project_name,
+        requested_by=job_requested_by,
     )
 
     supavisor_error = await _delete_tenant_api(
         service_label="Supavisor",
         base_url=SUPAVISOR_INTERNAL_URL,
-        fallback_container="supabase-pooler",
+        fallback_command="delete_supavisor_tenant",
         tenant_id=project_name,
         token=supavisor_token,
+        pool=pool,
+        job_id=current_job_id,
+        project_name=project_name,
+        requested_by=job_requested_by,
     )
 
     await asyncio.sleep(1)
@@ -3191,9 +3202,14 @@ async def _delete_project_impl(
 
     await report(90, "remove_files", "Removendo arquivos do projeto...")
     if database_removed:
-        success, stdout, stderr = await execute_delete_script(project_name)
-        if not success:
-            detail = stderr.strip() or stdout.strip() or "erro desconhecido"
+        files_record = await agent_step("delete_project_files", None)
+        if files_record["status"] != "done":
+            detail = (
+                (files_record["stderr_tail"] or "").strip()
+                or (files_record["message"] or "").strip()
+                or files_record["error_code"]
+                or "erro desconhecido"
+            )
             errors.append(f"Erro ao excluir diretórios: {detail}")
 
     await report(96, "verify_cleanup", "Verificando limpeza final...")
@@ -3258,6 +3274,14 @@ async def _delete_project_background(job_id: str, project_name: str) -> None:
             message=message,
             current_step="completed",
         )
+    except HostAgentError as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=f"Falha ao excluir projeto: {exc}",
+            error_code=exc.error_code,
+        )
+        print(f"[delete_project] {project_name}: host-agent: {exc}")
     except Exception as exc:
         message = f"Falha ao excluir projeto: {exc}"
         await _set_job_status(
@@ -3476,45 +3500,36 @@ async def _rotate_project_key_background(
         total_steps=4,
     )
     try:
-        if not ROTATE_SCRIPT.exists():
-            raise RuntimeError(f"Rotate script não encontrado: {ROTATE_SCRIPT}")
-
-        proc = await asyncio.create_subprocess_exec(
-            "bash", str(ROTATE_SCRIPT), project_name,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        pool = await get_pool()
+        record = await run_host_agent_command_for_job(
+            pool,
+            job_id=job_id,
+            command="rotate_keys",
+            project=project_name,
+            project_uuid=await _get_job_project_uuid(pool, job_id),
+            requested_by=actor_user_id,
+            reuse_terminal=True,
+            on_progress=_job_progress_mirror(job_id),
         )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            stdout_text = stdout.decode().strip()
-            stderr_text = stderr.decode().strip()
-            print(f"[rotate-key] stdout for {project_name}: {stdout_text}")
-            print(f"[rotate-key] stderr for {project_name}: {stderr_text}")
-            detail = (
-                stderr_text or stdout_text or "rotate script exited with no output"
-            )
-            await _set_job_status(
+        if record["status"] != "done":
+            await _fail_job_from_command(
                 job_id,
-                "failed",
-                message=f"Rotate failed: {detail}",
-                stdout_tail=stdout_text,
-                stderr_tail=stderr_text,
-                error_code="rotate_script_failed",
+                record,
+                default_error="rotate_script_failed",
+                message_prefix="Rotate failed",
             )
             return
 
-        lines = stdout.decode().splitlines()
-        kv = {
-            k: v
-            for k, v in (line.split("=", 1) for line in lines if "=" in line)
-        }
-        anon = kv.get("ANON_KEY_PROJETO")
-        service = kv.get("SERVICE_ROLE_KEY_PROJETO")
+        # O script persiste as chaves novas no .env do projeto; nada de
+        # segredo transita por stdout (que agora e sanitizado pelo agent).
+        keys = _read_project_secret_keys(project_name)
+        anon = keys["anon_key"]
+        service = keys["service_role"]
         if not anon or not service:
             await _set_job_status(
                 job_id,
                 "failed",
-                message="Keys not returned from script",
+                message="Keys not found in project .env after rotate",
                 error_code="missing_keys",
             )
             return
@@ -3526,7 +3541,6 @@ async def _rotate_project_key_background(
             progress=85,
             current_step="store_keys",
         )
-        pool = await get_pool()
         async with pool.acquire() as conn:
             async with conn.transaction():
                 project_row = await conn.fetchrow(
@@ -3580,6 +3594,14 @@ async def _rotate_project_key_background(
             message="Chaves rotacionadas com sucesso.",
             current_step="completed",
         )
+    except HostAgentError as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=f"Falha na rotação: {exc}",
+            error_code=exc.error_code,
+        )
+        print(f"[rotate-key] {project_name}: host-agent: {exc}")
     except Exception as exc:
         await _set_job_status(
             job_id,
@@ -3909,59 +3931,38 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
     )
 
     try:
-        project_uuid = str(uuid.uuid4())
-        
-        proc = await asyncio.create_subprocess_exec(
-            "bash", str(SCRIPT), project_name, project_uuid,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
+        tenant_uuid = str(uuid.uuid4())
+
+        record = await run_host_agent_command_for_job(
+            pool,
+            job_id=job_id,
+            command="create_project",
+            project=project_name,
+            project_uuid=await _get_job_project_uuid(pool, job_id),
+            requested_by=user,
+            args={"tenant_uuid": tenant_uuid},
+            reuse_terminal=True,
+            on_progress=_job_progress_mirror(job_id),
         )
-        stdout, _ = await proc.communicate()
-        if proc.returncode != 0:
-            output = stdout.decode(errors="replace")
-            await _set_job_status(
+        if record["status"] != "done":
+            await _fail_job_from_command(
                 job_id,
-                "failed",
-                message="Falha ao provisionar infraestrutura",
-                stdout_tail=output,
-                error_code="provision_failed",
+                record,
+                default_error="provision_failed",
+                message_prefix="Falha ao provisionar infraestrutura",
             )
-            print(output)
             await rollback_project_from_db(pool, project_name)
             return
 
         await _set_job_status(
             job_id,
             "running",
-            message="Extraindo chaves do projeto...",
+            message="Lendo chaves do projeto...",
             progress=70,
             current_step="extract_keys",
         )
-        proc2 = await asyncio.create_subprocess_exec(
-            "bash", str(EXTRACTOR), project_name,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        out2, err2 = await proc2.communicate()
-        if proc2.returncode != 0:
-            error_output = err2.decode(errors="replace")
-            await _set_job_status(
-                job_id,
-                "failed",
-                message="Falha ao extrair chaves",
-                stderr_tail=error_output,
-                error_code="key_extraction_failed",
-            )
-            print(error_output)
-            await rollback_project_from_db(pool, project_name)
-            return
-
-        lines = out2.decode().splitlines()
-        kv = {k: v for k, v in (line.split("=", 1) for line in lines if "=" in line)}
-        anon = kv.get("ANON_KEY_PROJETO")
-        service = kv.get("SERVICE_ROLE_KEY_PROJETO")
-        config_token = kv.get("CONFIG_TOKEN_PROJETO")
-        if not anon or not service or not config_token:
+        keys = _read_project_secret_keys(project_name)
+        if not keys["anon_key"] or not keys["service_role"] or not keys["config_token"]:
             await _set_job_status(
                 job_id,
                 "failed",
@@ -3990,9 +3991,9 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
             await store_project_secrets(
                 conn,
                 project_id=project_id,
-                anon_key=anon,
-                service_role=service,
-                config_token=config_token,
+                anon_key=keys["anon_key"],
+                service_role=keys["service_role"],
+                config_token=keys["config_token"],
             )
 
         await _set_job_status(
@@ -4002,6 +4003,14 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
             current_step="completed",
         )
 
+    except HostAgentError as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=str(exc),
+            error_code=exc.error_code,
+        )
+        await rollback_project_from_db(pool, project_name)
     except Exception as e:
         await _set_job_status(
             job_id,
@@ -4012,50 +4021,11 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
         print(f"Worker error: {e}")
         await rollback_project_from_db(pool, project_name)
 
-def _name_matches(cont_json: dict, project: str) -> bool:
-    patt = re.compile(rf"-{re.escape(project)}$")
-    names = cont_json.get("Names", "")
-    if isinstance(names, str):
-        return any(patt.search(n) for n in names.split(","))
-    return any(patt.search(n) for n in names)
 
 async def get_project_containers(project: str) -> list[dict]:
-    proc = await asyncio.create_subprocess_exec(
-        "docker", "ps", "--format", "{{json .}}", "-a",
-        stdout=asyncio.subprocess.PIPE,
-    )
-    stdout, _ = await proc.communicate()
-    lines = stdout.decode().splitlines()
-    containers = [json.loads(l) for l in lines if _name_matches(json.loads(l), project)]
-    return containers
-
-
-PROJECT_SERVICE_ORDER = ["meta", "auth", "rest", "imgproxy", "storage", "nginx"]
-
-
-def _get_project_service_priority(name: str) -> int:
-    lowered = name.lower()
-    for idx, service in enumerate(PROJECT_SERVICE_ORDER):
-        if service in lowered:
-            return idx
-    return 999
-
-
-def _sort_project_containers(containers: list[dict]) -> list[dict]:
-    return sorted(
-        containers,
-        key=lambda container: _get_project_service_priority(
-            container.get("Names", "")
-        ),
-    )
-
-
-def _services_touch_project_nginx(services: list[str]) -> bool:
-    return any(service.strip().lower() == "nginx" for service in services)
-
-
-def _containers_touch_project_nginx(containers: list[dict]) -> bool:
-    return any("nginx" in container.get("Names", "").lower() for container in containers)
+    """Snapshot dos containers mantido pelo host-agent no control plane."""
+    pool = await get_pool()
+    return await fetch_project_containers(pool, project)
 
 
 def _get_root_env_path() -> pathlib.Path:
@@ -4143,265 +4113,88 @@ def _extract_project_admin_apikey(request: Request) -> str:
     return ""
 
 
-def _normalize_public_base_url(url: str, proto: str | None = None) -> str:
-    normalized = url.rstrip("/")
-    if not re.match(r"^https?://", normalized):
-        normalized_proto = (proto or "").strip().lower()
-        if normalized_proto in {"http", "https"}:
-            normalized = f"{normalized_proto}://{normalized}"
-        else:
-            normalized = f"https://{normalized}"
-    return normalized
-
-
 def _read_env_file(env_path: pathlib.Path) -> dict[str, str]:
     return {k: (v or "") for k, v in dotenv_values(env_path).items()}
 
 
-def _read_existing_env_file(env_path: pathlib.Path, missing_message: str) -> dict[str, str]:
-    if not env_path.exists():
-        raise RuntimeError(missing_message)
-    return _read_env_file(env_path)
-
-
-def _render_generated_template(
-    template_path: pathlib.Path,
-    output_path: pathlib.Path,
-    replacements: dict[str, str],
-) -> None:
-    content = template_path.read_text(encoding="utf-8")
-    for key, value in replacements.items():
-        content = content.replace(f"{{{{{key}}}}}", value)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(content, encoding="utf-8")
-
-
-def _get_project_template_replacements(project_name: str) -> dict[str, str]:
-    root_env_path = _get_root_env_path()
-    project_env_path = _get_project_env_path(project_name)
-
-    root_env = _read_existing_env_file(
-        root_env_path,
-        "Arquivo .env raiz não encontrado",
-    )
-    project_env = _read_existing_env_file(
-        project_env_path,
-        f"Arquivo .env não encontrado para o projeto '{project_name}'",
-    )
-
-    server_url = root_env.get("SERVER_URL", "").strip()
-    server_proto = root_env.get("SERVER_PROTO", "").strip()
-    host_project_root = root_env.get("HOST_PROJECT_ROOT", "").strip()
-    if not server_url:
-        raise RuntimeError("SERVER_URL ausente no .env raiz")
-    if not host_project_root:
-        raise RuntimeError("HOST_PROJECT_ROOT ausente no .env raiz")
-
-    required_project_keys = (
-        "ANON_KEY_PROJETO",
-        "SERVICE_ROLE_KEY_PROJETO",
-        "CONFIG_TOKEN_PROJETO",
-        "JWT_SECRET_PROJETO",
-    )
-    missing_project_keys = [
-        key for key in required_project_keys if not project_env.get(key, "").strip()
-    ]
-    if missing_project_keys:
-        joined = ", ".join(missing_project_keys)
-        raise RuntimeError(
-            f".env do projeto '{project_name}' sem chaves obrigatórias: {joined}"
-        )
-
-    public_base_url = _normalize_public_base_url(server_url, server_proto)
-    project_public_url = f"{public_base_url}/{project_name}"
-    project_auth_external_url = f"{project_public_url}/auth/v1"
-
-    return {
-        "anon_key": project_env["ANON_KEY_PROJETO"],
-        "service_role_key": project_env["SERVICE_ROLE_KEY_PROJETO"],
-        "project_id": project_name,
-        "project_uuid": project_env.get("PROJECT_UUID") or project_name,
-        "config_token": project_env["CONFIG_TOKEN_PROJETO"],
-        "jwt_secret": project_env["JWT_SECRET_PROJETO"],
-        "server_url": server_url,
-        "public_base_url": public_base_url,
-        "project_public_url": project_public_url,
-        "project_auth_external_url": project_auth_external_url,
-        "project_root": host_project_root,
-    }
-
-
-def _sync_project_nginx_generated_files(project_name: str) -> None:
-    project_dir = _get_project_dir(project_name)
-    if not project_dir.exists():
-        raise RuntimeError(f"Diretório do projeto '{project_name}' não encontrado")
-
-    script_dir = BASE_DIR / "scripts"
-    replacements = _get_project_template_replacements(project_name)
-
-    nginx_config_path = project_dir / "nginx" / f"nginx_{project_name}.conf"
-    _render_generated_template(
-        script_dir / "nginxtemplate",
-        nginx_config_path,
-        replacements,
-    )
-    nginx_config_path.chmod(0o600)
-    _render_generated_template(
-        script_dir / "Dockerfile",
-        project_dir / "Dockerfile",
-        replacements,
-    )
-    _render_generated_template(
-        script_dir / "dockercomposetemplate",
-        project_dir / "docker-compose.yml",
-        replacements,
-    )
-
-
-async def _stop_project_containers(
+async def _container_lifecycle_background(
+    job_id: str,
     project_name: str,
-    containers: list[dict],
+    actor_user_id: uuid.UUID | None,
     *,
-    job_id: str | None = None,
-) -> dict:
-    stopped_containers: list[str] = []
-    errors: list[str] = []
-
-    sorted_containers = _sort_project_containers(containers)
-    for index, container in enumerate(sorted_containers, start=1):
-        container_name = container.get("Names", "")
-        container_status = container.get("State", "")
-
-        try:
-            if container_status == "running":
-                proc = await asyncio.create_subprocess_exec(
-                    "docker",
-                    "stop",
-                    container_name,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                _, stderr = await proc.communicate()
-
-                if proc.returncode == 0:
-                    stopped_containers.append(container_name)
-                else:
-                    errors.append(
-                        f"Error stopping {container_name}: {stderr.decode().strip()}"
-                    )
-            else:
-                stopped_containers.append(f"{container_name} (already stopped)")
-        except Exception as exc:
-            errors.append(f"Error stopping {container_name}: {exc}")
-
-        if job_id:
-            await _set_job_status(
+    command: str,
+    initial_message: str,
+    success_prefix: str,
+    error_code: str,
+) -> None:
+    """Delegar start/stop/restart ao host-agent espelhando o progresso."""
+    await _set_job_status(
+        job_id,
+        "running",
+        message=initial_message,
+        progress=1,
+        current_step="dispatch_host_agent",
+    )
+    try:
+        pool = await get_pool()
+        record = await run_host_agent_command_for_job(
+            pool,
+            job_id=job_id,
+            command=command,
+            project=project_name,
+            project_uuid=await _get_job_project_uuid(pool, job_id),
+            requested_by=actor_user_id,
+            on_progress=_job_progress_mirror(job_id),
+        )
+        if record["status"] != "done":
+            await _fail_job_from_command(
                 job_id,
-                "running",
-                message=f"Parando containers ({index}/{len(sorted_containers)})...",
-                progress=min(95, int(index * 95 / max(len(sorted_containers), 1))),
-                current_step=f"stop_container:{container_name}",
-                total_steps=max(len(sorted_containers), 1),
+                record,
+                default_error=error_code,
+                message_prefix=initial_message.rstrip("."),
             )
+            print(f"[{command}] {project_name}: {record['error_code']}")
+            return
 
-    return {
-        "project": project_name,
-        "stopped_containers": stopped_containers,
-        "errors": errors,
-        "success": len(errors) == 0,
-    }
+        touched = command_result(record).get("containers", [])
+        await _set_job_status(
+            job_id,
+            "done",
+            message=f"{success_prefix}: {', '.join(touched)}" if touched else success_prefix,
+            current_step="completed",
+        )
+    except HostAgentError as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=str(exc),
+            error_code=exc.error_code,
+        )
+        print(f"[{command}] {project_name}: host-agent: {exc}")
+    except Exception as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=f"{initial_message.rstrip('.')}: {exc}",
+            error_code=error_code,
+        )
+        print(f"[{command}] {project_name}: background task failed: {exc}")
 
 
 async def _stop_project_containers_background(
     job_id: str,
     project_name: str,
-    containers: list[dict],
+    actor_user_id: uuid.UUID | None = None,
 ) -> None:
-    await _set_job_status(
+    await _container_lifecycle_background(
         job_id,
-        "running",
-        message="Parando servicos do projeto...",
-        progress=1,
-        current_step="load_containers",
+        project_name,
+        actor_user_id,
+        command="stop_project",
+        initial_message="Parando servicos do projeto...",
+        success_prefix="Projeto parado com sucesso.",
+        error_code="stop_failed",
     )
-    try:
-        result = await _stop_project_containers(
-            project_name,
-            containers,
-            job_id=job_id,
-        )
-        if result["errors"]:
-            message = "\n".join(result["errors"])
-            await _set_job_status(
-                job_id,
-                "failed",
-                message=message,
-                error_code="stop_failed",
-            )
-            print(
-                f"[stop_project] {project_name}: "
-                + " | ".join(result["errors"])
-            )
-            return
-
-        await _set_job_status(
-            job_id,
-            "done",
-            message="Projeto parado com sucesso.",
-            current_step="completed",
-        )
-    except Exception as exc:
-        message = f"Falha ao parar projeto: {exc}"
-        await _set_job_status(
-            job_id,
-            "failed",
-            message=message,
-            error_code="stop_failed",
-        )
-        print(f"[stop_project] {project_name}: background task failed: {exc}")
-
-
-async def _recreate_project_services_impl(
-    project_name: str,
-    services: list[str],
-) -> dict:
-    project_dir = _get_project_dir(project_name)
-    if not project_dir.exists():
-        raise HTTPException(404, f"Diretório do projeto '{project_name}' não encontrado")
-
-    errors: list[str] = []
-
-    compose_base = [
-        "docker", "compose",
-        "-p", project_name,
-        "--env-file", "../../.env",
-        "--env-file", ".env",
-    ]
-
-    if _services_touch_project_nginx(services):
-        _sync_project_nginx_generated_files(project_name)
-
-    step_cmd = compose_base + ["up", "-d"]
-    if _services_touch_project_nginx(services):
-        step_cmd.append("--build")
-    step_cmd.append("--force-recreate")
-    step_cmd += services
-    proc = await asyncio.create_subprocess_exec(
-        *step_cmd,
-        cwd=str(project_dir),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    _, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        errors.append(f"Erro no recreate: {stderr.decode().strip()}")
-
-    return {
-        "project": project_name,
-        "recreated_services": services if not errors else [],
-        "errors": errors,
-        "success": len(errors) == 0,
-    }
 
 
 async def _recreate_project_services_background(
@@ -4418,18 +4211,31 @@ async def _recreate_project_services_background(
         total_steps=2,
     )
     try:
-        result = await _recreate_project_services_impl(project_name, services)
-        if result["errors"]:
-            message = "\n".join(result["errors"])
-            await _set_job_status(
+        pool = await get_pool()
+        job_row = await pool.fetchrow(
+            "SELECT created_by, project_uuid FROM jobs WHERE job_id = $1",
+            uuid.UUID(str(job_id)),
+        )
+        record = await run_host_agent_command_for_job(
+            pool,
+            job_id=job_id,
+            command="recreate_services",
+            project=project_name,
+            project_uuid=job_row["project_uuid"] if job_row else None,
+            requested_by=job_row["created_by"] if job_row else None,
+            args={"services": services},
+            on_progress=_job_progress_mirror(job_id),
+        )
+        if record["status"] != "done":
+            await _fail_job_from_command(
                 job_id,
-                "failed",
-                message=message,
-                error_code="recreate_failed",
+                record,
+                default_error="recreate_failed",
+                message_prefix="Falha ao recriar servicos",
             )
             print(
                 f"[recreate_project_services] {project_name}: "
-                + " | ".join(result["errors"])
+                f"{record['error_code']}"
             )
             return
 
@@ -4447,6 +4253,14 @@ async def _recreate_project_services_background(
             message=f"Servicos recriados: {', '.join(services)}",
             current_step="completed",
         )
+    except HostAgentError as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=str(exc),
+            error_code=exc.error_code,
+        )
+        print(f"[recreate_project_services] {project_name}: host-agent: {exc}")
     except Exception as exc:
         message = f"Falha ao recriar servicos: {exc}"
         await _set_job_status(
@@ -4461,10 +4275,20 @@ async def _recreate_project_services_background(
         )
 
 async def get_project_status(project_name: str) -> dict:
-    containers = await get_project_containers(project_name)
+    pool = await get_pool()
+    containers = await fetch_project_containers(pool, project_name)
 
     if not containers:
-        return {"status": "not_found", "containers": []}
+        if not await host_agent_alive(pool):
+            # Sem host-agent nao ha snapshot confiavel de containers.
+            return {
+                "status": "unknown",
+                "containers": [],
+                "running": 0,
+                "total": 0,
+                "agent_offline": True,
+            }
+        return {"status": "not_found", "containers": [], "running": 0, "total": 0}
 
     container_info = []
     running_count = 0
@@ -4541,6 +4365,8 @@ async def stop_project(
 
     containers = await get_project_containers(project_name)
     if not containers:
+        if not await host_agent_alive(pool):
+            raise HTTPException(503, "Host-agent offline; estado dos containers indisponivel")
         raise HTTPException(404, "No containers found for this project")
 
     job_id = await _create_project_job(
@@ -4558,7 +4384,7 @@ async def stop_project(
         lambda: _stop_project_containers_background(
             job_id,
             project_name,
-            containers,
+            auth_user["db_user_id"],
         ),
     )
     return JSONResponse(
@@ -4592,6 +4418,8 @@ async def start_project(
 
     containers = await get_project_containers(project_name)
     if not containers:
+        if not await host_agent_alive(pool):
+            raise HTTPException(503, "Host-agent offline; estado dos containers indisponivel")
         raise HTTPException(404, "No containers found for this project")
 
     job_id = await _create_project_job(
@@ -4610,7 +4438,7 @@ async def start_project(
         project_name,
         job_id,
         lambda: _start_project_containers_background(
-            job_id, project_name, containers, auth_user["db_user_id"]
+            job_id, project_name, auth_user["db_user_id"]
         ),
     )
     return JSONResponse(
@@ -4632,75 +4460,17 @@ async def start_project(
 async def _start_project_containers_background(
     job_id: str,
     project_name: str,
-    containers: list[dict],
-    actor_user_id: uuid.UUID,
+    actor_user_id: uuid.UUID | None,
 ) -> None:
-    await _set_job_status(
+    await _container_lifecycle_background(
         job_id,
-        "running",
-        message="Iniciando containers...",
-        progress=1,
-        current_step="load_containers",
-        total_steps=max(len(containers), 1),
+        project_name,
+        actor_user_id,
+        command="start_project",
+        initial_message="Iniciando containers...",
+        success_prefix="Iniciado",
+        error_code="start_failed",
     )
-    try:
-        sorted_containers = _sort_project_containers(containers)
-        started_containers: list[str] = []
-        errors: list[str] = []
-        for index, container in enumerate(sorted_containers, start=1):
-            container_name = container.get("Names", "")
-            container_status = container.get("State", "")
-            try:
-                if container_status != "running":
-                    proc = await asyncio.create_subprocess_exec(
-                        "docker", "start", container_name,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
-                    _, stderr = await proc.communicate()
-                    if proc.returncode == 0:
-                        started_containers.append(container_name)
-                        await asyncio.sleep(2)
-                    else:
-                        errors.append(
-                            f"Error starting {container_name}: "
-                            f"{stderr.decode().strip()}"
-                        )
-                else:
-                    started_containers.append(f"{container_name} (already running)")
-            except Exception as exc:
-                errors.append(f"Error starting {container_name}: {exc}")
-
-            await _set_job_status(
-                job_id,
-                "running",
-                message=f"Iniciando containers ({index}/{len(sorted_containers)})...",
-                progress=min(95, int(index * 95 / max(len(sorted_containers), 1))),
-                current_step=f"start_container:{container_name}",
-            )
-
-        if errors:
-            await _set_job_status(
-                job_id,
-                "failed",
-                message="\n".join(errors),
-                error_code="start_failed",
-            )
-            return
-        await _set_job_status(
-            job_id,
-            "done",
-            message=f"Iniciado: {', '.join(started_containers)}",
-            current_step="completed",
-        )
-    except Exception as exc:
-        await _set_job_status(
-            job_id,
-            "failed",
-            message=f"Falha ao iniciar: {exc}",
-            error_code="start_failed",
-        )
-        print(f"[start_project] {project_name}: {exc}")
 
 
 @app.post("/api/projects/{project_name}/restart", status_code=202)
@@ -4719,6 +4489,8 @@ async def restart_project(
 
     containers = await get_project_containers(project_name)
     if not containers:
+        if not await host_agent_alive(pool):
+            raise HTTPException(503, "Host-agent offline; estado dos containers indisponivel")
         raise HTTPException(404, "No containers found for this project")
 
     job_id = await _create_project_job(
@@ -4737,7 +4509,7 @@ async def restart_project(
         project_name,
         job_id,
         lambda: _restart_project_containers_background(
-            job_id, project_name, containers, auth_user["db_user_id"]
+            job_id, project_name, auth_user["db_user_id"]
         ),
     )
     return JSONResponse(
@@ -4759,74 +4531,18 @@ async def restart_project(
 async def _restart_project_containers_background(
     job_id: str,
     project_name: str,
-    containers: list[dict],
-    actor_user_id: uuid.UUID,
+    actor_user_id: uuid.UUID | None,
 ) -> None:
-    await _set_job_status(
+    await _container_lifecycle_background(
         job_id,
-        "running",
-        message="Reiniciando containers...",
-        progress=1,
-        current_step="load_containers",
-        total_steps=max(len(containers), 1),
+        project_name,
+        actor_user_id,
+        command="restart_project",
+        initial_message="Reiniciando containers...",
+        success_prefix="Reiniciado",
+        error_code="restart_failed",
     )
-    try:
-        sorted_containers = _sort_project_containers(containers)
-        restarted_containers: list[str] = []
-        errors: list[str] = []
-        for index, cont in enumerate(sorted_containers, start=1):
-            name = cont.get("Names", "")
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    "docker",
-                    "restart",
-                    "-t",
-                    "30",
-                    name,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                _, stderr = await proc.communicate()
-                if proc.returncode == 0:
-                    restarted_containers.append(name)
-                    await asyncio.sleep(2)
-                else:
-                    errors.append(
-                        f"Error restarting {name}: {stderr.decode().strip()}"
-                    )
-            except Exception as exc:
-                errors.append(f"Error restarting {name}: {exc}")
 
-            await _set_job_status(
-                job_id,
-                "running",
-                message=f"Reiniciando containers ({index}/{len(sorted_containers)})...",
-                progress=min(95, int(index * 95 / max(len(sorted_containers), 1))),
-                current_step=f"restart_container:{name}",
-            )
-
-        if errors:
-            await _set_job_status(
-                job_id,
-                "failed",
-                message="\n".join(errors),
-                error_code="restart_failed",
-            )
-            return
-        await _set_job_status(
-            job_id,
-            "done",
-            message=f"Reiniciado: {', '.join(restarted_containers)}",
-            current_step="completed",
-        )
-    except Exception as exc:
-        await _set_job_status(
-            job_id,
-            "failed",
-            message=f"Falha ao reiniciar: {exc}",
-            error_code="restart_failed",
-        )
-        print(f"[restart_project] {project_name}: {exc}")
 
 MAX_LOG_LINES = 1000
 
@@ -4855,28 +4571,21 @@ async def get_container_logs(
     container_name = f"supabase-{service}-{project_name}"
 
     try:
-        proc_check = await asyncio.create_subprocess_exec(
-            "docker", "inspect", container_name,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+        record = await run_host_agent_command(
+            pool,
+            command="container_logs",
+            project=project_name,
+            project_uuid=project_id,
+            requested_by=auth_user["db_user_id"],
+            args={"service": service, "lines": lines},
+            poll_interval=0.3,
         )
-        stdout_check, stderr_check = await proc_check.communicate()
-
-        if proc_check.returncode != 0:
-            raise HTTPException(404, f"Container {container_name} not found")
-
-        proc_logs = await asyncio.create_subprocess_exec(
-            "docker", "logs", "--tail", str(lines), "--timestamps", container_name,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        stdout_logs, _ = await proc_logs.communicate()
-
-        if proc_logs.returncode != 0:
+        if record["status"] != "done":
+            if record["error_code"] == "container_not_found":
+                raise HTTPException(404, f"Container {container_name} not found")
             raise HTTPException(500, "Error getting container logs")
 
-        container_info = json.loads(stdout_check.decode())[0]
-        c_status = container_info.get("State", {}).get("Status", "unknown")
+        result = command_result(record)
 
         async with pool.acquire() as conn:
             await audit_studio_action(
@@ -4890,13 +4599,15 @@ async def get_container_logs(
             )
 
         return {
-            "container": container_name,
-            "logs": stdout_logs.decode("utf-8", errors="replace"),
-            "status": c_status
+            "container": result.get("container", container_name),
+            "logs": result.get("logs", ""),
+            "status": result.get("status", "unknown"),
         }
 
     except HTTPException:
         raise
+    except HostAgentOffline as exc:
+        raise HTTPException(503, str(exc)) from exc
     except Exception as exc:
         print(f"[project_logs] {project_name}/{service}: {exc}")
         raise HTTPException(500, "Error accessing container logs") from exc

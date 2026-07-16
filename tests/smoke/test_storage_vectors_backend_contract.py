@@ -88,7 +88,16 @@ class StorageVectorsBackendContractTests(unittest.TestCase):
             self.assertLessEqual(len(content.splitlines()), 6)
 
         dockerfile = API_DOCKERFILE.read_text(encoding="utf-8")
-        self.assertIn("find ./scripts -type f -name '*.sh' -exec chmod +x {} +", dockerfile)
+        self.assertNotIn("generateProject", dockerfile)
+        agent_commands = (
+            ROOT / "servidor/host-agent/hostagent/commands.py"
+        ).read_text(encoding="utf-8")
+        for script in (
+            "generate_project.sh",
+            "duplicate_project.sh",
+            "rename_project.sh",
+        ):
+            self.assertIn(script, agent_commands)
 
     def test_obsolete_manual_bootstrap_was_removed(self) -> None:
         self.assertFalse((ROOT / "servidor/generateProject/enable_vector_storage.sh").exists())

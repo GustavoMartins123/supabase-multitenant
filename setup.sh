@@ -355,6 +355,7 @@ main() {
     SHARED_NGINX_TOKEN=$(generate_logflare_api_key)
     SHARED_NGINX_HMAC_SECRET=$(generate_hmac_secret)
     SHARED_INTERNAL_HMAC_SECRET=$(generate_hmac_secret)
+    HOST_AGENT_HMAC_SECRET=$(generate_hmac_secret)
 
     case "$topology_profile" in
         single-node)
@@ -437,6 +438,7 @@ main() {
     safe_sed "s|^NGINX_SHARED_TOKEN=.*|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" servidor/.env
     safe_sed "s|^NGINX_HMAC_SECRET=.*|NGINX_HMAC_SECRET=$SHARED_NGINX_HMAC_SECRET|g" servidor/.env
     safe_sed "s|^INTERNAL_HMAC_SECRET=.*|INTERNAL_HMAC_SECRET=$SHARED_INTERNAL_HMAC_SECRET|g" servidor/.env
+    safe_sed "s|^HOST_AGENT_HMAC_SECRET=.*|HOST_AGENT_HMAC_SECRET=$HOST_AGENT_HMAC_SECRET|g" servidor/.env
     safe_sed "s|PROJECT_DELETE_PASSWORD=pass|PROJECT_DELETE_PASSWORD=$PROJECT_DELETE_PASSWORD|g" servidor/.env
     if [[ "$SERVER_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
     [[ "$SERVER_IP" =~ : ]]; then
@@ -491,6 +493,7 @@ main() {
     assert_env_value studio/.env NGINX_HMAC_SECRET "$SHARED_NGINX_HMAC_SECRET"
     assert_env_value servidor/.env INTERNAL_HMAC_SECRET "$SHARED_INTERNAL_HMAC_SECRET"
     assert_env_value studio/.env INTERNAL_HMAC_SECRET "$SHARED_INTERNAL_HMAC_SECRET"
+    assert_env_value servidor/.env HOST_AGENT_HMAC_SECRET "$HOST_AGENT_HMAC_SECRET"
     assert_env_value servidor/.analytics.env LOGFLARE_PUBLIC_ACCESS_TOKEN "$LOGFLARE_PUBLIC_ACCESS_TOKEN"
     assert_env_value servidor/.analytics.env LOGFLARE_PRIVATE_ACCESS_TOKEN "$LOGFLARE_PRIVATE_ACCESS_TOKEN"
     assert_env_value servidor/.analytics.env LOGFLARE_DB_ENCRYPTION_KEY "$LOGFLARE_DB_ENCRYPTION_KEY"
@@ -514,6 +517,10 @@ main() {
     echo "  - NGINX_SHARED_TOKEN (servidor e studio)"
     echo "  - NGINX_HMAC_SECRET (servidor e studio)"
     echo "  - INTERNAL_HMAC_SECRET (servidor e studio)"
+    echo "  - HOST_AGENT_HMAC_SECRET (servidor e host-agent)"
+    echo ""
+    print_status "Lifecycle fisico agora roda no host-agent. Instale-o com:"
+    echo "  sudo bash servidor/host-agent/install.sh"
     echo ""
     if [[ "$PROTO" == "http" ]]; then
         IP_DOMAIN="IP"

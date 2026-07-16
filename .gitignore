@@ -12,6 +12,7 @@ tarefas.md
 # Python runtime artifacts
 __pycache__/
 *.py[cod]
+servidor/host-agent/.venv/
 
 # Local runtime logs
 *.log

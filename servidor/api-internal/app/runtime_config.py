@@ -15,14 +15,9 @@ from app.project_secrets import ProjectSecretError, ProjectSecretManager
 
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
-SCRIPT = BASE_DIR / "scripts" / "generate_project.sh"
-DUPLICATE_SCRIPT = BASE_DIR / "scripts" / "duplicate_project.sh"
-ROTATE_SCRIPT = BASE_DIR / "scripts" / "rotate_key.sh"
-DELETE_SCRIPT = BASE_DIR / "scripts" / "delete_project.sh"
-RENAME_SCRIPT = BASE_DIR / "scripts" / "rename_project.sh"
-EXTRACTOR = BASE_DIR / "scripts" / "extract_token.sh"
 
 DB_DSN = os.getenv("DB_DSN")
+HOST_AGENT_HMAC_SECRET = os.getenv("HOST_AGENT_HMAC_SECRET")
 PROJECT_SECRETS_MASTER_KEY = os.getenv("PROJECT_SECRETS_MASTER_KEY")
 PROJECT_SECRETS_MASTER_KEY_ID = os.getenv(
     "PROJECT_SECRETS_MASTER_KEY_ID", "project-secrets-master-v1"
@@ -96,6 +91,7 @@ for key_name, key_value in {
     "NGINX_SHARED_TOKEN": NGINX_SHARED_TOKEN,
     "NGINX_HMAC_SECRET": NGINX_HMAC_SECRET,
     "LOGFLARE_PRIVATE_ACCESS_TOKEN": LOGFLARE_PRIVATE_ACCESS_TOKEN,
+    "HOST_AGENT_HMAC_SECRET": HOST_AGENT_HMAC_SECRET,
 }.items():
     if not key_value:
         raise RuntimeError(f"Missing {key_name} environment variable")

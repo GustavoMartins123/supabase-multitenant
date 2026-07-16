@@ -70,29 +70,26 @@ class DockerSocketRemovalContractTest(unittest.TestCase):
         self.assertNotIn("docker_host:", self.vector_config.split("sources:", 1)[1])
         self.assertIn("VECTOR_FLUENTD_PORT", vector)
 
-    def test_projects_api_has_no_socket_or_traefik_labels(self) -> None:
+    def test_projects_api_has_no_docker_access_at_all(self) -> None:
         projects_api = service_block(self.api_compose, "projects-api")
         self.assertNotIn("/var/run/docker.sock", projects_api)
         self.assertNotIn("labels:", projects_api)
-        self.assertIn("DOCKER_HOST: ${DOCKER_HOST}", projects_api)
+        self.assertNotIn("DOCKER_HOST", projects_api)
+        self.assertIn("HOST_AGENT_HMAC_SECRET", projects_api)
 
-    def test_single_node_is_explicit_and_isolates_lifecycle_proxy(self) -> None:
-        projects_api = service_block(self.single_node, "projects-api")
-        proxy = service_block(self.single_node, "lifecycle-docker-proxy")
-        network = service_block(self.single_node, "lifecycle-docker-api")
-        self.assertIn("tcp://lifecycle-docker-proxy:2375", projects_api)
-        self.assertIn("lifecycle-docker-api", projects_api)
-        self.assertIn("/var/run/docker.sock", proxy)
-        self.assertNotIn("ports:", proxy)
-        self.assertIn("internal: true", network)
+    def test_topology_overrides_have_no_lifecycle_proxy(self) -> None:
+        for compose in (self.single_node, self.split_node):
+            self.assertNotIn("lifecycle-docker-proxy", compose)
+            self.assertNotIn("lifecycle-docker-api", compose)
+            self.assertNotIn("/var/run/docker.sock", compose)
+            self.assertNotIn("DOCKER_HOST", compose)
 
-    def test_split_node_keeps_lifecycle_socket_out_of_api(self) -> None:
-        projects_api = service_block(self.split_node, "projects-api")
-        proxy = service_block(self.split_node, "lifecycle-docker-proxy")
-        self.assertIn("tcp://lifecycle-docker-proxy:2375", projects_api)
-        self.assertNotIn("/var/run/docker.sock", projects_api)
-        self.assertIn("/var/run/docker.sock", proxy)
-        self.assertNotIn("ports:", proxy)
+    def test_api_image_has_no_docker_cli_or_scripts(self) -> None:
+        dockerfile = (ROOT / "servidor/api-internal/Dockerfile").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("docker-ce-cli", dockerfile)
+        self.assertNotIn("generateProject", dockerfile)
 
     def test_startup_profiles_separate_server_and_studio_nodes(self) -> None:
         start = (ROOT / "start.sh").read_text(encoding="utf-8")

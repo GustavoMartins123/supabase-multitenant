@@ -1,0 +1,28 @@
+# Unit template do host-agent. O install.sh substitui __SERVIDOR_DIR__ e
+# __AGENT_DIR__ pelos caminhos reais e instala em /etc/systemd/system/.
+[Unit]
+Description=Supabase multitenant host-agent (comandos fechados de lifecycle)
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=exec
+# O agent precisa do docker e de leitura/escrita em servidor/projects.
+# Rode como root ou como um usuario dedicado no grupo docker.
+User=root
+Environment=HOST_AGENT_ROOT=__SERVIDOR_DIR__
+ExecStart=__AGENT_DIR__/.venv/bin/python -m hostagent --root __SERVIDOR_DIR__
+WorkingDirectory=__AGENT_DIR__
+Restart=always
+RestartSec=5
+# Comandos longos (rename/duplicate) precisam terminar ou fazer rollback.
+TimeoutStopSec=600
+KillMode=mixed
+NoNewPrivileges=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

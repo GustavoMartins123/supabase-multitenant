@@ -37,6 +37,15 @@ API_COMPOSE=(docker compose -f docker-compose-api.yml -f "$API_OVERRIDE" --env-f
 docker compose -f docker-compose.yml --env-file .env up --build -d
 "${API_COMPOSE[@]}" up --build -d
 
+if [ -f /etc/systemd/system/supabase-host-agent.service ]; then
+    echo "Iniciando host-agent..."
+    systemctl start supabase-host-agent \
+        || echo "Aviso: nao foi possivel iniciar supabase-host-agent (rode como root)." >&2
+else
+    echo "Aviso: host-agent nao instalado; lifecycle de projetos ficara indisponivel." >&2
+    echo "       Instale com: sudo bash servidor/host-agent/install.sh" >&2
+fi
+
 echo "Aguardando o banco de dados ficar pronto..."
 counter=0
 until [ "$(docker inspect -f '{{.State.Health.Status}}' supabase-db)" = "healthy" ]; do

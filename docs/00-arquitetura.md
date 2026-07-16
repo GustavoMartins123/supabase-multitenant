@@ -242,24 +242,12 @@ Integrações como push worker e invalidação de cache usam contratos internos 
 
 ### Acesso ao Docker daemon
 
-Traefik, Vector e Projects API nao montam o Docker socket. Traefik observa
+Nenhum componente em container acessa o Docker daemon. Traefik observa
 somente arquivos dinamicos; Vector recebe eventos pelo protocolo Fluent; e a
-Projects API usa `DOCKER_HOST` na rede interna do proxy de lifecycle. O unico
-mount do socket fica nesse proxy, sem portas publicadas.
-
-<!-- Descricao historica anterior ao File Provider definitivo:
-
-Traefik e Vector não recebem o Docker socket diretamente. Cada processo usa um
-proxy exclusivo, conectado por uma rede Docker interna que não publica portas.
-Os proxies aceitam somente `GET` e `HEAD` para `version`, `ping`, `events` e
-`containers`; operações de build, exec, images, networks, volumes e system
-permanecem bloqueadas.
-
-A Projects API ainda acessa o socket diretamente porque executa o lifecycle
-completo dos projetos. A remoção desse acesso exige um host agent com operações
-de domínio restritas e permanece uma etapa separada de hardening.
-
--->
+Projects API grava intencoes assinadas no banco para o
+[host-agent](architecture/host-agent.md), o servico no host que executa o
+conjunto fechado de comandos de lifecycle. O antigo proxy Docker de
+lifecycle foi removido.
 
 ### Segredos de projeto
 
