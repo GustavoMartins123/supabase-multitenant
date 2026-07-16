@@ -50,12 +50,11 @@ verificadas por teste):
 | `terminate_supavisor_tenant` / `delete_supavisor_tenant` / `delete_realtime_tenant` | curl dentro do container do serviço, token construído localmente | 60s |
 
 Não existe comando que aceite argv, path ou SQL arbitrário. Os comandos de
-ponto de restauração recebem apenas UUIDs validados nos dois lados; o path
-resolvido fica confinado a `servidor/backups/<project_uuid>/` e o
-`project_uuid` vem da própria intenção assinada, conferido contra o `.env`
-do projeto. Diferente do restante do lifecycle, eles são autorizados para
-qualquer membro do projeto (`PROJECT_MEMBER_COMMANDS`), além de owner e
-admin global.
+ponto de restauração recebem apenas UUIDs validados nos dois lados; o path resolvido fica confinado a `servidor/backups/<tenant_uuid>/`, onde o
+`tenant_uuid` é o `PROJECT_UUID` lido do `.env` do projeto (imutável no
+rename, distinto do `projects.id` do control plane). Diferente do restante
+do lifecycle, eles são autorizados para qualquer membro do projeto
+(`PROJECT_MEMBER_COMMANDS`), além de owner e admin global.
 
 ## Segurança
 

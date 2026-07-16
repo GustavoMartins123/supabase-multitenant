@@ -238,7 +238,6 @@ class HostAgent:
             state=state,
             timeout_seconds=timeout_seconds,
             command=command,
-            project_uuid=str(record["project_uuid"]) if record["project_uuid"] else None,
         )
         heartbeat = asyncio.create_task(self._command_heartbeat_loop(command_id, state))
         try:

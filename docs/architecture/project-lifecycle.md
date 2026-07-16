@@ -193,8 +193,9 @@ tabelas da publication do Realtime.
 Ficam fora do ponto: `.env`, JWT secret, anon/service keys, config token,
 tenants do Realtime/Supavisor e configuração de containers. Por isso um
 ponto continua restaurável depois de rotação de chaves e de rename — os
-arquivos vivem em `servidor/backups/<project_uuid>/<point_id>/`, chaveados
-pelo UUID imutável.
+arquivos vivem em `servidor/backups/<tenant_uuid>/<point_id>/`, chaveados
+pelo `PROJECT_UUID` do `.env` do projeto (o UUID do tenant, imutável no
+rename).
 
 ### Captura (fria)
 

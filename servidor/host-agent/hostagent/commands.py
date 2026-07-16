@@ -29,6 +29,7 @@ from .host_agent_protocol import (
     COMMAND_TERM_GRACE,
     CONTAINER_LOGS_LIMIT,
     DEFAULT_TERM_GRACE,
+    is_valid_uuid,
     sanitize_output,
 )
 from .security import (
@@ -101,7 +102,6 @@ class CommandContext:
     state: RunningCommandState
     timeout_seconds: int
     command: str
-    project_uuid: str | None = None
 
 
 @dataclass
@@ -570,21 +570,14 @@ async def _remove_backup_tree(path: Path) -> bool:
 def _resolve_backup_context(
     ctx: CommandContext, project: str
 ) -> tuple[str, None] | tuple[None, CommandOutcome]:
-    expected = (ctx.project_uuid or "").strip().lower()
-    if not expected:
-        return None, CommandOutcome(
-            status="failed",
-            error_code="project_uuid_missing",
-            message="Intencao sem project_uuid; impossivel localizar backups.",
-        )
     env_uuid = _load_project_env(ctx, project).get("PROJECT_UUID", "").strip().lower()
-    if env_uuid != expected:
+    if not is_valid_uuid(env_uuid):
         return None, CommandOutcome(
             status="failed",
-            error_code="project_uuid_mismatch",
-            message="PROJECT_UUID do .env difere da intencao assinada.",
+            error_code="project_uuid_unavailable",
+            message="PROJECT_UUID ausente ou invalido no .env do projeto.",
         )
-    return expected, None
+    return env_uuid, None
 
 
 async def handle_backup_project(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
