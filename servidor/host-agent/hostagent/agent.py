@@ -37,6 +37,7 @@ from .host_agent_protocol import (
     HOST_AGENT_COMMANDS,
     NOTIFY_CHANNEL,
     evaluate_authorization,
+    sanitize_output,
     validate_command_args,
     verify_command_signature,
 )
@@ -284,6 +285,14 @@ class HostAgent:
             await self._refresh_container_state()
         except Exception:  # noqa: BLE001
             pass
+        if outcome.status == "failed":
+            logger.warning(
+                "comando %s (%s) falhou: %s — %s",
+                command_id,
+                command,
+                outcome.error_code or "sem_codigo",
+                sanitize_output(outcome.message or "", tail_limit=400) or "sem mensagem",
+            )
         logger.info("comando %s finalizado: %s", command_id, outcome.status)
 
     async def _command_heartbeat_loop(self, command_id: uuid.UUID, state: RunningCommandState) -> None:

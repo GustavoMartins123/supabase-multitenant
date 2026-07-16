@@ -12,8 +12,7 @@ NEW_NAME="${2:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-PROJECTS_ROOT="/docker/projects"
-[[ -d "$PROJECTS_ROOT" ]] || PROJECTS_ROOT="$PROJECT_ROOT/projects"
+PROJECTS_ROOT="$PROJECT_ROOT/projects"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
 
