@@ -1,6 +1,7 @@
 local _M = {}
 
 local hmac_sha256 = require("security.hmac_sha256")
+local secure_compare = require("security.secure_compare")
 
 local function should_log_invalid_cookie()
     local uri = ngx.var.uri or ""
@@ -52,7 +53,7 @@ function _M.resolve()
         ngx.log(ngx.ERR, "Falha ao validar cookie de projeto: ", err)
         return "default"
     end
-    if string.lower(expect) ~= string.lower(sig) then
+    if not secure_compare.equals(expect, sig) then
         if should_log_invalid_cookie() then
             ngx.log(ngx.WARN, "Assinatura de cookie inválida para projeto: ", ref,
                     "; limpando cookie")
@@ -73,7 +74,7 @@ function _M.resolve()
         end
 
         ngx.header["Set-Cookie"] =
-            ("supabase_project=%s.%s.%s; Path=/; HttpOnly; SameSite=Lax; Max-Age=%d")
+            ("supabase_project=%s.%s.%s; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=%d")
             :format(ref, new_ts, new_sig, max_age)
 
         ngx.log(ngx.INFO, "[COOKIE_RENEWAL] Cookie renovado para projeto: ", ref,

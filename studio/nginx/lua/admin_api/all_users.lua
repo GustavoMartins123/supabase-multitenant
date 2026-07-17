@@ -60,7 +60,7 @@ local admins_excluded = 0
 local seen_ids = {}
 
 for _, user_key in ipairs(keys) do
-    if user_key ~= "__mtime" and not user_key:match("^email:") then
+    if not user_key:match("^__") and not user_key:match("^email:") then
         local user_json = cache:get(user_key)
         if user_json then
             local user_data = cjson.decode(user_json)

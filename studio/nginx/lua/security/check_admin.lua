@@ -1,14 +1,8 @@
 local groups = ngx.var.authelia_groups or ""
 local email = ngx.var.authelia_email or ""
+local admin_groups = require("security.admin_groups")
 local user_context_headers = require("project_context.user_context_headers")
-local groups_clean = groups:gsub("[%[%]]", "")
-local is_admin = false
-for group in groups_clean:gmatch("[^,]+") do
-    if group:match("^%s*admin%s*$") then
-        is_admin = true
-        break
-    end
-end
+local is_admin = admin_groups.is_admin(groups)
 
 if email ~= "" then
     user_context_headers.apply(email, groups)

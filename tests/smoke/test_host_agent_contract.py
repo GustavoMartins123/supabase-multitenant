@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import pathlib
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -37,6 +38,57 @@ class ProtocolCopiesAreIdenticalTest(unittest.TestCase):
             api_copy,
             "As copias do host_agent_protocol.py divergiram; sincronize-as.",
         )
+
+
+class SystemdInstallerContractTest(unittest.TestCase):
+    def test_unit_quotes_paths_that_may_contain_spaces(self) -> None:
+        template = (
+            AGENT_ROOT / "supabase-host-agent.service"
+        ).read_text(encoding="utf-8")
+        self.assertIn('Environment="HOST_AGENT_ROOT=__SERVIDOR_DIR__"', template)
+        self.assertIn(
+            'ExecStart="__AGENT_DIR__/.venv/bin/python" '
+            '-m hostagent --root "__SERVIDOR_DIR__"',
+            template,
+        )
+        self.assertIn("WorkingDirectory=__AGENT_DIR__", template)
+
+    def test_installer_shell_syntax_and_systemd_escaping(self) -> None:
+        installer = AGENT_ROOT / "install.sh"
+        subprocess.run(["bash", "-n", str(installer)], check=True)
+        source = installer.read_text(encoding="utf-8")
+        self.assertIn("escape_systemd_value", source)
+        self.assertIn("escape_sed_replacement", source)
+        self.assertIn('render_unit "$SERVIDOR_DIR" "$AGENT_DIR" "$UNIT_PATH"', source)
+
+        with tempfile.TemporaryDirectory(prefix="host agent % & ") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            servidor_dir = root / "servidor com espaco"
+            agent_dir = AGENT_ROOT
+            rendered = root / "rendered.service"
+            servidor_dir.mkdir()
+            subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    'source "$1"; render_unit "$2" "$3" "$4"',
+                    "bash",
+                    str(installer),
+                    str(servidor_dir),
+                    str(agent_dir),
+                    str(rendered),
+                ],
+                check=True,
+            )
+            unit = rendered.read_text(encoding="utf-8")
+            escaped_servidor = str(servidor_dir).replace("%", "%%")
+            escaped_workdir = str(agent_dir).replace("%", "%%")
+            self.assertIn(
+                f'Environment="HOST_AGENT_ROOT={escaped_servidor}"',
+                unit,
+            )
+            self.assertIn(f'--root "{escaped_servidor}"', unit)
+            self.assertIn(f"WorkingDirectory={escaped_workdir}", unit)
 
 
 class ClosedCommandSetTest(unittest.TestCase):

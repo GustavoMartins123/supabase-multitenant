@@ -19,5 +19,7 @@ ngx.say(cjson.encode({
     version_reload = metrics:get("version_reload") or 0,
     invalidation = metrics:get("invalidation") or 0,
     fetch_error = metrics:get("fetch_error") or 0,
+    fetch_error_backoff = metrics:get("fetch_error_backoff") or 0,
+    stale_fetch = metrics:get("stale_fetch") or 0,
     version_check_error = metrics:get("version_check_error") or 0,
 }))

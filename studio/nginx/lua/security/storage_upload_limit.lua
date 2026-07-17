@@ -1,5 +1,6 @@
 local cjson = require("cjson.safe")
 local hmac_sha256 = require("security.hmac_sha256")
+local secure_compare = require("security.secure_compare")
 
 local _M = {}
 
@@ -91,7 +92,7 @@ local function storage_limit_for_project(project_ref)
         return nil, "Falha ao validar limite de upload"
     end
 
-    if string.lower(expected) ~= string.lower(sig) then
+    if not secure_compare.equals(expected, sig) then
         return nil, "Assinatura do limite de upload invalida"
     end
 

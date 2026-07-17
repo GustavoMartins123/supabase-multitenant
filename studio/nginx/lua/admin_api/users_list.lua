@@ -23,7 +23,7 @@ local function mask_email(email)
 end
 
 for _, key in ipairs(keys) do
-    if key ~= "__mtime" and not key:match("^email:") then
+    if not key:match("^__") and not key:match("^email:") then
         local user_data = cache:get(key)
         if user_data then
             local user = cjson.decode(user_data)

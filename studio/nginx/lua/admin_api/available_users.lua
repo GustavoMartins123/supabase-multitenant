@@ -69,7 +69,7 @@ if include_members then
         ngx.log(ngx.INFO, "[AVAILABLE][CONTENT] Modo ADMIN: retornando todos os usuários ativos exceto admins")
         
         for _, h in ipairs(keys) do
-            if h ~= "__mtime" and not h:match("^email:") then
+            if not h:match("^__") and not h:match("^email:") then
                 local ud_json = cache:get(h)
                 if ud_json then
                     local ud = cjson.decode(ud_json)
@@ -103,7 +103,7 @@ if include_members then
         if has_non_admin_members then
             ngx.log(ngx.INFO, "[AVAILABLE][CONTENT] Retornando ", table.getn(member_ids), " membros não-admins")
             for _, h in ipairs(keys) do
-                if h ~= "__mtime" and not h:match("^email:") then
+                if not h:match("^__") and not h:match("^email:") then
                     local ud_json = cache:get(h)
                     if ud_json then
                     local ud = cjson.decode(ud_json)
@@ -135,7 +135,7 @@ if include_members then
             end
             
             for _, h in ipairs(keys) do
-                if h ~= "__mtime" and not h:match("^email:") then
+                if not h:match("^__") and not h:match("^email:") then
                     local ud_json = cache:get(h)
                     if ud_json then
                         local ud = cjson.decode(ud_json)
@@ -185,7 +185,7 @@ else
 
     local available = {}
     for _, h in ipairs(keys) do
-        if h ~= "__mtime" and not h:match("^email:") then
+        if not h:match("^__") and not h:match("^email:") then
             local ud_json = cache:get(h)
             if ud_json then
                 local ud = cjson.decode(ud_json)

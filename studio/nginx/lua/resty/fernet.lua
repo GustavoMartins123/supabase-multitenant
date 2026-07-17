@@ -2,6 +2,7 @@ local aes = require("resty.aes")
 local bit = require("bit")
 local hmac_sha256 = require("security.hmac_sha256")
 local random = require("resty.random")
+local secure_compare = require("security.secure_compare")
 local str = require("resty.string")
 
 local _M = { _VERSION = "0.1-openssl3" }
@@ -47,7 +48,13 @@ function _M.generate_key()
 end
 
 function _M.new(self, key)
-  local decoded = assert(urlsafe_b64decode(key))
+  if type(key) ~= "string" then
+    return nil, "key must be a string"
+  end
+  local decoded = urlsafe_b64decode(key)
+  if not decoded or #decoded ~= 32 then
+    return nil, "invalid Fernet key"
+  end
   return setmetatable({
     signing_key = decoded:sub(1, 16),
     encryption_key = decoded:sub(17, 32)
@@ -121,7 +128,7 @@ function _M.decrypt(self, token, ttl)
     return nil, err
   end
 
-  if mac_a ~= mac_b then
+  if not secure_compare.equals(mac_a, mac_b) then
     return nil, "hmac digests do not match"
   end
 

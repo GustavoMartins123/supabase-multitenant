@@ -1,5 +1,6 @@
         local lyaml = require("lyaml")
         local lfs = require("lfs")
+        local cjson = require("cjson.safe")
         local user_identity = require("project_context.user_identity")
         local authelia_identifiers = require("admin_api.authelia_identifiers")
         local user_sync = require("admin_api.user_sync")
@@ -50,21 +51,61 @@
             end
         end
         
+        local function previously_managed_keys()
+            local managed = {}
+            local manifest = cjson.decode(cache:get("__yaml_user_keys") or "")
+            if type(manifest) == "table" then
+                for _, key in ipairs(manifest) do
+                    if type(key) == "string" then
+                        managed[key] = true
+                    end
+                end
+                return managed
+            end
+
+            -- Compatibilidade com o primeiro reload depois do upgrade, quando
+            -- ainda nao existe manifesto das chaves publicadas pelo YAML.
+            local keys = cache:get_keys(0) or {}
+            for _, key in ipairs(keys) do
+                if key:match("^email:") then
+                    managed[key] = true
+                elseif not key:match("^__") then
+                    local value = cache:get(key)
+                    local decoded = type(value) == "string" and cjson.decode(value)
+                    if type(decoded) == "table"
+                        and decoded.username
+                        and decoded.user_uuid
+                    then
+                        managed[key] = true
+                    end
+                end
+            end
+            return managed
+        end
+
         local function load_users()
             local f = assert(io.open(yaml))
-            local t = lyaml.load(f:read("*a")); f:close()
-            cache:flush_all()
-            ngx.log(ngx.INFO, "Carregando usuários do arquivo YAML…")
+            local content = f:read("*a")
+            f:close()
+            local t = lyaml.load(content)
+            if type(t) ~= "table" or type(t.users) ~= "table" then
+                return nil, "estrutura invalida no users_database.yml"
+            end
+
+            ngx.log(ngx.INFO, "Preparando snapshot de usuários do arquivo YAML…")
+            local snapshot = {}
             local users_for_sync = {}
-            local cjson = require("cjson.safe")
             local missing_identifiers = 0
-            
-            local function is_bootstrap_placeholder(uname, attr)
+
+            local function is_bootstrap_placeholder(uname)
                 return uname == "__bootstrap_placeholder__"
             end
 
-            for uname, attr in pairs(t.users or {}) do
-                if attr.disabled == true or is_bootstrap_placeholder(uname, attr) then
+            for uname, attr in pairs(t.users) do
+                if type(attr) ~= "table" then
+                    return nil, "registro invalido para usuario " .. tostring(uname)
+                end
+                if attr.disabled == true or is_bootstrap_placeholder(uname) then
                     ngx.log(ngx.INFO, "[CACHE] Usuario ignorado no bootstrap: ", uname)
                 else
                     local groups = attr.groups or {}
@@ -87,40 +128,25 @@
                     if not user_uuid then
                         missing_identifiers = missing_identifiers + 1
                         ngx.log(ngx.ERR, "[SYNC] Falha ao gerar/exportar opaque identifier para ", uname, ": ", identifier_err)
-                    end
-                    local cache_payload = {
-                        email = email,
-                        display_name = is_active and display_name or (display_name .. " (INATIVO)"),
-                        username = uname,
-                        is_active = is_active,
-                        is_admin = is_admin,
-                        user_uuid = user_uuid,
-                        picture = attr.picture or "",
-                    }
-                    local encoded_payload = cjson.encode(cache_payload)
-
-                    if user_uuid and user_uuid ~= "" then
-                        cache:set(user_uuid, encoded_payload)
-                        if email ~= "" then
-                            cache:set("email:" .. email, user_uuid)
+                    else
+                        local cache_payload = {
+                            email = email,
+                            display_name = is_active and display_name or (display_name .. " (INATIVO)"),
+                            username = uname,
+                            is_active = is_active,
+                            is_admin = is_admin,
+                            user_uuid = user_uuid,
+                            picture = attr.picture or "",
+                        }
+                        local encoded_payload = cjson.encode(cache_payload)
+                        if not encoded_payload then
+                            return nil, "falha ao serializar usuario " .. uname
                         end
-                    end
 
-                    ngx.log(
-                        ngx.INFO,
-                        "[CACHE] Usuario carregado: ", uname,
-                        " uuid=", user_uuid or "missing",
-                        " active=", tostring(is_active),
-                        " admin=", tostring(is_admin)
-                    )
-
-                    ngx.log(ngx.INFO, "[CACHE] set() – user=", uname,
-                        " email=", email,
-                        " uuid=", user_uuid or "missing",
-                        " active=", is_active,
-                        " admin=", is_admin)
-
-                    if user_uuid and user_uuid ~= "" then
+                        snapshot[user_uuid] = encoded_payload
+                        if email ~= "" then
+                            snapshot["email:" .. email] = user_uuid
+                        end
                         table.insert(users_for_sync, {
                             id = user_uuid,
                             username = uname,
@@ -130,20 +156,46 @@
                             source = "studio_bootstrap",
                             cache_key = user_uuid,
                         })
-                    else
-                        ngx.log(ngx.WARN, "[SYNC] Usuario ignorado porque nao foi possivel obter opaque identifier: ", uname)
                     end
+
+                    ngx.log(
+                        ngx.INFO,
+                        "[CACHE] Usuario preparado: ", uname,
+                        " uuid=", user_uuid or "missing",
+                        " active=", tostring(is_active),
+                        " admin=", tostring(is_admin)
+                    )
                 end
             end
-            
-            cache:set("__mtime", lfs.attributes(yaml, "modification"))
-            ngx.log(ngx.INFO, "[CACHE] Cache atualizado em mtime=", cache:get("__mtime"))
-            queue_user_sync(users_for_sync)
 
             if missing_identifiers > 0 then
                 return nil, "falha ao obter opaque identifier para " .. missing_identifiers .. " usuario(s)"
             end
 
+            -- Publica primeiro todas as entradas novas. Requests concorrentes
+            -- continuam vendo o snapshot anterior ate cada chave ser trocada.
+            local old_keys = previously_managed_keys()
+            local manifest = {}
+            for key, value in pairs(snapshot) do
+                local stored, store_err = cache:set(key, value)
+                if not stored then
+                    return nil, "falha ao publicar chave " .. key .. ": " .. (store_err or "erro desconhecido")
+                end
+                manifest[#manifest + 1] = key
+            end
+
+            -- Somente depois da publicacao remove usuarios/emails que sairam
+            -- do YAML, eliminando a janela global de cache vazio.
+            for key in pairs(old_keys) do
+                if snapshot[key] == nil then
+                    cache:delete(key)
+                end
+            end
+            table.sort(manifest)
+            cache:set("__yaml_user_keys", cjson.encode(manifest))
+            cache:set("__mtime", lfs.attributes(yaml, "modification"))
+            ngx.log(ngx.INFO, "[CACHE] Snapshot atualizado em mtime=", cache:get("__mtime"))
+            queue_user_sync(users_for_sync)
             return true
         end
 
@@ -172,9 +224,13 @@
                         ngx.log(ngx.INFO, "[INOTIFY-PIPE] Arquivo modificado: ", line)
                         ngx.sleep(0.1)
                         
-                        local ok, lerr = pcall(load_users)
-                        if not ok then
-                            ngx.log(ngx.ERR, "[INOTIFY-PIPE] Erro ao recarregar usuários: ", lerr)
+                        local called, loaded, load_err = pcall(load_users)
+                        if not called or not loaded then
+                            ngx.log(
+                                ngx.ERR,
+                                "[INOTIFY-PIPE] Erro ao recarregar usuários: ",
+                                called and load_err or loaded
+                            )
                         end
                     end
                 elseif err == "closed" then

@@ -1,4 +1,5 @@
 local cjson = require("cjson.safe")
+local service_key_version = require("cache.service_key_version")
 local shared_token = require("security.shared_token")
 
 local headers = ngx.req.get_headers()
@@ -24,16 +25,20 @@ if not project_ref or project_ref == "" or not version or version < 1 then
     return ngx.exit(ngx.HTTP_BAD_REQUEST)
 end
 
-local cache = ngx.shared.service_keys
-cache:delete("service_key:value:" .. project_ref)
-cache:delete("service_key:cached_version:" .. project_ref)
-cache:set("service_key:required_version:" .. project_ref, version)
-cache:set("service_key:checked_version:" .. project_ref, version, version_check_ttl)
+local required_version, version_err = service_key_version.invalidate(
+    project_ref,
+    version,
+    version_check_ttl
+)
+if not required_version then
+    ngx.log(ngx.ERR, "Falha ao invalidar service key: ", version_err)
+    return ngx.exit(ngx.HTTP_SERVICE_UNAVAILABLE)
+end
 ngx.shared.service_key_metrics:incr("invalidation", 1, 0)
 
 ngx.header.content_type = "application/json"
 ngx.say(cjson.encode({
     invalidated = true,
     project_ref = project_ref,
-    project_key_version = version,
+    project_key_version = required_version,
 }))

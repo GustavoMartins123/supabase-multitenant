@@ -1,4 +1,5 @@
 local hmac_sha256 = require("security.hmac_sha256")
+local secure_compare = require("security.secure_compare")
 local key = COOKIE_SECRET
 local storage_limit_key = os.getenv("NGINX_HMAC_SECRET") or ""
 local ref = ngx.var.arg_ref
@@ -15,7 +16,7 @@ if not sig then
 end
 
 local cookies = {
-    ("supabase_project=%s.%s.%s; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800")
+    ("supabase_project=%s.%s.%s; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800")
         :format(ref, ts, sig)
 }
 
@@ -33,13 +34,13 @@ if storage_limit_token and storage_limit_token ~= "" then
         return ngx.exit(500)
     end
 
-    if string.lower(expected) ~= string.lower(limit_sig) then
+    if not secure_compare.equals(expected, limit_sig) then
         return ngx.exit(400)
     end
 
     table.insert(
         cookies,
-        ("supabase_storage_limit=%s; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800")
+        ("supabase_storage_limit=%s; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800")
             :format(storage_limit_token)
     )
 end

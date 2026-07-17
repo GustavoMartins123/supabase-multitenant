@@ -63,6 +63,14 @@ bucket também são convertidas de `PATCH` para `PUT`.
 paths do GoTrue e injeta a service key do projeto. Métodos ou paths fora da
 lista conhecida são rejeitados com HTTP 400.
 
+### Grupos administrativos
+
+O header `Remote-Groups` do Authelia é tratado como uma lista CSV, normalizada
+com trim e lowercase. A comparação é exata contra `ADMIN_GROUPS` (padrão:
+`admin`); múltiplos grupos administrativos podem ser configurados como
+`ADMIN_GROUPS=admin,superadmins`. Formatos inesperados falham fechados e são
+registrados no log do Nginx.
+
 ## Convenções
 
 - Indentação de quatro espaços e nenhuma tabulação.
@@ -101,7 +109,9 @@ Os tempos são configuráveis:
 
 - `SERVICE_KEY_CACHE_TTL_SECONDS`: TTL da chave; padrão de 60 segundos;
 - `SERVICE_KEY_VERSION_CHECK_TTL_SECONDS`: intervalo máximo entre verificações
-  de versão; padrão de 5 segundos.
+  de versão; padrão de 5 segundos;
+- `SERVICE_KEY_FETCH_ERROR_TTL_SECONDS`: backoff curto depois de uma falha no
+  `enc-key`; padrão de 2 segundos (limitado a 10 segundos).
 
 Em operação normal, a consistência é imediata após a notificação. Se as três
 tentativas de invalidação falharem, o job termina com
@@ -110,10 +120,14 @@ usual de chave antiga ao intervalo de verificação. Se tanto a notificação
 quanto a API de versão estiverem indisponíveis, uma entrada existente pode ser
 usada até seu TTL expirar.
 
-Contadores de `hit`, `miss`, `version_reload`, `invalidation`, `fetch_error` e
-`version_check_error` ficam no `lua_shared_dict service_key_metrics` e podem
-ser consultados, com o token interno, em
-`GET /internal/cache/service-key-metrics`.
+Contadores de `hit`, `miss`, `version_reload`, `invalidation`, `fetch_error`,
+`fetch_error_backoff`, `stale_fetch` e `version_check_error` ficam no
+`lua_shared_dict service_key_metrics` e podem ser consultados, com o token
+interno, em `GET /internal/cache/service-key-metrics`.
+
+A versão requerida é monotônica entre workers. Uma resposta `enc-key` com
+versão anterior à invalidação corrente é descartada, em vez de recolocar a
+chave antiga no cache.
 
 ### Credenciais e config token
 

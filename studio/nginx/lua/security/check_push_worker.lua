@@ -1,22 +1,10 @@
-local bit = require("bit")
 local digest = require("resty.openssl.digest")
 local hmac_sha256 = require("security.hmac_sha256")
+local secure_compare = require("security.secure_compare")
 local str = require("resty.string")
 
 local secret = os.getenv("INTERNAL_HMAC_SECRET") or ""
 local max_skew = tonumber(os.getenv("INTERNAL_HMAC_MAX_SKEW_SECONDS") or "60") or 60
-
-local function secure_compare(left, right)
-    if not left or not right or #left ~= #right then
-        return false
-    end
-
-    local diff = 0
-    for i = 1, #left do
-        diff = bit.bor(diff, bit.bxor(left:byte(i), right:byte(i)))
-    end
-    return diff == 0
-end
 
 local function respond(status, message)
     ngx.status = status
@@ -135,7 +123,7 @@ if not expected_signature then
     return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
 end
 
-if not secure_compare(provided_signature, expected_signature) then
+if not secure_compare.equals(provided_signature, expected_signature) then
     ngx.log(ngx.WARN, "[PUSH] Assinatura HMAC invalida para /api/internal/push")
     return respond(ngx.HTTP_FORBIDDEN, "Invalid internal signature")
 end
