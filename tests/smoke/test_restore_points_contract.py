@@ -19,6 +19,11 @@ for path in (str(AGENT_ROOT), str(API_ROOT)):
         sys.path.insert(0, path)
 
 from hostagent import host_agent_protocol as protocol
+from hostagent.commands import (
+    BACKUP_PROGRESS_EVENTS,
+    RunningCommandState,
+    _apply_progress_events,
+)
 
 
 class RestorePointProtocolTest(unittest.TestCase):
@@ -95,6 +100,35 @@ class RestorePointScriptsTest(unittest.TestCase):
         self.assertIn("--exclude-schema=realtime", source)
         self.assertIn("manifest.json", source)
         self.assertIn("storage.tar.gz", source)
+
+    def test_backup_emits_progress_for_real_capture_stages(self) -> None:
+        core = (SCRIPTS_ROOT / "lib" / "backup_core.sh").read_text(encoding="utf-8")
+        implementation = (SCRIPTS_ROOT / "lib" / "backup_project_impl.sh").read_text(
+            encoding="utf-8"
+        )
+        source = core + implementation
+        for marker in BACKUP_PROGRESS_EVENTS:
+            event = marker.removeprefix("HOST_AGENT_PROGRESS=backup:")
+            self.assertIn(f"backup_progress {event}", source)
+
+
+class RestorePointProgressTest(unittest.TestCase):
+    def test_host_agent_applies_each_backup_progress_event_once(self) -> None:
+        state = RunningCommandState()
+        seen: set[str] = set()
+        database_marker = "HOST_AGENT_PROGRESS=backup:database_started"
+        storage_marker = "HOST_AGENT_PROGRESS=backup:storage_archived"
+
+        _apply_progress_events(database_marker, state, BACKUP_PROGRESS_EVENTS, seen)
+        self.assertEqual((state.progress, state.current_step), (25, "backup_database"))
+        self.assertTrue(state.progress_changed.is_set())
+
+        state.progress_changed.clear()
+        _apply_progress_events(database_marker, state, BACKUP_PROGRESS_EVENTS, seen)
+        self.assertFalse(state.progress_changed.is_set())
+
+        _apply_progress_events(storage_marker, state, BACKUP_PROGRESS_EVENTS, seen)
+        self.assertEqual((state.progress, state.current_step), (85, "backup_storage"))
 
 
 class RestorePointGatewayAndUiTest(unittest.TestCase):

@@ -298,7 +298,14 @@ class HostAgent:
 
     async def _command_heartbeat_loop(self, command_id: uuid.UUID, state: RunningCommandState) -> None:
         while True:
-            await asyncio.sleep(self.config.heartbeat_interval)
+            try:
+                await asyncio.wait_for(
+                    state.progress_changed.wait(),
+                    timeout=self.config.heartbeat_interval,
+                )
+            except asyncio.TimeoutError:
+                pass
+            state.progress_changed.clear()
             try:
                 await db.heartbeat_command(
                     self.pool,

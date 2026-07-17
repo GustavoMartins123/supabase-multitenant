@@ -81,6 +81,7 @@ say "Parando servicos do projeto $PROJECT..."
 STOPPED_CONTAINERS="$(backup_stop_project_containers "$PROJECT")"
 code="$(backup_http_code supabase-pooler GET "/api/tenants/$PROJECT/terminate" "$GLOBAL_ANON_TOKEN")"
 backup_accepted_code "$code" 200 204 404 || die "Supavisor nao encerrou pools (HTTP $code)"
+backup_progress services_stopped
 
 say "Capturando banco e storage..."
 backup_capture "$PROJECT" "$PROJECT_DIR" "$DEST_DIR"
@@ -88,6 +89,7 @@ backup_capture "$PROJECT" "$PROJECT_DIR" "$DEST_DIR"
 say "Religando servicos do projeto..."
 restart_stopped || die "Backup concluido, mas falhou ao religar servicos"
 STOPPED_CONTAINERS=""
+backup_progress services_restarted
 
 trap - ERR TERM INT HUP
 ok "BACKUP_COMPLETE ${PROJECT} id=${BACKUP_ID}"

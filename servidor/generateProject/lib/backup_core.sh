@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+backup_progress() {
+  printf 'HOST_AGENT_PROGRESS=backup:%s\n' "$1"
+}
+
 backup_generate_jwt() {
   local payload="$1" secret="$2" header='{"alg":"HS256","typ":"JWT"}'
   local header_b64 payload_b64 signature
@@ -61,12 +65,15 @@ backup_capture() {
   rm -rf "$tmp_dir"
   mkdir -p "$tmp_dir"
 
+  backup_progress database_started
   docker exec supabase-db pg_dump -U supabase_admin -d "$db" \
     --exclude-schema=realtime | gzip > "$tmp_dir/db.sql.gz"
+  backup_progress database_dumped
   docker exec supabase-db pg_dump -U supabase_admin -d "$db" \
     --schema=realtime --schema-only 2>/dev/null | gzip > "$tmp_dir/realtime-structure.sql.gz" || true
   docker exec supabase-db pg_dump -U supabase_admin -d "$db" --data-only \
     -t 'realtime.schema_migrations' 2>/dev/null | gzip > "$tmp_dir/realtime-migrations.sql.gz" || true
+  backup_progress realtime_dumped
 
   realtime_tables=$(docker exec supabase-db psql -U supabase_admin -d "$db" -tAc \
     "SELECT string_agg(format('%I.%I', schemaname, tablename), ',') FROM pg_publication_tables WHERE pubname = 'supabase_realtime';" \
@@ -74,6 +81,7 @@ backup_capture() {
   pg_version=$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc "SHOW server_version;" | tr -d '[:space:]')
   created_at=$(date +%s)
 
+  backup_progress storage_started
   if [[ -d "$project_dir/storage" ]]; then
     (cd "$project_dir/storage" && tar --xattrs --xattrs-include='*' --acls -cpf - .) \
       | gzip > "$tmp_dir/storage.tar.gz"
@@ -82,6 +90,7 @@ backup_capture() {
     (cd "$tmp_dir/empty-storage" && tar -cpf - .) | gzip > "$tmp_dir/storage.tar.gz"
     rm -rf "$tmp_dir/empty-storage"
   fi
+  backup_progress storage_archived
 
   jq -n \
     --arg uuid "$PROJECT_UUID" \
@@ -93,4 +102,5 @@ backup_capture() {
     > "$tmp_dir/manifest.json"
 
   mv "$tmp_dir" "$dest_dir"
+  backup_progress backup_published
 }

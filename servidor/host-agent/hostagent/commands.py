@@ -46,6 +46,51 @@ SUPAVISOR_CONTAINER = "supabase-pooler"
 REALTIME_CONTAINER = "realtime-dev.supabase-realtime"
 _OUTPUT_WINDOW_LIMIT = 64_000
 
+ProgressEvent = tuple[int, str, str]
+
+BACKUP_PROGRESS_EVENTS: dict[str, ProgressEvent] = {
+    "HOST_AGENT_PROGRESS=backup:services_stopped": (
+        20,
+        "stop_services",
+        "Serviços pausados; iniciando captura do backup...",
+    ),
+    "HOST_AGENT_PROGRESS=backup:database_started": (
+        25,
+        "backup_database",
+        "Exportando banco de dados...",
+    ),
+    "HOST_AGENT_PROGRESS=backup:database_dumped": (
+        55,
+        "backup_database",
+        "Banco de dados exportado.",
+    ),
+    "HOST_AGENT_PROGRESS=backup:realtime_dumped": (
+        65,
+        "backup_realtime",
+        "Estrutura do Realtime capturada.",
+    ),
+    "HOST_AGENT_PROGRESS=backup:storage_started": (
+        70,
+        "backup_storage",
+        "Compactando arquivos do Storage...",
+    ),
+    "HOST_AGENT_PROGRESS=backup:storage_archived": (
+        85,
+        "backup_storage",
+        "Arquivos do Storage compactados.",
+    ),
+    "HOST_AGENT_PROGRESS=backup:backup_published": (
+        90,
+        "publish_backup",
+        "Finalizando ponto de restauração...",
+    ),
+    "HOST_AGENT_PROGRESS=backup:services_restarted": (
+        95,
+        "restart_services",
+        "Serviços do projeto religados.",
+    ),
+}
+
 
 @dataclass
 class CommandOutcome:
@@ -66,6 +111,7 @@ class RunningCommandState:
     _stdout: str = ""
     _stderr: str = ""
     dirty: bool = field(default=False)
+    progress_changed: asyncio.Event = field(default_factory=asyncio.Event)
 
     def report(
         self,
@@ -81,6 +127,7 @@ class RunningCommandState:
         if message is not None:
             self.message = message
         self.dirty = True
+        self.progress_changed.set()
 
     def append_output(self, stream: str, text: str) -> None:
         if stream == "stderr":
@@ -111,7 +158,27 @@ class ProcessResult:
     markers_seen: set[str]
 
 
-async def _pump_stream(reader: asyncio.StreamReader | None, state: RunningCommandState, stream: str, markers: tuple[str, ...], seen: set[str]) -> None:
+def _apply_progress_events(
+    window: str,
+    state: RunningCommandState,
+    events: Mapping[str, ProgressEvent],
+    seen: set[str],
+) -> None:
+    for marker, (progress, step, message) in events.items():
+        if marker not in seen and marker in window:
+            seen.add(marker)
+            state.report(progress=progress, step=step, message=message)
+
+
+async def _pump_stream(
+    reader: asyncio.StreamReader | None,
+    state: RunningCommandState,
+    stream: str,
+    markers: tuple[str, ...],
+    seen: set[str],
+    progress_events: Mapping[str, ProgressEvent],
+    progress_seen: set[str],
+) -> None:
     if reader is None:
         return
     while True:
@@ -124,6 +191,9 @@ async def _pump_stream(reader: asyncio.StreamReader | None, state: RunningComman
             for marker in markers:
                 if marker in window:
                     seen.add(marker)
+        if progress_events:
+            window = state._stdout if stream == "stdout" else state._stderr
+            _apply_progress_events(window, state, progress_events, progress_seen)
 
 
 async def run_process(
@@ -132,6 +202,7 @@ async def run_process(
     *,
     cwd: Path | None = None,
     markers: tuple[str, ...] = (),
+    progress_events: Mapping[str, ProgressEvent] | None = None,
 ) -> ProcessResult:
     """Executa um processo com captura incremental, timeout e killpg."""
     term_grace = COMMAND_TERM_GRACE.get(ctx.command, DEFAULT_TERM_GRACE)
@@ -143,9 +214,27 @@ async def run_process(
         start_new_session=True,
     )
     seen: set[str] = set()
+    progress_seen: set[str] = set()
+    configured_progress_events = progress_events or {}
     pumps = asyncio.gather(
-        _pump_stream(proc.stdout, ctx.state, "stdout", markers, seen),
-        _pump_stream(proc.stderr, ctx.state, "stderr", markers, seen),
+        _pump_stream(
+            proc.stdout,
+            ctx.state,
+            "stdout",
+            markers,
+            seen,
+            configured_progress_events,
+            progress_seen,
+        ),
+        _pump_stream(
+            proc.stderr,
+            ctx.state,
+            "stderr",
+            markers,
+            seen,
+            configured_progress_events,
+            progress_seen,
+        ),
     )
     timed_out = False
     try:
@@ -443,6 +532,7 @@ async def _run_lifecycle_script(
     *,
     error_code: str,
     markers: tuple[str, ...] = (),
+    progress_events: Mapping[str, ProgressEvent] | None = None,
 ) -> tuple[CommandOutcome, ProcessResult]:
     script = ctx.config.scripts_dir / script_name
     if not script.is_file():
@@ -459,6 +549,7 @@ async def _run_lifecycle_script(
         ctx,
         cwd=ctx.config.root,
         markers=markers,
+        progress_events=progress_events,
     )
     if result.timed_out:
         return (
@@ -603,6 +694,7 @@ async def handle_backup_project(ctx: CommandContext, project: str, args: dict[st
         "backup_project.sh",
         [project, backup_id],
         error_code="backup_failed",
+        progress_events=BACKUP_PROGRESS_EVENTS,
     )
     if outcome.status == "done":
         size = await asyncio.to_thread(_dir_size_bytes, backup_dir)
