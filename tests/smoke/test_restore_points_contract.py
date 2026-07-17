@@ -68,8 +68,23 @@ class RestorePointApiSurfaceTest(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("project_restore_points", schema_source)
+        self.assertIn(
+            "created_by UUID REFERENCES users(id) ON DELETE SET NULL",
+            schema_source,
+        )
         self.assertIn("ensure_restore_points_schema", schema_source)
         self.assertIn("ensure_restore_points_schema", self.main_source)
+
+    def test_api_exposes_restore_point_creator_name(self) -> None:
+        self.assertIn('"created_by_name": row["created_by_name"]', self.main_source)
+        self.assertIn(
+            "COALESCE(u.display_name, u.authelia_username, 'Sistema') AS created_by_name",
+            self.main_source,
+        )
+        self.assertGreaterEqual(
+            self.main_source.count("job_id, created_by, project_ref_at_creation"),
+            2,
+        )
 
     def test_delete_flow_passes_project_uuid_for_backup_cleanup(self) -> None:
         self.assertIn('{"project_uuid": project_uuid}', self.main_source)
@@ -152,6 +167,14 @@ class RestorePointGatewayAndUiTest(unittest.TestCase):
         self.assertTrue(
             (SELECTOR_LIB / "dialogs" / "restore_points_dialog.dart").is_file()
         )
+        model = (SELECTOR_LIB / "models" / "restore_point.dart").read_text(
+            encoding="utf-8"
+        )
+        dialog = (SELECTOR_LIB / "dialogs" / "restore_points_dialog.dart").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("createdByName: json['created_by_name']", model)
+        self.assertIn("Criado por ${point.creatorName}", dialog)
         card = (SELECTOR_LIB / "widgets" / "project_card.dart").read_text(
             encoding="utf-8"
         )

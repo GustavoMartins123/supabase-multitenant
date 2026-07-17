@@ -537,7 +537,7 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
         maxCrossAxisExtent: 235,
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
-        childAspectRatio: 1.25,
+        mainAxisExtent: 220,
       ),
       itemCount: data.points.length,
       itemBuilder: (_, i) => _buildFolderTile(data.points[i]),
@@ -663,6 +663,32 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
             ),
           ],
           const Spacer(),
+          Tooltip(
+            message: 'Criado por ${point.creatorName}',
+            waitDuration: const Duration(milliseconds: 400),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.person_outline_rounded,
+                  size: 12,
+                  color: SupabaseColors.textMuted,
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    'Criado por ${point.creatorName}',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: SupabaseColors.textMuted,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 5),
           Row(
             children: [
               const Icon(

@@ -38,6 +38,11 @@ class RestorePoint {
   bool get isBusy =>
       status == 'creating' || status == 'restoring' || status == 'deleting';
 
+  String get creatorName {
+    final name = createdByName?.trim();
+    return name == null || name.isEmpty ? 'Sistema' : name;
+  }
+
   static DateTime? _parseDate(dynamic value) {
     if (value is! String || value.isEmpty) return null;
     return DateTime.tryParse(value);
