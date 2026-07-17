@@ -15,7 +15,7 @@ import httpx
 from app.runtime_config import (
     NGINX_SHARED_TOKEN,
     STUDIO_CACHE_INVALIDATION_URL,
-    STUDIO_CACHE_INVALIDATION_VERIFY_TLS,
+    build_studio_cache_ssl_context,
 )
 
 
@@ -30,7 +30,7 @@ async def rename_project_snippets(old_name: str, new_name: str) -> dict[str, Any
         try:
             async with httpx.AsyncClient(
                 timeout=5.0,
-                verify=STUDIO_CACHE_INVALIDATION_VERIFY_TLS,
+                verify=build_studio_cache_ssl_context(),
             ) as client:
                 response = await client.post(
                     url,

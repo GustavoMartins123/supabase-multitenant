@@ -114,7 +114,7 @@ class UserHmacContractTest(unittest.TestCase):
 
 class InternalPushHmacContractTest(unittest.TestCase):
     def test_worker_headers_match_gateway_canonical_contract(self) -> None:
-        url = "https://studio.example/api/internal/push?ignored=true"
+        url = "https://studio.example/api/internal/push?tenant=demo"
         body = b'{"project":"demo","body":"hello"}'
         timestamp = 1_750_000_000
         nonce = "ab" * 16
@@ -137,7 +137,14 @@ class InternalPushHmacContractTest(unittest.TestCase):
 
         changed_hash = hashlib.sha256(body + b"!").hexdigest()
         canonical = "\n".join(
-            ["push-v1", "POST", "/api/internal/push", str(timestamp), nonce, changed_hash]
+            [
+                "push-v2",
+                "POST",
+                "/api/internal/push?tenant=demo",
+                str(timestamp),
+                nonce,
+                changed_hash,
+            ]
         )
         changed_signature = hmac.new(
             INTERNAL_SECRET.encode(),
@@ -146,6 +153,19 @@ class InternalPushHmacContractTest(unittest.TestCase):
         ).hexdigest()
         self.assertNotEqual(
             changed_signature,
+            worker_headers["X-Internal-Signature"],
+        )
+
+        changed_query_headers = internal_hmac.build_internal_hmac_headers(
+            INTERNAL_SECRET,
+            "POST",
+            "https://studio.example/api/internal/push?tenant=other",
+            body,
+            timestamp=timestamp,
+            nonce=nonce,
+        )
+        self.assertNotEqual(
+            changed_query_headers["X-Internal-Signature"],
             worker_headers["X-Internal-Signature"],
         )
 

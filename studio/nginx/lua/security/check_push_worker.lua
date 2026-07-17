@@ -121,9 +121,9 @@ if not body_hash then
 end
 
 local canonical = table.concat({
-    "push-v1",
+    "push-v2",
     ngx.var.request_method,
-    ngx.var.uri,
+    ngx.var.request_uri,
     tostring(timestamp),
     nonce,
     body_hash,

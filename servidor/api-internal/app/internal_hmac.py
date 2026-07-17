@@ -18,13 +18,16 @@ def build_internal_hmac_headers(
 ) -> dict[str, str]:
     signed_at = int(time.time()) if timestamp is None else timestamp
     signed_nonce = secrets.token_hex(16) if nonce is None else nonce
-    path = urlparse(url).path or "/"
+    parsed = urlparse(url)
+    request_target = parsed.path or "/"
+    if parsed.query:
+        request_target = f"{request_target}?{parsed.query}"
     body_hash = hashlib.sha256(body).hexdigest()
     canonical = "\n".join(
         [
-            "push-v1",
+            "push-v2",
             method.upper(),
-            path,
+            request_target,
             str(signed_at),
             signed_nonce,
             body_hash,

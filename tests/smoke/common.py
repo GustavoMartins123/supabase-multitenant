@@ -48,12 +48,15 @@ def build_internal_push_headers(
 ) -> dict[str, str]:
     signed_at = int(time.time()) if timestamp is None else timestamp
     signed_nonce = nonce or os.urandom(16).hex()
-    path = urlparse(url).path or "/"
+    parsed = urlparse(url)
+    request_target = parsed.path or "/"
+    if parsed.query:
+        request_target = f"{request_target}?{parsed.query}"
     canonical = "\n".join(
         [
-            "push-v1",
+            "push-v2",
             "POST",
-            path,
+            request_target,
             str(signed_at),
             signed_nonce,
             hashlib.sha256(body).hexdigest(),

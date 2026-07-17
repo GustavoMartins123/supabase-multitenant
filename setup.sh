@@ -455,6 +455,8 @@ main() {
     fi
     safe_sed "s|PUSH_VERIFY_TLS=true|PUSH_VERIFY_TLS=true|g" servidor/.env
     safe_sed "s|PUSH_CA_FILE=/docker/push-certs/ca.pem|PUSH_CA_FILE=/docker/push-certs/ca.pem|g" servidor/.env
+    safe_sed "s|^STUDIO_CACHE_INVALIDATION_VERIFY_TLS=.*|STUDIO_CACHE_INVALIDATION_VERIFY_TLS=true|g" servidor/.env
+    safe_sed "s|^STUDIO_CACHE_INVALIDATION_CA_FILE=.*|STUDIO_CACHE_INVALIDATION_CA_FILE=/docker/push-certs/ca.pem|g" servidor/.env
     safe_sed "s|DASHBOARD_USER=pass|DASHBOARD_USER=${DASHBOARD_USER}|g" servidor/.env
     safe_sed "s|DASHBOARD_PASSWORD=pass|DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD}|g" servidor/.env
     print_success "Arquivo servidor/.env configurado com sucesso!"

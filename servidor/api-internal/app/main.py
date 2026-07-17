@@ -15,10 +15,6 @@ from fastapi.responses import JSONResponse, Response
 from app.schemas import NewProject, DuplicateProject, UserSyncPayload, AddMember, TransferBody, UpdateSettings, RecreateServices, ProjectNoteCreate, ProjectTagAssign, ProjectHintCreate, ProjectHintStatusUpdate, ProjectThreadMessageCreate, ProjectRenameRequest, ProjectDisplayNameUpdate, ProjectNotificationRead, RestorePointCreate
 from typing import Any, Optional, List, Dict
 from dotenv import dotenv_values
-from app.security_tokens import (
-    resolve_user_claims_from_hmac_token as resolve_signed_user_claims,
-    resolve_user_id_from_hmac_token as resolve_signed_user_id,
-)
 from app.pg_meta_crypto import encrypt_postgres_meta_uri
 from app.project_secret_service import (
     decrypt_project_secret,
@@ -81,37 +77,26 @@ from app.project_telemetry import (
     fetch_project_user_telemetry,
     resolve_telemetry_period,
 )
-
-db_pool: Optional[asyncpg.Pool] = None
-
-
-def resolve_user_id_from_hmac_token(request: Request) -> uuid.UUID:
-    return resolve_signed_user_id(
-        request,
-        secret=NGINX_HMAC_SECRET,
-        max_clock_skew_seconds=USER_TOKEN_MAX_CLOCK_SKEW_SECONDS,
-    )
-
-
-def resolve_user_claims_from_hmac_token(
-    request: Request,
-) -> tuple[uuid.UUID, dict[str, Any]]:
-    return resolve_signed_user_claims(
-        request,
-        secret=NGINX_HMAC_SECRET,
-        max_clock_skew_seconds=USER_TOKEN_MAX_CLOCK_SKEW_SECONDS,
-    )
-
-
-async def get_pool():
-    global db_pool
-    if db_pool is None:
-        raise RuntimeError("Database pool not initialized")
-    return db_pool
-
-
+from app.database import close_pool, get_pool, initialize_pool
+from app.dependencies import (
+    audit_project_member_change,
+    ensure_project_admin_access,
+    ensure_project_member_access,
+    get_project_member_row,
+    get_project_role,
+    get_project_row,
+    get_user_record_by_identifier,
+    require_synced_user_record,
+    resolve_authenticated_user,
+    resolve_user_claims_from_hmac_token,
+    resolve_user_id_from_hmac_token,
+    upsert_project_member,
+)
+from app.routers.collaboration import router as collaboration_router
+from app.routers.internal import router as internal_router
+from app.routers.lifecycle import router as lifecycle_router
+from app.routers.health import router as health_router
 configure_jobs(get_pool)
-
 
 
 async def _enqueue_project_action(
@@ -207,7 +192,10 @@ def _read_project_secret_keys(project_name: str) -> dict[str, str]:
 
 
 app = FastAPI()
-
+app.include_router(health_router)
+app.include_router(collaboration_router)
+app.include_router(internal_router)
+app.include_router(lifecycle_router)
 
 RECOVERABLE_RUNNING_ACTIONS = IDEMPOTENT_ACTIONS
 
@@ -481,7 +469,7 @@ async def _recover_pending_jobs() -> None:
                 await _set_job_status(
                     job_id,
                     "failed",
-                    message=f"Falha ao reconstruir job após reinício: {exc}",
+                    message="Falha interna ao reconstruir job após reinício.",
                     error_code="recovery_dispatch_failed",
                 )
             except Exception:
@@ -493,28 +481,27 @@ async def _recover_pending_jobs() -> None:
 
 @app.on_event("startup")
 async def startup():
-    global db_pool
-    db_pool = await asyncpg.create_pool(DB_DSN, min_size=1, max_size=10)
-    await ensure_identity_schema(db_pool)
-    await ensure_project_secrets_schema(db_pool)
-    await ensure_jobs_schema(db_pool)
-    await ensure_host_agent_schema(db_pool)
-    await ensure_collaboration_schema(db_pool)
-    await ensure_restore_points_schema(db_pool)
+    pool = await initialize_pool(DB_DSN)
+    await ensure_identity_schema(pool)
+    await ensure_project_secrets_schema(pool)
+    await ensure_jobs_schema(pool)
+    await ensure_host_agent_schema(pool)
+    await ensure_collaboration_schema(pool)
+    await ensure_restore_points_schema(pool)
     print("✅ Database pool initialized")
     await _recover_pending_jobs()
 
-
 @app.on_event("shutdown")
 async def shutdown():
-    global db_pool
     await action_queue.shutdown()
-    if db_pool:
-        await db_pool.close()
-        print("✅ Database pool closed")
+    await close_pool()
+    print("✅ Database pool closed")
 
 @app.middleware("http")
 async def validate_shared_token(request: Request, call_next):
+    if request.url.path == "/healthz":
+        return await call_next(request)
+
     token = request.headers.get("X-Shared-Token")
     
     if not token:
@@ -533,382 +520,17 @@ async def validate_shared_token(request: Request, call_next):
     return response
 
 
-@app.api_route(
-    "/api/internal/analytics/{analytics_path:path}",
-    methods=["GET", "POST"],
-)
-async def proxy_global_analytics(
-    analytics_path: str,
-    request: Request,
-):
-    if not analytics_path.startswith("api/") or ".." in analytics_path:
-        raise HTTPException(404, "Analytics path not allowed")
-
-    provided_token = request.headers.get("x-api-key", "")
-    authorization = request.headers.get("authorization", "")
-    if not provided_token and authorization.lower().startswith("bearer "):
-        provided_token = authorization[7:].strip()
-    if not provided_token or not hmac.compare_digest(
-        provided_token,
-        LOGFLARE_PRIVATE_ACCESS_TOKEN,
-    ):
-        raise HTTPException(403, "Invalid Analytics token")
-
-    upstream_headers = {"x-api-key": LOGFLARE_PRIVATE_ACCESS_TOKEN}
-    content_type = request.headers.get("content-type")
-    if content_type:
-        upstream_headers["content-type"] = content_type
-
-    try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(60.0, connect=5.0)
-        ) as client:
-            upstream = await client.request(
-                request.method,
-                f"{ANALYTICS_INTERNAL_URL}/{analytics_path}",
-                params=list(request.query_params.multi_items()),
-                headers=upstream_headers,
-                content=await request.body(),
-            )
-    except httpx.HTTPError as exc:
-        raise HTTPException(502, "Analytics service unavailable") from exc
-
-    response_headers = {"Cache-Control": "no-store"}
-    if upstream.headers.get("content-type"):
-        response_headers["Content-Type"] = upstream.headers["content-type"]
-    return Response(
-        content=upstream.content,
-        status_code=upstream.status_code,
-        headers=response_headers,
-    )
+# Rota extraída para app.routers.internal.
 
 
 
 
-@app.post("/api/projects/internal/users/sync")
-async def sync_user_identity(
-    body: UserSyncPayload,
-    pool=Depends(get_pool),
-):
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            synced = await sync_user_record(
-                conn,
-                user_id=body.id,
-                username=body.username,
-                display_name=body.display_name,
-                groups=body.groups,
-                is_active=body.is_active,
-                source=body.source,
-            )
-    return synced
+# Rota extraída para app.routers.internal.
 
 
-async def resolve_authenticated_user(
-    request: Request,
-    pool: asyncpg.Pool,
-) -> dict[str, Any]:
-    signed_user_id, token_claims = resolve_user_claims_from_hmac_token(request)
-    login_session = str(token_claims.get("login_session") or "")
-    if not re.fullmatch(r"[A-Za-z0-9_-]{43}", login_session):
-        login_session = ""
+# Dependências de autenticação e autorização: app.dependencies.
 
-    async with pool.acquire() as conn:
-        user_row = await conn.fetchrow(
-            """
-            SELECT
-                u.id,
-                u.authelia_username,
-                u.display_name,
-                u.is_active,
-                COALESCE(
-                    array_agg(ug.group_name) FILTER (WHERE ug.group_name IS NOT NULL),
-                    ARRAY[]::text[]
-                ) AS groups
-            FROM users u
-            LEFT JOIN user_groups ug ON ug.user_id = u.id
-            WHERE u.id = $1
-            GROUP BY u.id
-            """,
-            signed_user_id,
-        )
-
-        if user_row:
-            if login_session:
-                await conn.execute(
-                    """
-                    UPDATE users
-                    SET last_login_at = now(),
-                        last_login_session_hash = $2,
-                        updated_at = now()
-                    WHERE id = $1
-                      AND last_login_session_hash IS DISTINCT FROM $2
-                    """,
-                    user_row["id"],
-                    login_session,
-                )
-            await conn.execute(
-                """
-                UPDATE users
-                SET last_seen_at = now(), updated_at = now()
-                WHERE id = $1
-                  AND (
-                      last_seen_at IS NULL
-                      OR last_seen_at < now() - interval '5 minutes'
-                  )
-                """,
-                user_row["id"],
-            )
-
-    if not user_row:
-        raise HTTPException(403, "Usuário não sincronizado com o banco")
-    if not user_row["is_active"]:
-        raise HTTPException(403, "Usuário desativado")
-
-    groups = normalize_groups(user_row["groups"])
-    return {
-        "db_user_id": user_row["id"],
-        "username": user_row["authelia_username"],
-        "display_name": user_row["display_name"],
-        "groups": groups,
-        "is_global_admin": "admin" in groups,
-    }
-
-
-async def get_user_record_by_identifier(
-    conn: asyncpg.Connection,
-    *,
-    identifier: str,
-    field_name: str = "user_id",
-) -> asyncpg.Record | None:
-    raw_identifier = (identifier or "").strip()
-    maybe_uuid = parse_uuid_value(raw_identifier)
-
-    if maybe_uuid is None:
-        raise HTTPException(400, f"{field_name} inválido")
-
-    return await conn.fetchrow(
-        """
-        SELECT id, authelia_username, display_name, is_active
-        FROM users
-        WHERE id = $1
-        """,
-        maybe_uuid,
-    )
-
-
-async def require_synced_user_record(
-    conn: asyncpg.Connection,
-    *,
-    identifier: str,
-    field_name: str = "user_id",
-    missing_message: str = "Usuário alvo ainda não foi sincronizado com o banco",
-    allow_inactive: bool = False,
-) -> asyncpg.Record:
-    row = await get_user_record_by_identifier(conn, identifier=identifier, field_name=field_name)
-    if not row:
-        raise HTTPException(409, missing_message)
-    if not allow_inactive and not row["is_active"]:
-        raise HTTPException(409, "Usuário alvo está desativado")
-    return row
-
-
-async def get_project_row(conn: asyncpg.Connection, project_name: str) -> asyncpg.Record:
-    row = await conn.fetchrow(
-        "SELECT id, name, display_name, owner_id FROM projects WHERE name = $1",
-        project_name,
-    )
-    if not row:
-        raise HTTPException(404, "Project not found")
-    return row
-
-
-async def get_project_role(
-    conn: asyncpg.Connection,
-    *,
-    project_id: str,
-    auth_user: dict[str, Any],
-) -> str | None:
-    return await conn.fetchval(
-        """
-        SELECT role
-        FROM project_members
-        WHERE project_id = $1
-          AND user_id = $2
-        LIMIT 1
-        """,
-        project_id,
-        auth_user["db_user_id"],
-    )
-
-
-async def get_project_member_row(
-    conn: asyncpg.Connection,
-    *,
-    project_id: str,
-    user_id: uuid.UUID | None,
-) -> asyncpg.Record | None:
-    if user_id is None:
-        return None
-
-    return await conn.fetchrow(
-        """
-        SELECT user_id, role
-        FROM project_members
-        WHERE project_id = $1
-          AND user_id = $2
-        LIMIT 1
-        """,
-        project_id,
-        user_id,
-    )
-
-
-async def upsert_project_member(
-    conn: asyncpg.Connection,
-    *,
-    project_id: str,
-    user_id: uuid.UUID,
-    role: str,
-) -> str | None:
-    if role not in {"admin", "member"}:
-        raise ValueError("project member role must be 'admin' or 'member'")
-
-    existing_role = await conn.fetchval(
-        """
-        SELECT role
-        FROM project_members
-        WHERE project_id = $1
-          AND user_id = $2
-        """,
-        project_id,
-        user_id,
-    )
-
-    await conn.execute(
-        """
-        INSERT INTO project_members(project_id, user_id, role)
-        VALUES($1, $2, $3)
-        ON CONFLICT (project_id, user_id)
-        DO UPDATE SET role = EXCLUDED.role
-        """,
-        project_id,
-        user_id,
-        role,
-    )
-
-    return existing_role
-
-
-async def ensure_project_member_access(
-    conn: asyncpg.Connection,
-    *,
-    project_id: str,
-    auth_user: dict[str, Any],
-    message: str = "Acesso negado: você não é membro deste projeto",
-) -> None:
-    in_project = await conn.fetchval(
-        """
-        SELECT 1
-        FROM project_members
-        WHERE project_id = $1
-          AND user_id = $2
-        LIMIT 1
-        """,
-        project_id,
-        auth_user["db_user_id"],
-    )
-    if not in_project and not auth_user["is_global_admin"]:
-        raise HTTPException(403, message)
-
-
-async def ensure_project_admin_access(
-    conn: asyncpg.Connection,
-    *,
-    project_id: str,
-    auth_user: dict[str, Any],
-    message: str = "Acesso negado: apenas admin do projeto ou administrador do sistema",
-) -> None:
-    role = await get_project_role(conn, project_id=project_id, auth_user=auth_user)
-    if role != "admin" and not auth_user["is_global_admin"]:
-        raise HTTPException(403, message)
-
-
-async def audit_project_member_change(
-    conn: asyncpg.Connection,
-    *,
-    project_id: str,
-    target_user_id: uuid.UUID | None,
-    old_role: str | None,
-    new_role: str | None,
-    action: str,
-    actor_user_id: uuid.UUID | None,
-) -> None:
-    await conn.execute(
-        """
-        INSERT INTO project_members_audit(
-            project_id, target_user_id, old_role, new_role, action, actor_user_id
-        )
-        VALUES($1, $2, $3, $4, $5, $6)
-        """,
-        project_id,
-        target_user_id,
-        old_role,
-        new_role,
-        action,
-        actor_user_id,
-    )
-
-@app.get("/api/projects/internal/content-identity/{project_name}")
-async def get_content_project_identity(
-    project_name: str,
-    request: Request,
-    pool=Depends(get_pool),
-):
-    """Resolve o slug mutável para o UUID estável usado apenas por content."""
-    project_name = validate_project_id(project_name)
-    if request.headers.get("X-Internal-Service") != "studio-nginx":
-        raise HTTPException(403, "Internal service access required")
-
-    async with pool.acquire() as conn:
-        project = await conn.fetchrow(
-            "SELECT id, name FROM projects WHERE name = $1",
-            project_name,
-        )
-        if not project:
-            raise HTTPException(404, "Project not found")
-
-        history = await conn.fetch(
-            """
-            SELECT old_name, new_name
-            FROM project_name_history
-            WHERE project_id = $1
-              AND status = 'succeeded'
-            ORDER BY created_at ASC
-            """,
-            project["id"],
-        )
-
-    aliases: list[str] = []
-    seen: set[str] = set()
-    candidates = (
-        [project["name"]]
-        + [row["old_name"] for row in history]
-        + [row["new_name"] for row in history]
-    )
-    for candidate in candidates:
-        if candidate and candidate not in seen:
-            seen.add(candidate)
-            aliases.append(candidate)
-
-    return JSONResponse(
-        content={
-            "project_id": str(project["id"]),
-            "current_ref": project["name"],
-            "aliases": aliases,
-        },
-        headers={"Cache-Control": "no-store"},
-    )
+# Rota extraída para app.routers.internal.
 
 
 @app.get("/api/projects")
@@ -983,693 +605,7 @@ async def list_projects(
     return result
 
 
-@app.get("/api/projects/{project_name}/collaboration")
-async def get_project_collaboration(
-    project_name: str,
-    request: Request,
-    pool=Depends(get_pool),
-):
-    project_name = validate_project_id(project_name)
-    auth_user = await resolve_authenticated_user(request, pool)
-
-    async with pool.acquire() as conn:
-        project = await get_project_row(conn, project_name)
-        project_id = project["id"]
-        await ensure_project_member_access(
-            conn,
-            project_id=project_id,
-            auth_user=auth_user,
-        )
-        project_role = await get_project_role(
-            conn,
-            project_id=project_id,
-            auth_user=auth_user,
-        )
-
-        tag_rows = await conn.fetch(
-            """
-            SELECT
-                t.id,
-                t.name,
-                t.color,
-                t.category,
-                t.is_system,
-                a.created_at AS assigned_at
-            FROM studio_project_tags t
-            LEFT JOIN studio_project_tag_assignments a
-              ON a.tag_id = t.id
-             AND a.project_id = $1
-            ORDER BY t.is_system DESC, t.category, t.name
-            """,
-            project_id,
-        )
-        notes = await conn.fetch(
-            """
-            SELECT
-                n.id,
-                n.visibility,
-                n.body,
-                n.is_encrypted,
-                n.created_at,
-                n.updated_at,
-                n.author_user_id,
-                COALESCE(u.display_name, u.authelia_username, 'Operador') AS author_name
-            FROM studio_project_notes n
-            LEFT JOIN users u ON u.id = n.author_user_id
-            WHERE n.project_id = $1
-              AND (
-                  n.visibility = 'public'
-                  OR n.author_user_id = $2
-              )
-            ORDER BY n.created_at DESC
-            LIMIT 20
-            """,
-            project_id,
-            auth_user["db_user_id"],
-        )
-        member_rows = await conn.fetch(
-            """
-            SELECT
-                u.id,
-                COALESCE(u.display_name, u.authelia_username, 'Operador') AS display_name,
-                u.authelia_username,
-                pm.role
-            FROM project_members pm
-            JOIN users u ON u.id = pm.user_id
-            WHERE pm.project_id = $1
-              AND u.is_active = true
-            ORDER BY pm.role = 'admin' DESC, display_name
-            """,
-            project_id,
-        )
-        hints = await conn.fetch(
-            """
-            SELECT
-                h.id,
-                h.body,
-                h.status,
-                h.created_at,
-                h.updated_at,
-                h.resolved_at,
-                h.author_user_id,
-                h.target_user_id,
-                COALESCE(author.display_name, author.authelia_username, 'Operador') AS author_name,
-                COALESCE(target.display_name, target.authelia_username, 'Operador') AS target_name,
-                COALESCE(resolver.display_name, resolver.authelia_username) AS resolved_by_name
-            FROM studio_project_hints h
-            LEFT JOIN users author ON author.id = h.author_user_id
-            LEFT JOIN users target ON target.id = h.target_user_id
-            LEFT JOIN users resolver ON resolver.id = h.resolved_by
-            WHERE h.project_id = $1
-            ORDER BY h.status = 'open' DESC, h.created_at DESC
-            LIMIT 40
-            """,
-            project_id,
-        )
-        thread_messages = await conn.fetch(
-            """
-            SELECT *
-            FROM (
-                SELECT
-                    m.id,
-                    m.body,
-                    m.created_at,
-                    m.updated_at,
-                    m.author_user_id,
-                    COALESCE(u.display_name, u.authelia_username, 'Operador') AS author_name
-                FROM studio_project_thread_messages m
-                LEFT JOIN users u ON u.id = m.author_user_id
-                WHERE m.project_id = $1
-                ORDER BY m.created_at DESC
-                LIMIT 50
-            ) recent
-            ORDER BY created_at ASC
-            """,
-            project_id,
-        )
-        notification_rows = await conn.fetch(
-            """
-            SELECT
-                n.id,
-                n.kind,
-                n.target_type,
-                n.target_id,
-                n.payload,
-                n.read_at,
-                n.created_at,
-                COALESCE(u.display_name, u.authelia_username, 'Sistema') AS actor_name
-            FROM studio_project_notifications n
-            LEFT JOIN users u ON u.id = n.actor_user_id
-            WHERE n.project_id = $1
-              AND n.target_user_id = $2
-            ORDER BY n.created_at DESC
-            LIMIT 50
-            """,
-            project_id,
-            auth_user["db_user_id"],
-        )
-
-    available_tags = [
-        {
-            "id": str(row["id"]),
-            "name": row["name"],
-            "color": row["color"],
-            "category": row["category"],
-            "is_system": row["is_system"],
-            "assigned": row["assigned_at"] is not None,
-        }
-        for row in tag_rows
-    ]
-
-    return {
-        "project": project_name,
-        "available_tags": available_tags,
-        "assigned_tags": [tag for tag in available_tags if tag["assigned"]],
-        "members": [
-            {
-                "id": str(row["id"]),
-                "display_name": row["display_name"],
-                "username": row["authelia_username"],
-                "role": row["role"],
-            }
-            for row in member_rows
-        ],
-        "notes": [
-            {
-                "id": str(row["id"]),
-                "visibility": row["visibility"],
-                "body": row["body"],
-                "is_encrypted": row["is_encrypted"],
-                "created_at": row["created_at"].isoformat(),
-                "updated_at": row["updated_at"].isoformat(),
-                "author_user_id": str(row["author_user_id"]) if row["author_user_id"] else None,
-                "author_name": row["author_name"],
-                "can_delete": (
-                    auth_user["is_global_admin"]
-                    or row["author_user_id"] == auth_user["db_user_id"]
-                    or project_role == "admin"
-                ),
-            }
-            for row in notes
-        ],
-        "hints": [
-            {
-                "id": str(row["id"]),
-                "body": row["body"],
-                "status": row["status"],
-                "created_at": row["created_at"].isoformat(),
-                "updated_at": row["updated_at"].isoformat(),
-                "resolved_at": row["resolved_at"].isoformat() if row["resolved_at"] else None,
-                "author_user_id": str(row["author_user_id"]) if row["author_user_id"] else None,
-                "author_name": row["author_name"],
-                "target_user_id": str(row["target_user_id"]) if row["target_user_id"] else None,
-                "target_name": row["target_name"],
-                "resolved_by_name": row["resolved_by_name"],
-                "can_update": (
-                    auth_user["is_global_admin"]
-                    or project_role == "admin"
-                    or row["author_user_id"] == auth_user["db_user_id"]
-                    or row["target_user_id"] == auth_user["db_user_id"]
-                ),
-            }
-            for row in hints
-        ],
-        "thread_messages": [
-            {
-                "id": str(row["id"]),
-                "body": row["body"],
-                "created_at": row["created_at"].isoformat(),
-                "updated_at": row["updated_at"].isoformat(),
-                "author_user_id": str(row["author_user_id"]) if row["author_user_id"] else None,
-                "author_name": row["author_name"],
-            }
-            for row in thread_messages
-        ],
-        "notifications": [
-            {
-                "id": str(row["id"]),
-                "kind": row["kind"],
-                "target_type": row["target_type"],
-                "target_id": row["target_id"],
-                "payload": row["payload"],
-                "actor_name": row["actor_name"],
-                "read_at": row["read_at"].isoformat() if row["read_at"] else None,
-                "created_at": row["created_at"].isoformat(),
-            }
-            for row in notification_rows
-        ],
-    }
-
-
-@app.post("/api/projects/{project_name}/notes", status_code=201)
-async def create_project_note(
-    project_name: str,
-    body: ProjectNoteCreate,
-    request: Request,
-    pool=Depends(get_pool),
-):
-    project_name = validate_project_id(project_name)
-    visibility = body.visibility.strip().lower()
-    note_body = body.body.strip()
-
-    if visibility not in {"public", "private"}:
-        raise HTTPException(400, "visibility deve ser public ou private")
-    if not note_body:
-        raise HTTPException(400, "body é obrigatório")
-    if len(note_body) > 4000:
-        raise HTTPException(400, "body deve ter no máximo 4000 caracteres")
-
-    auth_user = await resolve_authenticated_user(request, pool)
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            project = await get_project_row(conn, project_name)
-            project_id = project["id"]
-            await ensure_project_member_access(
-                conn,
-                project_id=project_id,
-                auth_user=auth_user,
-            )
-            note = await conn.fetchrow(
-                """
-                INSERT INTO studio_project_notes(
-                    project_id, author_user_id, visibility, body
-                )
-                VALUES($1, $2, $3, $4)
-                RETURNING id, visibility, body, is_encrypted, created_at, updated_at
-                """,
-                project_id,
-                auth_user["db_user_id"],
-                visibility,
-                note_body,
-            )
-            await audit_studio_action(
-                conn,
-                project_id=project_id,
-                actor_user_id=auth_user["db_user_id"],
-                action="project_note_created",
-                target_type="studio_project_note",
-                target_id=str(note["id"]),
-                new_value={"visibility": visibility, "is_encrypted": False},
-            )
-
-    return {
-        "id": str(note["id"]),
-        "visibility": note["visibility"],
-        "body": note["body"],
-        "is_encrypted": note["is_encrypted"],
-        "created_at": note["created_at"].isoformat(),
-        "updated_at": note["updated_at"].isoformat(),
-        "author_user_id": str(auth_user["db_user_id"]),
-        "author_name": auth_user["display_name"] or auth_user["username"],
-    }
-
-
-@app.delete("/api/projects/{project_name}/notes/{note_id}")
-async def delete_project_note(
-    project_name: str,
-    note_id: str,
-    request: Request,
-    pool=Depends(get_pool),
-):
-    project_name = validate_project_id(project_name)
-    parsed_note_id = parse_uuid_value(note_id)
-    if parsed_note_id is None:
-        raise HTTPException(400, "note_id inválido")
-
-    auth_user = await resolve_authenticated_user(request, pool)
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            project = await get_project_row(conn, project_name)
-            project_id = project["id"]
-            await ensure_project_member_access(
-                conn,
-                project_id=project_id,
-                auth_user=auth_user,
-            )
-
-            note = await conn.fetchrow(
-                """
-                SELECT id, author_user_id, visibility, body
-                FROM studio_project_notes
-                WHERE id = $1
-                  AND project_id = $2
-                """,
-                parsed_note_id,
-                project_id,
-            )
-            if not note:
-                raise HTTPException(404, "Anotação não encontrada")
-
-            role = await get_project_role(
-                conn,
-                project_id=project_id,
-                auth_user=auth_user,
-            )
-            can_delete = (
-                auth_user["is_global_admin"]
-                or note["author_user_id"] == auth_user["db_user_id"]
-                or role == "admin"
-            )
-            if not can_delete:
-                raise HTTPException(403, "Sem permissão para excluir esta anotação")
-
-            await conn.execute(
-                "DELETE FROM studio_project_notes WHERE id = $1",
-                parsed_note_id,
-            )
-            await audit_studio_action(
-                conn,
-                project_id=project_id,
-                actor_user_id=auth_user["db_user_id"],
-                action="project_note_deleted",
-                target_type="studio_project_note",
-                target_id=str(parsed_note_id),
-                old_value={
-                    "visibility": note["visibility"],
-                    "author_user_id": str(note["author_user_id"]) if note["author_user_id"] else None,
-                },
-            )
-
-    return {"status": "ok"}
-
-
-@app.post("/api/projects/{project_name}/hints", status_code=201)
-async def create_project_hint(
-    project_name: str,
-    body: ProjectHintCreate,
-    request: Request,
-    pool=Depends(get_pool),
-):
-    project_name = validate_project_id(project_name)
-    hint_body = body.body.strip()
-    if not hint_body:
-        raise HTTPException(400, "body é obrigatório")
-    if len(hint_body) > 2000:
-        raise HTTPException(400, "body deve ter no máximo 2000 caracteres")
-
-    auth_user = await resolve_authenticated_user(request, pool)
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            project = await get_project_row(conn, project_name)
-            project_id = project["id"]
-            await ensure_project_member_access(
-                conn,
-                project_id=project_id,
-                auth_user=auth_user,
-            )
-            target_member = await get_project_member_row(
-                conn,
-                project_id=project_id,
-                user_id=body.target_user_id,
-            )
-            if not target_member:
-                raise HTTPException(400, "Usuário alvo não é membro deste projeto")
-
-            hint = await conn.fetchrow(
-                """
-                INSERT INTO studio_project_hints(
-                    project_id, author_user_id, target_user_id, body
-                )
-                VALUES($1, $2, $3, $4)
-                RETURNING id, status, created_at, updated_at
-                """,
-                project_id,
-                auth_user["db_user_id"],
-                body.target_user_id,
-                hint_body,
-            )
-            await audit_studio_action(
-                conn,
-                project_id=project_id,
-                actor_user_id=auth_user["db_user_id"],
-                action="project_hint_created",
-                target_type="studio_project_hint",
-                target_id=str(hint["id"]),
-                new_value={
-                    "target_user_id": str(body.target_user_id),
-                    "status": hint["status"],
-                    "body_length": len(hint_body),
-                },
-            )
-            await create_studio_notification(
-                conn,
-                project_id=project_id,
-                target_user_id=body.target_user_id,
-                actor_user_id=auth_user["db_user_id"],
-                kind="project_hint_created",
-                target_type="studio_project_hint",
-                target_id=str(hint["id"]),
-                payload={"status": hint["status"]},
-            )
-
-    return {
-        "id": str(hint["id"]),
-        "status": hint["status"],
-        "created_at": hint["created_at"].isoformat(),
-        "updated_at": hint["updated_at"].isoformat(),
-    }
-
-
-@app.put("/api/projects/{project_name}/hints/{hint_id}")
-async def update_project_hint_status(
-    project_name: str,
-    hint_id: str,
-    body: ProjectHintStatusUpdate,
-    request: Request,
-    pool=Depends(get_pool),
-):
-    project_name = validate_project_id(project_name)
-    parsed_hint_id = parse_uuid_value(hint_id)
-    if parsed_hint_id is None:
-        raise HTTPException(400, "hint_id inválido")
-
-    status = body.status.strip().lower()
-    if status not in {"open", "resolved"}:
-        raise HTTPException(400, "status deve ser open ou resolved")
-
-    auth_user = await resolve_authenticated_user(request, pool)
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            project = await get_project_row(conn, project_name)
-            project_id = project["id"]
-            await ensure_project_member_access(
-                conn,
-                project_id=project_id,
-                auth_user=auth_user,
-            )
-            hint = await conn.fetchrow(
-                """
-                SELECT id, author_user_id, target_user_id, status
-                FROM studio_project_hints
-                WHERE id = $1
-                  AND project_id = $2
-                """,
-                parsed_hint_id,
-                project_id,
-            )
-            if not hint:
-                raise HTTPException(404, "Hint não encontrado")
-
-            project_role = await get_project_role(
-                conn,
-                project_id=project_id,
-                auth_user=auth_user,
-            )
-            can_update = (
-                auth_user["is_global_admin"]
-                or project_role == "admin"
-                or hint["author_user_id"] == auth_user["db_user_id"]
-                or hint["target_user_id"] == auth_user["db_user_id"]
-            )
-            if not can_update:
-                raise HTTPException(403, "Sem permissão para alterar este hint")
-
-            if status == "resolved":
-                await conn.execute(
-                    """
-                    UPDATE studio_project_hints
-                    SET status = 'resolved',
-                        resolved_by = $1,
-                        resolved_at = now(),
-                        updated_at = now()
-                    WHERE id = $2
-                    """,
-                    auth_user["db_user_id"],
-                    parsed_hint_id,
-                )
-            else:
-                await conn.execute(
-                    """
-                    UPDATE studio_project_hints
-                    SET status = 'open',
-                        resolved_by = NULL,
-                        resolved_at = NULL,
-                        updated_at = now()
-                    WHERE id = $1
-                    """,
-                    parsed_hint_id,
-                )
-            await audit_studio_action(
-                conn,
-                project_id=project_id,
-                actor_user_id=auth_user["db_user_id"],
-                action="project_hint_status_updated",
-                target_type="studio_project_hint",
-                target_id=str(parsed_hint_id),
-                old_value={"status": hint["status"]},
-                new_value={
-                    "status": status,
-                    "resolved_by": (
-                        str(auth_user["db_user_id"])
-                        if status == "resolved"
-                        else None
-                    ),
-                },
-            )
-
-    return {"status": status}
-
-
-@app.post("/api/projects/{project_name}/thread/messages", status_code=201)
-async def create_project_thread_message(
-    project_name: str,
-    body: ProjectThreadMessageCreate,
-    request: Request,
-    pool=Depends(get_pool),
-):
-    project_name = validate_project_id(project_name)
-    message_body = body.body.strip()
-    if not message_body:
-        raise HTTPException(400, "body é obrigatório")
-    if len(message_body) > 4000:
-        raise HTTPException(400, "body deve ter no máximo 4000 caracteres")
-
-    auth_user = await resolve_authenticated_user(request, pool)
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            project = await get_project_row(conn, project_name)
-            project_id = project["id"]
-            await ensure_project_member_access(
-                conn,
-                project_id=project_id,
-                auth_user=auth_user,
-            )
-            message = await conn.fetchrow(
-                """
-                INSERT INTO studio_project_thread_messages(
-                    project_id, author_user_id, body
-                )
-                VALUES($1, $2, $3)
-                RETURNING id, created_at, updated_at
-                """,
-                project_id,
-                auth_user["db_user_id"],
-                message_body,
-            )
-            notification_targets = await conn.fetch(
-                """
-                SELECT user_id
-                FROM project_members
-                WHERE project_id = $1
-                  AND user_id <> $2
-                """,
-                project_id,
-                auth_user["db_user_id"],
-            )
-            for target in notification_targets:
-                await create_studio_notification(
-                    conn,
-                    project_id=project_id,
-                    target_user_id=target["user_id"],
-                    actor_user_id=auth_user["db_user_id"],
-                    kind="project_thread_message_created",
-                    target_type="studio_project_thread_message",
-                    target_id=str(message["id"]),
-                )
-            await audit_studio_action(
-                conn,
-                project_id=project_id,
-                actor_user_id=auth_user["db_user_id"],
-                action="project_thread_message_created",
-                target_type="studio_project_thread_message",
-                target_id=str(message["id"]),
-                new_value={
-                    "body_length": len(message_body),
-                    "notification_count": len(notification_targets),
-                },
-            )
-
-    return {
-        "id": str(message["id"]),
-        "created_at": message["created_at"].isoformat(),
-        "updated_at": message["updated_at"].isoformat(),
-    }
-
-
-@app.patch("/api/projects/{project_name}/notifications/{notification_id}")
-async def update_project_notification_read_state(
-    project_name: str,
-    notification_id: str,
-    body: ProjectNotificationRead,
-    request: Request,
-    pool=Depends(get_pool),
-):
-    project_name = validate_project_id(project_name)
-    parsed_notification_id = parse_uuid_value(notification_id)
-    if parsed_notification_id is None:
-        raise HTTPException(400, "notification_id invalido")
-
-    auth_user = await resolve_authenticated_user(request, pool)
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            project = await get_project_row(conn, project_name)
-            project_id = project["id"]
-            notification = await conn.fetchrow(
-                """
-                SELECT id, read_at
-                FROM studio_project_notifications
-                WHERE id = $1
-                  AND project_id = $2
-                  AND target_user_id = $3
-                FOR UPDATE
-                """,
-                parsed_notification_id,
-                project_id,
-                auth_user["db_user_id"],
-            )
-            if not notification:
-                raise HTTPException(404, "Notificacao nao encontrada")
-
-            old_read = notification["read_at"] is not None
-            if old_read != body.read:
-                updated_at = await conn.fetchval(
-                    """
-                    UPDATE studio_project_notifications
-                    SET read_at = CASE WHEN $1 THEN now() ELSE NULL END
-                    WHERE id = $2
-                    RETURNING read_at
-                    """,
-                    body.read,
-                    parsed_notification_id,
-                )
-                await audit_studio_action(
-                    conn,
-                    project_id=project_id,
-                    actor_user_id=auth_user["db_user_id"],
-                    action="project_notification_read_state_changed",
-                    target_type="studio_project_notification",
-                    target_id=str(parsed_notification_id),
-                    old_value={"read": old_read},
-                    new_value={"read": body.read},
-                )
-            else:
-                updated_at = notification["read_at"]
-
-    return {
-        "id": str(parsed_notification_id),
-        "read": body.read,
-        "read_at": updated_at.isoformat() if updated_at else None,
-    }
+# Endpoints de colaboração: app.routers.collaboration.
 
 
 
@@ -1814,7 +750,7 @@ async def _rename_project_background(
         except Exception as exc:  # noqa: BLE001
             snippet_note = (
                 "\n\n⚠️ Snippets do Studio não migraram automaticamente "
-                f"({exc})."
+                "por uma falha interna."
             )
             print(f"[rename_project] snippets {old_name} -> {new_name}: {exc}")
 
@@ -1877,7 +813,7 @@ async def _rename_project_background(
         await _set_job_status(
             job_id,
             "failed",
-            message=f"Falha inesperada no rename: {exc}",
+            message="Falha interna inesperada ao renomear o projeto.",
             error_code="unexpected_rename_error",
         )
         try:
@@ -1886,7 +822,7 @@ async def _rename_project_background(
                     conn,
                     history_id,
                     "failed",
-                    error=str(exc),
+                    error="Falha interna inesperada ao renomear o projeto.",
                 )
                 await audit_studio_action(
                     conn,
@@ -1899,7 +835,7 @@ async def _rename_project_background(
                     new_value={
                         "name": new_name,
                         "path": f"/{new_name}",
-                        "exception": str(exc),
+                        "error_code": "unexpected_rename_error",
                     },
                 )
         except Exception:
@@ -2055,14 +991,14 @@ async def rename_project(
                         updated_at = now()
                     WHERE job_id = $2
                     """,
-                    f"Falha ao enfileirar rename: {exc}",
+                    "Falha interna ao enfileirar a renomeação.",
                     job_id,
                 )
                 await _update_rename_history(
                     conn,
                     history_id,
                     "failed",
-                    error=f"queue_submit_failed: {exc}",
+                    error="queue_submit_failed",
                 )
         raise HTTPException(503, "Nao foi possivel enfileirar a renomeacao") from exc
 
@@ -2857,14 +1793,14 @@ async def _create_restore_point_background(
                 WHERE id = $1 AND status = 'creating'
                 """,
                 point_id,
-                str(exc)[:2000],
+                "Falha interna inesperada ao criar o ponto de restauração.",
             )
         except Exception:
             pass
         await _set_job_status(
             job_id,
             "failed",
-            message=f"Falha inesperada ao criar ponto de restauração: {exc}",
+            message="Falha interna inesperada ao criar o ponto de restauração.",
             error_code="unexpected_backup_error",
         )
         print(f"[restore_point] backup {project_name}: {exc}")
@@ -3022,7 +1958,7 @@ async def _restore_project_background(
                 WHERE id = $1 AND status = 'restoring'
                 """,
                 point_id,
-                str(exc)[:2000],
+                "Falha interna inesperada durante a restauração.",
             )
             await pool.execute(
                 """
@@ -3031,14 +1967,14 @@ async def _restore_project_background(
                 WHERE id = $1 AND status = 'creating'
                 """,
                 safety_point_id,
-                str(exc)[:2000],
+                "Falha interna inesperada durante a restauração.",
             )
         except Exception:
             pass
         await _set_job_status(
             job_id,
             "failed",
-            message=f"Falha inesperada na restauração: {exc}",
+            message="Falha interna inesperada durante a restauração.",
             error_code="unexpected_restore_error",
         )
         print(f"[restore_point] restore {project_name}: {exc}")
@@ -3126,153 +2062,20 @@ async def _delete_restore_point_background(
                 WHERE id = $1 AND status = 'deleting'
                 """,
                 point_id,
-                str(exc)[:2000],
+                "Falha interna inesperada ao excluir o ponto de restauração.",
             )
         except Exception:
             pass
         await _set_job_status(
             job_id,
             "failed",
-            message=f"Falha inesperada ao excluir ponto de restauração: {exc}",
+            message="Falha interna inesperada ao excluir o ponto de restauração.",
             error_code="unexpected_delete_backup_error",
         )
         print(f"[restore_point] delete {project_name}: {exc}")
 
 
-@app.post("/api/projects/{project_name}/tags", status_code=201)
-async def assign_project_tag(
-    project_name: str,
-    body: ProjectTagAssign,
-    request: Request,
-    pool=Depends(get_pool),
-):
-    project_name = validate_project_id(project_name)
-    auth_user = await resolve_authenticated_user(request, pool)
-
-    color = (body.color or "#3ECF8E").strip()
-    if not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
-        raise HTTPException(400, "color deve estar no formato #RRGGBB")
-
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            project = await get_project_row(conn, project_name)
-            project_id = project["id"]
-            await ensure_project_member_access(
-                conn,
-                project_id=project_id,
-                auth_user=auth_user,
-            )
-
-            tag_id = body.tag_id
-            if tag_id is None:
-                tag_name = (body.name or "").strip()
-                if not tag_name:
-                    raise HTTPException(400, "tag_id ou name é obrigatório")
-                if len(tag_name) > 40:
-                    raise HTTPException(400, "name deve ter no máximo 40 caracteres")
-                if not auth_user["is_global_admin"]:
-                    raise HTTPException(403, "Apenas admin do sistema pode criar novas tags")
-
-                tag_id = await conn.fetchval(
-                    """
-                    INSERT INTO studio_project_tags(name, color, category, created_by)
-                    VALUES($1, $2, 'custom', $3)
-                    ON CONFLICT (name)
-                    DO UPDATE SET name = EXCLUDED.name
-                    RETURNING id
-                    """,
-                    tag_name,
-                    color,
-                    auth_user["db_user_id"],
-                )
-            else:
-                tag_exists = await conn.fetchval(
-                    "SELECT 1 FROM studio_project_tags WHERE id = $1",
-                    tag_id,
-                )
-                if not tag_exists:
-                    raise HTTPException(404, "Tag não encontrada")
-
-            await conn.execute(
-                """
-                INSERT INTO studio_project_tag_assignments(project_id, tag_id, assigned_by)
-                VALUES($1, $2, $3)
-                ON CONFLICT (project_id, tag_id) DO NOTHING
-                """,
-                project_id,
-                tag_id,
-                auth_user["db_user_id"],
-            )
-            await audit_studio_action(
-                conn,
-                project_id=project_id,
-                actor_user_id=auth_user["db_user_id"],
-                action="project_tag_assigned",
-                target_type="studio_project_tag",
-                target_id=str(tag_id),
-            )
-
-            tag = await conn.fetchrow(
-                """
-                SELECT id, name, color, category, is_system
-                FROM studio_project_tags
-                WHERE id = $1
-                """,
-                tag_id,
-            )
-
-    return {
-        "id": str(tag["id"]),
-        "name": tag["name"],
-        "color": tag["color"],
-        "category": tag["category"],
-        "is_system": tag["is_system"],
-        "assigned": True,
-    }
-
-
-@app.delete("/api/projects/{project_name}/tags/{tag_id}")
-async def unassign_project_tag(
-    project_name: str,
-    tag_id: str,
-    request: Request,
-    pool=Depends(get_pool),
-):
-    project_name = validate_project_id(project_name)
-    parsed_tag_id = parse_uuid_value(tag_id)
-    if parsed_tag_id is None:
-        raise HTTPException(400, "tag_id inválido")
-
-    auth_user = await resolve_authenticated_user(request, pool)
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            project = await get_project_row(conn, project_name)
-            project_id = project["id"]
-            await ensure_project_member_access(
-                conn,
-                project_id=project_id,
-                auth_user=auth_user,
-            )
-            deleted = await conn.fetchval(
-                """
-                DELETE FROM studio_project_tag_assignments
-                WHERE project_id = $1 AND tag_id = $2
-                RETURNING tag_id
-                """,
-                project_id,
-                parsed_tag_id,
-            )
-            if deleted:
-                await audit_studio_action(
-                    conn,
-                    project_id=project_id,
-                    actor_user_id=auth_user["db_user_id"],
-                    action="project_tag_removed",
-                    target_type="studio_project_tag",
-                    target_id=str(parsed_tag_id),
-                )
-
-    return {"status": "ok"}
+# Endpoints de tags: app.routers.collaboration.
 
 @app.post("/api/projects", status_code=202)
 async def create_project(
@@ -3523,7 +2326,7 @@ async def _duplicate_and_store_keys(
         await _set_job_status(
             job_id,
             "failed",
-            message=str(exc),
+            message="O host-agent não conseguiu duplicar o projeto.",
             error_code=exc.error_code,
         )
         await rollback_project_from_db(pool, new_name)
@@ -3531,7 +2334,7 @@ async def _duplicate_and_store_keys(
         await _set_job_status(
             job_id,
             "failed",
-            message=f"Falha inesperada ao duplicar projeto: {e}",
+            message="Falha interna inesperada ao duplicar o projeto.",
             error_code="unexpected_duplicate_error",
         )
         print(f"Worker error: {e}")
@@ -3646,7 +2449,8 @@ async def _tenant_api_fallback(
                 requested_by=requested_by,
             )
     except HostAgentError as exc:
-        return f"{command}: {exc}"
+        print(f"[delete_project] fallback {command}: {exc}")
+        return f"{command}: falha no host-agent"
     if record["status"] == "done":
         return None
     return record["message"] or record["error_code"] or f"{command} falhou"
@@ -3681,11 +2485,10 @@ async def _delete_tenant_api(
             response = await client.delete(f"{base_url}{path}", headers=headers)
         if response.status_code in accepted_statuses:
             return None
-        direct_error = (
-            f"HTTP {response.status_code}: {response.text.strip()[:300]}"
-        )
+        direct_error = f"HTTP {response.status_code}"
     except httpx.HTTPError as exc:
-        direct_error = str(exc)
+        print(f"[delete_project] {service_label}: {exc}")
+        direct_error = "erro de transporte"
 
     fallback_error = await _tenant_api_fallback(
         pool=pool,
@@ -3729,11 +2532,10 @@ async def _terminate_supavisor_pools(
             )
         if response.status_code in accepted_statuses:
             return None
-        direct_error = (
-            f"HTTP {response.status_code}: {response.text.strip()[:300]}"
-        )
+        direct_error = f"HTTP {response.status_code}"
     except httpx.HTTPError as exc:
-        direct_error = str(exc)
+        print(f"[delete_project] Supavisor terminate: {exc}")
+        direct_error = "erro de transporte"
 
     fallback_error = await _tenant_api_fallback(
         pool=pool,
@@ -4094,16 +2896,15 @@ async def _delete_project_background(job_id: str, project_name: str) -> None:
         await _set_job_status(
             job_id,
             "failed",
-            message=f"Falha ao excluir projeto: {exc}",
+            message="O host-agent não conseguiu excluir o projeto.",
             error_code=exc.error_code,
         )
         print(f"[delete_project] {project_name}: host-agent: {exc}")
     except Exception as exc:
-        message = f"Falha ao excluir projeto: {exc}"
         await _set_job_status(
             job_id,
             "failed",
-            message=message,
+            message="Falha interna inesperada ao excluir o projeto.",
             error_code="delete_failed",
         )
         print(f"[delete_project] {project_name}: background task failed: {exc}")
@@ -4168,14 +2969,16 @@ async def drop_supabase_replication_slots(
                 await asyncio.sleep(1)
         except Exception as exc:
             if "does not exist" not in str(exc):
-                errors.append(f"terminate {slot}: {exc}")
+                print(f"[delete_project] terminate slot {slot}: {exc}")
+                errors.append(f"Não foi possível encerrar o slot {slot}.")
 
     async def drop_slot(slot: str) -> None:
         try:
             await conn.execute("SELECT pg_drop_replication_slot($1)", slot)
         except Exception as exc:
             if "does not exist" not in str(exc):
-                errors.append(f"drop {slot}: {exc}")
+                print(f"[delete_project] drop slot {slot}: {exc}")
+                errors.append(f"Não foi possível remover o slot {slot}.")
 
     await terminate_if_active(msg_slot)
     await drop_slot(msg_slot)
@@ -4414,7 +3217,7 @@ async def _rotate_project_key_background(
         await _set_job_status(
             job_id,
             "failed",
-            message=f"Falha na rotação: {exc}",
+            message="O host-agent não conseguiu rotacionar as chaves.",
             error_code=exc.error_code,
         )
         print(f"[rotate-key] {project_name}: host-agent: {exc}")
@@ -4422,7 +3225,7 @@ async def _rotate_project_key_background(
         await _set_job_status(
             job_id,
             "failed",
-            message=f"Falha na rotação: {exc}",
+            message="Falha interna inesperada durante a rotação de chaves.",
             error_code="rotate_failed",
         )
         print(f"[rotate-key] {project_name}: {exc}")
@@ -4682,58 +3485,10 @@ async def project_status(
         raise HTTPException(403, "Acesso negado a este job")
     return serialize_job(row, include_output=True)
 
-@app.get("/api/projects/internal/enc-key/{ref}")
-async def enc_key(
-    ref: str,
-    request: Request,
-    pool=Depends(get_pool)
-):
-    ref = validate_project_id(ref)
-    if request.headers.get("X-Internal-Service") != "studio-nginx":
-        raise HTTPException(403, "Internal service access required")
-
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            row = await conn.fetchrow(
-                """
-                SELECT id, service_role, project_key_version
-                FROM projects WHERE name=$1
-                """,
-                ref,
-            )
-            if not row or not row["service_role"]:
-                raise HTTPException(status_code=404, detail="Project not found")
-            service_key = await decrypt_project_secret(
-                conn,
-                project_id=row["id"],
-                column="service_role",
-                ciphertext=row["service_role"],
-            )
-
-    return {
-        "enc_service_key": service_key_transport_fernet.encrypt(
-            service_key.encode()
-        ).decode(),
-        "project_key_version": row["project_key_version"],
-    }
+# Rota extraída para app.routers.internal.
 
 
-@app.get("/api/projects/internal/key-version/{ref}")
-async def project_key_version(
-    ref: str,
-    request: Request,
-    pool=Depends(get_pool),
-):
-    ref = validate_project_id(ref)
-    if request.headers.get("X-Internal-Service") != "studio-nginx":
-        raise HTTPException(403, "Internal service access required")
-    version = await pool.fetchval(
-        "SELECT project_key_version FROM projects WHERE name = $1",
-        ref,
-    )
-    if version is None:
-        raise HTTPException(404, "Project not found")
-    return {"project_key_version": version}
+# Rota extraída para app.routers.internal.
 
 async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.UUID):
     pool = await get_pool()
@@ -4823,7 +3578,7 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
         await _set_job_status(
             job_id,
             "failed",
-            message=str(exc),
+            message="O host-agent não conseguiu criar o projeto.",
             error_code=exc.error_code,
         )
         await rollback_project_from_db(pool, project_name)
@@ -4831,7 +3586,7 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
         await _set_job_status(
             job_id,
             "failed",
-            message=f"Falha inesperada ao criar projeto: {e}",
+            message="Falha interna inesperada ao criar o projeto.",
             error_code="unexpected_create_error",
         )
         print(f"Worker error: {e}")
@@ -4983,7 +3738,7 @@ async def _container_lifecycle_background(
         await _set_job_status(
             job_id,
             "failed",
-            message=str(exc),
+            message="O host-agent não conseguiu concluir a operação do projeto.",
             error_code=exc.error_code,
         )
         print(f"[{command}] {project_name}: host-agent: {exc}")
@@ -4991,7 +3746,7 @@ async def _container_lifecycle_background(
         await _set_job_status(
             job_id,
             "failed",
-            message=f"{initial_message.rstrip('.')}: {exc}",
+            message=f"{initial_message.rstrip('.')}: falha interna inesperada.",
             error_code=error_code,
         )
         print(f"[{command}] {project_name}: background task failed: {exc}")
@@ -5073,12 +3828,12 @@ async def _recreate_project_services_background(
         await _set_job_status(
             job_id,
             "failed",
-            message=str(exc),
+            message="O host-agent não conseguiu recriar os serviços.",
             error_code=exc.error_code,
         )
         print(f"[recreate_project_services] {project_name}: host-agent: {exc}")
     except Exception as exc:
-        message = f"Falha ao recriar servicos: {exc}"
+        message = "Falha interna inesperada ao recriar os serviços."
         await _set_job_status(
             job_id,
             "failed",
@@ -5090,81 +3845,7 @@ async def _recreate_project_services_background(
             f"background task failed: {exc}"
         )
 
-async def get_project_status(project_name: str) -> dict:
-    pool = await get_pool()
-    containers = await fetch_project_containers(pool, project_name)
-
-    if not containers:
-        if not await host_agent_alive(pool):
-            # Sem host-agent nao ha snapshot confiavel de containers.
-            return {
-                "status": "unknown",
-                "containers": [],
-                "running": 0,
-                "total": 0,
-                "agent_offline": True,
-            }
-        return {"status": "not_found", "containers": [], "running": 0, "total": 0}
-
-    container_info = []
-    running_count = 0
-
-    for container in containers:
-        c_status = container.get("State", "unknown")
-        if c_status == "running":
-            running_count += 1
-
-        container_info.append({
-            "name": container.get("Names", ""),
-            "status": c_status,
-            "image": container.get("Image", "unknown"),
-            "created": container.get("CreatedAt", ""),
-            "ports": container.get("Ports", "")
-        })
-
-    total_containers = len(containers)
-    if running_count == 0:
-        overall_status = "stopped"
-    elif running_count == total_containers:
-        overall_status = "running"
-    else:
-        overall_status = "partial"
-
-    return {
-        "status": overall_status,
-        "containers": container_info,
-        "running": running_count,
-        "total": total_containers
-    }
-
-
-@app.get("/api/projects/{project_name}/status")
-async def get_project_docker_status(
-    project_name: str,
-    request: Request,
-    pool=Depends(get_pool)
-):
-    project_name = validate_project_id(project_name)
-
-    auth_user = await resolve_authenticated_user(request, pool)
-
-    async with pool.acquire() as conn:
-        project_row = await get_project_row(conn, project_name)
-        await ensure_project_member_access(
-            conn,
-            project_id=project_row["id"],
-            auth_user=auth_user,
-        )
-        project_role = await get_project_role(
-            conn,
-            project_id=project_row["id"],
-            auth_user=auth_user,
-        )
-
-    status_info = await get_project_status(project_name)
-    if project_role != "admin" and not auth_user["is_global_admin"]:
-        status_info.pop("containers", None)
-    return status_info
+# Estado de containers: app.routers.lifecycle.
 
 @app.post("/api/projects/{project_name}/stop")
 async def stop_project(
@@ -5360,73 +4041,7 @@ async def _restart_project_containers_background(
     )
 
 
-MAX_LOG_LINES = 1000
-
-@app.get("/api/projects/{project_name}/logs/{service}")
-async def get_container_logs(
-    project_name: str,
-    service: str,
-    request: Request,
-    pool=Depends(get_pool),
-    lines: int = Query(100, ge=1, le=MAX_LOG_LINES)
-):
-    project_name = validate_project_id(project_name)
-    service = validate_service_name(service)
-
-    async with pool.acquire() as conn:
-        auth_user = await resolve_authenticated_user(request, pool)
-        project_row = await get_project_row(conn, project_name)
-        await ensure_project_admin_access(
-            conn,
-            project_id=project_row["id"],
-            auth_user=auth_user,
-            message="Apenas admins podem consultar logs do projeto",
-        )
-        project_id = project_row["id"]
-
-    container_name = f"supabase-{service}-{project_name}"
-
-    try:
-        record = await run_host_agent_command(
-            pool,
-            command="container_logs",
-            project=project_name,
-            project_uuid=project_id,
-            requested_by=auth_user["db_user_id"],
-            args={"service": service, "lines": lines},
-            poll_interval=0.3,
-        )
-        if record["status"] != "done":
-            if record["error_code"] == "container_not_found":
-                raise HTTPException(404, f"Container {container_name} not found")
-            raise HTTPException(500, "Error getting container logs")
-
-        result = command_result(record)
-
-        async with pool.acquire() as conn:
-            await audit_studio_action(
-                conn,
-                project_id=project_id,
-                actor_user_id=auth_user["db_user_id"],
-                action="project_logs_read",
-                target_type="container_logs",
-                target_id=container_name,
-                new_value={"service": service, "lines": lines},
-            )
-
-        return {
-            "container": result.get("container", container_name),
-            "logs": result.get("logs", ""),
-            "status": result.get("status", "unknown"),
-        }
-
-    except HTTPException:
-        raise
-    except HostAgentOffline as exc:
-        raise HTTPException(503, str(exc)) from exc
-    except Exception as exc:
-        print(f"[project_logs] {project_name}/{service}: {exc}")
-        raise HTTPException(500, "Error accessing container logs") from exc
+# Logs de containers: app.routers.lifecycle.
 
 @app.post("/api/projects/admin/projects-info")
 async def get_projects_for_user(
@@ -5781,10 +4396,11 @@ async def proxy_project_meta(
                 content=await request.body(),
             )
     except httpx.HTTPError as exc:
+        print(f"[postgres_meta_proxy] {project_name}: {exc}")
         raise HTTPException(
             status_code=502,
-            detail=f"Falha ao acessar postgres-meta global: {exc}",
-        )
+            detail="Falha ao acessar postgres-meta global.",
+        ) from exc
 
     response_headers: dict[str, str] = {}
     response_content_type = upstream_response.headers.get("content-type")

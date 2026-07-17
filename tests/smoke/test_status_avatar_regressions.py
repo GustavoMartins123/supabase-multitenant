@@ -8,9 +8,11 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 class StatusAndAvatarRegressionTests(unittest.TestCase):
     def test_status_does_not_hold_a_pool_connection_during_auth_resolution(self) -> None:
-        source = (ROOT / "servidor/api-internal/app/main.py").read_text(encoding="utf-8")
-        start = source.index('@app.get("/api/projects/{project_name}/status")')
-        end = source.index('@app.post("/api/projects/{project_name}/stop")', start)
+        source = (
+            ROOT / "servidor/api-internal/app/routers/lifecycle.py"
+        ).read_text(encoding="utf-8")
+        start = source.index('@router.get("/api/projects/{project_name}/status")')
+        end = source.index("MAX_LOG_LINES = 1000", start)
         block = source[start:end]
         self.assertLess(
             block.index("auth_user = await resolve_authenticated_user(request, pool)"),

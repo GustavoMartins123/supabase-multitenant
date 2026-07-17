@@ -22,12 +22,14 @@ import hashlib
 import hmac
 import json
 import re
+import time
 from typing import Any
 
 PROTOCOL_VERSION = "v1"
 NOTIFY_CHANNEL = "host_agent_commands"
 OUTPUT_TAIL_LIMIT = 8_000
 CONTAINER_LOGS_LIMIT = 256_000
+MAX_INTENT_AGE_SECONDS = 24 * 60 * 60
 
 # Timeout duro (em segundos) aplicado pelo agent a cada comando. O conjunto
 # de chaves e o proprio conjunto fechado de comandos aceitos.
@@ -224,6 +226,16 @@ def canonical_args_hash(args: dict[str, Any] | None) -> str:
         args or {}, sort_keys=True, separators=(",", ":"), ensure_ascii=True
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def intent_is_expired(issued_at: Any, *, now: int | None = None) -> bool:
+    """Falha fechada quando a intencao nao e um timestamp recente."""
+    try:
+        issued_timestamp = int(issued_at)
+    except (TypeError, ValueError, OverflowError):
+        return True
+    current_timestamp = int(time.time()) if now is None else int(now)
+    return current_timestamp - issued_timestamp > MAX_INTENT_AGE_SECONDS
 
 
 def command_signature(

@@ -13,13 +13,15 @@ except ModuleNotFoundError:
     from internal_hmac import build_internal_hmac_headers as sign_internal_request
 
 BASE_DSN = os.getenv("DB_DSN")
-API_URL = os.getenv("PUSH_API_URL", "https://<SEU_IP>:4000/api/internal/push")
+API_URL = os.getenv("PUSH_API_URL")
 INTERNAL_HMAC_SECRET = os.getenv("INTERNAL_HMAC_SECRET")
 PUSH_REQUEST_TIMEOUT = float(os.getenv("PUSH_REQUEST_TIMEOUT", "10"))
-PUSH_VERIFY_TLS = os.getenv("PUSH_VERIFY_TLS", "false").lower() in ("1", "true", "yes", "on")
+PUSH_VERIFY_TLS = os.getenv("PUSH_VERIFY_TLS", "true").lower() in ("1", "true", "yes", "on")
 PUSH_CA_FILE = os.getenv("PUSH_CA_FILE", "/docker/push-certs/ca.pem")
 SUPPORTED_PLATFORMS = ("android", "ios")
 
+if not API_URL:
+    raise RuntimeError("Missing PUSH_API_URL environment variable")
 if not INTERNAL_HMAC_SECRET:
     raise RuntimeError("Missing INTERNAL_HMAC_SECRET environment variable")
 
@@ -34,7 +36,10 @@ def build_internal_hmac_headers(method: str, url: str, body: bytes) -> dict[str,
 
 def build_ssl_context() -> ssl.SSLContext:
     if not PUSH_VERIFY_TLS:
-        return ssl._create_unverified_context()
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        return context
 
     if PUSH_CA_FILE:
         return ssl.create_default_context(cafile=PUSH_CA_FILE)
@@ -124,7 +129,7 @@ async def get_user_push_tokens(conn: asyncpg.Connection, user_id):
     return await conn.fetch(query, user_id, list(SUPPORTED_PLATFORMS))
 
 async def poll_tenant(db_name: str):
-    project_name = db_name.replace("_supabase_", "")
+    project_name = db_name.removeprefix("_supabase_")
     tenant_dsn = get_tenant_dsn(BASE_DSN, db_name)
     
     print(f"✅ Iniciando monitoramento HÍBRIDO para o projeto: {project_name}")
@@ -231,7 +236,8 @@ async def worker_manager():
             removed_dbs = set(active_tasks) - current_dbs
             removed_tasks = []
             for db_name in removed_dbs:
-                print(f"[{db_name.replace('_supabase_', '')}] Banco removido da lista. Encerrando monitoramento.")
+                project_name = db_name.removeprefix("_supabase_")
+                print(f"[{project_name}] Banco removido da lista. Encerrando monitoramento.")
                 task = active_tasks.pop(db_name)
                 task.cancel()
                 removed_tasks.append(task)

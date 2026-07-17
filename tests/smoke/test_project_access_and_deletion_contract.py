@@ -7,6 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 MAIN_PATH = ROOT / "servidor" / "api-internal" / "app" / "main.py"
+DEPENDENCIES_PATH = ROOT / "servidor" / "api-internal" / "app" / "dependencies.py"
 
 
 class ProjectAccessAndDeletionContractTest(unittest.TestCase):
@@ -14,6 +15,8 @@ class ProjectAccessAndDeletionContractTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.source = MAIN_PATH.read_text(encoding="utf-8")
         cls.tree = ast.parse(cls.source)
+        cls.dependencies_source = DEPENDENCIES_PATH.read_text(encoding="utf-8")
+        cls.dependencies_tree = ast.parse(cls.dependencies_source)
 
     def function(self, name: str) -> ast.AsyncFunctionDef:
         for node in ast.walk(self.tree):
@@ -22,7 +25,12 @@ class ProjectAccessAndDeletionContractTest(unittest.TestCase):
         self.fail(f"async function {name} not found")
 
     def test_member_access_accepts_endpoint_specific_error_message(self) -> None:
-        function = self.function("ensure_project_member_access")
+        function = next(
+            node
+            for node in ast.walk(self.dependencies_tree)
+            if isinstance(node, ast.AsyncFunctionDef)
+            and node.name == "ensure_project_member_access"
+        )
         keyword_only_args = [argument.arg for argument in function.args.kwonlyargs]
         self.assertIn("message", keyword_only_args)
 

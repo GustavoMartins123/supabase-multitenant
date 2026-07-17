@@ -8,6 +8,11 @@ local shared_token = os.getenv("NGINX_SHARED_TOKEN")
 local encryption_key = os.getenv("STUDIO_SERVICE_KEY_ENCRYPTION_KEY")
 local cache_ttl = tonumber(os.getenv("SERVICE_KEY_CACHE_TTL_SECONDS")) or 60
 local version_check_ttl = tonumber(os.getenv("SERVICE_KEY_VERSION_CHECK_TTL_SECONDS")) or 5
+local verify_tls_value = (os.getenv("SERVICE_KEY_VERIFY_TLS") or "true"):lower()
+local verify_tls = verify_tls_value ~= "0"
+    and verify_tls_value ~= "false"
+    and verify_tls_value ~= "no"
+    and verify_tls_value ~= "off"
 local cache = ngx.shared.service_keys
 local metrics = ngx.shared.service_key_metrics
 
@@ -46,7 +51,8 @@ local function internal_request(path)
             ["X-Internal-Service"] = "studio-nginx",
             ["Host"] = hostname,
         },
-        ssl_verify = false,
+        ssl_verify = verify_tls,
+        ssl_server_name = hostname,
         method = "GET",
         keepalive = true,
     })

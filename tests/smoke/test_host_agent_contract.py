@@ -180,6 +180,22 @@ class HmacSignatureTest(unittest.TestCase):
             protocol.verify_command_signature("segredo", None, **self.FIELDS)
         )
 
+    def test_intent_expires_after_protocol_window(self) -> None:
+        now = 1_752_000_000
+        self.assertFalse(
+            protocol.intent_is_expired(
+                now - protocol.MAX_INTENT_AGE_SECONDS,
+                now=now,
+            )
+        )
+        self.assertTrue(
+            protocol.intent_is_expired(
+                now - protocol.MAX_INTENT_AGE_SECONDS - 1,
+                now=now,
+            )
+        )
+        self.assertTrue(protocol.intent_is_expired("invalid", now=now))
+
 
 class SanitizeOutputTest(unittest.TestCase):
     def test_redacts_jwt_password_uri_and_bearer(self) -> None:

@@ -44,10 +44,10 @@ class StudioApiTransportAndActivityTests(unittest.TestCase):
 
     def test_authenticated_requests_distinguish_login_from_activity(self) -> None:
         source = (
-            ROOT / "servidor/api-internal/app/main.py"
+            ROOT / "servidor/api-internal/app/dependencies.py"
         ).read_text(encoding="utf-8")
         start = source.index("async def resolve_authenticated_user(")
-        end = source.index("async def ensure_project_member_access(", start)
+        end = source.index("async def get_user_record_by_identifier(", start)
         block = source[start:end]
         self.assertIn("SET last_seen_at = now(), updated_at = now()", block)
         self.assertIn("last_seen_at < now() - interval '5 minutes'", block)
@@ -68,7 +68,8 @@ class StudioApiTransportAndActivityTests(unittest.TestCase):
             ROOT / "studio/nginx/lua/project_context/user_context_headers.lua"
         ).read_text(encoding="utf-8")
         self.assertIn("ngx.var.cookie_authelia_session", source)
-        self.assertIn("ngx.sha256_bin(session_cookie)", source)
+        self.assertIn('digest.new("sha256")', source)
+        self.assertIn("sha256_bin(session_cookie)", source)
         self.assertIn("login_session = login_session_fingerprint()", source)
 
 

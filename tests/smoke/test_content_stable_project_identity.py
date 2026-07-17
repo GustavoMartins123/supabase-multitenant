@@ -8,11 +8,16 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 class ContentStableProjectIdentityTests(unittest.TestCase):
     def test_internal_identity_route_returns_project_id_and_history(self) -> None:
-        source = (ROOT / "servidor/api-internal/app/main.py").read_text(encoding="utf-8")
+        source = (
+            ROOT / "servidor/api-internal/app/routers/internal.py"
+        ).read_text(encoding="utf-8")
         start = source.index(
-            '@app.get("/api/projects/internal/content-identity/{project_name}")'
+            '@router.get("/api/projects/internal/content-identity/{project_name}")'
         )
-        end = source.index('@app.get("/api/projects")', start)
+        end = source.index(
+            '@router.get("/api/projects/internal/enc-key/{ref}")',
+            start,
+        )
         route = source[start:end]
 
         self.assertIn('request.headers.get("X-Internal-Service") != "studio-nginx"', route)

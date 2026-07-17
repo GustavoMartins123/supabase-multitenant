@@ -37,6 +37,7 @@ from .host_agent_protocol import (
     HOST_AGENT_COMMANDS,
     NOTIFY_CHANNEL,
     evaluate_authorization,
+    intent_is_expired,
     sanitize_output,
     validate_command_args,
     verify_command_signature,
@@ -254,7 +255,7 @@ class HostAgent:
             outcome = CommandOutcome(
                 status="failed",
                 error_code="agent_internal_error",
-                message=f"Falha interna do host-agent: {exc}",
+                message="Falha interna inesperada no host-agent.",
             )
         finally:
             heartbeat.cancel()
@@ -334,6 +335,12 @@ class HostAgent:
             issued_at=record["issued_at"],
         ):
             return ("signature_invalid", "Assinatura HMAC da intencao nao confere.")
+
+        if intent_is_expired(record["issued_at"]):
+            return (
+                "intent_expired",
+                "Intencao assinada excedeu a janela maxima de validade.",
+            )
 
         arg_errors = validate_command_args(command, project, args)
         if arg_errors:

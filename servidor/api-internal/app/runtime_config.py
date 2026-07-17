@@ -7,6 +7,7 @@ aceitar trafego.
 import hmac
 import os
 import pathlib
+import ssl
 import urllib.parse
 
 from cryptography.fernet import Fernet
@@ -49,13 +50,27 @@ STUDIO_CACHE_INVALIDATION_URL = os.getenv(
     "STUDIO_CACHE_INVALIDATION_URL", "https://nginx:443"
 ).rstrip("/")
 STUDIO_CACHE_INVALIDATION_VERIFY_TLS = os.getenv(
-    "STUDIO_CACHE_INVALIDATION_VERIFY_TLS", "false"
+    "STUDIO_CACHE_INVALIDATION_VERIFY_TLS", "true"
 ).strip().lower() in {"1", "true", "yes", "on"}
+STUDIO_CACHE_INVALIDATION_CA_FILE = os.getenv(
+    "STUDIO_CACHE_INVALIDATION_CA_FILE", "/docker/push-certs/ca.pem"
+).strip()
 PG_META_ALLOWED_HOSTS = {
     host.strip().lower()
     for host in os.getenv("PG_META_ALLOWED_HOSTS", "postgres-meta-global").split(",")
     if host.strip()
 }
+
+
+def build_studio_cache_ssl_context() -> bool | ssl.SSLContext:
+    """Verifica a CA interna sem exigir que o certificado use o alias Docker."""
+    if not STUDIO_CACHE_INVALIDATION_VERIFY_TLS:
+        return False
+    context = ssl.create_default_context(
+        cafile=STUDIO_CACHE_INVALIDATION_CA_FILE or None
+    )
+    context.check_hostname = False
+    return context
 
 
 def _validate_pg_meta_internal_url(raw_url: str) -> str:

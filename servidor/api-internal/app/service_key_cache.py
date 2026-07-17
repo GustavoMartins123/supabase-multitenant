@@ -7,7 +7,7 @@ import httpx
 from app.runtime_config import (
     NGINX_SHARED_TOKEN,
     STUDIO_CACHE_INVALIDATION_URL,
-    STUDIO_CACHE_INVALIDATION_VERIFY_TLS,
+    build_studio_cache_ssl_context,
 )
 
 
@@ -22,7 +22,7 @@ async def invalidate_service_key_cache(project_ref: str, version: int) -> None:
         try:
             async with httpx.AsyncClient(
                 timeout=3.0,
-                verify=STUDIO_CACHE_INVALIDATION_VERIFY_TLS,
+                verify=build_studio_cache_ssl_context(),
             ) as client:
                 response = await client.post(
                     url,

@@ -19,6 +19,12 @@ services:
       - .analytics.env
     networks: [rede-supabase, analytics-internal]
     expose: ["${PROJECTS_API_PORT}"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18000/healthz', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     environment:
       DB_DSN: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
       HOST_AGENT_HMAC_SECRET: ${HOST_AGENT_HMAC_SECRET}
@@ -33,7 +39,8 @@ services:
       USER_TOKEN_MAX_CLOCK_SKEW_SECONDS: ${USER_TOKEN_MAX_CLOCK_SKEW_SECONDS}
       KEY_EXPIRY_WARNING_DAYS: ${KEY_EXPIRY_WARNING_DAYS}
       STUDIO_CACHE_INVALIDATION_URL: https://nginx:443
-      STUDIO_CACHE_INVALIDATION_VERIFY_TLS: ${STUDIO_CACHE_INVALIDATION_VERIFY_TLS}
+      STUDIO_CACHE_INVALIDATION_VERIFY_TLS: ${STUDIO_CACHE_INVALIDATION_VERIFY_TLS:-true}
+      STUDIO_CACHE_INVALIDATION_CA_FILE: ${STUDIO_CACHE_INVALIDATION_CA_FILE:-/docker/push-certs/ca.pem}
       PG_META_INTERNAL_URL: http://postgres-meta-global:8080
       PG_META_ALLOWED_HOSTS: postgres-meta-global
       ANALYTICS_INTERNAL_URL: http://analytics:4000
