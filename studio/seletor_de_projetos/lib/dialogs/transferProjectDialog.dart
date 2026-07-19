@@ -6,7 +6,7 @@ class TransferProjectDialog extends StatefulWidget {
   final String projectName;
   final Function(String) onTransfer;
   final Future<List<AvailableUser>> Function(String projectName)
-  loadAvailableUsers;
+      loadAvailableUsers;
 
   const TransferProjectDialog({
     super.key,
@@ -160,8 +160,8 @@ class TransferProjectDialogState extends State<TransferProjectDialog>
                 child: _loading
                     ? _buildLoading()
                     : _error != null
-                    ? _buildError()
-                    : _buildContent(),
+                        ? _buildError()
+                        : _buildContent(),
               ),
               Container(
                 padding: const EdgeInsets.all(16),
@@ -197,7 +197,8 @@ class TransferProjectDialogState extends State<TransferProjectDialog>
                               final userId = _selectedUser!.userId;
                               try {
                                 await widget.onTransfer(userId);
-                                if (mounted) Navigator.pop(context);
+                                if (!mounted) return;
+                                Navigator.of(this.context).pop();
                               } catch (e) {
                                 _showSnack(
                                   'Erro ao transferir: $e',
@@ -332,9 +333,8 @@ class TransferProjectDialogState extends State<TransferProjectDialog>
           ),
           const SizedBox(height: 16),
           Expanded(
-            child: _availableUsers.isEmpty
-                ? _buildEmptyState()
-                : _buildUserList(),
+            child:
+                _availableUsers.isEmpty ? _buildEmptyState() : _buildUserList(),
           ),
         ],
       ),

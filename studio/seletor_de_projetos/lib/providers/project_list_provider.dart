@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/project_repository.dart';
-import '../services/projectService.dart';
+import '../models/job.dart';
+import '../session.dart';
+import 'project_jobs_provider.dart';
 
 final projectListProvider =
     AsyncNotifierProvider<ProjectListNotifier, List<Map<String, dynamic>>>(
@@ -11,6 +13,27 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
   @override
   Future<List<Map<String, dynamic>>> build() async {
     return ref.watch(projectRepositoryProvider).fetchProjects();
+  }
+
+  Future<List<Map<String, dynamic>>> refresh(
+      {bool throwOnError = false}) async {
+    final previous = state.value;
+    if (previous == null) state = const AsyncLoading();
+    try {
+      final projects =
+          await ref.read(projectRepositoryProvider).fetchProjects();
+      state = AsyncData(projects);
+      return projects;
+    } catch (error, stackTrace) {
+      if (previous == null) {
+        state = AsyncError(error, stackTrace);
+        if (throwOnError) Error.throwWithStackTrace(error, stackTrace);
+        return const [];
+      }
+      state = AsyncData(previous);
+      if (throwOnError) Error.throwWithStackTrace(error, stackTrace);
+      return previous;
+    }
   }
 
   Future<bool> createProjectAndWait(String name) async {
@@ -28,18 +51,11 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
       },
     ]);
 
-    final job = await rep.createProject(name);
-    if (job == null) {
-      _removeLoading(name);
-      return false;
-    }
-
-    final ok = await ProjectService.waitUntilReady(job.id);
-    _removeLoading(name);
-    if (ok) {
-      ref.invalidateSelf(); // Refresh the full list
-    }
-    return ok;
+    return _submitAndTrack(
+      project: name,
+      action: 'create',
+      submit: () => rep.createProject(name),
+    );
   }
 
   Future<bool> duplicateProjectAndWait(
@@ -61,18 +77,34 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
       },
     ]);
 
-    final job = await rep.duplicateProject(originalName, newName, copyData);
-    if (job == null) {
-      _removeLoading(newName);
-      return false;
-    }
+    return _submitAndTrack(
+      project: newName,
+      action: 'duplicate',
+      submit: () => rep.duplicateProject(originalName, newName, copyData),
+    );
+  }
 
-    final ok = await ProjectService.waitUntilReady(job.id);
-    _removeLoading(newName);
-    if (ok) {
-      ref.invalidateSelf(); // Refresh the full list
+  Future<bool> _submitAndTrack({
+    required String project,
+    required String action,
+    required Future<Job?> Function() submit,
+  }) async {
+    Job? job;
+    try {
+      job = await submit();
+      if (job == null) return false;
+
+      final result = await ref.read(projectJobsProvider.notifier).waitFor(
+            job,
+            project: project,
+            action: action,
+            createdBy: Session().myId,
+          );
+      return result.ok;
+    } finally {
+      _removeLoading(project);
+      await refresh();
     }
-    return ok;
   }
 
   void _removeLoading(String name) {

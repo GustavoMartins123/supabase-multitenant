@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 import '../../supabase_colors.dart';
 import '../../data/project_repository.dart';
 import '../../providers/project_settings_provider.dart';
-import '../../services/projectService.dart';
+import '../../providers/project_jobs_provider.dart';
 import '../section_widget.dart';
 
 class _SettingMeta {
@@ -316,6 +316,13 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
   }
 
   Future<void> _save() async {
+    if (ref.read(activeProjectJobProvider(widget.projectRef)) != null) {
+      _showSnack(
+        'Aguarde a operação atual do projeto terminar.',
+        SupabaseColors.warning,
+      );
+      return;
+    }
     final validationErrors = _validationErrors;
     if (validationErrors.isNotEmpty) {
       final firstError = validationErrors.values.first;
@@ -338,6 +345,7 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
           .read(projectRepositoryProvider)
           .updateProjectSettings(widget.projectRef, changes);
 
+      if (!mounted) return;
       setState(() {
         _original = Map.from(_current);
         _affectedServices = result.affectedServices;
@@ -371,6 +379,13 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
 
   Future<void> _confirmAndRecreate() async {
     if (_affectedServices.isEmpty) return;
+    if (ref.read(activeProjectJobProvider(widget.projectRef)) != null) {
+      _showSnack(
+        'Aguarde a operação atual do projeto terminar.',
+        SupabaseColors.warning,
+      );
+      return;
+    }
 
     final confirm = await showDialog<bool>(
       context: context,
@@ -455,7 +470,7 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
       ),
     );
 
-    if (confirm != true) return;
+    if (confirm != true || !mounted) return;
 
     setState(() => _recreating = true);
     try {
@@ -465,7 +480,11 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
 
       final job = result.job;
       if (job != null) {
-        final waited = await ProjectService.waitForJob(job.id);
+        final waited = await ref.read(projectJobsProvider.notifier).waitFor(
+              job,
+              project: widget.projectRef,
+              action: 'recreate_services',
+            );
         _showSnack(
           waited.message ??
               (waited.ok
@@ -487,6 +506,7 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
         await _refreshProjectCookies(_pendingStorageLimitToken!);
       }
 
+      if (!mounted) return;
       setState(() {
         _affectedServices = [];
         _pendingStorageLimitToken = null;
@@ -517,13 +537,14 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
     final settingsAsync = ref.watch(
       projectEnvSettingsProvider(widget.projectRef),
     );
+    final activeJob = ref.watch(activeProjectJobProvider(widget.projectRef));
 
     return settingsAsync.when(
       loading: () => _buildLoading(),
       error: (err, _) => _buildError(err.toString()),
       data: (settings) {
         _initFromSettings(settings);
-        return _buildContent();
+        return _buildContent(activeJob != null);
       },
     );
   }
@@ -576,7 +597,7 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
     );
   }
 
-  Widget _buildContent() {
+  Widget _buildContent(bool projectBusy) {
     final categories = <String, List<_SettingMeta>>{};
     for (final meta in _kSettings) {
       categories.putIfAbsent(meta.category, () => []);
@@ -593,7 +614,7 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
     return SectionWidget(
       title: 'CONFIGURAÇÕES DO AMBIENTE',
       trailing: widget.isAdmin && _hasChanges
-          ? _saving
+          ? _saving || projectBusy
               ? const SizedBox(
                   width: 18,
                   height: 18,
@@ -605,7 +626,7 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
               : Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    onTap: _hasValidationErrors ? null : _save,
+                    onTap: _hasValidationErrors || projectBusy ? null : _save,
                     borderRadius: BorderRadius.circular(6),
                     child: Container(
                       padding: const EdgeInsets.symmetric(
@@ -663,7 +684,9 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
               children: [
                 _buildCategoryHeader(entry.key, icon),
                 const SizedBox(height: 8),
-                ...entry.value.map((meta) => _buildSettingRow(meta)),
+                ...entry.value.map(
+                  (meta) => _buildSettingRow(meta, projectBusy),
+                ),
                 const SizedBox(height: 16),
               ],
             );
@@ -806,9 +829,9 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
     );
   }
 
-  Widget _buildSettingRow(_SettingMeta meta) {
+  Widget _buildSettingRow(_SettingMeta meta, bool projectBusy) {
     final value = _current[meta.key] ?? '';
-    final enabled = widget.isAdmin && !_saving;
+    final enabled = widget.isAdmin && !_saving && !projectBusy;
     final error = _validateSetting(meta.key, value);
 
     return Padding(

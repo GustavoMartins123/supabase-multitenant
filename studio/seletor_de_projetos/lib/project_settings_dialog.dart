@@ -10,6 +10,7 @@ import 'data/project_repository.dart';
 import 'providers/config_provider.dart';
 import 'providers/project_settings_provider.dart';
 import 'providers/project_list_provider.dart';
+import 'providers/project_jobs_provider.dart';
 import 'services/projectService.dart';
 import 'dialogs/transferProjectDialog.dart';
 import 'dialogs/rename_project_dialog.dart';
@@ -96,11 +97,13 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
       final saved = await ref
           .read(projectRepositoryProvider)
           .updateProjectDisplayName(widget.ref, newName);
+      if (!mounted) return;
       setState(() {
         _currentDisplayName = saved ?? newName;
         _displayNameController.text = _currentDisplayName ?? '';
       });
-      ref.invalidate(projectListProvider);
+      await ref.read(projectListProvider.notifier).refresh();
+      if (!mounted) return;
       _showSnack('Nome de exibição atualizado.', SupabaseColors.success);
     } catch (e) {
       final msg = e.toString().replaceFirst('Exception: ', '');
@@ -120,7 +123,8 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     );
     if (result == null) return;
     if (!mounted) return;
-    ref.invalidate(projectListProvider);
+    await ref.read(projectListProvider.notifier).refresh();
+    if (!mounted) return;
     Navigator.of(context).pop(result.newName);
   }
 
@@ -183,18 +187,41 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
       ),
     );
 
-    if (confirm != true) return;
+    if (confirm != true || !mounted) return;
 
     setState(() => _rotatingKey = true);
     try {
-      final data =
+      final job =
           await ref.read(projectRepositoryProvider).rotateKey(widget.ref);
-      final newKey = data['anon_key'];
-      setState(() => _currentAnonKey = newKey);
+      final result = await ref.read(projectJobsProvider.notifier).waitFor(
+            job,
+            project: widget.ref,
+            action: 'rotate_key',
+          );
+      if (!mounted) return;
+      if (!result.ok) {
+        _showSnack(
+          result.message ?? 'Falha ao rotacionar as chaves.',
+          SupabaseColors.error,
+        );
+        return;
+      }
 
-      ref
+      final projects = await ref
           .read(projectListProvider.notifier)
-          .updateProjectKey(widget.ref, newKey);
+          .refresh(throwOnError: true);
+      if (!mounted) return;
+      String? newKey;
+      for (final project in projects) {
+        if (project['name'] == widget.ref) {
+          newKey = project['anon_token']?.toString();
+          break;
+        }
+      }
+      if (newKey == null || newKey.isEmpty) {
+        throw Exception('Nova chave não retornada pela listagem de projetos');
+      }
+      setState(() => _currentAnonKey = newKey!);
 
       _showSnack('Nova chave gerada!', SupabaseColors.success);
     } catch (e) {
@@ -226,6 +253,13 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     bool sucesso = await ProjectService.confirmAndDeleteProject(
       context,
       widget.ref,
+      submittedJobWaiter: (job) =>
+          ref.read(projectJobsProvider.notifier).waitFor(
+                job,
+                project: widget.ref,
+                action: 'delete',
+                max: 400,
+              ),
     );
     if (sucesso && mounted) Navigator.of(context).pop(widget.ref);
   }
@@ -238,6 +272,8 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
         serverDomain.isNotEmpty ? '$serverDomain/${widget.ref}' : widget.ref;
 
     final membersAsync = ref.watch(projectMembersProvider(widget.ref));
+    final activeJob = ref.watch(activeProjectJobProvider(widget.ref));
+    final projectBusy = activeJob != null;
     final myId = Session().myId;
     final myRole = membersAsync.value
         ?.firstWhere(
@@ -278,9 +314,9 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
                       const SizedBox(height: 20),
                       _buildUrlSection(projectUrl),
                       const SizedBox(height: 20),
-                      _buildIdentitySection(myRole),
+                      _buildIdentitySection(myRole, projectBusy),
                       const SizedBox(height: 20),
-                      _buildAnonKeySection(myRole),
+                      _buildAnonKeySection(myRole, projectBusy),
                       const SizedBox(height: 20),
                       if (myRole == 'admin' || Session().isSysAdmin) ...[
                         UserTelemetrySection(projectRef: widget.ref),
@@ -298,7 +334,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
                   ),
                 ),
               ),
-              _buildFooter(myRole),
+              _buildFooter(myRole, projectBusy),
             ],
           ),
         ),
@@ -358,7 +394,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     );
   }
 
-  Widget _buildFooter(String? myRole) {
+  Widget _buildFooter(String? myRole, bool projectBusy) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: const BoxDecoration(
@@ -373,13 +409,13 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
                 DangerButton(
                   label: 'Excluir',
                   icon: Icons.delete_outline_rounded,
-                  onPressed: _deleteProject,
+                  onPressed: projectBusy ? null : _deleteProject,
                 ),
                 const SizedBox(width: 8),
                 SecondaryButton(
                   label: 'Transferir',
                   icon: Icons.swap_horiz_rounded,
-                  onPressed: () => _showTransferDialog(),
+                  onPressed: projectBusy ? null : () => _showTransferDialog(),
                 ),
               ],
             ],
@@ -474,7 +510,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     );
   }
 
-  Widget _buildIdentitySection(String? myRole) {
+  Widget _buildIdentitySection(String? myRole, bool projectBusy) {
     final isAdmin = myRole == 'admin' || Session().isSysAdmin;
     final hasDisplayChange =
         _displayNameController.text.trim() != (_currentDisplayName ?? '');
@@ -540,8 +576,9 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
                       SecondaryButton(
                         label: 'Renomear',
                         icon: Icons.drive_file_rename_outline_rounded,
-                        onPressed:
-                            _savingDisplayName ? null : _openRenameDialog,
+                        onPressed: _savingDisplayName || projectBusy
+                            ? null
+                            : _openRenameDialog,
                       ),
                     ],
                   ],
@@ -572,7 +609,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
                 const SizedBox(height: 6),
                 TextField(
                   controller: _displayNameController,
-                  enabled: isAdmin && !_savingDisplayName,
+                  enabled: isAdmin && !_savingDisplayName && !projectBusy,
                   style: const TextStyle(
                     fontSize: 13,
                     color: SupabaseColors.textPrimary,
@@ -590,9 +627,10 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
                   Align(
                     alignment: Alignment.centerRight,
                     child: SecondaryButton(
-                      onPressed: !hasDisplayChange || _savingDisplayName
-                          ? null
-                          : _saveDisplayName,
+                      onPressed:
+                          !hasDisplayChange || _savingDisplayName || projectBusy
+                              ? null
+                              : _saveDisplayName,
                       icon: Icons.save_outlined,
                       label: _savingDisplayName
                           ? 'Salvando...'
@@ -608,7 +646,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     );
   }
 
-  Widget _buildAnonKeySection(String? myRole) {
+  Widget _buildAnonKeySection(String? myRole, bool projectBusy) {
     final hasKey = _currentAnonKey.isNotEmpty;
     return SectionWidget(
       title: 'CHAVE ANÔNIMA',
@@ -675,7 +713,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
             SecondaryButton(
               label: 'Gerar nova chave',
               icon: Icons.refresh_rounded,
-              onPressed: _rotatingKey ? null : _rotateKey,
+              onPressed: _rotatingKey || projectBusy ? null : _rotateKey,
             ),
           ],
         ],
@@ -775,11 +813,12 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
             }
           } catch (e) {
             final msg = e.toString().replaceFirst('Exception: ', '');
-            if (mounted)
+            if (mounted) {
               _showSnack(
                 'Erro ao transferir projeto: $msg',
                 SupabaseColors.error,
               );
+            }
           }
         },
         loadAvailableUsers: (projectName) async {

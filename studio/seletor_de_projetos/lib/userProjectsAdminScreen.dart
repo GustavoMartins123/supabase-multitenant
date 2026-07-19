@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:seletor_de_projetos/data/project_repository.dart';
 import 'package:seletor_de_projetos/services/projectService.dart';
+import 'package:seletor_de_projetos/providers/project_jobs_provider.dart';
 import 'package:seletor_de_projetos/session.dart';
 import 'package:seletor_de_projetos/supabase_colors.dart';
 import 'dart:html' as html;
@@ -162,6 +163,7 @@ class _UserProjectsAdminScreenState
   }
 
   void _showSnack(String message, Color color) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message, style: const TextStyle(color: Colors.white)),
@@ -180,6 +182,17 @@ class _UserProjectsAdminScreenState
 
   @override
   Widget build(BuildContext context) {
+    ref.listen(projectJobsProvider, (previous, next) {
+      final previousJobs = previous?.value ?? const [];
+      final nextIds = next.value?.map((job) => job.id).toSet() ?? {};
+      final relevantJobFinished = previousJobs.any(
+        (job) =>
+            !nextIds.contains(job.id) &&
+            _projects.any((project) => project.name == job.project),
+      );
+      if (relevantJobFinished) _fetchProjects();
+    });
+
     return Scaffold(
       backgroundColor: SupabaseColors.bg100,
       body: CustomScrollView(
@@ -340,7 +353,8 @@ class _UserProjectsAdminScreenState
   }
 
   Widget _buildProjectCard(ProjectInfo project) {
-    final busy = _session.isBusy(project.name);
+    final activeJob = ref.watch(activeProjectJobProvider(project.name));
+    final busy = _session.isBusy(project.name) || activeJob != null;
     final projectUrl = _getProjectUrl(project.name);
 
     if (project.statusFuture == null && !busy) {
@@ -487,13 +501,29 @@ class _UserProjectsAdminScreenState
                           color: SupabaseColors.brand.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(6),
                         ),
-                        child: const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: SupabaseColors.brand,
-                          ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: SupabaseColors.brand,
+                              ),
+                            ),
+                            if (activeJob?.progress != null) ...[
+                              const SizedBox(width: 8),
+                              Text(
+                                '${activeJob!.progress}%',
+                                style: const TextStyle(
+                                  color: SupabaseColors.brand,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ),
                   ],
@@ -654,7 +684,11 @@ class _UserProjectsAdminScreenState
 
       final job = result.job;
       if (job != null) {
-        final waited = await ProjectService.waitForJob(job.id);
+        final waited = await ref.read(projectJobsProvider.notifier).waitFor(
+              job,
+              project: projectName,
+              action: action,
+            );
         _showSnack(
           waited.message ??
               (waited.ok
@@ -683,6 +717,13 @@ class _UserProjectsAdminScreenState
     bool sucesso = await ProjectService.confirmAndDeleteProject(
       context,
       projectName,
+      submittedJobWaiter: (job) =>
+          ref.read(projectJobsProvider.notifier).waitFor(
+                job,
+                project: projectName,
+                action: 'delete',
+                max: 400,
+              ),
     );
 
     if (sucesso) {

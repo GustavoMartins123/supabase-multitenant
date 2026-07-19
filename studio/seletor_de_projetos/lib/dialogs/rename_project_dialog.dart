@@ -5,7 +5,7 @@ import '../data/project_repository.dart';
 import '../models/job.dart';
 import '../providers/favorites_provider.dart';
 import '../providers/project_list_provider.dart';
-import '../services/projectService.dart';
+import '../providers/project_jobs_provider.dart';
 import '../supabase_colors.dart';
 
 class RenameProjectResult {
@@ -84,9 +84,7 @@ class _RenameProjectDialogState extends ConsumerState<RenameProjectDialog> {
     });
 
     try {
-      final job = await ref
-          .read(projectRepositoryProvider)
-          .renameProject(
+      final job = await ref.read(projectRepositoryProvider).renameProject(
             widget.projectName,
             newName: newName,
             displayName: displayName.isEmpty ? null : displayName,
@@ -94,7 +92,11 @@ class _RenameProjectDialogState extends ConsumerState<RenameProjectDialog> {
       if (!mounted) return;
       setState(() => _createdJob = job);
 
-      final result = await ProjectService.waitForJob(job.id);
+      final result = await ref.read(projectJobsProvider.notifier).waitFor(
+            job,
+            project: widget.projectName,
+            action: 'rename',
+          );
       if (!mounted) return;
       if (!result.ok) {
         setState(() {
@@ -114,7 +116,8 @@ class _RenameProjectDialogState extends ConsumerState<RenameProjectDialog> {
         ref.invalidate(favoritesProvider);
       }
       if (!mounted) return;
-      ref.invalidate(projectListProvider);
+      await ref.read(projectListProvider.notifier).refresh();
+      if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -128,9 +131,11 @@ class _RenameProjectDialogState extends ConsumerState<RenameProjectDialog> {
         context,
       ).pop(RenameProjectResult(oldName: widget.projectName, newName: newName));
     } catch (e) {
-      setState(() {
-        _error = e.toString().replaceFirst('Exception: ', '');
-      });
+      if (mounted) {
+        setState(() {
+          _error = e.toString().replaceFirst('Exception: ', '');
+        });
+      }
     } finally {
       if (mounted) setState(() => _submitting = false);
     }

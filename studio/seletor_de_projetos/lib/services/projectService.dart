@@ -22,18 +22,26 @@ class JobWaitResult {
   final String? currentStep;
 }
 
+typedef SubmittedJobWaiter = Future<JobWaitResult> Function(Job job);
+
 class ProjectService {
   static Future<bool> confirmAndDeleteProject(
     BuildContext context,
-    String projectRef,
-  ) async {
+    String projectRef, {
+    SubmittedJobWaiter? submittedJobWaiter,
+  }) async {
     final confirmed = await _showConfirmationDialog(context, projectRef);
-    if (!confirmed) return false;
+    if (!confirmed || !context.mounted) return false;
 
     final password = await _showPasswordDialog(context);
-    if (password == null || password.isEmpty) return false;
+    if (password == null || password.isEmpty || !context.mounted) return false;
 
-    return await _executeProjectDeletion(context, projectRef, password);
+    return await _executeProjectDeletion(
+      context,
+      projectRef,
+      password,
+      submittedJobWaiter: submittedJobWaiter,
+    );
   }
 
   static Future<bool> _showConfirmationDialog(
@@ -133,8 +141,10 @@ class ProjectService {
   static Future<bool> _executeProjectDeletion(
     BuildContext context,
     String projectRef,
-    String password,
-  ) async {
+    String password, {
+    SubmittedJobWaiter? submittedJobWaiter,
+  }) async {
+    var loadingDialogOpen = true;
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -162,10 +172,12 @@ class ProjectService {
 
       final job = Job.fromResponse(response);
       if (job != null) {
-        final waited = await waitForJob(job.id);
-        if (context.mounted) {
-          Navigator.pop(context);
-        }
+        final waited = submittedJobWaiter == null
+            ? await waitForJob(job.id)
+            : await submittedJobWaiter(job);
+        if (!context.mounted) return waited.ok;
+        Navigator.pop(context);
+        loadingDialogOpen = false;
 
         await _showDeleteResultDialog(
           context,
@@ -178,8 +190,11 @@ class ProjectService {
         return waited.ok;
       }
 
+      var contextAvailable = false;
       if (context.mounted) {
+        contextAvailable = true;
         Navigator.pop(context);
+        loadingDialogOpen = false;
       }
 
       if (response.statusCode == 200) {
@@ -191,19 +206,20 @@ class ProjectService {
           if (errors != null && errors.isNotEmpty) errors.join('\n'),
         ].where((part) => part.isNotEmpty).join('\n');
 
-        await _showDeleteResultDialog(
-          context,
-          message: message,
-          success: status == 'success',
-        );
+        if (contextAvailable && context.mounted) {
+          await _showDeleteResultDialog(
+            context,
+            message: message,
+            success: status == 'success',
+          );
+        }
         return status == 'success';
       } else {
         throw Exception(jsonDecode(response.body)['detail'] ?? response.body);
       }
     } catch (e) {
-      if (context.mounted) {
-        Navigator.pop(context);
-      }
+      if (!context.mounted) return false;
+      if (loadingDialogOpen) Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Erro na exclusão: $e'),
@@ -254,17 +270,23 @@ class ProjectService {
   }) async {
     Map<String, dynamic> lastData = const {};
     for (var i = 0; i < max; i++) {
-      await Future.delayed(every);
-      final data = await http
-          .get(Uri.parse('/api/projects/status/$jobId'))
-          .then((r) => jsonDecode(r.body) as Map<String, dynamic>)
-          .catchError((_) => <String, dynamic>{});
+      if (i > 0) await Future.delayed(every);
+      final data =
+          await http.get(Uri.parse('/api/projects/status/$jobId')).then(
+        (response) {
+          if (response.statusCode != 200) return <String, dynamic>{};
+          final decoded = jsonDecode(response.body);
+          return decoded is Map
+              ? Map<String, dynamic>.from(decoded)
+              : <String, dynamic>{};
+        },
+      ).catchError((_) => <String, dynamic>{});
       if (data.isNotEmpty) onUpdate?.call(data);
 
       final st = data['status']?.toString() ?? 'unknown';
       final message = data['message']?.toString();
       final action = data['action']?.toString();
-      final progress = data['progress'] as int?;
+      final progress = (data['progress'] as num?)?.toInt();
       final currentStep = data['current_step']?.toString();
       lastData = data;
 
@@ -300,7 +322,7 @@ class ProjectService {
           'Tempo limite excedido em ${lastData['current_step'] ?? 'etapa desconhecida'} '
           '(${lastData['progress'] ?? 0}%).',
       action: lastData['action']?.toString(),
-      progress: lastData['progress'] as int?,
+      progress: (lastData['progress'] as num?)?.toInt(),
       currentStep: lastData['current_step']?.toString(),
     );
   }

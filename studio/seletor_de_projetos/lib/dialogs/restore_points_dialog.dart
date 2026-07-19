@@ -6,7 +6,7 @@ import '../data/project_repository.dart';
 import '../models/job.dart';
 import '../models/restore_point.dart';
 import '../providers/restore_points_provider.dart';
-import '../services/projectService.dart';
+import '../providers/project_jobs_provider.dart';
 import '../supabase_colors.dart';
 
 class RestorePointsDialog extends ConsumerStatefulWidget {
@@ -62,6 +62,7 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
     required String initialMessage,
     required String successMessage,
     required String failureMessage,
+    required String action,
     int max = 400,
   }) async {
     setState(() {
@@ -69,8 +70,10 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
       _busyMessage = initialMessage;
       _busyProgress = null;
     });
-    final result = await ProjectService.waitForJob(
-      job.id,
+    final result = await ref.read(projectJobsProvider.notifier).waitFor(
+      job,
+      project: widget.projectRef,
+      action: action,
       max: max,
       onUpdate: (data) {
         if (!mounted) return;
@@ -116,6 +119,7 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
         initialMessage: 'Criando ponto de restauração...',
         successMessage: 'Ponto de restauração criado!',
         failureMessage: 'Falha ao criar ponto de restauração.',
+        action: 'backup',
       );
     } catch (e) {
       _snack('Falha ao criar ponto: $e', SupabaseColors.error);
@@ -212,6 +216,7 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
         initialMessage: 'Restaurando projeto...',
         successMessage: 'Projeto restaurado com sucesso!',
         failureMessage: 'Falha na restauração.',
+        action: 'restore',
         max: 1300,
       );
     } catch (e) {
@@ -279,6 +284,7 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
         initialMessage: 'Excluindo ponto de restauração...',
         successMessage: 'Ponto de restauração excluído.',
         failureMessage: 'Falha ao excluir ponto.',
+        action: 'delete_restore_point',
       );
     } catch (e) {
       _snack('Falha ao excluir: $e', SupabaseColors.error);
@@ -288,35 +294,34 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
   @override
   Widget build(BuildContext context) {
     final pointsAsync = ref.watch(restorePointsProvider(widget.projectRef));
+    final activeJob = ref.watch(activeProjectJobProvider(widget.projectRef));
+    final busy = _working || activeJob != null;
 
-    return PopScope(
-      canPop: !_working,
-      child: Dialog(
-        backgroundColor: Colors.transparent,
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 760, maxHeight: 640),
-          decoration: BoxDecoration(
-            color: SupabaseColors.bg200,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: SupabaseColors.border),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildHeader(context),
-              if (_working) _buildBusyBanner(),
-              Flexible(
-                child: pointsAsync.when(
-                  loading: () => _buildLoading(),
-                  error: (err, _) => _buildError(err.toString()),
-                  data: (data) => data.points.isEmpty
-                      ? _buildEmpty()
-                      : _buildGrid(data),
-                ),
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 760, maxHeight: 640),
+        decoration: BoxDecoration(
+          color: SupabaseColors.bg200,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: SupabaseColors.border),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildHeader(context),
+            if (busy) _buildBusyBanner(activeJob),
+            Flexible(
+              child: pointsAsync.when(
+                loading: () => _buildLoading(),
+                error: (err, _) => _buildError(err.toString()),
+                data: (data) => data.points.isEmpty
+                    ? _buildEmpty()
+                    : _buildGrid(data, busy),
               ),
-              _buildFooter(pointsAsync.value),
-            ],
-          ),
+            ),
+            _buildFooter(pointsAsync.value, busy),
+          ],
         ),
       ),
     );
@@ -368,15 +373,13 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
             ),
           ),
           InkWell(
-            onTap: _working ? null : () => Navigator.pop(context),
-            child: Padding(
-              padding: const EdgeInsets.all(4),
+            onTap: () => Navigator.pop(context),
+            child: const Padding(
+              padding: EdgeInsets.all(4),
               child: Icon(
                 Icons.close_rounded,
                 size: 18,
-                color: _working
-                    ? SupabaseColors.border
-                    : SupabaseColors.textMuted,
+                color: SupabaseColors.textMuted,
               ),
             ),
           ),
@@ -385,7 +388,8 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
     );
   }
 
-  Widget _buildBusyBanner() {
+  Widget _buildBusyBanner(Job? activeJob) {
+    final progress = _busyProgress ?? activeJob?.progress;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       decoration: BoxDecoration(
@@ -410,7 +414,7 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  _busyMessage ?? 'Processando...',
+                  _busyMessage ?? activeJob?.message ?? 'Processando...',
                   style: const TextStyle(
                     fontSize: 12,
                     color: SupabaseColors.textSecondary,
@@ -419,9 +423,9 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              if (_busyProgress != null)
+              if (progress != null)
                 Text(
-                  '$_busyProgress%',
+                  '$progress%',
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -434,7 +438,7 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(
-              value: _busyProgress == null ? null : _busyProgress! / 100,
+              value: progress == null ? null : progress / 100,
               minHeight: 4,
               backgroundColor: SupabaseColors.bg300,
               color: SupabaseColors.info,
@@ -529,7 +533,7 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
     );
   }
 
-  Widget _buildGrid(RestorePointList data) {
+  Widget _buildGrid(RestorePointList data, bool busy) {
     return GridView.builder(
       shrinkWrap: true,
       padding: const EdgeInsets.all(20),
@@ -540,11 +544,11 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
         mainAxisExtent: 220,
       ),
       itemCount: data.points.length,
-      itemBuilder: (_, i) => _buildFolderTile(data.points[i]),
+      itemBuilder: (_, i) => _buildFolderTile(data.points[i], busy),
     );
   }
 
-  Widget _buildFolderTile(RestorePoint point) {
+  Widget _buildFolderTile(RestorePoint point, bool busy) {
     final statusChip = _statusChip(point);
     return Container(
       padding: const EdgeInsets.all(14),
@@ -571,7 +575,7 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
               ),
               const Spacer(),
               if (statusChip != null) statusChip,
-              if (!_working && !point.isBusy)
+              if (!busy && !point.isBusy)
                 PopupMenuButton<String>(
                   icon: const Icon(
                     Icons.more_vert_rounded,
@@ -801,7 +805,7 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
     );
   }
 
-  Widget _buildFooter(RestorePointList? data) {
+  Widget _buildFooter(RestorePointList? data, bool busy) {
     final count = data?.activeCount ?? 0;
     final limit = data?.limit ?? 15;
     final atLimit = count >= limit;
@@ -816,12 +820,13 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
             '$count de $limit pontos',
             style: TextStyle(
               fontSize: 12,
-              color: atLimit ? SupabaseColors.warning : SupabaseColors.textMuted,
+              color:
+                  atLimit ? SupabaseColors.warning : SupabaseColors.textMuted,
             ),
           ),
           const Spacer(),
           TextButton(
-            onPressed: _working ? null : () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(context),
             style: TextButton.styleFrom(
               foregroundColor: SupabaseColors.textSecondary,
               padding: const EdgeInsets.symmetric(
@@ -833,7 +838,7 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
           ),
           const SizedBox(width: 8),
           ElevatedButton.icon(
-            onPressed: _working || atLimit ? null : _createPoint,
+            onPressed: busy || atLimit ? null : _createPoint,
             style: ElevatedButton.styleFrom(
               backgroundColor: SupabaseColors.brand,
               foregroundColor: Colors.black,
@@ -1013,8 +1018,9 @@ class _CreateRestorePointDialogState extends State<_CreateRestorePointDialog> {
                     fontSize: 13,
                     color: SupabaseColors.textPrimary,
                   ),
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? 'Informe um título' : null,
+                  validator: (v) => (v == null || v.trim().isEmpty)
+                      ? 'Informe um título'
+                      : null,
                   onFieldSubmitted: (_) => _submit(),
                 ),
                 const SizedBox(height: 12),
@@ -1031,8 +1037,7 @@ class _CreateRestorePointDialogState extends State<_CreateRestorePointDialog> {
                   controller: _descriptionCtrl,
                   maxLength: 400,
                   maxLines: 3,
-                  decoration:
-                      _fieldDecoration('O que este ponto representa?'),
+                  decoration: _fieldDecoration('O que este ponto representa?'),
                   style: const TextStyle(
                     fontSize: 13,
                     color: SupabaseColors.textPrimary,

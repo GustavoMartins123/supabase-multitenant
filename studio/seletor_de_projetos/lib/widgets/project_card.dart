@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../dialogs/restore_points_dialog.dart';
+import '../models/job.dart';
 import '../models/project_collaboration.dart';
 import '../project_collaboration_dialog.dart';
 import '../providers/project_collaboration_provider.dart';
@@ -28,6 +29,7 @@ class ProjectCard extends ConsumerStatefulWidget {
     this.keyExpiringSoon = false,
     this.keyExpired = false,
     this.isLoading = false,
+    this.activeJob,
   });
 
   final String refKey;
@@ -43,6 +45,7 @@ class ProjectCard extends ConsumerStatefulWidget {
   final VoidCallback onToggleFavorite;
   final bool isLoading;
   final bool isFavorite;
+  final Job? activeJob;
 
   @override
   ConsumerState<ProjectCard> createState() => _ProjectCardState();
@@ -73,6 +76,7 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
       context: context,
       builder: (_) => ProjectCollaborationDialog(projectRef: widget.refKey),
     );
+    if (!mounted) return;
     ref.invalidate(projectCollaborationProvider(widget.refKey));
   }
 
@@ -81,6 +85,7 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
       context: context,
       builder: (_) => RestorePointsDialog(projectRef: widget.refKey),
     );
+    if (!mounted) return;
     ref.invalidate(restorePointsProvider(widget.refKey));
   }
 
@@ -111,8 +116,8 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
 
   @override
   Widget build(BuildContext ctx) {
-    if (widget.isLoading) {
-      return _buildLoadingCard();
+    if (widget.isLoading || widget.activeJob != null) {
+      return _buildLoadingCard(widget.activeJob);
     }
 
     final statusAsync = ref.watch(projectStatusProvider(widget.refKey));
@@ -527,7 +532,10 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
     );
   }
 
-  Widget _buildLoadingCard() {
+  Widget _buildLoadingCard(Job? job) {
+    final progress = job?.progress?.clamp(0, 100);
+    final action = _jobActionLabel(job?.action);
+    final status = job?.status == 'queued' ? 'NA FILA' : 'EM EXECUÇÃO';
     return Container(
       decoration: BoxDecoration(
         color: SupabaseColors.surface100,
@@ -540,43 +548,124 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
         children: [
           Row(
             children: [
-              _buildShimmer(40, 40, borderRadius: 8),
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: SupabaseColors.brand.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: SupabaseColors.brand,
+                  ),
+                ),
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildShimmer(120, 16),
-                    const SizedBox(height: 8),
-                    _buildShimmer(200, 12),
+                    Text(
+                      widget.refKey,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: SupabaseColors.textPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '$action · $status',
+                      style: const TextStyle(
+                        color: SupabaseColors.brand,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
                   ],
                 ),
               ),
             ],
           ),
           const Spacer(),
-          const SizedBox(height: 16),
-          _buildShimmer(double.infinity, 32),
+          Text(
+            job?.message ?? 'Preparando a operação…',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: SupabaseColors.textSecondary,
+              fontSize: 12,
+              height: 1.35,
+            ),
+          ),
+          if (job?.currentStep != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              job!.currentStep!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: SupabaseColors.textMuted,
+                fontSize: 10,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ],
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(999),
+                  child: LinearProgressIndicator(
+                    value: progress == null ? null : progress / 100,
+                    minHeight: 6,
+                    backgroundColor: SupabaseColors.bg300,
+                    color: SupabaseColors.brand,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                width: 34,
+                child: Text(
+                  progress == null ? '…' : '$progress%',
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    color: SupabaseColors.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildShimmer(double width, double height, {double borderRadius = 4}) {
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0.3, end: 0.7),
-      duration: const Duration(seconds: 1),
-      builder: (context, val, child) {
-        return Container(
-          width: width,
-          height: height,
-          decoration: BoxDecoration(
-            color: SupabaseColors.surface200.withValues(alpha: val),
-            borderRadius: BorderRadius.circular(borderRadius),
-          ),
-        );
-      },
-      onEnd: () {},
-    );
+  String _jobActionLabel(String? action) {
+    return switch (action) {
+      'create' => 'CRIANDO PROJETO',
+      'duplicate' => 'DUPLICANDO PROJETO',
+      'start' => 'INICIANDO PROJETO',
+      'stop' => 'PARANDO PROJETO',
+      'restart' => 'REINICIANDO PROJETO',
+      'recreate_services' => 'RECRIANDO SERVIÇOS',
+      'rename' => 'RENOMEANDO PROJETO',
+      'backup' => 'CRIANDO RESTORE POINT',
+      'restore' => 'RESTAURANDO PROJETO',
+      'delete_restore_point' => 'EXCLUINDO RESTORE POINT',
+      'rotate_key' => 'ROTACIONANDO CHAVES',
+      'delete' => 'EXCLUINDO PROJETO',
+      _ => 'PROCESSANDO PROJETO',
+    };
   }
 }

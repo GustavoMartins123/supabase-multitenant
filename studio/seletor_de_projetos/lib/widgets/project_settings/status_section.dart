@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/project_settings_provider.dart';
+import '../../providers/project_jobs_provider.dart';
 import '../../data/project_repository.dart';
+import '../../models/job.dart';
 import '../../supabase_colors.dart';
-import '../../services/projectService.dart';
 import '../action_button.dart';
 import '../section_widget.dart';
 import '../error_box.dart';
@@ -46,10 +47,11 @@ class _StatusSectionState extends ConsumerState<StatusSection> {
   Widget build(BuildContext context) {
     final statusAsync = ref.watch(projectStatusProvider(widget.projectRef));
     final membersAsync = ref.watch(projectMembersProvider(widget.projectRef));
+    final activeJob = ref.watch(activeProjectJobProvider(widget.projectRef));
+    final busy = _busy || activeJob != null;
 
     final myId = Session().myId;
-    final myRole =
-        membersAsync.value
+    final myRole = membersAsync.value
             ?.firstWhere(
               (m) => m.user_id == myId,
               orElse: () => ProjectMember(user_id: '', role: 'member'),
@@ -91,11 +93,10 @@ class _StatusSectionState extends ConsumerState<StatusSection> {
                           : SupabaseColors.error,
                       boxShadow: [
                         BoxShadow(
-                          color:
-                              (isRunning
-                                      ? SupabaseColors.success
-                                      : SupabaseColors.error)
-                                  .withValues(alpha: 0.5),
+                          color: (isRunning
+                                  ? SupabaseColors.success
+                                  : SupabaseColors.error)
+                              .withValues(alpha: 0.5),
                           blurRadius: 8,
                           spreadRadius: 2,
                         ),
@@ -129,6 +130,10 @@ class _StatusSectionState extends ConsumerState<StatusSection> {
                   ),
                 ],
               ),
+              if (activeJob != null) ...[
+                const SizedBox(height: 14),
+                _buildJobProgress(activeJob),
+              ],
               if (canManageProject) ...[
                 const SizedBox(height: 16),
                 Row(
@@ -138,8 +143,8 @@ class _StatusSectionState extends ConsumerState<StatusSection> {
                         icon: Icons.play_arrow_rounded,
                         label: 'Start',
                         color: SupabaseColors.success,
-                        onPressed: _busy ? null : () => _doAction('start'),
-                        busy: _busy,
+                        onPressed: busy ? null : () => _doAction('start'),
+                        busy: busy,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -148,8 +153,8 @@ class _StatusSectionState extends ConsumerState<StatusSection> {
                         icon: Icons.stop_rounded,
                         label: 'Stop',
                         color: SupabaseColors.error,
-                        onPressed: _busy ? null : () => _doAction('stop'),
-                        busy: _busy,
+                        onPressed: busy ? null : () => _doAction('stop'),
+                        busy: busy,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -158,8 +163,8 @@ class _StatusSectionState extends ConsumerState<StatusSection> {
                         icon: Icons.restart_alt_rounded,
                         label: 'Restart',
                         color: SupabaseColors.info,
-                        onPressed: _busy ? null : () => _doAction('restart'),
-                        busy: _busy,
+                        onPressed: busy ? null : () => _doAction('restart'),
+                        busy: busy,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -168,8 +173,8 @@ class _StatusSectionState extends ConsumerState<StatusSection> {
                         icon: Icons.refresh_rounded,
                         label: 'Recreate',
                         color: SupabaseColors.warning,
-                        onPressed: _busy ? null : () => _doRecreate(),
-                        busy: _busy,
+                        onPressed: busy ? null : () => _doRecreate(),
+                        busy: busy,
                       ),
                     ),
                   ],
@@ -178,6 +183,58 @@ class _StatusSectionState extends ConsumerState<StatusSection> {
             ],
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildJobProgress(Job job) {
+    final progress = job.progress?.clamp(0, 100);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: SupabaseColors.brand.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: SupabaseColors.brand.withValues(alpha: 0.25),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  job.message ?? 'Processando operação do projeto…',
+                  style: const TextStyle(
+                    color: SupabaseColors.textSecondary,
+                    fontSize: 11,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                progress == null ? '…' : '$progress%',
+                style: const TextStyle(
+                  color: SupabaseColors.brand,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: progress == null ? null : progress / 100,
+              minHeight: 5,
+              backgroundColor: SupabaseColors.bg300,
+              color: SupabaseColors.brand,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -194,7 +251,11 @@ class _StatusSectionState extends ConsumerState<StatusSection> {
       final job = result.job;
 
       if (job != null) {
-        final waited = await ProjectService.waitForJob(job.id);
+        final waited = await ref.read(projectJobsProvider.notifier).waitFor(
+              job,
+              project: widget.projectRef,
+              action: action,
+            );
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -204,9 +265,8 @@ class _StatusSectionState extends ConsumerState<StatusSection> {
                         ? 'Ação $action executada'
                         : 'Falha ao executar $action'),
               ),
-              backgroundColor: waited.ok
-                  ? SupabaseColors.success
-                  : SupabaseColors.error,
+              backgroundColor:
+                  waited.ok ? SupabaseColors.success : SupabaseColors.error,
             ),
           );
         }
@@ -218,7 +278,9 @@ class _StatusSectionState extends ConsumerState<StatusSection> {
           ),
         );
       }
-      ref.invalidate(projectStatusProvider(widget.projectRef));
+      if (mounted) {
+        ref.invalidate(projectStatusProvider(widget.projectRef));
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -294,7 +356,11 @@ class _StatusSectionState extends ConsumerState<StatusSection> {
 
       final job = result.job;
       if (job != null) {
-        final waited = await ProjectService.waitForJob(job.id);
+        final waited = await ref.read(projectJobsProvider.notifier).waitFor(
+              job,
+              project: widget.projectRef,
+              action: 'recreate_services',
+            );
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -304,9 +370,8 @@ class _StatusSectionState extends ConsumerState<StatusSection> {
                         ? 'Serviços recriados com sucesso'
                         : 'Falha ao recriar serviços'),
               ),
-              backgroundColor: waited.ok
-                  ? SupabaseColors.success
-                  : SupabaseColors.error,
+              backgroundColor:
+                  waited.ok ? SupabaseColors.success : SupabaseColors.error,
             ),
           );
         }
@@ -318,7 +383,9 @@ class _StatusSectionState extends ConsumerState<StatusSection> {
           ),
         );
       }
-      ref.invalidate(projectStatusProvider(widget.projectRef));
+      if (mounted) {
+        ref.invalidate(projectStatusProvider(widget.projectRef));
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

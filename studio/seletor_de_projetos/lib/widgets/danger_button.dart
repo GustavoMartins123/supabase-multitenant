@@ -11,7 +11,7 @@ class DangerButton extends StatelessWidget {
 
   final String label;
   final IconData? icon;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {

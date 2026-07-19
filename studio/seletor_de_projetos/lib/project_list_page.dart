@@ -1,6 +1,6 @@
+import 'dart:async';
 import 'dart:html' as html;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
@@ -12,6 +12,7 @@ import 'supabase_colors.dart';
 import 'providers/config_provider.dart';
 import 'providers/favorites_provider.dart';
 import 'providers/project_list_provider.dart';
+import 'providers/project_jobs_provider.dart';
 import 'widgets/project_card.dart';
 import 'widgets/supabase_button.dart';
 
@@ -63,14 +64,24 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
     setState(() => _creating = true);
     _snack('Gerando… aguarde', SupabaseColors.info);
 
-    final notifier = ref.read(projectListProvider.notifier);
-    final ok = await notifier.createProjectAndWait(name);
-
-    setState(() => _creating = false);
-    _snack(
-      ok ? 'Projeto criado!' : 'Falhou ao criar',
-      ok ? SupabaseColors.success : SupabaseColors.error,
-    );
+    try {
+      final notifier = ref.read(projectListProvider.notifier);
+      final ok = await notifier.createProjectAndWait(name);
+      if (!mounted) return;
+      _snack(
+        ok ? 'Projeto criado!' : 'Falhou ao criar',
+        ok ? SupabaseColors.success : SupabaseColors.error,
+      );
+    } catch (error) {
+      if (mounted) {
+        _snack(
+          'Falha ao criar: ${error.toString().replaceFirst('Exception: ', '')}',
+          SupabaseColors.error,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _creating = false);
+    }
   }
 
   Future<void> _duplicateAndWait(
@@ -81,18 +92,28 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
     setState(() => _creating = true);
     _snack('Duplicando projeto… aguarde', SupabaseColors.info);
 
-    final notifier = ref.read(projectListProvider.notifier);
-    final ok = await notifier.duplicateProjectAndWait(
-      originalName,
-      newName,
-      copyData,
-    );
-
-    setState(() => _creating = false);
-    _snack(
-      ok ? 'Projeto duplicado com sucesso!' : 'Falhou ao duplicar',
-      ok ? SupabaseColors.success : SupabaseColors.error,
-    );
+    try {
+      final notifier = ref.read(projectListProvider.notifier);
+      final ok = await notifier.duplicateProjectAndWait(
+        originalName,
+        newName,
+        copyData,
+      );
+      if (!mounted) return;
+      _snack(
+        ok ? 'Projeto duplicado com sucesso!' : 'Falhou ao duplicar',
+        ok ? SupabaseColors.success : SupabaseColors.error,
+      );
+    } catch (error) {
+      if (mounted) {
+        _snack(
+          'Falha ao duplicar: ${error.toString().replaceFirst('Exception: ', '')}',
+          SupabaseColors.error,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _creating = false);
+    }
   }
 
   Future<void> _showDuplicateDialog(String originalProjectName) async {
@@ -103,6 +124,7 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
           DuplicateProjectDialog(originalProjectName: originalProjectName),
     );
 
+    if (!mounted) return;
     if (newProject?['name'] != null && newProject?['name'].trim().isNotEmpty) {
       await _duplicateAndWait(
         originalProjectName,
@@ -187,13 +209,35 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
   @override
   Widget build(BuildContext context) {
     final projectsAsync = ref.watch(projectListProvider);
+    final jobsAsync = ref.watch(projectJobsProvider);
     final favoritesAsync = ref.watch(favoritesProvider);
     final configAsync = ref.watch(configProvider);
 
+    ref.listen(projectJobsProvider, (previous, next) {
+      final previousIds = previous?.value?.map((job) => job.id).toSet() ?? {};
+      final nextIds = next.value?.map((job) => job.id).toSet() ?? {};
+      final jobsLoadedForTheFirstTime =
+          previous?.isLoading == true && next.hasValue;
+      if (jobsLoadedForTheFirstTime ||
+          previousIds.difference(nextIds).isNotEmpty) {
+        unawaited(ref.read(projectListProvider.notifier).refresh());
+      }
+    });
+
     final isLoading = projectsAsync.isLoading && !projectsAsync.hasValue;
-    final projects = projectsAsync.value ?? [];
+    final hasLoadError = projectsAsync.hasError && !projectsAsync.hasValue;
+    final projects = mergeProjectsWithJobs(
+      projects: projectsAsync.value ?? [],
+      jobs: jobsAsync.value ?? const [],
+      currentUserId: Session().myId,
+    );
     final favorites = favoritesAsync.value ?? {};
     final serverDomain = configAsync.value?['server_domain'] as String?;
+    final hasProjectCreationInFlight = (jobsAsync.value ?? const []).any(
+      (job) =>
+          job.createdBy == Session().myId &&
+          (job.action == 'create' || job.action == 'duplicate'),
+    );
 
     return Scaffold(
       backgroundColor: SupabaseColors.bg100,
@@ -245,13 +289,14 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
                 child: Row(
                   children: [
                     SupabaseButton(
-                      onPressed: _creating
+                      onPressed: _creating || hasProjectCreationInFlight
                           ? null
                           : () async {
                               final name = await showDialog<String>(
                                 context: context,
                                 builder: (_) => const NewProjectDialog(),
                               );
+                              if (!mounted) return;
                               if (name != null && name.trim().isNotEmpty) {
                                 await _createAndWait(name.trim());
                               }
@@ -280,6 +325,9 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
                   child: Builder(
                     builder: (_) {
                       if (isLoading) return _buildLoadingState();
+                      if (hasLoadError) {
+                        return _buildErrorState(projectsAsync.error);
+                      }
                       if (projects.isEmpty) return _buildEmptyState();
 
                       return _buildProjectGrid(
@@ -321,6 +369,52 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
                 color: SupabaseColors.textSecondary,
                 fontSize: 14,
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildErrorState(Object? error) {
+    final message = error
+        .toString()
+        .replaceFirst('Exception: ', '')
+        .replaceFirst('FormatException: ', '');
+    return Padding(
+      padding: const EdgeInsets.all(80),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.cloud_off_rounded,
+              size: 40,
+              color: SupabaseColors.error,
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Não foi possível carregar os projetos',
+              style: TextStyle(
+                color: SupabaseColors.textPrimary,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: SupabaseColors.textMuted,
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(height: 18),
+            TextButton.icon(
+              onPressed: () => ref.read(projectListProvider.notifier).refresh(),
+              icon: const Icon(Icons.refresh_rounded, size: 16),
+              label: const Text('Tentar novamente'),
             ),
           ],
         ),
@@ -465,13 +559,14 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
       refKey: project['name'] as String,
       anonKey: project['anon_token'] ?? '',
       isLoading: project['is_loading'] == true,
+      activeJob: project['active_job'],
       isFavorite: isFavorite,
       serverDomain: serverDomain,
       displayName: project['display_name'] as String?,
       keyExpiresAtEpoch: project['key_expires_at'] as int?,
       keyExpiringSoon: project['key_expiring_soon'] == true,
       keyExpired: project['key_expired'] == true,
-      onTap: project['is_loading'] == true
+      onTap: project['is_loading'] == true || project['active_job'] != null
           ? () {}
           : () => _openProject(
                 project['name'],
@@ -496,7 +591,9 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
           context,
           MaterialPageRoute(builder: (_) => const AdminUsersPage()),
         );
-        ref.invalidate(projectListProvider);
+        if (!mounted) return;
+        await ref.read(projectListProvider.notifier).refresh();
+        await ref.read(projectJobsProvider.notifier).refresh();
       },
       backgroundColor: SupabaseColors.surface300,
       foregroundColor: SupabaseColors.textPrimary,

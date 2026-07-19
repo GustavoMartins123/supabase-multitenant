@@ -123,26 +123,25 @@ class ProjectRepository {
   }
 
   Future<List<Map<String, dynamic>>> fetchProjects() async {
-    try {
-      final r = await http.get(Uri.parse('/api/projects'));
-      if (r.statusCode == 200) {
-        final raw = jsonDecode(r.body) as List;
-        return raw.map((e) => Map<String, dynamic>.from(e)).toList();
-      }
-    } catch (_) {}
-    return [];
+    final response = await http.get(Uri.parse('/api/projects'));
+    _ensureCommandSucceeded(response);
+    final decoded = jsonDecode(response.body);
+    if (decoded is! List) {
+      throw const FormatException('Resposta inválida ao listar projetos');
+    }
+    return decoded
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList();
   }
 
   Future<Job?> createProject(String name) async {
-    try {
-      final res = await http.post(
-        Uri.parse('/api/projects'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'name': name}),
-      );
-      return Job.fromResponse(res);
-    } catch (_) {}
-    return null;
+    final response = await http.post(
+      Uri.parse('/api/projects'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'name': name}),
+    );
+    _ensureCommandSucceeded(response, allowedStatusCodes: const {202});
+    return Job.fromResponse(response);
   }
 
   Future<Job?> duplicateProject(
@@ -150,19 +149,17 @@ class ProjectRepository {
     String newName,
     bool copyData,
   ) async {
-    try {
-      final res = await http.post(
-        Uri.parse('/api/projects/duplicate'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'original_name': originalName,
-          'new_name': newName,
-          'copy_data': copyData,
-        }),
-      );
-      return Job.fromResponse(res);
-    } catch (_) {}
-    return null;
+    final response = await http.post(
+      Uri.parse('/api/projects/duplicate'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'original_name': originalName,
+        'new_name': newName,
+        'copy_data': copyData,
+      }),
+    );
+    _ensureCommandSucceeded(response, allowedStatusCodes: const {202});
+    return Job.fromResponse(response);
   }
 
   Future<String?> fetchProjectStatus(String ref) async {
@@ -191,8 +188,9 @@ class ProjectRepository {
       final dynamic data = jsonDecode(resp.body);
       if (data is List) return data;
       if (data is Map) {
-        if (data.containsKey('members'))
+        if (data.containsKey('members')) {
           return data['members'] as List<dynamic>;
+        }
         if (data.containsKey('users')) return data['users'] as List<dynamic>;
       }
       return [];
@@ -259,12 +257,14 @@ class ProjectRepository {
     );
   }
 
-  Future<Map<String, dynamic>> rotateKey(String ref) async {
+  Future<Job> rotateKey(String ref) async {
     final resp = await http.post(Uri.parse('/api/projects/$ref/rotate-key'));
-    if (resp.statusCode == 200) {
-      return jsonDecode(resp.body);
+    _ensureCommandSucceeded(resp, allowedStatusCodes: const {202});
+    final job = Job.fromResponse(resp);
+    if (job == null) {
+      throw Exception('Resposta de rotação de chave sem job_id');
     }
-    throw Exception('Erro ao rotacionar chave: ${resp.body}');
+    return job;
   }
 
   Future<ProjectActionResult> doAction(String ref, String action) async {
