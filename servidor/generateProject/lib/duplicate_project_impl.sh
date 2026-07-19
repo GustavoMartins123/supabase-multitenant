@@ -52,29 +52,75 @@ COMPOSE_STARTED=0
 cleanup_tmp() { rm -rf "$TMP_DIR"; }
 rollback() {
   local status="${1:-$?}"
+  local rollback_failed=0 remaining tenant_status raw_slot slot
+  local -a replication_slots=(
+    "supabase_realtime_messages_replication_slot_$NEW_PROJECT"
+    "supabase_realtime_replication_slot_$NEW_PROJECT"
+  )
   trap - ERR TERM INT HUP
   set +e
   echo "❌ Duplicacao falhou; limpando recursos do clone..." >&2
 
   if [[ "$COMPOSE_STARTED" -eq 1 && -d "$OUT_DIR" ]]; then
     (cd "$OUT_DIR" && docker compose -p "$NEW_PROJECT" \
-      --env-file ../../.env --env-file .env down --remove-orphans) >/dev/null 2>&1 || true
+      --env-file ../../.env --env-file .env down --remove-orphans) >/dev/null 2>&1 \
+      || rollback_failed=1
   fi
   if [[ "$CREATED_SUPAVISOR" -eq 1 ]]; then
-    docker exec supabase-pooler curl -s -X DELETE \
-      "http://localhost:4000/api/tenants/$NEW_PROJECT" >/dev/null 2>&1 || true
+    tenant_status="$(docker exec supabase-pooler curl -sS -o /dev/null -w '%{http_code}' -X DELETE \
+      "http://localhost:4000/api/tenants/$NEW_PROJECT" \
+      -H "Authorization: Bearer $GLOBAL_ANON_TOKEN")" || rollback_failed=1
+    [[ "$tenant_status" == "200" || "$tenant_status" == "202" \
+      || "$tenant_status" == "204" || "$tenant_status" == "404" ]] \
+      || rollback_failed=1
   fi
   if [[ "$CREATED_REALTIME" -eq 1 ]]; then
-    docker exec realtime-dev.supabase-realtime curl -s -X DELETE \
-      "http://localhost:4000/api/tenants/$PROJECT_UUID" >/dev/null 2>&1 || true
+    tenant_status="$(docker exec realtime-dev.supabase-realtime curl -sS -o /dev/null -w '%{http_code}' -X DELETE \
+      "http://localhost:4000/api/tenants/$PROJECT_UUID" \
+      -H "Authorization: Bearer $ANON_TOKEN")" || rollback_failed=1
+    [[ "$tenant_status" == "200" || "$tenant_status" == "202" \
+      || "$tenant_status" == "204" || "$tenant_status" == "404" ]] \
+      || rollback_failed=1
+  fi
+  if [[ "$CREATED_SUPAVISOR" -eq 1 || "$CREATED_REALTIME" -eq 1 ]]; then
+    docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
+      "DELETE FROM _realtime.extensions WHERE tenant_external_id = '$PROJECT_UUID';
+       DELETE FROM _realtime.tenants WHERE external_id = '$PROJECT_UUID';
+       DELETE FROM _supavisor.users WHERE tenant_external_id = '$NEW_PROJECT';
+       DELETE FROM _supavisor.tenants WHERE external_id = '$NEW_PROJECT';" \
+      >/dev/null || rollback_failed=1
   fi
   if [[ "$CREATED_DB" -eq 1 ]]; then
-    docker exec supabase-db psql -U supabase_admin -d postgres -c \
-      "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$NEW_DB' AND pid <> pg_backend_pid(); DROP DATABASE IF EXISTS $NEW_DB;" \
-      >/dev/null 2>&1 || true
+    docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
+      "ALTER DATABASE \"$NEW_DB\" ALLOW_CONNECTIONS false;" \
+      >/dev/null || rollback_failed=1
+    for raw_slot in "${replication_slots[@]}"; do
+      slot="${raw_slot:0:63}"
+      docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
+        "SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots WHERE slot_name = '$slot' AND active_pid IS NOT NULL;" \
+        >/dev/null || rollback_failed=1
+      sleep 1
+      docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
+        "SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name = '$slot';" \
+        >/dev/null || rollback_failed=1
+    done
+    docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
+      "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$NEW_DB' AND pid <> pg_backend_pid();" \
+      >/dev/null || rollback_failed=1
+    docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
+      "DROP DATABASE IF EXISTS \"$NEW_DB\";" >/dev/null || rollback_failed=1
+    remaining="$(docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin \
+      -d postgres -tAc "SELECT count(*) FROM pg_database WHERE datname = '$NEW_DB';" \
+      | tr -d '[:space:]')" || rollback_failed=1
+    [[ "$remaining" == "0" ]] || rollback_failed=1
   fi
-  if [[ "$CREATED_DIR" -eq 1 ]]; then rm -rf "$OUT_DIR"; fi
-  cleanup_tmp
+  if [[ "$CREATED_DIR" -eq 1 ]]; then rm -rf "$OUT_DIR" || rollback_failed=1; fi
+  cleanup_tmp || rollback_failed=1
+  if [[ "$rollback_failed" -eq 0 ]]; then
+    echo "HOST_AGENT_ROLLBACK_COMPLETE=1"
+  else
+    echo "HOST_AGENT_ROLLBACK_FAILED=1" >&2
+  fi
   exit "$status"
 }
 trap rollback ERR
@@ -252,24 +298,24 @@ realtime_payload=$(jq -cn \
   --arg password "$POSTGRES_PASSWORD" --arg slot "supabase_realtime_replication_slot_$NEW_PROJECT" \
   --argjson max_users "${MAX_CONCURRENT_USERS:-200}" \
   '{tenant:{name:$uuid,external_id:$uuid,jwt_secret:$secret,max_concurrent_users:$max_users,extensions:[{type:"postgres_cdc_rls",settings:{db_name:$db,db_host:$host,db_user:"supabase_admin",db_password:$password,db_port:$port,region:"us-west-1",poll_interval_ms:100,poll_max_record_bytes:1048576,ssl_enforced:false,slot_name:$slot}}]}}')
+CREATED_REALTIME=1
 response=$(docker exec realtime-dev.supabase-realtime curl -sS -w '\n%{http_code}' \
   -X POST http://localhost:4000/api/tenants -H 'Content-Type: application/json' \
   -H "Authorization: Bearer $ANON_TOKEN" -d "$realtime_payload")
 code=$(echo "$response" | tail -n1)
 [[ "$code" == "200" || "$code" == "201" ]] || die "Falha no Realtime (HTTP $code)"
-CREATED_REALTIME=1
 
 pg_version=$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc "SELECT version();" | awk '{print $2}')
 supavisor_payload=$(jq -cn \
   --arg id "$NEW_PROJECT" --arg host "$POSTGRES_HOST" --arg port "$POSTGRES_PORT" \
   --arg password "$POSTGRES_PASSWORD" --arg version "$pg_version" \
   '{tenant:{external_id:$id,db_host:$host,db_port:$port,db_database:("_supabase_"+$id),ip_version:"auto",enforce_ssl:false,require_user:false,auth_query:"SELECT * FROM pgbouncer.get_auth($1)",default_max_clients:800,default_pool_size:40,default_parameter_status:{server_version:$version},users:[{db_user:"pgbouncer",db_password:$password,mode_type:"transaction",pool_size:40,is_manager:true}]}}')
+CREATED_SUPAVISOR=1
 response=$(docker exec supabase-pooler curl -sS -w '\n%{http_code}' \
   -X PUT "http://localhost:4000/api/tenants/$NEW_PROJECT" -H 'Content-Type: application/json' \
   -H "Authorization: Bearer $GLOBAL_ANON_TOKEN" -d "$supavisor_payload")
 code=$(echo "$response" | tail -n1)
 [[ "$code" == "200" || "$code" == "201" || "$code" == "204" ]] || die "Falha no Supavisor (HTTP $code)"
-CREATED_SUPAVISOR=1
 
 COMPOSE_STARTED=1
 (

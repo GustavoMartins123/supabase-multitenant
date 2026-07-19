@@ -124,19 +124,81 @@ async def _enqueue_project_action(
         )
         raise RuntimeError("falha ao enfileirar operacao do projeto") from exc
 
-async def rollback_project_from_db(pool, project_name: str):
+async def rollback_project_from_db(
+    pool,
+    project_name: str,
+    project_uuid: uuid.UUID | None = None,
+) -> bool:
     try:
         async with pool.acquire() as conn:
-            await conn.execute("DELETE FROM projects WHERE name = $1", project_name)
-        print(f"Rollback: Projeto '{project_name}' removido do banco")
+            result = await conn.execute(
+                """
+                DELETE FROM projects
+                WHERE name = $1 AND ($2::uuid IS NULL OR id = $2)
+                """,
+                project_name,
+                project_uuid,
+            )
+        removed = result.endswith("1")
+        if removed:
+            print(f"Rollback: Projeto '{project_name}' removido do banco")
+        else:
+            print(
+                f"Rollback: registro de '{project_name}' já não existia "
+                "ou pertence a outra tentativa"
+            )
+        return removed
     except Exception as e:
         print(f"Erro no rollback do banco: {e}")
+        return False
 
 
 async def _get_job_project_uuid(pool, job_id: str) -> uuid.UUID | None:
     return await pool.fetchval(
         "SELECT project_uuid FROM jobs WHERE job_id = $1", uuid.UUID(str(job_id))
     )
+
+
+async def _failed_create_recovery_context(
+    pool,
+    *,
+    job_id: str,
+    project_name: str,
+    created_by: uuid.UUID,
+) -> tuple[bool, list[str]]:
+    """Localiza resíduos atribuíveis a criações falhas recentes do usuário.
+
+    O opt-in de limpeza nunca é inferido apenas pela existência de um banco
+    físico. Ele exige histórico durável de um job ``create`` falho para o
+    mesmo nome e autor, reduzindo o risco de apagar um banco legítimo que
+    tenha perdido apenas o registro do control plane.
+    """
+    rows = await pool.fetch(
+        """
+        SELECT hc.args->>'tenant_uuid' AS tenant_uuid
+        FROM jobs j
+        JOIN host_agent_commands hc ON hc.job_id = j.job_id
+        WHERE j.job_id <> $1
+          AND j.project = $2
+          AND j.created_by = $3
+          AND j.action = 'create'
+          AND j.status = 'failed'
+          AND j.finished_at >= now() - interval '7 days'
+          AND hc.command = 'create_project'
+          AND hc.status IN ('done', 'failed', 'cancelled')
+        ORDER BY hc.created_at DESC
+        LIMIT 20
+        """,
+        uuid.UUID(str(job_id)),
+        project_name,
+        created_by,
+    )
+    tenant_uuids: list[str] = []
+    for row in rows:
+        candidate = str(row["tenant_uuid"] or "").lower()
+        if parse_uuid_value(candidate) is not None and candidate not in tenant_uuids:
+            tenant_uuids.append(candidate)
+    return bool(rows), tenant_uuids
 
 
 def _job_progress_mirror(job_id: str):
@@ -197,7 +259,10 @@ app.include_router(collaboration_router)
 app.include_router(internal_router)
 app.include_router(lifecycle_router)
 
-RECOVERABLE_RUNNING_ACTIONS = IDEMPOTENT_ACTIONS
+# ``create`` nao e repetivel, mas e retomavel: o runner se religa ao mesmo
+# host_agent_command duravel com ``reuse_terminal=True`` e nunca dispara um
+# segundo script para o mesmo job.
+RECOVERABLE_RUNNING_ACTIONS = IDEMPOTENT_ACTIONS | {"create"}
 
 
 async def _build_recovery_runner(row: asyncpg.Record):
@@ -3492,6 +3557,7 @@ async def project_status(
 
 async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.UUID):
     pool = await get_pool()
+    project_uuid = await _get_job_project_uuid(pool, job_id)
     await _set_job_status(
         job_id,
         "running",
@@ -3503,26 +3569,56 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
 
     try:
         tenant_uuid = str(uuid.uuid4())
+        recover_stale, stale_tenant_uuids = await _failed_create_recovery_context(
+            pool,
+            job_id=job_id,
+            project_name=project_name,
+            created_by=user,
+        )
 
         record = await run_host_agent_command_for_job(
             pool,
             job_id=job_id,
             command="create_project",
             project=project_name,
-            project_uuid=await _get_job_project_uuid(pool, job_id),
+            project_uuid=project_uuid,
             requested_by=user,
-            args={"tenant_uuid": tenant_uuid},
+            args={
+                "tenant_uuid": tenant_uuid,
+                "recover_stale": recover_stale,
+                "stale_tenant_uuids": stale_tenant_uuids,
+            },
             reuse_terminal=True,
             on_progress=_job_progress_mirror(job_id),
         )
         if record["status"] != "done":
+            result = command_result(record)
+            rollback_completed = result.get("rollback_completed") is True
+            stale_state = result.get("stale_state_detected") is True
             await _fail_job_from_command(
                 job_id,
                 record,
                 default_error="provision_failed",
                 message_prefix="Falha ao provisionar infraestrutura",
             )
-            await rollback_project_from_db(pool, project_name)
+            await rollback_project_from_db(pool, project_name, project_uuid)
+            if not rollback_completed or stale_state:
+                detail = (
+                    record["message"]
+                    or record["error_code"]
+                    or "falha física não confirmada"
+                )
+                await _set_job_status(
+                    job_id,
+                    "failed",
+                    message=(
+                        f"Falha ao provisionar infraestrutura: {detail}. "
+                        "A limpeza física não pôde ser confirmada; os resíduos "
+                        "foram registrados e serão recuperados numa nova tentativa."
+                    ),
+                    current_step="rollback_unconfirmed",
+                    error_code=record["error_code"] or "rollback_unconfirmed",
+                )
             return
 
         await _set_job_status(
@@ -3541,7 +3637,7 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
                 error_code="missing_keys",
             )
             print("Missing tokens")
-            await rollback_project_from_db(pool, project_name)
+            await rollback_project_from_db(pool, project_name, project_uuid)
             return
 
         await _set_job_status(
@@ -3578,19 +3674,27 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
         await _set_job_status(
             job_id,
             "failed",
-            message="O host-agent não conseguiu criar o projeto.",
+            message=(
+                "O host-agent não conseguiu criar o projeto. A limpeza física "
+                "não foi confirmada; uma nova tentativa fará a recuperação."
+            ),
+            current_step="rollback_unconfirmed",
             error_code=exc.error_code,
         )
-        await rollback_project_from_db(pool, project_name)
+        await rollback_project_from_db(pool, project_name, project_uuid)
     except Exception as e:
         await _set_job_status(
             job_id,
             "failed",
-            message="Falha interna inesperada ao criar o projeto.",
+            message=(
+                "Falha interna inesperada ao criar o projeto. Possíveis resíduos "
+                "foram registrados para recuperação na próxima tentativa."
+            ),
+            current_step="rollback_unconfirmed",
             error_code="unexpected_create_error",
         )
         print(f"Worker error: {e}")
-        await rollback_project_from_db(pool, project_name)
+        await rollback_project_from_db(pool, project_name, project_uuid)
 
 
 async def get_project_containers(project: str) -> list[dict]:

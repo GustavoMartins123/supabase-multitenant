@@ -91,6 +91,58 @@ BACKUP_PROGRESS_EVENTS: dict[str, ProgressEvent] = {
     ),
 }
 
+CREATE_PROGRESS_EVENTS: dict[str, ProgressEvent] = {
+    "HOST_AGENT_PROGRESS=create:cleanup_stale": (
+        12,
+        "cleanup_stale_state",
+        "Limpando resíduos de uma tentativa anterior...",
+    ),
+    "HOST_AGENT_PROGRESS=create:transaction_initialized": (
+        15,
+        "initialize_transaction",
+        "Preparando arquivos do projeto...",
+    ),
+    "HOST_AGENT_PROGRESS=create:files_rendered": (
+        25,
+        "render_project_files",
+        "Arquivos do projeto gerados.",
+    ),
+    "HOST_AGENT_PROGRESS=create:database_created": (
+        40,
+        "create_database",
+        "Banco de dados criado.",
+    ),
+    "HOST_AGENT_PROGRESS=create:realtime_created": (
+        52,
+        "create_realtime_tenant",
+        "Tenant do Realtime criado.",
+    ),
+    "HOST_AGENT_PROGRESS=create:supavisor_created": (
+        60,
+        "create_supavisor_tenant",
+        "Pool de conexões configurado.",
+    ),
+    "HOST_AGENT_PROGRESS=create:services_started": (
+        66,
+        "start_project_services",
+        "Serviços do projeto iniciados.",
+    ),
+    "HOST_AGENT_PROGRESS=create:storage_verified": (
+        69,
+        "verify_storage",
+        "Storage validado; finalizando projeto...",
+    ),
+}
+
+ROLLBACK_COMPLETE_MARKER = "HOST_AGENT_ROLLBACK_COMPLETE=1"
+ROLLBACK_FAILED_MARKER = "HOST_AGENT_ROLLBACK_FAILED="
+STALE_STATE_MARKER = "HOST_AGENT_STALE_STATE="
+LIFECYCLE_MARKERS = (
+    ROLLBACK_COMPLETE_MARKER,
+    ROLLBACK_FAILED_MARKER,
+    STALE_STATE_MARKER,
+)
+
 
 @dataclass
 class CommandOutcome:
@@ -544,21 +596,38 @@ async def _run_lifecycle_script(
             ),
             ProcessResult(None, False, set()),
         )
+    lifecycle_markers = tuple(dict.fromkeys((*markers, *LIFECYCLE_MARKERS)))
     result = await run_process(
         ["bash", str(script), *script_args],
         ctx,
         cwd=ctx.config.root,
-        markers=markers,
+        markers=lifecycle_markers,
         progress_events=progress_events,
     )
     if result.timed_out:
         return (
-            CommandOutcome(status="failed", error_code="timeout", exit_code=result.returncode),
+            CommandOutcome(
+                status="failed",
+                error_code="timeout",
+                exit_code=result.returncode,
+                message="Script de lifecycle excedeu o tempo limite.",
+            ),
             result,
         )
     if result.returncode != 0:
+        detail_lines = [
+            line.strip()
+            for line in ctx.state.stderr_tail().splitlines()
+            if line.strip() and not line.startswith("HOST_AGENT_")
+        ]
+        detail = detail_lines[-1] if detail_lines else "consulte stderr_tail"
         return (
-            CommandOutcome(status="failed", error_code=error_code, exit_code=result.returncode),
+            CommandOutcome(
+                status="failed",
+                error_code=error_code,
+                exit_code=result.returncode,
+                message=f"Script de lifecycle falhou: {detail}",
+            ),
             result,
         )
     return CommandOutcome(status="done", exit_code=0), result
@@ -567,12 +636,41 @@ async def _run_lifecycle_script(
 async def handle_create_project(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
     resolve_project_dir(ctx.config.projects_root, project)
     ctx.state.report(progress=10, step="provision_infrastructure", message="Provisionando infraestrutura do projeto...")
-    outcome, _ = await _run_lifecycle_script(
+    recover_stale = bool(args.get("recover_stale", False))
+    stale_tenant_uuids = [str(item) for item in args.get("stale_tenant_uuids", [])]
+    outcome, process = await _run_lifecycle_script(
         ctx,
         "generate_project.sh",
-        [project, str(args["tenant_uuid"])],
+        [
+            project,
+            str(args["tenant_uuid"]),
+            "true" if recover_stale else "false",
+            *stale_tenant_uuids,
+        ],
         error_code="provision_failed",
+        progress_events=CREATE_PROGRESS_EVENTS,
     )
+    if outcome.status == "failed":
+        rollback_failed = ROLLBACK_FAILED_MARKER in process.markers_seen
+        rollback_complete = (
+            ROLLBACK_COMPLETE_MARKER in process.markers_seen and not rollback_failed
+        )
+        stale_state = STALE_STATE_MARKER in process.markers_seen
+        outcome.result = {
+            "rollback_completed": rollback_complete,
+            "stale_state_detected": stale_state,
+        }
+        if rollback_failed:
+            outcome.error_code = "provision_rollback_failed"
+            outcome.message = (
+                "O provisionamento falhou e o rollback físico ficou incompleto; "
+                "consulte stderr_tail."
+            )
+        elif stale_state:
+            outcome.error_code = "stale_project_state"
+            outcome.message = (
+                "Foram encontrados resíduos físicos de uma criação anterior."
+            )
     return outcome
 
 

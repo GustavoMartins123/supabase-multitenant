@@ -92,7 +92,9 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
     Job? job;
     try {
       job = await submit();
-      if (job == null) return false;
+      if (job == null) {
+        throw Exception('A API não retornou o job da operação.');
+      }
 
       final result = await ref.read(projectJobsProvider.notifier).waitFor(
             job,
@@ -100,7 +102,12 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
             action: action,
             createdBy: Session().myId,
           );
-      return result.ok;
+      if (!result.ok) {
+        throw Exception(
+          result.message ?? 'A operação falhou sem diagnóstico do servidor.',
+        );
+      }
+      return true;
     } finally {
       _removeLoading(project);
       await refresh();

@@ -121,6 +121,14 @@ class ClosedCommandSetTest(unittest.TestCase):
             ("start_project", "meu-projeto; rm -rf /", {}),
             ("start_project", "../escape", {}),
             ("create_project", "meuprojeto", {"tenant_uuid": "x; whoami"}),
+            ("create_project", "meuprojeto", {
+                "tenant_uuid": "9c8ce9f0-3b4e-4bcb-a739-2c1e8ad0e9aa",
+                "recover_stale": "true",
+            }),
+            ("create_project", "meuprojeto", {
+                "tenant_uuid": "9c8ce9f0-3b4e-4bcb-a739-2c1e8ad0e9aa",
+                "stale_tenant_uuids": ["../escape"],
+            }),
             ("recreate_services", "meuprojeto", {"services": ["auth", "traefik"]}),
             ("recreate_services", "meuprojeto", {"services": []}),
             ("rename_project", "meuprojeto", {"new_name": "meuprojeto"}),
@@ -154,6 +162,13 @@ class ClosedCommandSetTest(unittest.TestCase):
             ("start_project", "meuprojeto", {}),
             ("recreate_services", "meuprojeto", {"services": ["auth", "nginx"]}),
             ("create_project", "meuprojeto", {"tenant_uuid": tenant_uuid}),
+            ("create_project", "meuprojeto", {
+                "tenant_uuid": tenant_uuid,
+                "recover_stale": True,
+                "stale_tenant_uuids": [
+                    "1b671a64-40d5-491e-99b0-da01ff1f3341"
+                ],
+            }),
             ("duplicate_project", "copia", {
                 "original_name": "meuprojeto",
                 "copy_mode": "schema-only",

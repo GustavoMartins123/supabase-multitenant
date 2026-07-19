@@ -55,9 +55,11 @@ COMMAND_TIMEOUTS: dict[str, int] = {
 
 HOST_AGENT_COMMANDS = frozenset(COMMAND_TIMEOUTS)
 
-# Tempo extra concedido apos SIGTERM antes do SIGKILL. O rename e o restore
-# tratam TERM executando rollback compensatorio (Compose + verificacoes de banco).
+# Tempo extra concedido apos SIGTERM antes do SIGKILL. Os scripts longos abaixo
+# tratam TERM executando rollback compensatorio (Compose + banco/tenants).
 COMMAND_TERM_GRACE: dict[str, int] = {
+    "create_project": 180,
+    "duplicate_project": 180,
     "rename_project": 240,
     "restore_project": 240,
 }
@@ -178,9 +180,21 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
         ):
             errors.append("invalid_services")
     elif command == "create_project":
-        reject_unknown({"tenant_uuid"})
+        reject_unknown({"tenant_uuid", "recover_stale", "stale_tenant_uuids"})
         if not is_valid_uuid(args.get("tenant_uuid")):
             errors.append("invalid_tenant_uuid")
+        recover_stale = args.get("recover_stale", False)
+        if not isinstance(recover_stale, bool):
+            errors.append("invalid_recover_stale")
+        stale_tenant_uuids = args.get("stale_tenant_uuids", [])
+        if (
+            not isinstance(stale_tenant_uuids, list)
+            or len(stale_tenant_uuids) > 20
+            or any(not is_valid_uuid(item) for item in stale_tenant_uuids)
+        ):
+            errors.append("invalid_stale_tenant_uuids")
+        elif stale_tenant_uuids and recover_stale is not True:
+            errors.append("stale_tenants_require_recovery")
     elif command == "duplicate_project":
         reject_unknown({"original_name", "copy_mode", "tenant_uuid"})
         require_project_field("original_name")
