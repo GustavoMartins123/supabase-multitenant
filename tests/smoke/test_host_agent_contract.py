@@ -99,6 +99,9 @@ class SystemdInstallerContractTest(unittest.TestCase):
         self.assertIn('render_unit "$SERVIDOR_DIR" "$AGENT_DIR" "$UNIT_PATH"', source)
         self.assertIn("HOST_AGENT_INSTALL_SCHEMA_WAIT_TIMEOUT", source)
         self.assertIn("--wait-for-schema", source)
+        self.assertIn('cd "$AGENT_DIR"', source)
+        self.assertIn('exec "$python_path" -m hostagent "$@"', source)
+        self.assertIn("if run_hostagent", source)
 
         with tempfile.TemporaryDirectory(prefix="host agent % & ") as temp_dir:
             root = pathlib.Path(temp_dir)

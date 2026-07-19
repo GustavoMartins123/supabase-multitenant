@@ -48,6 +48,14 @@ SERVIDOR_DIR="$(dirname "$AGENT_DIR")"
 UNIT_NAME="supabase-host-agent.service"
 UNIT_PATH="/etc/systemd/system/$UNIT_NAME"
 
+run_hostagent() {
+  local python_path="$AGENT_DIR/.venv/bin/python"
+  (
+    cd "$AGENT_DIR"
+    exec "$python_path" -m hostagent "$@"
+  )
+}
+
 main() {
   [[ "$(id -u)" -eq 0 ]] || die "Execute como root (systemd + docker)."
   command -v docker >/dev/null || die "docker nao encontrado no host."
@@ -82,7 +90,7 @@ main() {
   systemctl enable "$UNIT_NAME"
   local schema_wait_timeout="${HOST_AGENT_INSTALL_SCHEMA_WAIT_TIMEOUT:-15}"
   say "Aguardando o schema do host-agent por ate ${schema_wait_timeout}s ..."
-  if "$AGENT_DIR/.venv/bin/python" -m hostagent \
+  if run_hostagent \
       --root "$SERVIDOR_DIR" \
       --wait-for-schema \
       --schema-timeout "$schema_wait_timeout"; then

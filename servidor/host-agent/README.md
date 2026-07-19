@@ -44,6 +44,9 @@ sudo bash servidor/host-agent/install.sh
 journalctl -u supabase-host-agent -f
 ```
 
+O comando pode ser executado da raiz do repositorio ou de outro diretorio; o
+instalador resolve o pacote local `hostagent` pelo proprio diretorio.
+
 O instalador aguarda brevemente as tabelas criadas pela Projects API. Em uma
 instalação limpa na qual a API ainda não subiu, ele deixa o serviço habilitado
 sem iniciá-lo. O `start.sh` sobe a API e inicia o serviço; o `ExecStartPre` da
