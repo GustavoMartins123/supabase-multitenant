@@ -104,9 +104,46 @@ async def ensure_identity_schema(pool: asyncpg.Pool) -> None:
         await conn.execute(
             """
             ALTER TABLE projects
-                ADD COLUMN IF NOT EXISTS project_key_version BIGINT NOT NULL DEFAULT 1;
+                ADD COLUMN IF NOT EXISTS project_key_version BIGINT NOT NULL DEFAULT 1,
+                ADD COLUMN IF NOT EXISTS tenant_uuid UUID;
             UPDATE projects SET project_key_version = 1
             WHERE project_key_version IS NULL OR project_key_version < 1;
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_tenant_uuid_unique
+                ON projects(tenant_uuid)
+                WHERE tenant_uuid IS NOT NULL;
+
+            COMMENT ON COLUMN projects.tenant_uuid IS
+                'Tenant externo persistido (Realtime/JWT/backups). Em projetos novos equivale a projects.id.';
+
+            CREATE OR REPLACE FUNCTION set_project_tenant_uuid_from_id()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                IF NEW.tenant_uuid IS NULL THEN
+                    NEW.tenant_uuid := NEW.id;
+                END IF;
+                RETURN NEW;
+            END;
+            $$;
+
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM pg_trigger
+                    WHERE tgrelid = 'projects'::regclass
+                      AND tgname = 'projects_default_tenant_uuid'
+                      AND NOT tgisinternal
+                ) THEN
+                    CREATE TRIGGER projects_default_tenant_uuid
+                    BEFORE INSERT ON projects
+                    FOR EACH ROW
+                    EXECUTE FUNCTION set_project_tenant_uuid_from_id();
+                END IF;
+            END
+            $$;
             """
         )
 

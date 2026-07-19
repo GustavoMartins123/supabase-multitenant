@@ -60,7 +60,11 @@ Tabelas principais:
 - `project_members`;
 - `project_members_audit`.
 
-A tabela `projects` possui o UUID canônico, project ref, display name, versão das chaves e segredos criptografados.
+A tabela `projects` possui o UUID canônico (`id`), o vínculo persistido com o
+tenant externo (`tenant_uuid`), project ref, display name, versão das chaves e
+segredos criptografados. Em projetos novos, `tenant_uuid` recebe exatamente o
+valor de `id`; a coluna separada mantém compatibilidade auditável com projetos
+legados.
 
 ### Jobs
 

@@ -7,6 +7,7 @@ class Job {
     this.id, {
     this.project,
     this.projectUuid,
+    this.tenantUuid,
     this.createdBy,
     this.action,
     this.status = 'queued',
@@ -22,6 +23,7 @@ class Job {
 
   final String? project;
   final String? projectUuid;
+  final String? tenantUuid;
   final String? createdBy;
   final String? action;
   final String status;
@@ -44,6 +46,7 @@ class Job {
       id,
       project: json['project']?.toString(),
       projectUuid: json['project_uuid']?.toString(),
+      tenantUuid: json['tenant_uuid']?.toString(),
       createdBy: json['created_by']?.toString(),
       action: json['action']?.toString(),
       status: json['status']?.toString() ?? 'queued',
@@ -61,6 +64,7 @@ class Job {
       id,
       project: this.project ?? project,
       projectUuid: projectUuid,
+      tenantUuid: tenantUuid,
       createdBy: this.createdBy ?? createdBy,
       action: this.action ?? action,
       status: status,

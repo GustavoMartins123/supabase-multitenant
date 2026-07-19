@@ -328,10 +328,16 @@ def serialize_job(row: asyncpg.Record, *, include_output: bool = False) -> dict[
         value = row[column]
         return value.isoformat() if value else None
 
+    payload = row["payload"] or {}
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    tenant_uuid = payload.get("tenant_uuid") if isinstance(payload, dict) else None
+
     result = {
         "job_id": str(row["job_id"]),
         "project": row["project"],
         "project_uuid": str(row["project_uuid"]) if row["project_uuid"] else None,
+        "tenant_uuid": str(tenant_uuid) if tenant_uuid else None,
         "created_by": str(row["created_by"]) if row["created_by"] else None,
         "action": row["action"],
         "status": row["status"],

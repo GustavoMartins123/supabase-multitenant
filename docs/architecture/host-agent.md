@@ -51,8 +51,9 @@ verificadas por teste):
 
 Não existe comando que aceite argv, path ou SQL arbitrário. Os comandos de
 ponto de restauração recebem apenas UUIDs validados nos dois lados; o path resolvido fica confinado a `servidor/backups/<tenant_uuid>/`, onde o
-`tenant_uuid` é o `PROJECT_UUID` lido do `.env` do projeto (imutável no
-rename, distinto do `projects.id` do control plane). Diferente do restante
+`tenant_uuid` é recebido do control plane e precisa coincidir com o
+`PROJECT_UUID` do `.env`. Em projetos novos ele equivale a `projects.id`; o
+mapeamento separado existe para preservar projetos legados. Diferente do restante
 do lifecycle, eles são autorizados para qualquer membro do projeto
 (`PROJECT_MEMBER_COMMANDS`), além de owner e admin global.
 
@@ -68,7 +69,8 @@ do lifecycle, eles são autorizados para qualquer membro do projeto
    admin global para o fluxo de delete e limpeza de tenants; owner, admin
    do projeto ou admin global para o restante. O `project_uuid` da intenção
    precisa bater com `projects.id` (exceto nos passos do delete que rodam
-   após a remoção da linha).
+   após a remoção da linha); quando os args carregam `tenant_uuid`, ele também
+   precisa bater com `projects.tenant_uuid`.
 3. **Paths confinados** — nomes passam pela mesma regex/reservas da API e
    o path resolvido precisa ficar sob `servidor/projects`; componentes
    symlink e traversal são rejeitados antes de qualquer script.

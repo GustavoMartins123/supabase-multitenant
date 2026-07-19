@@ -30,6 +30,13 @@ async def host_agent_schema_ready(dsn: str) -> bool:
                     to_regclass('host_agent_workers') IS NOT NULL
                     AND to_regclass('host_agent_commands') IS NOT NULL
                     AND to_regclass('project_container_state') IS NOT NULL
+                    AND EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_schema = current_schema()
+                          AND table_name = 'projects'
+                          AND column_name = 'tenant_uuid'
+                    )
                 """
             )
         )
@@ -279,6 +286,7 @@ async def load_authorization_context(
         "member_role": None,
         "project_row_exists": False,
         "project_id": None,
+        "tenant_uuid": None,
     }
     async with pool.acquire() as conn:
         if requested_by is not None:
@@ -301,12 +309,16 @@ async def load_authorization_context(
                 context["is_global_admin"] = bool(user_row["is_global_admin"])
 
         project_row = await conn.fetchrow(
-            "SELECT id, owner_id FROM projects WHERE name = $1",
+            """
+            SELECT id, owner_id, to_jsonb(projects)->>'tenant_uuid' AS tenant_uuid
+            FROM projects WHERE name = $1
+            """,
             project,
         )
         if project_row:
             context["project_row_exists"] = True
             context["project_id"] = project_row["id"]
+            context["tenant_uuid"] = project_row["tenant_uuid"]
             if requested_by is not None:
                 context["is_owner"] = project_row["owner_id"] == requested_by
                 context["member_role"] = await conn.fetchval(

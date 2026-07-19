@@ -13,7 +13,7 @@ import httpx
 from fastapi import FastAPI, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from app.schemas import NewProject, DuplicateProject, UserSyncPayload, AddMember, TransferBody, UpdateSettings, RecreateServices, ProjectNoteCreate, ProjectTagAssign, ProjectHintCreate, ProjectHintStatusUpdate, ProjectThreadMessageCreate, ProjectRenameRequest, ProjectDisplayNameUpdate, ProjectNotificationRead, RestorePointCreate
-from typing import Any, Optional, List, Dict
+from typing import Any, List, Dict
 from dotenv import dotenv_values
 from app.pg_meta_crypto import encrypt_postgres_meta_uri
 from app.project_secret_service import (
@@ -77,6 +77,12 @@ from app.project_telemetry import (
     fetch_project_user_telemetry,
     resolve_telemetry_period,
 )
+from app.project_identity import (
+    ProjectIdentityError,
+    get_job_project_identity as _get_job_project_identity,
+    parse_tenant_uuid,
+    reconcile_project_tenant_uuids,
+)
 from app.database import close_pool, get_pool, initialize_pool
 from app.dependencies import (
     audit_project_member_change,
@@ -97,6 +103,8 @@ from app.routers.internal import router as internal_router
 from app.routers.lifecycle import router as lifecycle_router
 from app.routers.health import router as health_router
 configure_jobs(get_pool)
+
+PROJECTS_ROOT = pathlib.Path("/docker/projects").resolve()
 
 
 async def _enqueue_project_action(
@@ -247,6 +255,7 @@ def _read_project_secret_keys(project_name: str) -> dict[str, str]:
     """
     env_values = _read_env_file(_get_project_env_path(project_name))
     return {
+        "tenant_uuid": (env_values.get("PROJECT_UUID") or "").strip(),
         "anon_key": (env_values.get("ANON_KEY_PROJETO") or "").strip(),
         "service_role": (env_values.get("SERVICE_ROLE_KEY_PROJETO") or "").strip(),
         "config_token": (env_values.get("CONFIG_TOKEN_PROJETO") or "").strip(),
@@ -551,6 +560,18 @@ async def startup():
     await ensure_project_secrets_schema(pool)
     await ensure_jobs_schema(pool)
     await ensure_host_agent_schema(pool)
+    identity_result = await reconcile_project_tenant_uuids(pool, PROJECTS_ROOT)
+    print(
+        "[identity] tenant UUIDs: "
+        f"migrados={identity_result.migrated}, "
+        f"persistidos={identity_result.already_persisted}, "
+        f"pendentes={len(identity_result.unresolved)}"
+    )
+    if identity_result.unresolved:
+        print(
+            "[identity] projetos sem tenant UUID verificavel: "
+            + ", ".join(identity_result.unresolved)
+        )
     await ensure_collaboration_schema(pool)
     await ensure_restore_points_schema(pool)
     print("✅ Database pool initialized")
@@ -608,7 +629,8 @@ async def list_projects(
     async with pool.acquire() as conn:
         async with conn.transaction():
             rows = await conn.fetch("""
-                SELECT p.id, p.name, p.display_name, p.anon_key, p.service_role
+                SELECT p.id, p.tenant_uuid, p.name, p.display_name,
+                       p.anon_key, p.service_role
                 FROM projects p
                 WHERE p.anon_key IS NOT NULL
                   AND EXISTS (
@@ -652,6 +674,10 @@ async def list_projects(
                     else None
                 )
                 result.append({
+                    "project_uuid": str(r["id"]),
+                    "tenant_uuid": (
+                        str(r["tenant_uuid"]) if r["tenant_uuid"] else None
+                    ),
                     "name": r["name"],
                     "display_name": r["display_name"],
                     "anon_token": anon_token,
@@ -1531,6 +1557,11 @@ async def create_project_restore_point(
                     "project_name": project_name,
                     "actor_user_id": str(auth_user["db_user_id"]),
                     "restore_point_id": str(point_id),
+                    "tenant_uuid": (
+                        str(project_row["tenant_uuid"])
+                        if project_row["tenant_uuid"]
+                        else None
+                    ),
                 },
                 total_steps=2,
                 project_uuid=project_id,
@@ -1634,6 +1665,11 @@ async def restore_project_restore_point(
                     "actor_user_id": str(auth_user["db_user_id"]),
                     "restore_point_id": str(parsed_point),
                     "safety_point_id": str(safety_point_id),
+                    "tenant_uuid": (
+                        str(project_row["tenant_uuid"])
+                        if project_row["tenant_uuid"]
+                        else None
+                    ),
                 },
                 total_steps=3,
                 project_uuid=project_id,
@@ -1740,6 +1776,11 @@ async def delete_project_restore_point(
                     "project_name": project_name,
                     "actor_user_id": str(auth_user["db_user_id"]),
                     "restore_point_id": str(parsed_point),
+                    "tenant_uuid": (
+                        str(project_row["tenant_uuid"])
+                        if project_row["tenant_uuid"]
+                        else None
+                    ),
                 },
                 total_steps=1,
                 project_uuid=project_id,
@@ -1782,6 +1823,7 @@ async def _create_restore_point_background(
 ) -> None:
     pool = await get_pool()
     try:
+        project_uuid, tenant_uuid = await _get_job_project_identity(pool, job_id)
         await _set_job_status(
             job_id,
             "running",
@@ -1795,9 +1837,12 @@ async def _create_restore_point_background(
             job_id=job_id,
             command="backup_project",
             project=project_name,
-            project_uuid=await _get_job_project_uuid(pool, job_id),
+            project_uuid=project_uuid,
             requested_by=actor_user_id,
-            args={"backup_id": str(point_id)},
+            args={
+                "backup_id": str(point_id),
+                "tenant_uuid": str(tenant_uuid),
+            },
             reuse_terminal=True,
             on_progress=_job_progress_mirror(job_id),
         )
@@ -1880,6 +1925,7 @@ async def _restore_project_background(
 ) -> None:
     pool = await get_pool()
     try:
+        project_uuid, tenant_uuid = await _get_job_project_identity(pool, job_id)
         await _set_job_status(
             job_id,
             "running",
@@ -1893,11 +1939,12 @@ async def _restore_project_background(
             job_id=job_id,
             command="restore_project",
             project=project_name,
-            project_uuid=await _get_job_project_uuid(pool, job_id),
+            project_uuid=project_uuid,
             requested_by=actor_user_id,
             args={
                 "backup_id": str(point_id),
                 "safety_backup_id": str(safety_point_id),
+                "tenant_uuid": str(tenant_uuid),
             },
             reuse_terminal=True,
             on_progress=_job_progress_mirror(job_id),
@@ -2053,6 +2100,7 @@ async def _delete_restore_point_background(
 ) -> None:
     pool = await get_pool()
     try:
+        project_uuid, tenant_uuid = await _get_job_project_identity(pool, job_id)
         await _set_job_status(
             job_id,
             "running",
@@ -2066,9 +2114,12 @@ async def _delete_restore_point_background(
             job_id=job_id,
             command="delete_restore_point",
             project=project_name,
-            project_uuid=await _get_job_project_uuid(pool, job_id),
+            project_uuid=project_uuid,
             requested_by=actor_user_id,
-            args={"backup_id": str(point_id)},
+            args={
+                "backup_id": str(point_id),
+                "tenant_uuid": str(tenant_uuid),
+            },
             reuse_terminal=True,
             on_progress=_job_progress_mirror(job_id),
         )
@@ -2162,14 +2213,16 @@ async def create_project(
             )
             if existing:
                 raise HTTPException(status_code=409, detail="Project already exists")
-            project_id = await conn.fetchval(
-                    """
-                    INSERT INTO projects(name, owner_id)
-                    VALUES($1, $2)
-                    RETURNING id
-                    """,
-                    name, auth_user["db_user_id"]
-                )
+            project_id = uuid.uuid4()
+            await conn.execute(
+                """
+                INSERT INTO projects(id, tenant_uuid, name, owner_id)
+                VALUES($1, $1, $2, $3)
+                """,
+                project_id,
+                name,
+                auth_user["db_user_id"],
+            )
             await conn.execute(
                     """
                     INSERT INTO project_members(project_id, user_id, role)
@@ -2185,6 +2238,7 @@ async def create_project(
                 payload={
                     "project_name": name,
                     "actor_user_id": str(auth_user["db_user_id"]),
+                    "tenant_uuid": str(project_id),
                 },
                 total_steps=3,
                 project_uuid=project_id,
@@ -2200,6 +2254,8 @@ async def create_project(
     )
     return {
         "job_id": job_id,
+        "project_uuid": str(project_id),
+        "tenant_uuid": str(project_id),
         "status": "queued",
         "queue_position": position,
         "message": (
@@ -2242,10 +2298,16 @@ async def duplicate_project(
             if exists:
                 raise HTTPException(409, "Nome de projeto já existe")
 
-            project_id = await conn.fetchval("""
-                INSERT INTO projects(name, owner_id)
-                VALUES($1, $2) RETURNING id
-            """, new_name, auth_user["db_user_id"])
+            project_id = uuid.uuid4()
+            await conn.execute(
+                """
+                INSERT INTO projects(id, tenant_uuid, name, owner_id)
+                VALUES($1, $1, $2, $3)
+                """,
+                project_id,
+                new_name,
+                auth_user["db_user_id"],
+            )
 
             await conn.execute("""
                 INSERT INTO project_members(project_id, user_id, role)
@@ -2262,6 +2324,7 @@ async def duplicate_project(
                     "new_name": new_name,
                     "actor_user_id": str(auth_user["db_user_id"]),
                     "copy_data": body.copy_data,
+                    "tenant_uuid": str(project_id),
                 },
                 total_steps=3,
                 project_uuid=project_id,
@@ -2282,6 +2345,8 @@ async def duplicate_project(
 
     return {
         "job_id": job_id,
+        "project_uuid": str(project_id),
+        "tenant_uuid": str(project_id),
         "status": "queued",
         "queue_position": position,
         "message": (
@@ -2300,6 +2365,7 @@ async def _duplicate_and_store_keys(
     copy_data: bool,
 ):
     pool = await get_pool()
+    project_uuid = await _get_job_project_uuid(pool, job_id)
     await _set_job_status(
         job_id,
         "running",
@@ -2311,19 +2377,23 @@ async def _duplicate_and_store_keys(
 
     try:
         copy_mode = "with-data" if copy_data else "schema-only"
-        tenant_uuid = str(uuid.uuid4())
+        resolved_project_uuid, tenant_uuid = await _get_job_project_identity(
+            pool, job_id
+        )
+        if project_uuid != resolved_project_uuid:
+            raise ProjectIdentityError("projects.id do job mudou durante duplicacao")
 
         record = await run_host_agent_command_for_job(
             pool,
             job_id=job_id,
             command="duplicate_project",
             project=new_name,
-            project_uuid=await _get_job_project_uuid(pool, job_id),
+            project_uuid=project_uuid,
             requested_by=owner_id,
             args={
                 "original_name": original_name,
                 "copy_mode": copy_mode,
-                "tenant_uuid": tenant_uuid,
+                "tenant_uuid": str(tenant_uuid),
             },
             reuse_terminal=True,
             on_progress=_job_progress_mirror(job_id),
@@ -2335,7 +2405,7 @@ async def _duplicate_and_store_keys(
                 default_error="duplicate_failed",
                 message_prefix="Falha ao duplicar infraestrutura",
             )
-            await rollback_project_from_db(pool, new_name)
+            await rollback_project_from_db(pool, new_name, project_uuid)
             return
 
         await _set_job_status(
@@ -2346,6 +2416,16 @@ async def _duplicate_and_store_keys(
             current_step="extract_keys",
         )
         keys = _read_project_secret_keys(new_name)
+        env_tenant_uuid = parse_tenant_uuid(keys["tenant_uuid"])
+        if env_tenant_uuid != tenant_uuid:
+            await _set_job_status(
+                job_id,
+                "failed",
+                message="PROJECT_UUID gerado diverge da identidade persistida",
+                error_code="tenant_uuid_mismatch",
+            )
+            await rollback_project_from_db(pool, new_name, project_uuid)
+            return
         if not keys["anon_key"] or not keys["service_role"] or not keys["config_token"]:
             await _set_job_status(
                 job_id,
@@ -2354,7 +2434,7 @@ async def _duplicate_and_store_keys(
                 error_code="missing_keys",
             )
             print("Missing tokens")
-            await rollback_project_from_db(pool, new_name)
+            await rollback_project_from_db(pool, new_name, project_uuid)
             return
 
         await _set_job_status(
@@ -2366,9 +2446,13 @@ async def _duplicate_and_store_keys(
         )
         async with pool.acquire() as conn:
             project_id = await conn.fetchval(
-                "SELECT id FROM projects WHERE name = $1 AND owner_id = $2",
+                """
+                SELECT id FROM projects
+                WHERE name = $1 AND owner_id = $2 AND id = $3
+                """,
                 new_name,
                 owner_id,
+                project_uuid,
             )
             if project_id is None:
                 raise RuntimeError("Projeto duplicado não encontrado ao persistir chaves")
@@ -2387,6 +2471,15 @@ async def _duplicate_and_store_keys(
             current_step="completed",
         )
 
+    except ProjectIdentityError as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message="A identidade persistida do tenant esta inconsistente.",
+            error_code="tenant_identity_error",
+        )
+        print(f"[project_identity] duplicate job {job_id}: {exc}")
+        await rollback_project_from_db(pool, new_name, project_uuid)
     except HostAgentError as exc:
         await _set_job_status(
             job_id,
@@ -2394,7 +2487,7 @@ async def _duplicate_and_store_keys(
             message="O host-agent não conseguiu duplicar o projeto.",
             error_code=exc.error_code,
         )
-        await rollback_project_from_db(pool, new_name)
+        await rollback_project_from_db(pool, new_name, project_uuid)
     except Exception as e:
         await _set_job_status(
             job_id,
@@ -2403,7 +2496,7 @@ async def _duplicate_and_store_keys(
             error_code="unexpected_duplicate_error",
         )
         print(f"Worker error: {e}")
-        await rollback_project_from_db(pool, new_name)
+        await rollback_project_from_db(pool, new_name, project_uuid)
 
 
 def _base64url_no_padding(raw: bytes) -> str:
@@ -2452,7 +2545,7 @@ def _build_short_lived_jwt(secret: str, issuer: str) -> str:
 
 
 def _load_project_env(project_name: str) -> dict[str, str]:
-    env_path = pathlib.Path("/docker/projects") / project_name / ".env"
+    env_path = PROJECTS_ROOT / project_name / ".env"
     try:
         return _read_env_file(env_path) if env_path.exists() else {}
     except Exception as exc:
@@ -2695,14 +2788,19 @@ async def _delete_project_impl(
 
     job_requested_by: uuid.UUID | None = None
     job_project_uuid: uuid.UUID | None = None
+    job_tenant_uuid: uuid.UUID | None = None
     if current_job_id:
         job_row = await pool.fetchrow(
-            "SELECT created_by, project_uuid FROM jobs WHERE job_id = $1",
+            "SELECT created_by, project_uuid, payload FROM jobs WHERE job_id = $1",
             uuid.UUID(str(current_job_id)),
         )
         if job_row:
             job_requested_by = job_row["created_by"]
             job_project_uuid = job_row["project_uuid"]
+            payload = job_row["payload"] or {}
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            job_tenant_uuid = parse_tenant_uuid(payload.get("tenant_uuid"))
 
     async def report(progress: int, step: str, message: str) -> None:
         if current_job_id:
@@ -2742,14 +2840,38 @@ async def _delete_project_impl(
 
     await report(5, "load_project_state", "Carregando estado do projeto...")
     project_env = _load_project_env(project_name)
-    project_uuid = (
-        project_env.get("PROJECT_UUID", "").strip()
-        or get_project_uuid_from_env(project_name)
+    identity_row = await pool.fetchrow(
+        "SELECT id, tenant_uuid FROM projects WHERE name = $1",
+        project_name,
     )
-    tenant_external_id = project_uuid if project_uuid else project_name
+    persisted_tenant_uuid = (
+        parse_tenant_uuid(identity_row["tenant_uuid"]) if identity_row else None
+    )
+    env_tenant_uuid = parse_tenant_uuid(project_env.get("PROJECT_UUID"))
+    tenant_candidates = {
+        candidate
+        for candidate in (
+            persisted_tenant_uuid,
+            env_tenant_uuid,
+            job_tenant_uuid,
+        )
+        if candidate is not None
+    }
+    if len(tenant_candidates) > 1:
+        raise ProjectIdentityError(
+            f"Projeto {project_name} possui tenant UUID divergente no delete"
+        )
+    tenant_uuid = tenant_candidates.pop() if tenant_candidates else None
+    if identity_row and persisted_tenant_uuid is None and tenant_uuid is not None:
+        await pool.execute(
+            "UPDATE projects SET tenant_uuid = $2 WHERE id = $1",
+            identity_row["id"],
+            tenant_uuid,
+        )
+    tenant_external_id = str(tenant_uuid) if tenant_uuid else project_name
 
-    if project_uuid:
-        print(f"Deletando projeto com UUID: {project_uuid}")
+    if tenant_uuid:
+        print(f"Deletando projeto com tenant UUID: {tenant_uuid}")
     else:
         print(
             "Deletando projeto antigo (sem UUID), "
@@ -2881,8 +3003,8 @@ async def _delete_project_impl(
     await report(90, "remove_files", "Removendo arquivos do projeto...")
     if database_removed:
         files_args = (
-            {"project_uuid": project_uuid}
-            if project_uuid and parse_uuid_value(project_uuid)
+            {"tenant_uuid": str(tenant_uuid)}
+            if tenant_uuid is not None
             else None
         )
         files_record = await agent_step("delete_project_files", None, files_args)
@@ -2974,28 +3096,6 @@ async def _delete_project_background(job_id: str, project_name: str) -> None:
         )
         print(f"[delete_project] {project_name}: background task failed: {exc}")
 
-def get_project_uuid_from_env(project_name: str) -> Optional[str]:
-    try:
-        env_path = pathlib.Path("/docker/projects") / project_name / ".env"
-        
-        if not env_path.exists():
-            print(f"Arquivo .env não encontrado em: {env_path}")
-            return None
-        
-        with open(env_path, 'r') as f:
-            for line in f:
-                if line.startswith('PROJECT_UUID='):
-                    uuid_value = line.split('=', 1)[1].strip()
-                    if uuid_value:
-                        print(f"PROJECT_UUID encontrado: {uuid_value}")
-                        return uuid_value
-        
-        print(f"PROJECT_UUID não encontrado no .env de {project_name}")
-        return None
-    except Exception as e:
-        print(f"Erro ao ler PROJECT_UUID do .env: {e}")
-        return None
-
 async def drop_supabase_replication_slots(
     conn: asyncpg.Connection, project_name: str
 ) -> List[str]:
@@ -3074,12 +3174,15 @@ async def delete_project(
         raise HTTPException(403, "Invalid delete password")
 
     async with pool.acquire() as conn:
-        project_exists = await conn.fetchval(
-            "SELECT 1 FROM projects WHERE name = $1",
+        project_row = await conn.fetchrow(
+            "SELECT id, tenant_uuid FROM projects WHERE name = $1",
             project_name,
         )
-        if not project_exists:
+        if not project_row:
             raise HTTPException(404, "Project not found")
+
+    project_id = project_row["id"]
+    tenant_uuid = parse_tenant_uuid(project_row["tenant_uuid"])
 
     job_id = await _create_project_job(
         pool,
@@ -3087,8 +3190,12 @@ async def delete_project(
         auth_user["db_user_id"],
         message="Exclusão enfileirada.",
         action="delete",
-        payload={"project_name": project_name},
+        payload={
+            "project_name": project_name,
+            "tenant_uuid": str(tenant_uuid) if tenant_uuid else None,
+        },
         total_steps=8,
+        project_uuid=project_id,
     )
     position = await _enqueue_project_action(
         project_name,
@@ -3568,7 +3675,11 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
     )
 
     try:
-        tenant_uuid = str(uuid.uuid4())
+        resolved_project_uuid, tenant_uuid = await _get_job_project_identity(
+            pool, job_id
+        )
+        if project_uuid != resolved_project_uuid:
+            raise ProjectIdentityError("projects.id do job mudou durante criacao")
         recover_stale, stale_tenant_uuids = await _failed_create_recovery_context(
             pool,
             job_id=job_id,
@@ -3584,7 +3695,7 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
             project_uuid=project_uuid,
             requested_by=user,
             args={
-                "tenant_uuid": tenant_uuid,
+                "tenant_uuid": str(tenant_uuid),
                 "recover_stale": recover_stale,
                 "stale_tenant_uuids": stale_tenant_uuids,
             },
@@ -3629,6 +3740,16 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
             current_step="extract_keys",
         )
         keys = _read_project_secret_keys(project_name)
+        env_tenant_uuid = parse_tenant_uuid(keys["tenant_uuid"])
+        if env_tenant_uuid != tenant_uuid:
+            await _set_job_status(
+                job_id,
+                "failed",
+                message="PROJECT_UUID gerado diverge da identidade persistida",
+                error_code="tenant_uuid_mismatch",
+            )
+            await rollback_project_from_db(pool, project_name, project_uuid)
+            return
         if not keys["anon_key"] or not keys["service_role"] or not keys["config_token"]:
             await _set_job_status(
                 job_id,
@@ -3649,9 +3770,13 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
         )
         async with pool.acquire() as conn:
             project_id = await conn.fetchval(
-                "SELECT id FROM projects WHERE name = $1 AND owner_id = $2",
+                """
+                SELECT id FROM projects
+                WHERE name = $1 AND owner_id = $2 AND id = $3
+                """,
                 project_name,
                 user,
+                project_uuid,
             )
             if project_id is None:
                 raise RuntimeError("Projeto não encontrado ao persistir chaves")
@@ -3670,6 +3795,15 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
             current_step="completed",
         )
 
+    except ProjectIdentityError as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message="A identidade persistida do tenant esta inconsistente.",
+            error_code="tenant_identity_error",
+        )
+        print(f"[project_identity] create job {job_id}: {exc}")
+        await rollback_project_from_db(pool, project_name, project_uuid)
     except HostAgentError as exc:
         await _set_job_status(
             job_id,
@@ -3708,11 +3842,11 @@ def _get_root_env_path() -> pathlib.Path:
 
 
 def _get_project_env_path(project_name: str) -> pathlib.Path:
-    return pathlib.Path("/docker/projects") / project_name / ".env"
+    return PROJECTS_ROOT / project_name / ".env"
 
 
 def _get_project_dir(project_name: str) -> pathlib.Path:
-    return pathlib.Path("/docker/projects") / project_name
+    return PROJECTS_ROOT / project_name
 
 
 def _get_project_pending_settings_path(project_name: str) -> pathlib.Path:

@@ -154,6 +154,7 @@ class SchemaReadinessTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("host_agent_workers", query)
         self.assertIn("host_agent_commands", query)
         self.assertIn("project_container_state", query)
+        self.assertIn("tenant_uuid", query)
         connection.close.assert_awaited_once()
 
     async def test_schema_wait_retries_until_api_schema_is_ready(self) -> None:
@@ -242,6 +243,10 @@ class ClosedCommandSetTest(unittest.TestCase):
             }),
             ("delete_restore_point", "meuprojeto", {"backup_id": "x; rm -rf /"}),
             ("delete_project_files", "meuprojeto", {"project_uuid": "nao-e-uuid"}),
+            ("delete_project_files", "meuprojeto", {
+                "project_uuid": "9c8ce9f0-3b4e-4bcb-a739-2c1e8ad0e9aa",
+                "tenant_uuid": "1b671a64-40d5-491e-99b0-da01ff1f3341",
+            }),
         ]
         for command, project, args in cases:
             with self.subTest(command=command, project=project, args=args):
@@ -267,14 +272,22 @@ class ClosedCommandSetTest(unittest.TestCase):
             }),
             ("rename_project", "meuprojeto", {"new_name": "novo_nome"}),
             ("container_logs", "meuprojeto", {"service": "auth", "lines": 100}),
-            ("backup_project", "meuprojeto", {"backup_id": tenant_uuid}),
+            ("backup_project", "meuprojeto", {
+                "backup_id": tenant_uuid,
+                "tenant_uuid": tenant_uuid,
+            }),
             ("restore_project", "meuprojeto", {
                 "backup_id": tenant_uuid,
                 "safety_backup_id": "1b671a64-40d5-491e-99b0-da01ff1f3341",
+                "tenant_uuid": tenant_uuid,
             }),
-            ("delete_restore_point", "meuprojeto", {"backup_id": tenant_uuid}),
+            ("delete_restore_point", "meuprojeto", {
+                "backup_id": tenant_uuid,
+                "tenant_uuid": tenant_uuid,
+            }),
             ("delete_project_files", "meuprojeto", {}),
             ("delete_project_files", "meuprojeto", {"project_uuid": tenant_uuid}),
+            ("delete_project_files", "meuprojeto", {"tenant_uuid": tenant_uuid}),
         ]
         for command, project, args in cases:
             with self.subTest(command=command):

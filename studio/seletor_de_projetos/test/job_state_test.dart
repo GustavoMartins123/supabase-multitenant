@@ -16,6 +16,7 @@ void main() {
         'job_id': 'job-1',
         'project': 'meu_projeto',
         'project_uuid': 'project-uuid',
+        'tenant_uuid': 'tenant-uuid',
         'created_by': 'user-1',
         'action': 'create',
         'status': 'running',
@@ -29,6 +30,7 @@ void main() {
       expect(job.id, 'job-1');
       expect(job.project, 'meu_projeto');
       expect(job.action, 'create');
+      expect(job.tenantUuid, 'tenant-uuid');
       expect(job.progress, 10);
       expect(job.currentStep, 'provision_infrastructure');
       expect(job.isInFlight, isTrue);

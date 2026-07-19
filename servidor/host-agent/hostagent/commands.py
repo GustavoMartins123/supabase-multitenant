@@ -696,10 +696,12 @@ async def handle_delete_project_files(ctx: CommandContext, project: str, args: d
         [project],
         error_code="delete_files_failed",
     )
-    project_uuid = str(args.get("project_uuid") or "").strip()
-    if outcome.status == "done" and project_uuid:
+    tenant_uuid = str(
+        args.get("tenant_uuid") or args.get("project_uuid") or ""
+    ).strip()
+    if outcome.status == "done" and tenant_uuid:
         removed = await _remove_backup_tree(
-            resolve_backup_project_dir(ctx.config.backups_root, project_uuid)
+            resolve_backup_project_dir(ctx.config.backups_root, tenant_uuid)
         )
         outcome.result = {**(outcome.result or {}), "backups_removed": removed}
     return outcome
@@ -757,7 +759,9 @@ async def _remove_backup_tree(path: Path) -> bool:
 
 
 def _resolve_backup_context(
-    ctx: CommandContext, project: str
+    ctx: CommandContext,
+    project: str,
+    expected_tenant_uuid: str | None = None,
 ) -> tuple[str, None] | tuple[None, CommandOutcome]:
     env_uuid = _load_project_env(ctx, project).get("PROJECT_UUID", "").strip().lower()
     if not is_valid_uuid(env_uuid):
@@ -766,12 +770,25 @@ def _resolve_backup_context(
             error_code="project_uuid_unavailable",
             message="PROJECT_UUID ausente ou invalido no .env do projeto.",
         )
+    if expected_tenant_uuid is not None:
+        expected = expected_tenant_uuid.strip().lower()
+        if env_uuid != expected:
+            return None, CommandOutcome(
+                status="failed",
+                error_code="tenant_uuid_mismatch",
+                message=(
+                    "PROJECT_UUID do .env diverge do tenant persistido "
+                    "no control plane."
+                ),
+            )
     return env_uuid, None
 
 
 async def handle_backup_project(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
     resolve_project_dir(ctx.config.projects_root, project, must_exist=True)
-    project_uuid, failure = _resolve_backup_context(ctx, project)
+    project_uuid, failure = _resolve_backup_context(
+        ctx, project, args.get("tenant_uuid")
+    )
     if failure is not None:
         return failure
     backup_id = str(args["backup_id"]).lower()
@@ -802,7 +819,9 @@ async def handle_backup_project(ctx: CommandContext, project: str, args: dict[st
 
 async def handle_restore_project(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
     resolve_project_dir(ctx.config.projects_root, project, must_exist=True)
-    project_uuid, failure = _resolve_backup_context(ctx, project)
+    project_uuid, failure = _resolve_backup_context(
+        ctx, project, args.get("tenant_uuid")
+    )
     if failure is not None:
         return failure
     backup_id = str(args["backup_id"]).lower()
@@ -854,7 +873,9 @@ async def handle_restore_project(ctx: CommandContext, project: str, args: dict[s
 
 
 async def handle_delete_restore_point(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
-    project_uuid, failure = _resolve_backup_context(ctx, project)
+    project_uuid, failure = _resolve_backup_context(
+        ctx, project, args.get("tenant_uuid")
+    )
     if failure is not None:
         return failure
     backup_id = str(args["backup_id"]).lower()

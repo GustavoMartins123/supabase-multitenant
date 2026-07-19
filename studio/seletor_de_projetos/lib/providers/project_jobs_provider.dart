@@ -200,6 +200,7 @@ Job mergeJobSnapshots(Job current, Job incoming) {
     current.id,
     project: newest.project ?? fallback.project,
     projectUuid: newest.projectUuid ?? fallback.projectUuid,
+    tenantUuid: newest.tenantUuid ?? fallback.tenantUuid,
     createdBy: newest.createdBy ?? fallback.createdBy,
     action: newest.action ?? fallback.action,
     status: status,

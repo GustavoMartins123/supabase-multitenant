@@ -8,7 +8,9 @@ Operações longas são representadas por jobs persistentes. O endpoint HTTP nor
 
 Antes de acompanhar qualquer fluxo, diferencie:
 
-- `project_uuid`: identidade canônica e imutável;
+- `project_uuid`: `projects.id`, identidade canônica e imutável;
+- `tenant_uuid`: vínculo persistido com Realtime/JWT/backups; equivale a
+  `projects.id` nos projetos novos e pode preservar o UUID legado;
 - `project_ref`: slug mutável usado em URL e recursos físicos;
 - `_supabase_<project_ref>`: database;
 - Realtime tenant: identificado pelo UUID;
@@ -21,15 +23,15 @@ Antes de acompanhar qualquer fluxo, diferencie:
 Fluxo resumido:
 
 1. a API valida usuário e nome;
-2. gera o UUID canônico;
-3. cria o job;
+2. gera uma única vez `projects.id` e persiste o mesmo valor em `tenant_uuid`;
+3. cria o job já com os dois identificadores duráveis;
 4. o script gera JWT secret, anon key, service role e config token;
 5. cria `_supabase_<project_ref>` a partir de `_supabase_template`;
 6. gera `.env`, compose, Dockerfile e configuração Nginx;
-7. registra o tenant do Realtime com `external_id = project_uuid`;
+7. registra o tenant do Realtime com `external_id = tenant_uuid`;
 8. registra o tenant do Supavisor com `external_id = project_ref`;
 9. sobe os containers;
-10. persiste o projeto e os segredos criptografados;
+10. persiste os segredos criptografados no registro do projeto;
 11. atualiza status e auditoria.
 
 O JWT usa o UUID como issuer:
@@ -37,7 +39,7 @@ O JWT usa o UUID como issuer:
 ```json
 {
   "role": "anon",
-  "iss": "<project_uuid>"
+  "iss": "<tenant_uuid>"
 }
 ```
 
@@ -76,7 +78,8 @@ A cópia não deve reutilizar segredos do projeto de origem.
 
 ## Rename
 
-Rename altera o project ref, mas preserva o UUID canônico.
+Rename altera o project ref, mas preserva tanto `projects.id` quanto
+`projects.tenant_uuid`.
 
 Recursos que acompanham o novo nome:
 
@@ -194,8 +197,8 @@ Ficam fora do ponto: `.env`, JWT secret, anon/service keys, config token,
 tenants do Realtime/Supavisor e configuração de containers. Por isso um
 ponto continua restaurável depois de rotação de chaves e de rename — os
 arquivos vivem em `servidor/backups/<tenant_uuid>/<point_id>/`, chaveados
-pelo `PROJECT_UUID` do `.env` do projeto (o UUID do tenant, imutável no
-rename).
+pelo `tenant_uuid` persistido no control plane e espelhado em `PROJECT_UUID`
+no `.env` do projeto (imutável no rename).
 
 ### Captura (fria)
 

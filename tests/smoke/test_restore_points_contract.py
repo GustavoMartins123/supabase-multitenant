@@ -86,8 +86,14 @@ class RestorePointApiSurfaceTest(unittest.TestCase):
             2,
         )
 
-    def test_delete_flow_passes_project_uuid_for_backup_cleanup(self) -> None:
-        self.assertIn('{"project_uuid": project_uuid}', self.main_source)
+    def test_delete_flow_passes_persisted_tenant_uuid_for_backup_cleanup(self) -> None:
+        self.assertIn('{"tenant_uuid": str(tenant_uuid)}', self.main_source)
+
+    def test_restore_commands_carry_persisted_tenant_identity(self) -> None:
+        self.assertGreaterEqual(
+            self.main_source.count('"tenant_uuid": str(tenant_uuid)'),
+            4,
+        )
 
 
 class RestorePointScriptsTest(unittest.TestCase):

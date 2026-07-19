@@ -146,7 +146,10 @@ async def require_synced_user_record(
 
 async def get_project_row(conn: asyncpg.Connection, project_name: str) -> asyncpg.Record:
     row = await conn.fetchrow(
-        "SELECT id, name, display_name, owner_id FROM projects WHERE name = $1",
+        """
+        SELECT id, tenant_uuid, name, display_name, owner_id
+        FROM projects WHERE name = $1
+        """,
         project_name,
     )
     if not row:

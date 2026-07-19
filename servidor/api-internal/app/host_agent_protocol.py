@@ -167,9 +167,13 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
     }:
         reject_unknown(set())
     elif command == "delete_project_files":
-        reject_unknown({"project_uuid"})
+        reject_unknown({"tenant_uuid", "project_uuid"})
+        if "tenant_uuid" in args and not is_valid_uuid(args.get("tenant_uuid")):
+            errors.append("invalid_tenant_uuid")
         if "project_uuid" in args and not is_valid_uuid(args.get("project_uuid")):
             errors.append("invalid_project_uuid")
+        if "tenant_uuid" in args and "project_uuid" in args:
+            errors.append("duplicate_tenant_identity")
     elif command == "recreate_services":
         reject_unknown({"services"})
         services = args.get("services")
@@ -208,20 +212,26 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
         if args.get("new_name") == project:
             errors.append("new_name_equals_project")
     elif command == "backup_project":
-        reject_unknown({"backup_id"})
+        reject_unknown({"backup_id", "tenant_uuid"})
         if not is_valid_uuid(args.get("backup_id")):
             errors.append("invalid_backup_id")
+        if "tenant_uuid" in args and not is_valid_uuid(args.get("tenant_uuid")):
+            errors.append("invalid_tenant_uuid")
     elif command == "restore_project":
-        reject_unknown({"backup_id", "safety_backup_id"})
+        reject_unknown({"backup_id", "safety_backup_id", "tenant_uuid"})
         for field in ("backup_id", "safety_backup_id"):
             if not is_valid_uuid(args.get(field)):
                 errors.append(f"invalid_{field}")
+        if "tenant_uuid" in args and not is_valid_uuid(args.get("tenant_uuid")):
+            errors.append("invalid_tenant_uuid")
         if args.get("backup_id") == args.get("safety_backup_id"):
             errors.append("backup_id_equals_safety_backup_id")
     elif command == "delete_restore_point":
-        reject_unknown({"backup_id"})
+        reject_unknown({"backup_id", "tenant_uuid"})
         if not is_valid_uuid(args.get("backup_id")):
             errors.append("invalid_backup_id")
+        if "tenant_uuid" in args and not is_valid_uuid(args.get("tenant_uuid")):
+            errors.append("invalid_tenant_uuid")
     elif command == "container_logs":
         reject_unknown({"service", "lines"})
         service = args.get("service")

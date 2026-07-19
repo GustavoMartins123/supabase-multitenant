@@ -361,6 +361,19 @@ class HostAgent:
         project_uuid_matches = True
         if record["project_uuid"] is not None and auth["project_id"] is not None:
             project_uuid_matches = auth["project_id"] == record["project_uuid"]
+        intent_tenant_uuid = args.get("tenant_uuid")
+        if intent_tenant_uuid is None and command == "delete_project_files":
+            intent_tenant_uuid = args.get("project_uuid")
+        if (
+            intent_tenant_uuid is not None
+            and auth.get("tenant_uuid") is not None
+            and str(intent_tenant_uuid).lower()
+            != str(auth["tenant_uuid"]).lower()
+        ):
+            return (
+                "authorization_denied:tenant_uuid_mismatch",
+                "Tenant UUID da intencao diverge do control plane.",
+            )
         denial = evaluate_authorization(
             command,
             user_exists=auth["user_exists"],

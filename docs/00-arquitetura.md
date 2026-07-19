@@ -97,10 +97,11 @@ O sistema não usa um único identificador para todas as finalidades.
 
 | Conceito | Exemplo | Regra |
 | --- | --- | --- |
-| UUID canônico | `0df3...` | não muda durante rename |
+| UUID canônico (`projects.id`) | `0df3...` | não muda durante rename |
+| UUID do tenant (`projects.tenant_uuid`) | `0df3...` | igual ao canônico em projetos novos; preservado no legado |
 | project ref | `cliente_a` | slug usado na URL e nos arquivos |
 | database | `_supabase_cliente_a` | acompanha o project ref |
-| Realtime `external_id` | UUID canônico | usado para resolver o JWT secret do tenant |
+| Realtime `external_id` | UUID do tenant | usado para resolver o JWT secret do tenant |
 | Supavisor `external_id` | project ref | usado no sufixo do usuário do pooler |
 | slot principal do CDC | sufixado pelo project ref | acompanha o database físico |
 | slot temporário de broadcast | hash derivado do UUID | permanece estável durante rename |
@@ -108,10 +109,15 @@ O sistema não usa um único identificador para todas as finalidades.
 O Nginx do projeto injeta o UUID no header `Host` das conexões WebSocket do Realtime:
 
 ```text
-Host: <project_uuid>.localhost
+Host: <tenant_uuid>.localhost
 ```
 
-O UUID identifica o tenant. O project ref continua identificando recursos físicos que precisam ser renomeados, como database, diretório, containers, tenant do Supavisor e slot principal.
+O `tenant_uuid` identifica o tenant. O project ref continua identificando recursos físicos que precisam ser renomeados, como database, diretório, containers, tenant do Supavisor e slot principal.
+
+O control plane persiste o vínculo externo em `projects.tenant_uuid`. Para
+projetos novos, `tenant_uuid = projects.id`; projetos legados preservam o
+`PROJECT_UUID` já usado pelo Realtime, JWTs e backups até uma migração
+explícita. O UUID nunca é regenerado dentro do worker ou de um retry.
 
 ## Serviços compartilhados
 

@@ -40,6 +40,7 @@ class JobsContractTest(unittest.TestCase):
             "job_id": job_id,
             "project": "example",
             "project_uuid": project_id,
+            "payload": {"tenant_uuid": str(project_id)},
             "created_by": actor_id,
             "action": "start",
             "status": "failed",
@@ -64,6 +65,7 @@ class JobsContractTest(unittest.TestCase):
 
         self.assertEqual(result["job_id"], str(job_id))
         self.assertEqual(result["project_uuid"], str(project_id))
+        self.assertEqual(result["tenant_uuid"], str(project_id))
         self.assertEqual(result["created_by"], str(actor_id))
         self.assertEqual(result["progress"], 50)
         self.assertEqual(result["current_step"], "container_2")

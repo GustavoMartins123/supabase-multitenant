@@ -132,6 +132,7 @@ echo "Criando tabela Projetos..."
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
 CREATE TABLE IF NOT EXISTS projects (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tenant_uuid UUID,
   name TEXT NOT NULL UNIQUE,
   display_name TEXT,
   owner_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
@@ -140,13 +141,39 @@ CREATE TABLE IF NOT EXISTS projects (
   config_token TEXT
 );
 
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS display_name TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS tenant_uuid UUID;
+
 COMMENT ON COLUMN projects.owner_id IS
   'UUID canonico do usuario dono do projeto.';
 
 COMMENT ON COLUMN projects.display_name IS
   'Nome exibicao humano do projeto. O slug/path continua sendo a coluna name.';
 
-ALTER TABLE projects ADD COLUMN IF NOT EXISTS display_name TEXT;
+COMMENT ON COLUMN projects.tenant_uuid IS
+  'Tenant externo persistido (Realtime/JWT/backups). Em projetos novos equivale a projects.id.';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_tenant_uuid_unique
+  ON projects(tenant_uuid)
+  WHERE tenant_uuid IS NOT NULL;
+
+CREATE OR REPLACE FUNCTION set_project_tenant_uuid_from_id()
+RETURNS trigger
+LANGUAGE plpgsql
+AS \$\$
+BEGIN
+  IF NEW.tenant_uuid IS NULL THEN
+    NEW.tenant_uuid := NEW.id;
+  END IF;
+  RETURN NEW;
+END;
+\$\$;
+
+DROP TRIGGER IF EXISTS projects_default_tenant_uuid ON projects;
+CREATE TRIGGER projects_default_tenant_uuid
+BEFORE INSERT ON projects
+FOR EACH ROW
+EXECUTE FUNCTION set_project_tenant_uuid_from_id();
 
 CREATE INDEX IF NOT EXISTS idx_projects_owner_id ON projects(owner_id);
 EOSQL
