@@ -44,6 +44,12 @@ sudo bash servidor/host-agent/install.sh
 journalctl -u supabase-host-agent -f
 ```
 
+O instalador aguarda brevemente as tabelas criadas pela Projects API. Em uma
+instalação limpa na qual a API ainda não subiu, ele deixa o serviço habilitado
+sem iniciá-lo. O `start.sh` sobe a API e inicia o serviço; o `ExecStartPre` da
+unit aguarda o schema ficar pronto, evitando reinícios com
+`UndefinedTableError`.
+
 Para rodar em foreground durante desenvolvimento:
 
 ```bash
@@ -66,6 +72,10 @@ Tudo é lido de `servidor/.env` (ou variáveis de ambiente com o mesmo nome):
 | `HOST_AGENT_STATE_REFRESH_INTERVAL` | `10.0` | Snapshot de containers por projeto. |
 | `HOST_AGENT_MAX_PARALLEL_COMMANDS` | `3` | Comandos simultâneos (nunca 2 do mesmo projeto). |
 | `HOST_AGENT_SHUTDOWN_GRACE` | `300` | Espera por comandos em execução no stop. |
+| `HOST_AGENT_SCHEMA_WAIT_TIMEOUT` | `180` | Espera da unit pelas tabelas criadas pela Projects API. |
+
+Para alterar apenas a espera curta feita durante a instalação, exporte
+`HOST_AGENT_INSTALL_SCHEMA_WAIT_TIMEOUT` (default: `15` segundos).
 
 ## Tabelas (criadas pela Projects API)
 

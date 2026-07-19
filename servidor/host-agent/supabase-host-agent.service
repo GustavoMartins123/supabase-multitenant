@@ -12,10 +12,13 @@ Type=exec
 # Rode como root ou como um usuario dedicado no grupo docker.
 User=root
 Environment="HOST_AGENT_ROOT=__SERVIDOR_DIR__"
+ExecStartPre="__AGENT_DIR__/.venv/bin/python" -m hostagent --root "__SERVIDOR_DIR__" --wait-for-schema
 ExecStart="__AGENT_DIR__/.venv/bin/python" -m hostagent --root "__SERVIDOR_DIR__"
 WorkingDirectory=__AGENT_DIR__
 Restart=always
 RestartSec=5
+# A espera tem timeout proprio (HOST_AGENT_SCHEMA_WAIT_TIMEOUT).
+TimeoutStartSec=0
 # Comandos longos (rename/duplicate) precisam terminar ou fazer rollback.
 TimeoutStopSec=600
 KillMode=mixed

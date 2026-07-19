@@ -10,10 +10,13 @@ from __future__ import annotations
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
+from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -27,6 +30,24 @@ for path in (str(AGENT_ROOT), str(API_ROOT)):
 from hostagent import host_agent_protocol as protocol
 from hostagent.commands import COMMAND_HANDLERS
 from hostagent.security import PathConfinementError, resolve_project_dir
+
+try:
+    import asyncpg as _asyncpg  # noqa: F401
+except ModuleNotFoundError:
+    asyncpg_stub = types.ModuleType("asyncpg")
+
+    class _PostgresError(Exception):
+        pass
+
+    asyncpg_stub.PostgresError = _PostgresError
+    asyncpg_stub.connect = None
+    sys.modules["asyncpg"] = asyncpg_stub
+    try:
+        from hostagent import db as agent_db
+    finally:
+        sys.modules.pop("asyncpg", None)
+else:
+    from hostagent import db as agent_db
 
 
 class ProtocolCopiesAreIdenticalTest(unittest.TestCase):
@@ -51,15 +72,33 @@ class SystemdInstallerContractTest(unittest.TestCase):
             '-m hostagent --root "__SERVIDOR_DIR__"',
             template,
         )
+        self.assertIn(
+            'ExecStartPre="__AGENT_DIR__/.venv/bin/python" '
+            '-m hostagent --root "__SERVIDOR_DIR__" --wait-for-schema',
+            template,
+        )
+        self.assertIn("TimeoutStartSec=0", template)
         self.assertIn("WorkingDirectory=__AGENT_DIR__", template)
 
     def test_installer_shell_syntax_and_systemd_escaping(self) -> None:
         installer = AGENT_ROOT / "install.sh"
-        subprocess.run(["bash", "-n", str(installer)], check=True)
+        bash = shutil.which("bash") or "bash"
+        if os.name == "nt":
+            git_bash = (
+                pathlib.Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+                / "Git"
+                / "bin"
+                / "bash.exe"
+            )
+            if git_bash.is_file():
+                bash = str(git_bash)
+        subprocess.run([bash, "-n", str(installer)], check=True)
         source = installer.read_text(encoding="utf-8")
         self.assertIn("escape_systemd_value", source)
         self.assertIn("escape_sed_replacement", source)
         self.assertIn('render_unit "$SERVIDOR_DIR" "$AGENT_DIR" "$UNIT_PATH"', source)
+        self.assertIn("HOST_AGENT_INSTALL_SCHEMA_WAIT_TIMEOUT", source)
+        self.assertIn("--wait-for-schema", source)
 
         with tempfile.TemporaryDirectory(prefix="host agent % & ") as temp_dir:
             root = pathlib.Path(temp_dir)
@@ -69,7 +108,7 @@ class SystemdInstallerContractTest(unittest.TestCase):
             servidor_dir.mkdir()
             subprocess.run(
                 [
-                    "bash",
+                    bash,
                     "-c",
                     'source "$1"; render_unit "$2" "$3" "$4"',
                     "bash",
@@ -81,14 +120,66 @@ class SystemdInstallerContractTest(unittest.TestCase):
                 check=True,
             )
             unit = rendered.read_text(encoding="utf-8")
-            escaped_servidor = str(servidor_dir).replace("%", "%%")
-            escaped_workdir = str(agent_dir).replace("%", "%%")
+            escaped_servidor = (
+                str(servidor_dir).replace("\\", "\\\\").replace("%", "%%")
+            )
+            escaped_workdir = (
+                str(agent_dir).replace("\\", "\\\\").replace("%", "%%")
+            )
             self.assertIn(
                 f'Environment="HOST_AGENT_ROOT={escaped_servidor}"',
                 unit,
             )
             self.assertIn(f'--root "{escaped_servidor}"', unit)
             self.assertIn(f"WorkingDirectory={escaped_workdir}", unit)
+
+
+class SchemaReadinessTest(unittest.IsolatedAsyncioTestCase):
+    async def test_schema_probe_checks_all_agent_tables_and_closes_connection(
+        self,
+    ) -> None:
+        connection = mock.AsyncMock()
+        connection.fetchval.return_value = True
+
+        with mock.patch.object(
+            agent_db.asyncpg,
+            "connect",
+            new=mock.AsyncMock(return_value=connection),
+        ) as connect:
+            ready = await agent_db.host_agent_schema_ready("postgresql://db")
+
+        self.assertTrue(ready)
+        connect.assert_awaited_once_with("postgresql://db", timeout=5)
+        query = connection.fetchval.await_args.args[0]
+        self.assertIn("host_agent_workers", query)
+        self.assertIn("host_agent_commands", query)
+        self.assertIn("project_container_state", query)
+        connection.close.assert_awaited_once()
+
+    async def test_schema_wait_retries_until_api_schema_is_ready(self) -> None:
+        probe = mock.AsyncMock(side_effect=[False, True])
+        with (
+            mock.patch.object(agent_db, "host_agent_schema_ready", probe),
+            mock.patch.object(agent_db.asyncio, "sleep", new=mock.AsyncMock()),
+        ):
+            await agent_db.wait_for_host_agent_schema(
+                "postgresql://db",
+                timeout=1,
+                poll_interval=0.1,
+            )
+
+        self.assertEqual(probe.await_count, 2)
+
+    async def test_zero_timeout_still_probes_once_then_fails(self) -> None:
+        probe = mock.AsyncMock(return_value=False)
+        with mock.patch.object(agent_db, "host_agent_schema_ready", probe):
+            with self.assertRaises(agent_db.HostAgentSchemaTimeout):
+                await agent_db.wait_for_host_agent_schema(
+                    "postgresql://db",
+                    timeout=0,
+                )
+
+        probe.assert_awaited_once_with("postgresql://db")
 
 
 class ClosedCommandSetTest(unittest.TestCase):

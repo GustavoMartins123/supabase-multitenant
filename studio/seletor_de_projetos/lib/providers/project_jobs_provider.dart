@@ -25,6 +25,8 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
   Timer? _pollTimer;
   bool _refreshing = false;
   bool _disposed = false;
+  final Map<String, Job> _trackedJobs = {};
+  final Set<String> _finishedJobIds = {};
 
   @override
   Future<List<Job>> build() async {
@@ -33,7 +35,8 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
       _pollTimer?.cancel();
     });
     try {
-      return await ref.watch(jobRepositoryProvider).fetchInFlightJobs();
+      final jobs = await ref.watch(jobRepositoryProvider).fetchInFlightJobs();
+      return _mergeWithTrackedJobs(jobs);
     } finally {
       _startPolling();
     }
@@ -53,7 +56,7 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
     _refreshing = true;
     try {
       final jobs = await ref.read(jobRepositoryProvider).fetchInFlightJobs();
-      if (!_disposed) state = AsyncData(jobs);
+      if (!_disposed) state = AsyncData(_mergeWithTrackedJobs(jobs));
     } catch (error, stackTrace) {
       if (!_disposed && !state.hasValue) {
         state = AsyncError(error, stackTrace);
@@ -77,14 +80,11 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
     );
     if (!tracked.isInFlight) return;
 
-    final current = [...?state.value];
-    final index = current.indexWhere((item) => item.id == tracked.id);
-    if (index == -1) {
-      current.add(tracked);
-    } else {
-      current[index] = tracked;
-    }
-    state = AsyncData(current);
+    _finishedJobIds.remove(tracked.id);
+    final previous = _trackedJobs[tracked.id];
+    _trackedJobs[tracked.id] =
+        previous == null ? tracked : mergeJobSnapshots(previous, tracked);
+    state = AsyncData(_mergeWithTrackedJobs(state.value ?? const []));
   }
 
   void updateFromJson(
@@ -107,9 +107,35 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
 
   void finish(String jobId) {
     if (_disposed) return;
+    _trackedJobs.remove(jobId);
+    _finishedJobIds.add(jobId);
     final current = [...?state.value]..removeWhere((job) => job.id == jobId);
     state = AsyncData(current);
     unawaited(refresh());
+  }
+
+  List<Job> _mergeWithTrackedJobs(Iterable<Job> remoteJobs) {
+    final merged = <String, Job>{};
+    for (final job in remoteJobs) {
+      if (!job.isInFlight || _finishedJobIds.contains(job.id)) continue;
+      merged[job.id] = job;
+    }
+    for (final tracked in _trackedJobs.values) {
+      if (!tracked.isInFlight || _finishedJobIds.contains(tracked.id)) {
+        continue;
+      }
+      final remote = merged[tracked.id];
+      merged[tracked.id] =
+          remote == null ? tracked : mergeJobSnapshots(remote, tracked);
+    }
+
+    final jobs = merged.values.toList();
+    jobs.sort((a, b) {
+      final aDate = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final bDate = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return aDate.compareTo(bDate);
+    });
+    return jobs;
   }
 
   Future<JobWaitResult> waitFor(
@@ -147,6 +173,46 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
       finish(job.id);
     }
   }
+}
+
+Job mergeJobSnapshots(Job current, Job incoming) {
+  final currentDate = current.updatedAt ?? current.createdAt;
+  final incomingDate = incoming.updatedAt ?? incoming.createdAt;
+  final incomingIsNewer = switch ((currentDate, incomingDate)) {
+    (null, null) => true,
+    (null, _) => true,
+    (_, null) => false,
+    (final currentValue?, final incomingValue?) =>
+      !incomingValue.isBefore(currentValue),
+  };
+  final newest = incomingIsNewer ? incoming : current;
+  final fallback = incomingIsNewer ? current : incoming;
+  final progressValues =
+      [current.progress, incoming.progress].whereType<int>().toList();
+  final progress = progressValues.isEmpty
+      ? null
+      : progressValues.reduce((a, b) => a > b ? a : b);
+  final status = current.status == 'running' || incoming.status == 'running'
+      ? 'running'
+      : newest.status;
+
+  return Job(
+    current.id,
+    project: newest.project ?? fallback.project,
+    projectUuid: newest.projectUuid ?? fallback.projectUuid,
+    createdBy: newest.createdBy ?? fallback.createdBy,
+    action: newest.action ?? fallback.action,
+    status: status,
+    message: newest.message ?? fallback.message,
+    progress: progress,
+    currentStep: newest.currentStep ?? fallback.currentStep,
+    totalSteps: newest.totalSteps ?? fallback.totalSteps,
+    createdAt: current.createdAt ?? incoming.createdAt,
+    updatedAt: incomingDate == null ||
+            (currentDate != null && currentDate.isAfter(incomingDate))
+        ? current.updatedAt
+        : incoming.updatedAt,
+  );
 }
 
 List<Map<String, dynamic>> mergeProjectsWithJobs({

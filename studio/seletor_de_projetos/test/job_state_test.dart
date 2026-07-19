@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -64,6 +66,68 @@ void main() {
       expect(requestedStatuses, {'queued', 'running'});
       expect(jobs.map((job) => job.status), containsAll(['queued', 'running']));
       repository.close();
+    });
+  });
+
+  group('ProjectJobsNotifier', () {
+    test('does not lose a tracked job when the initial fetch finishes late',
+        () async {
+      final initialFetch = Completer<List<Job>>();
+      final repository = _ControlledJobRepository(initialFetch);
+      final container = ProviderContainer(
+        overrides: [jobRepositoryProvider.overrideWithValue(repository)],
+      );
+      addTearDown(container.dispose);
+
+      container.read(projectJobsProvider);
+      final notifier = container.read(projectJobsProvider.notifier);
+      notifier.track(
+        const Job(
+          'job-race',
+          status: 'running',
+          message: 'Pool de conexoes configurado.',
+          progress: 60,
+          currentStep: 'create_supavisor_tenant',
+        ),
+        project: 'meu_projeto',
+        action: 'create',
+        createdBy: 'user-1',
+      );
+
+      initialFetch.complete(const []);
+      await container.read(projectJobsProvider.future);
+
+      final tracked = container.read(projectJobsProvider).requireValue.single;
+      expect(tracked.project, 'meu_projeto');
+      expect(tracked.action, 'create');
+      expect(tracked.progress, 60);
+      expect(tracked.currentStep, 'create_supavisor_tenant');
+    });
+
+    test('keeps the richest progress snapshot during concurrent refreshes', () {
+      final older = Job(
+        'job-merge',
+        project: 'meu_projeto',
+        status: 'queued',
+        progress: 5,
+        updatedAt: DateTime.utc(2026, 7, 19, 13, 14, 30),
+      );
+      final newer = Job(
+        'job-merge',
+        status: 'running',
+        message: 'Pool de conexoes configurado.',
+        progress: 60,
+        currentStep: 'create_supavisor_tenant',
+        updatedAt: DateTime.utc(2026, 7, 19, 13, 14, 40),
+      );
+
+      final merged = mergeJobSnapshots(older, newer);
+
+      expect(merged.project, 'meu_projeto');
+      expect(merged.status, 'running');
+      expect(merged.progress, 60);
+      expect(merged.message, 'Pool de conexoes configurado.');
+      expect(merged.currentStep, 'create_supavisor_tenant');
     });
   });
 
@@ -166,4 +230,14 @@ void main() {
       expect(preferredActiveJob([running, queued]), same(running));
     });
   });
+}
+
+class _ControlledJobRepository extends JobRepository {
+  _ControlledJobRepository(this.initialFetch)
+      : super(client: MockClient((_) async => http.Response('{}', 500)));
+
+  final Completer<List<Job>> initialFetch;
+
+  @override
+  Future<List<Job>> fetchInFlightJobs() => initialFetch.future;
 }

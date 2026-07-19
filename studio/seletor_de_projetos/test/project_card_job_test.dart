@@ -12,8 +12,8 @@ void main() {
       action: 'create',
       status: 'running',
       message: 'Provisionando infraestrutura do projeto...',
-      progress: 10,
-      currentStep: 'provision_infrastructure',
+      progress: 60,
+      currentStep: 'create_supavisor_tenant',
     );
 
     await tester.pumpWidget(
@@ -47,8 +47,8 @@ void main() {
       find.text('Provisionando infraestrutura do projeto...'),
       findsOneWidget,
     );
-    expect(find.text('provision_infrastructure'), findsOneWidget);
-    expect(find.text('10%'), findsOneWidget);
+    expect(find.text('create_supavisor_tenant'), findsOneWidget);
+    expect(find.text('60%'), findsOneWidget);
     expect(find.byType(LinearProgressIndicator), findsOneWidget);
   });
 }

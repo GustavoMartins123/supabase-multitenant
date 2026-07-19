@@ -80,8 +80,23 @@ main() {
 
   systemctl daemon-reload
   systemctl enable "$UNIT_NAME"
-  systemctl restart "$UNIT_NAME"
-  ok "Servico $UNIT_NAME instalado e iniciado."
+  local schema_wait_timeout="${HOST_AGENT_INSTALL_SCHEMA_WAIT_TIMEOUT:-15}"
+  say "Aguardando o schema do host-agent por ate ${schema_wait_timeout}s ..."
+  if "$AGENT_DIR/.venv/bin/python" -m hostagent \
+      --root "$SERVIDOR_DIR" \
+      --wait-for-schema \
+      --schema-timeout "$schema_wait_timeout"; then
+    systemctl restart "$UNIT_NAME"
+    ok "Servico $UNIT_NAME instalado e iniciado."
+  else
+    local schema_check_status=$?
+    if [[ "$schema_check_status" -ne 3 ]]; then
+      die "Nao foi possivel validar a configuracao/schema do host-agent."
+    fi
+    ok "Servico $UNIT_NAME instalado e habilitado."
+    say "A Projects API ainda nao publicou o schema; o servico nao foi iniciado."
+    say "Ao rodar start.sh, o ExecStartPre aguardara o schema antes de iniciar o agent."
+  fi
   say "Logs: journalctl -u $UNIT_NAME -f"
 }
 

@@ -7,11 +7,73 @@ Projects API no startup (``app/host_agent.py``).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from typing import Any
 
 import asyncpg
+
+
+class HostAgentSchemaTimeout(RuntimeError):
+    """O control plane ainda nao publicou o schema exigido pelo agent."""
+
+
+async def host_agent_schema_ready(dsn: str) -> bool:
+    """Confere as tabelas minimas sem tentar cria-las no host-agent."""
+    connection = await asyncpg.connect(dsn, timeout=5)
+    try:
+        return bool(
+            await connection.fetchval(
+                """
+                SELECT
+                    to_regclass('host_agent_workers') IS NOT NULL
+                    AND to_regclass('host_agent_commands') IS NOT NULL
+                    AND to_regclass('project_container_state') IS NOT NULL
+                """
+            )
+        )
+    finally:
+        await connection.close()
+
+
+async def wait_for_host_agent_schema(
+    dsn: str,
+    *,
+    timeout: float,
+    poll_interval: float = 2.0,
+) -> None:
+    """Aguarda a migracao da Projects API antes de iniciar o worker."""
+    timeout = max(0.0, timeout)
+    poll_interval = max(0.1, poll_interval)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    last_error: Exception | None = None
+
+    while True:
+        try:
+            if await host_agent_schema_ready(dsn):
+                return
+            last_error = None
+        except (
+            OSError,
+            ValueError,
+            asyncpg.PostgresError,
+            asyncio.TimeoutError,
+        ) as exc:
+            last_error = exc
+
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            detail = (
+                f" Ultimo erro de conexao: {type(last_error).__name__}."
+                if last_error is not None
+                else " As tabelas do host-agent ainda nao existem."
+            )
+            raise HostAgentSchemaTimeout(
+                f"Schema do host-agent indisponivel apos {timeout:g}s.{detail}"
+            )
+        await asyncio.sleep(min(poll_interval, remaining))
 
 
 async def create_pool(dsn: str) -> asyncpg.Pool:

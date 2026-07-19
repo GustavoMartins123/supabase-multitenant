@@ -31,6 +31,7 @@ class AgentConfig:
     state_refresh_interval: float
     max_parallel_commands: int
     shutdown_grace: int
+    schema_wait_timeout: float
 
 
 def _float_env(env: dict[str, str], key: str, default: float) -> float:
@@ -101,4 +102,5 @@ def load_config(root: str | Path) -> AgentConfig:
         state_refresh_interval=_float_env(env, "HOST_AGENT_STATE_REFRESH_INTERVAL", 10.0),
         max_parallel_commands=_int_env(env, "HOST_AGENT_MAX_PARALLEL_COMMANDS", 3),
         shutdown_grace=_int_env(env, "HOST_AGENT_SHUTDOWN_GRACE", 300),
+        schema_wait_timeout=_float_env(env, "HOST_AGENT_SCHEMA_WAIT_TIMEOUT", 180.0),
     )
