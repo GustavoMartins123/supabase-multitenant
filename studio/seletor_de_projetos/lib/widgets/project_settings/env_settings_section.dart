@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:http/http.dart' as http;
 
 import '../../supabase_colors.dart';
 import '../../data/project_repository.dart';
@@ -192,7 +191,6 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
   bool _saving = false;
   bool _recreating = false;
   List<String> _affectedServices = [];
-  String? _pendingStorageLimitToken;
 
   bool get _hasChanges {
     if (_original.length != _current.length) return true;
@@ -240,7 +238,6 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
       _original = Map.from(data.settings);
       _current = Map.from(data.settings);
       _affectedServices = List.from(data.pendingAffectedServices);
-      _pendingStorageLimitToken = data.storageLimitToken;
     }
   }
 
@@ -349,7 +346,6 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
       setState(() {
         _original = Map.from(_current);
         _affectedServices = result.affectedServices;
-        _pendingStorageLimitToken = result.storageLimitToken;
       });
 
       _showSnack('Configurações salvas!', SupabaseColors.success);
@@ -358,22 +354,6 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
       _showSnack('Erro ao salvar: $msg', SupabaseColors.error);
     } finally {
       if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  Future<void> _refreshProjectCookies(String storageLimitToken) async {
-    final uri = Uri(
-      path: '/set-project',
-      queryParameters: {
-        'ref': widget.projectRef,
-        'storage_limit_token': storageLimitToken,
-      },
-    );
-
-    final response = await http.get(uri);
-    if (response.statusCode != 200) {
-      throw Exception(
-          'Não foi possível atualizar o limite de upload da sessão');
     }
   }
 
@@ -501,15 +481,9 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
         );
       }
 
-      if (_pendingStorageLimitToken != null &&
-          _pendingStorageLimitToken!.isNotEmpty) {
-        await _refreshProjectCookies(_pendingStorageLimitToken!);
-      }
-
       if (!mounted) return;
       setState(() {
         _affectedServices = [];
-        _pendingStorageLimitToken = null;
       });
     } catch (e) {
       final msg = e.toString().replaceFirst('Exception: ', '');

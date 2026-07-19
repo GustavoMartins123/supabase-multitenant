@@ -7,6 +7,10 @@ local function expired_cookie_header()
     return "supabase_project=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
 end
 
+if require("project_context.project_ref_resolver").is_slug_mode() then
+    return expired_cookie_header()
+end
+
 local ref, ts, sig = cookie:match("^([^%.]+)%.(%d+)%.([0-9a-f]+)$")
 if not ref then
     return expired_cookie_header()

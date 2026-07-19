@@ -1,11 +1,5 @@
 local cjson = require("cjson.safe")
-local hmac_sha256 = require("security.hmac_sha256")
-local secure_compare = require("security.secure_compare")
-
 local _M = {}
-
-local key = os.getenv("NGINX_HMAC_SECRET") or ""
-local max_age = 604800
 
 local function parse_positive_integer(value)
     value = tostring(value or ""):match("^%s*(.-)%s*$")
@@ -67,39 +61,7 @@ local function reject(status, message, extra)
     return ngx.exit(status)
 end
 
-local function storage_limit_for_project(project_ref)
-    local cookie = ngx.var.cookie_supabase_storage_limit
-    if not cookie then
-        return nil, "Limite de upload do projeto ausente"
-    end
-    if key == "" then
-        return nil, "Chave de validacao do limite de upload ausente"
-    end
-
-    local ref, limit, ts, sig = cookie:match("^([^%.]+)%.(%d+)%.(%d+)%.([0-9a-f]+)$")
-    if not ref or ref ~= project_ref then
-        return nil, "Limite de upload nao corresponde ao projeto atual"
-    end
-
-    local age = ngx.time() - tonumber(ts)
-    if age > max_age then
-        return nil, "Limite de upload expirado"
-    end
-
-    local expected, err = hmac_sha256.hex(key, ref.."."..limit.."."..ts)
-    if not expected then
-        ngx.log(ngx.ERR, "Falha ao validar cookie de limite de storage: ", err)
-        return nil, "Falha ao validar limite de upload"
-    end
-
-    if not secure_compare.equals(expected, sig) then
-        return nil, "Assinatura do limite de upload invalida"
-    end
-
-    return parse_positive_integer(limit)
-end
-
-function _M.enforce()
+function _M.enforce(context)
     local method = ngx.req.get_method()
     if method ~= "POST" and method ~= "PUT" and method ~= "PATCH" then
         return
@@ -110,8 +72,7 @@ function _M.enforce()
         return
     end
 
-    local project_ref = ngx.var.project_ref
-    if not project_ref or project_ref == "" or project_ref == "default" then
+    if type(context) ~= "table" then
         return
     end
 
@@ -120,9 +81,11 @@ function _M.enforce()
         return
     end
 
-    local limit, err = storage_limit_for_project(project_ref)
+    local limit = parse_positive_integer(context.file_size_limit)
     if not limit then
-        return reject(ngx.HTTP_FORBIDDEN, err, { error = "storage_limit_missing" })
+        return reject(ngx.HTTP_FORBIDDEN, "Limite de upload do projeto ausente", {
+            error = "storage_limit_missing",
+        })
     end
 
     if request_size <= limit then

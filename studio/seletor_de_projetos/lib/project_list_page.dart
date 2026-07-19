@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:html' as html;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:http/http.dart' as http;
 
 import 'admin_users_page.dart';
 import 'duplicateProjectDialog.dart';
@@ -189,19 +188,9 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
     }
   }
 
-  Future<void> _openProject(String refKey, Object? storageLimitToken) async {
-    final uri = Uri(
-      path: '/set-project',
-      queryParameters: {
-        'ref': refKey,
-        if (storageLimitToken != null)
-          'storage_limit_token': storageLimitToken.toString(),
-      },
-    );
-
-    await http.get(uri);
+  void _openProject(String refKey) {
     html.window.open(
-      '${html.window.location.origin}/project/default',
+      '${html.window.location.origin}/project/$refKey',
       '_blank',
     );
   }
@@ -568,10 +557,7 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
       keyExpired: project['key_expired'] == true,
       onTap: project['is_loading'] == true || project['active_job'] != null
           ? () {}
-          : () => _openProject(
-                project['name'],
-                project['storage_limit_token'],
-              ),
+          : () => _openProject(project['name']),
       onDuplicate: () => _showDuplicateDialog(project['name']),
       onToggleFavorite: () =>
           ref.read(favoritesProvider.notifier).toggleFavorite(project['name']),

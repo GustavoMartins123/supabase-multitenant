@@ -37,9 +37,10 @@ local function get_project_ref()
 end
 
 local function get_selected_project_ref()
-    local project_ref = ngx.var.project_ref
-    if project_ref and project_ref ~= "" and project_ref ~= "default" then
-        return project_ref
+    local api_ref = get_project_ref()
+    local context = ngx.ctx.studio_project_context
+    if type(context) == "table" and context.ref == api_ref then
+        return context.ref
     end
     return nil
 end

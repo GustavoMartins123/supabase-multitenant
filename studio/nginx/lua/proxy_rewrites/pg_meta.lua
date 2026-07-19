@@ -3,7 +3,9 @@ local cjson = require("cjson.safe")
 
 local uri = ngx.var.request_uri
 if method == "GET"
-    and uri:match("^/api/platform/pg%-meta/default/policies%?included_schemas=&excluded_schemas=$")
+    and uri:match(
+        "^/api/platform/pg%-meta/[a-z_][a-z0-9_]*/policies%?included_schemas=&excluded_schemas=$"
+    )
 then
     ngx.req.set_uri("/policies", false)
     ngx.req.set_uri_args({})

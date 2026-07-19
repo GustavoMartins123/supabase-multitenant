@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import os
 import pathlib
 import shutil
 import subprocess
@@ -137,7 +138,9 @@ local resolver = require("project_context.project_ref_resolver")
 local ref = resolver.resolve()
 assert(ref == "meu_projeto", "esperava meu_projeto, obteve " .. tostring(ref))
 '''
-        subprocess.run([runtime, "-e", script], check=True)
+        env = os.environ.copy()
+        env["STUDIO_PROJECT_CONTEXT_MODE"] = "cookie"
+        subprocess.run([runtime, "-e", script], check=True, env=env)
 
     def test_python_and_shell_syntax(self) -> None:
         asgi_path = ROOT / "servidor/api-internal/app/asgi.py"

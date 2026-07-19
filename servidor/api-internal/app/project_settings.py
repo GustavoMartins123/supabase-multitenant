@@ -9,6 +9,10 @@ import tempfile
 from dotenv import dotenv_values
 from fastapi import HTTPException
 
+
+DEFAULT_FILE_SIZE_LIMIT = "524288000"
+DEFAULT_PROJECTS_ROOT = pathlib.Path("/docker/projects")
+
 SETTINGS_WHITELIST = {
     "DISABLE_SIGNUP",
     "ENABLE_EMAIL_SIGNUP",
@@ -80,6 +84,23 @@ def _read_env_whitelisted(env_path: pathlib.Path) -> dict[str, str]:
         if value is not None
     }
     return {k: value for k, value in all_values.items() if k in SETTINGS_WHITELIST}
+
+
+def get_project_file_size_limit(
+    project_name: str,
+    *,
+    projects_root: pathlib.Path = DEFAULT_PROJECTS_ROOT,
+) -> str:
+    """Return the tenant upload limit without exposing the tenant env file."""
+    try:
+        values = dotenv_values(projects_root / project_name / ".env")
+    except (OSError, ValueError):
+        return DEFAULT_FILE_SIZE_LIMIT
+
+    value = str(values.get("FILE_SIZE_LIMIT") or "").strip()
+    if re.fullmatch(r"\d+", value) and int(value) > 0:
+        return value
+    return DEFAULT_FILE_SIZE_LIMIT
 
 
 def _normalize_setting_value(key: str, raw_value: str) -> str:
@@ -191,7 +212,6 @@ def _get_affected_services(changed_keys: list[str]) -> list[str]:
         for svc in SETTING_TO_SERVICES.get(key, []):
             services.add(svc)
     return sorted(services)
-
 
 
 

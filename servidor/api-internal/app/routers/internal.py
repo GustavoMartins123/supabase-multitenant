@@ -8,6 +8,12 @@ from fastapi.responses import JSONResponse, Response
 
 from app.control_plane_service import sync_user_record
 from app.database import get_pool
+from app.dependencies import (
+    ensure_project_member_access,
+    get_project_role,
+    resolve_authenticated_user,
+)
+from app.project_settings import get_project_file_size_limit
 from app.project_secret_service import decrypt_project_secret
 from app.runtime_config import (
     ANALYTICS_INTERNAL_URL,
@@ -19,6 +25,11 @@ from app.validation import validate_project_id
 
 
 router = APIRouter(tags=["internal"])
+
+
+def _require_studio_nginx(request: Request) -> None:
+    if request.headers.get("X-Internal-Service") != "studio-nginx":
+        raise HTTPException(403, "Internal service access required")
 
 
 @router.api_route(
@@ -98,8 +109,7 @@ async def get_content_project_identity(
 ):
     """Resolve o slug mutável para o UUID estável usado apenas por content."""
     project_name = validate_project_id(project_name)
-    if request.headers.get("X-Internal-Service") != "studio-nginx":
-        raise HTTPException(403, "Internal service access required")
+    _require_studio_nginx(request)
 
     async with pool.acquire() as conn:
         project = await conn.fetchrow(
@@ -142,6 +152,70 @@ async def get_content_project_identity(
     )
 
 
+@router.get("/api/projects/internal/studio-context/{ref}")
+async def get_studio_project_context(
+    ref: str,
+    request: Request,
+    pool=Depends(get_pool),
+):
+    """Resolve and authorize the project carried by the Studio URL."""
+    ref = validate_project_id(ref)
+    _require_studio_nginx(request)
+    auth_user = await resolve_authenticated_user(request, pool)
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            project = await conn.fetchrow(
+                """
+                SELECT id, tenant_uuid, name, display_name,
+                       anon_key, project_key_version
+                FROM projects
+                WHERE name = $1
+                """,
+                ref,
+            )
+            if not project:
+                raise HTTPException(404, "Project not found")
+
+            await ensure_project_member_access(
+                conn,
+                project_id=project["id"],
+                auth_user=auth_user,
+            )
+            role = await get_project_role(
+                conn,
+                project_id=project["id"],
+                auth_user=auth_user,
+            )
+            if role is None and auth_user["is_global_admin"]:
+                role = "admin"
+
+            if not project["anon_key"]:
+                raise HTTPException(409, "Project API key is not ready")
+            anon_key = await decrypt_project_secret(
+                conn,
+                project_id=project["id"],
+                column="anon_key",
+                ciphertext=project["anon_key"],
+            )
+
+    return JSONResponse(
+        content={
+            "project_uuid": str(project["id"]),
+            "tenant_uuid": (
+                str(project["tenant_uuid"]) if project["tenant_uuid"] else None
+            ),
+            "ref": project["name"],
+            "display_name": project["display_name"] or project["name"],
+            "role": role,
+            "anon_key": anon_key,
+            "file_size_limit": int(get_project_file_size_limit(project["name"])),
+            "project_key_version": project["project_key_version"],
+        },
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @router.get("/api/projects/internal/enc-key/{ref}")
 async def enc_key(
     ref: str,
@@ -149,8 +223,7 @@ async def enc_key(
     pool=Depends(get_pool)
 ):
     ref = validate_project_id(ref)
-    if request.headers.get("X-Internal-Service") != "studio-nginx":
-        raise HTTPException(403, "Internal service access required")
+    _require_studio_nginx(request)
 
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -185,8 +258,7 @@ async def project_key_version(
     pool=Depends(get_pool),
 ):
     ref = validate_project_id(ref)
-    if request.headers.get("X-Internal-Service") != "studio-nginx":
-        raise HTTPException(403, "Internal service access required")
+    _require_studio_nginx(request)
     version = await pool.fetchval(
         "SELECT project_key_version FROM projects WHERE name = $1",
         ref,

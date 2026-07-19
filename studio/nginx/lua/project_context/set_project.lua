@@ -4,7 +4,16 @@ local key = COOKIE_SECRET
 local storage_limit_key = os.getenv("NGINX_HMAC_SECRET") or ""
 local ref = ngx.var.arg_ref
 if not ref or ref == "" then return ngx.exit(400) end
-if not ref:match("^[A-Za-z0-9_-]+$") then return ngx.exit(400) end
+local resolver = require("project_context.project_ref_resolver")
+if not resolver.valid_ref(ref) then return ngx.exit(400) end
+
+if resolver.is_slug_mode() then
+    ngx.header["Content-Type"] = "application/json; charset=utf-8"
+    ngx.header["Cache-Control"] = "no-store"
+    ngx.say(([[{"mode":"slug","project_ref":"%s","path":"/project/%s"}]])
+        :format(ref, ref))
+    return
+end
 
 local storage_limit_token = ngx.var.arg_storage_limit_token
 

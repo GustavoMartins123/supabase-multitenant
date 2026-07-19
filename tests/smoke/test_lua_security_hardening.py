@@ -54,7 +54,6 @@ class ConstantTimeHmacTest(unittest.TestCase):
             LUA / "project_context" / "set_project.lua",
             LUA / "project_context" / "project_ref_resolver.lua",
             LUA / "project_context" / "cookie_cleanup.lua",
-            LUA / "security" / "storage_upload_limit.lua",
             LUA / "security" / "check_push_worker.lua",
             LUA / "security" / "shared_token.lua",
             LUA / "resty" / "fernet.lua",
@@ -64,6 +63,10 @@ class ConstantTimeHmacTest(unittest.TestCase):
                 source = read(validator)
                 self.assertIn('require("security.secure_compare")', source)
                 self.assertIn("secure_compare.equals", source)
+
+        storage_limit = read(LUA / "security" / "storage_upload_limit.lua")
+        self.assertNotIn("cookie_supabase_storage_limit", storage_limit)
+        self.assertIn("context.file_size_limit", storage_limit)
 
         fernet = read(LUA / "resty" / "fernet.lua")
         self.assertNotIn("mac_a ~= mac_b", fernet)

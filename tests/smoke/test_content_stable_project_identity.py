@@ -15,12 +15,16 @@ class ContentStableProjectIdentityTests(unittest.TestCase):
             '@router.get("/api/projects/internal/content-identity/{project_name}")'
         )
         end = source.index(
-            '@router.get("/api/projects/internal/enc-key/{ref}")',
+            '@router.get("/api/projects/internal/studio-context/{ref}")',
             start,
         )
         route = source[start:end]
 
-        self.assertIn('request.headers.get("X-Internal-Service") != "studio-nginx"', route)
+        self.assertIn("_require_studio_nginx(request)", route)
+        self.assertIn(
+            'request.headers.get("X-Internal-Service") != "studio-nginx"',
+            source,
+        )
         self.assertIn('"SELECT id, name FROM projects WHERE name = $1"', route)
         self.assertIn("FROM project_name_history", route)
         self.assertIn('"project_id": str(project["id"])', route)
