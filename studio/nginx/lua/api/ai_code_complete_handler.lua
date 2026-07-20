@@ -28,8 +28,22 @@ end
 
 ngx.log(ngx.INFO, "[AI-CODE-COMPLETE] Request from: ", ngx.var.authelia_email)
 
-if ngx.var.project_ref and ngx.var.project_ref ~= "default" then
-    request.projectRef = ngx.var.project_ref
+local requested_ref = request.projectRef
+if requested_ref == nil then
+    ngx.header.content_type = "application/json"
+    ngx.status = ngx.HTTP_BAD_REQUEST
+    ngx.say('{"error": "projectRef required"}')
+    return ngx.exit(ngx.HTTP_BAD_REQUEST)
+end
+if not require("project_context.project_ref_resolver").valid_ref(requested_ref) then
+    ngx.header.content_type = "application/json"
+    ngx.status = ngx.HTTP_BAD_REQUEST
+    ngx.say('{"error": "Invalid projectRef"}')
+    return ngx.exit(ngx.HTTP_BAD_REQUEST)
+end
+local context = require("security.project_access").enforce(requested_ref)
+if type(context) ~= "table" then
+    return
 end
 
 local result, err = ai_code.complete(

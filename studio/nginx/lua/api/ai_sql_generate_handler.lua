@@ -1,6 +1,5 @@
 local cjson = require("cjson.safe")
 local ai_generate = require("ai_sql_generate")
-local db_helper = require("cache.db_helper")
 local user_identity = require("project_context.user_identity")
 
 ngx.req.read_body()
@@ -19,7 +18,23 @@ if not studio_request then
     return ngx.exit(ngx.HTTP_BAD_REQUEST)
 end
 
-local project_ref = ngx.var.project_ref or "default"
+local requested_ref = studio_request.projectRef
+if requested_ref == nil then
+    ngx.header.content_type = "application/json"
+    ngx.status = ngx.HTTP_BAD_REQUEST
+    ngx.say('{"error": "projectRef required"}')
+    return ngx.exit(ngx.HTTP_BAD_REQUEST)
+end
+if not require("project_context.project_ref_resolver").valid_ref(requested_ref) then
+    ngx.header.content_type = "application/json"
+    ngx.status = ngx.HTTP_BAD_REQUEST
+    ngx.say('{"error": "Invalid projectRef"}')
+    return ngx.exit(ngx.HTTP_BAD_REQUEST)
+end
+local context = require("security.project_access").enforce(requested_ref)
+if type(context) ~= "table" then
+    return
+end
 local function current_user_id()
     local email = user_identity.normalize_email(ngx.var.authelia_email or "")
     if email == "" then
@@ -37,14 +52,29 @@ if user_id == "" then
     return ngx.exit(ngx.HTTP_UNAUTHORIZED)
 end
 
-local session_id = studio_request.chatId
-
-local db_session_id, err = db_helper.get_or_create_session(user_id, project_ref, session_id)
-
-if err then
-    ngx.log(ngx.ERR, "[AI-HANDLER] Erro na sessão: ", err)
-    return ngx.exit(500)
+local client_chat_id = studio_request.chatId
+if client_chat_id ~= nil then
+    local normalized = tostring(client_chat_id):lower()
+    local a, b, c, d, e = normalized:match(
+        "^([0-9a-f]+)%-([0-9a-f]+)%-([0-9a-f]+)%-([0-9a-f]+)%-([0-9a-f]+)$"
+    )
+    if not a or #a ~= 8 or #b ~= 4 or #c ~= 4 or #d ~= 4 or #e ~= 12 then
+        ngx.status = ngx.HTTP_BAD_REQUEST
+        ngx.header.content_type = "application/json"
+        ngx.say('{"error": "Invalid chatId"}')
+        return ngx.exit(ngx.HTTP_BAD_REQUEST)
+    end
+    client_chat_id = normalized
+else
+    client_chat_id = "default"
 end
+
+local session_hash = ngx.md5(user_id .. ":" .. context.ref .. ":" .. client_chat_id)
+studio_request.chatId = session_hash:sub(1, 8)
+    .. "-" .. session_hash:sub(9, 12)
+    .. "-" .. session_hash:sub(13, 16)
+    .. "-" .. session_hash:sub(17, 20)
+    .. "-" .. session_hash:sub(21, 32)
 
 local messages = studio_request.messages
 if messages and #messages > 0 then
@@ -64,7 +94,7 @@ end
 ai_generate.generate(
     studio_request,
     user_id,
-    project_ref,
+    context.ref,
     os.getenv("OPENAI_API_KEY"),
     os.getenv("OPENAI_MODEL"),
     os.getenv("OPENAI_API_BASE_URL")

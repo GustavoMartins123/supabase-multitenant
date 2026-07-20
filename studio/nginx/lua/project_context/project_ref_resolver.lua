@@ -1,87 +1,83 @@
 local _M = {}
 
-local hmac_sha256 = require("security.hmac_sha256")
-local secure_compare = require("security.secure_compare")
+local path_patterns = {
+    "^/project/([^/]+)",
+    "^/api/platform/props/project/([^/]+)",
+    "^/api/platform/projects/([^/]+)",
+    "^/api/platform/pg%-meta/([^/]+)",
+    "^/api/platform/auth/([^/]+)",
+    "^/api/platform/storage/([^/]+)",
+    "^/api/v1/projects/([^/]+)",
+}
 
-local function should_log_invalid_cookie()
-    local uri = ngx.var.uri or ""
-    return not (
-        uri == "/auth"
-        or uri:match("^/auth/")
-        or uri == "/login"
-        or uri == "/logout"
-    )
+local function valid_ref(ref)
+    return type(ref) == "string"
+        and ref ~= "default"
+        and #ref >= 3
+        and #ref <= 40
+        and ref:match("^[a-z_][a-z0-9_]*$") ~= nil
+end
+
+local function request_path()
+    -- request_uri is immutable across internal rewrites and therefore is the
+    -- canonical path supplied by this browser request.
+    local raw = ngx.var.request_uri or ""
+    return raw:match("^([^?]*)") or raw
+end
+
+local function ref_from_path(path)
+    for _, pattern in ipairs(path_patterns) do
+        local ref = (path or ""):match(pattern)
+        if ref ~= nil then
+            if valid_ref(ref) then
+                return ref, true
+            end
+            return nil, true, "invalid_path_ref"
+        end
+    end
+    return nil, false
+end
+
+local function ref_from_header()
+    local ref = ngx.var.http_x_studio_project_ref
+    if ref == nil or ref == "" then
+        return nil
+    end
+    if not valid_ref(ref) then
+        return nil, "invalid_header_ref"
+    end
+    return ref
 end
 
 function _M.resolve()
-    local cookie = ngx.var.cookie_supabase_project
-    if not cookie then
-        return "default"
+    local path_ref, has_path_ref, path_err = ref_from_path(request_path())
+    if path_err then
+        return nil, path_err
     end
 
-    local ref, ts, sig = cookie:match("^([^%.]+)%.(%d+)%.([0-9a-f]+)$")
+    local header_ref, header_err = ref_from_header()
+    if header_err then
+        return nil, header_err
+    end
+
+    if path_ref and header_ref and path_ref ~= header_ref then
+        return nil, "project_ref_mismatch"
+    end
+
+    local ref = path_ref or header_ref
     if not ref then
-        if should_log_invalid_cookie() then
-            ngx.log(ngx.WARN, "Cookie de projeto malformado; limpando cookie")
-        end
-        return "default"
+        return nil, "project_ref_missing"
     end
 
-    if not ref:match("^[a-z_][a-z0-9_]*$") or #ref < 3 or #ref > 40 then
-        if should_log_invalid_cookie() then
-            ngx.log(ngx.WARN, "Project ref invalido no cookie; limpando cookie")
-        end
-        return "default"
-    end
+    return ref, nil, has_path_ref and "path" or "header"
+end
 
-    local numeric_ts = tonumber(ts)
-    if not numeric_ts then
-        return "default"
-    end
+function _M.ref_from_path(path)
+    return ref_from_path(path)
+end
 
-    local cookie_age = ngx.time() - numeric_ts
-    local max_age = 604800
-    if cookie_age < 0 or cookie_age > max_age then
-        if should_log_invalid_cookie() then
-            ngx.log(ngx.INFO, "Cookie de projeto expirado para projeto: ", ref)
-        end
-        return "default"
-    end
-
-    local expect, err = hmac_sha256.hex(COOKIE_SECRET, ref .. "." .. ts)
-    if not expect then
-        ngx.log(ngx.ERR, "Falha ao validar cookie de projeto: ", err)
-        return "default"
-    end
-    if not secure_compare.equals(expect, sig) then
-        if should_log_invalid_cookie() then
-            ngx.log(ngx.WARN, "Assinatura de cookie inválida para projeto: ", ref,
-                    "; limpando cookie")
-        end
-        return "default"
-    end
-
-    local renewal_threshold = 518400
-    if cookie_age > renewal_threshold then
-        local new_ts = tostring(ngx.time())
-        local new_sig, renewal_err = hmac_sha256.hex(
-            COOKIE_SECRET,
-            ref .. "." .. new_ts
-        )
-        if not new_sig then
-            ngx.log(ngx.ERR, "Falha ao renovar cookie de projeto: ", renewal_err)
-            return ref
-        end
-
-        ngx.header["Set-Cookie"] =
-            ("supabase_project=%s.%s.%s; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=%d")
-            :format(ref, new_ts, new_sig, max_age)
-
-        ngx.log(ngx.INFO, "[COOKIE_RENEWAL] Cookie renovado para projeto: ", ref,
-                " (idade anterior: ", cookie_age, "s)")
-    end
-
-    return ref
+function _M.valid_ref(ref)
+    return valid_ref(ref)
 end
 
 return _M

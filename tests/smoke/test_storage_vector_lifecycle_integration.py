@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import os
 import pathlib
 import shutil
 import subprocess
@@ -62,8 +63,8 @@ class StorageVectorLifecycleIntegrationTests(unittest.TestCase):
         rewrite = (STUDIO_LUA / "security/upload_route_guard.lua").read_text(
             encoding="utf-8"
         )
-        resolver = (
-            STUDIO_LUA / "project_context/project_ref_resolver.lua"
+        studio_patch = (
+            ROOT / "studio/studio-slug/studio-project-context.patch"
         ).read_text(encoding="utf-8")
         asgi = (ROOT / "servidor/api-internal/app/asgi.py").read_text(
             encoding="utf-8"
@@ -72,10 +73,11 @@ class StorageVectorLifecycleIntegrationTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn('uri == "/api/get-s3-keys"', rewrite)
-        self.assertIn("project_ref_resolver", rewrite)
-        self.assertIn("/storage/s3-keys", rewrite)
-        self.assertIn("hmac_sha256.hex(COOKIE_SECRET", resolver)
+        self.assertNotIn('/api/get-s3-keys', rewrite)
+        self.assertIn(
+            '/api/projects/${encodeURIComponent(projectRef)}/storage/s3-keys',
+            studio_patch,
+        )
 
         self.assertIn(
             '@app.get("/api/projects/{project_name}/storage/s3-keys")', asgi
@@ -112,7 +114,7 @@ class StorageVectorLifecycleIntegrationTests(unittest.TestCase):
         self.assertIn('ref:match("^[a-z_][a-z0-9_]*$")', resolver)
         self.assertIn('project_ref:match("^[a-z_][a-z0-9_]*$")', pg_meta)
 
-    def test_project_ref_resolver_accepts_a_valid_signed_ref_at_runtime(self) -> None:
+    def test_project_ref_resolver_accepts_explicit_path_and_rejects_mismatch(self) -> None:
         runtime = shutil.which("lua5.1") or shutil.which("lua") or shutil.which("resty")
         if runtime is None:
             self.skipTest("runtime Lua nao esta instalado")
@@ -120,24 +122,23 @@ class StorageVectorLifecycleIntegrationTests(unittest.TestCase):
         lua_root = STUDIO_LUA.as_posix()
         script = f'''
 package.path = "{lua_root}/?.lua;{lua_root}/?/init.lua;" .. package.path
-package.loaded["security.hmac_sha256"] = {{
-    hex = function(key, message) return "deadbeef" end
-}}
-_G.COOKIE_SECRET = "test-secret"
 _G.ngx = {{
-    var = {{ uri = "/", cookie_supabase_project = "meu_projeto.1000000.deadbeef" }},
-    time = function() return 1000000 end,
-    log = function(...) end,
-    header = {{}},
-    WARN = "WARN",
-    INFO = "INFO",
-    ERR = "ERR",
+    var = {{
+        request_uri = "/project/meu_projeto/editor?x=1",
+        http_x_studio_project_ref = "meu_projeto",
+    }},
 }}
 local resolver = require("project_context.project_ref_resolver")
-local ref = resolver.resolve()
+local ref, err = resolver.resolve()
 assert(ref == "meu_projeto", "esperava meu_projeto, obteve " .. tostring(ref))
+assert(err == nil, "erro inesperado: " .. tostring(err))
+
+ngx.var.http_x_studio_project_ref = "outro_projeto"
+local mismatch, mismatch_err = resolver.resolve()
+assert(mismatch == nil)
+assert(mismatch_err == "project_ref_mismatch")
 '''
-        subprocess.run([runtime, "-e", script], check=True)
+        subprocess.run([runtime, "-e", script], check=True, env=os.environ.copy())
 
     def test_python_and_shell_syntax(self) -> None:
         asgi_path = ROOT / "servidor/api-internal/app/asgi.py"
@@ -158,8 +159,8 @@ assert(ref == "meu_projeto", "esperava meu_projeto, obteve " .. tostring(ref))
             self.skipTest("luac nao esta instalado")
 
         for path in (
-            STUDIO_LUA / "project_context/project_ref.lua",
             STUDIO_LUA / "project_context/project_ref_resolver.lua",
+            STUDIO_LUA / "project_context/request_context.lua",
             STUDIO_LUA / "security/upload_route_guard.lua",
             STUDIO_LUA / "proxy_rewrites/pg_meta.lua",
         ):

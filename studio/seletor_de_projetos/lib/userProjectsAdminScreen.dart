@@ -538,12 +538,8 @@ class _UserProjectsAdminScreenState
                         icon: Icons.open_in_new_rounded,
                         label: 'Abrir',
                         color: SupabaseColors.brand,
-                        onPressed: busy
-                            ? null
-                            : () => _openProject(
-                                  project.name,
-                                  project.storageLimitToken,
-                                ),
+                        onPressed:
+                            busy ? null : () => _openProject(project.name),
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -658,19 +654,9 @@ class _UserProjectsAdminScreenState
     );
   }
 
-  Future<void> _openProject(String ref, String storageLimitToken) async {
-    final uri = Uri(
-      path: '/set-project',
-      queryParameters: {
-        'ref': ref,
-        if (storageLimitToken.isNotEmpty)
-          'storage_limit_token': storageLimitToken,
-      },
-    );
-
-    await http.get(uri);
+  void _openProject(String ref) {
     html.window.open(
-      '${html.window.location.origin}/project/default',
+      '${html.window.location.origin}/project/$ref',
       '_blank',
     );
   }

@@ -68,6 +68,7 @@ from app.project_settings import (
     _normalize_settings_updates,
     _read_env_whitelisted,
     _write_env_whitelisted,
+    get_project_file_size_limit,
 )
 from app.service_key_cache import invalidate_service_key_cache
 from app.snippets_migration import rename_project_snippets
@@ -3886,16 +3887,10 @@ def _clear_project_pending_settings(project_name: str) -> None:
 
 
 def _get_project_file_size_limit(project_name: str) -> str:
-    env_path = _get_project_env_path(project_name)
-    try:
-        values = _read_env_file(env_path)
-    except Exception:
-        return "524288000"
-
-    value = str(values.get("FILE_SIZE_LIMIT", "")).strip()
-    if re.fullmatch(r"\d+", value) and int(value) > 0:
-        return value
-    return "524288000"
+    return get_project_file_size_limit(
+        project_name,
+        projects_root=PROJECTS_ROOT,
+    )
 
 
 def _get_project_storage_limit_token(project_name: str) -> str:

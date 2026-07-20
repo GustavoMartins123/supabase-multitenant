@@ -1,12 +1,3 @@
-local email = ngx.var.authelia_email
-if not email or email == "" then
-    ngx.log(ngx.ERR, "[AUTH] Not authenticated")
-    return ngx.exit(ngx.HTTP_UNAUTHORIZED)
-end
-
-local user_context_headers = require("project_context.user_context_headers")
-user_context_headers.apply(email, ngx.var.authelia_groups or "")
-
 local context = require("security.project_access").enforce()
 if type(context) ~= "table" then
     return
@@ -20,4 +11,11 @@ if not key or key == "" then
     ngx.say('{"error":"project_service_unavailable"}')
     return ngx.exit(ngx.HTTP_SERVICE_UNAVAILABLE)
 end
+
+local headers = ngx.req.get_headers()
+local authorization = headers["X-GraphQL-Authorization"]
+    or headers["x-graphql-authorization"]
+    or ("Bearer " .. context.anon_key)
+
 ngx.req.set_header("apikey", key)
+ngx.req.set_header("Authorization", authorization)

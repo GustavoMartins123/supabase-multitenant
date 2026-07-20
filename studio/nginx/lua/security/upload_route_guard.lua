@@ -3,40 +3,6 @@ local cjson = require("cjson.safe")
 local method = ngx.req.get_method()
 local uri = ngx.var.uri or ""
 
--- O Studio oficial consulta /api/get-s3-keys antes de criar o S3 Vectors FDW.
--- Como este Studio e compartilhado, as chaves precisam vir do projeto selecionado
--- e passar pelo Projects API, que valida membership/admin e le o .env do tenant.
-if uri == "/api/get-s3-keys" then
-    if method ~= "GET" then
-        ngx.status = ngx.HTTP_NOT_ALLOWED
-        ngx.header["Allow"] = "GET"
-        ngx.header["Content-Type"] = "application/json"
-        ngx.say(cjson.encode({
-            error = "method_not_allowed",
-            message = "Use GET para consultar as credenciais S3 Vectors",
-        }))
-        return ngx.exit(ngx.HTTP_NOT_ALLOWED)
-    end
-
-    local resolver = require("project_context.project_ref_resolver")
-    local project_ref = resolver.resolve()
-    if project_ref == "default" then
-        ngx.status = ngx.HTTP_CONFLICT
-        ngx.header["Content-Type"] = "application/json"
-        ngx.header["Cache-Control"] = "no-store"
-        ngx.say(cjson.encode({
-            error = "project_not_selected",
-            message = "Selecione um projeto antes de instalar o S3 Vectors Wrapper",
-        }))
-        return ngx.exit(ngx.HTTP_CONFLICT)
-    end
-
-    return ngx.req.set_uri(
-        "/api/projects/" .. project_ref .. "/storage/s3-keys",
-        true
-    )
-end
-
 if method ~= "POST" and method ~= "PUT" and method ~= "PATCH" then
     return
 end

@@ -53,7 +53,13 @@ services:
       - ./snippets:/app/snippets
   studio:
     container_name: supabase-studio
-    image: ${STUDIO_IMAGE}
+    build:
+      context: ./studio-slug
+      dockerfile: Dockerfile
+      args:
+        SUPABASE_STUDIO_COMMIT: ${SUPABASE_STUDIO_COMMIT:-20290c71bdc48bef1720bfe7d292f3b9e6154f7d}
+        SUPABASE_STUDIO_REPOSITORY: ${SUPABASE_STUDIO_REPOSITORY:-https://github.com/supabase/supabase.git}
+    image: ${STUDIO_SLUG_IMAGE:-ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v1}
     restart: unless-stopped
     logging: *vector-logging
     healthcheck:

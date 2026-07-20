@@ -62,7 +62,7 @@ function _M.generate(studio_request, user_id, project_ref, openai_api_key, opena
         end
     end
 
-    local session_id = ngx.var.cookie_ai_chat_session
+    local session_id = studio_request.chatId
     
     local session_id_result, err = db.get_or_create_session(user_id, project_ref, session_id)
     if not session_id_result then
@@ -73,11 +73,6 @@ function _M.generate(studio_request, user_id, project_ref, openai_api_key, opena
 
     session_id = session_id_result
     
-    if not ngx.var.cookie_ai_chat_session then
-        ngx.header["Set-Cookie"] = "ai_chat_session=" .. session_id .. 
-            "; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000"
-    end
-
     local db_messages, err = db.get_recent_messages(session_id, 8)
     if not db_messages then
         db_messages = {}

@@ -68,12 +68,33 @@ DECLARE
     v_session_id text;
 BEGIN
     IF p_session_id IS NOT NULL THEN
-        SELECT id INTO v_session_id FROM ai_chat_sessions WHERE id::text = p_session_id;
+        SELECT id INTO v_session_id
+        FROM ai_chat_sessions
+        WHERE id::text = p_session_id
+          AND user_id = p_user_id
+          AND project_ref = p_project_ref;
+
+        IF v_session_id IS NULL THEN
+            INSERT INTO ai_chat_sessions (id, user_id, project_ref)
+            VALUES (p_session_id::uuid, p_user_id, p_project_ref)
+            ON CONFLICT (id) DO NOTHING
+            RETURNING id::text INTO v_session_id;
+
+            -- Outra requisicao do mesmo chat pode ter inserido entre o SELECT
+            -- e o INSERT. Releia somente se a sessao pertencer ao mesmo escopo.
+            IF v_session_id IS NULL THEN
+                SELECT id INTO v_session_id
+                FROM ai_chat_sessions
+                WHERE id::text = p_session_id
+                  AND user_id = p_user_id
+                  AND project_ref = p_project_ref;
+            END IF;
+        END IF;
     END IF;
     
     IF v_session_id IS NULL THEN
         INSERT INTO ai_chat_sessions (id, user_id, project_ref)
-        VALUES (COALESCE(p_session_id::uuid, gen_random_uuid()), p_user_id, p_project_ref)
+        VALUES (gen_random_uuid(), p_user_id, p_project_ref)
         RETURNING id::text INTO v_session_id;
     END IF;
     
