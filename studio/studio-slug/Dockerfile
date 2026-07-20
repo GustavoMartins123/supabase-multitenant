@@ -49,6 +49,28 @@ COPY --from=turbo /app/out/full ./
 RUN pnpm --filter studio exec next build
 
 FROM base AS production
+ARG SUPABASE_STUDIO_COMMIT
+ARG SUPABASE_STUDIO_REPOSITORY
+
+# --- UNOFFICIAL derivative: Apache-2.0 compliance & provenance ---------------
+# Supabase Studio is Apache-2.0. The Next standalone bundle does not carry the
+# upstream LICENSE, so ship it explicitly (sec. 4a). The patch + its description
+# travel with the image as the "prominent notice stating changes" (sec. 4b).
+# Apache-2.0 grants no trademark rights: this image is not affiliated with,
+# sponsored by, or endorsed by Supabase. Do not add the Supabase name/logo in a
+# way that implies endorsement.
+COPY LICENSE /usr/share/doc/multitenant-studio/LICENSE
+COPY studio-project-context.patch README.md /usr/share/doc/multitenant-studio/
+
+LABEL org.opencontainers.image.title="multitenant-studio" \
+      org.opencontainers.image.description="UNOFFICIAL derivative of Supabase Studio with a per-tab project-context patch. Not affiliated with, sponsored by, or endorsed by Supabase." \
+      org.opencontainers.image.source="https://github.com/GustavoMartins123/supabase-multitenant" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.revision="${SUPABASE_STUDIO_COMMIT}" \
+      io.github.gustavomartins123.upstream.repository="${SUPABASE_STUDIO_REPOSITORY}" \
+      io.github.gustavomartins123.upstream.commit="${SUPABASE_STUDIO_COMMIT}" \
+      io.github.gustavomartins123.official="false"
+
 COPY --from=builder /app/apps/studio/public ./apps/studio/public
 COPY --from=builder /app/apps/studio/.next/standalone ./
 COPY --from=builder /app/apps/studio/.next/static ./apps/studio/.next/static
