@@ -170,7 +170,9 @@ services:
       - -c
       - wal_keep_size=1GB
       - -c
-      - max_wal_senders=3
+      - max_replication_slots=32
+      - -c
+      - max_wal_senders=40
       - -c
       - tcp_keepalives_idle=60
       - -c

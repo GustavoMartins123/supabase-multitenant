@@ -215,8 +215,7 @@ O OpenResty funciona como uma anti-corruption layer entre o Supabase Studio, que
 Ele é responsável por:
 
 - autenticação via Authelia;
-- seleção do projeto ativo;
-- cookie de projeto assinado;
+- resolução do projeto de cada aba pela URL e pelo header `X-Studio-Project-Ref`;
 - resolução da identidade do usuário;
 - injeção da `service_role` somente no backend;
 - rewrites de Auth, REST, Storage e PG Meta;
@@ -225,14 +224,15 @@ Ele é responsável por:
 - armazenamento de snippets separado por usuário e projeto;
 - rotas administrativas do Flutter.
 
-Detalhes: [Arquitetura OpenResty/Lua](architecture/openresty-lua.md).
+Detalhes: [Arquitetura OpenResty/Lua](architecture/openresty-lua.md) e
+[Contexto do Supabase Studio por aba](architecture/studio-slug-context.md).
 
 ## Segurança e fronteiras de confiança
 
 ### Navegador para Studio
 
 - sessão validada pelo Authelia;
-- projeto ativo armazenado em cookie assinado;
+- projeto de cada aba resolvido pela URL;
 - a `service_role` nunca é entregue ao navegador;
 - ações administrativas são autorizadas novamente na API Python.
 
@@ -275,8 +275,8 @@ Detalhes: [Rotação de segredos e conexões](11-rotacao-cripto-conexoes.md).
 Usuário
   -> OpenResty :9091
   -> Authelia
-  -> Flutter seleciona o projeto
-  -> cookie assinado define o project ref
+  -> Flutter abre /project/<ref>
+  -> a URL da aba define o project ref
   -> OpenResty resolve a service key autorizada
   -> Traefik
   -> Nginx do projeto

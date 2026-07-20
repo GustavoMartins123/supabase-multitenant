@@ -54,7 +54,8 @@ obrigatoriamente contextualizada pelo projeto selecionado. O Nginx do Studio
 intercepta
 `/api/platform/projects/<ref>/analytics/...` e exige grupo Authelia `admin` antes
 de encaminhar a requisicao ao backend do Studio. O rewrite Lua substitui o
-`default` usado pelo Studio self-hosted pelo `project_ref` validado do cookie. O
+`default` usado pelo Studio self-hosted pelo `project_ref` resolvido pelo
+contexto da aba. O
 Studio envia esse valor ao endpoint do Logflare como parametro `project`, usado
 pelas CTEs nativas de `logs.all` para filtrar os eventos. Membros e admins apenas
 de projeto nao podem consultar o Logflare global.

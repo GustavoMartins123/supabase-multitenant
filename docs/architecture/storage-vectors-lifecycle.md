@@ -41,7 +41,8 @@ No wrapper exists yet because wrapper names depend on a vector bucket name.
 ## Install wrapper from Studio
 
 The upstream Studio uses the fixed endpoint `/api/get-s3-keys`. OpenResty resolves
-the signed project cookie and internally routes the request to:
+the tab's project from the URL (`X-Studio-Project-Ref`) and internally routes the
+request to:
 
 ```text
 /api/projects/<project>/storage/s3-keys

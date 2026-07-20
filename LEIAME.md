@@ -220,6 +220,7 @@ No primeiro acesso, crie o administrador inicial pelo navegador. Depois do boots
 
 Detalhes importantes do Studio:
 
+- cada aba do navegador mantém seu projeto pela URL (`/project/<ref>`);
 - `9091` é o único endpoint público do Studio e do Authelia;
 - requisições HTTP simples em `:9091` são redirecionadas para HTTPS na mesma porta;
 - integrações entre servidores que acessam o gateway do Studio também devem usar a porta `9091`.

@@ -8,7 +8,7 @@ definido em `studio/nginx/nginx.conf`.
 
 | Diretório | Responsabilidade |
 | --- | --- |
-| `project_context/` | Seleção do projeto, cookie assinado, referência ativa e headers de contexto. |
+| `project_context/` | Resolução do projeto pela URL da aba e pelo header `X-Studio-Project-Ref`, referência ativa e headers de contexto. |
 | `security/` | Autenticação, autorização, HMAC, service keys e limites de upload. |
 | `studio_compat/` | Respostas e endpoints de compatibilidade esperados pelo Supabase Studio. |
 | `proxy_rewrites/` | Tradução de URI, método, query string e payload antes do proxy. |
@@ -25,8 +25,10 @@ Nginx usam o caminho absoluto sob `/usr/local/openresty/lualib`.
 
 ## Fluxo de uma requisição
 
-1. `init/init.lua` valida o segredo usado para assinar o cookie de projeto.
-2. `project_context/` valida o cookie e determina `ngx.var.project_ref`.
+1. `init/init.lua` valida, na inicialização, a chave Fernet usada para
+   transportar a `service_role`.
+2. `project_context/` resolve o ref pela URL (`request_uri`) e/ou pelo header
+   `X-Studio-Project-Ref` e determina `ngx.var.project_ref`.
 3. `security/` autentica o usuário, restringe a rota e injeta credenciais
    internas quando necessário.
 4. `proxy_rewrites/` adapta o contrato do Studio ao contrato do upstream.
@@ -38,7 +40,8 @@ Nginx usam o caminho absoluto sob `/usr/local/openresty/lualib`.
 ### Analytics
 
 `proxy_rewrites/analytics.lua` troca o `default` do path self-hosted pelo
-`project_ref` validado do cookie antes de encaminhar a requisição ao Studio. O
+`project_ref` resolvido pelo contexto da aba antes de encaminhar a requisição
+ao Studio. O
 backend do Studio reutiliza esse segmento como parâmetro `project` ao consultar
 o Logflare. Sem esse rewrite, todos os painéis consultariam o contexto
 single-tenant `default`, independentemente do projeto selecionado.
@@ -162,6 +165,6 @@ Ao mover um módulo, atualize tanto os `require(...)` quanto todas as diretivas
 
 1. confirme que todo arquivo referenciado pelo Nginx existe;
 2. valide a sintaxe de todos os arquivos com `luac -p` ou equivalente;
-3. execute os testes de cookies e rewrites;
+3. execute os testes de contexto por aba e rewrites;
 4. carregue a configuração com `nginx -t` no container do Studio;
 5. teste ao menos Auth, REST, Storage e PG Meta com um projeto real.

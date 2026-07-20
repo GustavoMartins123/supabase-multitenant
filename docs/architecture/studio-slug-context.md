@@ -8,8 +8,8 @@ Cada aba mantém seu projeto exclusivamente pela URL:
 /project/<project_ref>/...
 ```
 
-Não existe projeto selecionado globalmente no navegador. Cookie, `Referer`,
-local storage e o literal `default` não participam da resolução.
+A resolução usa esse path e, em chamadas same-origin, o header
+`X-Studio-Project-Ref` que o cliente envia com o mesmo ref.
 
 ## Contrato
 

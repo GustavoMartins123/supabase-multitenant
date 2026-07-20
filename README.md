@@ -218,6 +218,7 @@ On the first access, create the initial administrator account in the browser. Af
 
 Important Studio details:
 
+- each browser tab keeps its project from the URL (`/project/<ref>`);
 - `9091` is the single public endpoint for Studio and Authelia;
 - plain HTTP requests to `:9091` are redirected to HTTPS on the same port;
 - server-to-server integrations that target the Studio gateway must also use port `9091`.
