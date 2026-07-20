@@ -37,6 +37,10 @@ function _M.capture(expected_ref)
         if expected and existing ~= expected then
             return nil, "project_ref_mismatch"
         end
+        local applied, apply_err = apply_proxy_context(existing)
+        if not applied then
+            return nil, apply_err
+        end
         return existing
     end
 
