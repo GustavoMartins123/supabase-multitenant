@@ -30,18 +30,16 @@ def run_lua(script: str, *, env: dict[str, str] | None = None) -> None:
     subprocess.run([runtime, "-e", script], check=True, env=env)
 
 
-class ProjectCookieHardeningTest(unittest.TestCase):
-    def test_project_cookies_are_always_secure(self) -> None:
-        sources = {
-            "set": read(LUA / "project_context" / "set_project.lua"),
-            "renewal": read(
-                LUA / "project_context" / "project_ref_resolver.lua"
-            ),
-            "cleanup": read(LUA / "project_context" / "cookie_cleanup.lua"),
-        }
-        self.assertEqual(sources["set"].count("; HttpOnly; Secure;"), 2)
-        self.assertIn("; HttpOnly; Secure;", sources["renewal"])
-        self.assertIn("; HttpOnly; Secure;", sources["cleanup"])
+class ProjectCookieRemovalTest(unittest.TestCase):
+    def test_legacy_cookie_is_only_expired_and_never_resolves_context(self) -> None:
+        resolver = read(LUA / "project_context" / "project_ref_resolver.lua")
+        cleanup = read(LUA / "project_context" / "cookie_cleanup.lua")
+
+        self.assertFalse((LUA / "project_context" / "set_project.lua").exists())
+        self.assertNotIn("cookie_supabase_project", resolver)
+        self.assertNotIn("http_referer", resolver)
+        self.assertIn("; HttpOnly; Secure;", cleanup)
+        self.assertIn("Max-Age=0", cleanup)
 
 
 class ConstantTimeHmacTest(unittest.TestCase):
@@ -51,9 +49,6 @@ class ConstantTimeHmacTest(unittest.TestCase):
         self.assertIn("difference == 0", compare)
 
         validators = (
-            LUA / "project_context" / "set_project.lua",
-            LUA / "project_context" / "project_ref_resolver.lua",
-            LUA / "project_context" / "cookie_cleanup.lua",
             LUA / "security" / "check_push_worker.lua",
             LUA / "security" / "shared_token.lua",
             LUA / "resty" / "fernet.lua",

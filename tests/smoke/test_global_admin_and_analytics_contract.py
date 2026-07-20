@@ -122,7 +122,7 @@ class SupabaseAnalyticsContractTest(unittest.TestCase):
         generic_route = nginx.index("location ~* ^/api/platform/projects/ {")
         self.assertLess(analytics_route, generic_route)
         self.assertIn(
-            "security/check_admin.lua",
+            "security/studio_project_admin_access.lua",
             nginx[analytics_route:generic_route],
         )
         self.assertIn(
@@ -133,9 +133,20 @@ class SupabaseAnalyticsContractTest(unittest.TestCase):
         analytics_rewrite = (
             ROOT / "studio" / "nginx" / "lua" / "proxy_rewrites" / "analytics.lua"
         ).read_text(encoding="utf-8")
-        self.assertIn("local project_ref = ngx.var.project_ref", analytics_rewrite)
+        self.assertIn("project_context.request_context", analytics_rewrite)
         self.assertIn("ngx.req.set_uri(project_uri, false)", analytics_rewrite)
         self.assertIn('ngx.req.set_header("X-Project-Ref", project_ref)', analytics_rewrite)
+
+        combined_gate = (
+            ROOT
+            / "studio"
+            / "nginx"
+            / "lua"
+            / "security"
+            / "studio_project_admin_access.lua"
+        ).read_text(encoding="utf-8")
+        self.assertIn('require("security.project_access").enforce()', combined_gate)
+        self.assertIn('require("security.admin_groups").is_admin(groups)', combined_gate)
 
     def test_legacy_direct_postgres_pipeline_is_not_wired(self) -> None:
         self.assertNotIn("vector_logs.sql", self.server_compose)

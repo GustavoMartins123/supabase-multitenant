@@ -1,5 +1,6 @@
 local method = ngx.req.get_method()
 local cjson = require("cjson.safe")
+local request_project_ref = require("project_context.request_context").capture()
 
 local uri = ngx.var.request_uri
 if method == "GET"
@@ -66,7 +67,7 @@ local function patch_s3_vectors_wrapper_query(body)
         return body
     end
 
-    local project_ref = ngx.var.project_ref
+    local project_ref = request_project_ref
     if type(project_ref) ~= "string"
         or not project_ref:match("^[a-z_][a-z0-9_]*$")
         or #project_ref < 3 or #project_ref > 40

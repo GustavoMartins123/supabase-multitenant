@@ -7,14 +7,13 @@ end
 local user_context_headers = require("project_context.user_context_headers")
 user_context_headers.apply(email, ngx.var.authelia_groups or "")
 
-local ref = ngx.var.project_ref
-local context = require("security.project_access").enforce(ref)
+local context = require("security.project_access").enforce()
 if type(context) ~= "table" then
     return
 end
 
 local get_service_key = require("security.get_service_key")
-local key = get_service_key(ref)
+local key = get_service_key(context.ref)
 if not key or key == "" then
     ngx.status = ngx.HTTP_SERVICE_UNAVAILABLE
     ngx.header["Content-Type"] = "application/json; charset=utf-8"

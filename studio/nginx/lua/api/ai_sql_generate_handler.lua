@@ -18,33 +18,23 @@ if not studio_request then
     return ngx.exit(ngx.HTTP_BAD_REQUEST)
 end
 
-local resolver = require("project_context.project_ref_resolver")
 local requested_ref = studio_request.projectRef
-local tab_ref = resolver.resolve()
-if requested_ref ~= nil and not resolver.valid_ref(requested_ref) then
+if requested_ref == nil then
+    ngx.header.content_type = "application/json"
+    ngx.status = ngx.HTTP_BAD_REQUEST
+    ngx.say('{"error": "projectRef required"}')
+    return ngx.exit(ngx.HTTP_BAD_REQUEST)
+end
+if not require("project_context.project_ref_resolver").valid_ref(requested_ref) then
     ngx.header.content_type = "application/json"
     ngx.status = ngx.HTTP_BAD_REQUEST
     ngx.say('{"error": "Invalid projectRef"}')
     return ngx.exit(ngx.HTTP_BAD_REQUEST)
 end
-if requested_ref == nil then
-    requested_ref = tab_ref
-end
-if resolver.is_slug_mode()
-    and resolver.valid_ref(tab_ref)
-    and requested_ref ~= tab_ref
-then
-    ngx.header.content_type = "application/json"
-    ngx.status = ngx.HTTP_CONFLICT
-    ngx.say('{"error": "projectRef does not match the current tab"}')
-    return ngx.exit(ngx.HTTP_CONFLICT)
-end
 local context = require("security.project_access").enforce(requested_ref)
 if type(context) ~= "table" then
     return
 end
-local project_ref = context.ref
-studio_request.projectRef = project_ref
 local function current_user_id()
     local email = user_identity.normalize_email(ngx.var.authelia_email or "")
     if email == "" then
@@ -79,7 +69,7 @@ else
     client_chat_id = "default"
 end
 
-local session_hash = ngx.md5(user_id .. ":" .. project_ref .. ":" .. client_chat_id)
+local session_hash = ngx.md5(user_id .. ":" .. context.ref .. ":" .. client_chat_id)
 studio_request.chatId = session_hash:sub(1, 8)
     .. "-" .. session_hash:sub(9, 12)
     .. "-" .. session_hash:sub(13, 16)
@@ -104,7 +94,7 @@ end
 ai_generate.generate(
     studio_request,
     user_id,
-    project_ref,
+    context.ref,
     os.getenv("OPENAI_API_KEY"),
     os.getenv("OPENAI_MODEL"),
     os.getenv("OPENAI_API_BASE_URL")

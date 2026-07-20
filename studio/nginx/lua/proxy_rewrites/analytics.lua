@@ -1,17 +1,10 @@
--- O Studio self-hosted usa "default" no path; o Logflare precisa do ref selecionado.
-local project_ref = ngx.var.project_ref
+local project_ref = require("project_context.request_context").capture()
 local uri = ngx.var.uri or ""
 
-if not project_ref
-    or project_ref == ""
-    or project_ref == "default"
-    or not project_ref:match("^[a-z_][a-z0-9_]*$")
-    or #project_ref < 3
-    or #project_ref > 40
-then
-    ngx.status = ngx.HTTP_BAD_REQUEST
-    ngx.say("Projeto nao selecionado para consulta de Analytics")
-    return ngx.exit(ngx.HTTP_BAD_REQUEST)
+if not project_ref then
+    -- The access phase returns the canonical JSON error. Do not invent a
+    -- second resolution/error path in rewrite phase.
+    return
 end
 
 local prefix, suffix = uri:match(

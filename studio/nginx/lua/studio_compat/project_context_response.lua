@@ -50,6 +50,23 @@ local function project_summary()
     return summary
 end
 
+local function projects_response()
+    local version = ngx.req.get_headers()["Version"]
+        or ngx.req.get_headers()["version"]
+    if tostring(version or "") ~= "2" then
+        return array({ project_detail() })
+    end
+
+    return {
+        projects = array({ project_summary() }),
+        pagination = {
+            count = 1,
+            limit = tonumber(ngx.var.arg_limit) or 100,
+            offset = tonumber(ngx.var.arg_offset) or 0,
+        },
+    }
+end
+
 local function project_settings()
     return {
         app_config = {
@@ -234,7 +251,7 @@ elseif uri:match("^/api/v1/projects/[^/]+/api%-keys/") then
 elseif uri == "/api/platform/profile" then
     payload = profile()
 elseif uri == "/api/platform/projects" or uri == "/api/platform/projects/" then
-    payload = array({ project_detail() })
+    payload = projects_response()
 elseif uri:match("^/api/platform/props/project/[^/]+/?$") then
     payload = { project = project_summary() }
 elseif uri:match("^/api/platform/projects/[^/]+/config/?$")

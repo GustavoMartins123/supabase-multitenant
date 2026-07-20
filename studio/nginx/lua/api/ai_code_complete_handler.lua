@@ -28,32 +28,23 @@ end
 
 ngx.log(ngx.INFO, "[AI-CODE-COMPLETE] Request from: ", ngx.var.authelia_email)
 
-local resolver = require("project_context.project_ref_resolver")
 local requested_ref = request.projectRef
-local tab_ref = resolver.resolve()
-if requested_ref ~= nil and not resolver.valid_ref(requested_ref) then
+if requested_ref == nil then
+    ngx.header.content_type = "application/json"
+    ngx.status = ngx.HTTP_BAD_REQUEST
+    ngx.say('{"error": "projectRef required"}')
+    return ngx.exit(ngx.HTTP_BAD_REQUEST)
+end
+if not require("project_context.project_ref_resolver").valid_ref(requested_ref) then
     ngx.header.content_type = "application/json"
     ngx.status = ngx.HTTP_BAD_REQUEST
     ngx.say('{"error": "Invalid projectRef"}')
     return ngx.exit(ngx.HTTP_BAD_REQUEST)
 end
-if requested_ref == nil then
-    requested_ref = tab_ref
-end
-if resolver.is_slug_mode()
-    and resolver.valid_ref(tab_ref)
-    and requested_ref ~= tab_ref
-then
-    ngx.header.content_type = "application/json"
-    ngx.status = ngx.HTTP_CONFLICT
-    ngx.say('{"error": "projectRef does not match the current tab"}')
-    return ngx.exit(ngx.HTTP_CONFLICT)
-end
 local context = require("security.project_access").enforce(requested_ref)
 if type(context) ~= "table" then
     return
 end
-request.projectRef = context.ref
 
 local result, err = ai_code.complete(
     request, 

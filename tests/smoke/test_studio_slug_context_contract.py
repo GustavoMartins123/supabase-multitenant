@@ -30,27 +30,20 @@ class StudioSlugContextContractTest(unittest.TestCase):
             self.assertNotIn("/set-project", source)
         self.assertNotIn("/set-project", settings)
 
-    def test_slug_resolver_prefers_path_and_uses_only_same_origin_referer(self) -> None:
+    def test_slug_resolver_accepts_only_explicit_path_or_tab_header(self) -> None:
         resolver = (LUA / "project_context/project_ref_resolver.lua").read_text(
             encoding="utf-8"
         )
-        self.assertIn('STUDIO_PROJECT_CONTEXT_MODE") or "slug"', resolver)
         self.assertIn('"^/project/([^/]+)"', resolver)
         self.assertIn('"^/api/platform/projects/([^/]+)"', resolver)
-        self.assertIn("ref_from_same_origin_referer", resolver)
-        self.assertIn("scheme:lower() ~= request_scheme", resolver)
-        self.assertIn("authority:lower() ~= request_authority:lower()", resolver)
-        self.assertIn("local path_ref, has_path_ref = ref_from_path", resolver)
-        self.assertIn('return path_ref or "default"', resolver)
-        slug_branch = resolver.split('if context_mode == "slug" then', 1)[1].split(
-            'if context_mode == "hybrid" then', 1
-        )[0]
-        self.assertNotIn("resolve_cookie()", slug_branch)
-        hybrid_branch = resolver.split('if context_mode == "hybrid" then', 1)[1].split(
-            "return resolve_cookie()\nend", 1
-        )[0]
-        self.assertIn('raw_path_ref == "default"', hybrid_branch)
-        self.assertIn("return resolve_cookie()", hybrid_branch)
+        self.assertIn("ngx.var.request_uri", resolver)
+        self.assertIn("ngx.var.http_x_studio_project_ref", resolver)
+        self.assertIn('return nil, "project_ref_mismatch"', resolver)
+        self.assertIn('return nil, "project_ref_missing"', resolver)
+        self.assertNotIn("http_referer", resolver)
+        self.assertNotIn("cookie_supabase_project", resolver)
+        self.assertNotIn("resolve_cookie", resolver)
+        self.assertNotIn('return "default"', resolver)
 
     def test_internal_context_authorizes_membership_and_never_returns_service_role(self) -> None:
         internal = (API_ROOT / "app/routers/internal.py").read_text(encoding="utf-8")
@@ -78,6 +71,25 @@ class StudioSlugContextContractTest(unittest.TestCase):
                     source.index('require("security.project_access").enforce'),
                     source.index('require("security.get_service_key")'),
                 )
+                self.assertIn("enforce()", source)
+                self.assertIn("get_service_key(context.ref)", source)
+                self.assertNotIn("project_ref = context.ref", source)
+
+    def test_access_gate_captures_context_once_without_repair_fallbacks(self) -> None:
+        gate = (LUA / "security/project_access.lua").read_text(encoding="utf-8")
+        request_context = (LUA / "project_context/request_context.lua").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("request_context.capture(expected_ref)", gate)
+        self.assertIn("ngx.ctx.studio_request_project_ref", request_context)
+        self.assertIn("local ref, resolve_err, source = resolver.resolve()", request_context)
+        self.assertIn("ngx.var.project_ref = ref", request_context)
+        self.assertIn('ngx.var.server_path = server_domain .. "/" .. ref .. "/"', request_context)
+        self.assertIn('ngx.req.set_header("X-Project-Ref", ref)', request_context)
+        self.assertIn('ngx.req.clear_header("X-Studio-Project-Ref")', request_context)
+        self.assertNotIn("Referer", request_context)
+        self.assertNotIn("cookie", request_context.lower())
 
     def test_browser_compatibility_responses_expose_only_the_anon_key(self) -> None:
         response = (LUA / "studio_compat/project_context_response.lua").read_text(
@@ -86,23 +98,29 @@ class StudioSlugContextContractTest(unittest.TestCase):
         self.assertIn("context.anon_key", response)
         self.assertIn('jwt_secret = ""', response)
         self.assertIn('serviceApiKey = ""', response)
+        self.assertIn('tostring(version or "") ~= "2"', response)
+        self.assertIn("projects = array({ project_summary() })", response)
+        self.assertIn("pagination = {", response)
         self.assertNotIn("context.service_role", response)
 
-    def test_ai_and_unscoped_s3_are_bound_to_the_tab_context(self) -> None:
+    def test_ai_and_s3_require_an_explicit_project_ref(self) -> None:
         sql_ai = (LUA / "api/ai_sql_generate_handler.lua").read_text(encoding="utf-8")
         code_ai = (LUA / "api/ai_code_complete_handler.lua").read_text(encoding="utf-8")
         upload_guard = (LUA / "security/upload_route_guard.lua").read_text(encoding="utf-8")
+        studio_patch = (ROOT / "studio/studio-slug/studio-project-context.patch").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("studio_request.projectRef", sql_ai)
         self.assertIn("project_access", sql_ai)
-        self.assertIn("if requested_ref ~= nil", sql_ai)
-        self.assertIn("requested_ref ~= tab_ref", sql_ai)
+        self.assertIn('"projectRef required"', sql_ai)
+        self.assertIn("enforce(requested_ref)", sql_ai)
         self.assertIn("request.projectRef", code_ai)
         self.assertIn("project_access", code_ai)
-        self.assertIn("if requested_ref ~= nil", code_ai)
-        self.assertIn("requested_ref ~= tab_ref", code_ai)
-        self.assertIn('uri == "/api/get-s3-keys"', upload_guard)
-        self.assertIn("project_ref_resolver", upload_guard)
+        self.assertIn('"projectRef required"', code_ai)
+        self.assertIn("enforce(requested_ref)", code_ai)
+        self.assertNotIn('/api/get-s3-keys', upload_guard)
+        self.assertIn('/api/projects/${encodeURIComponent(projectRef)}/storage/s3-keys', studio_patch)
 
     def test_ai_chat_history_is_namespaced_and_does_not_use_a_global_cookie(self) -> None:
         handler = (LUA / "api/ai_sql_generate_handler.lua").read_text(encoding="utf-8")
@@ -110,7 +128,7 @@ class StudioSlugContextContractTest(unittest.TestCase):
         schema = (ROOT / "studio/postgres/init.sql").read_text(encoding="utf-8")
         nginx = (ROOT / "studio/nginx/nginx.conf").read_text(encoding="utf-8")
 
-        self.assertIn('user_id .. ":" .. project_ref .. ":" .. client_chat_id', handler)
+        self.assertIn('user_id .. ":" .. context.ref .. ":" .. client_chat_id', handler)
         self.assertIn("studio_request.chatId = session_hash", handler)
         self.assertIn("local session_id = studio_request.chatId", generator)
         self.assertNotIn("cookie_ai_chat_session", generator)
@@ -119,16 +137,35 @@ class StudioSlugContextContractTest(unittest.TestCase):
         self.assertIn("ON CONFLICT (id) DO NOTHING", schema)
         self.assertIn("ai_chat_session=; Path=/; HttpOnly; Secure;", nginx)
 
-    def test_studio_image_remains_pinned_while_gateway_supplies_dynamic_context(self) -> None:
+    def test_custom_studio_build_is_pinned_and_patch_checked(self) -> None:
         env = (ROOT / "studio/.env.example").read_text(encoding="utf-8")
         compose = (ROOT / "studio/docker-compose.yml").read_text(encoding="utf-8")
         nginx = (ROOT / "studio/nginx/nginx.conf").read_text(encoding="utf-8")
         gateway_dockerfile = (ROOT / "studio/Dockerfile").read_text(encoding="utf-8")
+        studio_dockerfile = (ROOT / "studio/studio-slug/Dockerfile").read_text(
+            encoding="utf-8"
+        )
+        studio_patch = (ROOT / "studio/studio-slug/studio-project-context.patch").read_text(
+            encoding="utf-8"
+        )
 
-        self.assertIn("supabase/studio:2026.06.29-sha-20290c7", env)
-        self.assertIn("image: ${STUDIO_IMAGE}", compose)
+        full_sha = "20290c71bdc48bef1720bfe7d292f3b9e6154f7d"
+        self.assertIn(full_sha, env)
+        self.assertIn(full_sha, studio_dockerfile)
+        self.assertIn("git -C /src apply --check", studio_dockerfile)
+        self.assertIn("context: ./studio-slug", compose)
+        self.assertIn("STUDIO_SLUG_IMAGE", compose)
         self.assertIn("studio_compat/project_context_response.lua", nginx)
-        self.assertIn("STUDIO_PROJECT_CONTEXT_MODE=slug", env)
+        self.assertIn("X-Studio-Project-Ref", studio_patch)
+        self.assertIn(
+            "+        const response = await fetchHandler(url as RequestInfo, init)",
+            studio_patch,
+        )
+        self.assertIn(
+            "+        const response = await fetchHandler(aiEndpoint, {",
+            studio_patch,
+        )
+        self.assertNotIn("STUDIO_PROJECT_CONTEXT_MODE", env)
         self.assertIn("COPY nginx/lua/ /usr/local/openresty/lualib/", gateway_dockerfile)
 
     def test_nginx_gates_dynamic_routes_before_generic_fallbacks(self) -> None:
@@ -156,6 +193,12 @@ class StudioSlugContextContractTest(unittest.TestCase):
         mcp = nginx[mcp_start:mcp_end]
         self.assertIn("studio_project_access.lua", mcp)
         self.assertIn("mcp_disabled.lua", mcp)
+
+        project_start = nginx.index('location ~ "^/project/[a-z_][a-z0-9_]')
+        project_end = nginx.index("\n        }", project_start)
+        project_route = nginx[project_start:project_end]
+        self.assertIn("studio_project_access.lua", project_route)
+        self.assertNotIn("set_by_lua", project_route)
 
     def test_privileged_routes_fail_closed_without_a_project_ref_or_service_key(self) -> None:
         for relative in (

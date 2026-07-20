@@ -1,0 +1,558 @@
+diff --git a/apps/studio/components/interfaces/App/RouteValidationWrapper.tsx b/apps/studio/components/interfaces/App/RouteValidationWrapper.tsx
+index 4e0c9382d2..37b7961c94 100644
+--- a/apps/studio/components/interfaces/App/RouteValidationWrapper.tsx
++++ b/apps/studio/components/interfaces/App/RouteValidationWrapper.tsx
+@@ -27,7 +27,7 @@ export const RouteValidationWrapper = ({ children }: PropsWithChildren<{}>) => {
+     ? !!lastVisitedOrganization
+       ? `/org/${lastVisitedOrganization}`
+       : '/organizations'
+-    : '/project/default'
++    : '/'
+ 
+   /**
+    * Array of urls/routes that should be ignored
+diff --git a/apps/studio/components/interfaces/SQLEditor/SQLEditor.tsx b/apps/studio/components/interfaces/SQLEditor/SQLEditor.tsx
+index c3f736f8ca..5882d48381 100644
+--- a/apps/studio/components/interfaces/SQLEditor/SQLEditor.tsx
++++ b/apps/studio/components/interfaces/SQLEditor/SQLEditor.tsx
+@@ -68,7 +68,7 @@ import ResizableAIWidget from '@/components/ui/AIEditor/ResizableAIWidget'
+ import { GridFooter } from '@/components/ui/GridFooter'
+ import { useSqlTitleGenerateMutation } from '@/data/ai/sql-title-mutation'
+ import { useDatabaseEventTriggersQuery } from '@/data/database-event-triggers/database-event-triggers-query'
+-import { constructHeaders, isValidConnString } from '@/data/fetchers'
++import { constructHeaders, fetchHandler, isValidConnString } from '@/data/fetchers'
+ import { lintKeys } from '@/data/lint/keys'
+ import { useReadReplicasQuery } from '@/data/read-replicas/replicas-query'
+ import { useExecuteSqlMutation } from '@/data/sql/execute-sql-mutation'
+@@ -675,7 +675,7 @@ export const SQLEditor = () => {
+       try {
+         setIsCompletionLoading(true)
+ 
+-        const response = await fetch(`${BASE_PATH}/api/ai/code/complete`, {
++        const response = await fetchHandler(`${BASE_PATH}/api/ai/code/complete`, {
+           method: 'POST',
+           headers: {
+             'Content-Type': 'application/json',
+diff --git a/apps/studio/components/ui/AIEditor/index.tsx b/apps/studio/components/ui/AIEditor/index.tsx
+index ce8c6865a7..2b6f71f9e4 100644
+--- a/apps/studio/components/ui/AIEditor/index.tsx
++++ b/apps/studio/components/ui/AIEditor/index.tsx
+@@ -11,7 +11,7 @@ import { DiffEditor } from '../DiffEditor'
+ import ResizableAIWidget from './ResizableAIWidget'
+ import { getEditorSelectionParts } from './utils'
+ import { SIDEBAR_KEYS } from '@/components/layouts/ProjectLayout/LayoutSidebar/LayoutSidebarProvider'
+-import { constructHeaders } from '@/data/fetchers'
++import { constructHeaders, fetchHandler } from '@/data/fetchers'
+ import { useLatest } from '@/hooks/misc/useLatest'
+ import { SHORTCUT_IDS } from '@/state/shortcuts/registry'
+ import { useIsShortcutEnabled } from '@/state/shortcuts/useIsShortcutEnabled'
+@@ -105,7 +105,7 @@ export const AIEditor = ({
+         if (!aiEndpoint) throw new Error('AI endpoint is not configured')
+         setIsCompletionLoading(true)
+ 
+-        const response = await fetch(aiEndpoint, {
++        const response = await fetchHandler(aiEndpoint, {
+           method: 'POST',
+           headers: {
+             'Content-Type': 'application/json',
+diff --git a/apps/studio/components/layouts/AccountLayout/AccountLayout.tsx b/apps/studio/components/layouts/AccountLayout/AccountLayout.tsx
+index 6a7b39be1c..709b911c53 100644
+--- a/apps/studio/components/layouts/AccountLayout/AccountLayout.tsx
++++ b/apps/studio/components/layouts/AccountLayout/AccountLayout.tsx
+@@ -39,7 +39,7 @@ const AccountLayout = ({ children, title }: PropsWithChildren<AccountLayoutProps
+         ? `/org/${lastVisitedOrganization}`
+         : IS_PLATFORM
+           ? '/organizations'
+-          : '/project/default'
++          : '/'
+ 
+   const pageTitle = buildStudioPageTitle({
+     section: title,
+@@ -120,7 +120,7 @@ const AccountLayout = ({ children, title }: PropsWithChildren<AccountLayoutProps
+ 
+   useEffect(() => {
+     if (!IS_PLATFORM && currentPath !== '/account/me') {
+-      router.push('/project/default')
++      router.push('/')
+     }
+   }, [currentPath, router])
+ 
+diff --git a/apps/studio/components/layouts/DefaultLayout.tsx b/apps/studio/components/layouts/DefaultLayout.tsx
+index 5670934aaf..2b33349e47 100644
+--- a/apps/studio/components/layouts/DefaultLayout.tsx
++++ b/apps/studio/components/layouts/DefaultLayout.tsx
+@@ -51,7 +51,7 @@ export const DefaultLayout = ({
+         ? `/org/${lastVisitedOrganization}`
+         : IS_PLATFORM
+           ? '/organizations'
+-          : '/project/default'
++          : '/'
+     : undefined
+ 
+   useCheckLatestDeploy()
+diff --git a/apps/studio/components/layouts/Navigation/LayoutHeader/HomeIcon.tsx b/apps/studio/components/layouts/Navigation/LayoutHeader/HomeIcon.tsx
+index 0d3b227d3d..a127c5c025 100644
+--- a/apps/studio/components/layouts/Navigation/LayoutHeader/HomeIcon.tsx
++++ b/apps/studio/components/layouts/Navigation/LayoutHeader/HomeIcon.tsx
+@@ -1,3 +1,4 @@
++import { useParams } from 'common'
+ import Link from 'next/link'
+ import { useRouter } from 'next/router'
+ import { cn } from 'ui'
+@@ -10,6 +11,7 @@ import { IS_PLATFORM } from '@/lib/constants'
+ import { useTrack } from '@/lib/telemetry/track'
+ 
+ export const HomeIcon = ({ className }: { className?: string }) => {
++  const { ref } = useParams()
+   const { data: selectedOrganization } = useSelectedOrganizationQuery()
+   const { data: organizations } = useOrganizationsQuery()
+   const track = useTrack()
+@@ -26,7 +28,7 @@ export const HomeIcon = ({ className }: { className?: string }) => {
+     return '/organizations'
+   }
+ 
+-  const href = IS_PLATFORM ? getDefaultOrgRedirect() : '/project/default'
++  const href = IS_PLATFORM ? getDefaultOrgRedirect() : ref ? `/project/${ref}` : '/'
+ 
+   return (
+     <Link
+diff --git a/apps/studio/data/fetchers.ts b/apps/studio/data/fetchers.ts
+index 1ce51f26e8..a2a1f5be7f 100644
+--- a/apps/studio/data/fetchers.ts
++++ b/apps/studio/data/fetchers.ts
+@@ -15,9 +15,45 @@ import { ErrorMetadata } from '@/types/base'
+ 
+ const DEFAULT_HEADERS = { Accept: 'application/json' }
+ 
++const STUDIO_PROJECT_PATH = /^\/project\/([a-z_][a-z0-9_]{2,39})(?:\/|$)/
++const STUDIO_PROJECT_HEADER = 'X-Studio-Project-Ref'
++
++export function getStudioProjectRef(pathname?: string) {
++  const currentPath = pathname ?? (typeof window === 'undefined' ? '' : window.location.pathname)
++  return currentPath.match(STUDIO_PROJECT_PATH)?.[1]
++}
++
++function isSameOriginStudioRequest(input: RequestInfo | URL) {
++  if (typeof window === 'undefined') return false
++
++  const rawUrl =
++    typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
++
++  try {
++    const url = new URL(rawUrl, window.location.origin)
++    return url.origin === window.location.origin
++  } catch {
++    return false
++  }
++}
++
++function withStudioProjectContext(
++  input: RequestInfo | URL,
++  init?: RequestInit
++): RequestInit | undefined {
++  const projectRef = getStudioProjectRef()
++  if (!projectRef || !isSameOriginStudioRequest(input)) return init
++
++  const headers = new Headers(input instanceof Request ? input.headers : undefined)
++  new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
++  headers.set(STUDIO_PROJECT_HEADER, projectRef)
++
++  return { ...init, headers }
++}
++
+ export const fetchHandler: typeof fetch = async (input, init) => {
+   try {
+-    return await fetch(input, init)
++    return await fetch(input, withStudioProjectContext(input, init))
+   } catch (err: any) {
+     if (err instanceof TypeError && err.message === 'Failed to fetch') {
+       console.error(err)
+@@ -327,7 +363,7 @@ export async function fetchGet<T = any>(
+       ...DEFAULT_HEADERS,
+       ...otherHeaders,
+     })
+-    const response = await fetch(url, {
++    const response = await fetchHandler(url, {
+       headers,
+       method: 'GET',
+       referrerPolicy: 'no-referrer-when-downgrade',
+@@ -358,7 +394,7 @@ export async function fetchPost<T = any>(
+       ...DEFAULT_HEADERS,
+       ...otherHeaders,
+     })
+-    const response = await fetch(url, {
++    const response = await fetchHandler(url, {
+       headers,
+       method: 'POST',
+       body: JSON.stringify(data),
+@@ -391,7 +427,7 @@ export async function fetchHeadWithTimeout<T = any>(
+       ...otherHeaders,
+     })
+ 
+-    const response = await fetch(url, {
++    const response = await fetchHandler(url, {
+       method: 'HEAD',
+       referrerPolicy: 'no-referrer-when-downgrade',
+       headers,
+diff --git a/apps/studio/data/misc/keys.ts b/apps/studio/data/misc/keys.ts
+index 36d2eed504..cd625fb250 100644
+--- a/apps/studio/data/misc/keys.ts
++++ b/apps/studio/data/misc/keys.ts
+@@ -5,5 +5,5 @@ export const miscKeys = {
+   ipAddress: () => ['ip-address'] as const,
+   clockSkew: () => ['clock-skew'] as const,
+   enabledFeaturesOverride: () => ['enabled-features-override'] as const,
+-  localS3Keys: () => ['local-s3-keys'] as const,
++  localS3Keys: (projectRef: string | undefined) => ['local-s3-keys', projectRef] as const,
+ }
+diff --git a/apps/studio/data/misc/local-s3-keys-query.ts b/apps/studio/data/misc/local-s3-keys-query.ts
+index 1ca08be065..b3197f5f03 100644
+--- a/apps/studio/data/misc/local-s3-keys-query.ts
++++ b/apps/studio/data/misc/local-s3-keys-query.ts
+@@ -5,9 +5,11 @@ import { fetchHandler } from '@/data/fetchers'
+ import { BASE_PATH, IS_PLATFORM } from '@/lib/constants'
+ import type { ResponseError, UseCustomQueryOptions } from '@/types'
+ 
+-export async function getLocalS3Keys() {
++export async function getLocalS3Keys(projectRef: string) {
+   try {
+-    const data = await fetchHandler(`${BASE_PATH}/api/get-s3-keys`).then((res) => res.json())
++    const data = await fetchHandler(
++      `${BASE_PATH}/api/projects/${encodeURIComponent(projectRef)}/storage/s3-keys`
++    ).then((res) => res.json())
+     return data as { accessKey?: string; secretKey?: string }
+   } catch (error) {
+     throw error
+@@ -20,13 +22,16 @@ export type LocalS3KeysError = ResponseError
+ /**
+  * Specifically only for local CLI - to use the S3 keys as defined in the env file
+  */
+-export const useLocalS3KeysQuery = <TData = LocalS3KeysData>({
+-  enabled = true,
+-  ...options
+-}: UseCustomQueryOptions<LocalS3KeysData, LocalS3KeysError, TData> = {}) =>
++export const useLocalS3KeysQuery = <TData = LocalS3KeysData>(
++  projectRef: string | undefined,
++  {
++    enabled = true,
++    ...options
++  }: UseCustomQueryOptions<LocalS3KeysData, LocalS3KeysError, TData> = {}
++) =>
+   useQuery<LocalS3KeysData, LocalS3KeysError, TData>({
+-    queryKey: miscKeys.localS3Keys(),
+-    queryFn: () => getLocalS3Keys(),
+-    enabled: enabled && !IS_PLATFORM,
++    queryKey: miscKeys.localS3Keys(projectRef),
++    queryFn: () => getLocalS3Keys(projectRef!),
++    enabled: enabled && !IS_PLATFORM && projectRef !== undefined,
+     ...options,
+   })
+diff --git a/apps/studio/data/profile/keys.ts b/apps/studio/data/profile/keys.ts
+index 829e7986d0..f507a8f02d 100644
+--- a/apps/studio/data/profile/keys.ts
++++ b/apps/studio/data/profile/keys.ts
+@@ -1,5 +1,6 @@
+ export const profileKeys = {
+-  profile: () => ['profile'] as const,
++  profile: (projectRef?: string) =>
++    projectRef ? (['profile', projectRef] as const) : (['profile'] as const),
+   mfaFactors: () => ['mfa', 'factors'] as const,
+   identities: () => ['profile', 'identities'] as const,
+   aaLevel: () => ['mfa', 'aaLevel'] as const,
+diff --git a/apps/studio/data/profile/profile-query.ts b/apps/studio/data/profile/profile-query.ts
+index 122ce394d3..fc56e90f40 100644
+--- a/apps/studio/data/profile/profile-query.ts
++++ b/apps/studio/data/profile/profile-query.ts
+@@ -1,4 +1,5 @@
+ import { useQuery } from '@tanstack/react-query'
++import { useParams } from 'common'
+ 
+ import { profileKeys } from './keys'
+ import type { Profile } from './types'
+@@ -31,11 +32,13 @@ export const useProfileQuery = <TData = ProfileData>({
+   enabled = true,
+   ...options
+ }: UseCustomQueryOptions<ProfileData, ProfileError, TData> = {}) => {
++  const { ref } = useParams()
++
+   return useQuery<ProfileData, ProfileError, TData>({
+-    queryKey: profileKeys.profile(),
++    queryKey: profileKeys.profile(IS_PLATFORM ? undefined : ref),
+     queryFn: ({ signal }) => getProfile(signal),
+     staleTime: 1000 * 60 * 30,
+     ...options,
+-    enabled,
++    enabled: enabled && (IS_PLATFORM || ref !== undefined),
+   })
+ }
+diff --git a/apps/studio/data/projects/keys.ts b/apps/studio/data/projects/keys.ts
+index 765133e636..e4f7d3d25b 100644
+--- a/apps/studio/data/projects/keys.ts
++++ b/apps/studio/data/projects/keys.ts
+@@ -1,11 +1,14 @@
+ export const INFINITE_PROJECTS_KEY_PREFIX = 'all-projects-infinite'
+ 
+ export const projectKeys = {
+-  infiniteList: (params?: {
+-    limit: number
+-    sort?: 'name_asc' | 'name_desc' | 'created_asc' | 'created_desc'
+-    search?: string
+-  }) => [INFINITE_PROJECTS_KEY_PREFIX, params].filter(Boolean),
++  infiniteList: (
++    params?: {
++      limit: number
++      sort?: 'name_asc' | 'name_desc' | 'created_asc' | 'created_desc'
++      search?: string
++    },
++    projectRef?: string
++  ) => [INFINITE_PROJECTS_KEY_PREFIX, projectRef, params].filter(Boolean),
+   infiniteListByOrg: (
+     slug: string | undefined,
+     params?: {
+diff --git a/apps/studio/data/projects/projects-infinite-query.ts b/apps/studio/data/projects/projects-infinite-query.ts
+index fe114fa911..c14906b625 100644
+--- a/apps/studio/data/projects/projects-infinite-query.ts
++++ b/apps/studio/data/projects/projects-infinite-query.ts
+@@ -1,8 +1,10 @@
+ import { InfiniteData, useInfiniteQuery } from '@tanstack/react-query'
+ import { components } from 'api-types'
++import { useParams } from 'common'
+ 
+ import { projectKeys } from './keys'
+ import { get, handleError } from '@/data/fetchers'
++import { IS_PLATFORM } from '@/lib/constants'
+ import { useProfile } from '@/lib/profile'
+ import type { ResponseError, UseCustomInfiniteQueryOptions } from '@/types'
+ 
+@@ -59,11 +61,12 @@ export const useProjectsInfiniteQuery = <TData = ProjectsInfiniteData>(
+   > = {}
+ ) => {
+   const { profile } = useProfile()
++  const { ref } = useParams()
+   return useInfiniteQuery({
+-    queryKey: projectKeys.infiniteList({ limit, sort, search }),
++    queryKey: projectKeys.infiniteList({ limit, sort, search }, IS_PLATFORM ? undefined : ref),
+     queryFn: ({ signal, pageParam }) =>
+       getProjects({ limit, page: pageParam, sort, search }, signal),
+-    enabled: enabled && profile !== undefined,
++    enabled: enabled && profile !== undefined && (IS_PLATFORM || ref !== undefined),
+     staleTime: 30 * 60 * 1000, // 30 minutes
+     initialPageParam: 0,
+     getNextPageParam(lastPage, pages) {
+diff --git a/apps/studio/data/storage/s3-vectors-wrapper-create-mutation.ts b/apps/studio/data/storage/s3-vectors-wrapper-create-mutation.ts
+index c77b8c329a..3467178e5f 100644
+--- a/apps/studio/data/storage/s3-vectors-wrapper-create-mutation.ts
++++ b/apps/studio/data/storage/s3-vectors-wrapper-create-mutation.ts
+@@ -18,7 +18,7 @@ import { useSelectedProjectQuery } from '@/hooks/misc/useSelectedProject'
+ 
+ export const useS3VectorsWrapperCreateMutation = () => {
+   const { data: project } = useSelectedProjectQuery()
+-  const { data: localKeys } = useLocalS3KeysQuery()
++  const { data: localKeys } = useLocalS3KeysQuery(project?.ref)
+   const { isPlatform } = useDeploymentMode()
+ 
+   const { data: settings } = useProjectSettingsV2Query({ projectRef: project?.ref })
+diff --git a/apps/studio/pages/sign-in.tsx b/apps/studio/pages/sign-in.tsx
+index aeffd266dc..015436ac71 100644
+--- a/apps/studio/pages/sign-in.tsx
++++ b/apps/studio/pages/sign-in.tsx
+@@ -79,7 +79,7 @@ const SignInPage: NextPageWithLayout = () => {
+   useEffect(() => {
+     if (!IS_PLATFORM) {
+       // on selfhosted instance just redirect to projects page
+-      router.replace('/project/default')
++      router.replace('/')
+     }
+   }, [router])
+ 
+diff --git a/apps/studio/data/config/deployment-mode-query.ts b/apps/studio/data/config/deployment-mode-query.ts
+index 1ecd1e34c8..c5a9e714f2 100644
+--- a/apps/studio/data/config/deployment-mode-query.ts
++++ b/apps/studio/data/config/deployment-mode-query.ts
+@@ -1,7 +1,7 @@
+ import { useQuery } from '@tanstack/react-query'
+ 
+ import { configKeys } from './keys'
+-import { handleError } from '@/data/fetchers'
++import { fetchHandler, handleError } from '@/data/fetchers'
+ import { API_URL, IS_PLATFORM } from '@/lib/constants'
+ import type { ResponseError, UseCustomQueryOptions } from '@/types'
+ 
+@@ -10,7 +10,7 @@ export type DeploymentModeResponse = {
+ }
+ 
+ export async function getDeploymentMode(signal?: AbortSignal): Promise<DeploymentModeResponse> {
+-  const response = await fetch(`${API_URL}/platform/deployment-mode`, { signal })
++  const response = await fetchHandler(`${API_URL}/platform/deployment-mode`, { signal })
+   const body = await response.json()
+ 
+   if (!response.ok) {
+diff --git a/apps/studio/data/database-integrations/stripe/stripe-sync-install-mutation.ts b/apps/studio/data/database-integrations/stripe/stripe-sync-install-mutation.ts
+index 6aebe11d93..f000b5de5e 100644
+--- a/apps/studio/data/database-integrations/stripe/stripe-sync-install-mutation.ts
++++ b/apps/studio/data/database-integrations/stripe/stripe-sync-install-mutation.ts
+@@ -4,6 +4,7 @@ import { toast } from 'sonner'
+ 
+ import { stripeSyncKeys } from './keys'
+ import { databaseKeys } from '@/data/database/keys'
++import { fetchHandler } from '@/data/fetchers'
+ import { BASE_PATH } from '@/lib/constants'
+ import { useTrack } from '@/lib/telemetry/track'
+ import type { ResponseError } from '@/types'
+@@ -26,7 +27,7 @@ export async function installStripeSync({
+ }: StripeSyncInstallVariables): Promise<StripeSyncInstallResponse> {
+   const accessToken = await getAccessToken()
+ 
+-  const response = await fetch(`${BASE_PATH}/api/integrations/stripe-sync`, {
++  const response = await fetchHandler(`${BASE_PATH}/api/integrations/stripe-sync`, {
+     method: 'POST',
+     headers: {
+       'Content-Type': 'application/json',
+diff --git a/apps/studio/data/database-integrations/stripe/stripe-sync-uninstall-mutation.ts b/apps/studio/data/database-integrations/stripe/stripe-sync-uninstall-mutation.ts
+index 19057aa0eb..4ee592e8cc 100644
+--- a/apps/studio/data/database-integrations/stripe/stripe-sync-uninstall-mutation.ts
++++ b/apps/studio/data/database-integrations/stripe/stripe-sync-uninstall-mutation.ts
+@@ -4,6 +4,7 @@ import { toast } from 'sonner'
+ 
+ import { stripeSyncKeys } from './keys'
+ import { databaseKeys } from '@/data/database/keys'
++import { fetchHandler } from '@/data/fetchers'
+ import { BASE_PATH } from '@/lib/constants'
+ import { useTrack } from '@/lib/telemetry/track'
+ import type { ResponseError } from '@/types'
+@@ -24,7 +25,7 @@ export async function uninstallStripeSync({
+ }: StripeSyncUninstallVariables): Promise<StripeSyncUninstallResponse> {
+   const accessToken = await getAccessToken()
+ 
+-  const response = await fetch(`${BASE_PATH}/api/integrations/stripe-sync`, {
++  const response = await fetchHandler(`${BASE_PATH}/api/integrations/stripe-sync`, {
+     method: 'DELETE',
+     headers: {
+       'Content-Type': 'application/json',
+diff --git a/apps/studio/data/graphql/execute.ts b/apps/studio/data/graphql/execute.ts
+index fbafe81079..abe7fad98d 100644
+--- a/apps/studio/data/graphql/execute.ts
++++ b/apps/studio/data/graphql/execute.ts
+@@ -1,12 +1,12 @@
+ import type { TypedDocumentString } from './graphql'
+-import { handleError } from '@/data/fetchers'
++import { fetchHandler, handleError } from '@/data/fetchers'
+ 
+ export async function executeGraphQL<TResult, TVariables>(
+   query: TypedDocumentString<TResult, TVariables>,
+   { variables, signal }: { variables?: TVariables; signal?: AbortSignal }
+ ) {
+   try {
+-    const response = await fetch('/api/content/graphql', {
++    const response = await fetchHandler('/api/content/graphql', {
+       method: 'POST',
+       headers: {
+         'Content-Type': 'application/json',
+diff --git a/apps/studio/data/platform/incident-banner-query.ts b/apps/studio/data/platform/incident-banner-query.ts
+index 2b9fa3f8b5..918f42aee3 100644
+--- a/apps/studio/data/platform/incident-banner-query.ts
++++ b/apps/studio/data/platform/incident-banner-query.ts
+@@ -2,6 +2,7 @@ import { queryOptions } from '@tanstack/react-query'
+ import { IS_PLATFORM } from 'common'
+ 
+ import { platformKeys } from './keys'
++import { fetchHandler } from '@/data/fetchers'
+ import { BASE_PATH } from '@/lib/constants'
+ 
+ export interface IncidentBannerItem {
+@@ -18,7 +19,7 @@ export type IncidentBannerData = { incidents: Array<IncidentBannerItem> }
+ export type IncidentBannerError = unknown
+ 
+ async function getIncidentBanner(signal?: AbortSignal): Promise<IncidentBannerData> {
+-  const response = await fetch(`${BASE_PATH}/api/incident-banner`, {
++  const response = await fetchHandler(`${BASE_PATH}/api/incident-banner`, {
+     signal,
+     method: 'GET',
+     credentials: 'omit',
+diff --git a/apps/studio/data/platform/incident-status-query.ts b/apps/studio/data/platform/incident-status-query.ts
+index 42c6c62725..192f6fde5c 100644
+--- a/apps/studio/data/platform/incident-status-query.ts
++++ b/apps/studio/data/platform/incident-status-query.ts
+@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
+ import { partition } from 'lodash'
+ 
+ import { platformKeys } from './keys'
++import { fetchHandler } from '@/data/fetchers'
+ import type { IncidentInfo } from '@/lib/api/incident-status'
+ import { BASE_PATH, IS_PLATFORM, IS_TEST_ENV } from '@/lib/constants'
+ import { ResponseError, UseCustomQueryOptions } from '@/types'
+@@ -9,7 +10,7 @@ import { ResponseError, UseCustomQueryOptions } from '@/types'
+ export async function getIncidentStatus(
+   signal?: AbortSignal
+ ): Promise<{ maintenanceEvents: IncidentInfo[]; incidents: IncidentInfo[] }> {
+-  const response = await fetch(`${BASE_PATH}/api/incident-status`, {
++  const response = await fetchHandler(`${BASE_PATH}/api/incident-status`, {
+     signal,
+     method: 'GET',
+     credentials: 'omit',
+diff --git a/apps/studio/data/support/generate-attachment-urls-mutation.ts b/apps/studio/data/support/generate-attachment-urls-mutation.ts
+index 56ff2a306f..1221dda11e 100644
+--- a/apps/studio/data/support/generate-attachment-urls-mutation.ts
++++ b/apps/studio/data/support/generate-attachment-urls-mutation.ts
+@@ -1,7 +1,7 @@
+ import { useMutation } from '@tanstack/react-query'
+ import { toast } from 'sonner'
+ 
+-import { constructHeaders } from '@/data/fetchers'
++import { constructHeaders, fetchHandler } from '@/data/fetchers'
+ import { BASE_PATH } from '@/lib/constants'
+ import type { ResponseError, UseCustomMutationOptions } from '@/types'
+ 
+@@ -24,7 +24,7 @@ export async function generateAttachmentURLs({
+   const body = bucket ? JSON.stringify({ filenames, bucket }) : JSON.stringify({ filenames })
+ 
+   try {
+-    const response = await fetch(`${BASE_PATH}/api/generate-attachment-url`, {
++    const response = await fetchHandler(`${BASE_PATH}/api/generate-attachment-url`, {
+       method: 'POST',
+       headers,
+       body,
+diff --git a/apps/studio/state/ai-assistant-state.tsx b/apps/studio/state/ai-assistant-state.tsx
+index 7c31bfef13..e361af6179 100644
+--- a/apps/studio/state/ai-assistant-state.tsx
++++ b/apps/studio/state/ai-assistant-state.tsx
+@@ -7,7 +7,7 @@ import { createContext, PropsWithChildren, useContext, useEffect, useState } fro
+ import { v4 as uuidv4 } from 'uuid'
+ import { proxy, ref, snapshot, subscribe, useSnapshot } from 'valtio'
+ 
+-import { constructHeaders } from '@/data/fetchers'
++import { constructHeaders, fetchHandler } from '@/data/fetchers'
+ import { useSelectedProjectQuery } from '@/hooks/misc/useSelectedProject'
+ import { prepareMessagesForAPI } from '@/lib/ai/message-utils'
+ import { isKnownAssistantModelId } from '@/lib/ai/model.utils'
+@@ -236,7 +236,7 @@ function createChatInstance(
+     transport: new DefaultChatTransport({
+       api: `${BASE_PATH}/api/ai/sql/generate-v4`,
+       fetch: async (url, init) => {
+-        const response = await globalThis.fetch(url as RequestInfo, init)
++        const response = await fetchHandler(url as RequestInfo, init)
+         const spanId = response.headers.get('x-braintrust-span-id')
+         if (spanId) {
+           state.pendingSpanIds[options.id] = spanId
+diff --git a/apps/studio/redirects.shared.ts b/apps/studio/redirects.shared.ts
+index a786fac35d..782359628e 100644
+--- a/apps/studio/redirects.shared.ts
++++ b/apps/studio/redirects.shared.ts
+@@ -31,12 +31,11 @@ export const PLATFORM_REDIRECTS: StudioRedirect[] = [
+ ]
+ 
+ export const SELF_HOSTED_REDIRECTS: StudioRedirect[] = [
+-  { source: '/', destination: '/project/default', permanent: false },
+-  { source: '/register', destination: '/project/default', permanent: false },
+-  { source: '/signup', destination: '/project/default', permanent: false },
+-  { source: '/signin', destination: '/project/default', permanent: false },
+-  { source: '/login', destination: '/project/default', permanent: false },
+-  { source: '/log-in', destination: '/project/default', permanent: false },
++  { source: '/register', destination: '/', permanent: false },
++  { source: '/signup', destination: '/', permanent: false },
++  { source: '/signin', destination: '/', permanent: false },
++  { source: '/login', destination: '/', permanent: false },
++  { source: '/log-in', destination: '/', permanent: false },
+   { source: '/project/:ref/building', destination: '/project/:ref', permanent: false },
+ ]
+ 
