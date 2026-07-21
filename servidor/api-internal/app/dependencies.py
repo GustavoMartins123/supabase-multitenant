@@ -268,6 +268,21 @@ async def ensure_project_admin_access(
         raise HTTPException(403, message)
 
 
+async def ensure_project_owner_access(
+    conn: asyncpg.Connection,
+    *,
+    project_id: str,
+    auth_user: dict[str, Any],
+    message: str = "Acesso negado: apenas o dono do projeto ou administrador do sistema",
+) -> None:
+    owner_id = await conn.fetchval(
+        "SELECT owner_id FROM projects WHERE id = $1",
+        project_id,
+    )
+    if owner_id != auth_user["db_user_id"] and not auth_user["is_global_admin"]:
+        raise HTTPException(403, message)
+
+
 async def audit_project_member_change(
     conn: asyncpg.Connection,
     *,

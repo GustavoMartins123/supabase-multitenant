@@ -53,9 +53,9 @@ Não existe comando que aceite argv, path ou SQL arbitrário. Os comandos de
 ponto de restauração recebem apenas UUIDs validados nos dois lados; o path resolvido fica confinado a `servidor/backups/<tenant_uuid>/`, onde o
 `tenant_uuid` é recebido do control plane e precisa coincidir com o
 `PROJECT_UUID` do `.env`. Em projetos novos ele equivale a `projects.id`; o
-mapeamento separado existe para preservar projetos legados. Diferente do restante
-do lifecycle, eles são autorizados para qualquer membro do projeto
-(`PROJECT_MEMBER_COMMANDS`), além de owner e admin global.
+mapeamento separado existe para preservar projetos legados. Criar um ponto frio
+(`backup_project`) exige admin do projeto, owner ou admin global. Restaurar e
+excluir pontos (`PROJECT_OWNER_COMMANDS`) exigem owner ou admin global.
 
 ## Segurança
 
@@ -66,8 +66,9 @@ do lifecycle, eles são autorizados para qualquer membro do projeto
    forjar execução no host.
 2. **Reautorização no agent** — o agent reconsulta `users`, `user_groups`,
    `projects` e `project_members` e aplica a mesma matriz da API:
-   admin global para o fluxo de delete e limpeza de tenants; owner, admin
-   do projeto ou admin global para o restante. O `project_uuid` da intenção
+   admin global para o fluxo de exclusão integral do projeto e limpeza de
+   tenants; owner ou admin global para restaurar/excluir pontos; owner, admin
+   do projeto ou admin global para os demais comandos. O `project_uuid` da intenção
    precisa bater com `projects.id` (exceto nos passos do delete que rodam
    após a remoção da linha); quando os args carregam `tenant_uuid`, ele também
    precisa bater com `projects.tenant_uuid`.

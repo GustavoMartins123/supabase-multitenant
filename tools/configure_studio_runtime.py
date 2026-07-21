@@ -89,7 +89,7 @@ def ensure_secret_files(root: Path, *, rotate: bool) -> tuple[Path, ...]:
 
 
 def certificate_sans(host: str) -> str:
-    entries = ["DNS:authelia", "DNS:localhost", "IP:127.0.0.1"]
+    entries = ["DNS:authelia", "DNS:nginx", "DNS:localhost", "IP:127.0.0.1"]
     try:
         address = ipaddress.ip_address(host)
     except ValueError:

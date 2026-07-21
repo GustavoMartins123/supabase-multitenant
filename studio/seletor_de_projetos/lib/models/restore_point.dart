@@ -70,10 +70,19 @@ class RestorePoint {
 }
 
 class RestorePointList {
-  const RestorePointList({required this.limit, required this.points});
+  const RestorePointList({
+    required this.limit,
+    required this.points,
+    required this.canCreate,
+    required this.canRestore,
+    required this.canDelete,
+  });
 
   final int limit;
   final List<RestorePoint> points;
+  final bool canCreate;
+  final bool canRestore;
+  final bool canDelete;
 
   int get activeCount => points.where((p) => !p.isFailed).length;
 }

@@ -89,6 +89,7 @@ from app.dependencies import (
     audit_project_member_change,
     ensure_project_admin_access,
     ensure_project_member_access,
+    ensure_project_owner_access,
     get_project_member_row,
     get_project_role,
     get_project_row,
@@ -1495,6 +1496,13 @@ async def list_project_restore_points(
             project_id=project_row["id"],
             auth_user=auth_user,
         )
+        role = await get_project_role(
+            conn,
+            project_id=project_row["id"],
+            auth_user=auth_user,
+        )
+        is_owner = project_row["owner_id"] == auth_user["db_user_id"]
+        is_global_admin = auth_user["is_global_admin"]
         rows = await conn.fetch(
             """
             SELECT
@@ -1511,6 +1519,11 @@ async def list_project_restore_points(
     return {
         "project": project_name,
         "limit": RESTORE_POINT_LIMIT,
+        "permissions": {
+            "can_create": is_global_admin or is_owner or role == "admin",
+            "can_restore": is_global_admin or is_owner,
+            "can_delete": is_global_admin or is_owner,
+        },
         "points": [_serialize_restore_point(row) for row in rows],
     }
 
@@ -1536,10 +1549,11 @@ async def create_project_restore_point(
                 "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
                 str(project_id),
             )
-            await ensure_project_member_access(
+            await ensure_project_admin_access(
                 conn,
                 project_id=project_id,
                 auth_user=auth_user,
+                message="Apenas admins podem criar pontos de restauração",
             )
             active = await _count_active_restore_points(conn, project_id)
             if active >= RESTORE_POINT_LIMIT:
@@ -1634,10 +1648,11 @@ async def restore_project_restore_point(
                 "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
                 str(project_id),
             )
-            await ensure_project_member_access(
+            await ensure_project_owner_access(
                 conn,
                 project_id=project_id,
                 auth_user=auth_user,
+                message="Apenas o dono do projeto ou admin global pode restaurar o projeto",
             )
             point = await _fetch_restore_point_locked(conn, project_id, parsed_point)
             if point["status"] != "ready":
@@ -1755,10 +1770,11 @@ async def delete_project_restore_point(
                 "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
                 str(project_id),
             )
-            await ensure_project_member_access(
+            await ensure_project_owner_access(
                 conn,
                 project_id=project_id,
                 auth_user=auth_user,
+                message="Apenas o dono do projeto ou admin global pode excluir pontos de restauração",
             )
             point = await _fetch_restore_point_locked(conn, project_id, parsed_point)
             if point["status"] not in ("ready", "failed"):

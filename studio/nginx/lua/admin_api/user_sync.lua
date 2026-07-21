@@ -1,5 +1,6 @@
 local cjson = require("cjson.safe")
 local http = require("resty.http")
+local outbound_tls = require("utils.outbound_tls")
 
 local API_ORIGIN = (os.getenv("SERVER_DOMAIN") or ""):gsub("/+$", "")
 local TOKEN = os.getenv("NGINX_SHARED_TOKEN") or ""
@@ -17,17 +18,16 @@ local function request_sync(body)
 
     return httpc:request_uri(
         API_ORIGIN .. "/api/projects/internal/users/sync",
-        {
+        outbound_tls.apply_internal(API_ORIGIN, {
             method = "POST",
             body = body,
-            ssl_verify = false,
             headers = {
                 ["Content-Type"] = "application/json",
                 ["X-Shared-Token"] = TOKEN,
                 ["Host"] = host,
                 ["User-Agent"] = "studio-nginx-internal/1.0",
             }
-        }
+        })
     )
 end
 

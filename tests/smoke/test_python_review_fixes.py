@@ -24,21 +24,26 @@ class InternalTlsHardeningTest(unittest.TestCase):
 
         self.assertIn('"STUDIO_CACHE_INVALIDATION_VERIFY_TLS", "true"', runtime)
         self.assertIn('"/docker/push-certs/ca.pem"', runtime)
-        self.assertIn("context.check_hostname = False", runtime)
+        self.assertIn("context.check_hostname = True", runtime)
+        self.assertIn("must remain enabled for HTTPS", runtime)
         self.assertIn("verify=build_studio_cache_ssl_context()", cache_client)
         self.assertIn("verify=build_studio_cache_ssl_context()", snippets_client)
 
         self.assertIn('os.getenv("PUSH_VERIFY_TLS", "true")', worker)
         self.assertIn("ssl.create_default_context(cafile=PUSH_CA_FILE)", worker)
         self.assertNotIn("ssl._create_unverified_context", worker)
+        self.assertNotIn("ssl.CERT_NONE", worker)
+        self.assertIn("PUSH_VERIFY_TLS must remain enabled for HTTPS", worker)
 
     def test_openresty_service_key_client_verifies_tls_by_default(self) -> None:
         nginx = read("studio/nginx/nginx.conf")
         lua = read("studio/nginx/lua/security/get_service_key.lua")
-        self.assertIn("lua_ssl_trusted_certificate /config/ssl/ca.pem;", nginx)
-        self.assertIn('os.getenv("SERVICE_KEY_VERIFY_TLS") or "true"', lua)
-        self.assertIn("ssl_verify = verify_tls", lua)
-        self.assertIn("ssl_server_name = hostname", lua)
+        helper = read("studio/nginx/lua/utils/outbound_tls.lua")
+        self.assertIn("lua_ssl_trusted_certificate /var/run/studio-ca-bundle.pem;", nginx)
+        self.assertIn("outbound_tls.apply_internal", lua)
+        self.assertIn('os.getenv("SERVICE_KEY_VERIFY_TLS") or "true"', helper)
+        self.assertIn("options.ssl_verify = M.verify_internal", helper)
+        self.assertIn("options.ssl_server_name = hostname(url)", helper)
 
 
 class PushWorkerConfigurationTest(unittest.TestCase):

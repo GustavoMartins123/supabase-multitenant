@@ -11,12 +11,46 @@ class UserAvatarThumbnailTests(unittest.TestCase):
         source = (ROOT / "studio/nginx/lua/init/init_worker.lua").read_text(encoding="utf-8")
         self.assertIn('picture = attr.picture or ""', source)
 
-    def test_authenticated_avatar_handler_can_serve_requested_user(self) -> None:
+    def test_authenticated_directory_can_serve_any_active_user(self) -> None:
         source = (
             ROOT / "studio/nginx/lua/admin_api/user_avatar_handler.lua"
         ).read_text(encoding="utf-8")
-        self.assertIn("requested_path = avatar_path(requested_user_id)", source)
-        self.assertNotIn('avatar access denied', source)
+        self.assertIn('uri:match("^/api/users/([^/]+)/avatar$")', source)
+        self.assertIn("target.is_active ~= true", source)
+        self.assertIn("target.user_uuid ~= canonical", source)
+        self.assertNotIn("project_members", source)
+
+    def test_avatar_routes_keep_mutation_under_user_me(self) -> None:
+        nginx = (ROOT / "studio/nginx/nginx.conf").read_text(encoding="utf-8")
+        handler = (
+            ROOT / "studio/nginx/lua/admin_api/user_avatar_handler.lua"
+        ).read_text(encoding="utf-8")
+        self.assertIn('location ~ "^/api/users/[^/]+/avatar$"', nginx)
+        self.assertIn('uri ~= "/api/user/me/avatar"', handler)
+        self.assertEqual(handler.count('uri:match("^/api/users/'), 1)
+        self.assertIn('if not requested_user_id then', handler)
+
+    def test_lua_owns_bounded_image_normalization(self) -> None:
+        source = (
+            ROOT / "studio/nginx/lua/admin_api/user_avatar_handler.lua"
+        ).read_text(encoding="utf-8")
+        dockerfile = (ROOT / "studio/Dockerfile").read_text(encoding="utf-8")
+        compose = (ROOT / "studio/docker-compose.yml").read_text(encoding="utf-8")
+        nginx = (ROOT / "studio/nginx/nginx.conf").read_text(encoding="utf-8")
+
+        self.assertIn('require("ngx.pipe")', source)
+        self.assertIn('pipe.spawn(args, {', source)
+        self.assertIn('"/usr/bin/vipsheader"', source)
+        self.assertIn('"/usr/bin/vipsthumbnail"', source)
+        self.assertIn('output_path .. "[Q=85,strip]"', source)
+        self.assertIn('image_field(input_path, "n-pages")', source)
+        self.assertIn("width * height > MAX_PIXELS", source)
+        self.assertIn("width > MAX_SOURCE_EDGE", source)
+        self.assertIn("MAX_PROCESS_CONCURRENCY", source)
+        self.assertIn("libvips-tools", dockerfile)
+        self.assertNotIn("avatar-processor", compose)
+        self.assertIn("worker_processes auto", nginx)
+        self.assertIn("lua_shared_dict avatar_processing 1m", nginx)
 
     def test_user_lists_expose_picture_url(self) -> None:
         for relative in (

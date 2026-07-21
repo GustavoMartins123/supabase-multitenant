@@ -1,5 +1,6 @@
 local cjson = require("cjson.safe")
 local http = require("resty.http")
+local outbound_tls = require("utils.outbound_tls")
 
 local M = {}
 
@@ -75,7 +76,7 @@ local function fetch_identity(project_ref)
         SERVER_DOMAIN
             .. "/api/projects/internal/content-identity/"
             .. ngx.escape_uri(project_ref),
-        {
+        outbound_tls.apply_internal(SERVER_DOMAIN, {
             method = "GET",
             headers = {
                 ["Accept"] = "application/json",
@@ -83,9 +84,8 @@ local function fetch_identity(project_ref)
                 ["X-Shared-Token"] = SHARED_TOKEN,
                 ["X-Internal-Service"] = "studio-nginx",
             },
-            ssl_verify = false,
             keepalive = true,
-        }
+        })
     )
 
     if not response then

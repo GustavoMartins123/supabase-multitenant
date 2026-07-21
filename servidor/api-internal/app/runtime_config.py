@@ -55,6 +55,18 @@ STUDIO_CACHE_INVALIDATION_VERIFY_TLS = os.getenv(
 STUDIO_CACHE_INVALIDATION_CA_FILE = os.getenv(
     "STUDIO_CACHE_INVALIDATION_CA_FILE", "/docker/push-certs/ca.pem"
 ).strip()
+STUDIO_CACHE_INVALIDATION_SCHEME = urllib.parse.urlparse(
+    STUDIO_CACHE_INVALIDATION_URL
+).scheme.lower()
+if STUDIO_CACHE_INVALIDATION_SCHEME not in {"http", "https"}:
+    raise RuntimeError("STUDIO_CACHE_INVALIDATION_URL must use http or https")
+if (
+    STUDIO_CACHE_INVALIDATION_SCHEME == "https"
+    and not STUDIO_CACHE_INVALIDATION_VERIFY_TLS
+):
+    raise RuntimeError(
+        "STUDIO_CACHE_INVALIDATION_VERIFY_TLS must remain enabled for HTTPS"
+    )
 PG_META_ALLOWED_HOSTS = {
     host.strip().lower()
     for host in os.getenv("PG_META_ALLOWED_HOSTS", "postgres-meta-global").split(",")
@@ -63,13 +75,13 @@ PG_META_ALLOWED_HOSTS = {
 
 
 def build_studio_cache_ssl_context() -> bool | ssl.SSLContext:
-    """Verifica a CA interna sem exigir que o certificado use o alias Docker."""
-    if not STUDIO_CACHE_INVALIDATION_VERIFY_TLS:
-        return False
+    """Valida CA e hostname quando a invalidação usa HTTPS."""
+    if STUDIO_CACHE_INVALIDATION_SCHEME != "https":
+        return True
     context = ssl.create_default_context(
         cafile=STUDIO_CACHE_INVALIDATION_CA_FILE or None
     )
-    context.check_hostname = False
+    context.check_hostname = True
     return context
 
 

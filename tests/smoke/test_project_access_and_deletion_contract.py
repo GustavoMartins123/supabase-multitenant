@@ -54,6 +54,14 @@ class ProjectAccessAndDeletionContractTest(unittest.TestCase):
         self.assertIn("_supavisor.tenants", function_source)
         self.assertIn("_supavisor.users", function_source)
 
+    def test_whole_project_deletion_remains_global_admin_only(self) -> None:
+        function = self.function("delete_project")
+        function_source = ast.get_source_segment(self.source, function) or ""
+        self.assertIn('if not auth_user["is_global_admin"]', function_source)
+        self.assertIn('alias="X-Delete-Password"', function_source)
+        self.assertIn("hmac.compare_digest", function_source)
+        self.assertNotIn("ensure_project_owner_access", function_source)
+
 
 if __name__ == "__main__":
     unittest.main()

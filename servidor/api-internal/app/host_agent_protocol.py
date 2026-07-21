@@ -77,9 +77,8 @@ GLOBAL_ADMIN_COMMANDS = frozenset(
     }
 )
 
-PROJECT_MEMBER_COMMANDS = frozenset(
+PROJECT_OWNER_COMMANDS = frozenset(
     {
-        "backup_project",
         "restore_project",
         "delete_restore_point",
     }
@@ -370,13 +369,9 @@ def evaluate_authorization(
     if command in GLOBAL_ADMIN_COMMANDS:
         if not is_global_admin:
             return "global_admin_required"
-    elif command in PROJECT_MEMBER_COMMANDS:
-        if not (
-            is_global_admin
-            or is_owner
-            or member_role in ("admin", "member")
-        ):
-            return "project_member_required"
+    elif command in PROJECT_OWNER_COMMANDS:
+        if not (is_global_admin or is_owner):
+            return "project_owner_required"
     else:
         if not (is_global_admin or is_owner or member_role == "admin"):
             return "project_admin_required"

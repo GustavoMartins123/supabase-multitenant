@@ -4,6 +4,7 @@
 
 local http = require("resty.http")
 local cjson = require("cjson.safe")
+local outbound_tls = require("utils.outbound_tls")
 
 local _M = {}
 
@@ -67,16 +68,15 @@ function _M.get_available_functions(project_ref)
     local url = SERVER_DOMAIN .. "/api/projects/" .. project_ref .. "/functions"
     ngx.log(ngx.INFO, "[PROJECT-DB] Fetching AI functions: ", url)
     
-    local res, err = httpc:request_uri(url, {
+    local res, err = httpc:request_uri(url, outbound_tls.apply_internal(url, {
         method = "GET",
         headers = {
             ["X-User-Token"] = user_token,
             ["Content-Type"] = "application/json",
             ["X-Shared-Token"] = NGINX_SHARED_TOKEN,
             ["Host"] = SERVER_HOSTNAME
-        },
-        ssl_verify = false
-    })
+        }
+    }))
 
     
     if not res then
@@ -258,7 +258,7 @@ function _M.execute_function(project_ref, func_name, arguments)
     local url = SERVER_DOMAIN .. "/api/projects/" .. project_ref .. "/execute-function"
     ngx.log(ngx.INFO, "[PROJECT-DB] Executing function: ", safe_name, " with args: ", cjson.encode(args_object))
     
-    local res, err = httpc:request_uri(url, {
+    local res, err = httpc:request_uri(url, outbound_tls.apply_internal(url, {
         method = "POST",
         headers = {
             ["X-User-Token"] = exec_user_token,
@@ -269,9 +269,8 @@ function _M.execute_function(project_ref, func_name, arguments)
         body = cjson.encode({ 
             function_name = safe_name,
             arguments = args_object 
-        }),
-        ssl_verify = false
-    })
+        })
+    }))
     
     if not res then
         ngx.log(ngx.ERR, "[PROJECT-DB] Function request failed: ", err)

@@ -74,6 +74,48 @@ com trim e lowercase. A comparação é exata contra `ADMIN_GROUPS` (padrão:
 `ADMIN_GROUPS=admin,superadmins`. Formatos inesperados falham fechados e são
 registrados no log do Nginx.
 
+### Avatares do diretório autenticado
+
+`GET /api/users/{uuid}/avatar` é a rota canônica de leitura. Qualquer usuário
+com sessão e perfil administrativo ativos pode ler o avatar de outra conta
+ativa, mesmo sem projeto em comum, pois a seleção de membros consulta o
+diretório administrativo completo. UUID identifica o objeto; a sessão e o
+estado ativo autorizam a leitura. UUID malformado recebe 400 e conta inexistente
+ou inativa recebe 404. `/api/user/me/avatar` aceita apenas upload e remoção
+próprios; não existe uma segunda rota de leitura.
+
+O handler Lua limita o corpo a 2 MB, valida PNG/JPEG/WebP e usa `ngx.pipe` com
+argv fechado para chamar `vipsheader` e `vipsthumbnail`, sem shell. A imagem é
+decodificada por completo, limitada por pixels, reduzida, auto-orientada e
+reencodificada como WebP sem EXIF, ICC ou XMP. Avatares animados são rejeitados.
+O limite global de subprocessos (`AVATAR_PROCESS_MAX_CONCURRENCY`) impede que
+uploads ocupem toda a capacidade; `VIPS_CONCURRENCY` limita as threads de cada
+processo. `worker_processes auto` mantém os workers HTTP por CPU — não existe
+worker Nginx reservado por rota — e o pipe não bloqueia o event loop.
+
+### TLS de saídas
+
+Chamadas HTTPS Lua passam por `utils.outbound_tls`: endpoints públicos sempre
+validam certificado e hostname; endpoints internos respeitam
+`SERVICE_KEY_VERIFY_TLS`, cujo padrão é ativo. O entrypoint recusa iniciar com
+`SERVER_DOMAIN=https://...` e validação desabilitada. O trust store combina as
+CAs do sistema com o arquivo montado por `STUDIO_CA_CERT_PATH`; o backend Node
+recebe a mesma CA via `NODE_EXTRA_CA_CERTS`. O certificado local inclui o SAN
+`DNS:nginx`, usado nas chamadas internas do Studio. Falha de certificado,
+hostname ou CA é terminal para a requisição, sem fallback inseguro.
+
+Instalações anteriores a essa regra devem regenerar somente configuração e
+certificado (os secrets permanecem) antes de subir os containers:
+
+```bash
+python tools/configure_studio_runtime.py \
+  --studio-origin https://studio.exemplo.com:9091 \
+  --force
+```
+
+O entrypoint verifica o SAN `DNS:nginx` e recusa iniciar com um certificado
+legado incompatível.
+
 ## Convenções
 
 - Indentação de quatro espaços e nenhuma tabulação.

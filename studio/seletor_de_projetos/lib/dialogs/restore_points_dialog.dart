@@ -544,11 +544,15 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
         mainAxisExtent: 220,
       ),
       itemCount: data.points.length,
-      itemBuilder: (_, i) => _buildFolderTile(data.points[i], busy),
+      itemBuilder: (_, i) => _buildFolderTile(data.points[i], data, busy),
     );
   }
 
-  Widget _buildFolderTile(RestorePoint point, bool busy) {
+  Widget _buildFolderTile(
+    RestorePoint point,
+    RestorePointList permissions,
+    bool busy,
+  ) {
     final statusChip = _statusChip(point);
     return Container(
       padding: const EdgeInsets.all(14),
@@ -575,7 +579,9 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
               ),
               const Spacer(),
               if (statusChip != null) statusChip,
-              if (!busy && !point.isBusy)
+              if (!busy &&
+                  !point.isBusy &&
+                  (permissions.canRestore || permissions.canDelete))
                 PopupMenuButton<String>(
                   icon: const Icon(
                     Icons.more_vert_rounded,
@@ -592,7 +598,7 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
                     if (val == 'delete') _deletePoint(point);
                   },
                   itemBuilder: (_) => [
-                    if (point.isReady)
+                    if (point.isReady && permissions.canRestore)
                       const PopupMenuItem(
                         value: 'restore',
                         child: Row(
@@ -613,26 +619,27 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
                           ],
                         ),
                       ),
-                    const PopupMenuItem(
-                      value: 'delete',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.delete_outline_rounded,
-                            size: 16,
-                            color: SupabaseColors.error,
-                          ),
-                          SizedBox(width: 10),
-                          Text(
-                            'Excluir',
-                            style: TextStyle(
-                              fontSize: 13,
+                    if (permissions.canDelete)
+                      const PopupMenuItem(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.delete_outline_rounded,
+                              size: 16,
                               color: SupabaseColors.error,
                             ),
-                          ),
-                        ],
+                            SizedBox(width: 10),
+                            Text(
+                              'Excluir',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: SupabaseColors.error,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
                   ],
                 ),
             ],
@@ -837,24 +844,25 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
             child: const Text('Fechar', style: TextStyle(fontSize: 13)),
           ),
           const SizedBox(width: 8),
-          ElevatedButton.icon(
-            onPressed: busy || atLimit ? null : _createPoint,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: SupabaseColors.brand,
-              foregroundColor: Colors.black,
-              disabledBackgroundColor: SupabaseColors.bg300,
-              disabledForegroundColor: SupabaseColors.textMuted,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(6),
+          if (data?.canCreate == true)
+            ElevatedButton.icon(
+              onPressed: busy || atLimit ? null : _createPoint,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: SupabaseColors.brand,
+                foregroundColor: Colors.black,
+                disabledBackgroundColor: SupabaseColors.bg300,
+                disabledForegroundColor: SupabaseColors.textMuted,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
               ),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 10,
-              ),
+              icon: const Icon(Icons.create_new_folder_rounded, size: 16),
+              label: const Text('Criar ponto', style: TextStyle(fontSize: 13)),
             ),
-            icon: const Icon(Icons.create_new_folder_rounded, size: 16),
-            label: const Text('Criar ponto', style: TextStyle(fontSize: 13)),
-          ),
         ],
       ),
     );

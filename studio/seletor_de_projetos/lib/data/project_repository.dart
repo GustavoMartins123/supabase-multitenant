@@ -586,8 +586,14 @@ class ProjectRepository {
     if (resp.statusCode == 200) {
       final data = jsonDecode(resp.body) as Map<String, dynamic>;
       final raw = data['points'] as List<dynamic>? ?? [];
+      final permissions = Map<String, dynamic>.from(
+        data['permissions'] as Map? ?? const {},
+      );
       return RestorePointList(
         limit: (data['limit'] as num?)?.toInt() ?? 15,
+        canCreate: permissions['can_create'] == true,
+        canRestore: permissions['can_restore'] == true,
+        canDelete: permissions['can_delete'] == true,
         points: raw
             .map(
               (e) => RestorePoint.fromJson(Map<String, dynamic>.from(e as Map)),

@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -e
+umask 077
 
 # garante que o arquivo de opaque identifiers exista antes dos workers do nginx
 if [ ! -f /config/ids.yml ]; then
@@ -49,6 +50,32 @@ for file in /config/db.sqlite3-shm /config/db.sqlite3-wal /config/db.sqlite3-jou
 done
 
 chmod 755 /config/ssl 2>/dev/null || true
+
+EXTRA_CA_CERT_FILE="${STUDIO_EXTRA_CA_CERT_FILE:-/config/ssl/ca.pem}"
+if [ ! -s "$EXTRA_CA_CERT_FILE" ]; then
+    echo "[entrypoint] ERRO: certificado CA adicional ausente em $EXTRA_CA_CERT_FILE" >&2
+    exit 1
+fi
+
+if ! openssl x509 -in /config/ssl/ca.pem -noout -checkhost nginx >/dev/null 2>&1; then
+    echo "[entrypoint] ERRO: o certificado do Studio não contém o SAN DNS:nginx; regenere-o com tools/configure_studio_runtime.py --force" >&2
+    exit 1
+fi
+
+case "${SERVER_DOMAIN:-}" in
+    https://*)
+        case "${SERVICE_KEY_VERIFY_TLS:-true}" in
+            0|false|FALSE|no|NO|off|OFF)
+                echo "[entrypoint] ERRO: SERVICE_KEY_VERIFY_TLS deve permanecer ativo com SERVER_DOMAIN HTTPS" >&2
+                exit 1
+                ;;
+        esac
+        ;;
+esac
+
+CA_BUNDLE="/var/run/studio-ca-bundle.pem"
+cat /etc/ssl/certs/ca-certificates.crt "$EXTRA_CA_CERT_FILE" > "$CA_BUNDLE"
+chmod 644 "$CA_BUNDLE"
 
 SNIPPETS_DIR="${SNIPPETS_MANAGEMENT_FOLDER:-/app/snippets}"
 if [ -d "$SNIPPETS_DIR" ]; then

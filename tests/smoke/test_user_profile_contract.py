@@ -54,6 +54,10 @@ class UserProfileContractTests(unittest.TestCase):
         self.assertIn('return "image/webp"', source)
         self.assertIn("X-Content-Type-Options", source)
         self.assertIn("store.set_picture", source)
+        self.assertIn("MAX_PIXELS", source)
+        self.assertIn("vipsthumbnail", source)
+        self.assertIn("[Q=85,strip]", source)
+        self.assertIn("animated avatars are not accepted", source)
 
     def test_user_me_dispatches_profile_and_avatar(self) -> None:
         content = (
