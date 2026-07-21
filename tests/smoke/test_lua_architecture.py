@@ -41,7 +41,7 @@ class LuaArchitectureContractTest(unittest.TestCase):
 
     def test_internal_requires_resolve(self):
         modules = {
-            str(path.relative_to(LUA_ROOT).with_suffix("")).replace("\\", ".")
+            path.relative_to(LUA_ROOT).with_suffix("").as_posix().replace("/", ".")
             for path in LUA_ROOT.rglob("*.lua")
         }
         external_prefixes = (

@@ -2,34 +2,31 @@ server:
   address: tcp://0.0.0.0:9091/auth
   tls:
     certificate: /config/ssl/ca.pem
-    key:         /config/ssl/ca.key 
+    key:         /config/ssl/ca.key
 
 log:
   level: info
 
-#docker run --rm authelia/authelia:4.39 authelia crypto rand --length 64 --charset alphanumeric
+# Os segredos de reset, sessao e storage sao fornecidos pelos arquivos
+# declarados em studio/docker-compose.yml. Nao os adicione neste template.
 identity_validation:
   reset_password:
-    jwt_secret: "JWT_SECRET"
     jwt_lifespan: '5 minutes'
     jwt_algorithm: 'HS256'
 session:
   cookies:
     - name: authelia_session
-      domain: <SEU_IP>       
-      authelia_url: https://<SEU_IP>:9091/auth
-      default_redirection_url: https://<SEU_IP>:9091
+      domain: __STUDIO_HOST__
+      authelia_url: __STUDIO_ORIGIN__/auth
+      default_redirection_url: __STUDIO_ORIGIN__
       same_site: lax
-  secret: "SESSION_SECRET"
   expiration: '7d'
   inactivity: '24h'
   remember_me: '30d'
 
-#openssl rand -hex 96
 storage:
   local:
     path: /config/db.sqlite3
-  encryption_key: "STORAGE_KEY"
 
 authentication_backend:
   file:
@@ -43,26 +40,14 @@ authentication_backend:
       email: true
       case_insensitive: true
 
-
 access_control:
   default_policy: deny
   rules:
-    - domain: "<SEU_IP>"
+    - domain: "__STUDIO_HOST__"
       policy: one_factor
       subject:
-      - ["group:active"]
+        - ["group:active"]
 
 notifier:
   filesystem:
     filename: /config/notifications.txt
-
-# notifier:
-#   smtp:
-#     address: 'submission://smtp.gmail.com:587'
-#     timeout: '10s'
-#     username: 'exemplo'
-#     password: 'exemplo'
-#     sender: "Exemplo<exemplo@example.com>"
-#     identifier: 'exemplo'
-#     subject: "[Authelia] {title}"
-#     startup_check_address: 'exemplo@example.com'

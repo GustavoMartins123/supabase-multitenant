@@ -131,10 +131,6 @@ generate_fernet_key() {
     openssl rand -base64 32 | tr '/+' '_-' | tr -d '\n'
 }
 
-generate_cookie_sign_secret() {
-    openssl rand -base64 32 | tr -d '\n'
-}
-
 generate_jwt_secret() {
     openssl rand -base64 64 | tr -d '\n'
 }
@@ -468,7 +464,6 @@ main() {
         exit 1
     fi
     
-    COOKIE_SIGN_SECRET=$(generate_cookie_sign_secret)
     POSTGRES_NGINX_PASSWORD=$(generate_postgres_password)
 
     cp studio/.env.example studio/.env
@@ -478,7 +473,6 @@ main() {
     safe_sed "s|^NGINX_HMAC_SECRET=.*|NGINX_HMAC_SECRET=$SHARED_NGINX_HMAC_SECRET|g" studio/.env
     safe_sed "s|^INTERNAL_HMAC_SECRET=.*|INTERNAL_HMAC_SECRET=$SHARED_INTERNAL_HMAC_SECRET|g" studio/.env
     safe_sed "s|^LOGFLARE_PRIVATE_ACCESS_TOKEN=.*|LOGFLARE_PRIVATE_ACCESS_TOKEN=$LOGFLARE_PRIVATE_ACCESS_TOKEN|g" studio/.analytics.env
-    safe_sed "s|COOKIE_SIGN_SECRET=pass|COOKIE_SIGN_SECRET=$COOKIE_SIGN_SECRET|g" studio/.env
     safe_sed "s|POSTGRES_NGINX_PASSWORD=pass|POSTGRES_NGINX_PASSWORD=$POSTGRES_NGINX_PASSWORD|g" studio/.env
     safe_sed "s|^SERVER_DOMAIN=.*|SERVER_DOMAIN=${PROTO}://${SERVER_IP}|g" studio/.env
     if [[ "$SERVER_IP" != "$LOCAL_IP" ]]; then
@@ -500,7 +494,7 @@ main() {
     assert_env_value servidor/.analytics.env LOGFLARE_PRIVATE_ACCESS_TOKEN "$LOGFLARE_PRIVATE_ACCESS_TOKEN"
     assert_env_value servidor/.analytics.env LOGFLARE_DB_ENCRYPTION_KEY "$LOGFLARE_DB_ENCRYPTION_KEY"
     assert_env_value studio/.analytics.env LOGFLARE_PRIVATE_ACCESS_TOKEN "$LOGFLARE_PRIVATE_ACCESS_TOKEN"
-    chmod 644 servidor/.env servidor/.analytics.env studio/.env studio/.analytics.env
+    chmod 600 servidor/.env servidor/.analytics.env studio/.env studio/.analytics.env
     print_success "Arquivo studio/.env configurado com sucesso!"
     
     echo ""
@@ -532,8 +526,10 @@ main() {
     print_status "$IP_DOMAIN do servidor configurado: $SERVER_IP"
     echo ""
 
-    print_status "Gerando certificados SSL autoassinados para o Studio/Authelia..."
-    bash authelia.sh "$LOCAL_IP"
+    print_status "Gerando configuracao local e certificados do Studio/Authelia..."
+    python3 tools/configure_studio_runtime.py \
+        --studio-origin "https://${LOCAL_IP}:${STUDIO_HTTPS_PORT}" \
+        --force
 
     print_status "Copiando certificado do Studio para o servidor Python..."
     mkdir -p servidor/certs
@@ -542,33 +538,7 @@ main() {
     print_success "Certificado copiado para servidor/certs/ca.pem"
 
 
-    print_status "Configurando Nginx do Studio com o IP local detectado..."
-    backup_file "studio/nginx/nginx.conf"
-    safe_sed "s|server_name pass|server_name $LOCAL_IP|" studio/nginx/nginx.conf
-    print_success "Nginx do Studio configurado para escutar em $LOCAL_IP."
-
-    print_status "Configurando Authelia com o IP local..."
-
-    local authelia_config="studio/authelia/configuration.yml"
-
-    if [[ -f "$authelia_config" ]]; then
-        print_status "Configurando Authelia com o IP local e segredos únicos..."
-        
-        backup_file "$authelia_config"
-        safe_sed "s|<SEU_IP>|$LOCAL_IP|g" "$authelia_config"
-
-        local jwt_secret=$(generate_logflare_api_key)
-        local session_secret=$(generate_logflare_api_key)
-        local storage_key=$(generate_logflare_api_key)
-
-        safe_sed "s|JWT_SECRET|$jwt_secret|g" "$authelia_config"
-        safe_sed "s|SESSION_SECRET|$session_secret|g" "$authelia_config"
-        safe_sed "s|STORAGE_KEY|$storage_key|g" "$authelia_config"
-        
-        print_success "Arquivo de configuração do Authelia ($authelia_config) atualizado."
-    else
-        print_warning "Arquivo de configuração do Authelia ($authelia_config) não encontrado."
-    fi
+    print_success "Studio e Authelia configurados para $LOCAL_IP."
     print_status "Configurando update_geoip.sh com o caminho real..."
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     backup_file "servidor/traefik/update_geoip.sh"

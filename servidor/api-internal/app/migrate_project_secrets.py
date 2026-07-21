@@ -5,9 +5,11 @@ Run inside the projects-api image after adding the new environment variables:
     python -m app.migrate_project_secrets --dry-run
     python -m app.migrate_project_secrets --apply
 
-The command never prints plaintext secrets. It is resumable: already-v2 rows
-are authenticated and skipped, while a changed master key only rewraps each
-tenant DEK without re-encrypting the individual values.
+The command never prints plaintext secrets. A dry-run creates any required
+schema inside a transaction and rolls the whole transaction back. The apply
+mode is atomic and resumable: already-v2 rows are authenticated and skipped,
+while a changed master key only rewraps each tenant DEK without re-encrypting
+the individual values.
 """
 
 from __future__ import annotations
@@ -142,104 +144,107 @@ async def migrate(
     migrated_projects = migrated_values = rewrapped_deks = rotated_deks = 0
     try:
         async with pool.acquire() as conn:
-            if apply:
+            outer_transaction = conn.transaction()
+            await outer_transaction.start()
+            try:
                 await ensure_schema(conn)
-            elif not await conn.fetchval(
-                "SELECT to_regclass('public.project_key_envelopes') IS NOT NULL"
-            ):
-                raise RuntimeError(
-                    "project_key_envelopes is absent; start projects-api once "
-                    "to install the schema before running a dry-run"
+                rows = await conn.fetch(
+                    """
+                    SELECT id, name, anon_key, service_role, config_token
+                    FROM projects
+                    WHERE ($1::text IS NULL OR name = $1)
+                      AND (anon_key IS NOT NULL OR service_role IS NOT NULL OR config_token IS NOT NULL)
+                    ORDER BY name
+                    """,
+                    project_name,
                 )
-            rows = await conn.fetch(
-                """
-                SELECT id, name, anon_key, service_role, config_token
-                FROM projects
-                WHERE ($1::text IS NULL OR name = $1)
-                  AND (anon_key IS NOT NULL OR service_role IS NOT NULL OR config_token IS NOT NULL)
-                ORDER BY name
-                """,
-                project_name,
-            )
-            for row in rows:
-                async with conn.transaction():
-                    envelope, dek, rewrapped = await get_envelope(
-                        conn,
-                        manager,
-                        row["id"],
-                        apply=apply,
-                    )
-                    target_envelope, target_dek = envelope, dek
-                    if rotate_deks:
-                        target_envelope, target_dek = manager.create_envelope()
-                    updates: dict[str, str] = {}
-                    for column in SECRET_COLUMNS:
-                        ciphertext = row[column]
-                        if not ciphertext:
-                            continue
-                        if manager.is_v2(ciphertext):
-                            plaintext = manager.decrypt(
+                for row in rows:
+                    async with conn.transaction():
+                        envelope, dek, rewrapped = await get_envelope(
+                            conn,
+                            manager,
+                            row["id"],
+                            apply=apply,
+                        )
+                        target_envelope, target_dek = envelope, dek
+                        if rotate_deks:
+                            target_envelope, target_dek = manager.create_envelope()
+                        updates: dict[str, str] = {}
+                        for column in SECRET_COLUMNS:
+                            ciphertext = row[column]
+                            if not ciphertext:
+                                continue
+                            if manager.is_v2(ciphertext):
+                                plaintext = manager.decrypt(
+                                    project_id=row["id"],
+                                    purpose=column,
+                                    key_id=envelope.key_id,
+                                    dek=dek,
+                                    ciphertext=ciphertext,
+                                )
+                                if not rotate_deks:
+                                    continue
+                            else:
+                                if legacy is None:
+                                    raise RuntimeError(
+                                        "LEGACY_FERNET_SECRET is required while legacy values remain"
+                                    )
+                                try:
+                                    plaintext = legacy.decrypt(ciphertext.encode()).decode()
+                                except (InvalidToken, UnicodeDecodeError) as exc:
+                                    raise RuntimeError(
+                                        f"Cannot decrypt legacy {column} for project {row['name']}"
+                                    ) from exc
+                            updates[column] = manager.encrypt(
                                 project_id=row["id"],
                                 purpose=column,
-                                key_id=envelope.key_id,
-                                dek=dek,
-                                ciphertext=ciphertext,
+                                key_id=target_envelope.key_id,
+                                dek=target_dek,
+                                plaintext=plaintext,
                             )
-                            if not rotate_deks:
-                                continue
-                        else:
-                            if legacy is None:
-                                raise RuntimeError(
-                                    "LEGACY_FERNET_SECRET is required while legacy values remain"
-                                )
-                            try:
-                                plaintext = legacy.decrypt(ciphertext.encode()).decode()
-                            except (InvalidToken, UnicodeDecodeError) as exc:
-                                raise RuntimeError(
-                                    f"Cannot decrypt legacy {column} for project {row['name']}"
-                                ) from exc
-                        updates[column] = manager.encrypt(
-                            project_id=row["id"],
-                            purpose=column,
-                            key_id=target_envelope.key_id,
-                            dek=target_dek,
-                            plaintext=plaintext,
-                        )
 
-                    if updates:
-                        migrated_projects += 1
-                        migrated_values += len(updates)
-                        if apply:
-                            if rotate_deks:
+                        if updates:
+                            migrated_projects += 1
+                            migrated_values += len(updates)
+                            if apply:
+                                if rotate_deks:
+                                    await conn.execute(
+                                        """
+                                        UPDATE project_key_envelopes
+                                        SET key_id = $1,
+                                            wrapped_dek = $2,
+                                            wrapping_key_id = $3,
+                                            algorithm = $4,
+                                            updated_at = now()
+                                        WHERE project_id = $5
+                                        """,
+                                        uuid.UUID(target_envelope.key_id),
+                                        target_envelope.wrapped_dek,
+                                        target_envelope.wrapping_key_id,
+                                        target_envelope.algorithm,
+                                        row["id"],
+                                    )
+                                assignments = ", ".join(
+                                    f"{column} = ${index}"
+                                    for index, column in enumerate(updates, start=1)
+                                )
                                 await conn.execute(
-                                    """
-                                    UPDATE project_key_envelopes
-                                    SET key_id = $1,
-                                        wrapped_dek = $2,
-                                        wrapping_key_id = $3,
-                                        algorithm = $4,
-                                        updated_at = now()
-                                    WHERE project_id = $5
-                                    """,
-                                    uuid.UUID(target_envelope.key_id),
-                                    target_envelope.wrapped_dek,
-                                    target_envelope.wrapping_key_id,
-                                    target_envelope.algorithm,
+                                    f"UPDATE projects SET {assignments} WHERE id = ${len(updates) + 1}",
+                                    *updates.values(),
                                     row["id"],
                                 )
-                            assignments = ", ".join(
-                                f"{column} = ${index}"
-                                for index, column in enumerate(updates, start=1)
-                            )
-                            await conn.execute(
-                                f"UPDATE projects SET {assignments} WHERE id = ${len(updates) + 1}",
-                                *updates.values(),
-                                row["id"],
-                            )
-                    if rotate_deks:
-                        rotated_deks += 1
-                    if rewrapped:
-                        rewrapped_deks += 1
+                        if rotate_deks:
+                            rotated_deks += 1
+                        if rewrapped:
+                            rewrapped_deks += 1
+            except BaseException:
+                await outer_transaction.rollback()
+                raise
+            else:
+                if apply:
+                    await outer_transaction.commit()
+                else:
+                    await outer_transaction.rollback()
     finally:
         await pool.close()
     return migrated_projects, migrated_values, rewrapped_deks, rotated_deks

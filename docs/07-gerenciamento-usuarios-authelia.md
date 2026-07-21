@@ -241,7 +241,7 @@ Usuários desativados não conseguem fazer login, mas seus dados são preservado
 
 ## Configuração de SMTP
 
-Para habilitar reset de senha via email, configure o SMTP no arquivo `studio/authelia/configuration.yml`:
+Para habilitar reset de senha via email, ajuste o template `studio/authelia/configuration.yml.template` e gere novamente o arquivo local `configuration.runtime.yml`:
 
 ```yaml
 notifier:
@@ -404,14 +404,14 @@ maria:
 
 ### Email de reset não chega
 
-1. **Verifique a configuração SMTP** no `configuration.yml`
+1. **Verifique a configuração SMTP** no `configuration.runtime.yml`
 2. **Verifique os logs do Authelia:**
    ```bash
    docker logs authelia | grep -i smtp
    ```
 3. **Teste a conexão SMTP:**
    ```bash
-   docker exec authelia cat /config/configuration.yml | grep -A 10 smtp
+   docker exec authelia cat /config/configuration.runtime.yml | grep -A 10 smtp
    ```
 4. **Verifique a pasta de spam** do email
 

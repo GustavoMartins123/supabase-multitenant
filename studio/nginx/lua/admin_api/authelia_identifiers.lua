@@ -2,7 +2,7 @@ local lyaml = require("lyaml")
 local shell = require("resty.shell")
 
 local IDS_PATH = "/config/ids.yml"
-local CONFIG_PATH = "/config/configuration.yml"
+local CONFIG_PATH = "/config/configuration.runtime.yml"
 local AUTHELIA_BIN = "/usr/local/bin/authelia"
 local OPENID_SERVICE = "openid"
 local COMMAND_TIMEOUT_MS = 10000

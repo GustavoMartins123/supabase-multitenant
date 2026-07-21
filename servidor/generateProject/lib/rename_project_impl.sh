@@ -192,7 +192,7 @@ for command in docker jq openssl sed; do command -v "$command" >/dev/null || die
 [[ -f "$PROJECT_ROOT/.env" ]] || die "Arquivo $PROJECT_ROOT/.env ausente"
 [[ -d "$OLD_DIR" ]] || die "Diretorio $OLD_DIR nao encontrado"
 [[ ! -e "$NEW_DIR" ]] || die "Destino $NEW_DIR ja existe"
-for template in nginxtemplate .envtemplate dockercomposetemplate poolertemplate Dockerfile; do
+for template in nginxtemplate .envtemplate dockercomposetemplate poolertemplate Dockerfile .dockerignore; do
   [[ -f "$SCRIPT_DIR/$template" ]] || die "Template ausente: $template"
 done
 for file in .env docker-compose.yml Dockerfile pooler/pooler.exs; do
@@ -221,6 +221,7 @@ vector_validate_database "$OLD_DB" || die "Banco atual sem pgvector valido"
 cp -a "$OLD_DIR/.env" "$BACKUP_DIR/.env"
 cp -a "$OLD_DIR/docker-compose.yml" "$BACKUP_DIR/docker-compose.yml"
 cp -a "$OLD_DIR/Dockerfile" "$BACKUP_DIR/Dockerfile"
+[[ ! -f "$OLD_DIR/.dockerignore" ]] || cp -a "$OLD_DIR/.dockerignore" "$BACKUP_DIR/.dockerignore"
 mkdir -p "$BACKUP_DIR/nginx" "$BACKUP_DIR/pooler"
 cp -a "$OLD_DIR/nginx/." "$BACKUP_DIR/nginx/"
 cp -a "$OLD_DIR/pooler/pooler.exs" "$BACKUP_DIR/pooler/pooler.exs"
@@ -299,7 +300,9 @@ template_to_file "$SCRIPT_DIR/.envtemplate" "$NEW_DIR/.env"
 template_to_file "$SCRIPT_DIR/dockercomposetemplate" "$NEW_DIR/docker-compose.yml"
 template_to_file "$SCRIPT_DIR/poolertemplate" "$NEW_DIR/pooler/pooler.exs"
 template_to_file "$SCRIPT_DIR/Dockerfile" "$NEW_DIR/Dockerfile"
-chmod 644 "$NEW_DIR/.env" "$NEW_DIR/nginx/nginx_${NEW_NAME}.conf"
+template_to_file "$SCRIPT_DIR/.dockerignore" "$NEW_DIR/.dockerignore"
+chmod 600 "$NEW_DIR/.env"
+chmod 644 "$NEW_DIR/nginx/nginx_${NEW_NAME}.conf" "$NEW_DIR/.dockerignore"
 grep -qx "PROJECT_ID=$NEW_NAME" "$NEW_DIR/.env" || die "PROJECT_ID nao foi atualizado"
 grep -Eq '^S3_PROTOCOL_ACCESS_KEY_ID=[0-9a-fA-F]{32}$' "$NEW_DIR/.env" || die "Access key SigV4 nao foi preservada"
 grep -Eq '^S3_PROTOCOL_ACCESS_KEY_SECRET=[0-9a-fA-F]{64}$' "$NEW_DIR/.env" || die "Secret SigV4 nao foi preservado"

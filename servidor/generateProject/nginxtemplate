@@ -55,24 +55,24 @@ http {
 
     map $http_apikey $is_valid_key {
         default 0;
-        "{{anon_key}}" 1;  
-        "{{service_role_key}}" 1;  
+        "${ANON_KEY_PROJETO}" 1;
+        "${SERVICE_ROLE_KEY_PROJETO}" 1;
     }
 
     map $http_apikey $is_admin_key {
         default 0;
-        "{{service_role_key}}" 1; 
+        "${SERVICE_ROLE_KEY_PROJETO}" 1;
     }
 
     map $arg_apikey $is_valid_api_key {
         default 0;
-        "{{anon_key}}" 1;  
-        "{{service_role_key}}" 1;  
+        "${ANON_KEY_PROJETO}" 1;
+        "${SERVICE_ROLE_KEY_PROJETO}" 1;
     }
 
     map $http_x_config_token $is_valid_config_token {
         default 0;
-        "{{config_token}}" 1;
+        "${CONFIG_TOKEN_PROJETO}" 1;
     }
 
     map $http_x_forwarded_proto $real_scheme {
@@ -92,7 +92,7 @@ http {
         }
        
         location /recovery.html {
-            allow 172.50.0.0/16;
+            allow ${SUPABASE_NETWORK_SUBNET};
             deny all;
             root /usr/share/nginx/html;
             add_header Content-Type text/html;
@@ -101,7 +101,7 @@ http {
         }
 
         location /invite.html {
-            allow 172.50.0.0/16;
+            allow ${SUPABASE_NETWORK_SUBNET};
             deny all;
             root /usr/share/nginx/html;
             add_header Content-Type text/html;
@@ -110,7 +110,7 @@ http {
         }
 
         location /magiclink.html {
-            allow 172.50.0.0/16;
+            allow ${SUPABASE_NETWORK_SUBNET};
             deny all;
             root /usr/share/nginx/html;
             add_header Content-Type text/html;
@@ -119,7 +119,7 @@ http {
         }
 
         location /confirmation.html {
-            allow 172.50.0.0/16;
+            allow ${SUPABASE_NETWORK_SUBNET};
             deny all;
             root /usr/share/nginx/html;
             add_header Content-Type text/html;
@@ -128,7 +128,7 @@ http {
         }
 
         location /email_change.html {
-            allow 172.50.0.0/16;
+            allow ${SUPABASE_NETWORK_SUBNET};
             deny all;
             root /usr/share/nginx/html;
             add_header Content-Type text/html;
@@ -458,7 +458,7 @@ http {
             
             default_type application/json;
             add_header Cache-Control "no-store";
-            return 200 '{"supabase_url":"$config_url","anon_key":"{{anon_key}}"}';
+            return 200 '{"supabase_url":"$config_url","anon_key":"${ANON_KEY_PROJETO}"}';
         }
     }
 }

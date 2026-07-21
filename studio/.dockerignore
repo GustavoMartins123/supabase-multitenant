@@ -1,0 +1,11 @@
+.env
+.analytics.env
+authelia/
+secrets/
+snippets/
+postgres/data/
+seletor_de_projetos/.dart_tool/
+seletor_de_projetos/.idea/
+seletor_de_projetos/build/
+seletor_de_projetos/.flutter-plugins-dependencies
+seletor_de_projetos/*.iml

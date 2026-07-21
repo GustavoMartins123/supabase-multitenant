@@ -198,7 +198,9 @@ template_to_file "$SCRIPT_DIR/.envtemplate" "$OUT_DIR/.env"
 template_to_file "$SCRIPT_DIR/dockercomposetemplate" "$OUT_DIR/docker-compose.yml"
 template_to_file "$SCRIPT_DIR/poolertemplate" "$OUT_DIR/pooler/pooler.exs"
 template_to_file "$SCRIPT_DIR/Dockerfile" "$OUT_DIR/Dockerfile"
-chmod 644 "$OUT_DIR/.env" "$OUT_DIR/nginx/nginx_${NEW_PROJECT}.conf"
+template_to_file "$SCRIPT_DIR/.dockerignore" "$OUT_DIR/.dockerignore"
+chmod 600 "$OUT_DIR/.env"
+chmod 644 "$OUT_DIR/nginx/nginx_${NEW_PROJECT}.conf" "$OUT_DIR/.dockerignore"
 
 realtime_tables=$(docker exec supabase-db psql -U supabase_admin -d "$ORIGINAL_DB" -tAc \
   "SELECT string_agg(format('%I.%I', schemaname, tablename), ',') FROM pg_publication_tables WHERE pubname = 'supabase_realtime';" \

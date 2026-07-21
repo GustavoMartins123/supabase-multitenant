@@ -101,8 +101,28 @@ For implementation details, see the [architecture documentation](docs/00-arquite
 | --- | --- |
 | Linux | Host system used by the setup scripts. |
 | Docker and Docker Compose | Installed and running. |
+| Python | Python 3.10 or newer, including the `venv` module. It is required by `setup.sh`, the Studio/Authelia configuration tools, project lifecycle scripts and the host-agent. |
 | User | Permission to run Docker commands. |
 | Utilities | `openssl`, `curl`, `jq`, `sed` and standard shell tools. |
+
+On Ubuntu or Debian, install the host Python runtime with:
+
+```bash
+sudo apt update
+sudo apt install -y python3 python3-venv
+```
+
+Confirm the minimum version before running the setup:
+
+```bash
+python3 -c 'import sys; assert sys.version_info >= (3, 10), "Python 3.10 or newer is required"'
+python3 -m venv --help >/dev/null
+```
+
+In a two-machine deployment, Python must be installed on both the main server
+and the administrative Studio machine. The main server uses it for the
+host-agent and project lifecycle; the Studio machine uses it to render the
+Authelia runtime configuration and certificates.
 
 ---
 
@@ -249,7 +269,7 @@ Main references:
 
 The setup script generates a self-signed certificate for Authelia and the Studio gateway.
 
-By default, the certificate is valid for **one year**. Regenerate it before expiration to avoid losing access to the management interface.
+By default, the certificate is valid for **825 days**. Regenerate it before expiration to avoid losing access to the management interface.
 
 ## License
 

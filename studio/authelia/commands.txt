@@ -8,14 +8,14 @@ docker exec authelia \
 # Exportar os opaque identifiers dos usuarios do Authelia para ids.yml
 docker exec authelia \
   authelia storage user identifiers export \
-    --config /config/configuration.yml \
+    --config /config/configuration.runtime.yml \
     --file /config/ids.yml.tmp && \
 docker exec authelia mv /config/ids.yml.tmp /config/ids.yml
 
 # Gerar opaque identifiers no storage do Authelia para usuarios especificos
 docker exec authelia \
   authelia storage user identifiers generate \
-    --config /config/configuration.yml \
+    --config /config/configuration.runtime.yml \
     --users usuario1,usuario2 \
     --services openid \
     --sectors ""
@@ -23,7 +23,7 @@ docker exec authelia \
 # Importar ids.yml de volta no storage do Authelia
 docker exec authelia \
   authelia storage user identifiers import \
-    --config /config/configuration.yml \
+    --config /config/configuration.runtime.yml \
     /config/ids.yml
 
 #criar um senha em argon 2

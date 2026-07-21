@@ -75,10 +75,17 @@ for project_env in "$SERVER_DIR"/projects/*/.env; do
 
   nginx_config="$project_dir/nginx/nginx_${project_name}.conf"
   [[ -f "$nginx_config" ]] || fail "$project_name: configuração Nginx ausente"
-  grep -Fq "$config_token" "$nginx_config" \
-    || fail "$project_name: config token não foi renderizado no Nginx"
-  grep -Fq "$service_key" "$nginx_config" \
-    || fail "$project_name: service role não foi renderizada no Nginx"
+  grep -Fq '${CONFIG_TOKEN_PROJETO}' "$nginx_config" \
+    || fail "$project_name: placeholder runtime do config token ausente no Nginx"
+  grep -Fq '${SERVICE_ROLE_KEY_PROJETO}' "$nginx_config" \
+    || fail "$project_name: placeholder runtime da service role ausente no Nginx"
+  grep -Fq '${ANON_KEY_PROJETO}' "$nginx_config" \
+    || fail "$project_name: placeholder runtime da anon key ausente no Nginx"
+  if grep -Fq "$config_token" "$nginx_config" \
+    || grep -Fq "$service_key" "$nginx_config" \
+    || grep -Fq "$anon_key" "$nginx_config"; then
+    fail "$project_name: chave secreta foi incorporada na configuração Nginx"
+  fi
   ok "$project_name: chaves e templates consistentes"
 done
 

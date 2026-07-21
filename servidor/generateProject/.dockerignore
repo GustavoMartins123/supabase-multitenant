@@ -1,0 +1,4 @@
+**
+!Dockerfile
+!nginx/
+!nginx/nginx_*.conf

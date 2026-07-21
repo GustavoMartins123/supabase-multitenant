@@ -6,6 +6,14 @@ x-vector-logging: &vector-logging
     fluentd-async: "true"
     fluentd-sub-second-precision: "true"
 
+secrets:
+  JWT_SECRET:
+    file: ./secrets/authelia/JWT_SECRET
+  SESSION_SECRET:
+    file: ./secrets/authelia/SESSION_SECRET
+  STORAGE_ENCRYPTION_KEY:
+    file: ./secrets/authelia/STORAGE_ENCRYPTION_KEY
+
 services:
   usersdb-init:
     image: ${USERSDB_INIT_IMAGE}
@@ -21,10 +29,20 @@ services:
   authelia:
     image: ${AUTHELIA_IMAGE}
     container_name: authelia
+    command:
+      - authelia
+      - --config=/config/configuration.runtime.yml
     volumes:
       - ./authelia:/config
     environment:
       - TZ=${TZ}
+      - AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE=/run/secrets/JWT_SECRET
+      - AUTHELIA_SESSION_SECRET_FILE=/run/secrets/SESSION_SECRET
+      - AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE=/run/secrets/STORAGE_ENCRYPTION_KEY
+    secrets:
+      - JWT_SECRET
+      - SESSION_SECRET
+      - STORAGE_ENCRYPTION_KEY
     restart: unless-stopped
     logging: *vector-logging
 
@@ -47,6 +65,11 @@ services:
       - .env
     environment:
       SNIPPETS_MANAGEMENT_FOLDER: ${SNIPPETS_MANAGEMENT_FOLDER}
+      AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE: /var/run/authelia-cli-secrets/JWT_SECRET
+      AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE: /var/run/authelia-cli-secrets/STORAGE_ENCRYPTION_KEY
+    secrets:
+      - JWT_SECRET
+      - STORAGE_ENCRYPTION_KEY
     volumes:
       - ./nginx/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ./authelia:/config

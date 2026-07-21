@@ -6,8 +6,13 @@ servidor/backups/
 servidor/docker/volumes/db/data/*
 
 studio/.env
+studio/.analytics.env
 studio/authelia/profile-pictures/
+servidor/.env
 servidor/.analytics.env
+servidor/.legacy-migration.env
+servidor/projects/**
+!servidor/projects/.gitkeep
 tarefas.md
 
 # Python runtime artifacts

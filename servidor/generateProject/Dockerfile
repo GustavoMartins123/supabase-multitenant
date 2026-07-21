@@ -3,4 +3,4 @@ COPY --chown=101:101 --chmod=0400 \
   nginx/nginx_{{project_id}}.conf /etc/nginx/nginx.conf.template
 USER 101
 ENTRYPOINT ["/bin/sh", "-c"]
-CMD ["envsubst '$FILE_SIZE_LIMIT' < /etc/nginx/nginx.conf.template > /tmp/nginx.conf && exec nginx -g 'daemon off;' -c /tmp/nginx.conf"]
+CMD ["envsubst '$FILE_SIZE_LIMIT $SUPABASE_NETWORK_SUBNET $ANON_KEY_PROJETO $SERVICE_ROLE_KEY_PROJETO $CONFIG_TOKEN_PROJETO' < /etc/nginx/nginx.conf.template > /tmp/nginx.conf && exec nginx -g 'daemon off;' -c /tmp/nginx.conf"]

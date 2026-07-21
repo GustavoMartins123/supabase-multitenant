@@ -1,4 +1,4 @@
-ARG AUTHELIA_IMAGE
+ARG AUTHELIA_IMAGE=authelia/authelia:4.39.20
 
 FROM ghcr.io/cirruslabs/flutter:3.44.0 AS builder
 
@@ -50,13 +50,13 @@ RUN luarocks install https://luarocks.org/manifests/rsander/lua-resty-string-0.0
 
 COPY --from=authelia-cli /app/authelia /usr/local/bin/authelia
 
-COPY nginx/nginx.conf /etc/nginx/nginx.conf
+COPY nginx/nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
 COPY nginx/lua/ /usr/local/openresty/lualib/
 COPY --from=builder /app/build/web /usr/share/nginx/html
 COPY nginx/docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-RUN which argon2 && argon2 -h || echo "argon2 installation check failed"
+RUN command -v argon2 >/dev/null
 RUN ldconfig -p | grep -q libargon2
 
 EXPOSE 443

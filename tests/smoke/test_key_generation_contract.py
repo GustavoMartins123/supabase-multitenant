@@ -95,7 +95,7 @@ class KeyGenerationContractTest(unittest.TestCase):
     def test_generated_secret_files_are_restricted(self):
         setup = (ROOT / "setup.sh").read_text(encoding="utf-8")
         self.assertIn(
-            "chmod 644 servidor/.env servidor/.analytics.env "
+            "chmod 600 servidor/.env servidor/.analytics.env "
             "studio/.env studio/.analytics.env",
             setup,
         )
@@ -106,16 +106,41 @@ class KeyGenerationContractTest(unittest.TestCase):
             "lib/rename_project_impl.sh",
         }:
             source = (GENERATE / script_name).read_text(encoding="utf-8")
+            self.assertRegex(source, r'chmod 600 "[^\n]*\.env"', script_name)
             self.assertIn("chmod 644", source, script_name)
-            self.assertNotIn("chmod 600", source, script_name)
+            self.assertIn(".dockerignore", source, script_name)
 
     def test_unprivileged_nginx_can_read_and_render_its_template(self):
         dockerfile = (GENERATE / "Dockerfile").read_text(encoding="utf-8")
         self.assertIn("--chown=101:101", dockerfile)
         self.assertIn("--chmod=0400", dockerfile)
         self.assertIn("ENTRYPOINT", dockerfile)
-        self.assertIn("envsubst '$FILE_SIZE_LIMIT'", dockerfile)
+        self.assertIn(
+            "envsubst '$FILE_SIZE_LIMIT $SUPABASE_NETWORK_SUBNET "
+            "$ANON_KEY_PROJETO $SERVICE_ROLE_KEY_PROJETO $CONFIG_TOKEN_PROJETO'",
+            dockerfile,
+        )
         self.assertNotIn("/etc/nginx/templates/", dockerfile)
+
+        nginx_template = (GENERATE / "nginxtemplate").read_text(encoding="utf-8")
+        compose_template = (GENERATE / "dockercomposetemplate").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("allow 172.50.0.0/16", nginx_template)
+        self.assertIn("allow ${SUPABASE_NETWORK_SUBNET}", nginx_template)
+        self.assertIn("SUPABASE_NETWORK_SUBNET: ${SUPABASE_NETWORK_SUBNET}", compose_template)
+        for key in {
+            "ANON_KEY_PROJETO",
+            "SERVICE_ROLE_KEY_PROJETO",
+            "CONFIG_TOKEN_PROJETO",
+        }:
+            self.assertIn(f"${{{key}}}", nginx_template)
+            self.assertIn(f"{key}: ${{{key}}}", compose_template)
+
+        dockerignore = (GENERATE / ".dockerignore").read_text(encoding="utf-8")
+        self.assertIn("**", dockerignore)
+        self.assertIn("!Dockerfile", dockerignore)
+        self.assertIn("!nginx/nginx_*.conf", dockerignore)
 
     def test_key_expiry_and_collaboration_tabs_are_exposed(self):
         main = (ROOT / "servidor" / "api-internal" / "app" / "main.py").read_text(

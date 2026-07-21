@@ -29,6 +29,29 @@ class StudioRuntimeContractTests(unittest.TestCase):
         self.assertIn("studio:", self.nginx)
         self.assertIn("condition: service_started", self.nginx)
 
+    def test_authelia_storage_cli_has_private_runtime_credentials(self) -> None:
+        nginx_conf = (ROOT / "studio/nginx/nginx.conf").read_text(encoding="utf-8")
+        entrypoint = (ROOT / "studio/nginx/docker-entrypoint.sh").read_text(
+            encoding="utf-8"
+        )
+        runtime_tool = (ROOT / "tools/configure_studio_runtime.py").read_text(
+            encoding="utf-8"
+        )
+
+        for name in {
+            "AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE",
+            "AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE",
+        }:
+            self.assertIn(name, self.nginx)
+            self.assertIn(f"env {name};", nginx_conf)
+
+        self.assertIn("- JWT_SECRET", self.nginx)
+        self.assertIn("- STORAGE_ENCRYPTION_KEY", self.nginx)
+        self.assertNotIn("- SESSION_SECRET", self.nginx)
+        self.assertIn('install -m 400 -o 65534 -g 65534', entrypoint)
+        self.assertIn("chmod 644 /config/configuration.runtime.yml", entrypoint)
+        self.assertIn("atomic_write(target, rendered, mode=0o644", runtime_tool)
+
 
 if __name__ == "__main__":
     unittest.main()

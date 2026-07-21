@@ -1,2 +1,5 @@
 .env
 .analytics.env
+authelia/configuration.runtime.yml
+authelia/ssl/
+secrets/

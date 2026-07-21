@@ -101,8 +101,28 @@ Para os detalhes de implementação, consulte a [documentação da arquitetura](
 | --- | --- |
 | Linux | Sistema usado pelos scripts de setup. |
 | Docker e Docker Compose | Instalados e em execução. |
+| Python | Python 3.10 ou mais recente, incluindo o módulo `venv`. Ele é necessário para o `setup.sh`, configuração do Studio/Authelia, scripts de lifecycle dos projetos e host-agent. |
 | Usuário | Permissão para executar comandos Docker. |
 | Utilitários | `openssl`, `curl`, `jq`, `sed` e ferramentas padrão de shell. |
+
+No Ubuntu ou Debian, instale o Python necessário no host com:
+
+```bash
+sudo apt update
+sudo apt install -y python3 python3-venv
+```
+
+Confirme a versão mínima antes de executar o setup:
+
+```bash
+python3 -c 'import sys; assert sys.version_info >= (3, 10), "Python 3.10 ou mais recente é obrigatório"'
+python3 -m venv --help >/dev/null
+```
+
+Na topologia com duas máquinas, o Python precisa estar instalado tanto no
+servidor principal quanto na máquina administrativa do Studio. O servidor usa
+Python para o host-agent e o lifecycle dos projetos; a máquina do Studio usa
+Python para renderizar a configuração runtime e os certificados do Authelia.
 
 ---
 

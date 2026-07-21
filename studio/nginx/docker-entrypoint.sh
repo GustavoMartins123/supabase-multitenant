@@ -10,12 +10,24 @@ if [ ! -f /config/ids.yml ]; then
     } > /config/ids.yml
 fi
 
-# Ajusta permissoes dentro do volume compartilhado.
-#
-# Em alguns hosts/bind mounts o chown retorna sucesso, mas o owner continua
-# root:root. Os workers do OpenResty rodam como nobody, entao eles precisam de
-# permissao de escrita efetiva para gerar identifiers do Authelia e gravar
-# ids.yml. SQLite tambem precisa escrever no diretorio para journal/WAL.
+AUTHELIA_CLI_SECRETS_DIR="/var/run/authelia-cli-secrets"
+install -d -m 700 -o 65534 -g 65534 "$AUTHELIA_CLI_SECRETS_DIR"
+for secret_name in JWT_SECRET STORAGE_ENCRYPTION_KEY; do
+    source_path="/run/secrets/$secret_name"
+    target_path="$AUTHELIA_CLI_SECRETS_DIR/$secret_name"
+    if [ ! -s "$source_path" ]; then
+        echo "[entrypoint] ERRO: secret do Authelia ausente: $secret_name" >&2
+        exit 1
+    fi
+    install -m 400 -o 65534 -g 65534 "$source_path" "$target_path"
+done
+
+if [ ! -s /config/configuration.runtime.yml ]; then
+    echo "[entrypoint] ERRO: configuration.runtime.yml ausente" >&2
+    exit 1
+fi
+chmod 644 /config/configuration.runtime.yml
+
 chown 65534:65534 /config 2>/dev/null || true
 chmod 777 /config || true
 
@@ -38,16 +50,10 @@ done
 
 chmod 755 /config/ssl 2>/dev/null || true
 
-# O Studio e o OpenResty compartilham o mesmo bind mount de snippets, mas rodam
-# com usuarios diferentes. A migracao de namespaces precisa renomear diretorios
-# criados anteriormente pelo Studio; apenas montar o volume como rw nao concede
-# essa permissao ao worker nobody.
 SNIPPETS_DIR="${SNIPPETS_MANAGEMENT_FOLDER:-/app/snippets}"
 if [ -d "$SNIPPETS_DIR" ]; then
     chown -R 65534:65534 "$SNIPPETS_DIR" 2>/dev/null || true
 
-    # Diretorios precisam de write+execute para rename/delete e arquivos precisam
-    # continuar gravaveis pelo Studio, independentemente do UID usado pela imagem.
     if find "$SNIPPETS_DIR" -type d -exec chmod 777 {} + \
         && find "$SNIPPETS_DIR" -type f -exec chmod 666 {} +; then
         echo "[entrypoint] snippets preparados para escrita compartilhada em $SNIPPETS_DIR"
