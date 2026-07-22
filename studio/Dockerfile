@@ -29,6 +29,7 @@ RUN apt-get update \
         openssl \
         git \
         inotify-tools \
+        libvips-tools \
         luarocks \
     && rm -rf /var/lib/apt/lists/*
 

@@ -23,8 +23,7 @@ class MembersSection extends ConsumerWidget {
     final membersAsync = ref.watch(projectMembersProvider(projectRef));
 
     final myId = Session().myId;
-    final myRole =
-        membersAsync.value
+    final myRole = membersAsync.value
             ?.firstWhere(
               (m) => m.user_id == myId,
               orElse: () => ProjectMember(user_id: '', role: 'member'),

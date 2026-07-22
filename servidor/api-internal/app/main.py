@@ -3,7 +3,6 @@ import uuid
 import pathlib
 import asyncpg
 import hmac
-import base64
 import hashlib
 import time
 import datetime as dt
@@ -34,8 +33,8 @@ from app.jobs import (
 from app.runtime_config import (
     ANALYTICS_INTERNAL_URL, BASE_DIR, DB_DSN,
     KEY_EXPIRY_WARNING_DAYS, NGINX_HMAC_SECRET, NGINX_SHARED_TOKEN, PG_META_CRYPTO_KEY,
-    LOGFLARE_PRIVATE_ACCESS_TOKEN, PG_META_INTERNAL_URL, REALTIME_INTERNAL_URL,
-    SUPAVISOR_INTERNAL_URL, USER_TOKEN_MAX_CLOCK_SKEW_SECONDS,
+    LOGFLARE_PRIVATE_ACCESS_TOKEN, PG_META_INTERNAL_URL,
+    USER_TOKEN_MAX_CLOCK_SKEW_SECONDS,
     service_key_transport_fernet,
 )
 from app.host_agent import (
@@ -78,6 +77,18 @@ from app.project_telemetry import (
     fetch_project_user_telemetry,
     resolve_telemetry_period,
 )
+from app.project_deletion import (
+    ProjectDeletionError,
+    build_global_delete_token,
+    build_realtime_delete_token,
+    delete_realtime_tenant,
+    delete_supavisor_tenant,
+    drain_database_connections,
+    drop_database_force,
+    load_project_environment,
+    terminate_supavisor_pools,
+)
+from app.routers.lifecycle import get_project_status
 from app.project_identity import (
     ProjectIdentityError,
     get_job_project_identity as _get_job_project_identity,
@@ -89,6 +100,7 @@ from app.dependencies import (
     audit_project_member_change,
     ensure_project_admin_access,
     ensure_project_member_access,
+    ensure_project_owner_access,
     get_project_member_row,
     get_project_role,
     get_project_row,
@@ -132,6 +144,29 @@ async def _enqueue_project_action(
             error_code="queue_submit_failed",
         )
         raise RuntimeError("falha ao enfileirar operacao do projeto") from exc
+
+
+async def _serialize_queued_job(
+    pool,
+    job_id: str,
+    queue_position: int,
+    message: str,
+    *,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Retorna o contrato completo e canonico de um job recem-enfileirado."""
+    row = await pool.fetchrow(
+        "SELECT * FROM jobs WHERE job_id = $1",
+        uuid.UUID(str(job_id)),
+    )
+    if row is None:
+        raise RuntimeError(f"job enfileirado nao encontrado: {job_id}")
+    result = serialize_job(row)
+    result["queue_position"] = queue_position
+    result["message"] = message
+    if extra:
+        result.update(extra)
+    return result
 
 async def rollback_project_from_db(
     pool,
@@ -1094,22 +1129,21 @@ async def rename_project(
                 )
         raise HTTPException(503, "Nao foi possivel enfileirar a renomeacao") from exc
 
+    message = (
+        "Renomeação enfileirada. O projeto ficará indisponível durante a migração."
+        if position == 0
+        else f"Renomeação enfileirada. Existem {position} ações na fila para "
+        f"{project_name}; este job é o próximo."
+    )
     return JSONResponse(
         status_code=202,
-        content={
-            "job_id": job_id,
-            "old_name": project_name,
-            "new_name": new_name,
-            "status": "queued",
-            "queue_position": position,
-            "message": (
-                "Renomeação enfileirada. O projeto ficará indisponível "
-                "durante a migração."
-                if position == 0
-                else f"Renomeação enfileirada. Existem {position} ações "
-                f"na fila para {project_name}; este job é o próximo."
-            ),
-        },
+        content=await _serialize_queued_job(
+            pool,
+            job_id,
+            position,
+            message,
+            extra={"old_name": project_name, "new_name": new_name},
+        ),
     )
 
 
@@ -1495,6 +1529,13 @@ async def list_project_restore_points(
             project_id=project_row["id"],
             auth_user=auth_user,
         )
+        role = await get_project_role(
+            conn,
+            project_id=project_row["id"],
+            auth_user=auth_user,
+        )
+        is_owner = project_row["owner_id"] == auth_user["db_user_id"]
+        is_global_admin = auth_user["is_global_admin"]
         rows = await conn.fetch(
             """
             SELECT
@@ -1511,6 +1552,11 @@ async def list_project_restore_points(
     return {
         "project": project_name,
         "limit": RESTORE_POINT_LIMIT,
+        "permissions": {
+            "can_create": is_global_admin or is_owner or role == "admin",
+            "can_restore": is_global_admin or is_owner,
+            "can_delete": is_global_admin or is_owner,
+        },
         "points": [_serialize_restore_point(row) for row in rows],
     }
 
@@ -1536,10 +1582,11 @@ async def create_project_restore_point(
                 "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
                 str(project_id),
             )
-            await ensure_project_member_access(
+            await ensure_project_admin_access(
                 conn,
                 project_id=project_id,
                 auth_user=auth_user,
+                message="Apenas admins podem criar pontos de restauração",
             )
             active = await _count_active_restore_points(conn, project_id)
             if active >= RESTORE_POINT_LIMIT:
@@ -1592,20 +1639,21 @@ async def create_project_restore_point(
             job_id, project_name, auth_user["db_user_id"], point_id
         ),
     )
+    message = (
+        "Criação do ponto de restauração enfileirada."
+        if position == 0
+        else f"Criação enfileirada. Existem {position} ações antes desta na "
+        f"fila para {project_name}."
+    )
     return JSONResponse(
         status_code=202,
-        content={
-            "job_id": job_id,
-            "restore_point_id": str(point_id),
-            "status": "queued",
-            "queue_position": position,
-            "message": (
-                "Criação do ponto de restauração enfileirada."
-                if position == 0
-                else f"Criação enfileirada. Existem {position} ações antes "
-                f"desta na fila para {project_name}."
-            ),
-        },
+        content=await _serialize_queued_job(
+            pool,
+            job_id,
+            position,
+            message,
+            extra={"restore_point_id": str(point_id)},
+        ),
     )
 
 
@@ -1634,10 +1682,11 @@ async def restore_project_restore_point(
                 "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
                 str(project_id),
             )
-            await ensure_project_member_access(
+            await ensure_project_owner_access(
                 conn,
                 project_id=project_id,
                 auth_user=auth_user,
+                message="Apenas o dono do projeto ou admin global pode restaurar o projeto",
             )
             point = await _fetch_restore_point_locked(conn, project_id, parsed_point)
             if point["status"] != "ready":
@@ -1712,22 +1761,24 @@ async def restore_project_restore_point(
             safety_point_id,
         ),
     )
+    message = (
+        "Restauração enfileirada. O projeto ficará indisponível durante o processo."
+        if position == 0
+        else f"Restauração enfileirada. Existem {position} ações antes desta "
+        f"na fila para {project_name}."
+    )
     return JSONResponse(
         status_code=202,
-        content={
-            "job_id": job_id,
-            "restore_point_id": str(parsed_point),
-            "safety_point_id": str(safety_point_id),
-            "status": "queued",
-            "queue_position": position,
-            "message": (
-                "Restauração enfileirada. O projeto ficará indisponível "
-                "durante o processo."
-                if position == 0
-                else f"Restauração enfileirada. Existem {position} ações "
-                f"antes desta na fila para {project_name}."
-            ),
-        },
+        content=await _serialize_queued_job(
+            pool,
+            job_id,
+            position,
+            message,
+            extra={
+                "restore_point_id": str(parsed_point),
+                "safety_point_id": str(safety_point_id),
+            },
+        ),
     )
 
 
@@ -1755,10 +1806,11 @@ async def delete_project_restore_point(
                 "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
                 str(project_id),
             )
-            await ensure_project_member_access(
+            await ensure_project_owner_access(
                 conn,
                 project_id=project_id,
                 auth_user=auth_user,
+                message="Apenas o dono do projeto ou admin global pode excluir pontos de restauração",
             )
             point = await _fetch_restore_point_locked(conn, project_id, parsed_point)
             if point["status"] not in ("ready", "failed"):
@@ -1806,13 +1858,13 @@ async def delete_project_restore_point(
     )
     return JSONResponse(
         status_code=202,
-        content={
-            "job_id": job_id,
-            "restore_point_id": str(parsed_point),
-            "status": "queued",
-            "queue_position": position,
-            "message": "Exclusão do ponto de restauração enfileirada.",
-        },
+        content=await _serialize_queued_job(
+            pool,
+            job_id,
+            position,
+            "Exclusão do ponto de restauração enfileirada.",
+            extra={"restore_point_id": str(parsed_point)},
+        ),
     )
 
 
@@ -2253,18 +2305,12 @@ async def create_project(
             job_id, name, auth_user["db_user_id"]
         ),
     )
-    return {
-        "job_id": job_id,
-        "project_uuid": str(project_id),
-        "tenant_uuid": str(project_id),
-        "status": "queued",
-        "queue_position": position,
-        "message": (
-            "Criação enfileirada."
-            if position == 0
-            else f"Criação enfileirada. Existem {position} ações antes desta na fila para {name}."
-        ),
-    }
+    message = (
+        "Criação enfileirada."
+        if position == 0
+        else f"Criação enfileirada. Existem {position} ações antes desta na fila para {name}."
+    )
+    return await _serialize_queued_job(pool, job_id, position, message)
 
 
 @app.post("/api/projects/duplicate", status_code=202)
@@ -2344,18 +2390,12 @@ async def duplicate_project(
         ),
     )
 
-    return {
-        "job_id": job_id,
-        "project_uuid": str(project_id),
-        "tenant_uuid": str(project_id),
-        "status": "queued",
-        "queue_position": position,
-        "message": (
-            "Duplicação enfileirada."
-            if position == 0
-            else f"Duplicação enfileirada. Existem {position} ações antes desta na fila para {new_name}."
-        ),
-    }
+    message = (
+        "Duplicação enfileirada."
+        if position == 0
+        else f"Duplicação enfileirada. Existem {position} ações antes desta na fila para {new_name}."
+    )
+    return await _serialize_queued_job(pool, job_id, position, message)
 
 
 async def _duplicate_and_store_keys(
@@ -2500,283 +2540,6 @@ async def _duplicate_and_store_keys(
         await rollback_project_from_db(pool, new_name, project_uuid)
 
 
-def _base64url_no_padding(raw: bytes) -> str:
-    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
-
-
-def _create_hs256_jwt(payload: dict[str, Any], secret: str) -> str:
-    header = {"alg": "HS256", "typ": "JWT"}
-    header_b64 = _base64url_no_padding(
-        json.dumps(header, separators=(",", ":")).encode("utf-8")
-    )
-    payload_b64 = _base64url_no_padding(
-        json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    )
-    signature = hmac.new(
-        secret.encode("utf-8"),
-        f"{header_b64}.{payload_b64}".encode("ascii"),
-        hashlib.sha256,
-    ).digest()
-    return f"{header_b64}.{payload_b64}.{_base64url_no_padding(signature)}"
-
-
-def _get_global_jwt_secret() -> str:
-    env_secret = os.getenv("JWT_SECRET", "").strip()
-    if env_secret:
-        return env_secret
-
-    try:
-        return _read_env_file(_get_root_env_path()).get("JWT_SECRET", "").strip()
-    except Exception as exc:
-        print(f"[delete_project] falha ao ler JWT_SECRET do .env raiz: {exc}")
-        return ""
-
-
-def _build_short_lived_jwt(secret: str, issuer: str) -> str:
-    now = int(time.time())
-    return _create_hs256_jwt(
-        {
-            "role": "anon",
-            "iss": issuer,
-            "iat": now,
-            "exp": now + 3600,
-        },
-        secret,
-    )
-
-
-def _load_project_env(project_name: str) -> dict[str, str]:
-    env_path = PROJECTS_ROOT / project_name / ".env"
-    try:
-        return _read_env_file(env_path) if env_path.exists() else {}
-    except Exception as exc:
-        print(f"[delete_project] falha ao ler .env de {project_name}: {exc}")
-        return {}
-
-
-def _build_realtime_delete_token(
-    project_env: dict[str, str],
-    tenant_external_id: str,
-) -> str:
-    anon_token = project_env.get("ANON_KEY_PROJETO", "").strip()
-    if anon_token:
-        return anon_token
-
-    jwt_secret = project_env.get("JWT_SECRET_PROJETO", "").strip()
-    if jwt_secret:
-        return _build_short_lived_jwt(jwt_secret, tenant_external_id)
-
-    return ""
-
-
-def _build_global_delete_token(issuer: str) -> str:
-    secret = _get_global_jwt_secret()
-    return _build_short_lived_jwt(secret, issuer) if secret else ""
-
-
-async def _tenant_api_fallback(
-    *,
-    pool,
-    job_id: str | None,
-    project_name: str,
-    requested_by: uuid.UUID | None,
-    command: str,
-) -> str | None:
-    """Fallback do host-agent quando a chamada HTTP direta falha.
-
-    O agent constroi o token localmente a partir dos .env do host e chama
-    a API do tenant com curl dentro do proprio container do servico, no
-    lugar do acesso que a Projects API tinha antes da migracao.
-    """
-    try:
-        if job_id:
-            record = await run_host_agent_command_for_job(
-                pool,
-                job_id=job_id,
-                command=command,
-                project=project_name,
-                project_uuid=None,
-                requested_by=requested_by,
-                reuse_terminal=True,
-            )
-        else:
-            record = await run_host_agent_command(
-                pool,
-                command=command,
-                project=project_name,
-                project_uuid=None,
-                requested_by=requested_by,
-            )
-    except HostAgentError as exc:
-        print(f"[delete_project] fallback {command}: {exc}")
-        return f"{command}: falha no host-agent"
-    if record["status"] == "done":
-        return None
-    return record["message"] or record["error_code"] or f"{command} falhou"
-
-
-async def _delete_tenant_api(
-    *,
-    service_label: str,
-    base_url: str,
-    fallback_command: str,
-    tenant_id: str,
-    token: str,
-    pool,
-    job_id: str | None,
-    project_name: str,
-    requested_by: uuid.UUID | None,
-) -> str | None:
-    if not token:
-        print(
-            f"[delete_project] {service_label}: token ausente; "
-            "seguindo com fallback SQL."
-        )
-        return None
-
-    encoded_tenant = urllib.parse.quote(tenant_id, safe="")
-    path = f"/api/tenants/{encoded_tenant}"
-    headers = {"Authorization": f"Bearer {token}"}
-    accepted_statuses = {200, 202, 204, 404}
-
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.delete(f"{base_url}{path}", headers=headers)
-        if response.status_code in accepted_statuses:
-            return None
-        direct_error = f"HTTP {response.status_code}"
-    except httpx.HTTPError as exc:
-        print(f"[delete_project] {service_label}: {exc}")
-        direct_error = "erro de transporte"
-
-    fallback_error = await _tenant_api_fallback(
-        pool=pool,
-        job_id=job_id,
-        project_name=project_name,
-        requested_by=requested_by,
-        command=fallback_command,
-    )
-    if fallback_error is None:
-        return None
-
-    return (
-        f"{service_label}: falha ao remover tenant {tenant_id}; "
-        f"direto={direct_error}; host_agent={fallback_error}"
-    )
-
-
-async def _terminate_supavisor_pools(
-    *,
-    tenant_id: str,
-    token: str,
-    pool,
-    job_id: str | None,
-    project_name: str,
-    requested_by: uuid.UUID | None,
-) -> str | None:
-    """Solicita ao Supavisor que encerre pools antes do banco ser removido."""
-    if not token:
-        return "Supavisor: token ausente para encerrar os pools do tenant"
-
-    encoded_tenant = urllib.parse.quote(tenant_id, safe="")
-    path = f"/api/tenants/{encoded_tenant}/terminate"
-    headers = {"Authorization": f"Bearer {token}"}
-    accepted_statuses = {200, 204, 404}
-
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(
-                f"{SUPAVISOR_INTERNAL_URL}{path}",
-                headers=headers,
-            )
-        if response.status_code in accepted_statuses:
-            return None
-        direct_error = f"HTTP {response.status_code}"
-    except httpx.HTTPError as exc:
-        print(f"[delete_project] Supavisor terminate: {exc}")
-        direct_error = "erro de transporte"
-
-    fallback_error = await _tenant_api_fallback(
-        pool=pool,
-        job_id=job_id,
-        project_name=project_name,
-        requested_by=requested_by,
-        command="terminate_supavisor_tenant",
-    )
-    if fallback_error is None:
-        return None
-
-    return (
-        f"Supavisor: falha ao encerrar pools do tenant {tenant_id}; "
-        f"direto={direct_error}; host_agent={fallback_error}"
-    )
-
-
-async def _drain_database_connections(
-    conn: asyncpg.Connection,
-    db_name: str,
-    *,
-    timeout_seconds: float = 10.0,
-) -> bool:
-    """Encerra conexões e detecta pools que continuam tentando reconectar."""
-    deadline = time.monotonic() + timeout_seconds
-    quiet_since: float | None = None
-    while True:
-        active_connections = await conn.fetchval(
-            """
-            SELECT count(*)
-            FROM pg_stat_activity
-            WHERE datname = $1 AND pid <> pg_backend_pid()
-            """,
-            db_name,
-        )
-        now = time.monotonic()
-        if active_connections:
-            quiet_since = None
-            await conn.execute(
-                """
-                SELECT pg_terminate_backend(pid)
-                FROM pg_stat_activity
-                WHERE datname = $1 AND pid <> pg_backend_pid()
-                """,
-                db_name,
-            )
-        elif quiet_since is None:
-            quiet_since = now
-        elif now - quiet_since >= 2.0:
-            return True
-
-        if now >= deadline:
-            return False
-        await asyncio.sleep(0.5)
-
-
-async def _drop_database_force_or_fallback(
-    conn: asyncpg.Connection,
-    db_name: str,
-) -> None:
-    quoted_db = '"' + db_name.replace('"', '""') + '"'
-    try:
-        await conn.execute(f"DROP DATABASE IF EXISTS {quoted_db} WITH (FORCE)")
-        return
-    except Exception as force_error:
-        await conn.execute(
-            """
-            SELECT pg_terminate_backend(pid)
-            FROM pg_stat_activity
-            WHERE datname = $1 AND pid <> pg_backend_pid()
-            """,
-            db_name,
-        )
-        await asyncio.sleep(1)
-        try:
-            await conn.execute(f"DROP DATABASE IF EXISTS {quoted_db}")
-        except Exception as drop_error:
-            raise RuntimeError(
-                f"{drop_error}; tentativa com FORCE: {force_error}"
-            ) from drop_error
-
-
 async def _delete_project_impl(
     project_name: str,
     pool,
@@ -2785,7 +2548,6 @@ async def _delete_project_impl(
 ) -> dict:
     errors: list[str] = []
     db_name = f"_supabase_{project_name}"
-    database_removed = False
 
     job_requested_by: uuid.UUID | None = None
     job_project_uuid: uuid.UUID | None = None
@@ -2840,7 +2602,7 @@ async def _delete_project_impl(
         )
 
     await report(5, "load_project_state", "Carregando estado do projeto...")
-    project_env = _load_project_env(project_name)
+    project_env = load_project_environment(PROJECTS_ROOT, project_name)
     identity_row = await pool.fetchrow(
         "SELECT id, tenant_uuid FROM projects WHERE name = $1",
         project_name,
@@ -2849,35 +2611,25 @@ async def _delete_project_impl(
         parse_tenant_uuid(identity_row["tenant_uuid"]) if identity_row else None
     )
     env_tenant_uuid = parse_tenant_uuid(project_env.get("PROJECT_UUID"))
-    tenant_candidates = {
-        candidate
-        for candidate in (
-            persisted_tenant_uuid,
-            env_tenant_uuid,
-            job_tenant_uuid,
+    if persisted_tenant_uuid is None:
+        raise ProjectIdentityError(
+            f"Projeto {project_name} precisa de tenant UUID persistido antes do delete"
         )
-        if candidate is not None
-    }
-    if len(tenant_candidates) > 1:
+    if env_tenant_uuid is None:
+        raise ProjectIdentityError(
+            f"Projeto {project_name} não possui PROJECT_UUID válido no ambiente"
+        )
+    if job_tenant_uuid is None:
+        raise ProjectIdentityError(
+            f"Job de exclusão de {project_name} não possui tenant UUID válido"
+        )
+    if len({persisted_tenant_uuid, env_tenant_uuid, job_tenant_uuid}) != 1:
         raise ProjectIdentityError(
             f"Projeto {project_name} possui tenant UUID divergente no delete"
         )
-    tenant_uuid = tenant_candidates.pop() if tenant_candidates else None
-    if identity_row and persisted_tenant_uuid is None and tenant_uuid is not None:
-        await pool.execute(
-            "UPDATE projects SET tenant_uuid = $2 WHERE id = $1",
-            identity_row["id"],
-            tenant_uuid,
-        )
-    tenant_external_id = str(tenant_uuid) if tenant_uuid else project_name
-
-    if tenant_uuid:
-        print(f"Deletando projeto com tenant UUID: {tenant_uuid}")
-    else:
-        print(
-            "Deletando projeto antigo (sem UUID), "
-            f"usando project_name: {project_name}"
-        )
+    tenant_uuid = persisted_tenant_uuid
+    tenant_external_id = str(tenant_uuid)
+    print(f"Deletando projeto com tenant UUID: {tenant_uuid}")
 
     await report(15, "remove_containers", "Removendo containers do projeto...")
     containers_record = await agent_step("delete_project_containers", job_project_uuid)
@@ -2887,41 +2639,16 @@ async def _delete_project_impl(
             or containers_record["error_code"]
             or "falha ao remover containers"
         ]
-        errors.extend(str(item) for item in container_errors)
+        raise ProjectDeletionError("; ".join(str(item) for item in container_errors))
 
     await report(30, "remove_tenants", "Removendo tenants globais...")
-    supavisor_token = _build_global_delete_token(tenant_external_id)
-    supavisor_terminate_error = await _terminate_supavisor_pools(
-        tenant_id=project_name,
-        token=supavisor_token,
-        pool=pool,
-        job_id=current_job_id,
-        project_name=project_name,
-        requested_by=job_requested_by,
+    supavisor_token = build_global_delete_token(tenant_external_id)
+    await terminate_supavisor_pools(project_name, supavisor_token)
+    await delete_realtime_tenant(
+        tenant_external_id,
+        build_realtime_delete_token(project_env),
     )
-    realtime_error = await _delete_tenant_api(
-        service_label="Realtime",
-        base_url=REALTIME_INTERNAL_URL,
-        fallback_command="delete_realtime_tenant",
-        tenant_id=tenant_external_id,
-        token=_build_realtime_delete_token(project_env, tenant_external_id),
-        pool=pool,
-        job_id=current_job_id,
-        project_name=project_name,
-        requested_by=job_requested_by,
-    )
-
-    supavisor_error = await _delete_tenant_api(
-        service_label="Supavisor",
-        base_url=SUPAVISOR_INTERNAL_URL,
-        fallback_command="delete_supavisor_tenant",
-        tenant_id=project_name,
-        token=supavisor_token,
-        pool=pool,
-        job_id=current_job_id,
-        project_name=project_name,
-        requested_by=job_requested_by,
-    )
+    await delete_supavisor_tenant(project_name, supavisor_token)
 
     await asyncio.sleep(1)
 
@@ -2952,71 +2679,50 @@ async def _delete_project_impl(
             f"supavisor_tenants={deleted_supavisor_tenant}"
         )
 
-        if realtime_error:
-            print(f"[delete_project] {realtime_error}")
-
-        if supavisor_terminate_error:
-            print(f"[delete_project] {supavisor_terminate_error}")
-        if supavisor_error:
-            print(f"[delete_project] {supavisor_error}")
-
         await report(65, "drop_database", "Removendo slots e database...")
-        connections_drained = await _drain_database_connections(conn, db_name)
+        await drain_database_connections(conn, db_name)
 
         slot_errors = await drop_supabase_replication_slots(conn, project_name)
         if slot_errors:
-            errors.extend(slot_errors)
+            raise ProjectDeletionError("; ".join(slot_errors))
 
-        if not connections_drained:
-            errors.append(
-                "Supavisor continuou abrindo conexões após a remoção do "
-                f"tenant; o banco {db_name} foi preservado para evitar "
-                "estado inconsistente"
-            )
-        else:
-            try:
-                await _drop_database_force_or_fallback(conn, db_name)
-                database_removed = True
-            except Exception as drop_error:
-                errors.append(f"Erro ao dropar banco {db_name}: {drop_error}")
+        await drop_database_force(conn, db_name)
 
-        await report(
-            78,
-            "remove_control_plane",
-            "Removendo registros do control plane...",
+    await report(78, "remove_files", "Removendo arquivos do projeto...")
+    files_record = await agent_step(
+        "delete_project_files",
+        None,
+        {"tenant_uuid": str(tenant_uuid)},
+    )
+    if files_record["status"] != "done":
+        detail = (
+            (files_record["stderr_tail"] or "").strip()
+            or (files_record["message"] or "").strip()
+            or files_record["error_code"]
+            or "erro desconhecido"
         )
-        if database_removed:
-            project_id = await conn.fetchval(
-                "SELECT id FROM projects WHERE name = $1",
-                project_name,
-            )
-            if project_id:
-                await conn.execute(
-                    "DELETE FROM project_members WHERE project_id = $1",
-                    project_id,
-                )
-                await conn.execute("DELETE FROM projects WHERE id = $1", project_id)
-            else:
-                errors.append(
-                    f"Projeto {project_name} não encontrado para limpeza final."
-                )
+        raise ProjectDeletionError(f"Erro ao excluir diretórios: {detail}")
 
-    await report(90, "remove_files", "Removendo arquivos do projeto...")
-    if database_removed:
-        files_args = (
-            {"tenant_uuid": str(tenant_uuid)}
-            if tenant_uuid is not None
-            else None
+    await report(
+        90,
+        "remove_control_plane",
+        "Removendo registros do control plane...",
+    )
+    async with pool.acquire() as conn:
+        project_id = await conn.fetchval(
+            "SELECT id FROM projects WHERE name = $1",
+            project_name,
         )
-        files_record = await agent_step("delete_project_files", None, files_args)
-        if files_record["status"] != "done":
-            detail = (
-                (files_record["stderr_tail"] or "").strip()
-                or (files_record["message"] or "").strip()
-                or files_record["error_code"]
-                or "erro desconhecido"
+        if project_id is None:
+            raise ProjectDeletionError(
+                f"Projeto {project_name} não encontrado para limpeza final"
             )
-            errors.append(f"Erro ao excluir diretórios: {detail}")
+        async with conn.transaction():
+            await conn.execute(
+                "DELETE FROM project_members WHERE project_id = $1",
+                project_id,
+            )
+            await conn.execute("DELETE FROM projects WHERE id = $1", project_id)
 
     await report(96, "verify_cleanup", "Verificando limpeza final...")
     async with pool.acquire() as conn:
@@ -3039,16 +2745,15 @@ async def _delete_project_impl(
                 f"Metadata do tenant {project_name} ainda existe no Supavisor"
             )
 
+    if errors:
+        raise ProjectDeletionError("; ".join(errors))
+
     return {
         "project": project_name,
-        "status": "success" if not errors else "partial_success",
-        "message": (
-            "Projeto excluído com sucesso."
-            if not errors
-            else "Projeto excluído com avisos."
-        ),
-        "errors": errors,
-        "success": len(errors) == 0,
+        "status": "success",
+        "message": "Projeto excluído com sucesso.",
+        "errors": [],
+        "success": True,
     }
 
 
@@ -3184,6 +2889,11 @@ async def delete_project(
 
     project_id = project_row["id"]
     tenant_uuid = parse_tenant_uuid(project_row["tenant_uuid"])
+    if tenant_uuid is None:
+        raise HTTPException(
+            409,
+            "Project tenant UUID is missing; run the canonical migration first",
+        )
 
     job_id = await _create_project_job(
         pool,
@@ -3193,7 +2903,7 @@ async def delete_project(
         action="delete",
         payload={
             "project_name": project_name,
-            "tenant_uuid": str(tenant_uuid) if tenant_uuid else None,
+            "tenant_uuid": str(tenant_uuid),
         },
         total_steps=8,
         project_uuid=project_id,
@@ -3203,20 +2913,16 @@ async def delete_project(
         job_id,
         lambda: _delete_project_background(job_id, project_name),
     )
+    message = (
+        "Exclusão enfileirada. Será executada quando não houver outras ações "
+        "em andamento para este projeto."
+        if position == 0
+        else f"Exclusão enfileirada. Existem {position} ações antes desta na "
+        f"fila para {project_name}."
+    )
     return JSONResponse(
         status_code=202,
-        content={
-            "job_id": job_id,
-            "status": "queued",
-            "queue_position": position,
-            "message": (
-                "Exclusão enfileirada. Será executada quando não houver "
-                "outras ações em andamento para este projeto."
-                if position == 0
-                else f"Exclusão enfileirada. Existem {position} ações "
-                f"antes desta na fila para {project_name}."
-            ),
-        },
+        content=await _serialize_queued_job(pool, job_id, position, message),
     )
 
 
@@ -3261,20 +2967,15 @@ async def rotate_project_key(
             job_id, project_name, auth_user["db_user_id"]
         ),
     )
+    message = (
+        "Rotação enfileirada."
+        if position == 0
+        else f"Rotação enfileirada. Existem {position} ações antes desta na "
+        f"fila para {project_name}."
+    )
     return JSONResponse(
         status_code=202,
-        content={
-            "job_id": job_id,
-            "project": project_name,
-            "status": "queued",
-            "queue_position": position,
-            "message": (
-                "Rotação enfileirada."
-                if position == 0
-                else f"Rotação enfileirada. Existem {position} ações "
-                f"antes desta na fila para {project_name}."
-            ),
-        },
+        content=await _serialize_queued_job(pool, job_id, position, message),
     )
 
 
@@ -3838,10 +3539,6 @@ async def get_project_containers(project: str) -> list[dict]:
     return await fetch_project_containers(pool, project)
 
 
-def _get_root_env_path() -> pathlib.Path:
-    return BASE_DIR / ".env"
-
-
 def _get_project_env_path(project_name: str) -> pathlib.Path:
     return PROJECTS_ROOT / project_name / ".env"
 
@@ -4117,19 +3814,15 @@ async def stop_project(
             auth_user["db_user_id"],
         ),
     )
+    message = (
+        "Parada enfileirada."
+        if position == 0
+        else f"Parada enfileirada. Existem {position} ações antes desta na "
+        f"fila para {project_name}."
+    )
     return JSONResponse(
         status_code=202,
-        content={
-            "job_id": job_id,
-            "status": "queued",
-            "queue_position": position,
-            "message": (
-                "Parada enfileirada."
-                if position == 0
-                else f"Parada enfileirada. Existem {position} ações "
-                f"antes desta na fila para {project_name}."
-            ),
-        },
+        content=await _serialize_queued_job(pool, job_id, position, message),
     )
 
 @app.post("/api/projects/{project_name}/start", status_code=202)
@@ -4171,19 +3864,15 @@ async def start_project(
             job_id, project_name, auth_user["db_user_id"]
         ),
     )
+    message = (
+        "Inicialização enfileirada."
+        if position == 0
+        else f"Inicialização enfileirada. Existem {position} ações antes desta "
+        f"na fila para {project_name}."
+    )
     return JSONResponse(
         status_code=202,
-        content={
-            "job_id": job_id,
-            "status": "queued",
-            "queue_position": position,
-            "message": (
-                "Inicialização enfileirada."
-                if position == 0
-                else f"Inicialização enfileirada. Existem {position} ações "
-                f"antes desta na fila para {project_name}."
-            ),
-        },
+        content=await _serialize_queued_job(pool, job_id, position, message),
     )
 
 
@@ -4242,19 +3931,15 @@ async def restart_project(
             job_id, project_name, auth_user["db_user_id"]
         ),
     )
+    message = (
+        "Reinicialização enfileirada."
+        if position == 0
+        else f"Reinicialização enfileirada. Existem {position} ações antes "
+        f"desta na fila para {project_name}."
+    )
     return JSONResponse(
         status_code=202,
-        content={
-            "job_id": job_id,
-            "status": "queued",
-            "queue_position": position,
-            "message": (
-                "Reinicialização enfileirada."
-                if position == 0
-                else f"Reinicialização enfileirada. Existem {position} ações "
-                f"antes desta na fila para {project_name}."
-            ),
-        },
+        content=await _serialize_queued_job(pool, job_id, position, message),
     )
 
 
@@ -4276,7 +3961,7 @@ async def _restart_project_containers_background(
 
 # Logs de containers: app.routers.lifecycle.
 
-@app.post("/api/projects/admin/projects-info")
+@app.post("/api/admin/projects-info")
 async def get_projects_for_user(
     body: Dict[str, str],
     request: Request,
@@ -4629,7 +4314,7 @@ async def proxy_project_meta(
                 content=await request.body(),
             )
     except httpx.HTTPError as exc:
-        print(f"[postgres_meta_proxy] {project_name}: {exc}")
+        print(f"[postgres_meta_proxy] {ref}: {exc}")
         raise HTTPException(
             status_code=502,
             detail="Falha ao acessar postgres-meta global.",
@@ -4940,17 +4625,13 @@ async def recreate_project_services(
             services,
         ),
     )
+    message = (
+        "Recriação enfileirada."
+        if position == 0
+        else f"Recriação enfileirada. Existem {position} ações antes desta na "
+        f"fila para {project_name}."
+    )
     return JSONResponse(
         status_code=202,
-        content={
-            "job_id": job_id,
-            "status": "queued",
-            "queue_position": position,
-            "message": (
-                "Recriação enfileirada."
-                if position == 0
-                else f"Recriação enfileirada. Existem {position} ações "
-                f"antes desta na fila para {project_name}."
-            ),
-        },
+        content=await _serialize_queued_job(pool, job_id, position, message),
     )

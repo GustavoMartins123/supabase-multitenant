@@ -1,6 +1,7 @@
 local cjson = require("cjson")
 local cjson_safe = require("cjson.safe")
 local http = require("resty.http")
+local outbound_tls = require("utils.outbound_tls")
 
 local _M = {}
 
@@ -47,10 +48,9 @@ local function storage_request(path, payload)
     local httpc = http.new()
     httpc:set_timeout(10000)
 
-    return httpc:request_uri(base_url .. path, {
+    return httpc:request_uri(base_url .. path, outbound_tls.apply_internal(base_url, {
         method = "POST",
         body = encoded,
-        ssl_verify = false,
         keepalive = false,
         headers = {
             ["Accept"] = "application/json",
@@ -59,7 +59,7 @@ local function storage_request(path, payload)
             ["Content-Type"] = "application/json",
             ["User-Agent"] = "studio-storage-compat/1.0",
         },
-    })
+    }))
 end
 
 local function decode_upstream_json(res, operation)

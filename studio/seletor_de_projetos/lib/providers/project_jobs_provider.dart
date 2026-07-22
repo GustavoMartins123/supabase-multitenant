@@ -58,7 +58,7 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
       final jobs = await ref.read(jobRepositoryProvider).fetchInFlightJobs();
       if (!_disposed) state = AsyncData(_mergeWithTrackedJobs(jobs));
     } catch (error, stackTrace) {
-      if (!_disposed && !state.hasValue) {
+      if (!_disposed) {
         state = AsyncError(error, stackTrace);
       }
     } finally {
@@ -73,7 +73,7 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
     String? createdBy,
   }) {
     if (_disposed) return;
-    final tracked = job.withFallback(
+    final tracked = job.verifyContext(
       project: project,
       action: action,
       createdBy: createdBy,
@@ -93,7 +93,7 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
     String? action,
     String? createdBy,
   }) {
-    final job = Job.fromJson(json).withFallback(
+    final job = Job.fromJson(json).verifyContext(
       project: project,
       action: action,
       createdBy: createdBy,
@@ -186,7 +186,7 @@ Job mergeJobSnapshots(Job current, Job incoming) {
       !incomingValue.isBefore(currentValue),
   };
   final newest = incomingIsNewer ? incoming : current;
-  final fallback = incomingIsNewer ? current : incoming;
+  final olderSnapshot = incomingIsNewer ? current : incoming;
   final progressValues =
       [current.progress, incoming.progress].whereType<int>().toList();
   final progress = progressValues.isEmpty
@@ -198,16 +198,16 @@ Job mergeJobSnapshots(Job current, Job incoming) {
 
   return Job(
     current.id,
-    project: newest.project ?? fallback.project,
-    projectUuid: newest.projectUuid ?? fallback.projectUuid,
-    tenantUuid: newest.tenantUuid ?? fallback.tenantUuid,
-    createdBy: newest.createdBy ?? fallback.createdBy,
-    action: newest.action ?? fallback.action,
+    project: newest.project ?? olderSnapshot.project,
+    projectUuid: newest.projectUuid ?? olderSnapshot.projectUuid,
+    tenantUuid: newest.tenantUuid ?? olderSnapshot.tenantUuid,
+    createdBy: newest.createdBy ?? olderSnapshot.createdBy,
+    action: newest.action ?? olderSnapshot.action,
     status: status,
-    message: newest.message ?? fallback.message,
+    message: newest.message ?? olderSnapshot.message,
     progress: progress,
-    currentStep: newest.currentStep ?? fallback.currentStep,
-    totalSteps: newest.totalSteps ?? fallback.totalSteps,
+    currentStep: newest.currentStep ?? olderSnapshot.currentStep,
+    totalSteps: newest.totalSteps ?? olderSnapshot.totalSteps,
     createdAt: current.createdAt ?? incoming.createdAt,
     updatedAt: incomingDate == null ||
             (currentDate != null && currentDate.isAfter(incomingDate))

@@ -2,6 +2,7 @@ local cjson = require("cjson.safe")
 local fernet = require("resty.fernet")
 local http = require("resty.http")
 local service_key_version = require("cache.service_key_version")
+local outbound_tls = require("utils.outbound_tls")
 
 local server_domain = (os.getenv("SERVER_DOMAIN") or ""):gsub("/+$", "")
 local hostname = string.match(server_domain or "", "//([^/:]+)") or "localhost"
@@ -10,11 +11,6 @@ local encryption_key = os.getenv("STUDIO_SERVICE_KEY_ENCRYPTION_KEY")
 local cache_ttl = tonumber(os.getenv("SERVICE_KEY_CACHE_TTL_SECONDS")) or 60
 local version_check_ttl = tonumber(os.getenv("SERVICE_KEY_VERSION_CHECK_TTL_SECONDS")) or 5
 local fetch_error_ttl = tonumber(os.getenv("SERVICE_KEY_FETCH_ERROR_TTL_SECONDS")) or 2
-local verify_tls_value = (os.getenv("SERVICE_KEY_VERIFY_TLS") or "true"):lower()
-local verify_tls = verify_tls_value ~= "0"
-    and verify_tls_value ~= "false"
-    and verify_tls_value ~= "no"
-    and verify_tls_value ~= "off"
 local cache = ngx.shared.service_keys
 local metrics = ngx.shared.service_key_metrics
 
@@ -48,17 +44,16 @@ end
 local function internal_request(path)
     local http_client = http.new()
     http_client:set_timeout(1000)
-    return http_client:request_uri(server_domain .. path, {
+    local url = server_domain .. path
+    return http_client:request_uri(url, outbound_tls.apply_internal(url, {
         headers = {
             ["X-Shared-Token"] = shared_token,
             ["X-Internal-Service"] = "studio-nginx",
             ["Host"] = hostname,
         },
-        ssl_verify = verify_tls,
-        ssl_server_name = hostname,
         method = "GET",
         keepalive = true,
-    })
+    }))
 end
 
 local function refresh_required_version(project_ref)

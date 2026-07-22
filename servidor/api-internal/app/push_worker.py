@@ -25,6 +25,12 @@ if not API_URL:
 if not INTERNAL_HMAC_SECRET:
     raise RuntimeError("Missing INTERNAL_HMAC_SECRET environment variable")
 
+PUSH_API_SCHEME = urlparse(API_URL).scheme.lower()
+if PUSH_API_SCHEME not in ("http", "https"):
+    raise RuntimeError("PUSH_API_URL must use http or https")
+if PUSH_API_SCHEME == "https" and not PUSH_VERIFY_TLS:
+    raise RuntimeError("PUSH_VERIFY_TLS must remain enabled for HTTPS")
+
 
 def build_internal_hmac_headers(method: str, url: str, body: bytes) -> dict[str, str]:
     return sign_internal_request(
@@ -35,13 +41,7 @@ def build_internal_hmac_headers(method: str, url: str, body: bytes) -> dict[str,
     )
 
 def build_ssl_context() -> ssl.SSLContext:
-    if not PUSH_VERIFY_TLS:
-        context = ssl.create_default_context()
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
-        return context
-
-    if PUSH_CA_FILE:
+    if PUSH_API_SCHEME == "https" and PUSH_CA_FILE:
         return ssl.create_default_context(cafile=PUSH_CA_FILE)
 
     return ssl.create_default_context()

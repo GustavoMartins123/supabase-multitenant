@@ -54,8 +54,8 @@ class _AddMemberDialogState extends ConsumerState<AddMemberDialog>
       _shown = q.isEmpty
           ? users
           : users
-                .where((u) => u.displayName.toLowerCase().contains(q))
-                .toList();
+              .where((u) => u.displayName.toLowerCase().contains(q))
+              .toList();
     });
   }
 
@@ -337,83 +337,84 @@ class _AddMemberDialogState extends ConsumerState<AddMemberDialog>
             ),
           ),
           Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.all(4),
-              itemCount: _shown.length,
-              itemBuilder: (_, i) {
-                final u = _shown[i];
-                final sel = u == _sel;
+            child: RadioGroup<AvailableUserShort>(
+              groupValue: _sel,
+              onChanged: (value) => setState(() => _sel = value),
+              child: ListView.builder(
+                padding: const EdgeInsets.all(4),
+                itemCount: _shown.length,
+                itemBuilder: (_, i) {
+                  final u = _shown[i];
+                  final sel = u == _sel;
 
-                return Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () => setState(() => _sel = u),
-                    borderRadius: BorderRadius.circular(6),
-                    child: Container(
-                      padding: const EdgeInsets.all(10),
-                      margin: const EdgeInsets.only(bottom: 2),
-                      decoration: BoxDecoration(
-                        color: sel
-                            ? SupabaseColors.brand.withValues(alpha: 0.1)
-                            : null,
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(
+                  return Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () => setState(() => _sel = u),
+                      borderRadius: BorderRadius.circular(6),
+                      child: Container(
+                        padding: const EdgeInsets.all(10),
+                        margin: const EdgeInsets.only(bottom: 2),
+                        decoration: BoxDecoration(
                           color: sel
-                              ? SupabaseColors.brand.withValues(alpha: 0.3)
-                              : Colors.transparent,
+                              ? SupabaseColors.brand.withValues(alpha: 0.1)
+                              : null,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: sel
+                                ? SupabaseColors.brand.withValues(alpha: 0.3)
+                                : Colors.transparent,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            UserAvatarThumbnail(
+                              pictureUrl: u.pictureUrl,
+                              size: 36,
+                              borderRadius: BorderRadius.circular(6),
+                              backgroundColor: sel
+                                  ? SupabaseColors.brand.withValues(alpha: 0.2)
+                                  : SupabaseColors.surface200,
+                              fallback: Text(
+                                u.displayName[0].toUpperCase(),
+                                style: TextStyle(
+                                  color: sel
+                                      ? SupabaseColors.brand
+                                      : SupabaseColors.textSecondary,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                u.displayName,
+                                style: TextStyle(
+                                  fontWeight:
+                                      sel ? FontWeight.w600 : FontWeight.w500,
+                                  fontSize: 13,
+                                  color: SupabaseColors.textPrimary,
+                                ),
+                              ),
+                            ),
+                            SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: Radio<AvailableUserShort>(
+                                value: u,
+                                activeColor: SupabaseColors.brand,
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      child: Row(
-                        children: [
-                          UserAvatarThumbnail(
-                            pictureUrl: u.pictureUrl,
-                            size: 36,
-                            borderRadius: BorderRadius.circular(6),
-                            backgroundColor: sel
-                                ? SupabaseColors.brand.withValues(alpha: 0.2)
-                                : SupabaseColors.surface200,
-                            fallback: Text(
-                              u.displayName[0].toUpperCase(),
-                              style: TextStyle(
-                                color: sel
-                                    ? SupabaseColors.brand
-                                    : SupabaseColors.textSecondary,
-                                fontWeight: FontWeight.w600,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              u.displayName,
-                              style: TextStyle(
-                                fontWeight: sel
-                                    ? FontWeight.w600
-                                    : FontWeight.w500,
-                                fontSize: 13,
-                                color: SupabaseColors.textPrimary,
-                              ),
-                            ),
-                          ),
-                          SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: Radio<AvailableUserShort>(
-                              value: u,
-                              groupValue: _sel,
-                              onChanged: (_) => setState(() => _sel = u),
-                              activeColor: SupabaseColors.brand,
-                              materialTapTargetSize:
-                                  MaterialTapTargetSize.shrinkWrap,
-                            ),
-                          ),
-                        ],
-                      ),
                     ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
           ),
         ],

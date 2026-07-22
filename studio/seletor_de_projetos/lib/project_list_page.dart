@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:html' as html;
+import 'package:web/web.dart' as web;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -184,15 +184,24 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
     );
 
     if (confirm == true) {
-      html.window.location.href = '/logout';
+      web.window.location.href = '/logout';
     }
   }
 
   void _openProject(String refKey) {
-    html.window.open(
-      '${html.window.location.origin}/project/$refKey',
+    web.window.open(
+      '${web.window.location.origin}/project/$refKey',
       '_blank',
     );
+  }
+
+  Future<void> _retryPageLoad() async {
+    ref.invalidate(configProvider);
+    ref.invalidate(favoritesProvider);
+    await Future.wait([
+      ref.read(projectListProvider.notifier).refresh(),
+      ref.read(projectJobsProvider.notifier).refresh(),
+    ]);
   }
 
   @override
@@ -213,8 +222,20 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
       }
     });
 
-    final isLoading = projectsAsync.isLoading && !projectsAsync.hasValue;
-    final hasLoadError = projectsAsync.hasError && !projectsAsync.hasValue;
+    final pageStates = [
+      projectsAsync,
+      jobsAsync,
+      favoritesAsync,
+      configAsync,
+    ];
+    final isLoading = pageStates.any(
+      (value) => value.isLoading && !value.hasValue,
+    );
+    final hasLoadError = pageStates.any((value) => value.hasError);
+    final loadError = projectsAsync.error ??
+        jobsAsync.error ??
+        favoritesAsync.error ??
+        configAsync.error;
     final projects = mergeProjectsWithJobs(
       projects: projectsAsync.value ?? [],
       jobs: jobsAsync.value ?? const [],
@@ -315,7 +336,7 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
                     builder: (_) {
                       if (isLoading) return _buildLoadingState();
                       if (hasLoadError) {
-                        return _buildErrorState(projectsAsync.error);
+                        return _buildErrorState(loadError);
                       }
                       if (projects.isEmpty) return _buildEmptyState();
 
@@ -370,42 +391,47 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
         .toString()
         .replaceFirst('Exception: ', '')
         .replaceFirst('FormatException: ', '');
-    return Padding(
-      padding: const EdgeInsets.all(80),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(
-              Icons.cloud_off_rounded,
-              size: 40,
-              color: SupabaseColors.error,
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Não foi possível carregar os projetos',
-              style: TextStyle(
-                color: SupabaseColors.textPrimary,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      label: 'Erro ao carregar projetos: $message',
+      child: Padding(
+        padding: const EdgeInsets.all(80),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.cloud_off_rounded,
+                size: 40,
+                color: SupabaseColors.error,
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: SupabaseColors.textMuted,
-                fontSize: 12,
+              const SizedBox(height: 16),
+              const Text(
+                'Não foi possível carregar os projetos',
+                style: TextStyle(
+                  color: SupabaseColors.textPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-            const SizedBox(height: 18),
-            TextButton.icon(
-              onPressed: () => ref.read(projectListProvider.notifier).refresh(),
-              icon: const Icon(Icons.refresh_rounded, size: 16),
-              label: const Text('Tentar novamente'),
-            ),
-          ],
+              const SizedBox(height: 8),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: SupabaseColors.textMuted,
+                  fontSize: 12,
+                ),
+              ),
+              const SizedBox(height: 18),
+              TextButton.icon(
+                onPressed: _retryPageLoad,
+                icon: const Icon(Icons.refresh_rounded, size: 16),
+                label: const Text('Tentar novamente'),
+              ),
+            ],
+          ),
         ),
       ),
     );

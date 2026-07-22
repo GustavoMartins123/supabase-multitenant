@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'package:seletor_de_projetos/data/api_client.dart';
 import 'package:seletor_de_projetos/supabase_colors.dart';
 
 class CreateUserDialog extends StatefulWidget {
@@ -25,6 +25,7 @@ class _CreateUserDialogState extends State<CreateUserDialog>
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final ApiClient _client = ApiClient();
 
   bool _isLoading = false;
   bool _showPassword = false;
@@ -48,6 +49,7 @@ class _CreateUserDialogState extends State<CreateUserDialog>
 
   @override
   void dispose() {
+    _client.close();
     _usernameController.dispose();
     _displayNameController.dispose();
     _emailController.dispose();
@@ -63,7 +65,7 @@ class _CreateUserDialogState extends State<CreateUserDialog>
     setState(() => _isLoading = true);
 
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse(
           widget.bootstrapMode
               ? '/api/bootstrap/admin'
@@ -83,7 +85,7 @@ class _CreateUserDialogState extends State<CreateUserDialog>
         Navigator.of(context).pop();
         widget.onUserCreated();
       } else {
-        final error = jsonDecode(response.body)['error'] ?? 'Erro desconhecido';
+        final error = ApiException.fromResponse(response);
         if (!mounted) return;
         _showSnack('Erro: $error', SupabaseColors.error);
       }

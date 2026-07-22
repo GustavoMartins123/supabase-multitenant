@@ -86,6 +86,9 @@ void main() {
       notifier.track(
         const Job(
           'job-race',
+          project: 'meu_projeto',
+          action: 'create',
+          createdBy: 'user-1',
           status: 'running',
           message: 'Pool de conexoes configurado.',
           progress: 60,

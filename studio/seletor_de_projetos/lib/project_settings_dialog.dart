@@ -99,7 +99,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
           .updateProjectDisplayName(widget.ref, newName);
       if (!mounted) return;
       setState(() {
-        _currentDisplayName = saved ?? newName;
+        _currentDisplayName = saved;
         _displayNameController.text = _currentDisplayName ?? '';
       });
       await ref.read(projectListProvider.notifier).refresh();
@@ -207,10 +207,9 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
         return;
       }
 
-      final projects = await ref
-          .read(projectListProvider.notifier)
-          .refresh(throwOnError: true);
+      await ref.read(projectListProvider.notifier).refresh(throwOnError: true);
       if (!mounted) return;
+      final projects = ref.read(projectListProvider).requireValue;
       String? newKey;
       for (final project in projects) {
         if (project['name'] == widget.ref) {

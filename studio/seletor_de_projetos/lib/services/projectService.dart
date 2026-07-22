@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
 
+import '../data/api_client.dart';
 import '../models/job.dart';
 
 class JobWaitResult {
@@ -162,61 +162,42 @@ class ProjectService {
     );
 
     try {
-      final response = await http.delete(
-        Uri.parse('/api/admin/projects/$projectRef'),
-        headers: {
-          'X-Delete-Password': password,
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await (() async {
+        final client = ApiClient();
+        try {
+          return await client.delete(
+            Uri.parse('/api/admin/projects/$projectRef'),
+            headers: {
+              'X-Delete-Password': password,
+              'Content-Type': 'application/json',
+            },
+          );
+        } finally {
+          client.close();
+        }
+      })();
+
+      if (response.statusCode != 202) {
+        throw ApiException.fromResponse(response);
+      }
 
       final job = Job.fromResponse(response);
-      if (job != null) {
-        final waited = submittedJobWaiter == null
-            ? await waitForJob(job.id)
-            : await submittedJobWaiter(job);
-        if (!context.mounted) return waited.ok;
-        Navigator.pop(context);
-        loadingDialogOpen = false;
+      final waited = submittedJobWaiter == null
+          ? await waitForJob(job.id)
+          : await submittedJobWaiter(job);
+      if (!context.mounted) return waited.ok;
+      Navigator.pop(context);
+      loadingDialogOpen = false;
 
-        await _showDeleteResultDialog(
-          context,
-          message: waited.message ??
-              (waited.ok
-                  ? 'Projeto excluído com sucesso.'
-                  : 'Falha ao excluir projeto.'),
-          success: waited.ok,
-        );
-        return waited.ok;
-      }
-
-      var contextAvailable = false;
-      if (context.mounted) {
-        contextAvailable = true;
-        Navigator.pop(context);
-        loadingDialogOpen = false;
-      }
-
-      if (response.statusCode == 200) {
-        final result = jsonDecode(response.body);
-        final status = result['status']?.toString() ?? 'unknown';
-        final errors = (result['errors'] as List?)?.map((e) => e.toString());
-        final message = [
-          result['message']?.toString() ?? 'Projeto excluído',
-          if (errors != null && errors.isNotEmpty) errors.join('\n'),
-        ].where((part) => part.isNotEmpty).join('\n');
-
-        if (contextAvailable && context.mounted) {
-          await _showDeleteResultDialog(
-            context,
-            message: message,
-            success: status == 'success',
-          );
-        }
-        return status == 'success';
-      } else {
-        throw Exception(jsonDecode(response.body)['detail'] ?? response.body);
-      }
+      await _showDeleteResultDialog(
+        context,
+        message: waited.message ??
+            (waited.ok
+                ? 'Projeto excluído com sucesso.'
+                : 'Falha ao excluir projeto.'),
+        success: waited.ok,
+      );
+      return waited.ok;
     } catch (e) {
       if (!context.mounted) return false;
       if (loadingDialogOpen) Navigator.pop(context);
@@ -267,53 +248,76 @@ class ProjectService {
     Duration every = const Duration(seconds: 3),
     int max = 100,
     void Function(Map<String, dynamic> data)? onUpdate,
+    RequestCancellation? cancellation,
   }) async {
     Map<String, dynamic> lastData = const {};
-    for (var i = 0; i < max; i++) {
-      if (i > 0) await Future.delayed(every);
-      final data =
-          await http.get(Uri.parse('/api/projects/status/$jobId')).then(
-        (response) {
-          if (response.statusCode != 200) return <String, dynamic>{};
-          final decoded = jsonDecode(response.body);
-          return decoded is Map
-              ? Map<String, dynamic>.from(decoded)
-              : <String, dynamic>{};
-        },
-      ).catchError((_) => <String, dynamic>{});
-      if (data.isNotEmpty) onUpdate?.call(data);
-
-      final st = data['status']?.toString() ?? 'unknown';
-      final message = data['message']?.toString();
-      final action = data['action']?.toString();
-      final progress = (data['progress'] as num?)?.toInt();
-      final currentStep = data['current_step']?.toString();
-      lastData = data;
-
-      if (st == 'done') {
-        return JobWaitResult(
-          ok: true,
-          status: st,
-          message: message,
-          action: action,
-          progress: progress,
-          currentStep: currentStep,
+    final client = ApiClient();
+    try {
+      for (var i = 0; i < max; i++) {
+        if (cancellation?.isCancelled == true) {
+          throw const ApiException(
+            ApiFailureKind.cancelled,
+            'Acompanhamento do job cancelado',
+          );
+        }
+        if (i > 0) await Future.delayed(every);
+        final response = await client.get(
+          Uri.parse('/api/projects/status/$jobId'),
+          cancellation: cancellation,
         );
+        if (response.statusCode != 200) {
+          throw ApiException.fromResponse(response);
+        }
+        final decoded = jsonDecode(response.body);
+        if (decoded is! Map) {
+          throw const ApiException(
+            ApiFailureKind.invalidResponse,
+            'Resposta invalida ao acompanhar job',
+          );
+        }
+        final data = Map<String, dynamic>.from(decoded);
+        onUpdate?.call(data);
+
+        final status = data['status']?.toString();
+        if (status == null || status.isEmpty) {
+          throw const ApiException(
+            ApiFailureKind.invalidResponse,
+            'Resposta de job sem status',
+          );
+        }
+        final message = data['message']?.toString();
+        final action = data['action']?.toString();
+        final progress = (data['progress'] as num?)?.toInt();
+        final currentStep = data['current_step']?.toString();
+        lastData = data;
+
+        if (status == 'done') {
+          return JobWaitResult(
+            ok: true,
+            status: status,
+            message: message,
+            action: action,
+            progress: progress,
+            currentStep: currentStep,
+          );
+        }
+        if (status == 'failed' || status == 'cancelled') {
+          final diagnostic = [
+            if (message != null && message.isNotEmpty) message,
+            if (currentStep != null) 'Etapa: $currentStep (${progress ?? 0}%)',
+          ].join('\n');
+          return JobWaitResult(
+            ok: false,
+            status: status,
+            message: diagnostic.isEmpty ? null : diagnostic,
+            action: action,
+            progress: progress,
+            currentStep: currentStep,
+          );
+        }
       }
-      if (st == 'failed') {
-        final diagnostic = [
-          if (message != null && message.isNotEmpty) message,
-          if (currentStep != null) 'Etapa: $currentStep (${progress ?? 0}%)',
-        ].join('\n');
-        return JobWaitResult(
-          ok: false,
-          status: st,
-          message: diagnostic.isEmpty ? null : diagnostic,
-          action: action,
-          progress: progress,
-          currentStep: currentStep,
-        );
-      }
+    } finally {
+      client.close();
     }
     return JobWaitResult(
       ok: false,

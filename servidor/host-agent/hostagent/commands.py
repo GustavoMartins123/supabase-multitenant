@@ -9,16 +9,11 @@ paths confinados ao diretorio raiz de projetos.
 from __future__ import annotations
 
 import asyncio
-import base64
-import hashlib
-import hmac as hmac_module
 import json
 import os
 import re
 import shutil
 import signal
-import time
-import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping
@@ -41,9 +36,6 @@ from .security import (
 from .templates import sync_project_generated_files
 
 PROJECT_SERVICE_ORDER = ["meta", "auth", "rest", "imgproxy", "storage", "nginx"]
-TENANT_API_ACCEPTED_STATUSES = {200, 202, 204, 404}
-SUPAVISOR_CONTAINER = "supabase-pooler"
-REALTIME_CONTAINER = "realtime-dev.supabase-realtime"
 _OUTPUT_WINDOW_LIMIT = 64_000
 
 ProgressEvent = tuple[int, str, str]
@@ -381,64 +373,12 @@ def sort_project_containers(containers: list[dict[str, Any]]) -> list[dict[str, 
     )
 
 
-def _b64url(raw: bytes) -> str:
-    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
-
-
-def _hs256_jwt(payload: dict[str, Any], secret: str) -> str:
-    header_b64 = _b64url(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
-    payload_b64 = _b64url(json.dumps(payload, separators=(",", ":")).encode())
-    signature = hmac_module.new(
-        secret.encode("utf-8"),
-        f"{header_b64}.{payload_b64}".encode("ascii"),
-        hashlib.sha256,
-    ).digest()
-    return f"{header_b64}.{payload_b64}.{_b64url(signature)}"
-
-
-def _short_lived_jwt(secret: str, issuer: str) -> str:
-    now = int(time.time())
-    return _hs256_jwt(
-        {"role": "anon", "iss": issuer, "iat": now, "exp": now + 3600},
-        secret,
-    )
-
-
 def _load_project_env(ctx: CommandContext, project: str) -> dict[str, str]:
     try:
         project_dir = resolve_project_dir(ctx.config.projects_root, project)
     except PathConfinementError:
         return {}
     return read_env_file(project_dir / ".env")
-
-
-def _tenant_external_id(project_env: dict[str, str], project: str) -> str:
-    return project_env.get("PROJECT_UUID", "").strip() or project
-
-
-async def _tenant_curl(
-    container: str,
-    method: str,
-    path: str,
-    token: str,
-) -> tuple[int | None, str]:
-    argv = [
-        "docker", "exec", container,
-        "curl", "-sS", "-w", "\n%{http_code}",
-    ]
-    if method != "GET":
-        argv += ["-X", method]
-    argv += [f"http://localhost:4000{path}", "-H", f"Authorization: Bearer {token}"]
-    code, stdout, stderr = await _run_short(argv, timeout=30.0)
-    if code != 0:
-        return None, (stderr or stdout or f"codigo {code}")[:300]
-    body, separator, status_text = stdout.rpartition("\n")
-    if not separator:
-        return None, stdout[:300]
-    try:
-        return int(status_text.strip()), body.strip()[:300]
-    except ValueError:
-        return None, stdout[:300]
 
 
 async def _container_action(
@@ -925,84 +865,6 @@ async def handle_container_logs(ctx: CommandContext, project: str, args: dict[st
     )
 
 
-async def _tenant_api_command(
-    ctx: CommandContext,
-    project: str,
-    *,
-    container: str,
-    method: str,
-    path_template: str,
-    token: str,
-) -> CommandOutcome:
-    if not token:
-        return CommandOutcome(
-            status="failed",
-            error_code="token_missing",
-            message="Sem credencial local para autenticar na API do tenant.",
-        )
-    status, body = await _tenant_curl(container, method, path_template, token)
-    if status in TENANT_API_ACCEPTED_STATUSES:
-        return CommandOutcome(status="done", result={"http_status": status})
-    return CommandOutcome(
-        status="failed",
-        error_code="tenant_api_error",
-        result={"http_status": status},
-        message=sanitize_output(f"HTTP {status}: {body}", tail_limit=400),
-    )
-
-
-async def handle_terminate_supavisor_tenant(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
-    root_env = read_env_file(ctx.config.root / ".env")
-    project_env = _load_project_env(ctx, project)
-    issuer = _tenant_external_id(project_env, project)
-    secret = root_env.get("JWT_SECRET", "").strip()
-    token = _short_lived_jwt(secret, issuer) if secret else ""
-    encoded = urllib.parse.quote(project, safe="")
-    return await _tenant_api_command(
-        ctx,
-        project,
-        container=SUPAVISOR_CONTAINER,
-        method="GET",
-        path_template=f"/api/tenants/{encoded}/terminate",
-        token=token,
-    )
-
-
-async def handle_delete_supavisor_tenant(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
-    root_env = read_env_file(ctx.config.root / ".env")
-    project_env = _load_project_env(ctx, project)
-    issuer = _tenant_external_id(project_env, project)
-    secret = root_env.get("JWT_SECRET", "").strip()
-    token = _short_lived_jwt(secret, issuer) if secret else ""
-    encoded = urllib.parse.quote(project, safe="")
-    return await _tenant_api_command(
-        ctx,
-        project,
-        container=SUPAVISOR_CONTAINER,
-        method="DELETE",
-        path_template=f"/api/tenants/{encoded}",
-        token=token,
-    )
-
-
-async def handle_delete_realtime_tenant(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
-    project_env = _load_project_env(ctx, project)
-    tenant_external = _tenant_external_id(project_env, project)
-    token = project_env.get("ANON_KEY_PROJETO", "").strip()
-    if not token:
-        jwt_secret = project_env.get("JWT_SECRET_PROJETO", "").strip()
-        token = _short_lived_jwt(jwt_secret, tenant_external) if jwt_secret else ""
-    encoded = urllib.parse.quote(tenant_external, safe="")
-    return await _tenant_api_command(
-        ctx,
-        project,
-        container=REALTIME_CONTAINER,
-        method="DELETE",
-        path_template=f"/api/tenants/{encoded}",
-        token=token,
-    )
-
-
 CommandHandler = Callable[[CommandContext, str, dict[str, Any]], Awaitable[CommandOutcome]]
 
 COMMAND_HANDLERS: dict[str, CommandHandler] = {
@@ -1020,7 +882,4 @@ COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "restore_project": handle_restore_project,
     "delete_restore_point": handle_delete_restore_point,
     "container_logs": handle_container_logs,
-    "terminate_supavisor_tenant": handle_terminate_supavisor_tenant,
-    "delete_supavisor_tenant": handle_delete_supavisor_tenant,
-    "delete_realtime_tenant": handle_delete_realtime_tenant,
 }

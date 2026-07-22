@@ -436,14 +436,29 @@ class AuthorizationMatrixTest(unittest.TestCase):
         self.assertIsNone(self.check("start_project", member_role="admin"))
         self.assertIsNone(self.check("start_project", is_global_admin=True))
 
-    def test_restore_point_commands_allow_any_project_member(self) -> None:
-        for command in sorted(protocol.PROJECT_MEMBER_COMMANDS):
+    def test_restore_and_backup_deletion_require_owner_or_global_admin(self) -> None:
+        for command in sorted(protocol.PROJECT_OWNER_COMMANDS):
             with self.subTest(command=command):
-                self.assertEqual(self.check(command), "project_member_required")
-                self.assertIsNone(self.check(command, member_role="member"))
-                self.assertIsNone(self.check(command, member_role="admin"))
+                self.assertEqual(self.check(command), "project_owner_required")
+                self.assertEqual(
+                    self.check(command, member_role="member"),
+                    "project_owner_required",
+                )
+                self.assertEqual(
+                    self.check(command, member_role="admin"),
+                    "project_owner_required",
+                )
                 self.assertIsNone(self.check(command, is_owner=True))
                 self.assertIsNone(self.check(command, is_global_admin=True))
+
+    def test_backup_creation_requires_project_admin(self) -> None:
+        self.assertEqual(
+            self.check("backup_project", member_role="member"),
+            "project_admin_required",
+        )
+        self.assertIsNone(self.check("backup_project", member_role="admin"))
+        self.assertIsNone(self.check("backup_project", is_owner=True))
+        self.assertIsNone(self.check("backup_project", is_global_admin=True))
 
     def test_project_row_and_uuid_are_revalidated(self) -> None:
         self.assertEqual(

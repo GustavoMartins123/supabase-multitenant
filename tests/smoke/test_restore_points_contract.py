@@ -33,9 +33,10 @@ class RestorePointProtocolTest(unittest.TestCase):
             self.assertGreater(protocol.COMMAND_TIMEOUTS[command], 0)
         self.assertGreaterEqual(protocol.COMMAND_TERM_GRACE["restore_project"], 240)
 
-    def test_commands_are_member_accessible_not_global_admin_only(self) -> None:
-        expected = {"backup_project", "restore_project", "delete_restore_point"}
-        self.assertEqual(protocol.PROJECT_MEMBER_COMMANDS, expected)
+    def test_restore_and_delete_require_owner_while_backup_uses_admin_policy(self) -> None:
+        expected = {"restore_project", "delete_restore_point"}
+        self.assertEqual(protocol.PROJECT_OWNER_COMMANDS, expected)
+        self.assertNotIn("backup_project", protocol.PROJECT_OWNER_COMMANDS)
         self.assertFalse(expected & protocol.GLOBAL_ADMIN_COMMANDS)
         self.assertFalse(expected & protocol.PROJECT_ROW_OPTIONAL_COMMANDS)
 
@@ -53,9 +54,11 @@ class RestorePointApiSurfaceTest(unittest.TestCase):
         ):
             self.assertIn(route, self.main_source)
 
-    def test_endpoints_authorize_project_members_and_serialize_limit(self) -> None:
+    def test_endpoints_apply_role_matrix_and_serialize_limit(self) -> None:
         self.assertIn("RESTORE_POINT_LIMIT = 15", self.main_source)
         self.assertIn("_count_active_restore_points", self.main_source)
+        self.assertIn("ensure_project_admin_access", self.main_source)
+        self.assertIn("ensure_project_owner_access", self.main_source)
         for runner in (
             "_create_restore_point_background",
             "_restore_project_background",

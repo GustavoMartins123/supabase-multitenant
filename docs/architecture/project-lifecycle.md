@@ -239,10 +239,13 @@ descrição, status (`creating`, `ready`, `restoring`, `deleting`,
 `failed`), flag de ponto automático, tamanho, contadores de restauração e
 o job associado. Limite de 15 pontos ativos por projeto; a restauração
 exige uma vaga livre para o ponto automático. Todas as operações são
-auditadas em `studio_audit_log` e acessíveis a qualquer membro do projeto
-ou admin global. `backup` e `restore` não são idempotentes: o recovery da
+auditadas em `studio_audit_log`. A listagem é acessível a qualquer membro;
+criar ponto exige admin do projeto, enquanto restaurar ou excluir ponto
+exige o dono ou admin global. `backup` e `restore` não são idempotentes: o recovery da
 API religa na intenção existente do host-agent em vez de reexecutar. O
-delete do projeto remove `servidor/backups/<uuid>/` junto com os arquivos.
+delete integral do projeto continua exclusivo de admin global, protegido também
+pela senha de exclusão mantida apenas no servidor, e remove
+`servidor/backups/<uuid>/` junto com os arquivos.
 
 ## Start, stop e restart
 

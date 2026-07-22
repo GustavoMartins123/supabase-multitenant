@@ -1,4 +1,4 @@
-import 'dart:html' as html;
+import 'package:web/web.dart' as web;
 
 import 'package:flutter/material.dart';
 
@@ -16,7 +16,7 @@ class _BootstrapAdminPageState extends State<BootstrapAdminPage> {
   bool _dialogOpen = false;
 
   String _loginUrl() {
-    final location = html.window.location;
+    final location = web.window.location;
     return '${location.protocol}//${location.hostname}:9091/login';
   }
 
@@ -30,7 +30,7 @@ class _BootstrapAdminPageState extends State<BootstrapAdminPage> {
       builder: (context) => CreateUserDialog(
         bootstrapMode: true,
         onUserCreated: () {
-          html.window.location.href = _loginUrl();
+          web.window.location.href = _loginUrl();
         },
       ),
     );

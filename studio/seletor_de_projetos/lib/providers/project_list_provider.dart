@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../data/api_client.dart';
 import '../data/project_repository.dart';
 import '../models/job.dart';
 import '../session.dart';
@@ -10,29 +11,34 @@ final projectListProvider =
 );
 
 class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
+  RequestCancellation? _listRequest;
+
   @override
   Future<List<Map<String, dynamic>>> build() async {
-    return ref.watch(projectRepositoryProvider).fetchProjects();
+    final cancellation = RequestCancellation();
+    _listRequest?.cancel();
+    _listRequest = cancellation;
+    ref.onDispose(cancellation.cancel);
+    return ref.watch(projectRepositoryProvider).fetchProjects(
+          cancellation: cancellation,
+        );
   }
 
-  Future<List<Map<String, dynamic>>> refresh(
-      {bool throwOnError = false}) async {
-    final previous = state.value;
-    if (previous == null) state = const AsyncLoading();
+  Future<void> refresh({bool throwOnError = false}) async {
+    _listRequest?.cancel();
+    final cancellation = RequestCancellation();
+    _listRequest = cancellation;
+    state = const AsyncLoading();
     try {
-      final projects =
-          await ref.read(projectRepositoryProvider).fetchProjects();
+      final projects = await ref.read(projectRepositoryProvider).fetchProjects(
+            cancellation: cancellation,
+          );
       state = AsyncData(projects);
-      return projects;
     } catch (error, stackTrace) {
-      if (previous == null) {
-        state = AsyncError(error, stackTrace);
-        if (throwOnError) Error.throwWithStackTrace(error, stackTrace);
-        return const [];
-      }
-      state = AsyncData(previous);
+      state = AsyncError(error, stackTrace);
       if (throwOnError) Error.throwWithStackTrace(error, stackTrace);
-      return previous;
+    } finally {
+      if (identical(_listRequest, cancellation)) _listRequest = null;
     }
   }
 
@@ -87,14 +93,10 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
   Future<bool> _submitAndTrack({
     required String project,
     required String action,
-    required Future<Job?> Function() submit,
+    required Future<Job> Function() submit,
   }) async {
-    Job? job;
     try {
-      job = await submit();
-      if (job == null) {
-        throw Exception('A API não retornou o job da operação.');
-      }
+      final job = await submit();
 
       final result = await ref.read(projectJobsProvider.notifier).waitFor(
             job,
@@ -103,7 +105,8 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
             createdBy: Session().myId,
           );
       if (!result.ok) {
-        throw Exception(
+        throw ApiException(
+          ApiFailureKind.server,
           result.message ?? 'A operação falhou sem diagnóstico do servidor.',
         );
       }

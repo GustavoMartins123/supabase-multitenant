@@ -2,6 +2,7 @@ local cjson = require("cjson.safe")
 local http = require("resty.http")
 local pkey = require("resty.openssl.pkey")
 local digest = require("resty.openssl.digest")
+local outbound_tls = require("utils.outbound_tls")
 
 local function b64url(str)
     local b = ngx.encode_base64(str)
@@ -41,12 +42,12 @@ local sig = pk:sign(d)
 local jwt = to_sign .. "." .. b64url(sig)
 
 local httpc = http.new()
-local token_res, token_err = httpc:request_uri("https://oauth2.googleapis.com/token", {
+local token_url = "https://oauth2.googleapis.com/token"
+local token_res, token_err = httpc:request_uri(token_url, outbound_tls.apply_public(token_url, {
     method = "POST",
     body = "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=" .. jwt,
     headers = {["Content-Type"] = "application/x-www-form-urlencoded"},
-    ssl_verify = false
-})
+}))
 
 if not token_res or token_res.status ~= 200 then
     ngx.status = 500
@@ -75,15 +76,15 @@ local fcm_payload = cjson.encode({
     }
 })
 
-local fcm_res, fcm_err = httpc:request_uri("https://fcm.googleapis.com/v1/projects/" .. sa_data.project_id .. "/messages:send", {
+local fcm_url = "https://fcm.googleapis.com/v1/projects/" .. sa_data.project_id .. "/messages:send"
+local fcm_res, fcm_err = httpc:request_uri(fcm_url, outbound_tls.apply_public(fcm_url, {
     method = "POST",
     body = fcm_payload,
     headers = {
         ["Authorization"] = "Bearer " .. access_token,
         ["Content-Type"] = "application/json"
     },
-    ssl_verify = false
-})
+}))
 
 ngx.status = fcm_res and fcm_res.status or 500
 ngx.header.content_type = "application/json"

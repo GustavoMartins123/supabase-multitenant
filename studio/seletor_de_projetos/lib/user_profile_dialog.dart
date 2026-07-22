@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:html' as html;
+import 'dart:js_interop';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'package:web/web.dart' as web;
 
+import 'data/api_client.dart';
 import 'models/user_profile.dart';
 import 'session.dart';
 import 'supabase_colors.dart';
@@ -92,6 +93,7 @@ class UserProfileDialog extends StatefulWidget {
 class _UserProfileDialogState extends State<UserProfileDialog> {
   final _formKey = GlobalKey<FormState>();
   final Map<String, TextEditingController> _controllers = {};
+  final ApiClient _client = ApiClient();
   bool _saving = false;
   bool _avatarBusy = false;
   String? _error;
@@ -129,16 +131,16 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
 
   @override
   void dispose() {
+    _client.close();
     for (final controller in _controllers.values) {
       controller.dispose();
     }
     super.dispose();
   }
 
-  String _value(String key) => _controllers[key]!.text.trim();
-
   Map<String, String> _payload() => {
-        for (final entry in _controllers.entries) entry.key: entry.value.text.trim(),
+        for (final entry in _controllers.entries)
+          entry.key: entry.value.text.trim(),
       };
 
   Future<void> _save() async {
@@ -148,49 +150,52 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
       _error = null;
     });
     try {
-      final response = await http.patch(
+      final response = await _client.patch(
         Uri.parse('/api/user/me'),
         headers: const {'Content-Type': 'application/json'},
         body: jsonEncode(_payload()),
       );
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
       if (response.statusCode != 200) {
-        throw StateError(data['error']?.toString() ?? 'Não foi possível salvar o perfil');
+        throw ApiException.fromResponse(response);
       }
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
       Session().setProfile(UserProfile.fromJson(data));
-      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        Navigator.pop(context);
+      }
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString().replaceFirst('Bad state: ', ''));
+      if (mounted) {
+        setState(
+          () => _error = error.toString().replaceFirst('Bad state: ', ''),
+        );
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
-  Future<html.File?> _selectFile() async {
-    final input = html.FileUploadInputElement()
+  Future<web.File?> _selectFile() async {
+    final input = web.HTMLInputElement()
+      ..type = 'file'
       ..accept = 'image/png,image/jpeg,image/webp'
       ..multiple = false;
+    final completer = Completer<web.File?>();
+    input.addEventListener(
+      'change',
+      ((web.Event _) {
+        final files = input.files;
+        completer.complete(
+          files != null && files.length > 0 ? files.item(0) : null,
+        );
+      }).toJS,
+    );
     input.click();
-    await input.onChange.first;
-    return input.files?.isNotEmpty == true ? input.files!.first : null;
+    return completer.future;
   }
 
-  Future<Uint8List> _readFile(html.File file) async {
-    final reader = html.FileReader();
-    final completer = Completer<Uint8List>();
-    reader.onLoad.listen((_) {
-      final result = reader.result;
-      if (result is Uint8List) {
-        completer.complete(result);
-      } else if (result is ByteBuffer) {
-        completer.complete(Uint8List.view(result));
-      } else {
-        completer.completeError(StateError('Arquivo inválido'));
-      }
-    });
-    reader.onError.listen((_) => completer.completeError(StateError('Falha ao ler a imagem')));
-    reader.readAsArrayBuffer(file);
-    return completer.future;
+  Future<Uint8List> _readFile(web.File file) async {
+    final buffer = (await file.arrayBuffer().toDart).toDart;
+    return Uint8List.view(buffer);
   }
 
   Future<void> _uploadAvatar() async {
@@ -206,19 +211,26 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
     });
     try {
       final bytes = await _readFile(file);
-      final response = await http.put(
+      final response = await _client.put(
         Uri.parse('/api/user/me/avatar'),
-        headers: {'Content-Type': file.type.isEmpty ? 'application/octet-stream' : file.type},
+        headers: {
+          'Content-Type':
+              file.type.isEmpty ? 'application/octet-stream' : file.type
+        },
         body: bytes,
       );
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
       if (response.statusCode != 200) {
-        throw StateError(data['error']?.toString() ?? 'Não foi possível enviar a foto');
+        throw ApiException.fromResponse(response);
       }
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
       Session().setProfile(UserProfile.fromJson(data));
       if (mounted) setState(() {});
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString().replaceFirst('Bad state: ', ''));
+      if (mounted) {
+        setState(
+          () => _error = error.toString().replaceFirst('Bad state: ', ''),
+        );
+      }
     } finally {
       if (mounted) setState(() => _avatarBusy = false);
     }
@@ -230,15 +242,19 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
       _error = null;
     });
     try {
-      final response = await http.delete(Uri.parse('/api/user/me/avatar'));
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final response = await _client.delete(Uri.parse('/api/user/me/avatar'));
       if (response.statusCode != 200) {
-        throw StateError(data['error']?.toString() ?? 'Não foi possível remover a foto');
+        throw ApiException.fromResponse(response);
       }
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
       Session().setProfile(UserProfile.fromJson(data));
       if (mounted) setState(() {});
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString().replaceFirst('Bad state: ', ''));
+      if (mounted) {
+        setState(
+          () => _error = error.toString().replaceFirst('Bad state: ', ''),
+        );
+      }
     } finally {
       if (mounted) setState(() => _avatarBusy = false);
     }
@@ -314,7 +330,8 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
               padding: const EdgeInsets.fromLTRB(24, 20, 16, 16),
               child: Row(
                 children: [
-                  const Icon(Icons.manage_accounts_outlined, color: SupabaseColors.brand),
+                  const Icon(Icons.manage_accounts_outlined,
+                      color: SupabaseColors.brand),
                   const SizedBox(width: 12),
                   const Expanded(
                     child: Text(
@@ -327,8 +344,11 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
                     ),
                   ),
                   IconButton(
-                    onPressed: _saving || _avatarBusy ? null : () => Navigator.pop(context),
-                    icon: const Icon(Icons.close, color: SupabaseColors.textSecondary),
+                    onPressed: _saving || _avatarBusy
+                        ? null
+                        : () => Navigator.pop(context),
+                    icon: const Icon(Icons.close,
+                        color: SupabaseColors.textSecondary),
                   ),
                 ],
               ),
@@ -372,14 +392,18 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
                                   spacing: 8,
                                   children: [
                                     OutlinedButton.icon(
-                                      onPressed: _avatarBusy ? null : _uploadAvatar,
-                                      icon: const Icon(Icons.upload_outlined, size: 17),
+                                      onPressed:
+                                          _avatarBusy ? null : _uploadAvatar,
+                                      icon: const Icon(Icons.upload_outlined,
+                                          size: 17),
                                       label: const Text('Alterar foto'),
                                     ),
                                     if (profile.picture.isNotEmpty)
                                       TextButton.icon(
-                                        onPressed: _avatarBusy ? null : _removeAvatar,
-                                        icon: const Icon(Icons.delete_outline, size: 17),
+                                        onPressed:
+                                            _avatarBusy ? null : _removeAvatar,
+                                        icon: const Icon(Icons.delete_outline,
+                                            size: 17),
                                         label: const Text('Remover'),
                                       ),
                                   ],
@@ -397,27 +421,34 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
                           decoration: BoxDecoration(
                             color: SupabaseColors.error.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: SupabaseColors.error.withValues(alpha: 0.5)),
+                            border: Border.all(
+                                color: SupabaseColors.error
+                                    .withValues(alpha: 0.5)),
                           ),
-                          child: Text(_error!, style: const TextStyle(color: SupabaseColors.error)),
+                          child: Text(_error!,
+                              style:
+                                  const TextStyle(color: SupabaseColors.error)),
                         ),
                       ],
                       const SizedBox(height: 28),
                       _section('Identidade', [
-                        _field('display_name', 'Nome de exibição', required: true),
+                        _field('display_name', 'Nome de exibição',
+                            required: true),
                         _field('given_name', 'Nome'),
                         _field('middle_name', 'Nome do meio'),
                         _field('family_name', 'Sobrenome'),
                         _field('nickname', 'Apelido'),
                         _field('gender', 'Gênero'),
-                        _field('birthdate', 'Data de nascimento', hint: 'AAAA-MM-DD'),
+                        _field('birthdate', 'Data de nascimento',
+                            hint: 'AAAA-MM-DD'),
                       ]),
                       const SizedBox(height: 28),
                       _section('Contato e presença', [
                         _field('phone_number', 'Telefone'),
                         _field('phone_extension', 'Ramal'),
                         _field('website', 'Website', hint: 'https://...'),
-                        _field('profile', 'Página de perfil', hint: 'https://...'),
+                        _field('profile', 'Página de perfil',
+                            hint: 'https://...'),
                       ]),
                       const SizedBox(height: 28),
                       _section('Localização', [
@@ -426,7 +457,8 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
                         _field('region', 'Estado ou região'),
                         _field('postal_code', 'CEP'),
                         _field('country', 'País'),
-                        _field('zoneinfo', 'Fuso horário', hint: 'America/Sao_Paulo'),
+                        _field('zoneinfo', 'Fuso horário',
+                            hint: 'America/Sao_Paulo'),
                         _field('locale', 'Idioma', hint: 'pt-BR'),
                       ]),
                       const SizedBox(height: 8),
@@ -442,7 +474,9 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   TextButton(
-                    onPressed: _saving || _avatarBusy ? null : () => Navigator.pop(context),
+                    onPressed: _saving || _avatarBusy
+                        ? null
+                        : () => Navigator.pop(context),
                     child: const Text('Cancelar'),
                   ),
                   const SizedBox(width: 8),

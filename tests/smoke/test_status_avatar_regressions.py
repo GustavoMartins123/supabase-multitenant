@@ -31,12 +31,15 @@ class StatusAndAvatarRegressionTests(unittest.TestCase):
         self.assertIn('proxy_pass $server_domain/api/projects$1;', generic_block)
         self.assertNotIn('projects-api:18000', source)
 
-    def test_flutter_accepts_uint8list_from_file_reader(self) -> None:
+    def test_flutter_reads_browser_file_without_deprecated_dart_html(self) -> None:
         source = (
             ROOT / "studio/seletor_de_projetos/lib/user_profile_dialog.dart"
         ).read_text(encoding="utf-8")
-        self.assertIn("if (result is Uint8List)", source)
-        self.assertIn("else if (result is ByteBuffer)", source)
+        self.assertIn("file.arrayBuffer().toDart", source)
+        self.assertIn("Uint8List.view(buffer)", source)
+        self.assertIn("web.HTMLInputElement()", source)
+        self.assertNotIn("dart:html", source)
+        self.assertNotIn("FileReader", source)
 
 
 if __name__ == "__main__":

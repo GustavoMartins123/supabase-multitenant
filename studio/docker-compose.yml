@@ -65,6 +65,13 @@ services:
       - .env
     environment:
       SNIPPETS_MANAGEMENT_FOLDER: ${SNIPPETS_MANAGEMENT_FOLDER}
+      AVATAR_PROCESS_MAX_CONCURRENCY: ${AVATAR_PROCESS_MAX_CONCURRENCY:-2}
+      AVATAR_PROCESS_TIMEOUT_MS: ${AVATAR_PROCESS_TIMEOUT_MS:-15000}
+      AVATAR_MAX_PIXELS: ${AVATAR_MAX_PIXELS:-16000000}
+      AVATAR_MAX_SOURCE_EDGE: ${AVATAR_MAX_SOURCE_EDGE:-8192}
+      AVATAR_MAX_EDGE: ${AVATAR_MAX_EDGE:-512}
+      VIPS_CONCURRENCY: ${VIPS_CONCURRENCY:-1}
+      STUDIO_EXTRA_CA_CERT_FILE: /etc/studio/extra-ca.pem
       AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE: /var/run/authelia-cli-secrets/JWT_SECRET
       AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE: /var/run/authelia-cli-secrets/STORAGE_ENCRYPTION_KEY
     secrets:
@@ -74,6 +81,9 @@ services:
       - ./nginx/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ./authelia:/config
       - ./snippets:/app/snippets
+      - ${STUDIO_CA_CERT_PATH:-./authelia/ssl/ca.pem}:/etc/studio/extra-ca.pem:ro
+    tmpfs:
+      - /tmp:size=256m,mode=1777
   studio:
     container_name: supabase-studio
     build:
@@ -100,7 +110,7 @@ services:
     networks: [default, rede-supabase]
     environment:
       HOSTNAME: "0.0.0.0"
-      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+      NODE_EXTRA_CA_CERTS: /etc/ssl/certs/studio-ca.pem
       STUDIO_PG_META_URL: https://nginx:443/api/platform/pg-meta
       DEFAULT_ORGANIZATION_NAME: ${DEFAULT_ORGANIZATION_NAME}
       DEFAULT_PROJECT_NAME: postgres
@@ -112,6 +122,7 @@ services:
       SNIPPETS_MANAGEMENT_FOLDER: ${SNIPPETS_MANAGEMENT_FOLDER}
     volumes:
       - ./snippets:/app/snippets
+      - ${STUDIO_CA_CERT_PATH:-./authelia/ssl/ca.pem}:/etc/ssl/certs/studio-ca.pem:ro
   # postgres:
   #   build:
   #     context: ./postgres
