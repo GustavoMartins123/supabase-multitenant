@@ -7,6 +7,8 @@ import 'package:http/testing.dart';
 import 'package:seletor_de_projetos/data/api_client.dart';
 
 void main() {
+  tearDown(() => ApiClient.unauthorizedHandler = null);
+
   test('classifica resposta HTTP e preserva a mensagem da API', () async {
     final client = ApiClient(
       client: MockClient(
@@ -78,4 +80,128 @@ void main() {
       ),
     );
   });
+
+  test('detecta quando o navegador seguiu a API ate a pagina de login',
+      () async {
+    var redirects = 0;
+    ApiClient.unauthorizedHandler = () => redirects++;
+    final client = ApiClient(client: _AuthenticationRedirectClient());
+    addTearDown(client.close);
+
+    await expectLater(
+      client.get(Uri.parse('https://studio.test/api/user/me')),
+      throwsA(
+        isA<ApiException>()
+            .having(
+              (error) => error.kind,
+              'kind',
+              ApiFailureKind.unauthorized,
+            )
+            .having((error) => error.uri?.path, 'uri', '/api/user/me'),
+      ),
+    );
+    expect(redirects, 1);
+  });
+
+  test('rejeita HTML em resposta 200 de API sem expor o documento', () async {
+    final client = ApiClient(
+      client: MockClient(
+        (_) async => http.Response(
+          '<!doctype html><html><body>pagina indevida</body></html>',
+          200,
+          headers: {'content-type': 'text/html; charset=utf-8'},
+        ),
+      ),
+    );
+    addTearDown(client.close);
+
+    await expectLater(
+      client.get(Uri.parse('https://studio.test/api/jobs')),
+      throwsA(
+        isA<ApiException>()
+            .having(
+              (error) => error.kind,
+              'kind',
+              ApiFailureKind.invalidResponse,
+            )
+            .having(
+              (error) => error.message.contains('<html>'),
+              'does not expose HTML',
+              isFalse,
+            ),
+      ),
+    );
+  });
+
+  test('decodifica objetos JSON e converte erro de sintaxe em ApiException',
+      () {
+    final valid = http.Response(
+      jsonEncode({'ok': true}),
+      200,
+      headers: {'content-type': 'application/json'},
+    );
+    expect(
+      decodeJsonObject(valid, context: 'Teste'),
+      {'ok': true},
+    );
+
+    final invalid = http.Response(
+      '{',
+      200,
+      headers: {'content-type': 'application/json'},
+    );
+    expect(
+      () => decodeJsonObject(invalid, context: 'Teste'),
+      throwsA(
+        isA<ApiException>().having(
+          (error) => error.kind,
+          'kind',
+          ApiFailureKind.invalidResponse,
+        ),
+      ),
+    );
+  });
+
+  test('solicita JSON por padrao em todas as rotas de API', () async {
+    late String accept;
+    final client = ApiClient(
+      client: MockClient((request) async {
+        accept = request.headers['accept'] ?? '';
+        return http.Response('{}', 200);
+      }),
+    );
+    addTearDown(client.close);
+
+    await client.get(Uri.parse('https://studio.test/api/config'));
+    expect(accept, 'application/json');
+  });
+}
+
+final class _AuthenticationRedirectClient extends http.BaseClient {
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    request.finalize();
+    return _ResponseWithUrl(
+      request: request,
+      url: Uri.parse(
+        'https://studio.test/auth?rd=https%3A%2F%2Fstudio.test%2F',
+      ),
+    );
+  }
+}
+
+final class _ResponseWithUrl extends http.StreamedResponse
+    implements http.BaseResponseWithUrl {
+  _ResponseWithUrl({
+    required http.BaseRequest request,
+    required this.url,
+  }) : super(
+          Stream.value(utf8.encode('<!doctype html><html></html>')),
+          200,
+          request: request,
+          headers: {'content-type': 'text/html; charset=utf-8'},
+        );
+
+  @override
+  final Uri url;
 }

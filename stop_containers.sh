@@ -4,6 +4,14 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOYMENT_PROFILE="${1:-${DEPLOYMENT_PROFILE:-single-node}}"
 
+run_systemctl() {
+    if [ "$(id -u)" -eq 0 ]; then
+        systemctl "$@"
+    else
+        sudo systemctl "$@"
+    fi
+}
+
 stop_studio() {
     cd "$ROOT_DIR/studio"
     docker compose down
@@ -27,6 +35,12 @@ case "$DEPLOYMENT_PROFILE" in
         exit 1
         ;;
 esac
+
+if [ -f /etc/systemd/system/supabase-host-agent.service ]; then
+    echo "Parando host-agent..."
+    run_systemctl stop supabase-host-agent \
+        || echo "Aviso: nao foi possivel parar supabase-host-agent." >&2
+fi
 
 cd "$ROOT_DIR/servidor"
 API_OVERRIDE="docker-compose.${SERVER_TOPOLOGY}.yml"

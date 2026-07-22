@@ -102,11 +102,15 @@ class UserProfileContractTests(unittest.TestCase):
         main = (
             ROOT / "studio/seletor_de_projetos/lib/main.dart"
         ).read_text(encoding="utf-8")
+        bootstrap = (
+            ROOT / "studio/seletor_de_projetos/lib/app_bootstrap.dart"
+        ).read_text(encoding="utf-8")
         dialog = (
             ROOT / "studio/seletor_de_projetos/lib/user_profile_dialog.dart"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("Session().setProfile(UserProfile.fromJson(data))", main)
+        self.assertIn("UserProfile.fromJson(profileData)", bootstrap)
+        self.assertIn("Session().setProfile(profile)", main)
         self.assertIn("UserProfileLauncher", main)
         self.assertIn("_client.patch", dialog)
         self.assertIn("/api/user/me/avatar", dialog)

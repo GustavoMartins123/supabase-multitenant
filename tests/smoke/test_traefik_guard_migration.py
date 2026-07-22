@@ -87,6 +87,10 @@ class FileProviderRendererTests(unittest.TestCase):
         self.assertIn("http://supabase-nginx-meu_projeto:8080", result)
         self.assertIn("project-guard-meu_projeto", result)
         self.assertIn("project-strip-meu_projeto", result)
+        self.assertIn("PathPrefix(`/api/projects`)", result)
+        self.assertIn("PathPrefix(`/api/jobs`)", result)
+        self.assertIn("PathPrefix(`/api/admin`)", result)
+        self.assertIn("PathPrefix(`/api/internal/analytics`)", result)
 
 
 if __name__ == "__main__":

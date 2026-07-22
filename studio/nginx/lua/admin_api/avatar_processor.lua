@@ -4,7 +4,7 @@ local M = {}
 
 local TEMP_DIR = "/tmp"
 local MAX_BYTES = 2 * 1024 * 1024
-local UUID_PATTERN = "^[0-9a-fA-F]{8}%-[0-9a-fA-F]{4}%-[0-9a-fA-F]{4}%-[0-9a-fA-F]{4}%-[0-9a-fA-F]{12}$"
+local UUID_PARTS_PATTERN = "^(%x+)%-(%x+)%-(%x+)%-(%x+)%-(%x+)$"
 
 local function bounded_integer(name, default, minimum, maximum)
     local value = tonumber(os.getenv(name) or "") or default
@@ -27,7 +27,14 @@ local VIPS_CONCURRENCY = bounded_integer("VIPS_CONCURRENCY", 1, 1, 4)
 
 function M.normalize_uuid(user_id)
     local value = tostring(user_id or "")
-    if not value:match(UUID_PATTERN) then
+    local first, second, third, fourth, fifth = value:match(UUID_PARTS_PATTERN)
+    if not first
+        or #first ~= 8
+        or #second ~= 4
+        or #third ~= 4
+        or #fourth ~= 4
+        or #fifth ~= 12
+    then
         return nil
     end
     return value:lower()

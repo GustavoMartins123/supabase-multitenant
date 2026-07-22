@@ -1,3 +1,4 @@
+/// Project membership directory returned by the administration API.
 class AllUsersResponse {
   final String projectSlug;
   final UsersSummary summary;

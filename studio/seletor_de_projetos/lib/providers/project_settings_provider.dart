@@ -1,8 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/project_repository.dart';
 import '../models/project_member.dart';
-import '../models/AllUsers.dart';
-import '../models/projectDockerStatus.dart';
+import '../models/all_users.dart';
+import '../models/project_docker_status.dart';
 
 final projectMembersProvider = FutureProvider.autoDispose
     .family<List<ProjectMember>, String>((ref, projectRef) async {

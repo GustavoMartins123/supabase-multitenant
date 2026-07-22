@@ -76,6 +76,60 @@ class StorageVectorsBackendContractTests(unittest.TestCase):
         self.assertIn("vector_validate_database", rename)
         self.assertIn("vector_sync_project_wrappers", rename)
 
+    def test_rename_reloads_env_and_rolls_back_dependencies_in_order(self) -> None:
+        rename = RENAME_IMPL.read_text(encoding="utf-8")
+
+        rollback_start = rename.index("rollback_on_error()")
+        rollback_end = rename.index("trap rollback_on_error ERR")
+        rollback = rename[rollback_start:rollback_end]
+
+        restore_old_env = rollback.index('source "$OLD_DIR/.env"')
+        stop_new_pool = rollback.index(
+            'GET "/api/tenants/$NEW_NAME/terminate"'
+        )
+        delete_new_tenant = rollback.index(
+            "DELETE FROM _supavisor.users WHERE tenant_external_id = '$NEW_NAME'"
+        )
+        restore_database = rollback.index(
+            r'ALTER DATABASE \"$NEW_DB\" RENAME TO \"$OLD_DB\"'
+        )
+        restore_old_tenant = rollback.index(
+            'PUT "/api/tenants/$OLD_NAME"'
+        )
+        start_old_stack = rollback.index("compose_old up -d")
+
+        self.assertLess(restore_old_env, start_old_stack)
+        self.assertLess(stop_new_pool, delete_new_tenant)
+        self.assertLess(delete_new_tenant, restore_database)
+        self.assertLess(restore_database, restore_old_tenant)
+        self.assertLess(restore_old_tenant, start_old_stack)
+
+        generated_env_validated = rename.index(
+            'grep -qx "PROJECT_ID=$NEW_NAME" "$NEW_DIR/.env"'
+        )
+        load_new_env = rename.index(
+            'source "$NEW_DIR/.env"', generated_env_validated
+        )
+        start_new_stack = rename.index("compose_new up --build -d", load_new_env)
+
+        self.assertLess(generated_env_validated, load_new_env)
+        self.assertLess(load_new_env, start_new_stack)
+
+        forward_start = rename.index('say "Parando stack antiga..."')
+        mark_realtime_mutation = rename.index("REALTIME_UPDATED=1", forward_start)
+        update_realtime = rename.index(
+            'PUT "/api/tenants/$PROJECT_UUID"', mark_realtime_mutation
+        )
+        mark_supavisor_mutation = rename.index(
+            "SUPAVISOR_UPDATED=1", forward_start
+        )
+        update_supavisor = rename.index(
+            'PUT "/api/tenants/$NEW_NAME"', mark_supavisor_mutation
+        )
+
+        self.assertLess(mark_realtime_mutation, update_realtime)
+        self.assertLess(mark_supavisor_mutation, update_supavisor)
+
     def test_public_entrypoints_delegate_to_organized_implementations(self) -> None:
         expectations = {
             GENERATE_ENTRYPOINT: "lib/generate_project_impl.sh",

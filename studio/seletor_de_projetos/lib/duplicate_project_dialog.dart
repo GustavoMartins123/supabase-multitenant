@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+
 import 'package:seletor_de_projetos/supabase_colors.dart';
 
 class DuplicateProjectDialog extends StatefulWidget {

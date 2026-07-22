@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'createUserDialog.dart';
+import 'create_user_dialog.dart';
 import 'providers/admin_users_provider.dart';
 import 'session.dart';
 import 'supabase_colors.dart';

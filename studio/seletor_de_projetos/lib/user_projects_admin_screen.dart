@@ -3,15 +3,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:seletor_de_projetos/data/project_repository.dart';
-import 'package:seletor_de_projetos/services/projectService.dart';
+import 'package:seletor_de_projetos/services/project_service.dart';
 import 'package:seletor_de_projetos/providers/project_jobs_provider.dart';
 import 'package:seletor_de_projetos/session.dart';
 import 'package:seletor_de_projetos/supabase_colors.dart';
 import 'package:web/web.dart' as web;
-import 'dialogs/transferProjectDialog.dart';
-import 'models/AllUsers.dart';
-import 'models/ProjectInfo.dart';
-import 'models/projectDockerStatus.dart';
+import 'dialogs/transfer_project_dialog.dart';
+import 'models/all_users.dart';
+import 'models/project_info.dart';
+import 'models/project_docker_status.dart';
 import 'widgets/error_box.dart';
 
 class UserProjectsAdminScreen extends ConsumerStatefulWidget {

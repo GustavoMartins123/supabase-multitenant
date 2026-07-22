@@ -36,6 +36,33 @@ void main() {
       expect(job.isInFlight, isTrue);
       expect(job.createdAt, isNotNull);
     });
+
+    test('accepts only the old or new project context during rename', () {
+      const completedRename = Job(
+        'job-rename',
+        project: 'projeto_novo',
+        createdBy: 'user-1',
+        action: 'rename',
+        status: 'done',
+      );
+
+      expect(
+        completedRename.verifyContext(
+          acceptedProjects: const {'projeto_antigo', 'projeto_novo'},
+          action: 'rename',
+          createdBy: 'user-1',
+        ),
+        same(completedRename),
+      );
+      expect(
+        () => completedRename.verifyContext(
+          acceptedProjects: const {'projeto_antigo', 'outro_projeto'},
+          action: 'rename',
+          createdBy: 'user-1',
+        ),
+        throwsFormatException,
+      );
+    });
   });
 
   group('JobRepository', () {

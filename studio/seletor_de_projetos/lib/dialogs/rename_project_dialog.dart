@@ -94,7 +94,7 @@ class _RenameProjectDialogState extends ConsumerState<RenameProjectDialog> {
 
       final result = await ref.read(projectJobsProvider.notifier).waitFor(
             job,
-            project: widget.projectName,
+            acceptedProjects: {widget.projectName, newName},
             action: 'rename',
           );
       if (!mounted) return;

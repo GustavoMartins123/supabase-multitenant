@@ -1,6 +1,6 @@
-import 'dart:convert';
-
 import 'package:http/http.dart' as http;
+
+import '../data/api_client.dart';
 
 class Job {
   const Job(
@@ -59,14 +59,29 @@ class Job {
     );
   }
 
-  Job verifyContext({String? project, String? action, String? createdBy}) {
+  Job verifyContext({
+    String? project,
+    Iterable<String>? acceptedProjects,
+    String? action,
+    String? createdBy,
+  }) {
+    if (project != null && acceptedProjects != null) {
+      throw ArgumentError(
+        'Use project ou acceptedProjects, nunca os dois',
+      );
+    }
+    final validProjects =
+        project == null ? acceptedProjects?.toSet() : <String>{project};
+    if (validProjects != null && !validProjects.contains(this.project)) {
+      throw const FormatException(
+        'Contrato do job invalido: project divergente ou ausente',
+      );
+    }
     final expected = {
-      if (project != null) 'project': project,
       if (action != null) 'action': action,
       if (createdBy != null) 'created_by': createdBy,
     };
     final actual = {
-      'project': this.project,
       'action': this.action,
       'created_by': this.createdBy,
     };
@@ -82,13 +97,13 @@ class Job {
 
   static Job fromResponse(http.Response r) {
     if (r.statusCode != 202) {
-      throw FormatException('Resposta de job com HTTP ${r.statusCode}');
+      throw ApiException.fromResponse(r);
     }
-    final decoded = jsonDecode(r.body);
-    if (decoded is! Map || decoded['job_id'] == null) {
+    final decoded = decodeJsonObject(r, context: 'Criacao do job');
+    if (decoded['job_id'] == null) {
       throw const FormatException('Resposta sem job_id');
     }
-    return Job.fromJson(Map<String, dynamic>.from(decoded));
+    return Job.fromJson(decoded);
   }
 
   static Job? fromOptionalResponse(http.Response response) {

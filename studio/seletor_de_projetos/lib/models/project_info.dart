@@ -1,4 +1,4 @@
-import 'package:seletor_de_projetos/models/projectDockerStatus.dart';
+import 'package:seletor_de_projetos/models/project_docker_status.dart';
 
 class ProjectInfo {
   final String name;

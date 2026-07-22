@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:seletor_de_projetos/models/AllUsers.dart';
+import 'package:seletor_de_projetos/models/all_users.dart';
 import 'package:seletor_de_projetos/providers/project_settings_provider.dart';
 import 'package:seletor_de_projetos/supabase_colors.dart';
 import 'package:seletor_de_projetos/widgets/user_avatar_thumbnail.dart';

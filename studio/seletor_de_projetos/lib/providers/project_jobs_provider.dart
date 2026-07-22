@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/job_repository.dart';
 import '../models/job.dart';
-import '../services/projectService.dart';
+import '../services/project_service.dart';
 import '../session.dart';
 
 final projectJobsProvider =
@@ -69,12 +69,14 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
   void track(
     Job job, {
     String? project,
+    Iterable<String>? acceptedProjects,
     String? action,
     String? createdBy,
   }) {
     if (_disposed) return;
     final tracked = job.verifyContext(
       project: project,
+      acceptedProjects: acceptedProjects,
       action: action,
       createdBy: createdBy,
     );
@@ -90,11 +92,13 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
   void updateFromJson(
     Map<String, dynamic> json, {
     String? project,
+    Iterable<String>? acceptedProjects,
     String? action,
     String? createdBy,
   }) {
     final job = Job.fromJson(json).verifyContext(
       project: project,
+      acceptedProjects: acceptedProjects,
       action: action,
       createdBy: createdBy,
     );
@@ -141,6 +145,7 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
   Future<JobWaitResult> waitFor(
     Job job, {
     String? project,
+    Iterable<String>? acceptedProjects,
     String? action,
     String? createdBy,
     Duration every = const Duration(seconds: 3),
@@ -151,6 +156,7 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
     track(
       job,
       project: project,
+      acceptedProjects: acceptedProjects,
       action: action,
       createdBy: effectiveCreatedBy,
     );
@@ -163,6 +169,7 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
           updateFromJson(
             data,
             project: project,
+            acceptedProjects: acceptedProjects,
             action: action,
             createdBy: effectiveCreatedBy,
           );

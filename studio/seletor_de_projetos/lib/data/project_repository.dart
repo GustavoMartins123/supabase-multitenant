@@ -52,14 +52,7 @@ class ProjectRepository {
   void close() => _client.close();
 
   Map<String, dynamic>? _tryDecodeObject(String body) {
-    if (body.isEmpty) return null;
-
-    try {
-      final data = jsonDecode(body);
-      return data is Map<String, dynamic> ? data : null;
-    } on FormatException {
-      return null;
-    }
+    return tryDecodeJsonObjectBody(body);
   }
 
   String? _extractMessage(http.Response resp) {
@@ -98,14 +91,10 @@ class ProjectRepository {
   Future<Map<String, dynamic>> fetchConfig() async {
     final response = await _client.get(Uri.parse('/api/config'));
     _ensureCommandSucceeded(response);
-    final decoded = jsonDecode(response.body);
-    if (decoded is! Map) {
-      throw const ApiException(
-        ApiFailureKind.invalidResponse,
-        'Resposta invalida ao carregar configuracao',
-      );
-    }
-    return Map<String, dynamic>.from(decoded);
+    return decodeJsonObject(
+      response,
+      context: 'Configuracao do Studio',
+    );
   }
 
   Future<List<Map<String, dynamic>>> fetchProjects({
@@ -116,13 +105,21 @@ class ProjectRepository {
       cancellation: cancellation,
     );
     _ensureCommandSucceeded(response);
-    final decoded = jsonDecode(response.body);
-    if (decoded is! List) {
-      throw const FormatException('Resposta inválida ao listar projetos');
+    final decoded = decodeJsonList(
+      response,
+      context: 'Lista de projetos',
+    );
+    final projects = <Map<String, dynamic>>[];
+    for (final item in decoded) {
+      if (item is! Map) {
+        throw const ApiException(
+          ApiFailureKind.invalidResponse,
+          'Lista de projetos: item invalido',
+        );
+      }
+      projects.add(Map<String, dynamic>.from(item));
     }
-    return decoded
-        .map((item) => Map<String, dynamic>.from(item as Map))
-        .toList();
+    return projects;
   }
 
   Future<Job> createProject(String name) async {
@@ -156,8 +153,11 @@ class ProjectRepository {
   Future<String> fetchProjectStatus(String ref) async {
     final response = await _client.get(Uri.parse('/api/projects/$ref/status'));
     _ensureCommandSucceeded(response);
-    final decoded = jsonDecode(response.body);
-    if (decoded is! Map || decoded['status'] is! String) {
+    final decoded = decodeJsonObject(
+      response,
+      context: 'Status do projeto',
+    );
+    if (decoded['status'] is! String) {
       throw const ApiException(
         ApiFailureKind.invalidResponse,
         'Resposta de status invalida',
@@ -169,13 +169,13 @@ class ProjectRepository {
   Future<dynamic> getFullStatus(String ref) async {
     final resp = await _client.get(Uri.parse('/api/projects/$ref/status'));
     _ensureCommandSucceeded(resp);
-    return jsonDecode(resp.body);
+    return decodeJsonResponse(resp, context: 'Status completo do projeto');
   }
 
   Future<List<dynamic>> getMembers(String ref) async {
     final resp = await _client.get(Uri.parse('/api/projects/$ref/members'));
     _ensureCommandSucceeded(resp);
-    final dynamic data = jsonDecode(resp.body);
+    final data = decodeJsonResponse(resp, context: 'Membros do projeto');
     if (data is List) return data;
     if (data is Map && data['members'] is List) {
       return data['members'] as List<dynamic>;
@@ -207,7 +207,10 @@ class ProjectRepository {
       Uri.parse('/api/projects/$ref/available-users'),
     );
     _ensureCommandSucceeded(resp);
-    final dynamic data = jsonDecode(resp.body);
+    final data = decodeJsonResponse(
+      resp,
+      context: 'Usuarios disponiveis do projeto',
+    );
     if (data is List) return data;
     if (data is Map && data['users'] is List) {
       return data['users'] as List<dynamic>;
@@ -228,7 +231,10 @@ class ProjectRepository {
       ),
     );
     _ensureCommandSucceeded(resp);
-    final dynamic data = jsonDecode(resp.body);
+    final data = decodeJsonResponse(
+      resp,
+      context: 'Usuarios transferiveis do projeto',
+    );
     if (data is List) return data;
     if (data is Map && data['users'] is List) {
       return data['users'] as List<dynamic>;
@@ -274,13 +280,10 @@ class ProjectRepository {
       );
     }
 
-    final data = jsonDecode(response.body);
-    if (data is! Map<String, dynamic>) {
-      throw const ApiException(
-        ApiFailureKind.invalidResponse,
-        'Dados invalidos ao carregar usuarios',
-      );
-    }
+    final data = decodeJsonObject(
+      response,
+      context: 'Usuarios administrativos',
+    );
 
     final resp = UserListResponse.fromJson(data);
 
@@ -305,8 +308,11 @@ class ProjectRepository {
       body: jsonEncode({'user_id': userId}),
     );
     _ensureCommandSucceeded(response);
-    final decoded = jsonDecode(response.body);
-    if (decoded is! Map || decoded['projects'] is! List) {
+    final decoded = decodeJsonObject(
+      response,
+      context: 'Projetos do usuario',
+    );
+    if (decoded['projects'] is! List) {
       throw const ApiException(
         ApiFailureKind.invalidResponse,
         'Resposta invalida ao carregar projetos do usuario',
@@ -330,8 +336,11 @@ class ProjectRepository {
   Future<ProjectSettingsData> fetchProjectSettings(String ref) async {
     final resp = await _client.get(Uri.parse('/api/projects/$ref/settings'));
     _ensureCommandSucceeded(resp);
-    final data = jsonDecode(resp.body);
-    if (data is! Map || data['settings'] is! Map) {
+    final data = decodeJsonObject(
+      resp,
+      context: 'Configuracoes do projeto',
+    );
+    if (data['settings'] is! Map) {
       throw const ApiException(
         ApiFailureKind.invalidResponse,
         'Resposta invalida ao carregar configuracoes',
@@ -358,8 +367,8 @@ class ProjectRepository {
     final resp =
         await _client.get(Uri.parse('/api/projects/$ref/config-token'));
     _ensureCommandSucceeded(resp);
-    final data = _tryDecodeObject(resp.body);
-    final token = data?['config_token']?.toString() ?? '';
+    final data = decodeJsonObject(resp, context: 'Token do projeto');
+    final token = data['config_token']?.toString() ?? '';
     if (token.isEmpty) {
       throw const ApiException(
         ApiFailureKind.invalidResponse,
@@ -386,13 +395,7 @@ class ProjectRepository {
     );
     final resp = await _client.get(uri);
     _ensureCommandSucceeded(resp);
-    final data = _tryDecodeObject(resp.body);
-    if (data == null) {
-      throw const ApiException(
-        ApiFailureKind.invalidResponse,
-        'Resposta de telemetria invalida',
-      );
-    }
+    final data = decodeJsonObject(resp, context: 'Telemetria do projeto');
     return ProjectUserTelemetry.fromJson(data);
   }
 
@@ -406,8 +409,11 @@ class ProjectRepository {
       body: jsonEncode({'settings': settings}),
     );
     _ensureCommandSucceeded(resp);
-    final data = jsonDecode(resp.body);
-    if (data is! Map || data['affected_services'] is! List) {
+    final data = decodeJsonObject(
+      resp,
+      context: 'Atualizacao das configuracoes do projeto',
+    );
+    if (data['affected_services'] is! List) {
       throw const ApiException(
         ApiFailureKind.invalidResponse,
         'Resposta invalida ao atualizar configuracoes',
@@ -441,7 +447,9 @@ class ProjectRepository {
       Uri.parse('/api/projects/$ref/collaboration'),
     );
     _ensureCommandSucceeded(resp);
-    return ProjectCollaboration.fromJson(jsonDecode(resp.body));
+    return ProjectCollaboration.fromJson(
+      decodeJsonObject(resp, context: 'Colaboracao do projeto'),
+    );
   }
 
   Future<void> createProjectNote(
@@ -570,8 +578,8 @@ class ProjectRepository {
       body: jsonEncode({'display_name': displayName}),
     );
     _ensureCommandSucceeded(resp);
-    final data = _tryDecodeObject(resp.body);
-    if (data == null || data['display_name'] is! String) {
+    final data = decodeJsonObject(resp, context: 'Nome de exibicao do projeto');
+    if (data['display_name'] is! String) {
       throw const ApiException(
         ApiFailureKind.invalidResponse,
         'Resposta sem display_name',
@@ -585,9 +593,11 @@ class ProjectRepository {
       Uri.parse('/api/projects/$ref/restore-points'),
     );
     _ensureCommandSucceeded(resp);
-    final decoded = jsonDecode(resp.body);
-    if (decoded is! Map ||
-        decoded['points'] is! List ||
+    final decoded = decodeJsonObject(
+      resp,
+      context: 'Pontos de restauracao',
+    );
+    if (decoded['points'] is! List ||
         decoded['permissions'] is! Map ||
         decoded['limit'] is! num) {
       throw const ApiException(
@@ -655,8 +665,11 @@ class ProjectRepository {
       Uri.parse('/api/projects/$ref/rename-history'),
     );
     _ensureCommandSucceeded(resp);
-    final data = jsonDecode(resp.body);
-    if (data is! Map || data['events'] is! List) {
+    final data = decodeJsonObject(
+      resp,
+      context: 'Historico de nomes do projeto',
+    );
+    if (data['events'] is! List) {
       throw const ApiException(
         ApiFailureKind.invalidResponse,
         'Resposta invalida ao carregar historico de nomes',

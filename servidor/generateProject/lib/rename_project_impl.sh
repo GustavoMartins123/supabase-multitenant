@@ -122,20 +122,17 @@ rollback_on_error() {
     mv "$NEW_DIR" "$OLD_DIR" || rollback_failed=1
     rm -f "$OLD_DIR/nginx/nginx_${NEW_NAME}.conf"
     cp -a "$BACKUP_DIR/." "$OLD_DIR/" 2>/dev/null || rollback_failed=1
+    set -a
+    source "$OLD_DIR/.env" 2>/dev/null || rollback_failed=1
+    set +a
   fi
   if [[ "$SUPAVISOR_UPDATED" -eq 1 ]]; then
+    code=$(http_code supabase-pooler GET "/api/tenants/$NEW_NAME/terminate" \
+      "$GLOBAL_ANON_TOKEN" 2>/dev/null)
+    accepted_code "$code" 200 204 404 || rollback_failed=1
     docker exec supabase-db psql -U supabase_admin -d "$META_DB" -c \
       "DELETE FROM _supavisor.users WHERE tenant_external_id = '$NEW_NAME'; DELETE FROM _supavisor.tenants WHERE external_id = '$NEW_NAME';" \
       >/dev/null 2>&1 || rollback_failed=1
-  fi
-  if [[ "$SUPAVISOR_OLD_DELETED" -eq 1 ]]; then
-    code=$(http_code supabase-pooler PUT "/api/tenants/$OLD_NAME" "$GLOBAL_ANON_TOKEN" "$SUPAVISOR_OLD_PAYLOAD" 2>/dev/null)
-    accepted_code "$code" 200 201 204 || rollback_failed=1
-  fi
-  if [[ "$REALTIME_UPDATED" -eq 1 ]]; then
-    code=$(http_code realtime-dev.supabase-realtime PUT "/api/tenants/$PROJECT_UUID" \
-      "$ANON_KEY_PROJETO" "$REALTIME_OLD_PAYLOAD" 2>/dev/null)
-    accepted_code "$code" 200 201 204 || rollback_failed=1
   fi
   if [[ "$RENAMED_SLOT" -eq 1 ]]; then
     pid=$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc \
@@ -158,6 +155,16 @@ rollback_on_error() {
       docker exec supabase-db psql -U supabase_admin -d "$OLD_DB" -c \
         "SELECT pg_create_logical_replication_slot('$OLD_SLOT', '$SLOT_PLUGIN');" >/dev/null 2>&1 || rollback_failed=1
     fi
+  fi
+  if [[ "$SUPAVISOR_OLD_DELETED" -eq 1 ]]; then
+    code=$(http_code supabase-pooler PUT "/api/tenants/$OLD_NAME" \
+      "$GLOBAL_ANON_TOKEN" "$SUPAVISOR_OLD_PAYLOAD" 2>/dev/null)
+    accepted_code "$code" 200 201 204 || rollback_failed=1
+  fi
+  if [[ "$REALTIME_UPDATED" -eq 1 ]]; then
+    code=$(http_code realtime-dev.supabase-realtime PUT "/api/tenants/$PROJECT_UUID" \
+      "$ANON_KEY_PROJETO" "$REALTIME_OLD_PAYLOAD" 2>/dev/null)
+    accepted_code "$code" 200 201 204 || rollback_failed=1
   fi
   if [[ "$OLD_COMPOSE_STOPPED" -eq 1 && -d "$OLD_DIR" ]]; then
     compose_old up -d >/dev/null 2>&1 || rollback_failed=1
@@ -257,16 +264,16 @@ if [[ "$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc "SELECT
   restore_slot "$OLD_SLOT" "$NEW_SLOT" "$SLOT_PLUGIN" "$NEW_DB"
 fi
 
+REALTIME_UPDATED=1
 code=$(http_code realtime-dev.supabase-realtime PUT "/api/tenants/$PROJECT_UUID" "$ANON_KEY_PROJETO" "$REALTIME_NEW_PAYLOAD")
 accepted_code "$code" 200 201 204 || die "Falha no Realtime (HTTP $code)"
-REALTIME_UPDATED=1
 
 docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$META_DB" -c \
   "DELETE FROM _supavisor.users WHERE tenant_external_id = '$OLD_NAME'; DELETE FROM _supavisor.tenants WHERE external_id = '$OLD_NAME';" >/dev/null
 SUPAVISOR_OLD_DELETED=1
+SUPAVISOR_UPDATED=1
 code=$(http_code supabase-pooler PUT "/api/tenants/$NEW_NAME" "$GLOBAL_ANON_TOKEN" "$SUPAVISOR_NEW_PAYLOAD")
 accepted_code "$code" 200 201 204 || die "Falha no Supavisor (HTTP $code)"
-SUPAVISOR_UPDATED=1
 
 say "Movendo diretorio e regenerando configuracao..."
 mv "$OLD_DIR" "$NEW_DIR"
@@ -306,6 +313,10 @@ chmod 644 "$NEW_DIR/nginx/nginx_${NEW_NAME}.conf" "$NEW_DIR/.dockerignore"
 grep -qx "PROJECT_ID=$NEW_NAME" "$NEW_DIR/.env" || die "PROJECT_ID nao foi atualizado"
 grep -Eq '^S3_PROTOCOL_ACCESS_KEY_ID=[0-9a-fA-F]{32}$' "$NEW_DIR/.env" || die "Access key SigV4 nao foi preservada"
 grep -Eq '^S3_PROTOCOL_ACCESS_KEY_SECRET=[0-9a-fA-F]{64}$' "$NEW_DIR/.env" || die "Secret SigV4 nao foi preservado"
+
+set -a
+source "$NEW_DIR/.env"
+set +a
 
 updated=$(docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$META_DB" -tAc \
   "WITH changed AS (UPDATE projects SET name = '$NEW_NAME' WHERE name = '$OLD_NAME' RETURNING name) SELECT count(*) FROM changed;" | tr -d '[:space:]')

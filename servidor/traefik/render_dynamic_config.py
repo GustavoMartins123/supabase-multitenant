@@ -87,7 +87,8 @@ def render(root_env: pathlib.Path, projects_dir: pathlib.Path) -> str:
         "  routers:",
         "    projects-api:",
         "      rule: " + yaml_quote(
-            "(PathPrefix(`/api/projects`) || PathPrefix(`/api/internal/analytics`)) "
+            "(PathPrefix(`/api/projects`) || PathPrefix(`/api/jobs`) || "
+            "PathPrefix(`/api/admin`) || PathPrefix(`/api/internal/analytics`)) "
             f"&& Header(`X-Shared-Token`, `{shared_token}`)"
         ),
         "      entryPoints:",

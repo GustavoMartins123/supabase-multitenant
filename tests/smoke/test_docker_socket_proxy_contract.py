@@ -100,6 +100,26 @@ class DockerSocketRemovalContractTest(unittest.TestCase):
         self.assertIn('API_OVERRIDE="docker-compose.${SERVER_TOPOLOGY}.yml"', start)
         self.assertIn('if [ "$DEPLOYMENT_PROFILE" = "single-node" ]', start)
 
+    def test_server_start_requires_and_reloads_operational_host_agent(self) -> None:
+        start = (ROOT / "start.sh").read_text(encoding="utf-8")
+        self.assertIn("require_host_agent_installation", start)
+        self.assertIn('HOST_AGENT_PYTHON="$HOST_AGENT_DIR/.venv/bin/python"', start)
+        self.assertIn('grep -Fq "$HOST_AGENT_PYTHON" "$HOST_AGENT_UNIT"', start)
+        self.assertIn("Aguardando Projects API ficar pronta", start)
+        self.assertIn('cd "$HOST_AGENT_DIR"', start)
+        self.assertIn("--check-schema", start)
+        self.assertIn("run_systemctl restart supabase-host-agent", start)
+        self.assertIn("host-agent ainda usa o contrato antigo de root", start)
+        self.assertNotIn('exec sudo bash "$ROOT_DIR/start.sh"', start)
+        self.assertNotIn("systemctl start supabase-host-agent", start)
+
+    def test_server_stop_stops_host_agent_before_shared_services(self) -> None:
+        stop = (ROOT / "stop_containers.sh").read_text(encoding="utf-8")
+        agent_stop = stop.index("run_systemctl stop supabase-host-agent")
+        shared_stop = stop.index('echo "Parando Projects API e servicos compartilhados..."')
+        self.assertLess(agent_stop, shared_stop)
+        self.assertNotIn('exec sudo bash "$ROOT_DIR/stop_containers.sh"', stop)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -53,8 +53,8 @@ class _StatusSectionState extends ConsumerState<StatusSection> {
     final myId = Session().myId;
     final myRole = membersAsync.value
             ?.firstWhere(
-              (m) => m.user_id == myId,
-              orElse: () => ProjectMember(user_id: '', role: 'member'),
+              (m) => m.userId == myId,
+              orElse: () => ProjectMember(userId: '', role: 'member'),
             )
             .role ??
         'member';

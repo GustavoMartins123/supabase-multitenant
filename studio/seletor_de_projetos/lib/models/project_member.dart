@@ -1,12 +1,12 @@
 class ProjectMember {
-  final String user_id;
+  final String userId;
   final String? userHash;
   final String role;
   final String? displayName;
   final String? pictureUrl;
 
   ProjectMember({
-    required this.user_id,
+    required this.userId,
     required this.role,
     this.displayName,
     this.userHash,
@@ -14,12 +14,17 @@ class ProjectMember {
   });
 
   factory ProjectMember.fromJson(Map<String, dynamic> json) {
+    final userId = (json['user_id'] ?? json['user_uuid'])?.toString() ?? '';
+    final role = json['role']?.toString() ?? '';
+    if (userId.isEmpty || role.isEmpty) {
+      throw const FormatException('Membro sem identificador ou papel');
+    }
     return ProjectMember(
-      user_id: (json['user_id'] ?? json['user_uuid'] ?? '') as String,
-      userHash: json['user_hash'] as String?,
-      displayName: json['display_name'] as String?,
-      role: json['role'] as String,
-      pictureUrl: json['picture_url'] as String?,
+      userId: userId,
+      userHash: json['user_hash']?.toString(),
+      displayName: json['display_name']?.toString(),
+      role: role,
+      pictureUrl: json['picture_url']?.toString(),
     );
   }
 }

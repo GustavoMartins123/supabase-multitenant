@@ -11,6 +11,7 @@ class ErrorBox extends StatelessWidget {
   Widget build(BuildContext context) {
     return Semantics(
       container: true,
+      explicitChildNodes: true,
       liveRegion: true,
       label: 'Erro: $message',
       child: Container(

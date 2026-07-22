@@ -1,12 +1,41 @@
 from __future__ import annotations
 
 import pathlib
+import shutil
+import subprocess
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class UserAvatarThumbnailTests(unittest.TestCase):
+    def test_avatar_uuid_normalization_uses_lua_patterns_correctly(self) -> None:
+        runtime = shutil.which("lua5.1") or shutil.which("lua")
+        if not runtime:
+            self.skipTest("Lua runtime is not installed")
+
+        lua_root = (ROOT / "studio/nginx/lua").as_posix()
+        script = f'''\
+package.path = "{lua_root}/?.lua;{lua_root}/?/init.lua;" .. package.path
+package.preload["ngx.pipe"] = function() return {{}} end
+
+local processor = require("admin_api.avatar_processor")
+assert(processor.normalize_uuid("11111111-2222-3333-4444-555555555555")
+    == "11111111-2222-3333-4444-555555555555")
+assert(processor.normalize_uuid("AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")
+    == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+assert(processor.normalize_uuid("not-a-uuid") == nil)
+assert(processor.normalize_uuid("11111111-2222-3333-4444-55555555555") == nil)
+assert(processor.normalize_uuid("11111111-2222-3333-4444-555555555555/../x") == nil)
+'''
+        subprocess.run(
+            [runtime, "-"],
+            input=script,
+            text=True,
+            check=True,
+            capture_output=True,
+        )
+
     def test_cache_loads_picture_from_authelia(self) -> None:
         source = (ROOT / "studio/nginx/lua/init/init_worker.lua").read_text(encoding="utf-8")
         self.assertIn('picture = attr.picture or ""', source)
@@ -70,7 +99,7 @@ class UserAvatarThumbnailTests(unittest.TestCase):
     def test_flutter_models_parse_picture_url(self) -> None:
         for relative in (
             "studio/seletor_de_projetos/lib/models/user_models.dart",
-            "studio/seletor_de_projetos/lib/models/AllUsers.dart",
+            "studio/seletor_de_projetos/lib/models/all_users.dart",
             "studio/seletor_de_projetos/lib/models/project_member.dart",
         ):
             source = (ROOT / relative).read_text(encoding="utf-8")
@@ -80,7 +109,7 @@ class UserAvatarThumbnailTests(unittest.TestCase):
     def test_visible_user_lists_use_thumbnail_widget(self) -> None:
         for relative in (
             "studio/seletor_de_projetos/lib/widgets/admin_users/user_card.dart",
-            "studio/seletor_de_projetos/lib/dialogs/addMemberDialog.dart",
+            "studio/seletor_de_projetos/lib/dialogs/add_member_dialog.dart",
             "studio/seletor_de_projetos/lib/widgets/project_settings/members_section.dart",
         ):
             source = (ROOT / relative).read_text(encoding="utf-8")

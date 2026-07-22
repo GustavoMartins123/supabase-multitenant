@@ -4,8 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'admin_users_page.dart';
-import 'duplicateProjectDialog.dart';
-import 'newProjectDialog.dart';
+import 'auth_navigation.dart';
+import 'duplicate_project_dialog.dart';
+import 'new_project_dialog.dart';
 import 'session.dart';
 import 'supabase_colors.dart';
 import 'providers/config_provider.dart';
@@ -184,7 +185,7 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
     );
 
     if (confirm == true) {
-      web.window.location.href = '/logout';
+      redirectToLogout();
     }
   }
 

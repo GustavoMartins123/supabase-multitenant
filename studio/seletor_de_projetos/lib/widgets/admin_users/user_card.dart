@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../supabase_colors.dart';
 import '../../models/user_models.dart';
-import '../../userProjectsAdminScreen.dart';
+import '../../user_projects_admin_screen.dart';
 import '../user_avatar_thumbnail.dart';
 
 class UserCard extends StatelessWidget {

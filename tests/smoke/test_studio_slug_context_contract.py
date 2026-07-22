@@ -16,7 +16,7 @@ class StudioSlugContextContractTest(unittest.TestCase):
         project_list = (ROOT / "studio/seletor_de_projetos/lib/project_list_page.dart").read_text(
             encoding="utf-8"
         )
-        admin = (ROOT / "studio/seletor_de_projetos/lib/userProjectsAdminScreen.dart").read_text(
+        admin = (ROOT / "studio/seletor_de_projetos/lib/user_projects_admin_screen.dart").read_text(
             encoding="utf-8"
         )
         settings = (

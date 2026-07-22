@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'dart:convert';
 
 import '../data/api_client.dart';
 import '../models/job.dart';
@@ -268,14 +267,10 @@ class ProjectService {
         if (response.statusCode != 200) {
           throw ApiException.fromResponse(response);
         }
-        final decoded = jsonDecode(response.body);
-        if (decoded is! Map) {
-          throw const ApiException(
-            ApiFailureKind.invalidResponse,
-            'Resposta invalida ao acompanhar job',
-          );
-        }
-        final data = Map<String, dynamic>.from(decoded);
+        final data = decodeJsonObject(
+          response,
+          context: 'Acompanhamento do job',
+        );
         onUpdate?.call(data);
 
         final status = data['status']?.toString();

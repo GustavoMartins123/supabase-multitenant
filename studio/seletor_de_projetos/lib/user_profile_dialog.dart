@@ -158,7 +158,10 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
       if (response.statusCode != 200) {
         throw ApiException.fromResponse(response);
       }
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = decodeJsonObject(
+        response,
+        context: 'Atualizacao do perfil',
+      );
       Session().setProfile(UserProfile.fromJson(data));
       if (mounted) {
         Navigator.pop(context);
@@ -222,7 +225,10 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
       if (response.statusCode != 200) {
         throw ApiException.fromResponse(response);
       }
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = decodeJsonObject(
+        response,
+        context: 'Upload do avatar',
+      );
       Session().setProfile(UserProfile.fromJson(data));
       if (mounted) setState(() {});
     } catch (error) {
@@ -246,7 +252,10 @@ class _UserProfileDialogState extends State<UserProfileDialog> {
       if (response.statusCode != 200) {
         throw ApiException.fromResponse(response);
       }
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = decodeJsonObject(
+        response,
+        context: 'Remocao do avatar',
+      );
       Session().setProfile(UserProfile.fromJson(data));
       if (mounted) setState(() {});
     } catch (error) {

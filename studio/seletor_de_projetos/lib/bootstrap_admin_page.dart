@@ -1,8 +1,7 @@
-import 'package:web/web.dart' as web;
-
 import 'package:flutter/material.dart';
 
-import 'createUserDialog.dart';
+import 'auth_navigation.dart';
+import 'create_user_dialog.dart';
 import 'supabase_colors.dart';
 
 class BootstrapAdminPage extends StatefulWidget {
@@ -15,11 +14,6 @@ class BootstrapAdminPage extends StatefulWidget {
 class _BootstrapAdminPageState extends State<BootstrapAdminPage> {
   bool _dialogOpen = false;
 
-  String _loginUrl() {
-    final location = web.window.location;
-    return '${location.protocol}//${location.hostname}:9091/login';
-  }
-
   Future<void> _openCreateAdmin() async {
     if (_dialogOpen) return;
     setState(() => _dialogOpen = true);
@@ -30,7 +24,7 @@ class _BootstrapAdminPageState extends State<BootstrapAdminPage> {
       builder: (context) => CreateUserDialog(
         bootstrapMode: true,
         onUserCreated: () {
-          web.window.location.href = _loginUrl();
+          redirectToLogin();
         },
       ),
     );

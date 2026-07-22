@@ -11,8 +11,8 @@ import 'providers/config_provider.dart';
 import 'providers/project_settings_provider.dart';
 import 'providers/project_list_provider.dart';
 import 'providers/project_jobs_provider.dart';
-import 'services/projectService.dart';
-import 'dialogs/transferProjectDialog.dart';
+import 'services/project_service.dart';
+import 'dialogs/transfer_project_dialog.dart';
 import 'dialogs/rename_project_dialog.dart';
 import 'dialogs/rename_history_dialog.dart';
 
@@ -27,7 +27,7 @@ import 'widgets/project_settings/members_section.dart';
 import 'widgets/project_settings/env_settings_section.dart';
 import 'widgets/project_settings/user_telemetry_section.dart';
 import 'models/project_member.dart';
-import 'models/AllUsers.dart';
+import 'models/all_users.dart';
 
 class ProjectSettingsDialog extends ConsumerStatefulWidget {
   const ProjectSettingsDialog({
@@ -276,8 +276,8 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     final myId = Session().myId;
     final myRole = membersAsync.value
         ?.firstWhere(
-          (m) => m.user_id == myId,
-          orElse: () => ProjectMember(user_id: '', role: 'member'),
+          (m) => m.userId == myId,
+          orElse: () => ProjectMember(userId: '', role: 'member'),
         )
         .role;
 

@@ -8,7 +8,6 @@ void main() {
   ) async {
     var retried = false;
     final semantics = tester.ensureSemantics();
-    addTearDown(semantics.dispose);
 
     await tester.pumpWidget(
       MaterialApp(
@@ -29,5 +28,6 @@ void main() {
 
     await tester.tap(find.text('Tentar novamente'));
     expect(retried, isTrue);
+    semantics.dispose();
   });
 }

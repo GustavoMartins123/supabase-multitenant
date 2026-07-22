@@ -8,9 +8,7 @@ Requires=docker.service
 
 [Service]
 Type=exec
-# O agent precisa do docker e de leitura/escrita em servidor/projects.
-# Rode como root ou como um usuario dedicado no grupo docker.
-User=root
+User=__HOST_AGENT_USER__
 Environment="HOST_AGENT_ROOT=__SERVIDOR_DIR__"
 ExecStartPre="__AGENT_DIR__/.venv/bin/python" -m hostagent --root "__SERVIDOR_DIR__" --wait-for-schema
 ExecStart="__AGENT_DIR__/.venv/bin/python" -m hostagent --root "__SERVIDOR_DIR__"

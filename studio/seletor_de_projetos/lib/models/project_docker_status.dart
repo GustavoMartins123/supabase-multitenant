@@ -1,3 +1,4 @@
+/// Aggregate Docker status for a project.
 class ProjectDockerStatus {
   final String status; // running | stopped | partial | unknown
   final int running;

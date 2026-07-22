@@ -1,11 +1,11 @@
-import 'dart:convert';
 import 'package:web/web.dart' as web;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'app_bootstrap.dart';
+import 'auth_navigation.dart';
 import 'bootstrap_admin_page.dart';
 import 'data/api_client.dart';
-import 'models/user_profile.dart';
 import 'project_list_page.dart';
 import 'session.dart';
 import 'supabase_colors.dart';
@@ -19,36 +19,20 @@ Future<void> main() async {
   var accessDenied = false;
   String? initializationError;
   final client = ApiClient();
+  ApiClient.unauthorizedHandler = redirectToLogin;
 
   try {
-    final bootstrapResponse = await client.get(
-      Uri.parse('/api/bootstrap/status'),
-    );
-    if (bootstrapResponse.statusCode != 200) {
-      throw ApiException.fromResponse(bootstrapResponse);
+    final bootstrap = await loadAppBootstrap(client);
+    needsBootstrapAdmin = bootstrap.needsBootstrapAdmin;
+    accessDenied = bootstrap.accessDenied;
+    if (bootstrap.profile case final profile?) {
+      Session().setProfile(profile);
     }
-    final bootstrapData = jsonDecode(bootstrapResponse.body);
-    if (bootstrapData is! Map) {
-      throw const ApiException(
-        ApiFailureKind.invalidResponse,
-        'Resposta de inicializacao invalida',
-      );
-    }
-    needsBootstrapAdmin = bootstrapData['needs_admin'] == true;
-
-    if (!needsBootstrapAdmin) {
-      final response = await client.get(Uri.parse('/api/user/me'));
-      if (response.statusCode == 403) {
-        accessDenied = true;
-      } else if (response.statusCode == 401) {
-        redirectingToLogin = true;
-        web.window.location.href = _loginUrl();
-      } else if (response.statusCode != 200) {
-        throw ApiException.fromResponse(response);
-      } else {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        Session().setProfile(UserProfile.fromJson(data));
-      }
+  } on ApiException catch (error) {
+    if (error.kind == ApiFailureKind.unauthorized) {
+      redirectingToLogin = true;
+    } else {
+      initializationError = error.message;
     }
   } catch (error) {
     initializationError = error.toString();
@@ -66,16 +50,6 @@ Future<void> main() async {
       ),
     ),
   );
-}
-
-String _loginUrl() {
-  final location = web.window.location;
-  return '${location.protocol}//${location.hostname}:9091/login';
-}
-
-String _logoutUrl() {
-  final location = web.window.location;
-  return '${location.protocol}//${location.hostname}:9091/logout';
 }
 
 class ProjectInitApp extends StatelessWidget {
@@ -175,7 +149,7 @@ class _InitializationErrorPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 20),
                 FilledButton.icon(
-                  onPressed: web.window.location.reload,
+                  onPressed: () => web.window.location.reload(),
                   icon: const Icon(Icons.refresh_rounded),
                   label: const Text('Tentar novamente'),
                 ),
@@ -236,7 +210,7 @@ class _AccessDeniedPage extends StatelessWidget {
               const SizedBox(height: 22),
               ElevatedButton.icon(
                 onPressed: () {
-                  web.window.location.href = _logoutUrl();
+                  redirectToLogout();
                 },
                 icon: const Icon(Icons.logout_rounded, size: 18),
                 label: const Text('Sair'),

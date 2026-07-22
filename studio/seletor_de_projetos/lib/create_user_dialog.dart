@@ -1,4 +1,5 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:seletor_de_projetos/data/api_client.dart';
 import 'package:seletor_de_projetos/supabase_colors.dart';

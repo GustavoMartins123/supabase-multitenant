@@ -1,4 +1,4 @@
-// Models for UserProjectsAdminScreen
+// Project projection used by the administrative user screen.
 class AdminProjectInfo {
   final String id; // Project's database ID
   final String name;

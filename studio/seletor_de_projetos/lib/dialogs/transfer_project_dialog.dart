@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:seletor_de_projetos/models/AllUsers.dart';
+import 'package:seletor_de_projetos/models/all_users.dart';
 import 'package:seletor_de_projetos/supabase_colors.dart';
 
 class TransferProjectDialog extends StatefulWidget {

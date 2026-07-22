@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
@@ -41,9 +39,15 @@ class JobRepository {
         throw ApiException.fromResponse(response);
       }
 
-      final decoded = jsonDecode(response.body);
-      if (decoded is! Map || decoded['items'] is! List) {
-        throw const FormatException('Resposta inválida ao consultar jobs');
+      final decoded = decodeJsonObject(
+        response,
+        context: 'Consulta de jobs',
+      );
+      if (decoded['items'] is! List) {
+        throw const ApiException(
+          ApiFailureKind.invalidResponse,
+          'Consulta de jobs: items ausente ou invalido',
+        );
       }
 
       for (final raw in decoded['items'] as List<dynamic>) {

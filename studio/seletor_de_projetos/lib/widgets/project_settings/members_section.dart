@@ -10,7 +10,7 @@ import '../icon_button_widget.dart';
 import '../secondary_button.dart';
 import '../danger_button.dart';
 import '../../session.dart';
-import '../../dialogs/addMemberDialog.dart';
+import '../../dialogs/add_member_dialog.dart';
 import '../../models/project_member.dart';
 import '../user_avatar_thumbnail.dart';
 
@@ -25,8 +25,8 @@ class MembersSection extends ConsumerWidget {
     final myId = Session().myId;
     final myRole = membersAsync.value
             ?.firstWhere(
-              (m) => m.user_id == myId,
-              orElse: () => ProjectMember(user_id: '', role: 'member'),
+              (m) => m.userId == myId,
+              orElse: () => ProjectMember(userId: '', role: 'member'),
             )
             .role ??
         'member';
@@ -92,7 +92,7 @@ class MembersSection extends ConsumerWidget {
     String myRole,
     String myId,
   ) {
-    final isMe = member.user_id == myId;
+    final isMe = member.userId == myId;
     final canRemove = myRole == 'admin' && member.role != 'admin' && !isMe;
 
     return Container(
@@ -194,7 +194,7 @@ class MembersSection extends ConsumerWidget {
               try {
                 await ref
                     .read(projectRepositoryProvider)
-                    .removeMember(projectRef, member.user_id);
+                    .removeMember(projectRef, member.userId);
                 ref.invalidate(projectMembersProvider(projectRef));
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(

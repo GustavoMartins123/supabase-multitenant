@@ -66,6 +66,8 @@ class SystemdInstallerContractTest(unittest.TestCase):
         template = (
             AGENT_ROOT / "supabase-host-agent.service"
         ).read_text(encoding="utf-8")
+        self.assertIn("User=__HOST_AGENT_USER__", template)
+        self.assertNotIn("User=root", template)
         self.assertIn('Environment="HOST_AGENT_ROOT=__SERVIDOR_DIR__"', template)
         self.assertIn(
             'ExecStart="__AGENT_DIR__/.venv/bin/python" '
@@ -96,12 +98,19 @@ class SystemdInstallerContractTest(unittest.TestCase):
         source = installer.read_text(encoding="utf-8")
         self.assertIn("escape_systemd_value", source)
         self.assertIn("escape_sed_replacement", source)
-        self.assertIn('render_unit "$SERVIDOR_DIR" "$AGENT_DIR" "$UNIT_PATH"', source)
-        self.assertIn("HOST_AGENT_INSTALL_SCHEMA_WAIT_TIMEOUT", source)
-        self.assertIn("--wait-for-schema", source)
-        self.assertIn('cd "$AGENT_DIR"', source)
-        self.assertIn('exec "$python_path" -m hostagent "$@"', source)
-        self.assertIn("if run_hostagent", source)
+        self.assertIn(
+            'render_unit "$SERVIDOR_DIR" "$AGENT_DIR" "$SERVICE_USER" "$UNIT_PATH"',
+            source,
+        )
+        self.assertIn("HOST_AGENT_USER", source)
+        self.assertIn('SERVICE_USER="$(resolve_service_user)"', source)
+        self.assertIn('find "$runtime_dir" -xdev -uid 0', source)
+        self.assertIn("run_as_service_user docker info", source)
+        self.assertIn('systemctl enable "$UNIT_NAME"', source)
+        self.assertNotIn("HOST_AGENT_INSTALL_SCHEMA_WAIT_TIMEOUT", source)
+        self.assertNotIn("--wait-for-schema", source)
+        self.assertNotIn('systemctl restart "$UNIT_NAME"', source)
+        self.assertNotIn("run_hostagent", source)
 
         with tempfile.TemporaryDirectory(prefix="host agent % & ") as temp_dir:
             root = pathlib.Path(temp_dir)
@@ -113,11 +122,12 @@ class SystemdInstallerContractTest(unittest.TestCase):
                 [
                     bash,
                     "-c",
-                    'source "$1"; render_unit "$2" "$3" "$4"',
+                    'source "$1"; render_unit "$2" "$3" "$4" "$5"',
                     "bash",
                     str(installer),
                     str(servidor_dir),
                     str(agent_dir),
+                    "hostagent_test",
                     str(rendered),
                 ],
                 check=True,
@@ -133,6 +143,7 @@ class SystemdInstallerContractTest(unittest.TestCase):
                 f'Environment="HOST_AGENT_ROOT={escaped_servidor}"',
                 unit,
             )
+            self.assertIn("User=hostagent_test", unit)
             self.assertIn(f'--root "{escaped_servidor}"', unit)
             self.assertIn(f"WorkingDirectory={escaped_workdir}", unit)
 
