@@ -375,128 +375,129 @@ class TransferProjectDialogState extends State<TransferProjectDialog>
             ),
           ),
           Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.all(4),
-              itemCount: _availableUsers.length,
-              itemBuilder: (context, index) {
-                final user = _availableUsers[index];
-                final isSelected = _selectedUser == user;
+            child: RadioGroup<AvailableUser>(
+              groupValue: _selectedUser,
+              onChanged: (value) => setState(() => _selectedUser = value),
+              child: ListView.builder(
+                padding: const EdgeInsets.all(4),
+                itemCount: _availableUsers.length,
+                itemBuilder: (context, index) {
+                  final user = _availableUsers[index];
+                  final isSelected = _selectedUser == user;
 
-                return Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () => setState(() => _selectedUser = user),
-                    borderRadius: BorderRadius.circular(6),
-                    child: Container(
-                      padding: const EdgeInsets.all(12),
-                      margin: const EdgeInsets.only(bottom: 2),
-                      decoration: BoxDecoration(
-                        color: isSelected
-                            ? SupabaseColors.warning.withValues(alpha: 0.1)
-                            : null,
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(
+                  return Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () => setState(() => _selectedUser = user),
+                      borderRadius: BorderRadius.circular(6),
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        margin: const EdgeInsets.only(bottom: 2),
+                        decoration: BoxDecoration(
                           color: isSelected
-                              ? SupabaseColors.warning.withValues(alpha: 0.3)
-                              : Colors.transparent,
+                              ? SupabaseColors.warning.withValues(alpha: 0.1)
+                              : null,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: isSelected
+                                ? SupabaseColors.warning.withValues(alpha: 0.3)
+                                : Colors.transparent,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? SupabaseColors.warning.withValues(
+                                        alpha: 0.2,
+                                      )
+                                    : SupabaseColors.surface200,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  user.displayName.isNotEmpty
+                                      ? user.displayName[0].toUpperCase()
+                                      : '?',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    color: isSelected
+                                        ? SupabaseColors.warning
+                                        : SupabaseColors.textSecondary,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    user.displayName,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 13,
+                                      color: SupabaseColors.textPrimary,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '@${user.username}',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: SupabaseColors.textMuted,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: user.isActive
+                                    ? SupabaseColors.success.withValues(
+                                        alpha: 0.15,
+                                      )
+                                    : SupabaseColors.surface300,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                user.isActive ? 'Ativo' : 'Inativo',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w600,
+                                  color: user.isActive
+                                      ? SupabaseColors.success
+                                      : SupabaseColors.textMuted,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: Radio<AvailableUser>(
+                                value: user,
+                                activeColor: SupabaseColors.warning,
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              color: isSelected
-                                  ? SupabaseColors.warning.withValues(
-                                      alpha: 0.2,
-                                    )
-                                  : SupabaseColors.surface200,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Center(
-                              child: Text(
-                                user.displayName.isNotEmpty
-                                    ? user.displayName[0].toUpperCase()
-                                    : '?',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                  color: isSelected
-                                      ? SupabaseColors.warning
-                                      : SupabaseColors.textSecondary,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  user.displayName,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 13,
-                                    color: SupabaseColors.textPrimary,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  '@${user.username}',
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    color: SupabaseColors.textMuted,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: user.isActive
-                                  ? SupabaseColors.success.withValues(
-                                      alpha: 0.15,
-                                    )
-                                  : SupabaseColors.surface300,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              user.isActive ? 'Ativo' : 'Inativo',
-                              style: TextStyle(
-                                fontSize: 9,
-                                fontWeight: FontWeight.w600,
-                                color: user.isActive
-                                    ? SupabaseColors.success
-                                    : SupabaseColors.textMuted,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: Radio<AvailableUser>(
-                              value: user,
-                              groupValue: _selectedUser,
-                              onChanged: (value) =>
-                                  setState(() => _selectedUser = value),
-                              activeColor: SupabaseColors.warning,
-                              materialTapTargetSize:
-                                  MaterialTapTargetSize.shrinkWrap,
-                            ),
-                          ),
-                        ],
-                      ),
                     ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
           ),
         ],

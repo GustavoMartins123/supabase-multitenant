@@ -1,20 +1,18 @@
-import 'dart:convert';
 import 'package:collection/collection.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:http/http.dart' as http;
 import 'package:seletor_de_projetos/data/project_repository.dart';
 import 'package:seletor_de_projetos/services/projectService.dart';
 import 'package:seletor_de_projetos/providers/project_jobs_provider.dart';
 import 'package:seletor_de_projetos/session.dart';
 import 'package:seletor_de_projetos/supabase_colors.dart';
-import 'dart:html' as html;
+import 'package:web/web.dart' as web;
 import 'dialogs/transferProjectDialog.dart';
 import 'models/AllUsers.dart';
 import 'models/ProjectInfo.dart';
 import 'models/projectDockerStatus.dart';
+import 'widgets/error_box.dart';
 
 class UserProjectsAdminScreen extends ConsumerStatefulWidget {
   final String userIdHash;
@@ -36,6 +34,7 @@ class _UserProjectsAdminScreenState
     with SingleTickerProviderStateMixin {
   List<ProjectInfo> _projects = [];
   bool _loading = true;
+  String? _loadError;
   String? _serverDomain;
   final Session _session = Session();
   late AnimationController _fadeController;
@@ -81,12 +80,11 @@ class _UserProjectsAdminScreenState
 
   Future<void> _fetchConfig() async {
     try {
-      final r = await http.get(Uri.parse('/api/config'));
-      if (r.statusCode == 200) {
-        final data = jsonDecode(r.body);
-        _safeSetState(() => _serverDomain = data['server_domain']);
-      }
-    } catch (_) {}
+      final data = await ref.read(projectRepositoryProvider).fetchConfig();
+      _safeSetState(() => _serverDomain = data['server_domain']?.toString());
+    } catch (error) {
+      _safeSetState(() => _loadError = error.toString());
+    }
   }
 
   Future<List<AvailableUser>> _loadAvailableUsers(String projectName) async {
@@ -108,21 +106,14 @@ class _UserProjectsAdminScreenState
 
   Future<void> _transferProject(String projectName, String newOwnerId) async {
     try {
-      final response = await http.post(
-        Uri.parse('/api/admin/projects/$projectName/transfer'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'new_owner_id': newOwnerId}),
+      await ref
+          .read(projectRepositoryProvider)
+          .transferProject(projectName, newOwnerId);
+      _showSnack(
+        'Projeto "$projectName" transferido!',
+        SupabaseColors.success,
       );
-
-      if (response.statusCode == 200) {
-        _showSnack(
-          'Projeto "$projectName" transferido!',
-          SupabaseColors.success,
-        );
-        await _fetchProjects();
-      } else {
-        throw Exception('Erro ${response.statusCode}: ${response.body}');
-      }
+      await _fetchProjects();
     } catch (e) {
       _showSnack('Erro ao transferir projeto: $e', SupabaseColors.error);
     }
@@ -140,23 +131,19 @@ class _UserProjectsAdminScreenState
   }
 
   Future<void> _fetchProjects() async {
-    _safeSetState(() => _loading = true);
+    _safeSetState(() {
+      _loading = true;
+      _loadError = null;
+    });
     try {
-      final response = await http.post(
-        Uri.parse('/api/admin/projects-info'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({"user_id": widget.userIdHash}),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final projectsJson = data["projects"] as List;
-        _projects = projectsJson.map((p) => ProjectInfo.fromJson(p)).toList();
-      } else {
-        throw Exception('Erro ao carregar projetos: ${response.body}');
-      }
-    } catch (e) {
-      if (kDebugMode) print(e);
+      final projects = await ref
+          .read(projectRepositoryProvider)
+          .fetchAdminProjectsInfo(widget.userIdHash);
+      _safeSetState(() {
+        _projects = projects.map(ProjectInfo.fromJson).toList();
+      });
+    } catch (error) {
+      _safeSetState(() => _loadError = error.toString());
     } finally {
       _safeSetState(() => _loading = false);
     }
@@ -299,6 +286,16 @@ class _UserProjectsAdminScreenState
       );
     }
 
+    if (_loadError != null) {
+      return Padding(
+        padding: const EdgeInsets.all(24),
+        child: ErrorBox(
+          message: _loadError!,
+          onRetry: _fetchProjects,
+        ),
+      );
+    }
+
     if (_projects.isEmpty) {
       return Padding(
         padding: const EdgeInsets.all(80),
@@ -358,9 +355,10 @@ class _UserProjectsAdminScreenState
     final projectUrl = _getProjectUrl(project.name);
 
     if (project.statusFuture == null && !busy) {
-      project.statusFuture = http
-          .get(Uri.parse('/api/projects/${project.name}/status'))
-          .then((r) => ProjectDockerStatus.fromJson(jsonDecode(r.body)));
+      project.statusFuture = ref
+          .read(projectRepositoryProvider)
+          .getFullStatus(project.name)
+          .then((data) => ProjectDockerStatus.fromJson(data));
     }
 
     return FutureBuilder<ProjectDockerStatus>(
@@ -655,8 +653,8 @@ class _UserProjectsAdminScreenState
   }
 
   void _openProject(String ref) {
-    html.window.open(
-      '${html.window.location.origin}/project/$ref',
+    web.window.open(
+      '${web.window.location.origin}/project/$ref',
       '_blank',
     );
   }

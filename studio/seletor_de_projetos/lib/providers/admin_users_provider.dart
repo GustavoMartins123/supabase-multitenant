@@ -4,8 +4,8 @@ import '../data/project_repository.dart';
 
 final adminUsersProvider =
     AsyncNotifierProvider<AdminUsersNotifier, UserListResponse>(
-      () => AdminUsersNotifier(),
-    );
+  () => AdminUsersNotifier(),
+);
 
 class AdminUsersNotifier extends AsyncNotifier<UserListResponse> {
   @override

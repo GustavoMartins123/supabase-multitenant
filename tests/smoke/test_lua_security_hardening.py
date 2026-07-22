@@ -120,9 +120,17 @@ class InternalServiceKeyHardeningTest(unittest.TestCase):
     def test_tls_verification_and_internal_ca_remain_enabled(self) -> None:
         nginx = read(NGINX)
         client = read(LUA / "security" / "get_service_key.lua")
-        self.assertIn("lua_ssl_trusted_certificate /config/ssl/ca.pem;", nginx)
-        self.assertIn('os.getenv("SERVICE_KEY_VERIFY_TLS") or "true"', client)
-        self.assertIn("ssl_verify = verify_tls", client)
+        outbound_tls = read(LUA / "utils" / "outbound_tls.lua")
+        self.assertIn(
+            "lua_ssl_trusted_certificate /var/run/studio-ca-bundle.pem;",
+            nginx,
+        )
+        self.assertIn(
+            'os.getenv("SERVICE_KEY_VERIFY_TLS") or "true"',
+            outbound_tls,
+        )
+        self.assertIn("options.ssl_verify = M.verify_internal", outbound_tls)
+        self.assertIn("outbound_tls.apply_internal", client)
 
     def test_fernet_constructor_and_decrypt_are_both_protected(self) -> None:
         client = read(LUA / "security" / "get_service_key.lua")

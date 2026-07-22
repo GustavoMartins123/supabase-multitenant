@@ -217,8 +217,9 @@ class _NewProjectDialogState extends State<NewProjectDialog>
     if (v == null || v.trim().isEmpty) return 'Informe um nome';
     final txt = _normalize(v);
     if (txt.isEmpty) return 'Nome inválido';
-    if (!_regex.hasMatch(txt))
+    if (!_regex.hasMatch(txt)) {
       return 'Use minúsculas, números ou "_" (3-40 caracteres)';
+    }
     if (_reserved.contains(txt)) return 'Nome reservado — escolha outro.';
     return null;
   }

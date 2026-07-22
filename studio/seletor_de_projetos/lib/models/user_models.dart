@@ -13,9 +13,8 @@ class UserListResponse {
     List<UserInfo> usersList = [];
     if (json['users'] != null) {
       if (json['users'] is List) {
-        usersList = (json['users'] as List)
-            .map((u) => UserInfo.fromJson(u))
-            .toList();
+        usersList =
+            (json['users'] as List).map((u) => UserInfo.fromJson(u)).toList();
       }
     }
 

@@ -67,9 +67,8 @@ class UserCard extends StatelessWidget {
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
                       fontSize: 14,
-                      decoration: user.isActive
-                          ? null
-                          : TextDecoration.lineThrough,
+                      decoration:
+                          user.isActive ? null : TextDecoration.lineThrough,
                       color: SupabaseColors.textPrimary,
                     ),
                   ),

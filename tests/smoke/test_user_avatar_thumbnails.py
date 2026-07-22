@@ -31,8 +31,11 @@ class UserAvatarThumbnailTests(unittest.TestCase):
         self.assertIn('if not requested_user_id then', handler)
 
     def test_lua_owns_bounded_image_normalization(self) -> None:
-        source = (
+        handler = (
             ROOT / "studio/nginx/lua/admin_api/user_avatar_handler.lua"
+        ).read_text(encoding="utf-8")
+        source = (
+            ROOT / "studio/nginx/lua/admin_api/avatar_processor.lua"
         ).read_text(encoding="utf-8")
         dockerfile = (ROOT / "studio/Dockerfile").read_text(encoding="utf-8")
         compose = (ROOT / "studio/docker-compose.yml").read_text(encoding="utf-8")
@@ -47,6 +50,9 @@ class UserAvatarThumbnailTests(unittest.TestCase):
         self.assertIn("width * height > MAX_PIXELS", source)
         self.assertIn("width > MAX_SOURCE_EDGE", source)
         self.assertIn("MAX_PROCESS_CONCURRENCY", source)
+        self.assertIn('require("admin_api.avatar_processor")', handler)
+        self.assertIn('stored avatar is not normalized', handler)
+        self.assertNotIn("normalize_stored_avatar", handler)
         self.assertIn("libvips-tools", dockerfile)
         self.assertNotIn("avatar-processor", compose)
         self.assertIn("worker_processes auto", nginx)

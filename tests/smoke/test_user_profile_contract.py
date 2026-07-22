@@ -44,20 +44,23 @@ class UserProfileContractTests(unittest.TestCase):
         self.assertNotIn('street_address = "street_address"', source)
 
     def test_avatar_endpoint_validates_content_and_size(self) -> None:
-        source = (
+        handler = (
             ROOT / "studio/nginx/lua/admin_api/user_avatar_handler.lua"
         ).read_text(encoding="utf-8")
+        processor = (
+            ROOT / "studio/nginx/lua/admin_api/avatar_processor.lua"
+        ).read_text(encoding="utf-8")
 
-        self.assertIn("2 * 1024 * 1024", source)
-        self.assertIn('return "image/png"', source)
-        self.assertIn('return "image/jpeg"', source)
-        self.assertIn('return "image/webp"', source)
-        self.assertIn("X-Content-Type-Options", source)
-        self.assertIn("store.set_picture", source)
-        self.assertIn("MAX_PIXELS", source)
-        self.assertIn("vipsthumbnail", source)
-        self.assertIn("[Q=85,strip]", source)
-        self.assertIn("animated avatars are not accepted", source)
+        self.assertIn("2 * 1024 * 1024", processor)
+        self.assertIn('return "image/png"', processor)
+        self.assertIn('return "image/jpeg"', processor)
+        self.assertIn('return "image/webp"', processor)
+        self.assertIn("X-Content-Type-Options", handler)
+        self.assertIn("store.set_picture", handler)
+        self.assertIn("MAX_PIXELS", processor)
+        self.assertIn("vipsthumbnail", processor)
+        self.assertIn("[Q=85,strip]", processor)
+        self.assertIn("animated avatars are not accepted", processor)
 
     def test_user_me_dispatches_profile_and_avatar(self) -> None:
         content = (
@@ -105,9 +108,10 @@ class UserProfileContractTests(unittest.TestCase):
 
         self.assertIn("Session().setProfile(UserProfile.fromJson(data))", main)
         self.assertIn("UserProfileLauncher", main)
-        self.assertIn("http.patch", dialog)
+        self.assertIn("_client.patch", dialog)
         self.assertIn("/api/user/me/avatar", dialog)
-        self.assertIn("FileUploadInputElement", dialog)
+        self.assertIn("web.HTMLInputElement()", dialog)
+        self.assertNotIn("dart:html", dialog)
         self.assertNotIn("'email':", dialog)
         self.assertNotIn("'username':", dialog)
 

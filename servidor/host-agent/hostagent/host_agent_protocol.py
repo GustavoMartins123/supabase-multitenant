@@ -48,9 +48,6 @@ COMMAND_TIMEOUTS: dict[str, int] = {
     "restore_project": 3_600,
     "delete_restore_point": 120,
     "container_logs": 60,
-    "terminate_supavisor_tenant": 60,
-    "delete_supavisor_tenant": 60,
-    "delete_realtime_tenant": 60,
 }
 
 HOST_AGENT_COMMANDS = frozenset(COMMAND_TIMEOUTS)
@@ -71,9 +68,6 @@ GLOBAL_ADMIN_COMMANDS = frozenset(
     {
         "delete_project_containers",
         "delete_project_files",
-        "terminate_supavisor_tenant",
-        "delete_supavisor_tenant",
-        "delete_realtime_tenant",
     }
 )
 
@@ -89,9 +83,6 @@ PROJECT_OWNER_COMMANDS = frozenset(
 PROJECT_ROW_OPTIONAL_COMMANDS = frozenset(
     {
         "delete_project_files",
-        "terminate_supavisor_tenant",
-        "delete_supavisor_tenant",
-        "delete_realtime_tenant",
     }
 )
 
@@ -160,9 +151,6 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
         "restart_project",
         "delete_project_containers",
         "rotate_keys",
-        "terminate_supavisor_tenant",
-        "delete_supavisor_tenant",
-        "delete_realtime_tenant",
     }:
         reject_unknown(set())
     elif command == "delete_project_files":

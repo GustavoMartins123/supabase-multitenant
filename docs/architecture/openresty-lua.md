@@ -84,14 +84,20 @@ estado ativo autorizam a leitura. UUID malformado recebe 400 e conta inexistente
 ou inativa recebe 404. `/api/user/me/avatar` aceita apenas upload e remoção
 próprios; não existe uma segunda rota de leitura.
 
-O handler Lua limita o corpo a 2 MB, valida PNG/JPEG/WebP e usa `ngx.pipe` com
+`admin_api/user_avatar_handler.lua` mantém apenas rota, autorização, armazenamento
+e sincronização de perfil. `admin_api/avatar_processor.lua` concentra leitura,
+limites e todo o processamento libvips;
+
+O processador Lua limita o corpo a 2 MB, valida PNG/JPEG/WebP e usa `ngx.pipe` com
 argv fechado para chamar `vipsheader` e `vipsthumbnail`, sem shell. A imagem é
 decodificada por completo, limitada por pixels, reduzida, auto-orientada e
 reencodificada como WebP sem EXIF, ICC ou XMP. Avatares animados são rejeitados.
 O limite global de subprocessos (`AVATAR_PROCESS_MAX_CONCURRENCY`) impede que
 uploads ocupem toda a capacidade; `VIPS_CONCURRENCY` limita as threads de cada
 processo. `worker_processes auto` mantém os workers HTTP por CPU — não existe
-worker Nginx reservado por rota — e o pipe não bloqueia o event loop.
+worker Nginx reservado por rota — e o pipe não bloqueia o event loop. A leitura
+aceita somente WebP acompanhado do marcador de normalização atual; arquivos
+antigos ou incompletos falham fechados com 415 e não são convertidos sob demanda.
 
 ### TLS de saídas
 

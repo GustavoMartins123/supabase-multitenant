@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/job.dart';
+import 'api_client.dart';
 
 final jobRepositoryProvider = Provider<JobRepository>((ref) {
   final repository = JobRepository();
@@ -12,9 +13,13 @@ final jobRepositoryProvider = Provider<JobRepository>((ref) {
 });
 
 class JobRepository {
-  JobRepository({http.Client? client}) : _client = client ?? http.Client();
+  JobRepository({http.Client? client, Duration? timeout})
+      : _client = ApiClient(
+          client: client,
+          timeout: timeout ?? const Duration(seconds: 15),
+        );
 
-  final http.Client _client;
+  final ApiClient _client;
 
   void close() => _client.close();
 
@@ -33,9 +38,7 @@ class JobRepository {
     final jobs = <String, Job>{};
     for (final response in responses) {
       if (response.statusCode != 200) {
-        throw Exception(
-          'Erro ao consultar jobs (${response.statusCode}): ${response.body}',
-        );
+        throw ApiException.fromResponse(response);
       }
 
       final decoded = jsonDecode(response.body);
@@ -44,7 +47,12 @@ class JobRepository {
       }
 
       for (final raw in decoded['items'] as List<dynamic>) {
-        if (raw is! Map) continue;
+        if (raw is! Map) {
+          throw const ApiException(
+            ApiFailureKind.invalidResponse,
+            'Item invalido na resposta de jobs',
+          );
+        }
         final job = Job.fromJson(Map<String, dynamic>.from(raw));
         if (job.isInFlight) jobs[job.id] = job;
       }
