@@ -88,10 +88,12 @@ local function serve(path)
         ngx.status = 304
         return ngx.exit(304)
     end
+    ngx.status = ngx.HTTP_OK
     ngx.header.content_type = "image/webp"
+    ngx.header["Content-Length"] = #data
     ngx.header["X-Content-Type-Options"] = "nosniff"
     ngx.print(data)
-    return ngx.exit(200)
+    return
 end
 
 local function upload(email, profile, path)

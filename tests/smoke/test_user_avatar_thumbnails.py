@@ -54,10 +54,154 @@ assert(processor.normalize_uuid("11111111-2222-3333-4444-555555555555/../x") == 
         handler = (
             ROOT / "studio/nginx/lua/admin_api/user_avatar_handler.lua"
         ).read_text(encoding="utf-8")
+        content = (
+            ROOT / "studio/nginx/lua/admin_api/user_avatar_content.lua"
+        ).read_text(encoding="utf-8")
         self.assertIn('location ~ "^/api/users/[^/]+/avatar$"', nginx)
+        self.assertIn(
+            "content_by_lua_file "
+            "/usr/local/openresty/lualib/admin_api/user_avatar_content.lua;",
+            nginx,
+        )
+        self.assertNotIn(
+            "content_by_lua_file "
+            "/usr/local/openresty/lualib/admin_api/user_avatar_handler.lua;",
+            nginx,
+        )
+        self.assertIn(
+            'return require("admin_api.user_avatar_handler").handle()',
+            content,
+        )
         self.assertIn('uri ~= "/api/user/me/avatar"', handler)
         self.assertEqual(handler.count('uri:match("^/api/users/'), 1)
         self.assertIn('if not requested_user_id then', handler)
+
+    def test_avatar_content_entrypoint_invokes_the_handler(self) -> None:
+        content = ROOT / "studio/nginx/lua/admin_api/user_avatar_content.lua"
+        runtime = shutil.which("lua5.1") or shutil.which("lua")
+        if not runtime:
+            self.skipTest("Lua runtime is not installed")
+
+        script = f'''\
+local calls = 0
+package.preload["admin_api.user_avatar_handler"] = function()
+    return {{ handle = function() calls = calls + 1 end }}
+end
+dofile("{content.as_posix()}")
+assert(calls == 1)
+'''
+        subprocess.run(
+            [runtime, "-"],
+            input=script,
+            text=True,
+            check=True,
+            capture_output=True,
+        )
+
+    def test_avatar_get_flushes_the_binary_body_without_early_exit(self) -> None:
+        handler_path = (
+            ROOT / "studio/nginx/lua/admin_api/user_avatar_handler.lua"
+        )
+        source = handler_path.read_text(encoding="utf-8")
+        serve_start = source.index("local function serve(path)")
+        serve_end = source.index("local function upload", serve_start)
+        serve = source[serve_start:serve_end]
+
+        self.assertIn('ngx.header["Content-Length"] = #data', serve)
+        self.assertIn("ngx.print(data)", serve)
+        self.assertNotIn("ngx.exit(200)", serve)
+
+        runtime = shutil.which("lua5.1") or shutil.which("lua")
+        if not runtime:
+            self.skipTest("Lua runtime is not installed")
+
+        lua_root = (ROOT / "studio/nginx/lua").as_posix()
+        script = f'''\
+package.path = "{lua_root}/?.lua;{lua_root}/?/init.lua;" .. package.path
+
+local user_id = "11111111-2222-3333-4444-555555555555"
+local payload = "RIFF-avatar-WEBP-binary-body"
+local response_body = ""
+local exit_calls = 0
+
+package.preload["cjson.safe"] = function()
+    return {{
+        encode = function(_) return "{{}}" end,
+        decode = function(_) return {{ is_active = true, user_uuid = user_id }} end,
+    }}
+end
+package.preload["lfs"] = function()
+    return {{
+        attributes = function(_, attribute)
+            if attribute == "mode" then return "file" end
+            return {{ modification = 123, size = #payload }}
+        end,
+    }}
+end
+package.preload["admin_api.avatar_processor"] = function()
+    return {{
+        normalize_uuid = function(value) return value end,
+        avatar_path = function(directory, value)
+            return directory .. "/" .. value .. ".avatar"
+        end,
+        marker_path = function(path) return path .. ".normalized-v2" end,
+        read_limited_file = function(_) return payload end,
+        detect_type = function(_) return "image/webp" end,
+    }}
+end
+package.preload["admin_api.user_profile_store"] = function()
+    return {{
+        get = function(_)
+            return {{
+                user_id = user_id,
+                username = "admin",
+                email = "admin@example.test",
+                groups = {{}},
+                is_active = true,
+            }}
+        end,
+    }}
+end
+package.preload["admin_api.user_sync"] = function()
+    return {{ sync_user = function(_) return true end }}
+end
+
+ngx = {{
+    HTTP_OK = 200,
+    HTTP_SERVICE_UNAVAILABLE = 503,
+    status = 0,
+    header = {{}},
+    var = {{
+        authelia_email = "admin@example.test",
+        uri = "/api/users/" .. user_id .. "/avatar",
+        http_if_none_match = nil,
+    }},
+    req = {{ get_method = function() return "GET" end }},
+    shared = {{ users_cache = {{ get = function(_, _) return "{{}}" end }} }},
+    print = function(value) response_body = response_body .. value end,
+    say = function(_) error("unexpected JSON response") end,
+    exit = function(status)
+        exit_calls = exit_calls + 1
+        return status
+    end,
+}}
+
+local handler = require("admin_api.user_avatar_handler")
+handler.handle()
+
+assert(ngx.status == 200)
+assert(ngx.header.content_type == "image/webp")
+assert(ngx.header["Content-Length"] == #payload)
+assert(response_body == payload)
+assert(exit_calls == 0)
+'''
+        subprocess.run(
+            [runtime, "-"],
+            input=script,
+            text=True,
+            check=True,
+            capture_output=True,
+        )
 
     def test_lua_owns_bounded_image_normalization(self) -> None:
         handler = (
