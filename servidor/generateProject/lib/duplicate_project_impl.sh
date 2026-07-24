@@ -27,6 +27,11 @@ for word in "${RESERVED[@]}"; do
   [[ "$NEW_PROJECT" != "$word" ]] || die "'$NEW_PROJECT' e palavra reservada"
 done
 
+RESERVED_ROUTES=(admin phpmyadmin xmlrpc actuator)
+for word in "${RESERVED_ROUTES[@]}"; do
+  [[ "$NEW_PROJECT" != "$word" ]] || die "'$NEW_PROJECT' e rota reservada"
+done
+
 set -a
 source "$PROJECT_ROOT/.env"
 set +a

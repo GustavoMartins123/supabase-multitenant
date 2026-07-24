@@ -7,6 +7,7 @@ import '../providers/favorites_provider.dart';
 import '../providers/project_list_provider.dart';
 import '../providers/project_jobs_provider.dart';
 import '../supabase_colors.dart';
+import '../utils/project_name_validator.dart';
 
 class RenameProjectResult {
   const RenameProjectResult({required this.oldName, required this.newName});
@@ -50,10 +51,6 @@ class _RenameProjectDialogState extends ConsumerState<RenameProjectDialog> {
     super.dispose();
   }
 
-  bool _isValidName(String name) {
-    return RegExp(r'^[a-z_][a-z0-9_]{2,39}$').hasMatch(name);
-  }
-
   String? _validate() {
     final newName = _newNameController.text.trim();
     if (newName.isEmpty) {
@@ -62,8 +59,11 @@ class _RenameProjectDialogState extends ConsumerState<RenameProjectDialog> {
     if (newName == widget.projectName) {
       return 'O novo nome precisa ser diferente do atual';
     }
-    if (!_isValidName(newName)) {
+    if (!ProjectNameValidator.isValidShape(newName)) {
       return 'Use letras minúsculas, dígitos ou _ (3–40 chars, começando com letra/_)';
+    }
+    if (ProjectNameValidator.isReserved(newName)) {
+      return 'Nome reservado — escolha outro.';
     }
     return null;
   }

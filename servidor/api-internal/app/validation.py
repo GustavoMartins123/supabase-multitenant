@@ -5,18 +5,9 @@ import uuid
 
 from fastapi import HTTPException
 
+from app.host_agent_protocol import ProjectNameValidator
 
-RESERVED_WORDS = {
-    "default", "select", "from", "where", "insert", "update", "delete",
-    "table", "create", "drop", "join", "group", "order", "limit", "into",
-    "index", "view", "trigger", "procedure", "function", "database",
-    "schema", "primary", "foreign", "key", "constraint", "unique", "null",
-    "not", "and", "or", "in", "like", "between", "exists", "having",
-    "union", "inner", "left", "right", "outer", "cross", "on", "as",
-    "case", "when", "then", "else", "end", "if", "while", "for", "begin",
-    "commit", "rollback",
-}
-PROJECT_NAME_RE = re.compile(r"^[a-z_][a-z0-9_]{2,39}$")
+
 SERVICE_NAME_RE = re.compile(r"^[a-z][a-z0-9\-]{0,39}$")
 
 
@@ -44,14 +35,16 @@ def parse_uuid_value(raw: str | None) -> uuid.UUID | None:
 
 def validate_project_id(raw: str) -> str:
     name = raw.strip().lower()
-    if not PROJECT_NAME_RE.fullmatch(name):
+    if not ProjectNameValidator.NAME_RE.fullmatch(name):
         raise HTTPException(
             400,
             "Nome invalido: use letras minusculas, numeros ou '_', "
             "(3-40 caracteres, comecando por letra ou '_').",
         )
-    if name in RESERVED_WORDS:
+    if name in ProjectNameValidator.RESERVED_WORDS:
         raise HTTPException(400, "Nome invalido: palavra reservada SQL.")
+    if name in ProjectNameValidator.RESERVED_ROUTE_NAMES:
+        raise HTTPException(400, "Nome invalido: rota reservada do Traefik.")
     return name
 
 

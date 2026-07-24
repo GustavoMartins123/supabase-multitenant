@@ -128,133 +128,80 @@ Para produção, é crucial enviar o header `Strict-Transport-Security` (HSTS), 
 
 ---
 
-### Passo 3: Atualizar os Labels do Docker Compose
+### Passo 3: Atualizar os Roteadores em middlewares.yml
 
-* Abra o arquivo servidor/traefik/docker-compose.yml.
+* Abra o arquivo servidor/traefik/middlewares.yml.
 
-* Ajuste os entrypoints: Para cada roteador (malicious-paths e block-bad-useragents), comente a linha que aponta apenas para web e descomente a que aponta para web,websecure.
-
-* Habilite o TLS: Descomente a linha tls=true para cada um desses roteadores.
-
-* Ative o HTTPS Catch-all: Descomente o bloco inteiro do roteador https-catchall no final da lista de labels.
+* Ajuste os entrypoints: Para cada roteador (malicious-paths, block-bad-useragents e http-catchall), adicione `- websecure` a lista de `entryPoints` e adicione a chave `tls: {}`.
 
 * Exemplo para o roteador malicious-paths:
 
 ANTES:
 ```yml
-# - "traefik.http.routers.malicious-paths.entrypoints=web,websecure"
-- "traefik.http.routers.malicious-paths.entrypoints=web"
-# ...
-# - "traefik.http.routers.malicious-paths.tls=true"
+    malicious-paths:
+      rule: "..."
+      entryPoints:
+        - web
+      priority: 2000
+      middlewares:
+        - malicious-paths-chain
+      service: forbidden-service
 ```
 DEPOIS:
 ```yml
-- "traefik.http.routers.malicious-paths.entrypoints=web,websecure"
-# - "traefik.http.routers.malicious-paths.entrypoints=web"
-# ...
-- "traefik.http.routers.malicious-paths.tls=true"
+    malicious-paths:
+      rule: "..."
+      entryPoints:
+        - web
+        - websecure
+      tls: {}
+      priority: 2000
+      middlewares:
+        - malicious-paths-chain
+      service: forbidden-service
 ```
-* Essa etapa vale da mesma forma para o bloco logo abaixo, o 'block-bad-useragents'
+* Essa etapa vale da mesma forma para os roteadores 'block-bad-useragents' e 'http-catchall'.
 
-**3.1. Adicionar o Roteador HTTPS Catch-all**
+**3.1. Roteador da API de Projetos (projects-api)**
 
-Este roteador funciona como uma "rede de segurança" para conexões HTTPS, capturando qualquer tentativa de acesso a domínios não configurados e aplicando as mesmas políticas de segurança.
+* Abra o arquivo servidor/traefik/render_dynamic_config.py.
+* Encontre o bloco que monta o roteador "projects-api".
 
-* **Cole** no final do bloco `labels`:
-
-```yml
- - "traefik.http.routers.https-catchall.rule=HostRegexp(`{host:.+}`)"
- - "traefik.http.routers.https-catchall.entrypoints=websecure"
- - "traefik.http.routers.https-catchall.priority=100"
- - "traefik.http.routers.https-catchall.middlewares=security-chain-enhanced@file"
- - "traefik.http.routers.https-catchall.tls=true"
- - "traefik.http.routers.https-catchall.service=noop@internal"
+ANTES:
+```python
+        "      entryPoints:",
+        "        - web",
+        "      priority: 1000",
 ```
-Importante: Este roteador complementa o http-catchall existente, garantindo que tanto conexões HTTP quanto HTTPS não autorizadas sejam tratadas com as mesmas políticas de segurança.
-
-**3.2. Roteador da API de Projetos (projects-api)**
-
-Para garantir que a api que gerencia os projetos responda a partir do dominio faça o seguinte:
- 
-* Edite o arquivo que fica em "servidor/docker-compose.yml"
-* Role até achar o "projects-api"
-* Edite as labels
-
-```yml
-labels:
-  - traefik.enable=true
-  - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.50.0.0/16
-  - traefik.http.routers.projects.rule=PathPrefix(`/api/projects`)
-  - traefik.http.routers.projects.middlewares=lanonly, api-security-chain@file
-  - traefik.http.services.projects.loadbalancer.server.port=18000  
-```
-
 DEPOIS:
-```yml
-labels:
-  - traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.50.0.0/16
-  - traefik.http.routers.projects.rule=Host(`seu_dominio`) && PathPrefix(`/api/projects`)
-  - traefik.http.routers.projects.priority=100
-  - traefik.http.routers.projects.entrypoints=websecure
-  - traefik.http.routers.projects.tls=true
-  - traefik.http.routers.projects.tls.certresolver=letsencrypt
-  - traefik.http.routers.projects.middlewares=lanonly, api-security-chain@file
-  - traefik.http.services.projects.loadbalancer.server.port=18000
+```python
+        "      entryPoints:",
+        "        - web",
+        "        - websecure",
+        "      tls: {}",
+        "      priority: 1000",
 ```
-
-Nota: troque 'seu_dominio' pelo dominio real que será usado.
-
-> ⚠️ **Nota sobre o middleware `lanonly`:**
-> A regra `- traefik.http.middlewares.lanonly.ipallowlist.sourcerange=<SEU_IP>/32, 172.50.0.0/16` limita o acesso à API de gerenciamento de projetos apenas para a sua rede local e o IP configurado.
-> * **Se você possui um IP dinâmico ou precisa acessar a API de outras redes** (ex: automações, CI/CD ou servidores externos), essa configuração restritiva causará bloqueios. Avalie alterar a lista de IPs permitidos ou remover o middleware `lanonly` caso adote outra forma de autenticação/segurança diretamente na API.
 
 ## Passo 4: Configurar os Roteadores dos Projetos para HTTPS
 
 * Esta é a etapa final para expor suas aplicações Supabase de forma segura.
 
-**4.1. Para Novos Projetos (Editando o Template)**
+* No mesmo arquivo servidor/traefik/render_dynamic_config.py, encontre o bloco que monta o roteador "project-{project_id}". Como esse roteador é gerado dinamicamente para todos os projetos a partir do conteúdo de projects/, essa edição já vale tanto para os projetos existentes quanto para os que forem criados depois.
 
-* Para garantir que todos os projetos criados a partir de agora já nasçam configurados para HTTPS, você deve editar o arquivo de template que o script generate_project.sh utiliza.
-
-    Abra o arquivo: servidor/generateProject/dockercomposetemplate.
-
-    Edite os labels do serviço nginx para que fiquem como no exemplo "DEPOIS" abaixo.
-
-```yml
-labels:
-  - "traefik.enable=true"
-  # - "traefik.http.routers.supabase-nginx-{{project_id}}.rule=Host(`seu_dominio`) && PathPrefix(`/{{project_id}}`)"
-  # - "traefik.http.routers.supabase-nginx-{{project_id}}.entrypoints=websecure"
-  # - "traefik.http.routers.supabase-nginx-{{project_id}}.tls=true"
-  # - "traefik.http.routers.supabase-nginx-{{project_id}}.tls.certresolver=letsencrypt"
-  - "traefik.http.routers.supabase-nginx-{{project_id}}.rule=PathPrefix(`/{{project_id}}`)"
-  - "traefik.http.routers.supabase-nginx-{{project_id}}.entrypoints=web"
-  # ...
+ANTES:
+```python
+                "      entryPoints:",
+                "        - web",
+                "      priority: 500",
 ```
-
 DEPOIS:
-```yml
-labels:
-  - "traefik.enable=true"
-  - "traefik.http.routers.supabase-nginx-{{project_id}}.rule=Host(`seu_dominio`) && PathPrefix(`/{{project_id}}`)"
-  - "traefik.http.routers.supabase-nginx-{{project_id}}.entrypoints=websecure"
-  - "traefik.http.routers.supabase-nginx-{{project_id}}.tls=true"
-  - "traefik.http.routers.supabase-nginx-{{project_id}}.tls.certresolver=letsencrypt"
-  # - "traefik.http.routers.supabase-nginx-{{project_id}}.rule=PathPrefix(`/{{project_id}}`)"
-  # - "traefik.http.routers.supabase-nginx-{{project_id}}.entrypoints=web"
-  # ...
+```python
+                "      entryPoints:",
+                "        - web",
+                "        - websecure",
+                "      tls: {}",
+                "      priority: 500",
 ```
-Nota: troque 'seu_dominio' pelo dominio real que será usado.
-
-**4.2. Para Projetos Existentes (Editando Manualmente)**
-
-Se você já possui projetos que foram criados com a configuração HTTP, é necessário atualizá-los manualmente para que usem HTTPS.
-
-* Navegue até a pasta do projeto que deseja migrar (ex: projects/meu_projeto_antigo/).
-
-* Abra o arquivo docker-compose.yml.
-
-* Aplique as exatamente as mesmas alterações descritas na seção [4.1](#41-para-novos-projetos-editando-o-template) acima: comente as linhas de configuração HTTP e descomente as linhas de HTTPS, inserindo seu domínio na regra Host(...).
 
 ## Passo 5: Aplicar as Configurações Finais
 
@@ -283,15 +230,9 @@ BACKEND_PROTO=https
 
 **5.2. Reinicie Todos os Serviços**
 
-Os comandos abaixo forçam a recriação dos contêineres, garantindo que eles usem os novos labels e arquivos .env que você modificou.
+Os comandos abaixo forçam a recriação dos contêineres, garantindo que eles usem os novos arquivos .yml e .env que você modificou.
 
-* Reinicie os Serviços Base do Servidor:
-
-```bash
-# Inicia o PostgreSQL, a API de gerenciamento, etc.
-docker compose -f servidor/docker-compose.yml --env-file servidor/.env up -d --force-recreate
-```
-Reinicie o Gateway de Borda (Traefik) e de permissão para escrita ao arquivo 'acme.json':
+Reinicie o Gateway de Borda (Traefik), o watcher da configuração dinâmica e de permissão para escrita ao arquivo 'acme.json':
 
 ```bash
 # Aplica as novas configurações de HTTPS e resolvedores de certificado.
@@ -303,10 +244,4 @@ Reinicie a Interface de Gerenciamento (Studio):
 ```bash
 # Aplica as novas variáveis de ambiente para o backend.
 docker compose -f studio/docker-compose.yml up -d --force-recreate
-```
-
-Reinicie o Projeto Existente que foi Modificado:
-```bash
-# Aplica os novos labels de HTTPS ao projeto. Substitua nos dois <seu_projeto> pelo nome real.
-docker compose -f projects/<seu_projeto>/docker-compose.yml -p <seu_projeto> --env-file servidor/.env --env-file projects/<seu_projeto>/.env up -d --force-recreate
 ```

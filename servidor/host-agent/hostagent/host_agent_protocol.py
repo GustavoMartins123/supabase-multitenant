@@ -86,21 +86,36 @@ PROJECT_ROW_OPTIONAL_COMMANDS = frozenset(
     }
 )
 
-# Espelho de app/validation.py. O agent revalida tudo localmente e nao
-# confia na validacao feita pela API.
-PROJECT_NAME_RE = re.compile(r"^[a-z_][a-z0-9_]{2,39}$")
-RESERVED_PROJECT_NAMES = frozenset(
-    {
-        "default", "select", "from", "where", "insert", "update", "delete",
-        "table", "create", "drop", "join", "group", "order", "limit", "into",
-        "index", "view", "trigger", "procedure", "function", "database",
-        "schema", "primary", "foreign", "key", "constraint", "unique", "null",
-        "not", "and", "or", "in", "like", "between", "exists", "having",
-        "union", "inner", "left", "right", "outer", "cross", "on", "as",
-        "case", "when", "then", "else", "end", "if", "while", "for", "begin",
-        "commit", "rollback",
-    }
-)
+# Fonte unica do formato e dos nomes reservados de projeto. app/validation.py
+# importa esta classe em vez de manter sua propria copia. O agent revalida
+# tudo localmente e nao confia na validacao feita pela API.
+class ProjectNameValidator:
+    NAME_RE = re.compile(r"^[a-z_][a-z0-9_]{2,39}$")
+    RESERVED_WORDS = frozenset(
+        {
+            "default", "select", "from", "where", "insert", "update", "delete",
+            "table", "create", "drop", "join", "group", "order", "limit", "into",
+            "index", "view", "trigger", "procedure", "function", "database",
+            "schema", "primary", "foreign", "key", "constraint", "unique", "null",
+            "not", "and", "or", "in", "like", "between", "exists", "having",
+            "union", "inner", "left", "right", "outer", "cross", "on", "as",
+            "case", "when", "then", "else", "end", "if", "while", "for", "begin",
+            "commit", "rollback",
+        }
+    )
+    RESERVED_ROUTE_NAMES = frozenset({"admin", "phpmyadmin", "xmlrpc", "actuator"})
+
+    @classmethod
+    def is_valid(cls, raw: Any) -> bool:
+        if not isinstance(raw, str):
+            return False
+        return (
+            bool(cls.NAME_RE.fullmatch(raw))
+            and raw not in cls.RESERVED_WORDS
+            and raw not in cls.RESERVED_ROUTE_NAMES
+        )
+
+
 RECREATE_SERVICE_NAMES = frozenset(
     {"auth", "rest", "storage", "imgproxy", "nginx", "meta"}
 )
@@ -109,12 +124,6 @@ UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
 MAX_LOG_LINES = 1_000
-
-
-def is_valid_project_name(raw: Any) -> bool:
-    if not isinstance(raw, str):
-        return False
-    return bool(PROJECT_NAME_RE.fullmatch(raw)) and raw not in RESERVED_PROJECT_NAMES
 
 
 def is_valid_uuid(raw: Any) -> bool:
@@ -131,13 +140,13 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
     errors: list[str] = []
     if command not in HOST_AGENT_COMMANDS:
         return [f"unknown_command:{command}"]
-    if not is_valid_project_name(project):
+    if not ProjectNameValidator.is_valid(project):
         errors.append("invalid_project_name")
     if not isinstance(args, dict):
         return errors + ["args_must_be_object"]
 
     def require_project_field(field: str) -> None:
-        if not is_valid_project_name(args.get(field)):
+        if not ProjectNameValidator.is_valid(args.get(field)):
             errors.append(f"invalid_{field}")
 
     def reject_unknown(allowed: set[str]) -> None:

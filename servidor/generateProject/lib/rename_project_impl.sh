@@ -195,6 +195,8 @@ NAME_RE='^[a-z_][a-z0-9_]{2,39}$'
   || die "Nomes devem usar minusculas, digitos ou _ (3-40 caracteres)"
 RESERVED=(default select from where insert update delete table create drop join group order limit into index view trigger procedure function database schema primary foreign key constraint unique null not and or in like between exists having union inner left right outer cross on as case when then else end if while for begin commit rollback)
 for word in "${RESERVED[@]}"; do [[ "$NEW_NAME" != "$word" ]] || die "'$NEW_NAME' e palavra reservada"; done
+RESERVED_ROUTES=(admin phpmyadmin xmlrpc actuator)
+for word in "${RESERVED_ROUTES[@]}"; do [[ "$NEW_NAME" != "$word" ]] || die "'$NEW_NAME' e rota reservada"; done
 for command in docker jq openssl sed; do command -v "$command" >/dev/null || die "Comando obrigatorio ausente: $command"; done
 [[ -f "$PROJECT_ROOT/.env" ]] || die "Arquivo $PROJECT_ROOT/.env ausente"
 [[ -d "$OLD_DIR" ]] || die "Diretorio $OLD_DIR nao encontrado"

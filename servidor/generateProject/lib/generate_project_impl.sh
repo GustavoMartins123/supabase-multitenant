@@ -177,6 +177,11 @@ for word in "${RESERVED[@]}"; do
   [[ "$PROJECT_ID" != "$word" ]] || die "'$PROJECT_ID' é palavra reservada."
 done
 
+RESERVED_ROUTES=(admin phpmyadmin xmlrpc actuator)
+for word in "${RESERVED_ROUTES[@]}"; do
+  [[ "$PROJECT_ID" != "$word" ]] || die "'$PROJECT_ID' é rota reservada."
+done
+
 OUT_DIR="$PROJECT_ROOT/projects/$PROJECT_ID"
 
 docker_must_exist() {

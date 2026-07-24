@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .host_agent_protocol import is_valid_project_name, is_valid_uuid
+from .host_agent_protocol import ProjectNameValidator, is_valid_uuid
 
 
 class PathConfinementError(RuntimeError):
@@ -30,7 +30,7 @@ def resolve_project_dir(
     Rejeita nomes fora da regex do protocolo, componentes symlink e
     qualquer resolucao que escape do diretorio raiz.
     """
-    if not is_valid_project_name(project):
+    if not ProjectNameValidator.is_valid(project):
         raise PathConfinementError("invalid_project_name", project)
 
     root = projects_root.resolve(strict=True)

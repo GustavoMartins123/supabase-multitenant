@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:seletor_de_projetos/supabase_colors.dart';
+import 'package:seletor_de_projetos/utils/project_name_validator.dart';
 
 class NewProjectDialog extends StatefulWidget {
   const NewProjectDialog({super.key});
@@ -19,66 +20,7 @@ class _NewProjectDialogState extends State<NewProjectDialog>
   late AnimationController _animController;
   late Animation<double> _scaleAnimation;
 
-  static final _regex = RegExp(r'^[a-z_][a-z0-9_]{2,40}$');
   String _crop(String s) => s.length > 40 ? s.substring(0, 40) : s;
-
-  static const _reserved = <String>{
-    'default',
-    'select',
-    'from',
-    'where',
-    'insert',
-    'update',
-    'delete',
-    'table',
-    'create',
-    'drop',
-    'join',
-    'group',
-    'order',
-    'limit',
-    'into',
-    'index',
-    'view',
-    'trigger',
-    'procedure',
-    'function',
-    'database',
-    'schema',
-    'primary',
-    'foreign',
-    'key',
-    'constraint',
-    'unique',
-    'null',
-    'not',
-    'and',
-    'or',
-    'in',
-    'like',
-    'between',
-    'exists',
-    'having',
-    'union',
-    'inner',
-    'left',
-    'right',
-    'outer',
-    'cross',
-    'on',
-    'as',
-    'case',
-    'when',
-    'then',
-    'else',
-    'end',
-    'if',
-    'while',
-    'for',
-    'begin',
-    'commit',
-    'rollback',
-  };
 
   static const _prefixes = <String>[
     'app',
@@ -143,31 +85,22 @@ class _NewProjectDialogState extends State<NewProjectDialog>
     ).join();
   }
 
-  String _normalize(String input) {
-    return input
-        .trim()
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9_]'), '_')
-        .replaceAll(RegExp(r'_+'), '_')
-        .replaceAll(RegExp(r'^_+|_+$'), '');
-  }
-
   List<String> _suggestions(String raw) {
-    final base = _normalize(raw);
+    final base = ProjectNameValidator.normalize(raw);
     if (base.isEmpty) return _getDefaultSuggestions();
 
     final Set<String> suggestions = <String>{};
 
     void addIfValid(String s) {
-      final normalized = _crop(_normalize(s));
+      final normalized = _crop(ProjectNameValidator.normalize(s));
       if (normalized.isNotEmpty &&
-          _regex.hasMatch(normalized) &&
-          !_reserved.contains(normalized)) {
+          ProjectNameValidator.isValidShape(normalized) &&
+          !ProjectNameValidator.isReserved(normalized)) {
         suggestions.add(normalized);
       }
     }
 
-    if (!_reserved.contains(base)) addIfValid(base);
+    if (!ProjectNameValidator.isReserved(base)) addIfValid(base);
 
     final today = DateFormat('ddMMyy').format(DateTime.now());
     final year = DateFormat('yyyy').format(DateTime.now());
@@ -216,18 +149,20 @@ class _NewProjectDialogState extends State<NewProjectDialog>
 
   String? _validate(String? v) {
     if (v == null || v.trim().isEmpty) return 'Informe um nome';
-    final txt = _normalize(v);
+    final txt = ProjectNameValidator.normalize(v);
     if (txt.isEmpty) return 'Nome inválido';
-    if (!_regex.hasMatch(txt)) {
+    if (!ProjectNameValidator.isValidShape(txt)) {
       return 'Use minúsculas, números ou "_" (3-40 caracteres)';
     }
-    if (_reserved.contains(txt)) return 'Nome reservado — escolha outro.';
+    if (ProjectNameValidator.isReserved(txt)) {
+      return 'Nome reservado — escolha outro.';
+    }
     return null;
   }
 
   void _submit() {
     if (_formKey.currentState!.validate()) {
-      Navigator.pop(context, _normalize(_ctrl.text));
+      Navigator.pop(context, ProjectNameValidator.normalize(_ctrl.text));
     }
   }
 

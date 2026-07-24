@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import 'package:seletor_de_projetos/supabase_colors.dart';
+import 'package:seletor_de_projetos/utils/project_name_validator.dart';
 
 class DuplicateProjectDialog extends StatefulWidget {
   final String originalProjectName;
@@ -20,66 +21,7 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
   late Animation<double> _scaleAnimation;
   bool _copyData = false;
 
-  static final _regex = RegExp(r'^[a-z_][a-z0-9_]{2,40}$');
   String _crop(String s) => s.length > 40 ? s.substring(0, 40) : s;
-
-  static const _reserved = <String>{
-    'default',
-    'select',
-    'from',
-    'where',
-    'insert',
-    'update',
-    'delete',
-    'table',
-    'create',
-    'drop',
-    'join',
-    'group',
-    'order',
-    'limit',
-    'into',
-    'index',
-    'view',
-    'trigger',
-    'procedure',
-    'function',
-    'database',
-    'schema',
-    'primary',
-    'foreign',
-    'key',
-    'constraint',
-    'unique',
-    'null',
-    'not',
-    'and',
-    'or',
-    'in',
-    'like',
-    'between',
-    'exists',
-    'having',
-    'union',
-    'inner',
-    'left',
-    'right',
-    'outer',
-    'cross',
-    'on',
-    'as',
-    'case',
-    'when',
-    'then',
-    'else',
-    'end',
-    'if',
-    'while',
-    'for',
-    'begin',
-    'commit',
-    'rollback',
-  };
 
   @override
   void initState() {
@@ -104,23 +46,16 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
     super.dispose();
   }
 
-  String _normalize(String input) {
-    return input
-        .trim()
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9_]'), '_')
-        .replaceAll(RegExp(r'_+'), '_')
-        .replaceAll(RegExp(r'^_+|_+$'), '');
-  }
-
   String? _validate(String? v) {
     if (v == null || v.trim().isEmpty) return 'Informe um nome';
-    final txt = _normalize(v);
+    final txt = ProjectNameValidator.normalize(v);
     if (txt.isEmpty) return 'Nome inválido';
-    if (!_regex.hasMatch(txt)) {
+    if (!ProjectNameValidator.isValidShape(txt)) {
       return 'Use minúsculas, números ou "_" (3-40 caracteres)';
     }
-    if (_reserved.contains(txt)) return 'Nome reservado — escolha outro.';
+    if (ProjectNameValidator.isReserved(txt)) {
+      return 'Nome reservado — escolha outro.';
+    }
     if (txt == widget.originalProjectName) {
       return 'O nome deve ser diferente do original';
     }
@@ -130,7 +65,7 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
   void _submit() {
     if (_formKey.currentState!.validate()) {
       Navigator.pop(context, {
-        'name': _normalize(_ctrl.text),
+        'name': ProjectNameValidator.normalize(_ctrl.text),
         'copy_data': _copyData,
       });
     }
@@ -151,7 +86,10 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
 
     return suggestions
         .where(
-          (s) => s.isNotEmpty && _regex.hasMatch(s) && !_reserved.contains(s),
+          (s) =>
+              s.isNotEmpty &&
+              ProjectNameValidator.isValidShape(s) &&
+              !ProjectNameValidator.isReserved(s),
         )
         .toList();
   }
