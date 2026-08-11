@@ -63,3 +63,7 @@ class ProjectNotificationRead(BaseModel):
 class RestorePointCreate(BaseModel):
     title: Optional[str] = Field(default=None, max_length=80)
     description: Optional[str] = Field(default=None, max_length=400)
+
+
+class AutomaticKeyRotationUpdate(BaseModel):
+    enabled: bool

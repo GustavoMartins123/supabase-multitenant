@@ -105,13 +105,28 @@ async def ensure_identity_schema(pool: asyncpg.Pool) -> None:
             """
             ALTER TABLE projects
                 ADD COLUMN IF NOT EXISTS project_key_version BIGINT NOT NULL DEFAULT 1,
-                ADD COLUMN IF NOT EXISTS tenant_uuid UUID;
+                ADD COLUMN IF NOT EXISTS tenant_uuid UUID,
+                ADD COLUMN IF NOT EXISTS automatic_key_rotation_enabled BOOLEAN NOT NULL DEFAULT true,
+                ADD COLUMN IF NOT EXISTS key_expires_at TIMESTAMPTZ,
+                ADD COLUMN IF NOT EXISTS last_key_rotation_at TIMESTAMPTZ,
+                ADD COLUMN IF NOT EXISTS automatic_key_rotation_blocked_at TIMESTAMPTZ,
+                ADD COLUMN IF NOT EXISTS automatic_key_rotation_last_error TEXT;
             UPDATE projects SET project_key_version = 1
             WHERE project_key_version IS NULL OR project_key_version < 1;
+            UPDATE projects SET automatic_key_rotation_enabled = true
+            WHERE automatic_key_rotation_enabled IS NULL;
+            ALTER TABLE projects
+                ALTER COLUMN automatic_key_rotation_enabled SET DEFAULT true,
+                ALTER COLUMN automatic_key_rotation_enabled SET NOT NULL;
 
             CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_tenant_uuid_unique
                 ON projects(tenant_uuid)
                 WHERE tenant_uuid IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_projects_automatic_key_rotation_due
+                ON projects(key_expires_at)
+                WHERE automatic_key_rotation_enabled
+                  AND automatic_key_rotation_blocked_at IS NULL
+                  AND anon_key IS NOT NULL;
 
             COMMENT ON COLUMN projects.tenant_uuid IS
                 'Tenant externo persistido (Realtime/JWT/backups). Em projetos novos equivale a projects.id.';

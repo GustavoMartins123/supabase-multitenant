@@ -4,6 +4,21 @@ Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 
 O formato deste arquivo segue as diretrizes do [Keep a Changelog](https://keepachangelog.com/) e este projeto adota [Versionamento Semântico](https://semver.org/).
 
+## [Não lançado]
+
+### 2026-08-11
+
+- Adicionada rotação automática de anon/service keys, habilitada por padrão e
+  configurável por projeto, com agenda derivada do `exp`, jobs duráveis,
+  concorrência limitada, auditoria e bloqueio explícito após falha.
+- Host-agent passou a autorizar o ator de sistema exclusivamente para
+  `rotate_keys` em projetos habilitados; rotações interrompidas são retomadas
+  pela mesma intenção durável.
+- Cache de service key passou a exigir a versão canônica em cada uso e falhar
+  fechado quando a Projects API estiver indisponível.
+- Script de rotação passou a exigir `PROJECT_UUID`, emitir `jti` aleatório e não
+  registrar as chaves geradas em stdout.
+
 ## [0.13.0-alpha] - 2026-04-02 a 2026-05-07
 
 ### 2026-05-07

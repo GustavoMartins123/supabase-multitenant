@@ -11,7 +11,7 @@ import urllib.parse
 import httpx
 from fastapi import FastAPI, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
-from app.schemas import NewProject, DuplicateProject, UserSyncPayload, AddMember, TransferBody, UpdateSettings, RecreateServices, ProjectNoteCreate, ProjectTagAssign, ProjectHintCreate, ProjectHintStatusUpdate, ProjectThreadMessageCreate, ProjectRenameRequest, ProjectDisplayNameUpdate, ProjectNotificationRead, RestorePointCreate
+from app.schemas import NewProject, DuplicateProject, UserSyncPayload, AddMember, TransferBody, UpdateSettings, RecreateServices, ProjectNoteCreate, ProjectTagAssign, ProjectHintCreate, ProjectHintStatusUpdate, ProjectThreadMessageCreate, ProjectRenameRequest, ProjectDisplayNameUpdate, ProjectNotificationRead, RestorePointCreate, AutomaticKeyRotationUpdate
 from typing import Any, List, Dict
 from dotenv import dotenv_values
 from app.pg_meta_crypto import encrypt_postgres_meta_uri
@@ -32,6 +32,7 @@ from app.jobs import (
 )
 from app.runtime_config import (
     ANALYTICS_INTERNAL_URL, BASE_DIR, DB_DSN,
+    AUTOMATIC_KEY_ROTATION_LEAD_DAYS,
     KEY_EXPIRY_WARNING_DAYS, NGINX_HMAC_SECRET, NGINX_SHARED_TOKEN, PG_META_CRYPTO_KEY,
     LOGFLARE_PRIVATE_ACCESS_TOKEN, PG_META_INTERNAL_URL,
     USER_TOKEN_MAX_CLOCK_SKEW_SECONDS,
@@ -71,7 +72,13 @@ from app.project_settings import (
 )
 from app.service_key_cache import invalidate_service_key_cache
 from app.snippets_migration import rename_project_snippets
-from app.jwt_metadata import get_unverified_jwt_expiry
+from app.key_rotation import KeyRotationMetadataError, project_key_schedule
+from app.automatic_key_rotation import (
+    block_automatic_key_rotation,
+    scan_automatic_key_rotations,
+    start_automatic_key_rotation,
+    stop_automatic_key_rotation,
+)
 from app.project_telemetry import (
     TelemetryValidationError,
     fetch_project_user_telemetry,
@@ -307,7 +314,7 @@ app.include_router(lifecycle_router)
 # ``create`` nao e repetivel, mas e retomavel: o runner se religa ao mesmo
 # host_agent_command duravel com ``reuse_terminal=True`` e nunca dispara um
 # segundo script para o mesmo job.
-RECOVERABLE_RUNNING_ACTIONS = IDEMPOTENT_ACTIONS | {"create"}
+RECOVERABLE_RUNNING_ACTIONS = IDEMPOTENT_ACTIONS | {"create", "rotate_key"}
 
 
 async def _build_recovery_runner(row: asyncpg.Record):
@@ -334,10 +341,15 @@ async def _build_recovery_runner(row: asyncpg.Record):
     if action == "delete":
         return lambda: _delete_project_background(job_id, project_name)
     if action == "rotate_key":
+        trigger = str(payload.get("trigger") or "manual")
+        if trigger not in {"manual", "automatic"}:
+            return None
+        actor_user_id = owner_id if trigger == "manual" else None
         return lambda: _rotate_project_key_background(
             job_id,
             project_name,
-            owner_id,
+            actor_user_id,
+            trigger=trigger,
         )
     if action == "rename":
         pool = await get_pool()
@@ -589,6 +601,13 @@ async def _recover_pending_jobs() -> None:
             )
 
 
+async def _scan_automatic_key_rotations() -> int:
+    return await scan_automatic_key_rotations(
+        enqueue_action=_enqueue_project_action,
+        rotation_runner=_rotate_project_key_background,
+    )
+
+
 @app.on_event("startup")
 async def startup():
     pool = await initialize_pool(DB_DSN)
@@ -612,9 +631,14 @@ async def startup():
     await ensure_restore_points_schema(pool)
     print("✅ Database pool initialized")
     await _recover_pending_jobs()
+    await start_automatic_key_rotation(
+        enqueue_action=_enqueue_project_action,
+        rotation_runner=_rotate_project_key_background,
+    )
 
 @app.on_event("shutdown")
 async def shutdown():
+    await stop_automatic_key_rotation()
     await action_queue.shutdown()
     await close_pool()
     print("✅ Database pool closed")
@@ -666,7 +690,11 @@ async def list_projects(
         async with conn.transaction():
             rows = await conn.fetch("""
                 SELECT p.id, p.tenant_uuid, p.name, p.display_name,
-                       p.anon_key, p.service_role
+                       p.anon_key, p.service_role,
+                       p.automatic_key_rotation_enabled,
+                       p.automatic_key_rotation_blocked_at,
+                       p.automatic_key_rotation_last_error,
+                       p.last_key_rotation_at
                 FROM projects p
                 WHERE p.anon_key IS NOT NULL
                   AND EXISTS (
@@ -695,15 +723,21 @@ async def list_projects(
                     if r["service_role"]
                     else ""
                 )
-                expiries = [
-                    expiry
-                    for expiry in (
-                        get_unverified_jwt_expiry(anon_token),
-                        get_unverified_jwt_expiry(service_role_token),
+                key_metadata_error = None
+                try:
+                    key_schedule = project_key_schedule(
+                        anon_token,
+                        service_role_token,
+                        lead_days=AUTOMATIC_KEY_ROTATION_LEAD_DAYS,
                     )
-                    if expiry is not None
-                ]
-                key_expires_at = min(expiries) if expiries else None
+                except KeyRotationMetadataError as exc:
+                    key_schedule = None
+                    key_metadata_error = str(exc)
+                key_expires_at = (
+                    int(key_schedule.expires_at.timestamp())
+                    if key_schedule is not None
+                    else None
+                )
                 seconds_remaining = (
                     key_expires_at - int(time.time())
                     if key_expires_at is not None
@@ -720,14 +754,43 @@ async def list_projects(
                     "file_size_limit": _get_project_file_size_limit(r["name"]),
                     "storage_limit_token": _get_project_storage_limit_token(r["name"]),
                     "key_expires_at": key_expires_at,
+                    "key_metadata_valid": key_metadata_error is None,
+                    "key_metadata_error": key_metadata_error,
                     "key_expired": (
-                        seconds_remaining is not None and seconds_remaining <= 0
+                        key_metadata_error is not None
+                        or (seconds_remaining is not None and seconds_remaining <= 0)
                     ),
                     "key_expiring_soon": (
-                        seconds_remaining is not None
-                        and seconds_remaining <= KEY_EXPIRY_WARNING_DAYS * 86400
+                        key_metadata_error is not None
+                        or (
+                            seconds_remaining is not None
+                            and seconds_remaining
+                            <= KEY_EXPIRY_WARNING_DAYS * 86400
+                        )
                     ),
                     "key_expiry_warning_days": KEY_EXPIRY_WARNING_DAYS,
+                    "automatic_key_rotation_enabled": r[
+                        "automatic_key_rotation_enabled"
+                    ],
+                    "automatic_key_rotation_lead_days": (
+                        AUTOMATIC_KEY_ROTATION_LEAD_DAYS
+                    ),
+                    "automatic_key_rotation_due_at": (
+                        int(key_schedule.rotate_at.timestamp())
+                        if key_schedule is not None
+                        else None
+                    ),
+                    "automatic_key_rotation_blocked": (
+                        r["automatic_key_rotation_blocked_at"] is not None
+                    ),
+                    "automatic_key_rotation_last_error": r[
+                        "automatic_key_rotation_last_error"
+                    ],
+                    "last_key_rotation_at": (
+                        r["last_key_rotation_at"].isoformat()
+                        if r["last_key_rotation_at"]
+                        else None
+                    ),
                 })
     return result
 
@@ -2477,6 +2540,11 @@ async def _duplicate_and_store_keys(
             print("Missing tokens")
             await rollback_project_from_db(pool, new_name, project_uuid)
             return
+        schedule = project_key_schedule(
+            keys["anon_key"],
+            keys["service_role"],
+            lead_days=AUTOMATIC_KEY_ROTATION_LEAD_DAYS,
+        )
 
         await _set_job_status(
             job_id,
@@ -2503,6 +2571,11 @@ async def _duplicate_and_store_keys(
                 anon_key=keys["anon_key"],
                 service_role=keys["service_role"],
                 config_token=keys["config_token"],
+            )
+            await conn.execute(
+                "UPDATE projects SET key_expires_at = $2 WHERE id = $1",
+                project_id,
+                schedule.expires_at,
             )
 
         await _set_job_status(
@@ -2929,6 +3002,75 @@ async def delete_project(
 
 
 
+@app.put("/api/projects/{project_name}/automatic-key-rotation")
+async def update_automatic_key_rotation(
+    project_name: str,
+    body: AutomaticKeyRotationUpdate,
+    request: Request,
+    pool=Depends(get_pool),
+):
+    project_name = validate_project_id(project_name)
+    auth_user = await resolve_authenticated_user(request, pool)
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            project_row = await get_project_row(conn, project_name)
+            await ensure_project_admin_access(
+                conn,
+                project_id=project_row["id"],
+                auth_user=auth_user,
+                message=(
+                    "Only project admin or system admin can configure "
+                    "automatic key rotation"
+                ),
+            )
+            old_enabled = bool(project_row["automatic_key_rotation_enabled"])
+            updated = await conn.fetchrow(
+                """
+                UPDATE projects
+                SET automatic_key_rotation_enabled = $2,
+                    automatic_key_rotation_blocked_at = CASE
+                        WHEN $2 THEN NULL
+                        ELSE automatic_key_rotation_blocked_at
+                    END,
+                    automatic_key_rotation_last_error = CASE
+                        WHEN $2 THEN NULL
+                        ELSE automatic_key_rotation_last_error
+                    END
+                WHERE id = $1
+                RETURNING automatic_key_rotation_enabled,
+                          automatic_key_rotation_blocked_at,
+                          automatic_key_rotation_last_error
+                """,
+                project_row["id"],
+                body.enabled,
+            )
+            await audit_studio_action(
+                conn,
+                project_id=project_row["id"],
+                actor_user_id=auth_user["db_user_id"],
+                action="automatic_key_rotation_updated",
+                target_type="project_keys",
+                old_value={"enabled": old_enabled},
+                new_value={"enabled": body.enabled},
+            )
+
+    if body.enabled:
+        await _scan_automatic_key_rotations()
+    return {
+        "automatic_key_rotation_enabled": updated[
+            "automatic_key_rotation_enabled"
+        ],
+        "automatic_key_rotation_blocked": (
+            updated["automatic_key_rotation_blocked_at"] is not None
+        ),
+        "automatic_key_rotation_last_error": updated[
+            "automatic_key_rotation_last_error"
+        ],
+        "automatic_key_rotation_lead_days": AUTOMATIC_KEY_ROTATION_LEAD_DAYS,
+    }
+
+
 @app.post("/api/projects/{project_name}/rotate-key", status_code=202)
 async def rotate_project_key(
     project_name: str,
@@ -2940,31 +3082,56 @@ async def rotate_project_key(
     auth_user = await resolve_authenticated_user(request, pool)
 
     async with pool.acquire() as conn:
-        project_row = await get_project_row(conn, project_name)
-        await ensure_project_admin_access(
-            conn,
-            project_id=project_row["id"],
-            auth_user=auth_user,
-            message="Only project admin or system admin can rotate keys",
-        )
-
-    job_id = await _create_project_job(
-        pool,
-        project_name,
-        auth_user["db_user_id"],
-        message="Rotação de chaves enfileirada.",
-        action="rotate_key",
-        payload={
-            "project_name": project_name,
-            "actor_user_id": str(auth_user["db_user_id"]),
-        },
-        total_steps=4,
-    )
+        async with conn.transaction():
+            project_row = await get_project_row(conn, project_name)
+            await ensure_project_admin_access(
+                conn,
+                project_id=project_row["id"],
+                auth_user=auth_user,
+                message="Only project admin or system admin can rotate keys",
+            )
+            await conn.execute(
+                "SELECT id FROM projects WHERE id = $1 FOR UPDATE",
+                project_row["id"],
+            )
+            active_rotation = await conn.fetchval(
+                """
+                SELECT job_id FROM jobs
+                WHERE project_uuid = $1
+                  AND action = 'rotate_key'
+                  AND status IN ('queued', 'running')
+                LIMIT 1
+                """,
+                project_row["id"],
+            )
+            if active_rotation is not None:
+                raise HTTPException(
+                    409,
+                    "Ja existe uma rotacao de chaves ativa para este projeto",
+                )
+            job_id = await _create_project_job(
+                pool,
+                project_name,
+                auth_user["db_user_id"],
+                message="Rotação de chaves enfileirada.",
+                action="rotate_key",
+                payload={
+                    "project_name": project_name,
+                    "actor_user_id": str(auth_user["db_user_id"]),
+                    "trigger": "manual",
+                },
+                total_steps=4,
+                project_uuid=project_row["id"],
+                connection=conn,
+            )
     position = await _enqueue_project_action(
         project_name,
         job_id,
         lambda: _rotate_project_key_background(
-            job_id, project_name, auth_user["db_user_id"]
+            job_id,
+            project_name,
+            auth_user["db_user_id"],
+            trigger="manual",
         ),
     )
     message = (
@@ -2982,8 +3149,42 @@ async def rotate_project_key(
 async def _rotate_project_key_background(
     job_id: str,
     project_name: str,
-    actor_user_id: uuid.UUID,
+    actor_user_id: uuid.UUID | None,
+    *,
+    trigger: str,
 ) -> None:
+    if trigger not in {"manual", "automatic"}:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message="Origem da rotacao de chaves invalida.",
+            error_code="invalid_rotation_trigger",
+        )
+        return
+
+    async def fail_rotation(
+        *,
+        message: str,
+        error_code: str,
+        detail: str = "",
+        current_step: str | None = None,
+    ) -> None:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=message,
+            current_step=current_step,
+            error_code=error_code,
+            stderr_tail=detail or None,
+        )
+        if trigger == "automatic":
+            await block_automatic_key_rotation(
+                project_name,
+                error_code=error_code,
+                detail=detail or message,
+                job_id=job_id,
+            )
+
     await _set_job_status(
         job_id,
         "running",
@@ -3001,6 +3202,7 @@ async def _rotate_project_key_background(
             project=project_name,
             project_uuid=await _get_job_project_uuid(pool, job_id),
             requested_by=actor_user_id,
+            args={"trigger": "automatic"} if trigger == "automatic" else {},
             reuse_terminal=True,
             on_progress=_job_progress_mirror(job_id),
         )
@@ -3011,6 +3213,13 @@ async def _rotate_project_key_background(
                 default_error="rotate_script_failed",
                 message_prefix="Rotate failed",
             )
+            if trigger == "automatic":
+                await block_automatic_key_rotation(
+                    project_name,
+                    error_code=record["error_code"] or "rotate_script_failed",
+                    detail=record["message"] or "Falha no script de rotacao.",
+                    job_id=job_id,
+                )
             return
 
         # O script persiste as chaves novas no .env do projeto; nada de
@@ -3019,11 +3228,22 @@ async def _rotate_project_key_background(
         anon = keys["anon_key"]
         service = keys["service_role"]
         if not anon or not service:
-            await _set_job_status(
-                job_id,
-                "failed",
+            await fail_rotation(
                 message="Keys not found in project .env after rotate",
                 error_code="missing_keys",
+            )
+            return
+        try:
+            schedule = project_key_schedule(
+                anon,
+                service,
+                lead_days=AUTOMATIC_KEY_ROTATION_LEAD_DAYS,
+            )
+        except KeyRotationMetadataError as exc:
+            await fail_rotation(
+                message="As chaves geradas nao possuem expiracao coerente.",
+                error_code="invalid_key_metadata",
+                detail=str(exc),
             )
             return
 
@@ -3051,11 +3271,29 @@ async def _rotate_project_key_background(
                 key_version = await conn.fetchval(
                     """
                     UPDATE projects
-                    SET project_key_version = project_key_version + 1
+                    SET project_key_version = project_key_version + 1,
+                        key_expires_at = $2,
+                        last_key_rotation_at = now(),
+                        automatic_key_rotation_blocked_at = NULL,
+                        automatic_key_rotation_last_error = NULL
                     WHERE id = $1
                     RETURNING project_key_version
                     """,
                     project_row["id"],
+                    schedule.expires_at,
+                )
+                await audit_studio_action(
+                    conn,
+                    project_id=project_row["id"],
+                    actor_user_id=actor_user_id,
+                    action="project_keys_rotated",
+                    target_type="project_keys",
+                    target_id=job_id,
+                    new_value={
+                        "trigger": trigger,
+                        "project_key_version": key_version,
+                        "expires_at": schedule.expires_at.isoformat(),
+                    },
                 )
 
         await _set_job_status(
@@ -3068,16 +3306,11 @@ async def _rotate_project_key_background(
         try:
             await invalidate_service_key_cache(project_name, key_version)
         except Exception as cache_exc:
-            await _set_job_status(
-                job_id,
-                "failed",
-                message=(
-                    "Chaves rotacionadas, mas a invalidação imediata do cache falhou. "
-                    "A verificação de versão corrigirá o cache dentro da janela configurada."
-                ),
+            await fail_rotation(
+                message="Chaves rotacionadas, mas a invalidacao obrigatoria do cache falhou.",
                 current_step="invalidate_service_key_cache",
                 error_code="service_key_cache_invalidation_failed",
-                stderr_tail=str(cache_exc),
+                detail=str(cache_exc),
             )
             return
 
@@ -3088,19 +3321,17 @@ async def _rotate_project_key_background(
             current_step="completed",
         )
     except HostAgentError as exc:
-        await _set_job_status(
-            job_id,
-            "failed",
+        await fail_rotation(
             message="O host-agent não conseguiu rotacionar as chaves.",
             error_code=exc.error_code,
+            detail=str(exc),
         )
         print(f"[rotate-key] {project_name}: host-agent: {exc}")
     except Exception as exc:
-        await _set_job_status(
-            job_id,
-            "failed",
+        await fail_rotation(
             message="Falha interna inesperada durante a rotação de chaves.",
             error_code="rotate_failed",
+            detail=str(exc),
         )
         print(f"[rotate-key] {project_name}: {exc}")
 
@@ -3257,22 +3488,45 @@ async def list_job_history(
         filters.append(expression.format(index=len(values)))
 
     if not auth_user["is_global_admin"]:
-        add_filter("created_by = ${index}", auth_user["db_user_id"])
+        add_filter(
+            """
+            (
+                j.created_by = ${index}
+                OR (
+                    j.created_by IS NULL
+                    AND EXISTS (
+                        SELECT 1
+                        FROM projects p
+                        WHERE p.id = j.project_uuid
+                          AND (
+                              p.owner_id = ${index}
+                              OR EXISTS (
+                                  SELECT 1 FROM project_members pm
+                                  WHERE pm.project_id = p.id
+                                    AND pm.user_id = ${index}
+                              )
+                          )
+                    )
+                )
+            )
+            """,
+            auth_user["db_user_id"],
+        )
     if project_uuid is not None:
-        add_filter("project_uuid = ${index}", project_uuid)
+        add_filter("j.project_uuid = ${index}", project_uuid)
     if action:
-        add_filter("action = ${index}", action.strip())
+        add_filter("j.action = ${index}", action.strip())
     if status:
-        add_filter("status = ${index}", status.strip())
+        add_filter("j.status = ${index}", status.strip())
 
     where_sql = " WHERE " + " AND ".join(filters) if filters else ""
     values.extend((limit, offset))
     rows = await pool.fetch(
         f"""
         SELECT *
-        FROM jobs
+        FROM jobs j
         {where_sql}
-        ORDER BY created_at DESC, job_id DESC
+        ORDER BY j.created_at DESC, j.job_id DESC
         LIMIT ${len(values) - 1} OFFSET ${len(values)}
         """,
         *values,
@@ -3356,7 +3610,28 @@ async def project_status(
     if not row:
         raise HTTPException(404, "Job not found")
     if row["created_by"] != auth_user["db_user_id"] and not auth_user["is_global_admin"]:
-        raise HTTPException(403, "Acesso negado a este job")
+        if row["created_by"] is not None:
+            raise HTTPException(403, "Acesso negado a este job")
+        can_view = await pool.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM projects p
+                WHERE p.id = $1
+                  AND (
+                      p.owner_id = $2
+                      OR EXISTS (
+                          SELECT 1 FROM project_members pm
+                          WHERE pm.project_id = p.id AND pm.user_id = $2
+                      )
+                  )
+            )
+            """,
+            row["project_uuid"],
+            auth_user["db_user_id"],
+        )
+        if not can_view:
+            raise HTTPException(403, "Acesso negado a este job")
     return serialize_job(row, include_output=True)
 
 # Rota extraída para app.routers.internal.
@@ -3462,6 +3737,11 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
             print("Missing tokens")
             await rollback_project_from_db(pool, project_name, project_uuid)
             return
+        schedule = project_key_schedule(
+            keys["anon_key"],
+            keys["service_role"],
+            lead_days=AUTOMATIC_KEY_ROTATION_LEAD_DAYS,
+        )
 
         await _set_job_status(
             job_id,
@@ -3488,6 +3768,11 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
                 anon_key=keys["anon_key"],
                 service_role=keys["service_role"],
                 config_token=keys["config_token"],
+            )
+            await conn.execute(
+                "UPDATE projects SET key_expires_at = $2 WHERE id = $1",
+                project_id,
+                schedule.expires_at,
             )
 
         await _set_job_status(

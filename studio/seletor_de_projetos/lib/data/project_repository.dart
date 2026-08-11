@@ -252,6 +252,30 @@ class ProjectRepository {
     return job;
   }
 
+  Future<Map<String, dynamic>> updateAutomaticKeyRotation(
+    String ref, {
+    required bool enabled,
+  }) async {
+    final resp = await _client.put(
+      Uri.parse('/api/projects/$ref/automatic-key-rotation'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'enabled': enabled}),
+    );
+    _ensureCommandSucceeded(resp);
+    final data = decodeJsonObject(
+      resp,
+      context: 'Rotacao automatica de chaves',
+    );
+    if (data['automatic_key_rotation_enabled'] is! bool ||
+        data['automatic_key_rotation_blocked'] is! bool) {
+      throw const ApiException(
+        ApiFailureKind.invalidResponse,
+        'Resposta invalida ao configurar rotacao automatica',
+      );
+    }
+    return data;
+  }
+
   Future<ProjectActionResult> doAction(String ref, String action) async {
     final resp = await _client.post(Uri.parse('/api/projects/$ref/$action'));
     _ensureCommandSucceeded(resp, allowedStatusCodes: const {200, 202});

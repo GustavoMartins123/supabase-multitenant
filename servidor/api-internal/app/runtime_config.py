@@ -17,6 +17,17 @@ from app.project_secrets import ProjectSecretError, ProjectSecretManager
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
 
+
+def _read_bounded_integer(name: str, *, default: int, minimum: int) -> int:
+    raw_value = os.getenv(name, str(default))
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer") from exc
+    if value < minimum:
+        raise RuntimeError(f"{name} must be at least {minimum}")
+    return value
+
 DB_DSN = os.getenv("DB_DSN")
 HOST_AGENT_HMAC_SECRET = os.getenv("HOST_AGENT_HMAC_SECRET")
 PROJECT_SECRETS_MASTER_KEY = os.getenv("PROJECT_SECRETS_MASTER_KEY")
@@ -40,6 +51,15 @@ USER_TOKEN_MAX_CLOCK_SKEW_SECONDS = int(
     os.getenv("USER_TOKEN_MAX_CLOCK_SKEW_SECONDS", "30")
 )
 KEY_EXPIRY_WARNING_DAYS = max(1, int(os.getenv("KEY_EXPIRY_WARNING_DAYS", "14")))
+AUTOMATIC_KEY_ROTATION_LEAD_DAYS = _read_bounded_integer(
+    "AUTOMATIC_KEY_ROTATION_LEAD_DAYS", default=7, minimum=1
+)
+AUTOMATIC_KEY_ROTATION_CHECK_INTERVAL_SECONDS = _read_bounded_integer(
+    "AUTOMATIC_KEY_ROTATION_CHECK_INTERVAL_SECONDS", default=300, minimum=60
+)
+AUTOMATIC_KEY_ROTATION_MAX_CONCURRENT = _read_bounded_integer(
+    "AUTOMATIC_KEY_ROTATION_MAX_CONCURRENT", default=3, minimum=1
+)
 SUPAVISOR_INTERNAL_URL = os.getenv(
     "SUPAVISOR_INTERNAL_URL", "http://supabase-pooler:4000"
 ).rstrip("/")

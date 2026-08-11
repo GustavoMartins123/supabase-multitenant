@@ -157,7 +157,23 @@ Depois de uma rotação:
 2. chama o endpoint interno de invalidação no Studio;
 3. o OpenResty remove a entrada anterior e publica a versão mínima;
 4. os workers descartam chaves abaixo dessa versão;
-5. uma consulta periódica da versão funciona como fallback.
+5. toda utilização confirma a versão canônica na Projects API.
+
+Falha na consulta de versão bloqueia a requisição. O OpenResty não usa uma
+service key em cache quando não consegue provar que ela corresponde à versão
+persistida.
+
+### Agendador de API keys
+
+A Projects API mantém `key_expires_at` e verifica projetos habilitados em
+intervalo configurável. Um advisory lock do PostgreSQL e locks de linha fazem a
+eleição de líder e a distribuição segura entre réplicas. Jobs automáticos usam
+o fluxo durável `rotate_key` já existente e aparecem para os membros do projeto
+com `created_by=null` e `trigger=automatic`.
+
+Falhas automáticas bloqueiam novas tentativas daquele projeto até intervenção
+explícita. Habilitar novamente limpa o bloqueio e solicita uma nova
+reconciliação; desabilitar impede que o host-agent autorize o ator de sistema.
 
 O comportamento canônico do cache está documentado em [OpenResty/Lua](openresty-lua.md).
 

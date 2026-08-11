@@ -383,6 +383,14 @@ class HostAgent:
             member_role=auth["member_role"],
             project_row_exists=auth["project_row_exists"],
             project_uuid_matches=project_uuid_matches,
+            system_automatic_rotation=(
+                command == "rotate_keys"
+                and args.get("trigger") == "automatic"
+                and record["requested_by"] is None
+            ),
+            automatic_key_rotation_enabled=auth[
+                "automatic_key_rotation_enabled"
+            ],
         )
         if denial is not None:
             return (f"authorization_denied:{denial}", "Reautorizacao no agent negou o comando.")

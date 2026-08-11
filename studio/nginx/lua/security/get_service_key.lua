@@ -9,13 +9,11 @@ local hostname = string.match(server_domain or "", "//([^/:]+)") or "localhost"
 local shared_token = os.getenv("NGINX_SHARED_TOKEN")
 local encryption_key = os.getenv("STUDIO_SERVICE_KEY_ENCRYPTION_KEY")
 local cache_ttl = tonumber(os.getenv("SERVICE_KEY_CACHE_TTL_SECONDS")) or 60
-local version_check_ttl = tonumber(os.getenv("SERVICE_KEY_VERSION_CHECK_TTL_SECONDS")) or 5
 local fetch_error_ttl = tonumber(os.getenv("SERVICE_KEY_FETCH_ERROR_TTL_SECONDS")) or 2
 local cache = ngx.shared.service_keys
 local metrics = ngx.shared.service_key_metrics
 
 cache_ttl = math.max(1, math.min(cache_ttl, 3600))
-version_check_ttl = math.max(1, math.min(version_check_ttl, cache_ttl))
 fetch_error_ttl = math.max(1, math.min(fetch_error_ttl, 10))
 
 local function increment_metric(name)
@@ -23,18 +21,6 @@ local function increment_metric(name)
     if err then
         ngx.log(ngx.WARN, "Falha ao incrementar métrica de service key: ", err)
     end
-end
-
-local function cached_version_key(project_ref)
-    return "service_key:cached_version:" .. project_ref
-end
-
-local function required_version_key(project_ref)
-    return "service_key:required_version:" .. project_ref
-end
-
-local function checked_version_key(project_ref)
-    return "service_key:checked_version:" .. project_ref
 end
 
 local function fetch_error_key(project_ref)
@@ -67,40 +53,25 @@ local function refresh_required_version(project_ref)
             "Falha ao consultar versão da service key: ",
             err or (response and response.status) or "sem resposta"
         )
-        local fallback_version = cache:get(required_version_key(project_ref))
-            or cache:get(cached_version_key(project_ref))
-            or 0
-        -- Evita uma chamada bloqueante por request durante indisponibilidade.
-        cache:set(checked_version_key(project_ref), fallback_version, version_check_ttl)
-        return fallback_version
+        return nil, "version_check_failed"
     end
 
     local data = cjson.decode(response.body)
     local version = data and tonumber(data.project_key_version)
     if not version then
         increment_metric("version_check_error")
-        local fallback_version = cache:get(required_version_key(project_ref))
-            or cache:get(cached_version_key(project_ref))
-            or 0
-        cache:set(checked_version_key(project_ref), fallback_version, version_check_ttl)
-        return fallback_version
+        return nil, "invalid_version_response"
     end
     local required, promote_err = service_key_version.promote(project_ref, version)
     if not required then
         increment_metric("version_check_error")
         ngx.log(ngx.ERR, "Falha ao promover versao da service key: ", promote_err)
-        return cache:get(required_version_key(project_ref)) or 0
+        return nil, promote_err or "version_promote_failed"
     end
-    cache:set(checked_version_key(project_ref), required, version_check_ttl)
     return required
 end
 
 local function get_required_version(project_ref)
-    local checked_version = cache:get(checked_version_key(project_ref))
-    local required_version = cache:get(required_version_key(project_ref)) or 0
-    if checked_version and checked_version >= required_version then
-        return checked_version
-    end
     return refresh_required_version(project_ref)
 end
 
@@ -148,7 +119,16 @@ local function get_service_key(project_ref)
         return ""
     end
 
-    get_required_version(project_ref)
+    local required_version, version_err = get_required_version(project_ref)
+    if not required_version then
+        increment_metric("fetch_error")
+        ngx.log(
+            ngx.ERR,
+            "Service key bloqueada por falha na verificacao de versao: ",
+            version_err or "unknown"
+        )
+        return ""
+    end
     local value, cache_state = service_key_version.read_cached(project_ref)
     if cache_state == "hit" then
         increment_metric("hit")
@@ -180,8 +160,7 @@ local function get_service_key(project_ref)
         project_ref,
         plaintext,
         fetched_version,
-        cache_ttl,
-        version_check_ttl
+        cache_ttl
     )
     if not published then
         if type(required_or_err) == "number" then

@@ -14,10 +14,6 @@ if ngx.req.get_method() ~= "POST" then
 end
 
 local project_ref = ngx.var.cache_ref
-local version_check_ttl = tonumber(
-    os.getenv("SERVICE_KEY_VERSION_CHECK_TTL_SECONDS")
-) or 5
-version_check_ttl = math.max(1, math.min(version_check_ttl, 3600))
 ngx.req.read_body()
 local body = cjson.decode(ngx.req.get_body_data() or "{}") or {}
 local version = tonumber(body.project_key_version)
@@ -27,8 +23,7 @@ end
 
 local required_version, version_err = service_key_version.invalidate(
     project_ref,
-    version,
-    version_check_ttl
+    version
 )
 if not required_version then
     ngx.log(ngx.ERR, "Falha ao invalidar service key: ", version_err)

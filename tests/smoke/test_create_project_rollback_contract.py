@@ -61,7 +61,7 @@ class CreateRollbackContractTest(unittest.TestCase):
     def test_running_create_reattaches_after_api_restart(self) -> None:
         source = API_MAIN.read_text(encoding="utf-8")
         self.assertIn(
-            'RECOVERABLE_RUNNING_ACTIONS = IDEMPOTENT_ACTIONS | {"create"}',
+            'RECOVERABLE_RUNNING_ACTIONS = IDEMPOTENT_ACTIONS | {"create", "rotate_key"}',
             source,
         )
         self.assertIn("reuse_terminal=True", source)

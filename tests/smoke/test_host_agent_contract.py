@@ -222,6 +222,20 @@ class ClosedCommandSetTest(unittest.TestCase):
         errors = protocol.validate_command_args("run_shell", "meuprojeto", {})
         self.assertEqual(errors, ["unknown_command:run_shell"])
 
+    def test_rotate_keys_accepts_only_the_automatic_system_trigger(self) -> None:
+        self.assertEqual(
+            protocol.validate_command_args(
+                "rotate_keys", "meuprojeto", {"trigger": "automatic"}
+            ),
+            [],
+        )
+        self.assertEqual(
+            protocol.validate_command_args(
+                "rotate_keys", "meuprojeto", {"trigger": "manual"}
+            ),
+            ["invalid_rotation_trigger"],
+        )
+
     def test_args_validation_rejects_injection_shapes(self) -> None:
         cases = [
             ("start_project", "meu-projeto; rm -rf /", {}),
@@ -415,6 +429,8 @@ class AuthorizationMatrixTest(unittest.TestCase):
         member_role=None,
         project_row_exists=True,
         project_uuid_matches=True,
+        system_automatic_rotation=False,
+        automatic_key_rotation_enabled=False,
     )
 
     def check(self, command: str, **overrides):
@@ -470,6 +486,33 @@ class AuthorizationMatrixTest(unittest.TestCase):
         self.assertIsNone(self.check("backup_project", member_role="admin"))
         self.assertIsNone(self.check("backup_project", is_owner=True))
         self.assertIsNone(self.check("backup_project", is_global_admin=True))
+
+    def test_automatic_rotation_is_the_only_system_project_action(self) -> None:
+        self.assertIsNone(
+            self.check(
+                "rotate_keys",
+                user_exists=False,
+                user_active=False,
+                system_automatic_rotation=True,
+                automatic_key_rotation_enabled=True,
+            )
+        )
+        self.assertEqual(
+            self.check(
+                "rotate_keys",
+                system_automatic_rotation=True,
+                automatic_key_rotation_enabled=False,
+            ),
+            "automatic_key_rotation_disabled",
+        )
+        self.assertEqual(
+            self.check(
+                "start_project",
+                system_automatic_rotation=True,
+                automatic_key_rotation_enabled=True,
+            ),
+            "automatic_action_not_allowed",
+        )
 
     def test_project_row_and_uuid_are_revalidated(self) -> None:
         self.assertEqual(

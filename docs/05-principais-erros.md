@@ -147,7 +147,7 @@ O cache atual é versionado. A rotação deve:
 1. atualizar os segredos;
 2. incrementar `project_key_version`;
 3. chamar a invalidação ativa no OpenResty;
-4. manter verificação periódica de versão como fallback.
+4. exigir a versão canônica antes de cada uso da service key.
 
 Consulte a versão:
 
@@ -166,13 +166,19 @@ docker logs projects-api --tail 200 | grep -i 'service.key\|cache'
 docker logs nginx --tail 200 | grep -i 'service.key\|cache'
 ```
 
-Reiniciar o Nginx limpa o cache, mas não é o mecanismo normal de consistência. Antes disso, valide:
+O cache não usa a chave local quando a consulta de versão falha. Reiniciar o
+Nginx limpa o cache, mas não corrige a dependência indisponível e não é o
+mecanismo normal de consistência. Valide:
 
 - `STUDIO_CACHE_INVALIDATION_URL`;
 - `NGINX_SHARED_TOKEN` nos dois lados;
 - `X-Internal-Service: projects-api`;
 - conectividade entre Projects API e Studio;
 - endpoint de versão da chave.
+
+Se `automatic_key_rotation_blocked_at` estiver preenchido, corrija o erro
+registrado e use **Retomar rotação automática** no Studio. Não limpe o campo
+diretamente no banco: a ação de retomada é auditada e dispara a reconciliação.
 
 Detalhes: [Arquitetura OpenResty/Lua](architecture/openresty-lua.md).
 

@@ -34,12 +34,22 @@ class ProjectSettingsDialog extends ConsumerStatefulWidget {
     super.key,
     required this.ref,
     required this.anonKey,
+    required this.automaticKeyRotationEnabled,
+    required this.automaticKeyRotationBlocked,
+    required this.automaticKeyRotationLeadDays,
+    required this.keyMetadataValid,
     this.displayName,
+    this.automaticKeyRotationLastError,
   });
 
   final String ref;
   final String anonKey;
   final String? displayName;
+  final bool automaticKeyRotationEnabled;
+  final bool automaticKeyRotationBlocked;
+  final String? automaticKeyRotationLastError;
+  final int automaticKeyRotationLeadDays;
+  final bool keyMetadataValid;
 
   @override
   ConsumerState<ProjectSettingsDialog> createState() =>
@@ -56,6 +66,11 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
   String? _currentDisplayName;
   late final TextEditingController _displayNameController;
   bool _rotatingKey = false;
+  late bool _automaticKeyRotationEnabled;
+  late bool _automaticKeyRotationBlocked;
+  late bool _keyMetadataValid;
+  String? _automaticKeyRotationLastError;
+  bool _updatingAutomaticKeyRotation = false;
   bool _savingDisplayName = false;
   bool _loadingConfigToken = false;
 
@@ -73,6 +88,10 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     _animController.forward();
 
     _currentAnonKey = widget.anonKey;
+    _automaticKeyRotationEnabled = widget.automaticKeyRotationEnabled;
+    _automaticKeyRotationBlocked = widget.automaticKeyRotationBlocked;
+    _keyMetadataValid = widget.keyMetadataValid;
+    _automaticKeyRotationLastError = widget.automaticKeyRotationLastError;
     _currentConfigToken = '';
     _currentDisplayName = widget.displayName;
     _displayNameController = TextEditingController(
@@ -214,6 +233,13 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
       for (final project in projects) {
         if (project['name'] == widget.ref) {
           newKey = project['anon_token']?.toString();
+          _automaticKeyRotationEnabled =
+              project['automatic_key_rotation_enabled'] as bool;
+          _automaticKeyRotationBlocked =
+              project['automatic_key_rotation_blocked'] as bool;
+          _automaticKeyRotationLastError =
+              project['automatic_key_rotation_last_error']?.toString();
+          _keyMetadataValid = project['key_metadata_valid'] as bool;
           break;
         }
       }
@@ -227,6 +253,43 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
       _showSnack('Erro ao gerar chave: $e', SupabaseColors.error);
     } finally {
       if (mounted) setState(() => _rotatingKey = false);
+    }
+  }
+
+  Future<void> _setAutomaticKeyRotation(bool enabled) async {
+    setState(() => _updatingAutomaticKeyRotation = true);
+    try {
+      final result = await ref
+          .read(projectRepositoryProvider)
+          .updateAutomaticKeyRotation(widget.ref, enabled: enabled);
+      if (!mounted) return;
+      setState(() {
+        _automaticKeyRotationEnabled =
+            result['automatic_key_rotation_enabled'] as bool;
+        _automaticKeyRotationBlocked =
+            result['automatic_key_rotation_blocked'] as bool;
+        _automaticKeyRotationLastError =
+            result['automatic_key_rotation_last_error']?.toString();
+      });
+      await ref.read(projectListProvider.notifier).refresh();
+      if (!mounted) return;
+      _showSnack(
+        enabled
+            ? 'Rotação automática ativada.'
+            : 'Rotação automática desativada.',
+        SupabaseColors.success,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      _showSnack(
+        'Erro ao configurar rotação automática: '
+        '${error.toString().replaceFirst('Exception: ', '')}',
+        SupabaseColors.error,
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _updatingAutomaticKeyRotation = false);
+      }
     }
   }
 
@@ -687,7 +750,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
               ],
             ),
           ),
-          if (hasKey) ...[
+          if (hasKey && _keyMetadataValid) ...[
             const SizedBox(height: 8),
             Row(
               children: [
@@ -707,7 +770,81 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
               ],
             ),
           ],
+          if (hasKey && !_keyMetadataValid) ...[
+            const SizedBox(height: 8),
+            const Text(
+              'Metadata de expiração inválida. A rotação automática está bloqueada.',
+              style: TextStyle(fontSize: 11, color: SupabaseColors.error),
+            ),
+          ],
           if (myRole == 'admin' || Session().isSysAdmin) ...[
+            const SizedBox(height: 12),
+            Container(
+              decoration: BoxDecoration(
+                color: SupabaseColors.bg300,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: _automaticKeyRotationBlocked
+                      ? SupabaseColors.error
+                      : SupabaseColors.border,
+                ),
+              ),
+              child: Column(
+                children: [
+                  SwitchListTile.adaptive(
+                    value: _automaticKeyRotationEnabled,
+                    onChanged: _updatingAutomaticKeyRotation || projectBusy
+                        ? null
+                        : _setAutomaticKeyRotation,
+                    activeThumbColor: SupabaseColors.brand,
+                    title: const Text(
+                      'Rotação automática',
+                      style: TextStyle(
+                        color: SupabaseColors.textPrimary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    subtitle: Text(
+                      'Gera novas chaves ${widget.automaticKeyRotationLeadDays} '
+                      'dias antes da expiração.',
+                      style: const TextStyle(
+                        color: SupabaseColors.textMuted,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                  if (_automaticKeyRotationBlocked) ...[
+                    const Divider(height: 1, color: SupabaseColors.border),
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _automaticKeyRotationLastError ??
+                                'A rotação automática foi bloqueada após uma falha.',
+                            style: const TextStyle(
+                              color: SupabaseColors.error,
+                              fontSize: 11,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          SecondaryButton(
+                            label: 'Retomar rotação automática',
+                            icon: Icons.play_arrow_rounded,
+                            onPressed:
+                                _updatingAutomaticKeyRotation || projectBusy
+                                    ? null
+                                    : () => _setAutomaticKeyRotation(true),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
             const SizedBox(height: 12),
             SecondaryButton(
               label: 'Gerar nova chave',

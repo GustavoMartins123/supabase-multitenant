@@ -17,19 +17,23 @@ class ServiceKeyCacheContractTest(unittest.TestCase):
         self.assertLess(store, bump)
         self.assertLess(bump, invalidate)
 
-    def test_cache_uses_versions_metrics_and_configurable_ttls(self):
+    def test_cache_requires_canonical_version_check_and_fails_closed(self):
         source = (LUA / "security" / "get_service_key.lua").read_text(
             encoding="utf-8"
         )
         for contract in {
             "SERVICE_KEY_CACHE_TTL_SECONDS",
-            "SERVICE_KEY_VERSION_CHECK_TTL_SECONDS",
             "project_key_version",
             'increment_metric("hit")',
             'increment_metric("miss")',
             'increment_metric("version_reload")',
+            'return nil, "version_check_failed"',
+            "Service key bloqueada por falha na verificacao de versao",
         }:
             self.assertIn(contract, source)
+        self.assertNotIn("fallback_version", source)
+        self.assertNotIn("checked_version", source)
+        self.assertNotIn("SERVICE_KEY_VERSION_CHECK_TTL_SECONDS", source)
 
     def test_rotation_handler_does_not_invalidate_before_job_finishes(self):
         source = (LUA / "admin_api" / "project_rotate_key.lua").read_text(

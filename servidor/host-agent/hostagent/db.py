@@ -287,6 +287,7 @@ async def load_authorization_context(
         "project_row_exists": False,
         "project_id": None,
         "tenant_uuid": None,
+        "automatic_key_rotation_enabled": False,
     }
     async with pool.acquire() as conn:
         if requested_by is not None:
@@ -310,7 +311,9 @@ async def load_authorization_context(
 
         project_row = await conn.fetchrow(
             """
-            SELECT id, owner_id, to_jsonb(projects)->>'tenant_uuid' AS tenant_uuid
+            SELECT id, owner_id,
+                   to_jsonb(projects)->>'tenant_uuid' AS tenant_uuid,
+                   automatic_key_rotation_enabled
             FROM projects WHERE name = $1
             """,
             project,
@@ -319,6 +322,9 @@ async def load_authorization_context(
             context["project_row_exists"] = True
             context["project_id"] = project_row["id"]
             context["tenant_uuid"] = project_row["tenant_uuid"]
+            context["automatic_key_rotation_enabled"] = bool(
+                project_row["automatic_key_rotation_enabled"]
+            )
             if requested_by is not None:
                 context["is_owner"] = project_row["owner_id"] == requested_by
                 context["member_role"] = await conn.fetchval(

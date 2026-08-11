@@ -151,25 +151,22 @@ O endpoint exige `X-Shared-Token` e `X-Internal-Service: projects-api`, remove
 a chave anterior e publica a nova versão mínima no shared dictionary. A
 invalidação afeta todos os workers do OpenResty sem restart ou reload do Nginx.
 
-Antes de usar uma entrada, o cache compara sua versão com a versão requerida.
-Como proteção para perda da notificação ativa, a versão do banco é consultada
-periodicamente em `GET /api/projects/internal/key-version/{project_ref}`.
-Quando a versão persistida for maior, a chave antiga é descartada e recarregada.
+Antes de usar uma entrada, o cache consulta a versão canônica em
+`GET /api/projects/internal/key-version/{project_ref}`. Quando a versão
+persistida for maior, a chave antiga é descartada e recarregada. Se a consulta
+falhar, o módulo retorna chave vazia e a requisição falha fechada, mesmo que
+exista uma entrada local ainda dentro do TTL.
 
 Os tempos são configuráveis:
 
 - `SERVICE_KEY_CACHE_TTL_SECONDS`: TTL da chave; padrão de 60 segundos;
-- `SERVICE_KEY_VERSION_CHECK_TTL_SECONDS`: intervalo máximo entre verificações
-  de versão; padrão de 5 segundos;
 - `SERVICE_KEY_FETCH_ERROR_TTL_SECONDS`: backoff curto depois de uma falha no
   `enc-key`; padrão de 2 segundos (limitado a 10 segundos).
 
 Em operação normal, a consistência é imediata após a notificação. Se as três
 tentativas de invalidação falharem, o job termina com
-`service_key_cache_invalidation_failed`; o fallback de versão limita a janela
-usual de chave antiga ao intervalo de verificação. Se tanto a notificação
-quanto a API de versão estiverem indisponíveis, uma entrada existente pode ser
-usada até seu TTL expirar.
+`service_key_cache_invalidation_failed`. Se a API de versão estiver
+indisponível, a service key não é usada.
 
 Contadores de `hit`, `miss`, `version_reload`, `invalidation`, `fetch_error`,
 `fetch_error_backoff`, `stale_fetch` e `version_check_error` ficam no

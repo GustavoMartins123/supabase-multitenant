@@ -21,6 +21,61 @@ headers de conexão persistidos para recriptografar: a API gera um novo header a
 cada requisição. A imagem oficial também expõe essa separação como
 `PG_META_CRYPTO_KEY`.
 
+## Rotação automática de anon e service role
+
+As API keys legadas de cada projeto são JWTs emitidos com o
+`JWT_SECRET_PROJETO` daquele tenant e validade de 90 dias. A rotação automática
+é habilitada por padrão, gera um par novo sete dias antes do `exp` e não altera
+o JWT secret. Por isso ela não encerra sessões de usuários do GoTrue.
+
+O estado operacional fica em `projects`:
+
+| Coluna | Significado |
+| --- | --- |
+| `automatic_key_rotation_enabled` | opt-out por projeto; padrão `true` |
+| `key_expires_at` | vencimento comum validado de anon/service role |
+| `last_key_rotation_at` | última troca persistida |
+| `automatic_key_rotation_blocked_at` | automação suspensa após falha |
+| `automatic_key_rotation_last_error` | erro explícito que exige intervenção |
+
+O agendador cria jobs duráveis com `trigger=automatic`. O host-agent revalida a
+assinatura, o UUID e a opção do projeto antes de executar `rotate_key.sh`. O
+script exige `PROJECT_UUID`, usa `jti` aleatório em cada token, atualiza arquivos
+com rollback transacional e não escreve as chaves em stdout/stderr.
+
+Depois do script, a API valida os dois `exp`, cifra os valores com o DEK do
+tenant, incrementa `project_key_version`, grava auditoria e invalida o cache do
+Studio. Qualquer falha encerra o job e bloqueia novas tentativas automáticas. Um
+admin precisa corrigir a causa e reabilitar a opção, ou executar uma rotação
+manual bem-sucedida.
+
+Consulta operacional:
+
+```sql
+SELECT name, automatic_key_rotation_enabled, key_expires_at,
+       last_key_rotation_at, automatic_key_rotation_blocked_at,
+       automatic_key_rotation_last_error
+FROM projects
+ORDER BY key_expires_at NULLS FIRST;
+```
+
+Desabilitar a automação é uma decisão por projeto, disponível no Studio ou na
+rota `PUT /api/projects/{project_ref}/automatic-key-rotation`. Não altere os
+campos de bloqueio manualmente, pois a retomada pela API é auditada e executa a
+reconciliação imediatamente.
+
+### Critérios e referências
+
+O desenho segue estes princípios publicados:
+
+- [OWASP Secrets Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html): automação, auditoria e metadata de criação/rotação/expiração;
+- [NIST SP 800-57 Part 1 Rev. 5](https://csrc.nist.gov/pubs/sp/800/57/pt1/r5/final): cryptoperiod definido conforme risco e uso da chave;
+- [AWS Secrets Manager — four-step rotation](https://docs.aws.amazon.com/secretsmanager/latest/userguide/rotate-secrets_lambda-functions.html): etapas explícitas de criação, aplicação, teste e conclusão;
+- [AWS Secrets Manager — schedules](https://docs.aws.amazon.com/secretsmanager/latest/userguide/rotate-secrets_schedule.html): janela de rotação antes do vencimento;
+- [Google Cloud Secret Manager — rotation recommendations](https://docs.cloud.google.com/secret-manager/docs/rotation-recommendations): rotação programada e consumidor preparado para a nova versão;
+- [HashiCorp Vault — automated credential rotation](https://developer.hashicorp.com/vault/docs/enterprise/automated-credential-rotation/overview): execução por líder, estado persistido e interrupção explícita após falha;
+- [Supabase self-hosted Auth keys](https://supabase.com/docs/guides/self-hosting/self-hosted-auth-keys) e [signing keys](https://supabase.com/docs/guides/auth/signing-keys): distinção entre API keys e signing keys e caminho atual para chaves assimétricas.
+
 ## Pré-requisitos
 
 1. Faça backup consistente da base `postgres`.

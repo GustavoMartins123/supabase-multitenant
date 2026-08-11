@@ -138,11 +138,26 @@ CREATE TABLE IF NOT EXISTS projects (
   owner_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
   anon_key TEXT,
   service_role TEXT,
-  config_token TEXT
+  config_token TEXT,
+  automatic_key_rotation_enabled BOOLEAN NOT NULL DEFAULT true,
+  key_expires_at TIMESTAMPTZ,
+  last_key_rotation_at TIMESTAMPTZ,
+  automatic_key_rotation_blocked_at TIMESTAMPTZ,
+  automatic_key_rotation_last_error TEXT
 );
 
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS display_name TEXT;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS tenant_uuid UUID;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS automatic_key_rotation_enabled BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS key_expires_at TIMESTAMPTZ;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS last_key_rotation_at TIMESTAMPTZ;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS automatic_key_rotation_blocked_at TIMESTAMPTZ;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS automatic_key_rotation_last_error TEXT;
+UPDATE projects SET automatic_key_rotation_enabled = true
+WHERE automatic_key_rotation_enabled IS NULL;
+ALTER TABLE projects
+  ALTER COLUMN automatic_key_rotation_enabled SET DEFAULT true,
+  ALTER COLUMN automatic_key_rotation_enabled SET NOT NULL;
 
 COMMENT ON COLUMN projects.owner_id IS
   'UUID canonico do usuario dono do projeto.';
@@ -156,6 +171,12 @@ COMMENT ON COLUMN projects.tenant_uuid IS
 CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_tenant_uuid_unique
   ON projects(tenant_uuid)
   WHERE tenant_uuid IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_projects_automatic_key_rotation_due
+  ON projects(key_expires_at)
+  WHERE automatic_key_rotation_enabled
+    AND automatic_key_rotation_blocked_at IS NULL
+    AND anon_key IS NOT NULL;
 
 CREATE OR REPLACE FUNCTION set_project_tenant_uuid_from_id()
 RETURNS trigger

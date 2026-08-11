@@ -147,7 +147,10 @@ async def require_synced_user_record(
 async def get_project_row(conn: asyncpg.Connection, project_name: str) -> asyncpg.Record:
     row = await conn.fetchrow(
         """
-        SELECT id, tenant_uuid, name, display_name, owner_id
+        SELECT id, tenant_uuid, name, display_name, owner_id,
+               automatic_key_rotation_enabled,
+               automatic_key_rotation_blocked_at,
+               automatic_key_rotation_last_error
         FROM projects WHERE name = $1
         """,
         project_name,

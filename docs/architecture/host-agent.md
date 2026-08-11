@@ -71,6 +71,10 @@ excluir pontos (`PROJECT_OWNER_COMMANDS`) exigem owner ou admin global.
    precisa bater com `projects.id` (exceto nos passos do delete que rodam
    após a remoção da linha); quando os args carregam `tenant_uuid`, ele também
    precisa bater com `projects.tenant_uuid`.
+   A única intenção sem usuário é `rotate_keys` com
+   `args.trigger=automatic`; ela só é aceita quando
+   `projects.automatic_key_rotation_enabled=true`. Qualquer outro comando de
+   sistema é recusado.
 3. **Paths confinados** — nomes passam pela mesma regex/reservas da API e
    o path resolvido precisa ficar sob `servidor/projects`; componentes
    symlink e traversal são rejeitados antes de qualquer script.
@@ -93,8 +97,8 @@ mentir.
 
 - API reiniciada no meio de um comando: o agent continua executando; o
   recovery religa o job na mesma intenção (`job_id` + comando) e finaliza
-  com o resultado persistido. Rename voltou a ser retomável por esse
-  mecanismo.
+  com o resultado persistido. Rename e rotação de chaves são retomáveis por
+  esse mecanismo sem disparar um segundo script.
 - Agent reiniciado no meio de um comando: o lease expira, a linha vira
   `failed (lease_expired)` e o job falha com esse código.
 - Agent offline: intenções em fila são canceladas após 60s sem worker e a

@@ -23,11 +23,16 @@ class ProjectCard extends ConsumerStatefulWidget {
     required this.onDuplicate,
     required this.onToggleFavorite,
     required this.isFavorite,
+    required this.automaticKeyRotationEnabled,
+    required this.automaticKeyRotationBlocked,
+    required this.automaticKeyRotationLeadDays,
+    required this.keyMetadataValid,
     this.displayName,
     this.serverDomain,
     this.keyExpiresAtEpoch,
     this.keyExpiringSoon = false,
     this.keyExpired = false,
+    this.automaticKeyRotationLastError,
     this.isLoading = false,
     this.activeJob,
   });
@@ -39,6 +44,11 @@ class ProjectCard extends ConsumerStatefulWidget {
   final int? keyExpiresAtEpoch;
   final bool keyExpiringSoon;
   final bool keyExpired;
+  final bool automaticKeyRotationEnabled;
+  final bool automaticKeyRotationBlocked;
+  final String? automaticKeyRotationLastError;
+  final int automaticKeyRotationLeadDays;
+  final bool keyMetadataValid;
   final VoidCallback onTap;
   final VoidCallback onDeleted;
   final VoidCallback onDuplicate;
@@ -63,6 +73,11 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
         ref: widget.refKey,
         anonKey: widget.anonKey,
         displayName: widget.displayName,
+        automaticKeyRotationEnabled: widget.automaticKeyRotationEnabled,
+        automaticKeyRotationBlocked: widget.automaticKeyRotationBlocked,
+        automaticKeyRotationLastError: widget.automaticKeyRotationLastError,
+        automaticKeyRotationLeadDays: widget.automaticKeyRotationLeadDays,
+        keyMetadataValid: widget.keyMetadataValid,
       ),
     );
 
@@ -107,6 +122,9 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
   }
 
   String get _keyExpiryMessage {
+    if (!widget.keyMetadataValid) {
+      return 'Metadata de expiração das keys inválida';
+    }
     if (widget.keyExpired) return 'Keys expiradas — rotacione agora';
     final days = _daysUntilKeyExpiry;
     if (days == null) return 'Expiração das keys indisponível';

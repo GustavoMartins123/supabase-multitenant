@@ -159,9 +159,12 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
         "stop_project",
         "restart_project",
         "delete_project_containers",
-        "rotate_keys",
     }:
         reject_unknown(set())
+    elif command == "rotate_keys":
+        reject_unknown({"trigger"})
+        if args.get("trigger") not in {None, "automatic"}:
+            errors.append("invalid_rotation_trigger")
     elif command == "delete_project_files":
         reject_unknown({"tenant_uuid", "project_uuid"})
         if "tenant_uuid" in args and not is_valid_uuid(args.get("tenant_uuid")):
@@ -350,6 +353,8 @@ def evaluate_authorization(
     member_role: str | None,
     project_row_exists: bool,
     project_uuid_matches: bool,
+    system_automatic_rotation: bool,
+    automatic_key_rotation_enabled: bool,
 ) -> str | None:
     """Reavalia a autorizacao no agent com dados lidos do banco.
 
@@ -359,19 +364,25 @@ def evaluate_authorization(
     """
     if command not in HOST_AGENT_COMMANDS:
         return "unknown_command"
-    if not user_exists:
-        return "requester_unknown"
-    if not user_active:
-        return "requester_inactive"
-    if command in GLOBAL_ADMIN_COMMANDS:
-        if not is_global_admin:
-            return "global_admin_required"
-    elif command in PROJECT_OWNER_COMMANDS:
-        if not (is_global_admin or is_owner):
-            return "project_owner_required"
+    if system_automatic_rotation:
+        if command != "rotate_keys":
+            return "automatic_action_not_allowed"
+        if not automatic_key_rotation_enabled:
+            return "automatic_key_rotation_disabled"
     else:
-        if not (is_global_admin or is_owner or member_role == "admin"):
-            return "project_admin_required"
+        if not user_exists:
+            return "requester_unknown"
+        if not user_active:
+            return "requester_inactive"
+        if command in GLOBAL_ADMIN_COMMANDS:
+            if not is_global_admin:
+                return "global_admin_required"
+        elif command in PROJECT_OWNER_COMMANDS:
+            if not (is_global_admin or is_owner):
+                return "project_owner_required"
+        else:
+            if not (is_global_admin or is_owner or member_role == "admin"):
+                return "project_admin_required"
     if command not in PROJECT_ROW_OPTIONAL_COMMANDS:
         if not project_row_exists:
             return "project_not_found"

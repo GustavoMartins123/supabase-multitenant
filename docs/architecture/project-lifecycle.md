@@ -151,13 +151,42 @@ Fluxo:
 4. persiste os segredos com envelope encryption;
 5. incrementa `project_key_version`;
 6. invalida o cache de service key do Studio;
-7. atualiza o job e a auditoria.
+7. persiste a nova expiração, conclui o job e grava a auditoria.
 
-A invalidação do cache faz parte do sucesso da operação. Existe fallback por verificação de versão e TTL, mas a API tenta a invalidação ativa antes de concluir.
+A invalidação do cache faz parte do sucesso da operação. Antes de usar qualquer
+entrada, o OpenResty precisa confirmar a versão canônica na Projects API. Se a
+consulta falhar, a requisição é bloqueada; uma chave em cache nunca substitui a
+validação de versão.
+
+### Rotação automática
+
+Todo projeto nasce com `automatic_key_rotation_enabled=true`. A Projects API
+calcula a agenda pelo claim `exp`, persiste `key_expires_at` e cria um job no
+mesmo runner da rotação manual sete dias antes do vencimento. O scanner:
+
+- usa advisory lock do PostgreSQL para haver um único líder;
+- bloqueia a linha com `FOR UPDATE SKIP LOCKED`;
+- não cria um segundo job enquanto houver ação ativa no projeto;
+- limita a concorrência global;
+- registra ator de sistema, versão e expiração na auditoria.
+
+Uma falha automática grava `automatic_key_rotation_blocked_at` e
+`automatic_key_rotation_last_error`. O scanner não repete a operação até um
+admin retomar explicitamente a automação ou concluir uma rotação manual. Não há
+loop silencioso nem uso da chave anterior como caminho secundário.
+
+A opção pode ser desativada no Studio ou por
+`PUT /api/projects/{project_ref}/automatic-key-rotation` com
+`{"enabled": false}`. Os parâmetros globais são:
+
+- `AUTOMATIC_KEY_ROTATION_LEAD_DAYS=7`;
+- `AUTOMATIC_KEY_ROTATION_CHECK_INTERVAL_SECONDS=300`;
+- `AUTOMATIC_KEY_ROTATION_MAX_CONCURRENT=3`.
 
 ### Expiração
 
-A API extrai metadata de expiração dos JWTs e pode avisar o Studio quando as chaves estão expiradas ou próximas do vencimento.
+A API extrai metadata de expiração dos JWTs, agenda a rotação automática e
+avisa o Studio quando as chaves estão expiradas ou próximas do vencimento.
 
 A janela é configurada por `KEY_EXPIRY_WARNING_DAYS`.
 

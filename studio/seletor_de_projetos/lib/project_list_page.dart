@@ -582,6 +582,15 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
       keyExpiresAtEpoch: project['key_expires_at'] as int?,
       keyExpiringSoon: project['key_expiring_soon'] == true,
       keyExpired: project['key_expired'] == true,
+      automaticKeyRotationEnabled:
+          project['automatic_key_rotation_enabled'] as bool,
+      automaticKeyRotationBlocked:
+          project['automatic_key_rotation_blocked'] as bool,
+      automaticKeyRotationLastError:
+          project['automatic_key_rotation_last_error']?.toString(),
+      automaticKeyRotationLeadDays:
+          project['automatic_key_rotation_lead_days'] as int,
+      keyMetadataValid: project['key_metadata_valid'] as bool,
       onTap: project['is_loading'] == true || project['active_job'] != null
           ? () {}
           : () => _openProject(project['name']),

@@ -17,10 +17,6 @@ local function value_key(project_ref)
     return "service_key:value:" .. project_ref
 end
 
-local function checked_key(project_ref)
-    return "service_key:checked_version:" .. project_ref
-end
-
 local function fetch_error_key(project_ref)
     return "service_key:fetch_error:" .. project_ref
 end
@@ -89,7 +85,7 @@ function M.read_cached(project_ref)
     end)
 end
 
-function M.publish(project_ref, value, version, cache_ttl, checked_ttl)
+function M.publish(project_ref, value, version, cache_ttl)
     version = tonumber(version)
     if not version or version < 1 then
         return nil, "invalid_version"
@@ -121,13 +117,12 @@ function M.publish(project_ref, value, version, cache_ttl, checked_ttl)
             cache:delete(value_key(project_ref))
             error(version_err or "cached_version_store_failed")
         end
-        cache:set(checked_key(project_ref), minimum, checked_ttl)
         cache:delete(fetch_error_key(project_ref))
         return true, minimum
     end)
 end
 
-function M.invalidate(project_ref, version, checked_ttl)
+function M.invalidate(project_ref, version)
     version = tonumber(version)
     if not version or version < 1 then
         return nil, "invalid_version"
@@ -149,7 +144,6 @@ function M.invalidate(project_ref, version, checked_ttl)
             cache:delete(cached_key(project_ref))
         end
         cache:delete(fetch_error_key(project_ref))
-        cache:set(checked_key(project_ref), minimum, checked_ttl)
         return minimum
     end)
 end

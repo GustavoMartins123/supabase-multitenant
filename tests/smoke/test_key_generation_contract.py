@@ -92,6 +92,20 @@ class KeyGenerationContractTest(unittest.TestCase):
         self.assertIn('get_env_value "CONFIG_TOKEN_PROJETO"', rotation)
         self.assertNotRegex(rotation, r"CONFIG_TOKEN(_PROJETO)?=.*openssl rand")
 
+    def test_rotation_fails_closed_and_never_prints_generated_keys(self):
+        rotation = (GENERATE / "rotate_key.sh").read_text(encoding="utf-8")
+        self.assertIn(
+            '[[ -z "$PROJECT_UUID" ]] && die "PROJECT_UUID não encontrado',
+            rotation,
+        )
+        self.assertNotIn("usando PROJECT_ID como fallback", rotation)
+        self.assertNotIn('echo "ANON_KEY_PROJETO=$NEW_ANON"', rotation)
+        self.assertNotIn('echo "SERVICE_ROLE_KEY_PROJETO=$NEW_SERVICE"', rotation)
+        self.assertIn(r'\"jti\":\"$anon_jti\"', rotation)
+        self.assertIn(r'\"jti\":\"$service_jti\"', rotation)
+        self.assertNotIn('url="https://$url"', rotation)
+        self.assertIn('SERVER_PROTO deve ser http ou https', rotation)
+
     def test_generated_secret_files_are_restricted(self):
         setup = (ROOT / "setup.sh").read_text(encoding="utf-8")
         self.assertIn(

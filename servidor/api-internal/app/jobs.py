@@ -214,7 +214,7 @@ async def set_job_status(
 async def create_project_job(
     pool: asyncpg.Pool,
     project_name: str,
-    user: uuid.UUID,
+    user: uuid.UUID | None,
     *,
     message: str | None = None,
     action: str,
