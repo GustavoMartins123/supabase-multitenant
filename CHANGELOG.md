@@ -19,6 +19,190 @@ O formato deste arquivo segue as diretrizes do [Keep a Changelog](https://keepac
 - Script de rotação passou a exigir `PROJECT_UUID`, emitir `jti` aleatório e não
   registrar as chaves geradas em stdout.
 
+### 2026-07-24
+
+- Validação de nomes de projeto centralizada e aplicada à criação, duplicação e
+  renomeação, incluindo bloqueio de nomes reservados pelas rotas da plataforma.
+- Configuração HTTPS do Traefik passou a ser gerada pelo arquivo dinâmico, com
+  `websecure`, TLS e resolução de certificados também para a Projects API e para
+  os roteadores de bloqueio.
+
+### 2026-07-22
+
+- Fluxo de autenticação do Studio reorganizado com middleware dedicado,
+  bootstrap explícito da aplicação e navegação autenticada centralizada.
+- Modelos, providers e acesso à API do seletor de projetos foram reorganizados;
+  o instalador do host-agent passou a aceitar usuário de serviço configurável.
+- Ordem de rollback e carregamento do ambiente no rename foram corrigidos, e o
+  handler de avatares passou a finalizar respostas de forma consistente.
+- Utilitários temporários de migração legada e seus testes foram removidos,
+  mantendo apenas os caminhos canônicos de configuração e lifecycle.
+
+### 2026-07-21
+
+- Python 3.10 ou superior tornou-se requisito explícito do host para setup,
+  configuração do Studio/Authelia e execução do host-agent.
+- Configuração de runtime e sincronização de CA do Studio foram automatizadas,
+  com contextos de build reduzidos por novos `.dockerignore`.
+- Requisições HTTPS de saída do OpenResty passaram a validar certificado,
+  hostname e SAN; endpoints internos obedecem à política TLS configurada.
+- Autorizações de pontos de restauração foram endurecidas: backup exige
+  administrador do projeto e restore/delete exigem proprietário ou admin global.
+- Deleção de projetos foi consolidada em um workflow coordenado, sem comandos
+  parciais de remoção de tenant expostos pelo protocolo do host-agent.
+- Processamento de avatar foi isolado em módulo próprio com libvips, validação de
+  formato/tamanho, normalização para WebP e rejeição explícita de conteúdo inválido.
+
+### 2026-07-20
+
+- Integração do Studio com contexto por slug recebeu correções na propagação do
+  contexto pelo proxy e passou a usar por padrão uma imagem versionada publicada.
+- Contrato de contexto por URL, isolamento entre abas e proveniência do patch do
+  Studio foram documentados.
+
+### 2026-07-19
+
+- Studio passou a acompanhar jobs assíncronos de criação, duplicação e rotação
+  com polling, progresso, status e atualização reativa dos cards e diálogos.
+- Criação de projeto ganhou recuperação controlada de estado residual, baseada
+  no histórico durável do job, e rollback transacional mais preciso.
+- Host-agent passou a aguardar o schema do control plane e tratar inicialização e
+  reconexão de maneira ordenada.
+- Identidade passou a distinguir o UUID canônico do projeto do `tenant_uuid`
+  usado por Realtime, JWTs, backups e serviços externos.
+- Contexto do Studio passou a ser resolvido pelo control plane a partir do slug
+  na URL, com autorização por projeto e isolamento independente por aba.
+- Fontes implícitas de contexto, incluindo cookie e valores globais, foram
+  removidas; handlers de IA e proxies passaram a exigir referência explícita e
+  validada do projeto.
+
+### 2026-07-17
+
+- Backup e restore passaram a reportar progresso detalhado em tempo real desde a
+  parada dos serviços até a publicação do backup e reinício do projeto.
+- Camada OpenResty/Lua recebeu comparação segura de segredos, grupos de admin
+  normalizados e controle monotônico de versão do cache de service key.
+- Cards de pontos de restauração passaram a exibir o usuário responsável pela
+  criação, com a atribuição persistida no control plane.
+
+### 2026-07-16
+
+- Adicionado sistema de pontos de restauração com backup frio, manifesto,
+  restauração, backup de segurança prévio e rollback transacional em caso de erro.
+- Protocolo do host-agent e Studio foram ampliados para backup/restore, com dados
+  isolados por UUID e registros persistidos no control plane.
+- Projects API foi separada em routers de health, lifecycle, colaboração e rotas
+  internas, com dependências compartilhadas e validação HMAC endurecida.
+- Resolução do diretório físico de projetos no host-agent foi padronizada e
+  falhas de comandos passaram a produzir diagnóstico explícito.
+
+### 2026-07-15
+
+- Adicionado host-agent independente, instalado como serviço `systemd`, para
+  executar o lifecycle físico a partir de intenções HMAC assinadas e persistidas.
+- Execução de comandos passou a usar conjunto fechado, leases, heartbeat e
+  validação de identidade, retirando da Projects API o acesso direto ao Docker.
+- Corrigida a visibilidade do tipo `halfvec` para o papel
+  `supabase_storage_admin` nos bancos de projeto.
+
+### 2026-07-14
+
+- Implantação ganhou perfis explícitos `single-node` e `split-node`, utilizáveis
+  de forma não interativa por `setup.sh`, `start.sh` e `stop_containers.sh`.
+- Configuração dinâmica dos projetos no Traefik passou a ser renderizada e
+  observada por arquivo, reforçando o isolamento do acesso ao daemon Docker.
+- Tradução de consultas do Analytics foi corrigida para projeções e uniões de
+  campos escalares usadas pelo Studio.
+
+### 2026-07-13
+
+- Credenciais S3 Vectors passaram a ser expostas ao Studio somente pelo control
+  plane e vinculadas ao Storage do tenant selecionado.
+- Analytics passou a ser construído localmente com tradução de SQL do dialeto
+  BigQuery para PostgreSQL e consultas/logs isolados pelo projeto selecionado.
+- Acesso de Traefik e Vector ao Docker foi endurecido com interfaces restritas e
+  remoção de montagens diretas do socket nos consumidores.
+- Permissões de `.env` e arquivos de configuração gerados foram ajustadas para
+  permitir leitura pelos usuários não root dos contêineres.
+
+### 2026-07-12
+
+- Adicionado perfil de usuário integrado ao Authelia, com persistência atômica,
+  auditoria sem PII, edição no Studio e sincronização sem bloquear leituras.
+- Upload autenticado de avatar passou a gerar URL estável por usuário; avatares
+  também passaram a aparecer nas listas administrativas.
+- Adicionado plugin local Supabase Guard no Traefik para validar saúde e isolar
+  requisições por projeto, inclusive em instalações já existentes.
+- Configurações de serviços e Docker foram externalizadas para o ambiente, e os
+  scripts de start/stop passaram a carregar explicitamente o env do servidor.
+- Ordem de inicialização e healthcheck do Studio foram corrigidos para evitar
+  respostas 502 antes de o dashboard estar pronto.
+- Storage Vectors ganhou roteamento centralizado no Studio, backend `pgvector`
+  por projeto, adaptação das rotas de buckets/índices e credenciais SigV4 isoladas.
+- Lifecycle de vetores foi integrado à criação, duplicação e rename, com extensão
+  no template, wrappers por bucket, limpeza e validação antes do commit da operação.
+- Resolução assinada da referência de projeto foi compartilhada entre os proxies
+  do Studio, eliminando fontes divergentes de contexto.
+
+### 2026-07-11
+
+- Comunicação interna ganhou tokens HMAC reutilizáveis e autenticação assinada
+  para o push-worker, com controles de papel nos membros de projeto.
+- Jobs passaram a ser persistentes, idempotentes quando aplicável e consultáveis,
+  com tentativas, retry, etapas, progresso e caudas limitadas de stdout/stderr.
+- Segredos dos projetos foram migrados para envelope encryption AES-256-GCM com
+  DEK por tenant e chaves separadas por domínio criptográfico.
+- Control plane passou a centralizar identidade, grupos, settings, segredos,
+  configuração de runtime, notificações e trilha de auditoria.
+- Service keys passaram a ser armazenadas cifradas e servidas por cache
+  versionado, com invalidação ativa, métricas e incremento atômico na rotação.
+- Metadados de expiração dos JWTs e avisos configuráveis de keys vencidas ou
+  próximas do vencimento foram adicionados à API e ao Studio.
+- Deleção passou a encerrar pools do Supavisor e drenar conexões antes de remover
+  o banco, preservando-o quando o encerramento seguro não puder ser confirmado.
+- Rename recebeu correções no Compose, Supavisor, Realtime e carregamento de env;
+  snippets passaram a ser migrados junto com o slug do projeto.
+- Adicionada telemetria administrativa de usuários por projeto e período, com
+  filtros, auditoria e visualização nas configurações do Studio.
+- Módulos Lua foram reorganizados por domínio e a documentação foi consolidada
+  em índice e fontes canônicas para control plane, lifecycle e OpenResty.
+- Criada suíte de smoke tests para contratos de HMAC, schema, lifecycle,
+  criptografia, cache, telemetria e isolamento entre tenants.
+
+### 2026-07-10
+
+- Adicionado rename completo de projeto, com script de lifecycle, histórico,
+  progresso e controles no Studio.
+- Gerenciamento ganhou colaboração por projeto, incluindo membros, notas, tags,
+  hints, threads e nome de exibição, além de métricas do Realtime.
+- Confiabilidade do rename foi reforçada e artefatos de build deixaram de ser
+  mantidos no repositório.
+
+### 2026-05-12
+
+- Autorização multi-tenant do Realtime passou a distinguir contexto ausente de
+  contexto inválido e a rejeitar tokens globais em endpoints de tenant.
+- Bloqueio de requisições sensíveis foi centralizado no serviço de negação do
+  Traefik, com respostas 403 consistentes e cadeia de middlewares simplificada.
+
+### 2026-05-11
+
+- Postgres Meta foi migrado de instâncias por projeto para um serviço global,
+  com conexão dinâmica cifrada e fronteira de autorização por projeto.
+- Adicionado serviço de negação endurecido no Traefik para bloquear arquivos,
+  prefixos e caminhos sensíveis sem expor cabeçalhos do servidor.
+- Arquitetura e hardening do Postgres Meta global foram documentados.
+
+### 2026-05-08
+
+- Adicionado limite configurável de upload por projeto, validado no OpenResty por
+  token HMAC, e rastreamento de settings pendentes até a recriação dos serviços.
+- Validação de nomes passou a rejeitar palavras SQL reservadas; snippets e demais
+  conteúdos do usuário passaram a exigir escopo explícito de projeto.
+- URLs públicas do Storage foram alinhadas à origem externa do Studio, e rotas de
+  upload receberam validação dedicada antes do encaminhamento.
+- Imagem do Authelia foi atualizada para a versão estável 4.39.
+
 ## [0.13.0-alpha] - 2026-04-02 a 2026-05-07
 
 ### 2026-05-07
