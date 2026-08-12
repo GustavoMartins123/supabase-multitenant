@@ -226,7 +226,7 @@ CREATE TABLE IF NOT EXISTS project_api_key_slots (
   kind TEXT NOT NULL,
   allowed_services TEXT[] NOT NULL,
   automatic_rotation_enabled BOOLEAN NOT NULL,
-  rotation_interval_days INTEGER NOT NULL,
+  rotation_interval_days INTEGER,
   status TEXT NOT NULL DEFAULT 'active',
   automatic_rotation_blocked_at TIMESTAMPTZ,
   automatic_rotation_last_error TEXT,
@@ -245,8 +245,15 @@ CREATE TABLE IF NOT EXISTS project_api_key_slots (
       'auth', 'rest', 'graphql', 'realtime', 'storage', 'functions'
     ]::text[]
   ),
-  CONSTRAINT project_api_key_slots_rotation_interval CHECK (
-    rotation_interval_days BETWEEN 1 AND 3650
+  CONSTRAINT project_api_key_slots_lifecycle CHECK (
+    (
+      rotation_interval_days IS NULL
+      AND automatic_rotation_enabled = false
+    )
+    OR (
+      rotation_interval_days IS NOT NULL
+      AND rotation_interval_days BETWEEN 1 AND 3650
+    )
   ),
   CONSTRAINT project_api_key_slots_status CHECK (
     status IN ('active', 'disabled')
@@ -267,7 +274,7 @@ CREATE TABLE IF NOT EXISTS project_api_keys (
   status TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   activate_at TIMESTAMPTZ,
-  expires_at TIMESTAMPTZ NOT NULL,
+  expires_at TIMESTAMPTZ,
   activated_at TIMESTAMPTZ,
   revoked_at TIMESTAMPTZ,
   last_used_at TIMESTAMPTZ,
@@ -278,7 +285,9 @@ CREATE TABLE IF NOT EXISTS project_api_keys (
   CONSTRAINT project_api_keys_status CHECK (
     status IN ('pending', 'active', 'revoked', 'expired')
   ),
-  CONSTRAINT project_api_keys_lifetime CHECK (expires_at > created_at),
+  CONSTRAINT project_api_keys_optional_lifetime CHECK (
+    expires_at IS NULL OR expires_at > created_at
+  ),
   CONSTRAINT project_api_keys_rotation_trigger CHECK (
     rotation_trigger IN ('initial', 'manual', 'automatic')
   ),
@@ -300,8 +309,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_project_api_keys_one_pending
   ON project_api_keys(slot_id) WHERE status = 'pending';
 CREATE INDEX IF NOT EXISTS idx_project_api_keys_lookup
   ON project_api_keys(secret_hash) WHERE status = 'active';
-CREATE INDEX IF NOT EXISTS idx_project_api_keys_due
-  ON project_api_keys(expires_at) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_project_api_keys_expiring_due
+  ON project_api_keys(expires_at)
+  WHERE status = 'active' AND expires_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_project_api_key_slots_project
   ON project_api_key_slots(project_id, status);
 

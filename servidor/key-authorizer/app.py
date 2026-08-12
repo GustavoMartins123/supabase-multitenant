@@ -256,7 +256,7 @@ async def authorize(
                 WHERE s.project_id = $1
                   AND s.status = 'active'
                   AND k.secret_hash = $2
-                  AND k.expires_at > now()
+                  AND (k.expires_at IS NULL OR k.expires_at > now())
                   AND (
                       (
                           k.status = 'active'

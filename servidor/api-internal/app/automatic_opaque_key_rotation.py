@@ -96,7 +96,7 @@ async def scan_automatic_opaque_key_rotations() -> int:
                   AND k.status = 'pending'
                   AND k.confirmed_at IS NOT NULL
                   AND k.activate_at <= now()
-                  AND k.expires_at > now()
+                  AND (k.expires_at IS NULL OR k.expires_at > now())
                 ORDER BY k.activate_at, s.id
                 FOR UPDATE OF s, k SKIP LOCKED
                 LIMIT $1
@@ -224,6 +224,7 @@ async def scan_automatic_opaque_key_rotations() -> int:
                   AND s.automatic_rotation_blocked_at IS NULL
                   AND k.status = 'pending'
                   AND k.rotation_trigger = 'automatic'
+                  AND k.expires_at IS NOT NULL
                   AND k.expires_at <= now()
                 ORDER BY k.expires_at, s.id
                 FOR UPDATE OF s, k SKIP LOCKED
@@ -283,9 +284,11 @@ async def scan_automatic_opaque_key_rotations() -> int:
                   AND p.opaque_keys_activated_at IS NOT NULL
                   AND p.opaque_gateway_ready_at IS NOT NULL
                   AND s.automatic_rotation_enabled
+                  AND s.rotation_interval_days IS NOT NULL
                   AND s.status = 'active'
                   AND s.automatic_rotation_blocked_at IS NULL
                   AND k.status = 'active'
+                  AND k.expires_at IS NOT NULL
                   AND k.expires_at <= now()
                   AND NOT EXISTS (
                       SELECT 1 FROM project_api_keys pending
@@ -347,9 +350,11 @@ async def scan_automatic_opaque_key_rotations() -> int:
                   AND p.opaque_keys_activated_at IS NOT NULL
                   AND p.opaque_gateway_ready_at IS NOT NULL
                   AND s.automatic_rotation_enabled
+                  AND s.rotation_interval_days IS NOT NULL
                   AND s.status = 'active'
                   AND s.automatic_rotation_blocked_at IS NULL
                   AND k.status = 'active'
+                  AND k.expires_at IS NOT NULL
                   AND k.expires_at > now()
                   AND k.expires_at <= now() + make_interval(days => $1)
                   AND NOT EXISTS (

@@ -33,6 +33,12 @@ class UpdateSettingsResult {
   final String? storageLimitToken;
 }
 
+class OpaqueApiKeyExpirationPolicyUpdate {
+  const OpaqueApiKeyExpirationPolicyUpdate(this.rotationIntervalDays);
+
+  final int? rotationIntervalDays;
+}
+
 class ProjectSettingsData {
   const ProjectSettingsData({
     required this.settings,
@@ -298,7 +304,7 @@ class ProjectRepository {
     required String kind,
     required List<String> allowedServices,
     required bool automaticRotationEnabled,
-    required int rotationIntervalDays,
+    required int? rotationIntervalDays,
   }) async {
     final resp = await _client.post(
       Uri.parse('/api/projects/$ref/api-key-slots'),
@@ -340,7 +346,7 @@ class ProjectRepository {
     String ref,
     String slotId, {
     bool? automaticRotationEnabled,
-    int? rotationIntervalDays,
+    OpaqueApiKeyExpirationPolicyUpdate? expirationPolicy,
     List<String>? allowedServices,
   }) async {
     final resp = await _client.patch(
@@ -349,8 +355,8 @@ class ProjectRepository {
       body: jsonEncode({
         if (automaticRotationEnabled != null)
           'automatic_rotation_enabled': automaticRotationEnabled,
-        if (rotationIntervalDays != null)
-          'rotation_interval_days': rotationIntervalDays,
+        if (expirationPolicy != null)
+          'rotation_interval_days': expirationPolicy.rotationIntervalDays,
         if (allowedServices != null) 'allowed_services': allowedServices,
       }),
     );

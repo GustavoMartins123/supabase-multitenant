@@ -21,7 +21,7 @@ class OpaqueApiKeyVersion {
   final bool currentlyAccepted;
   final DateTime createdAt;
   final DateTime? activateAt;
-  final DateTime expiresAt;
+  final DateTime? expiresAt;
   final DateTime? activatedAt;
   final DateTime? revokedAt;
   final DateTime? lastUsedAt;
@@ -37,7 +37,7 @@ class OpaqueApiKeyVersion {
       currentlyAccepted: _requiredBool(json, 'currently_accepted'),
       createdAt: _requiredDate(json, 'created_at'),
       activateAt: _optionalDate(json, 'activate_at'),
-      expiresAt: _requiredDate(json, 'expires_at'),
+      expiresAt: _requiredNullableDate(json, 'expires_at'),
       activatedAt: _optionalDate(json, 'activated_at'),
       revokedAt: _optionalDate(json, 'revoked_at'),
       lastUsedAt: _optionalDate(json, 'last_used_at'),
@@ -70,7 +70,7 @@ class OpaqueApiKeySlot {
   final String role;
   final List<String> allowedServices;
   final bool automaticRotationEnabled;
-  final int rotationIntervalDays;
+  final int? rotationIntervalDays;
   final String status;
   final DateTime createdAt;
   final DateTime? automaticRotationBlockedAt;
@@ -91,7 +91,8 @@ class OpaqueApiKeySlot {
       allowedServices: rawServices.map((item) => item.toString()).toList(),
       automaticRotationEnabled:
           _requiredBool(json, 'automatic_rotation_enabled'),
-      rotationIntervalDays: _requiredInt(json, 'rotation_interval_days'),
+      rotationIntervalDays:
+          _requiredNullableInt(json, 'rotation_interval_days'),
       status: _requiredString(json, 'status'),
       createdAt: _requiredDate(json, 'created_at'),
       automaticRotationBlockedAt:
@@ -128,7 +129,7 @@ class IssuedOpaqueApiKey {
   final String kind;
   final String status;
   final DateTime? activateAt;
-  final DateTime expiresAt;
+  final DateTime? expiresAt;
 
   factory IssuedOpaqueApiKey.fromJson(Map<String, dynamic> json) {
     return IssuedOpaqueApiKey(
@@ -139,7 +140,7 @@ class IssuedOpaqueApiKey {
       kind: _requiredString(json, 'kind'),
       status: _requiredString(json, 'status'),
       activateAt: _optionalDate(json, 'activate_at'),
-      expiresAt: _requiredDate(json, 'expires_at'),
+      expiresAt: _requiredNullableDate(json, 'expires_at'),
     );
   }
 }
@@ -187,8 +188,12 @@ bool _requiredBool(Map<String, dynamic> json, String key) {
   return value;
 }
 
-int _requiredInt(Map<String, dynamic> json, String key) {
+int? _requiredNullableInt(Map<String, dynamic> json, String key) {
+  if (!json.containsKey(key)) {
+    throw FormatException('Campo obrigatorio ausente: $key');
+  }
   final value = json[key];
+  if (value == null) return null;
   if (value is! int) throw FormatException('Campo inteiro invalido: $key');
   return value;
 }
@@ -207,4 +212,11 @@ DateTime? _optionalDate(Map<String, dynamic> json, String key) {
   final parsed = DateTime.tryParse(value);
   if (parsed == null) throw FormatException('Data invalida: $key');
   return parsed;
+}
+
+DateTime? _requiredNullableDate(Map<String, dynamic> json, String key) {
+  if (!json.containsKey(key)) {
+    throw FormatException('Campo obrigatorio ausente: $key');
+  }
+  return _optionalDate(json, key);
 }

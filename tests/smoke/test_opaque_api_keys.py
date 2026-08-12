@@ -209,7 +209,7 @@ class OpaqueKeyContractTest(unittest.TestCase):
             "s.project_id = $1",
             "k.secret_hash = $2",
             "target_service not in key[\"allowed_services\"]",
-            "k.expires_at > now()",
+            "(k.expires_at IS NULL OR k.expires_at > now())",
             "k.confirmed_at IS NOT NULL",
         ):
             with self.subTest(contract=contract):

@@ -190,11 +190,14 @@ persistida.
 A Projects API mantém dois ciclos independentes. `key_expires_at` agenda a
 regeneração dos JWTs internos anon/service role pelo fluxo durável
 `rotate_key`. O registro opaco agenda cada slot por `project_api_keys.expires_at`
-e prepara uma versão `pending` que precisa de claim e confirmação.
+quando esse campo possui timestamp e prepara uma versão `pending` que precisa
+de claim e confirmação. `expires_at = NULL` representa um slot sem expiração
+temporal e fica fora das consultas de lead time e vencimento.
 
 Os dois scanners usam advisory lock do PostgreSQL e locks de linha para eleição
 de líder e distribuição segura entre réplicas. O scheduler opaco só processa
-projetos cujo gateway possui `opaque_gateway_ready_at`.
+projetos cujo gateway possui `opaque_gateway_ready_at`. Pending manual com
+cutover explícito continua convergindo mesmo quando a nova versão não expira.
 
 Falhas automáticas bloqueiam novas tentativas daquele projeto até intervenção
 explícita. Habilitar novamente limpa o bloqueio e solicita uma nova

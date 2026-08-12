@@ -236,6 +236,47 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
     });
   }
 
+  Future<void> _editExpirationPolicy(OpaqueApiKeySlot slot) async {
+    final selection = await showDialog<_ExpirationPolicySelection>(
+      context: context,
+      builder: (context) => _ExpirationPolicyDialog(
+        initialDays: slot.rotationIntervalDays,
+      ),
+    );
+    if (selection == null ||
+        selection.days == slot.rotationIntervalDays ||
+        !mounted) {
+      return;
+    }
+    final neverExpires = selection.days == null;
+    final confirmed = await _confirm(
+      neverExpires ? 'Remover expiração temporal?' : 'Alterar expiração?',
+      neverExpires
+          ? 'A chave ativa continuará válida até rotação, revogação ou disable '
+              'do slot. Uma rotação automática pendente ainda não efetiva '
+              'será cancelada.'
+          : 'A chave ativa passará a expirar ${selection.days} dias após esta '
+              'alteração. Uma chave já vencida não será reativada.',
+    );
+    if (!confirmed) return;
+    await _mutate(() async {
+      await ref.read(projectRepositoryProvider).updateOpaqueApiKeySlot(
+            widget.projectRef,
+            slot.id,
+            automaticRotationEnabled: neverExpires ? false : null,
+            expirationPolicy: OpaqueApiKeyExpirationPolicyUpdate(
+              selection.days,
+            ),
+          );
+      _snack(
+        neverExpires
+            ? 'A chave ativa agora não expira.'
+            : 'Expiração temporal atualizada.',
+        SupabaseColors.success,
+      );
+    });
+  }
+
   Future<void> _cancelPendingRotation(OpaqueApiKeySlot slot) async {
     final confirmed = await _confirm(
       'Cancelar rotação pendente?',
@@ -280,6 +321,17 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
               const Text(
                 'O valor completo nao sera armazenado nem mostrado novamente.',
                 style: TextStyle(color: SupabaseColors.warning),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                issued.expiresAt == null
+                    ? 'Lifetime da credencial: Não expira'
+                    : 'Lifetime da credencial: expira em '
+                        '${_date(issued.expiresAt!)}',
+                style: const TextStyle(
+                  color: SupabaseColors.textMuted,
+                  fontSize: 11,
+                ),
               ),
               const SizedBox(height: 12),
               SelectableText(
@@ -479,7 +531,8 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           ),
           const SizedBox(height: 4),
           Text(
-            '${slot.allowedServices.join(', ')} · ${slot.rotationIntervalDays} dias',
+            '${slot.allowedServices.join(', ')} · Expiração: '
+            '${_expirationLabel(slot.rotationIntervalDays)}',
             style:
                 const TextStyle(color: SupabaseColors.textMuted, fontSize: 11),
           ),
@@ -495,7 +548,8 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
                 (key) => Padding(
                   padding: const EdgeInsets.only(bottom: 4),
                   child: Text(
-                    '${key.tokenHint} · ${key.status} · expira ${_date(key.expiresAt)}'
+                    '${key.tokenHint} · ${key.status} · '
+                    '${key.expiresAt == null ? 'Não expira' : 'expira ${_date(key.expiresAt!)}'}'
                     '${key.lastUsedAt == null ? '' : ' · uso ${_date(key.lastUsedAt!)}'}',
                     style: TextStyle(
                       color: key.currentlyAccepted
@@ -522,15 +576,28 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           SwitchListTile.adaptive(
             contentPadding: EdgeInsets.zero,
             value: slot.automaticRotationEnabled,
-            onChanged:
-                _disabled ? null : (value) => _toggleAutomatic(slot, value),
+            onChanged: _disabled || slot.rotationIntervalDays == null
+                ? null
+                : (value) => _toggleAutomatic(slot, value),
             title: const Text('Rotacao automatica',
                 style: TextStyle(fontSize: 12)),
+            subtitle: slot.rotationIntervalDays == null
+                ? const Text(
+                    'Defina uma expiração temporal para habilitar.',
+                    style: TextStyle(fontSize: 11),
+                  )
+                : null,
           ),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
+              SecondaryButton(
+                label: 'Expiração: '
+                    '${_expirationLabel(slot.rotationIntervalDays)}',
+                icon: Icons.timer_outlined,
+                onPressed: _disabled ? null : () => _editExpirationPolicy(slot),
+              ),
               SecondaryButton(
                 label: 'Rotacionar agora',
                 icon: Icons.refresh_rounded,
@@ -604,7 +671,7 @@ class _CreateOpaqueSlotDialogState extends State<_CreateOpaqueSlotDialog> {
   final _selectedServices = <String>{..._services};
   String _kind = 'publishable';
   bool _automatic = true;
-  int _interval = 90;
+  int? _interval = 90;
   bool _saving = false;
   String? _error;
 
@@ -612,6 +679,18 @@ class _CreateOpaqueSlotDialogState extends State<_CreateOpaqueSlotDialog> {
   void dispose() {
     _name.dispose();
     super.dispose();
+  }
+
+  Future<void> _chooseExpirationPolicy() async {
+    final selection = await showDialog<_ExpirationPolicySelection>(
+      context: context,
+      builder: (context) => _ExpirationPolicyDialog(initialDays: _interval),
+    );
+    if (selection == null || !mounted) return;
+    setState(() {
+      _interval = selection.days;
+      if (_interval == null) _automatic = false;
+    });
   }
 
   Future<void> _submit() async {
@@ -703,21 +782,20 @@ class _CreateOpaqueSlotDialogState extends State<_CreateOpaqueSlotDialog> {
               SwitchListTile.adaptive(
                 contentPadding: EdgeInsets.zero,
                 value: _automatic,
-                onChanged: _saving
+                onChanged: _saving || _interval == null
                     ? null
                     : (value) => setState(() => _automatic = value),
                 title: const Text('Rotacao automatica'),
+                subtitle: _interval == null
+                    ? const Text(
+                        'Indisponível para chaves sem expiração temporal.',
+                      )
+                    : null,
               ),
-              DropdownButtonFormField<int>(
-                initialValue: _interval,
-                decoration: const InputDecoration(labelText: 'Intervalo'),
-                items: const [30, 60, 90, 180, 365]
-                    .map((days) => DropdownMenuItem(
-                        value: days, child: Text('$days dias')))
-                    .toList(),
-                onChanged: _saving
-                    ? null
-                    : (value) => setState(() => _interval = value!),
+              SecondaryButton(
+                label: 'Expiração da chave: ${_expirationLabel(_interval)}',
+                icon: Icons.timer_outlined,
+                onPressed: _saving ? null : _chooseExpirationPolicy,
               ),
               if (_error != null) ...[
                 const SizedBox(height: 10),
@@ -737,6 +815,137 @@ class _CreateOpaqueSlotDialogState extends State<_CreateOpaqueSlotDialog> {
           onPressed: _saving ? null : _submit,
           child: Text(_saving ? 'Criando...' : 'Criar e revelar'),
         ),
+      ],
+    );
+  }
+}
+
+class _ExpirationPolicySelection {
+  const _ExpirationPolicySelection(this.days);
+
+  final int? days;
+}
+
+String _expirationLabel(int? days) =>
+    days == null ? 'Não expira' : '$days dias';
+
+class _ExpirationPolicyDialog extends StatefulWidget {
+  const _ExpirationPolicyDialog({required this.initialDays});
+
+  final int? initialDays;
+
+  @override
+  State<_ExpirationPolicyDialog> createState() =>
+      _ExpirationPolicyDialogState();
+}
+
+class _ExpirationPolicyDialogState extends State<_ExpirationPolicyDialog> {
+  static const _presetDays = {90, 180, 365};
+  late String _choice;
+  late final TextEditingController _customDays;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final initialDays = widget.initialDays;
+    if (initialDays == null) {
+      _choice = 'never';
+    } else if (_presetDays.contains(initialDays)) {
+      _choice = initialDays.toString();
+    } else {
+      _choice = 'custom';
+    }
+    _customDays = TextEditingController(
+      text: initialDays == null || _presetDays.contains(initialDays)
+          ? ''
+          : initialDays.toString(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _customDays.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    int? days;
+    if (_choice != 'never') {
+      days = _choice == 'custom'
+          ? int.tryParse(_customDays.text)
+          : int.parse(_choice);
+      if (days == null || days < 1 || days > 3650) {
+        setState(() => _error = 'Informe um intervalo entre 1 e 3650 dias.');
+        return;
+      }
+    }
+    Navigator.pop(context, _ExpirationPolicySelection(days));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: SupabaseColors.bg200,
+      title: const Text('Expiração da chave'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'O lifetime da credencial não altera a janela curta de '
+              'revelação única nem o lifetime de JWTs e sessões.',
+              style: TextStyle(
+                color: SupabaseColors.textMuted,
+                fontSize: 11,
+              ),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _choice,
+              decoration: const InputDecoration(labelText: 'Política'),
+              items: const [
+                DropdownMenuItem(value: 'never', child: Text('Não expira')),
+                DropdownMenuItem(value: '90', child: Text('90 dias')),
+                DropdownMenuItem(value: '180', child: Text('180 dias')),
+                DropdownMenuItem(value: '365', child: Text('365 dias')),
+                DropdownMenuItem(value: 'custom', child: Text('Personalizado')),
+              ],
+              onChanged: (value) => setState(() {
+                _choice = value!;
+                _error = null;
+              }),
+            ),
+            if (_choice == 'custom') ...[
+              const SizedBox(height: 12),
+              TextField(
+                controller: _customDays,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: const InputDecoration(
+                  labelText: 'Intervalo em dias',
+                  hintText: '1 a 3650',
+                ),
+              ),
+            ],
+            if (_error != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                _error!,
+                style: const TextStyle(color: SupabaseColors.error),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        TextButton(onPressed: _submit, child: const Text('Aplicar')),
       ],
     );
   }

@@ -1,8 +1,8 @@
 # Operação de chaves de API opacas
 
-Este runbook cobre criação, migração, rotação, expiração e incidente das chaves
-`sb_publishable_*` e `sb_secret_*` gerenciadas pelo projeto. O desenho completo
-e os critérios de aceite estão na
+Este runbook cobre criação, migração, rotação, política opcional de expiração e
+incidente das chaves `sb_publishable_*` e `sb_secret_*` gerenciadas pelo
+projeto. O desenho completo e os critérios de aceite estão na
 [especificação](specs/opaque-api-keys.md).
 
 ## Regras operacionais
@@ -13,6 +13,10 @@ e os critérios de aceite estão na
   ou logs.
 - Uma chave só pode ser revelada uma vez. Copie-a diretamente para o secret
   manager do consumidor.
+- “Não expira” remove somente o vencimento temporal. Não impede rotação,
+  revogação, disable, restrição de serviços ou qualquer outro corte explícito.
+- Lifetime da credencial, TTL do reveal e lifetime de JWT/sessão são políticas
+  independentes.
 - Confirme a instalação somente depois de o valor correto estar no consumidor.
 - Não distribua `ANON_KEY_PROJETO`, `SERVICE_ROLE_KEY_PROJETO` ou
   `API_GATEWAY_TOKEN_PROJETO`; são materiais internos.
@@ -34,6 +38,18 @@ Antes de criar ou migrar chaves:
 O healthcheck interno do authorizer é `/healthz`. Ele não deve ser publicado na
 Internet.
 
+## Atualização do schema
+
+A Projects API aplica a migration
+`20260812_opaque_api_key_optional_expiration.sql` quando detecta o schema
+anterior. Ela torna `rotation_interval_days` e `project_api_keys.expires_at`
+nullable, substitui as constraints e adapta o índice de vencimento. Não executa
+`UPDATE` nas chaves: todas as linhas existentes preservam seu `expires_at`.
+
+Depois do deploy, confirme que a migration terminou antes de permitir PATCH de
+política. Falha de migration impede a inicialização canônica da Projects API;
+não altere as constraints manualmente para contornar o erro.
+
 ## Projeto novo ou duplicado
 
 Projetos novos e duplicados já nascem no modo `active`, com:
@@ -41,7 +57,10 @@ Projetos novos e duplicados já nascem no modo `active`, com:
 - `default-publishable`;
 - `default-secret`.
 
-As revelações iniciais expiram em 30 minutos.
+Os slots iniciais preservam o padrão temporizado de 90 dias com automação
+habilitada; isso evita mudar silenciosamente a política de instalações
+existentes. O admin pode selecionar **Não expira** depois da criação. As
+revelações iniciais expiram em 30 minutos em qualquer política.
 
 1. No Studio, abra as configurações do projeto e a seção de API keys.
 2. Faça claim de cada chave necessária.
@@ -131,6 +150,48 @@ Restrinja `allowed_services` ao necessário. A criação ativa a chave
 imediatamente e retorna o valor uma única vez. Perder a resposta exige rotação
 imediata; não há endpoint de recuperação do plaintext.
 
+Escolha também a expiração do slot:
+
+- **Não expira**: `rotation_interval_days = NULL`,
+  `automatic_rotation_enabled = false` e `expires_at = NULL`;
+- **90/180/365 dias ou personalizado**: a chave recebe `expires_at`; a rotação
+  automática pode permanecer ligada ou ser desligada independentemente.
+
+Desligar somente a rotação automática não remove uma expiração já definida.
+Para mudar para `never`, envie também `automatic_rotation_enabled: false` na
+mesma operação. A API rejeita automação ligada sem intervalo temporal e não
+substitui esse valor silenciosamente.
+
+## Alterar a política de expiração
+
+A alteração usa o relógio transacional do PostgreSQL, incrementa
+`api_keyset_version` e é auditada. Ela só atua sobre a versão `active` ainda
+válida; versões `revoked`/`expired` nunca são reativadas.
+
+### Temporizada para sem expiração
+
+1. confirme que não existe rotação manual pendente;
+2. no Studio, selecione **Expiração da chave → Não expira**;
+3. confirme o aviso;
+4. verifique `rotation_interval_days = NULL`,
+   `automatic_rotation_enabled = false` e `expires_at = NULL` na listagem;
+5. valide o consumidor e a auditoria.
+
+Uma preparação automática ainda não efetiva é cancelada na mesma transação.
+Pending manual, pending já efetiva ou chave ativa já vencida fazem a operação
+falhar explicitamente. Para chave vencida, execute hard rotation.
+
+### Sem expiração para temporizada
+
+1. selecione 90, 180, 365 dias ou um intervalo entre 1 e 3650;
+2. confirme a alteração; o novo `expires_at` é calculado a partir do `now()` do
+   banco;
+3. habilite rotação automática se desejar preparação no lead time;
+4. valide a data exibida, o consumidor e a auditoria.
+
+Se houver pending, conclua ou cancele esse lifecycle antes de mudar a política.
+Alterar a política não revela novamente o plaintext.
+
 ## Rotação manual
 
 ### Corte imediato
@@ -146,9 +207,13 @@ a nova entra em vigor na mesma transação, sem overlap.
 Existe indisponibilidade entre o corte e a atualização do consumidor. Essa é a
 semântica intencional de hard rotation.
 
+Em um slot sem expiração, o mesmo procedimento cria outra chave com
+`expires_at = NULL`; a chave anterior continua sendo revogada atomicamente.
+“Não expira” nunca autoriza reutilizar a versão comprometida.
+
 ### Corte programado
 
-O agendamento Ã© feito pela API interna
+O agendamento é feito pela API interna
 `POST /internal/projects/{project}/api-key-slots/{slot_id}/rotation`; o Studio
 expÃµe somente o corte imediato nesta fase.
 
@@ -184,6 +249,9 @@ original. O slot entra em estado bloqueado com um erro explícito.
 
 O opt-out pode ser feito no projeto inteiro ou no slot. Desabilitar cancela
 somente preparações automáticas pendentes e não prolonga a chave ativa.
+Slots configurados como **Não expira** não são candidatos do scheduler e não
+geram pending automático. Cutovers manuais explicitamente agendados continuam
+sendo processados.
 
 ## Incidentes
 
@@ -197,6 +265,11 @@ somente preparações automáticas pendentes e não prolonga a chave ativa.
 6. corrija a causa do vazamento antes de criar outra credencial.
 
 Não revele nem restaure a versão antiga.
+
+Para uma chave sem expiração, não espere um evento temporal: faça hard
+rotation imediatamente. Se o slot não precisar mais existir, use **Revogar
+slot**. Ambas as operações continuam sendo autoritativas sobre
+`expires_at = NULL`.
 
 ### Chave expirou sem reposição
 

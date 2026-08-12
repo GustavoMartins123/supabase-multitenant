@@ -7,6 +7,7 @@ import hashlib
 import re
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 import asyncpg
@@ -36,6 +37,10 @@ MIGRATION_REVEAL_TTL_DAYS = 7
 KEY_AUTHORIZER_ROLE = "key_authorizer"
 KEY_AUTHORIZER_PASSWORD_RE = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
 PROJECT_GATEWAY_TOKEN_RE = re.compile(r"^[a-f0-9]{64}$")
+OPTIONAL_EXPIRATION_MIGRATION = (
+    Path(__file__).with_name("migrations")
+    / "20260812_opaque_api_key_optional_expiration.sql"
+)
 
 
 class OpaqueKeyLifecycleError(ValueError):
@@ -54,7 +59,7 @@ class IssuedOpaqueKey:
     token_hint: str
     kind: OpaqueKeyKind
     status: KeyStatus
-    expires_at: dt.datetime
+    expires_at: dt.datetime | None
     activate_at: dt.datetime | None = None
 
 
@@ -83,7 +88,7 @@ async def ensure_opaque_key_schema(pool: asyncpg.Pool) -> None:
                 kind TEXT NOT NULL,
                 allowed_services TEXT[] NOT NULL,
                 automatic_rotation_enabled BOOLEAN NOT NULL,
-                rotation_interval_days INTEGER NOT NULL,
+                rotation_interval_days INTEGER,
                 status TEXT NOT NULL DEFAULT 'active',
                 automatic_rotation_blocked_at TIMESTAMPTZ,
                 automatic_rotation_last_error TEXT,
@@ -102,8 +107,15 @@ async def ensure_opaque_key_schema(pool: asyncpg.Pool) -> None:
                         'auth', 'rest', 'graphql', 'realtime', 'storage', 'functions'
                     ]::text[]
                 ),
-                CONSTRAINT project_api_key_slots_rotation_interval CHECK (
-                    rotation_interval_days BETWEEN 1 AND 3650
+                CONSTRAINT project_api_key_slots_lifecycle CHECK (
+                    (
+                        rotation_interval_days IS NULL
+                        AND automatic_rotation_enabled = false
+                    )
+                    OR (
+                        rotation_interval_days IS NOT NULL
+                        AND rotation_interval_days BETWEEN 1 AND 3650
+                    )
                 ),
                 CONSTRAINT project_api_key_slots_status CHECK (
                     status IN ('active', 'disabled')
@@ -125,7 +137,7 @@ async def ensure_opaque_key_schema(pool: asyncpg.Pool) -> None:
                 status TEXT NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 activate_at TIMESTAMPTZ,
-                expires_at TIMESTAMPTZ NOT NULL,
+                expires_at TIMESTAMPTZ,
                 activated_at TIMESTAMPTZ,
                 revoked_at TIMESTAMPTZ,
                 last_used_at TIMESTAMPTZ,
@@ -136,7 +148,9 @@ async def ensure_opaque_key_schema(pool: asyncpg.Pool) -> None:
                 CONSTRAINT project_api_keys_status CHECK (
                     status IN ('pending', 'active', 'revoked', 'expired')
                 ),
-                CONSTRAINT project_api_keys_lifetime CHECK (expires_at > created_at),
+                CONSTRAINT project_api_keys_optional_lifetime CHECK (
+                    expires_at IS NULL OR expires_at > created_at
+                ),
                 CONSTRAINT project_api_keys_rotation_trigger CHECK (
                     rotation_trigger IN ('initial', 'manual', 'automatic')
                 ),
@@ -175,8 +189,9 @@ async def ensure_opaque_key_schema(pool: asyncpg.Pool) -> None:
                 ON project_api_keys(slot_id) WHERE status = 'pending';
             CREATE INDEX IF NOT EXISTS idx_project_api_keys_lookup
                 ON project_api_keys(secret_hash) WHERE status = 'active';
-            CREATE INDEX IF NOT EXISTS idx_project_api_keys_due
-                ON project_api_keys(expires_at) WHERE status = 'active';
+            CREATE INDEX IF NOT EXISTS idx_project_api_keys_expiring_due
+                ON project_api_keys(expires_at)
+                WHERE status = 'active' AND expires_at IS NOT NULL;
             CREATE INDEX IF NOT EXISTS idx_project_api_key_slots_project
                 ON project_api_key_slots(project_id, status);
 
@@ -192,6 +207,56 @@ async def ensure_opaque_key_schema(pool: asyncpg.Pool) -> None:
             );
             """
         )
+        needs_optional_expiration_migration = await conn.fetchval(
+            """
+            SELECT
+                EXISTS (
+                    SELECT 1
+                    FROM pg_attribute
+                    WHERE attrelid = 'project_api_key_slots'::regclass
+                      AND attname = 'rotation_interval_days'
+                      AND attnotnull
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM pg_attribute
+                    WHERE attrelid = 'project_api_keys'::regclass
+                      AND attname = 'expires_at'
+                      AND attnotnull
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conrelid IN (
+                        'project_api_key_slots'::regclass,
+                        'project_api_keys'::regclass
+                    )
+                      AND conname IN (
+                        'project_api_key_slots_rotation_interval',
+                        'project_api_keys_lifetime'
+                    )
+                )
+                OR NOT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conrelid = 'project_api_key_slots'::regclass
+                      AND conname = 'project_api_key_slots_lifecycle'
+                )
+                OR NOT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conrelid = 'project_api_keys'::regclass
+                      AND conname = 'project_api_keys_optional_lifetime'
+                )
+                OR to_regclass('idx_project_api_keys_due') IS NOT NULL
+                OR to_regclass('idx_project_api_keys_expiring_due') IS NULL
+            """
+        )
+        if needs_optional_expiration_migration:
+            migration_sql = OPTIONAL_EXPIRATION_MIGRATION.read_text(
+                encoding="utf-8"
+            )
+            await conn.execute(migration_sql)
 
 
 async def ensure_key_authorizer_role(
@@ -272,6 +337,37 @@ def _validate_rotation_interval(days: int) -> int:
     return days
 
 
+def _validate_slot_lifecycle(
+    *, automatic_rotation_enabled: bool, rotation_interval_days: int | None
+) -> None:
+    if rotation_interval_days is None and automatic_rotation_enabled:
+        raise OpaqueKeyLifecycleError(
+            "automatic rotation requires a temporal expiration interval"
+        )
+
+
+def _expiration_from_policy(
+    now: dt.datetime, rotation_interval_days: int | None
+) -> dt.datetime | None:
+    if rotation_interval_days is None:
+        return None
+    return now + dt.timedelta(days=rotation_interval_days)
+
+
+def _expiration_for_policy_transition(
+    *,
+    now: dt.datetime,
+    current_expires_at: dt.datetime | None,
+    rotation_interval_days: int | None,
+) -> dt.datetime | None:
+    if current_expires_at is not None and current_expires_at <= now:
+        raise OpaqueKeyLifecycleError(
+            "an expired API key cannot be revived by a policy change; "
+            "rotate the slot immediately"
+        )
+    return _expiration_from_policy(now, rotation_interval_days)
+
+
 async def _database_now(conn: asyncpg.Connection) -> dt.datetime:
     value = await conn.fetchval("SELECT now()")
     if not isinstance(value, dt.datetime) or value.tzinfo is None:
@@ -309,7 +405,7 @@ async def _insert_key(
     slot_id: uuid.UUID,
     kind: OpaqueKeyKind,
     status: KeyStatus,
-    expires_at: dt.datetime,
+    expires_at: dt.datetime | None,
     replaces_key_id: uuid.UUID | None,
     activate_at: dt.datetime | None = None,
     retain_reveal: bool = False,
@@ -387,7 +483,7 @@ async def create_slot_with_active_key(
     allowed_services: list[str] | tuple[str, ...],
     created_by: uuid.UUID,
     automatic_rotation_enabled: bool | None = None,
-    rotation_interval_days: int = DEFAULT_ROTATION_INTERVAL_DAYS,
+    rotation_interval_days: int | None = DEFAULT_ROTATION_INTERVAL_DAYS,
     retain_reveal: bool = False,
     rotation_trigger: RotationTrigger = "manual",
     initializing_project: bool = False,
@@ -396,7 +492,11 @@ async def create_slot_with_active_key(
 
     name = normalize_slot_name(name)
     services = validate_allowed_services(allowed_services)
-    interval = _validate_rotation_interval(rotation_interval_days)
+    interval = (
+        _validate_rotation_interval(rotation_interval_days)
+        if rotation_interval_days is not None
+        else None
+    )
     project = await conn.fetchrow(
         """
         SELECT automatic_key_rotation_enabled, opaque_keys_prepared_at,
@@ -428,6 +528,10 @@ async def create_slot_with_active_key(
         if automatic_rotation_enabled is None
         else automatic_rotation_enabled
     )
+    _validate_slot_lifecycle(
+        automatic_rotation_enabled=auto_rotation,
+        rotation_interval_days=interval,
+    )
     slot_id = uuid.uuid4()
     await conn.execute(
         """
@@ -453,7 +557,7 @@ async def create_slot_with_active_key(
         slot_id=slot_id,
         kind=kind,
         status="active",
-        expires_at=now + dt.timedelta(days=interval),
+        expires_at=_expiration_from_policy(now, interval),
         replaces_key_id=None,
         retain_reveal=retain_reveal,
         rotation_trigger=rotation_trigger,
@@ -703,7 +807,10 @@ async def validate_prepared_project_opaque_keys(
             "both initial API keys must be revealed and confirmed before cutover"
         )
     now = await _database_now(conn)
-    if any(row["expires_at"] <= now for row in rows):
+    if any(
+        row["expires_at"] is not None and row["expires_at"] <= now
+        for row in rows
+    ):
         raise OpaqueKeyLifecycleError(
             "prepared migration contains an expired API key"
         )
@@ -800,11 +907,14 @@ async def activate_prepared_project_opaque_keys(
             SET status = 'active',
                 activate_at = now(),
                 activated_at = now(),
-                expires_at = now() + make_interval(days => $2)
+                expires_at = CASE
+                    WHEN $2::integer IS NULL THEN NULL
+                    ELSE now() + make_interval(days => $2::integer)
+                END
             WHERE id = $1 AND status = 'pending'
             """,
             row["key_id"],
-            int(row["rotation_interval_days"]),
+            row["rotation_interval_days"],
         )
     await conn.execute(
         """
@@ -915,7 +1025,9 @@ async def rotate_slot_immediately(
         slot_id=slot_id,
         kind=slot["kind"],
         status="active",
-        expires_at=now + dt.timedelta(days=int(slot["rotation_interval_days"])),
+        expires_at=_expiration_from_policy(
+            now, slot["rotation_interval_days"]
+        ),
         replaces_key_id=replaces_key_id,
     )
     version = await _increment_keyset_version(conn, project_id)
@@ -976,7 +1088,10 @@ async def prepare_slot_rotation(
     )
     if active is None:
         raise OpaqueKeyLifecycleError("slot has no active API key")
-    if activate_at > active["expires_at"]:
+    if (
+        active["expires_at"] is not None
+        and activate_at > active["expires_at"]
+    ):
         raise OpaqueKeyLifecycleError(
             "activate_at cannot be later than the active API key expiration"
         )
@@ -987,8 +1102,9 @@ async def prepare_slot_rotation(
         kind=slot["kind"],
         status="pending",
         activate_at=activate_at,
-        expires_at=activate_at
-        + dt.timedelta(days=int(slot["rotation_interval_days"])),
+        expires_at=_expiration_from_policy(
+            activate_at, slot["rotation_interval_days"]
+        ),
         replaces_key_id=active["id"],
         retain_reveal=retain_reveal,
         rotation_trigger=rotation_trigger,
@@ -1038,7 +1154,7 @@ async def activate_pending_key(
     now = await _database_now(conn)
     if pending["activate_at"] is None or pending["activate_at"] > now:
         raise OpaqueKeyLifecycleError("pending API key is not due for activation")
-    if pending["expires_at"] <= now:
+    if pending["expires_at"] is not None and pending["expires_at"] <= now:
         raise OpaqueKeyLifecycleError("pending API key has expired")
     revoked_id = await conn.fetchval(
         """
@@ -1116,7 +1232,7 @@ async def confirm_pending_key_installation(
             "pending API key installation is already confirmed"
         )
     now = await _database_now(conn)
-    if pending["expires_at"] <= now:
+    if pending["expires_at"] is not None and pending["expires_at"] <= now:
         raise OpaqueKeyLifecycleError("pending API key has expired")
     await conn.execute(
         "UPDATE project_api_keys SET confirmed_at = now() WHERE id = $1",
@@ -1256,9 +1372,10 @@ async def update_slot_policy(
     slot_id: uuid.UUID,
     automatic_rotation_enabled: bool | None,
     rotation_interval_days: int | None,
+    rotation_interval_days_provided: bool,
     allowed_services: list[str] | tuple[str, ...] | None,
 ) -> int:
-    """Update one slot policy and cancel only machine-created pending keys."""
+    """Update one slot policy without reviving an expired key."""
 
     slot = await conn.fetchrow(
         """
@@ -1278,15 +1395,19 @@ async def update_slot_policy(
         raise OpaqueKeyLifecycleError("active API key slot not found")
     if (
         automatic_rotation_enabled is None
-        and rotation_interval_days is None
+        and not rotation_interval_days_provided
         and allowed_services is None
     ):
         raise OpaqueKeyLifecycleError("at least one slot policy field is required")
 
     interval = (
-        _validate_rotation_interval(rotation_interval_days)
-        if rotation_interval_days is not None
-        else int(slot["rotation_interval_days"])
+        (
+            _validate_rotation_interval(rotation_interval_days)
+            if rotation_interval_days is not None
+            else None
+        )
+        if rotation_interval_days_provided
+        else slot["rotation_interval_days"]
     )
     services = (
         validate_allowed_services(allowed_services)
@@ -1297,6 +1418,10 @@ async def update_slot_policy(
         bool(automatic_rotation_enabled)
         if automatic_rotation_enabled is not None
         else bool(slot["automatic_rotation_enabled"])
+    )
+    _validate_slot_lifecycle(
+        automatic_rotation_enabled=auto_rotation,
+        rotation_interval_days=interval,
     )
 
     if automatic_rotation_enabled is False:
@@ -1325,6 +1450,57 @@ async def update_slot_policy(
                 [row["id"] for row in cancelled],
             )
 
+    if (
+        rotation_interval_days_provided
+        and interval != slot["rotation_interval_days"]
+    ):
+        pending_exists = await conn.fetchval(
+            """
+            SELECT EXISTS(
+                SELECT 1
+                FROM project_api_keys
+                WHERE slot_id = $1 AND status = 'pending'
+            )
+            """,
+            slot_id,
+        )
+        if pending_exists:
+            raise OpaqueKeyLifecycleError(
+                "expiration policy cannot change while the slot has a pending key"
+            )
+        active = await conn.fetchrow(
+            """
+            SELECT id, expires_at
+            FROM project_api_keys
+            WHERE slot_id = $1 AND status = 'active'
+            FOR UPDATE
+            """,
+            slot_id,
+        )
+        if active is None:
+            raise OpaqueKeyLifecycleError("slot has no active API key")
+        now = await _database_now(conn)
+        new_expiration = _expiration_for_policy_transition(
+            now=now,
+            current_expires_at=active["expires_at"],
+            rotation_interval_days=interval,
+        )
+        result = await conn.execute(
+            """
+            UPDATE project_api_keys
+            SET expires_at = $2
+            WHERE id = $1
+              AND status = 'active'
+              AND (expires_at IS NULL OR expires_at > now())
+            """,
+            active["id"],
+            new_expiration,
+        )
+        if result != "UPDATE 1":
+            raise OpaqueKeyLifecycleError(
+                "active API key expiration policy update conflicted"
+            )
+
     await conn.execute(
         """
         UPDATE project_api_key_slots
@@ -1332,10 +1508,12 @@ async def update_slot_policy(
             rotation_interval_days = $3,
             allowed_services = $4::text[],
             automatic_rotation_blocked_at = CASE
-                WHEN $2 THEN NULL ELSE automatic_rotation_blocked_at
+                WHEN $2 OR $3::integer IS NULL THEN NULL
+                ELSE automatic_rotation_blocked_at
             END,
             automatic_rotation_last_error = CASE
-                WHEN $2 THEN NULL ELSE automatic_rotation_last_error
+                WHEN $2 OR $3::integer IS NULL THEN NULL
+                ELSE automatic_rotation_last_error
             END,
             updated_at = now()
         WHERE id = $1
@@ -1450,12 +1628,14 @@ async def list_slots(
             k.replaces_key_id,
             k.rotation_trigger,
             CASE
-                WHEN k.status = 'pending'
+                WHEN s.status = 'active'
+                  AND k.status = 'pending'
                   AND k.activate_at <= now()
                   AND k.confirmed_at IS NOT NULL
-                  AND k.expires_at > now() THEN true
-                WHEN k.status = 'active'
-                  AND k.expires_at > now()
+                  AND (k.expires_at IS NULL OR k.expires_at > now()) THEN true
+                WHEN s.status = 'active'
+                  AND k.status = 'active'
+                  AND (k.expires_at IS NULL OR k.expires_at > now())
                   AND NOT EXISTS (
                       SELECT 1 FROM project_api_keys due
                       WHERE due.slot_id = k.slot_id
@@ -1510,7 +1690,9 @@ async def list_slots(
                 "activate_at": (
                     row["activate_at"].isoformat() if row["activate_at"] else None
                 ),
-                "expires_at": row["expires_at"].isoformat(),
+                "expires_at": (
+                    row["expires_at"].isoformat() if row["expires_at"] else None
+                ),
                 "activated_at": (
                     row["activated_at"].isoformat() if row["activated_at"] else None
                 ),

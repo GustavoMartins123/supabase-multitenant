@@ -210,7 +210,7 @@ class CreateApiKeySlot(OpaqueKeyRequest):
         default_factory=lambda: sorted(ALLOWED_SERVICES), min_length=1
     )
     automatic_rotation_enabled: bool | None = None
-    rotation_interval_days: int = Field(
+    rotation_interval_days: int | None = Field(
         default=DEFAULT_ROTATION_INTERVAL_DAYS, ge=1, le=3650
     )
 
@@ -554,7 +554,9 @@ def _issued_response(issued, keyset_version: int, *, status_code: int) -> JSONRe
             "activate_at": (
                 issued.activate_at.isoformat() if issued.activate_at else None
             ),
-            "expires_at": issued.expires_at.isoformat(),
+            "expires_at": (
+                issued.expires_at.isoformat() if issued.expires_at else None
+            ),
             "api_keyset_version": keyset_version,
             "reveal_once": True,
         },
@@ -610,6 +612,20 @@ async def create_api_key_slot(
                     automatic_rotation_enabled=body.automatic_rotation_enabled,
                     rotation_interval_days=body.rotation_interval_days,
                 )
+                created_policy = await conn.fetchrow(
+                    """
+                    SELECT automatic_rotation_enabled,
+                           rotation_interval_days,
+                           allowed_services
+                    FROM project_api_key_slots
+                    WHERE id = $1
+                    """,
+                    issued.slot_id,
+                )
+                if created_policy is None:
+                    raise OpaqueKeyLifecycleError(
+                        "created API key slot policy is unavailable"
+                    )
                 await audit_studio_action(
                     conn,
                     project_id=project["id"],
@@ -621,6 +637,15 @@ async def create_api_key_slot(
                         "key_id": str(issued.key_id),
                         "kind": issued.kind,
                         "token_hint": issued.token_hint,
+                        "automatic_rotation_enabled": created_policy[
+                            "automatic_rotation_enabled"
+                        ],
+                        "rotation_interval_days": created_policy[
+                            "rotation_interval_days"
+                        ],
+                        "allowed_services": list(
+                            created_policy["allowed_services"]
+                        ),
                         "api_keyset_version": version,
                     },
                 )
@@ -699,6 +724,10 @@ async def update_api_key_slot_policy(
 ):
     project_name = validate_project_id(project_name)
     auth_user, project = await _authorize_project_admin(request, pool, project_name)
+    changed_fields = body.model_fields_set
+    rotation_interval_days_provided = (
+        "rotation_interval_days" in changed_fields
+    )
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
@@ -715,8 +744,25 @@ async def update_api_key_slot_policy(
                     slot_id=slot_id,
                     automatic_rotation_enabled=body.automatic_rotation_enabled,
                     rotation_interval_days=body.rotation_interval_days,
+                    rotation_interval_days_provided=(
+                        rotation_interval_days_provided
+                    ),
                     allowed_services=body.allowed_services,
                 )
+                updated_policy = await conn.fetchrow(
+                    """
+                    SELECT automatic_rotation_enabled,
+                           rotation_interval_days,
+                           allowed_services
+                    FROM project_api_key_slots
+                    WHERE id = $1
+                    """,
+                    slot_id,
+                )
+                if updated_policy is None:
+                    raise OpaqueKeyLifecycleError(
+                        "updated API key slot policy is unavailable"
+                    )
                 await audit_studio_action(
                     conn,
                     project_id=project["id"],
@@ -725,11 +771,15 @@ async def update_api_key_slot_policy(
                     target_type="project_api_key_slot",
                     target_id=str(slot_id),
                     new_value={
-                        "automatic_rotation_enabled": (
-                            body.automatic_rotation_enabled
+                        "automatic_rotation_enabled": updated_policy[
+                            "automatic_rotation_enabled"
+                        ],
+                        "rotation_interval_days": updated_policy[
+                            "rotation_interval_days"
+                        ],
+                        "allowed_services": list(
+                            updated_policy["allowed_services"]
                         ),
-                        "rotation_interval_days": body.rotation_interval_days,
-                        "allowed_services": body.allowed_services,
                         "api_keyset_version": version,
                     },
                 )

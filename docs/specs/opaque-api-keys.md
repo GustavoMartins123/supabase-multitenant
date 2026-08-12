@@ -2,7 +2,7 @@
 
 Status: núcleo implementado; validação em stack Docker e fase ES256/JWKS pendentes  
 Branch: `opaque-keys`  
-Última revisão técnica: 2026-08-11
+Última revisão técnica: 2026-08-12
 
 ## 1. Objetivo
 
@@ -13,6 +13,10 @@ permitir várias credenciais independentes por projeto e separar três ciclos:
 2. a autorização interna `anon` ou `service_role`, representada por JWTs que
    ficam somente no servidor;
 3. a assinatura e a expiração dos JWTs de sessão emitidos pelo Auth.
+
+O lifetime temporal de cada slot é uma política opcional. Uma versão pode ter
+`expires_at` definido ou permanecer válida sem prazo até uma transição explícita
+de lifecycle.
 
 Depois do corte de um projeto, seu gateway opera somente no modo opaco. JWTs
 legados enviados como `apikey` não são aceitos como caminho alternativo.
@@ -66,8 +70,9 @@ colunas necessárias e `UPDATE` somente em `last_used_at`.
 - Falha do authorizer, do banco, do token exclusivo do gateway ou da tradução
   bloqueia a requisição.
 - Uma chave fora do formato canônico é rejeitada antes do lookup.
-- Expiração é aplicada pelo relógio do PostgreSQL no caminho de autorização;
-  não depende de o scheduler já ter atualizado o status persistido.
+- Expiração temporal, quando configurada, é aplicada pelo relógio do PostgreSQL
+  no caminho de autorização; não depende de o scheduler já ter atualizado o
+  status persistido.
 - Uma chave antiga nunca é prorrogada automaticamente.
 - Depois de um `activate_at` confirmado, a chave antiga nunca volta a ser
   aceita, mesmo se a pendente expirar antes de o scheduler persistir o corte.
@@ -122,13 +127,20 @@ Tabela `project_api_key_slots`:
 | `kind` | `publishable` ou `secret` |
 | `allowed_services` | lista canônica, não vazia e sem duplicatas na API |
 | `automatic_rotation_enabled` | herda a opção do projeto na criação |
-| `rotation_interval_days` | entre 1 e 3650; padrão 90 |
+| `rotation_interval_days` | `NULL` para não expirar ou entre 1 e 3650; padrão 90 |
 | `status` | `active` ou `disabled` |
 | campos de bloqueio | falha automática explícita que exige intervenção |
 | `created_by` e timestamps | rastreabilidade |
 
 Há no máximo uma versão persistida como `active` e uma como `pending` por
 slot. Slots diferentes são identidades diferentes e podem coexistir.
+
+O contrato canônico usa o campo já existente como política: `NULL` significa
+`never` e um inteiro significa lifetime temporizado. Não há enum redundante.
+`automatic_rotation_enabled = true` exige um intervalo; intervalo definido com
+automação desligada é válido e significa “expira sem reposição automática”.
+Ao mudar de temporizado para `never`, o cliente deve enviar explicitamente os
+dois campos; a API não substitui silenciosamente `true` por `false`.
 
 ### 5.2 Versão de chave
 
@@ -142,7 +154,7 @@ Tabela `project_api_keys`:
 | `token_hint` | identificação visual não autenticadora |
 | `status` | `pending`, `active`, `revoked` ou `expired` |
 | `activate_at` | instante programado do corte |
-| `expires_at` | limite absoluto, sempre verificado no data plane |
+| `expires_at` | `NULL` para ausência de expiração temporal ou limite absoluto verificado no data plane |
 | `activated_at`, `revoked_at` | timestamps de transição |
 | `revealed_at`, `confirmed_at` | entrega e confirmação do consumidor |
 | `last_used_at` | telemetria amostrada em cinco minutos |
@@ -150,9 +162,10 @@ Tabela `project_api_keys`:
 | `rotation_trigger` | `initial`, `manual` ou `automatic` |
 
 `status` representa o estado persistido; `currently_accepted` é calculado com
-estado, confirmação, `activate_at`, `expires_at` e a existência de uma nova
-versão efetiva. Assim, uma linha ainda persistida como `active` nunca é aceita
-depois de `expires_at`.
+estado do slot e da versão, confirmação, `activate_at`, `expires_at` e a
+existência de uma nova versão efetiva. Uma linha ainda persistida como `active`
+nunca é aceita depois de um `expires_at` definido. `expires_at = NULL` remove
+somente esse evento temporal; revogação, disable e cutover continuam valendo.
 
 ### 5.3 Revelação de uso único
 
@@ -166,6 +179,10 @@ Prazos atuais:
 - 30 minutos para chaves iniciais de projetos novos;
 - 7 dias para as duas chaves de migração;
 - até `activate_at` para uma preparação automática.
+
+O TTL dessa revelação é independente de `project_api_keys.expires_at`. Uma
+credencial sem expiração temporal continua tendo uma janela curta e única para
+obtenção do plaintext.
 
 ### 5.4 Estado do projeto
 
@@ -267,30 +284,62 @@ DELETE /api/projects/{project}/opaque-api-keys/migration
 Não existem aliases legados. Listagens retornam metadados; criação, rotação
 imediata e claim são as únicas respostas que podem conter plaintext.
 
+A política de lifetime usa uma única representação nullable:
+
+```json
+{
+  "automatic_rotation_enabled": false,
+  "rotation_interval_days": null
+}
+```
+
+Esse estado significa “não expira”. Um inteiro de 1 a 3650 representa uma
+política temporizada; `automatic_rotation_enabled` pode ser `true` ou `false`
+nesse caso. `true` com intervalo `null` é rejeitado pela API e pelo banco.
+Respostas serializam `expires_at: null` sem data sentinela. Até o limite de
+3650 dias continua sendo um vencimento real, nunca um alias para `never`.
+
 ## 9. Lifecycle e expiração
 
 Todas as decisões temporais do lifecycle usam `now()` transacional do
 PostgreSQL, a mesma fonte usada pelo authorizer. O relógio do processo não
 antecipa nem posterga cutover.
 
+Há dois modos:
+
+- `rotation_interval_days` inteiro: cada nova versão recebe `expires_at`; a
+  versão deixa de ser aceita nesse instante;
+- `rotation_interval_days = NULL`: cada nova versão recebe
+  `expires_at = NULL` e continua válida até rotação, revogação, disable ou
+  outro corte explícito.
+
+Alterar a política atualiza atomicamente somente uma chave ativa ainda válida.
+Uma mudança para intervalo conta o novo lifetime a partir do `now()` do banco.
+Chave temporalmente vencida não pode ser ressuscitada por PATCH: exige hard
+rotation. Mudança de lifetime com pending manual ou já efetiva é rejeitada; ao
+mudar para `never` com opt-out simultâneo, uma preparação automática ainda não
+efetiva é cancelada na mesma transação.
+
 ### 9.1 Criação e rotação imediata
 
 Uma transação bloqueia projeto e slot, revoga a versão ativa, cria a nova
-versão ativa, incrementa `api_keyset_version` e grava auditoria. Não há
-sobreposição. Se a resposta com o segredo for perdida, a recuperação é outra
-rotação explícita.
+versão ativa com a política de lifetime atual, incrementa
+`api_keyset_version` e grava auditoria. Não há sobreposição. Se a resposta com
+o segredo for perdida, a recuperação é outra rotação explícita.
 
 ### 9.2 Rotação programada
 
-1. cria uma versão `pending` com `activate_at` e expiração própria;
+1. cria uma versão `pending` com `activate_at` e a política de lifetime do slot;
 2. revela o token uma vez;
 3. o operador instala no consumidor e confirma o key ID;
 4. a partir de `activate_at`, o authorizer aceita a pendente confirmada e deixa
    de aceitar a anterior, mesmo antes de o scheduler persistir a transição;
 5. o scheduler converte a pendente para `active`, revoga a anterior e audita.
 
-Sem confirmação, a pendente não é aceita. A chave anterior continua somente
-até seu `expires_at` original e nunca é prorrogada.
+Sem confirmação, a pendente não é aceita. Em slot temporizado, a chave anterior
+continua somente até seu `expires_at` original e nunca é prorrogada. Em slot
+sem expiração, uma preparação manual não confirmada também não corta a chave
+anterior; o operador precisa confirmar, cancelar ou executar hard rotation.
 Uma pendente confirmada não pode ser cancelada depois de `activate_at`; o corte
 lógico é monotônico e precisa convergir para a persistência de `active`.
 Uma rotação imediata explícita pode substituí-la de forma atômica, inclusive se
@@ -299,6 +348,9 @@ ela já expirou, sem reabilitar a chave anterior.
 ### 9.3 Rotação automática
 
 - A opção do projeto nasce `true` e cada slot herda esse valor.
+- Somente slots temporizados podem habilitar rotação automática. Slots com
+  `rotation_interval_days = NULL` não entram nas consultas de expiração, lead
+  time ou preparação automática.
 - O scheduler usa advisory lock e `FOR UPDATE SKIP LOCKED`.
 - No lead time, prepara uma pendente com `activate_at` exatamente igual à
   expiração da ativa.
@@ -309,6 +361,9 @@ ela já expirou, sem reabilitar a chave anterior.
 - Desabilitar a opção do projeto ou do slot cancela apenas preparações
   automáticas anteriores a `activate_at`; não altera chaves ativas, um corte já
   efetivo ou rotações manuais.
+- Transformar explicitamente a política do slot para `NULL` é uma operação
+  distinta do opt-out: além de desligar a automação, remove o `expires_at` da
+  chave ativa ainda válida.
 
 ### 9.4 Relação com JWTs
 
@@ -321,6 +376,10 @@ JWTs de sessão dos usuários continuam expirando segundo a política do Auth.
 Isso é desejado e não é resolvido por API keys. Enquanto a sessão estiver
 válida, o refresh token emite um novo access JWT; uma API key não pode renovar
 nem prolongar uma sessão.
+
+Portanto, três TTLs não devem ser confundidos: lifetime da API key opaca,
+janela de reveal do plaintext e lifetime de JWT/sessão. Alterar qualquer um
+deles não modifica os outros dois.
 
 A futura fase ES256/JWKS trata assinatura e rotação de signing keys, não a
 validade de cada sessão. Seu protocolo terá estados explícitos `standby`,
@@ -462,6 +521,9 @@ com rotação própria até uma migração coordenada completa.
 | `OK-FUN-006` | lifecycle preserva a identidade do gateway | coberto por contratos; E2E pendente |
 | `OK-FUN-007` | novos projetos herdam automação habilitada | implementado |
 | `OK-FUN-008` | opt-out impede novas preparações sem alterar ativa | implementado |
+| `OK-FUN-009` | chave ativa com `expires_at = NULL` é aceita até transição explícita | implementado |
+| `OK-FUN-010` | scheduler ignora lifetime `never` e mantém slots temporizados | implementado |
+| `OK-FUN-011` | mudança de política não ressuscita versão vencida ou revogada | implementado |
 
 ## 13. Decisões adiadas
 
