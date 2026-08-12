@@ -190,10 +190,10 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
         reject_unknown({"tenant_uuid", "recover_stale", "stale_tenant_uuids"})
         if not is_valid_uuid(args.get("tenant_uuid")):
             errors.append("invalid_tenant_uuid")
-        recover_stale = args.get("recover_stale", False)
+        recover_stale = args.get("recover_stale")
         if not isinstance(recover_stale, bool):
             errors.append("invalid_recover_stale")
-        stale_tenant_uuids = args.get("stale_tenant_uuids", [])
+        stale_tenant_uuids = args.get("stale_tenant_uuids")
         if (
             not isinstance(stale_tenant_uuids, list)
             or len(stale_tenant_uuids) > 20

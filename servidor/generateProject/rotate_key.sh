@@ -82,48 +82,64 @@ set +a
 PROJECT_ID="${1:-}"
 
 [[ -z "$PROJECT_ID" ]] && die "Uso: $0 <project_id>"
+[[ "$PROJECT_ID" =~ ^[a-z_][a-z0-9_]{2,39}$ ]] \
+  || die "PROJECT_ID invalido"
 
 PROJECT_DIR="$PROJECT_ROOT/projects/$PROJECT_ID"
 [[ -d "$PROJECT_DIR" ]] || die "Projeto '$PROJECT_ID' não encontrado em $PROJECT_DIR"
+for command in docker openssl sed grep; do
+  command -v "$command" >/dev/null || die "Comando obrigatorio ausente: $command"
+done
+for template in nginxtemplate Dockerfile dockercomposetemplate .dockerignore; do
+  [[ -f "$SCRIPT_DIR/$template" ]] || die "Template ausente: $template"
+done
+for file in .env "nginx/nginx_${PROJECT_ID}.conf" Dockerfile docker-compose.yml .dockerignore; do
+  [[ -f "$PROJECT_DIR/$file" ]] || die "Arquivo do projeto ausente: $file"
+done
 
 get_env_value() {
   local key="$1"
   local file="$2"
-  local count
-  count="$(grep -c "^${key}=" "$file" || true)"
-  [[ "$count" == "1" ]] || die "$key deve existir exatamente uma vez em $file"
-  sed -n "s/^${key}=//p" "$file"
+  local assignment_count canonical_count value
+  assignment_count="$(grep -Ec "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" "$file" || true)"
+  canonical_count="$(grep -c "^${key}=" "$file" || true)"
+  [[ "$assignment_count" == "1" && "$canonical_count" == "1" ]] \
+    || die "$key deve ter exatamente uma atribuicao canonica em $file"
+  value="$(sed -n "s/^${key}=//p" "$file")"
+  [[ "$value" != *$'\r'* && -n "$value" && "$value" == "${value# }" && "$value" == "${value% }" ]] \
+    || die "$key possui valor nao canonico em $file"
+  printf '%s' "$value"
 }
 
-upsert_env_value() {
+replace_env_value() {
   local key="$1"
   local value="$2"
   local file="$3"
   local escaped_value
-  local count
   escaped_value=$(escape_sed_replacement "$value")
-  count="$(grep -c "^${key}=" "$file" || true)"
-  [[ "$count" -le 1 ]] || die "$key esta duplicada em $file"
-
-  if [[ "$count" == "1" ]]; then
-    sed -i "s|^${key}=.*|${key}=${escaped_value}|" "$file"
-  else
-    printf '\n%s=%s\n' "$key" "$value" >> "$file"
-  fi
+  get_env_value "$key" "$file" >/dev/null
+  sed -i "s|^${key}=.*|${key}=${escaped_value}|" "$file"
 }
 
 CONFIG_TOKEN=$(get_env_value "CONFIG_TOKEN_PROJETO" "$PROJECT_DIR/.env")
 JWT_SECRET_PROJETO=$(get_env_value "JWT_SECRET_PROJETO" "$PROJECT_DIR/.env")
 PROJECT_UUID=$(get_env_value "PROJECT_UUID" "$PROJECT_DIR/.env")
 API_GATEWAY_TOKEN_PROJETO=$(get_env_value "API_GATEWAY_TOKEN_PROJETO" "$PROJECT_DIR/.env")
+CURRENT_ANON=$(get_env_value "ANON_KEY_PROJETO" "$PROJECT_DIR/.env")
+CURRENT_SERVICE=$(get_env_value "SERVICE_ROLE_KEY_PROJETO" "$PROJECT_DIR/.env")
 
-[[ -z "$CONFIG_TOKEN" ]] && die "CONFIG_TOKEN_PROJETO não encontrado no .env do projeto"
-[[ -z "$JWT_SECRET_PROJETO" ]]  && die "JWT_SECRET_PROJETO não encontrado no .env do projeto"
-
-[[ -z "$PROJECT_UUID" ]] && die "PROJECT_UUID não encontrado no .env do projeto"
-
+[[ "$CONFIG_TOKEN" =~ ^[a-f0-9]{64}$ ]] \
+  || die "CONFIG_TOKEN_PROJETO invalido"
+[[ "$JWT_SECRET_PROJETO" =~ ^[A-Za-z0-9_-]{43}=?$ ]] \
+  || die "JWT_SECRET_PROJETO invalido"
+[[ "$PROJECT_UUID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] \
+  || die "PROJECT_UUID invalido"
 [[ "$API_GATEWAY_TOKEN_PROJETO" =~ ^[a-f0-9]{64}$ ]] \
   || die "API_GATEWAY_TOKEN_PROJETO ausente ou invalido"
+[[ "$CURRENT_ANON" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]] \
+  || die "ANON_KEY_PROJETO atual invalida"
+[[ "$CURRENT_SERVICE" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]] \
+  || die "SERVICE_ROLE_KEY_PROJETO atual invalida"
 
 generate_jwt() {
   local payload="$1" secret="$2"
@@ -214,8 +230,8 @@ template_to_file "$SCRIPT_DIR/.dockerignore" "$PROJECT_DIR/.dockerignore"
 chmod 600 "$PROJECT_DIR/.env"
 chmod 644 "$PROJECT_DIR/nginx/nginx_${PROJECT_ID}.conf" "$PROJECT_DIR/.dockerignore"
 
-upsert_env_value "ANON_KEY_PROJETO" "$NEW_ANON" "$PROJECT_DIR/.env"
-upsert_env_value "SERVICE_ROLE_KEY_PROJETO" "$NEW_SERVICE" "$PROJECT_DIR/.env"
+replace_env_value "ANON_KEY_PROJETO" "$NEW_ANON" "$PROJECT_DIR/.env"
+replace_env_value "SERVICE_ROLE_KEY_PROJETO" "$NEW_SERVICE" "$PROJECT_DIR/.env"
 
 cd "$PROJECT_DIR"
 docker compose -p "$PROJECT_ID" \

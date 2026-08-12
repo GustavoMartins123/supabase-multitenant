@@ -25,11 +25,14 @@ log:
 
 accessLog:
   filePath: "/var/log/traefik/access.log"
+  format: json
   bufferingSize: 100
   fields:
     defaultMode: keep
     names:
       ClientUsername: drop
       StartUTC: drop
+    queryParameters:
+      defaultMode: drop
   filters:
     statusCodes: ["400-599"]

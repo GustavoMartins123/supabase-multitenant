@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .envfile import read_canonical_env_value, read_env_file
+from .envfile import read_canonical_env_value
 from .security import ensure_inside
 
 
@@ -30,17 +30,23 @@ def _render_template(template_path: Path, output_path: Path, replacements: dict[
     content = template_path.read_text(encoding="utf-8")
     for key, value in replacements.items():
         content = content.replace(f"{{{{{key}}}}}", value)
+    unresolved = sorted(set(re.findall(r"\{\{[a-z0-9_]+\}\}", content)))
+    if unresolved:
+        raise RuntimeError(
+            f"Template {template_path.name} possui placeholders sem valor: "
+            + ", ".join(unresolved)
+        )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(content, encoding="utf-8")
 
 
 def _build_replacements(root: Path, project_dir: Path, project: str) -> dict[str, str]:
-    root_env = read_env_file(root / ".env")
-    if not root_env:
-        raise RuntimeError("Arquivo .env raiz nao encontrado")
-    server_url = root_env.get("SERVER_URL", "").strip()
-    server_proto = root_env.get("SERVER_PROTO", "").strip()
-    host_project_root = root_env.get("HOST_PROJECT_ROOT", "").strip()
+    root_env_path = root / ".env"
+    server_url = read_canonical_env_value(root_env_path, "SERVER_URL")
+    server_proto = read_canonical_env_value(root_env_path, "SERVER_PROTO")
+    host_project_root = read_canonical_env_value(
+        root_env_path, "HOST_PROJECT_ROOT"
+    )
     if not server_url:
         raise RuntimeError("SERVER_URL ausente no .env raiz")
     if not host_project_root:
@@ -69,6 +75,27 @@ def _build_replacements(root: Path, project_dir: Path, project: str) -> dict[str
         for key, value in raw_project_env.items()
         if value is not None
     }
+    if not re.fullmatch(
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+        r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+        project_env["PROJECT_UUID"],
+    ):
+        raise RuntimeError("PROJECT_UUID invalido no .env do projeto")
+    if not re.fullmatch(r"[a-f0-9]{64}", project_env["CONFIG_TOKEN_PROJETO"]):
+        raise RuntimeError("CONFIG_TOKEN_PROJETO invalido no .env do projeto")
+    if not re.fullmatch(
+        r"[a-f0-9]{64}", project_env["API_GATEWAY_TOKEN_PROJETO"]
+    ):
+        raise RuntimeError("API_GATEWAY_TOKEN_PROJETO invalido no .env do projeto")
+    if not re.fullmatch(
+        r"[A-Za-z0-9_-]{43}=?", project_env["JWT_SECRET_PROJETO"]
+    ):
+        raise RuntimeError("JWT_SECRET_PROJETO invalido no .env do projeto")
+    jwt_re = re.compile(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
+    if not jwt_re.fullmatch(project_env["ANON_KEY_PROJETO"]):
+        raise RuntimeError("ANON_KEY_PROJETO invalida no .env do projeto")
+    if not jwt_re.fullmatch(project_env["SERVICE_ROLE_KEY_PROJETO"]):
+        raise RuntimeError("SERVICE_ROLE_KEY_PROJETO invalida no .env do projeto")
 
     public_base_url = _normalize_public_base_url(server_url, server_proto)
     project_public_url = f"{public_base_url}/{project}"

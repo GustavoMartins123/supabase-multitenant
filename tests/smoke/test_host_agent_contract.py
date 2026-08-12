@@ -285,7 +285,11 @@ class ClosedCommandSetTest(unittest.TestCase):
         cases = [
             ("start_project", "meuprojeto", {}),
             ("recreate_services", "meuprojeto", {"services": ["auth", "nginx"]}),
-            ("create_project", "meuprojeto", {"tenant_uuid": tenant_uuid}),
+            ("create_project", "meuprojeto", {
+                "tenant_uuid": tenant_uuid,
+                "recover_stale": False,
+                "stale_tenant_uuids": [],
+            }),
             ("create_project", "meuprojeto", {
                 "tenant_uuid": tenant_uuid,
                 "recover_stale": True,

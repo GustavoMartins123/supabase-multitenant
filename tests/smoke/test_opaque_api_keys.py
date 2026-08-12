@@ -163,6 +163,9 @@ class OpaqueKeyContractTest(unittest.TestCase):
         cls.compose = (
             ROOT / "servidor" / "docker-compose-api.yml"
         ).read_text(encoding="utf-8")
+        cls.traefik = (
+            ROOT / "servidor" / "traefik" / "traefik.yml"
+        ).read_text(encoding="utf-8")
         cls.scheduler = (
             API_ROOT / "app" / "automatic_opaque_key_rotation.py"
         ).read_text(encoding="utf-8")
@@ -190,6 +193,9 @@ class OpaqueKeyContractTest(unittest.TestCase):
         self.assertIn('/{project_name}/api-key-slots/{slot_id}/activation"', self.router)
         self.assertIn('/{project_name}/api-key-reveals/{key_id}/claim"', self.router)
         self.assertIn('"Cache-Control": "no-store, max-age=0"', self.router)
+        self.assertIn('extra = "forbid"', self.router)
+        self.assertIn("host-agent omitted error_code", self.router)
+        self.assertNotIn('command["message"]\n                or', self.router)
         self.assertNotIn("/legacy-api-key", self.router.lower())
 
     def test_schema_and_router_are_registered_at_startup(self) -> None:
@@ -219,6 +225,19 @@ class OpaqueKeyContractTest(unittest.TestCase):
             due_clause = source[due_start : due_start + 500]
             self.assertIn("due.confirmed_at IS NOT NULL", due_clause)
             self.assertNotIn("due.expires_at > now()", due_clause)
+        self.assertIn(
+            "an effective pending API key cannot be cancelled", self.service
+        )
+        self.assertIn(
+            "effective pending API key replacement conflicted", self.service
+        )
+        self.assertIn(
+            "activate_at cannot be later than the active API key expiration",
+            self.service,
+        )
+        self.assertIn('await conn.fetchval("SELECT now()")', self.service)
+        self.assertNotIn("_utcnow", self.service)
+        self.assertGreaterEqual(self.service.count("activate_at <= now()"), 3)
 
     def test_nginx_uses_fail_closed_auth_subrequests_for_protected_services(self) -> None:
         self.assertIn("internal;", self.nginx)
@@ -247,6 +266,9 @@ class OpaqueKeyContractTest(unittest.TestCase):
             "proxy_set_header Authorization $opaque_upstream_authorization;",
             self.nginx[realtime_start:realtime_end],
         )
+        self.assertIn("access_log off;", self.nginx[realtime_start:realtime_end])
+        self.assertIn("queryParameters:", self.traefik)
+        self.assertIn("defaultMode: drop", self.traefik)
         for public_auth_path in ("verify", "callback", "authorize"):
             self.assertIn(
                 f"location = /auth/v1/{public_auth_path} {{",
@@ -293,6 +315,9 @@ class OpaqueKeyContractTest(unittest.TestCase):
         self.assertIn(
             "DELETE FROM project_api_key_reveals WHERE expires_at <= now()",
             self.scheduler,
+        )
+        self.assertGreaterEqual(
+            self.scheduler.count("k.rotation_trigger = 'automatic'"), 2
         )
 
     def test_host_agent_protocol_copies_are_identical(self) -> None:

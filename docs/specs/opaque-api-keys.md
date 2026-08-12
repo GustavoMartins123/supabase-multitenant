@@ -45,8 +45,11 @@ colunas necessárias e `UPDATE` somente em `last_used_at`.
 - [Supabase — Understanding API keys](https://supabase.com/docs/guides/getting-started/api-keys): separa a identidade da aplicação da autenticação do usuário e recomenda uma secret key por componente.
 - [Supabase self-hosted — New API Keys and Asymmetric Authentication](https://supabase.com/docs/guides/self-hosting/self-hosted-auth-keys): documenta a limitação de uma chave por papel, a tradução para JWT interno e o fluxo do Realtime.
 - [Supabase self-hosted — Envoy API Gateway](https://supabase.com/docs/guides/self-hosting/self-hosted-envoy): referência atual das rotas, da tradução e do `x-api-key` do Realtime.
+- [Supabase — User sessions](https://supabase.com/docs/guides/auth/sessions): access JWT curto, refresh token e política de expiração de sessão.
+- [Supabase — JWT Signing Keys](https://supabase.com/docs/guides/auth/signing-keys): estados de chave, JWKS e rotação sem encerrar sessões cujos JWTs ainda são válidos.
 - [Nginx `auth_request`](https://nginx.org/en/docs/http/ngx_http_auth_request_module.html): autorização por subrequest; somente 2xx libera a requisição.
 - [Nginx njs request reference](https://nginx.org/en/docs/njs/reference.html): documenta que `$arg_*` retorna o primeiro argumento, ignora caixa e não faz percent-decoding; o authorizer compensa essas ambiguidades usando também `$args` bruto.
+- [Traefik access logs](https://doc.traefik.io/traefik/reference/install-configuration/observability/logs-and-accesslogs/): permite remover query parameters dos logs; necessário porque o WebSocket do Realtime leva `apikey` na URL.
 - [OWASP Secrets Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html): geração, privilégio mínimo, automação, auditoria, rotação, revogação e expiração.
 - [AWS Secrets Manager rotation functions](https://docs.aws.amazon.com/secretsmanager/latest/userguide/rotate-secrets_lambda-functions.html): referência para preparar, instalar, testar e concluir uma rotação.
 - [JWT Best Current Practices — RFC 8725](https://datatracker.ietf.org/doc/rfc8725): base para a futura migração de assinatura.
@@ -96,6 +99,9 @@ colunas necessárias e `UPDATE` somente em `last_used_at`.
 - Respostas com plaintext usam `Cache-Control: no-store`.
 - Auditoria e notificações registram UUID, slot, ação e `token_hint`; nunca
   token, hash ou JWT interno.
+- O Nginx não produz access log da rota WebSocket e o Traefik remove todos os
+  query parameters de seus access logs, porque o Realtime transporta a chave
+  na URL de upgrade.
 - O token exclusivo de cada gateway é armazenado no `.env` do projeto e o
   control plane persiste apenas seu hash.
 
@@ -263,6 +269,10 @@ imediata e claim são as únicas respostas que podem conter plaintext.
 
 ## 9. Lifecycle e expiração
 
+Todas as decisões temporais do lifecycle usam `now()` transacional do
+PostgreSQL, a mesma fonte usada pelo authorizer. O relógio do processo não
+antecipa nem posterga cutover.
+
 ### 9.1 Criação e rotação imediata
 
 Uma transação bloqueia projeto e slot, revoga a versão ativa, cria a nova
@@ -281,6 +291,10 @@ rotação explícita.
 
 Sem confirmação, a pendente não é aceita. A chave anterior continua somente
 até seu `expires_at` original e nunca é prorrogada.
+Uma pendente confirmada não pode ser cancelada depois de `activate_at`; o corte
+lógico é monotônico e precisa convergir para a persistência de `active`.
+Uma rotação imediata explícita pode substituí-la de forma atômica, inclusive se
+ela já expirou, sem reabilitar a chave anterior.
 
 ### 9.3 Rotação automática
 
@@ -293,7 +307,8 @@ até seu `expires_at` original e nunca é prorrogada.
 - Sem confirmação ou reposição, o slot falha fechado e fica bloqueado com
   erro auditável.
 - Desabilitar a opção do projeto ou do slot cancela apenas preparações
-  automáticas ainda pendentes; não altera chaves ativas ou rotações manuais.
+  automáticas anteriores a `activate_at`; não altera chaves ativas, um corte já
+  efetivo ou rotações manuais.
 
 ### 9.4 Relação com JWTs
 
@@ -303,8 +318,17 @@ Esta entrega resolve o acoplamento público: uma API key opaca não possui JWT
 mas são segredos operacionais do gateway.
 
 JWTs de sessão dos usuários continuam expirando segundo a política do Auth.
-Isso é desejado e não é resolvido por API keys. A futura fase ES256/JWKS trata
-assinatura e rotação de signing keys, não a validade de cada sessão.
+Isso é desejado e não é resolvido por API keys. Enquanto a sessão estiver
+válida, o refresh token emite um novo access JWT; uma API key não pode renovar
+nem prolongar uma sessão.
+
+A futura fase ES256/JWKS trata assinatura e rotação de signing keys, não a
+validade de cada sessão. Seu protocolo terá estados explícitos `standby`,
+`in_use`, `previously_used` e `revoked`: Auth passa a assinar com a nova chave,
+enquanto a pública anterior permanece verificável somente até vencer o maior
+TTL de access JWT já emitido, acrescido da margem de propagação de JWKS. Uma
+revogação emergencial ignora essa janela e encerra deliberadamente os JWTs
+afetados.
 
 ## 10. Provisionamento e migração
 
@@ -385,7 +409,10 @@ transação. Depois desse marco, abort é rejeitado.
 - [ ] Auth assina ES256 com `kid` canônico;
 - [ ] PostgREST, Realtime e Storage recebem JWKS pública;
 - [ ] tokens internos ES256;
-- [ ] rotação e revogação separadas;
+- [ ] estados `standby`, `in_use`, `previously_used` e `revoked`;
+- [ ] retenção da chave anterior limitada ao maior TTL emitido mais a margem
+  de propagação de JWKS;
+- [ ] rotação normal e revogação emergencial separadas;
 - [ ] testes de sessões durante o cryptoperiod.
 
 Esta fase não tem implementação parcial nesta branch. HS256 continua interno e

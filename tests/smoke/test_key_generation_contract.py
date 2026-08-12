@@ -95,11 +95,10 @@ class KeyGenerationContractTest(unittest.TestCase):
 
     def test_rotation_fails_closed_and_never_prints_generated_keys(self):
         rotation = (GENERATE / "rotate_key.sh").read_text(encoding="utf-8")
-        self.assertIn(
-            '[[ -z "$PROJECT_UUID" ]] && die "PROJECT_UUID não encontrado',
-            rotation,
-        )
+        self.assertIn('[[ "$PROJECT_UUID" =~ ^[0-9a-fA-F]{8}', rotation)
         self.assertNotIn("usando PROJECT_ID como fallback", rotation)
+        self.assertNotIn("upsert_env_value", rotation)
+        self.assertIn('replace_env_value "ANON_KEY_PROJETO"', rotation)
         self.assertNotIn('echo "ANON_KEY_PROJETO=$NEW_ANON"', rotation)
         self.assertNotIn('echo "SERVICE_ROLE_KEY_PROJETO=$NEW_SERVICE"', rotation)
         self.assertIn(r'\"jti\":\"$anon_jti\"', rotation)

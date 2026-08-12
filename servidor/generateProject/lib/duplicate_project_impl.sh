@@ -216,8 +216,7 @@ chmod 600 "$OUT_DIR/.env"
 chmod 644 "$OUT_DIR/nginx/nginx_${NEW_PROJECT}.conf" "$OUT_DIR/.dockerignore"
 
 realtime_tables=$(docker exec supabase-db psql -U supabase_admin -d "$ORIGINAL_DB" -tAc \
-  "SELECT string_agg(format('%I.%I', schemaname, tablename), ',') FROM pg_publication_tables WHERE pubname = 'supabase_realtime';" \
-  2>/dev/null || true)
+  "SELECT string_agg(format('%I.%I', schemaname, tablename), ',') FROM pg_publication_tables WHERE pubname = 'supabase_realtime';")
 
 docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
   "CREATE DATABASE $NEW_DB;"
@@ -235,17 +234,19 @@ else
   docker exec supabase-db pg_dump -U supabase_admin -d "$ORIGINAL_DB" \
     --exclude-schema=auth --exclude-schema=storage --exclude-schema=realtime --schema-only >> "$DUMP_FILE"
   docker exec supabase-db pg_dump -U supabase_admin -d "$ORIGINAL_DB" --data-only \
-    -t 'auth.schema_migrations' -t 'storage.migrations' >> "$DUMP_FILE" || true
+    -t 'auth.schema_migrations' -t 'storage.migrations' >> "$DUMP_FILE"
 fi
 
 docker exec supabase-db pg_dump -U supabase_admin -d "$ORIGINAL_DB" \
-  --schema=realtime --schema-only > "$RT_STRUCTURE_FILE" || true
+  --schema=realtime --schema-only > "$RT_STRUCTURE_FILE"
 docker exec supabase-db pg_dump -U supabase_admin -d "$ORIGINAL_DB" --data-only \
-  -t 'realtime.schema_migrations' > "$RT_MIGRATIONS_FILE" 2>/dev/null || true
+  -t 'realtime.schema_migrations' > "$RT_MIGRATIONS_FILE"
 
 docker exec -i supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$NEW_DB" < "$DUMP_FILE"
-[[ ! -s "$RT_STRUCTURE_FILE" ]] || docker exec -i supabase-db psql -U supabase_admin -d "$NEW_DB" < "$RT_STRUCTURE_FILE"
-[[ ! -s "$RT_MIGRATIONS_FILE" ]] || docker exec -i supabase-db psql -U supabase_admin -d "$NEW_DB" < "$RT_MIGRATIONS_FILE" || true
+[[ -s "$RT_STRUCTURE_FILE" ]] || die "Dump da estrutura Realtime ficou vazio"
+[[ -s "$RT_MIGRATIONS_FILE" ]] || die "Dump das migrations Realtime ficou vazio"
+docker exec -i supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$NEW_DB" < "$RT_STRUCTURE_FILE"
+docker exec -i supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$NEW_DB" < "$RT_MIGRATIONS_FILE"
 
 docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$NEW_DB" <<'SQL'
 CREATE EXTENSION IF NOT EXISTS vector SCHEMA public;
@@ -266,8 +267,8 @@ docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c
 vector_validate_database "$NEW_DB" || die "Clone sem pgvector valido"
 vector_strip_copied_wrappers "$NEW_DB" || die "Falha ao remover wrappers/segredos copiados"
 
-docker exec supabase-db psql -U supabase_admin -d "$NEW_DB" -c \
-  "TRUNCATE realtime.subscription RESTART IDENTITY CASCADE;" 2>/dev/null || true
+docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$NEW_DB" -c \
+  "TRUNCATE realtime.subscription RESTART IDENTITY CASCADE;"
 
 docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$NEW_DB" <<'SQL'
 DO $part$

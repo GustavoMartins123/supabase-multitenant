@@ -2558,36 +2558,39 @@ async def _duplicate_and_store_keys(
             current_step="store_keys",
         )
         async with pool.acquire() as conn:
-            project_id = await conn.fetchval(
-                """
-                SELECT id FROM projects
-                WHERE name = $1 AND owner_id = $2 AND id = $3
-                """,
-                new_name,
-                owner_id,
-                project_uuid,
-            )
-            if project_id is None:
-                raise RuntimeError("Projeto duplicado não encontrado ao persistir chaves")
-            await store_project_secrets(
-                conn,
-                project_id=project_id,
-                anon_key=keys["anon_key"],
-                service_role=keys["service_role"],
-                config_token=keys["config_token"],
-            )
             async with conn.transaction():
+                project_id = await conn.fetchval(
+                    """
+                    SELECT id FROM projects
+                    WHERE name = $1 AND owner_id = $2 AND id = $3
+                    FOR UPDATE
+                    """,
+                    new_name,
+                    owner_id,
+                    project_uuid,
+                )
+                if project_id is None:
+                    raise RuntimeError(
+                        "Projeto duplicado não encontrado ao persistir chaves"
+                    )
+                await store_project_secrets(
+                    conn,
+                    project_id=project_id,
+                    anon_key=keys["anon_key"],
+                    service_role=keys["service_role"],
+                    config_token=keys["config_token"],
+                )
                 await bootstrap_project_opaque_keys(
                     conn,
                     project_id=project_id,
                     created_by=owner_id,
                     gateway_token=keys["gateway_token"],
                 )
-            await conn.execute(
-                "UPDATE projects SET key_expires_at = $2 WHERE id = $1",
-                project_id,
-                schedule.expires_at,
-            )
+                await conn.execute(
+                    "UPDATE projects SET key_expires_at = $2 WHERE id = $1",
+                    project_id,
+                    schedule.expires_at,
+                )
 
         await _set_job_status(
             job_id,
@@ -3794,36 +3797,39 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
             current_step="store_keys",
         )
         async with pool.acquire() as conn:
-            project_id = await conn.fetchval(
-                """
-                SELECT id FROM projects
-                WHERE name = $1 AND owner_id = $2 AND id = $3
-                """,
-                project_name,
-                user,
-                project_uuid,
-            )
-            if project_id is None:
-                raise RuntimeError("Projeto não encontrado ao persistir chaves")
-            await store_project_secrets(
-                conn,
-                project_id=project_id,
-                anon_key=keys["anon_key"],
-                service_role=keys["service_role"],
-                config_token=keys["config_token"],
-            )
             async with conn.transaction():
+                project_id = await conn.fetchval(
+                    """
+                    SELECT id FROM projects
+                    WHERE name = $1 AND owner_id = $2 AND id = $3
+                    FOR UPDATE
+                    """,
+                    project_name,
+                    user,
+                    project_uuid,
+                )
+                if project_id is None:
+                    raise RuntimeError(
+                        "Projeto não encontrado ao persistir chaves"
+                    )
+                await store_project_secrets(
+                    conn,
+                    project_id=project_id,
+                    anon_key=keys["anon_key"],
+                    service_role=keys["service_role"],
+                    config_token=keys["config_token"],
+                )
                 await bootstrap_project_opaque_keys(
                     conn,
                     project_id=project_id,
                     created_by=user,
                     gateway_token=keys["gateway_token"],
                 )
-            await conn.execute(
-                "UPDATE projects SET key_expires_at = $2 WHERE id = $1",
-                project_id,
-                schedule.expires_at,
-            )
+                await conn.execute(
+                    "UPDATE projects SET key_expires_at = $2 WHERE id = $1",
+                    project_id,
+                    schedule.expires_at,
+                )
 
         await _set_job_status(
             job_id,

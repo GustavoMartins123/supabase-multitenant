@@ -13,10 +13,15 @@ ok() { echo "OK: $*"; }
 
 env_value() {
   local file="$1" key="$2"
-  local count
-  count="$(grep -c "^${key}=" "$file" || true)"
-  [[ "$count" == "1" ]] || fail "$file: $key deve existir exatamente uma vez"
-  sed -n "s/^${key}=//p" "$file"
+  local assignment_count canonical_count value
+  assignment_count="$(grep -Ec "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" "$file" || true)"
+  canonical_count="$(grep -c "^${key}=" "$file" || true)"
+  [[ "$assignment_count" == "1" && "$canonical_count" == "1" ]] \
+    || fail "$file: $key deve ter exatamente uma atribuicao canonica"
+  value="$(sed -n "s/^${key}=//p" "$file")"
+  [[ "$value" != *$'\r'* && -n "$value" && "$value" == "${value# }" && "$value" == "${value% }" ]] \
+    || fail "$file: $key possui valor nao canonico"
+  printf '%s' "$value"
 }
 
 [[ -f "$SERVER_ENV" ]] || fail "servidor/.env não encontrado"
@@ -78,10 +83,18 @@ for project_env in "$SERVER_DIR"/projects/*/.env; do
   [[ "$gateway_token" =~ ^[0-9a-f]{64}$ ]] \
     || fail "$project_name: API_GATEWAY_TOKEN_PROJETO fora do formato esperado"
 
+  project_uuid="$(env_value "$project_env" PROJECT_UUID)"
+  jwt_secret="$(env_value "$project_env" JWT_SECRET_PROJETO)"
   anon_key="$(env_value "$project_env" ANON_KEY_PROJETO)"
   service_key="$(env_value "$project_env" SERVICE_ROLE_KEY_PROJETO)"
-  [[ "$anon_key" == *.*.* ]] || fail "$project_name: anon key não é JWT"
-  [[ "$service_key" == *.*.* ]] || fail "$project_name: service role não é JWT"
+  [[ "$project_uuid" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] \
+    || fail "$project_name: PROJECT_UUID fora do formato esperado"
+  [[ "$jwt_secret" =~ ^[A-Za-z0-9_-]{43}=?$ ]] \
+    || fail "$project_name: JWT_SECRET_PROJETO fora do formato esperado"
+  [[ "$anon_key" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]] \
+    || fail "$project_name: anon key não é JWT canônico"
+  [[ "$service_key" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]] \
+    || fail "$project_name: service role não é JWT canônico"
 
   nginx_config="$project_dir/nginx/nginx_${project_name}.conf"
   [[ -f "$nginx_config" ]] || fail "$project_name: configuração Nginx ausente"

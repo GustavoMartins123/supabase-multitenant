@@ -52,6 +52,38 @@ NO_STORE_HEADERS = {
 }
 
 
+class OpaqueKeyRequest(BaseModel):
+    class Config:
+        extra = "forbid"
+
+
+def _raise_host_command_failure(
+    command: asyncpg.Record, *, operation: str
+) -> None:
+    status = command["status"]
+    error_code = command["error_code"]
+    message = command["message"]
+    if status not in {"failed", "cancelled"}:
+        raise HTTPException(
+            502,
+            f"{operation}: invalid host-agent terminal status {status!r}",
+        )
+    if not isinstance(error_code, str) or not error_code.strip():
+        raise HTTPException(
+            502,
+            f"{operation}: host-agent omitted error_code",
+        )
+    if not isinstance(message, str) or not message.strip():
+        raise HTTPException(
+            502,
+            f"{operation}: host-agent omitted message ({error_code})",
+        )
+    raise HTTPException(
+        503,
+        f"{operation} failed ({error_code}): {message}",
+    )
+
+
 @router.get("/{project_name}/opaque-api-keys/migration")
 async def get_opaque_api_key_migration(
     project_name: str,
@@ -171,7 +203,7 @@ async def abort_opaque_api_key_migration(
     }
 
 
-class CreateApiKeySlot(BaseModel):
+class CreateApiKeySlot(OpaqueKeyRequest):
     name: str = Field(min_length=3, max_length=40)
     kind: Literal["publishable", "secret"]
     allowed_services: list[str] = Field(
@@ -183,17 +215,17 @@ class CreateApiKeySlot(BaseModel):
     )
 
 
-class RotateApiKeySlot(BaseModel):
+class RotateApiKeySlot(OpaqueKeyRequest):
     activate_at: dt.datetime | None = None
 
 
-class UpdateApiKeySlotPolicy(BaseModel):
+class UpdateApiKeySlotPolicy(OpaqueKeyRequest):
     automatic_rotation_enabled: bool | None = None
     rotation_interval_days: int | None = Field(default=None, ge=1, le=3650)
     allowed_services: list[str] | None = None
 
 
-class ConfirmApiKeyInstallation(BaseModel):
+class ConfirmApiKeyInstallation(OpaqueKeyRequest):
     key_id: uuid.UUID
 
 
@@ -270,11 +302,9 @@ async def prepare_opaque_api_key_migration(
             args={},
         )
         if command["status"] != "done":
-            raise HTTPException(
-                503,
-                command["message"]
-                or command["error_code"]
-                or "Failed to prepare the project gateway token",
+            _raise_host_command_failure(
+                command,
+                operation="Prepare project gateway token",
             )
         gateway_token = read_project_secret_keys(project_name)["gateway_token"]
 
@@ -426,11 +456,9 @@ async def cutover_opaque_api_key_migration(
             args={},
         )
         if staged["status"] != "done":
-            raise HTTPException(
-                503,
-                staged["message"]
-                or staged["error_code"]
-                or "Failed to stop and stage the project gateway",
+            _raise_host_command_failure(
+                staged,
+                operation="Stop and stage project gateway",
             )
 
         version = int(state["api_keyset_version"])
@@ -465,13 +493,10 @@ async def cutover_opaque_api_key_migration(
             args={"services": ["nginx"]},
         )
         if started["status"] != "done":
-            raise HTTPException(
-                503,
-                "Opaque keys were activated but the gateway remains stopped: "
-                + (
-                    started["message"]
-                    or started["error_code"]
-                    or "gateway start failed"
+            _raise_host_command_failure(
+                started,
+                operation=(
+                    "Opaque keys were activated but the gateway remains stopped"
                 ),
             )
 

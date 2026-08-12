@@ -666,8 +666,8 @@ async def _run_lifecycle_script(
 async def handle_create_project(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
     resolve_project_dir(ctx.config.projects_root, project)
     ctx.state.report(progress=10, step="provision_infrastructure", message="Provisionando infraestrutura do projeto...")
-    recover_stale = bool(args.get("recover_stale", False))
-    stale_tenant_uuids = [str(item) for item in args.get("stale_tenant_uuids", [])]
+    recover_stale = args["recover_stale"]
+    stale_tenant_uuids = [str(item) for item in args["stale_tenant_uuids"]]
     outcome, process = await _run_lifecycle_script(
         ctx,
         "generate_project.sh",

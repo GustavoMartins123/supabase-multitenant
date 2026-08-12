@@ -272,8 +272,13 @@ def _validate_rotation_interval(days: int) -> int:
     return days
 
 
-def _utcnow() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
+async def _database_now(conn: asyncpg.Connection) -> dt.datetime:
+    value = await conn.fetchval("SELECT now()")
+    if not isinstance(value, dt.datetime) or value.tzinfo is None:
+        raise OpaqueKeyLifecycleError(
+            "database returned an invalid transaction timestamp"
+        )
+    return value
 
 
 def _reveal_purpose(key_id: uuid.UUID) -> str:
@@ -313,7 +318,7 @@ async def _insert_key(
 ) -> IssuedOpaqueKey:
     generated: GeneratedOpaqueKey = generate_opaque_key(project_id, kind)
     key_id = uuid.uuid4()
-    now = _utcnow()
+    now = await _database_now(conn)
     activated_at = now if status == "active" else None
     revealed_at = now if status == "pending" and not retain_reveal else None
     await conn.execute(
@@ -441,7 +446,7 @@ async def create_slot_with_active_key(
         interval,
         created_by,
     )
-    now = _utcnow()
+    now = await _database_now(conn)
     issued = await _insert_key(
         conn,
         project_id=project_id,
@@ -575,7 +580,7 @@ async def prepare_project_opaque_key_migration(
             "project opaque API key migration is already prepared"
         )
 
-    now = _utcnow()
+    now = await _database_now(conn)
     reveal_expires_at = now + dt.timedelta(days=MIGRATION_REVEAL_TTL_DAYS)
     issued: list[IssuedOpaqueKey] = []
     for name, kind in (
@@ -697,7 +702,8 @@ async def validate_prepared_project_opaque_keys(
         raise OpaqueKeyLifecycleError(
             "both initial API keys must be revealed and confirmed before cutover"
         )
-    if any(row["expires_at"] <= _utcnow() for row in rows):
+    now = await _database_now(conn)
+    if any(row["expires_at"] <= now for row in rows):
         raise OpaqueKeyLifecycleError(
             "prepared migration contains an expired API key"
         )
@@ -853,12 +859,41 @@ async def rotate_slot_immediately(
         """,
         slot_id,
     )
-    pending_exists = await conn.fetchval(
-        "SELECT EXISTS(SELECT 1 FROM project_api_keys WHERE slot_id = $1 AND status = 'pending')",
+    now = await _database_now(conn)
+    pending = await conn.fetchrow(
+        """
+        SELECT id, activate_at, confirmed_at
+        FROM project_api_keys
+        WHERE slot_id = $1 AND status = 'pending'
+        FOR UPDATE
+        """,
         slot_id,
     )
-    if pending_exists:
-        raise OpaqueKeyLifecycleError("slot already has a pending rotation")
+    replaces_effective_pending_id = None
+    if pending is not None:
+        if (
+            pending["confirmed_at"] is None
+            or pending["activate_at"] is None
+            or pending["activate_at"] > now
+        ):
+            raise OpaqueKeyLifecycleError("slot already has a pending rotation")
+        result = await conn.execute(
+            """
+            UPDATE project_api_keys
+            SET status = 'revoked', revoked_at = now()
+            WHERE id = $1 AND status = 'pending'
+            """,
+            pending["id"],
+        )
+        if result != "UPDATE 1":
+            raise OpaqueKeyLifecycleError(
+                "effective pending API key replacement conflicted"
+            )
+        await conn.execute(
+            "DELETE FROM project_api_key_reveals WHERE key_id = $1",
+            pending["id"],
+        )
+        replaces_effective_pending_id = pending["id"]
     active_id = await conn.fetchval(
         """
         UPDATE project_api_keys
@@ -870,7 +905,10 @@ async def rotate_slot_immediately(
     )
     if active_id is None:
         raise OpaqueKeyLifecycleError("slot has no active API key")
-    now = _utcnow()
+    if replaces_effective_pending_id is not None:
+        replaces_key_id = replaces_effective_pending_id
+    else:
+        replaces_key_id = active_id
     issued = await _insert_key(
         conn,
         project_id=project_id,
@@ -878,7 +916,7 @@ async def rotate_slot_immediately(
         kind=slot["kind"],
         status="active",
         expires_at=now + dt.timedelta(days=int(slot["rotation_interval_days"])),
-        replaces_key_id=active_id,
+        replaces_key_id=replaces_key_id,
     )
     version = await _increment_keyset_version(conn, project_id)
     return issued, version
@@ -893,9 +931,9 @@ async def prepare_slot_rotation(
     retain_reveal: bool,
     rotation_trigger: RotationTrigger = "manual",
 ) -> tuple[IssuedOpaqueKey, int]:
-    """Create a rejected pending version for a future deterministic cutover."""
+    """Create a pending version for a future deterministic cutover."""
 
-    now = _utcnow()
+    now = await _database_now(conn)
     if activate_at.tzinfo is None:
         raise OpaqueKeyLifecycleError("activate_at must include a timezone")
     activate_at = activate_at.astimezone(dt.timezone.utc)
@@ -926,12 +964,22 @@ async def prepare_slot_rotation(
         """,
         slot_id,
     )
-    active_id = await conn.fetchval(
-        "SELECT id FROM project_api_keys WHERE slot_id = $1 AND status = 'active'",
+    pending_exists = await conn.fetchval(
+        "SELECT EXISTS(SELECT 1 FROM project_api_keys WHERE slot_id = $1 AND status = 'pending')",
         slot_id,
     )
-    if active_id is None:
+    if pending_exists:
+        raise OpaqueKeyLifecycleError("slot already has a pending rotation")
+    active = await conn.fetchrow(
+        "SELECT id, expires_at FROM project_api_keys WHERE slot_id = $1 AND status = 'active'",
+        slot_id,
+    )
+    if active is None:
         raise OpaqueKeyLifecycleError("slot has no active API key")
+    if activate_at > active["expires_at"]:
+        raise OpaqueKeyLifecycleError(
+            "activate_at cannot be later than the active API key expiration"
+        )
     issued = await _insert_key(
         conn,
         project_id=project_id,
@@ -941,7 +989,7 @@ async def prepare_slot_rotation(
         activate_at=activate_at,
         expires_at=activate_at
         + dt.timedelta(days=int(slot["rotation_interval_days"])),
-        replaces_key_id=active_id,
+        replaces_key_id=active["id"],
         retain_reveal=retain_reveal,
         rotation_trigger=rotation_trigger,
     )
@@ -987,26 +1035,33 @@ async def activate_pending_key(
         raise OpaqueKeyLifecycleError(
             "pending API key installation has not been confirmed"
         )
-    if pending["activate_at"] is None or pending["activate_at"] > _utcnow():
+    now = await _database_now(conn)
+    if pending["activate_at"] is None or pending["activate_at"] > now:
         raise OpaqueKeyLifecycleError("pending API key is not due for activation")
-    if pending["expires_at"] <= _utcnow():
+    if pending["expires_at"] <= now:
         raise OpaqueKeyLifecycleError("pending API key has expired")
-    await conn.execute(
+    revoked_id = await conn.fetchval(
         """
         UPDATE project_api_keys
         SET status = 'revoked', revoked_at = now()
         WHERE slot_id = $1 AND status = 'active'
+        RETURNING id
         """,
         slot_id,
     )
-    await conn.execute(
+    if revoked_id is None:
+        raise OpaqueKeyLifecycleError("slot has no active API key")
+    activated_id = await conn.fetchval(
         """
         UPDATE project_api_keys
         SET status = 'active', activated_at = now()
         WHERE id = $1 AND status = 'pending'
+        RETURNING id
         """,
         pending["id"],
     )
+    if activated_id is None:
+        raise OpaqueKeyLifecycleError("pending API key activation conflicted")
     await conn.execute("DELETE FROM project_api_key_reveals WHERE key_id = $1", pending["id"])
     version = await _increment_keyset_version(conn, project_id)
     return pending["id"], version
@@ -1023,7 +1078,7 @@ async def confirm_pending_key_installation(
 
     pending = await conn.fetchrow(
         """
-        SELECT k.id, k.revealed_at, k.confirmed_at
+        SELECT k.id, k.revealed_at, k.confirmed_at, k.expires_at
         FROM project_api_keys k
         JOIN project_api_key_slots s ON s.id = k.slot_id
         JOIN projects p ON p.id = s.project_id
@@ -1060,6 +1115,9 @@ async def confirm_pending_key_installation(
         raise OpaqueKeyLifecycleError(
             "pending API key installation is already confirmed"
         )
+    now = await _database_now(conn)
+    if pending["expires_at"] <= now:
+        raise OpaqueKeyLifecycleError("pending API key has expired")
     await conn.execute(
         "UPDATE project_api_keys SET confirmed_at = now() WHERE id = $1",
         key_id,
@@ -1085,11 +1143,12 @@ async def cancel_pending_key(
 ) -> tuple[uuid.UUID, int]:
     """Revoke the one pending replacement without touching the active key."""
 
-    key_id = await conn.fetchval(
+    pending = await conn.fetchrow(
         """
-        UPDATE project_api_keys k
-        SET status = 'revoked', revoked_at = now()
-        FROM project_api_key_slots s, projects p
+        SELECT k.id, k.activate_at, k.confirmed_at
+        FROM project_api_keys k
+        JOIN project_api_key_slots s ON s.id = k.slot_id
+        JOIN projects p ON p.id = s.project_id
         WHERE k.slot_id = s.id
           AND k.slot_id = $1
           AND s.project_id = $2
@@ -1098,13 +1157,33 @@ async def cancel_pending_key(
           AND p.opaque_gateway_ready_at IS NOT NULL
           AND s.status = 'active'
           AND k.status = 'pending'
-        RETURNING k.id
+        FOR UPDATE OF k, s, p
         """,
         slot_id,
         project_id,
     )
-    if key_id is None:
+    if pending is None:
         raise OpaqueKeyLifecycleError("slot has no pending API key")
+    now = await _database_now(conn)
+    if (
+        pending["confirmed_at"] is not None
+        and pending["activate_at"] is not None
+        and pending["activate_at"] <= now
+    ):
+        raise OpaqueKeyLifecycleError(
+            "an effective pending API key cannot be cancelled"
+        )
+    key_id = pending["id"]
+    result = await conn.execute(
+        """
+        UPDATE project_api_keys
+        SET status = 'revoked', revoked_at = now()
+        WHERE id = $1 AND status = 'pending'
+        """,
+        key_id,
+    )
+    if result != "UPDATE 1":
+        raise OpaqueKeyLifecycleError("pending API key cancellation conflicted")
     await conn.execute(
         "DELETE FROM project_api_key_reveals WHERE key_id = $1",
         key_id,
@@ -1228,6 +1307,11 @@ async def update_slot_policy(
             WHERE slot_id = $1
               AND status = 'pending'
               AND rotation_trigger = 'automatic'
+              AND NOT (
+                  confirmed_at IS NOT NULL
+                  AND activate_at IS NOT NULL
+                  AND activate_at <= now()
+              )
             RETURNING id
             """,
             slot_id,
@@ -1282,6 +1366,11 @@ async def cancel_project_automatic_pending_keys(
           AND s.project_id = $1
           AND k.status = 'pending'
           AND k.rotation_trigger = 'automatic'
+          AND NOT (
+              k.confirmed_at IS NOT NULL
+              AND k.activate_at IS NOT NULL
+              AND k.activate_at <= now()
+          )
         RETURNING k.id
         """,
         project_id,

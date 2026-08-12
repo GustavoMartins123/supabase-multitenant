@@ -372,6 +372,7 @@ http {
         }
 
         location ^~ /realtime/v1/websocket {
+            access_log off;
             set $opaque_target_service realtime;
             set $opaque_required_role "";
             set $opaque_allow_missing_key 0;

@@ -161,8 +161,14 @@ expÃµe somente o corte imediato nesta fase.
 No instante programado, uma pendente confirmada passa a ser aceita e a antiga
 deixa de ser aceita. O scheduler persiste a transição em seguida.
 
-Uma preparação pode ser cancelada antes de ser efetivada. Cancelar revoga
-somente a pendente; não cria outra chave.
+Uma preparação pode ser cancelada antes de ser efetivada. Uma pendente
+confirmada que já atingiu `activate_at` não pode ser cancelada, pois isso faria
+a chave anterior voltar. Cancelar revoga somente a pendente; não cria outra
+chave.
+
+Se uma pendente efetiva expirar durante indisponibilidade prolongada do
+scheduler, execute **Rotacionar agora**. O corte emergencial revoga a pendente e
+a chave anterior na mesma transação e entrega uma nova credencial.
 
 ## Rotação automática
 
@@ -240,4 +246,5 @@ Nunca copie para tickets ou logs:
 API keys opacas não mudam a expiração das sessões dos usuários. A assinatura
 continua HS256 internamente nesta fase. A migração P-256/ES256/JWKS é uma fase
 separada e precisa de corte coordenado entre Auth, PostgREST, Realtime e
-Storage.
+Storage. Access JWTs de usuário continuam curtos e são renovados por refresh
+token enquanto a sessão for válida; nenhuma API key prolonga a sessão.

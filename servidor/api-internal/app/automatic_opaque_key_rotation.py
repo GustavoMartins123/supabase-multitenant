@@ -160,6 +160,7 @@ async def scan_automatic_opaque_key_rotations() -> int:
                   AND s.status = 'active'
                   AND s.automatic_rotation_blocked_at IS NULL
                   AND k.status = 'pending'
+                  AND k.rotation_trigger = 'automatic'
                   AND k.confirmed_at IS NULL
                   AND k.activate_at <= now()
                 ORDER BY k.activate_at, s.id
@@ -222,6 +223,7 @@ async def scan_automatic_opaque_key_rotations() -> int:
                   AND s.status = 'active'
                   AND s.automatic_rotation_blocked_at IS NULL
                   AND k.status = 'pending'
+                  AND k.rotation_trigger = 'automatic'
                   AND k.expires_at <= now()
                 ORDER BY k.expires_at, s.id
                 FOR UPDATE OF s, k SKIP LOCKED
