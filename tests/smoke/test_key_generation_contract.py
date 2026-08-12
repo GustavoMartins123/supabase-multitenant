@@ -125,6 +125,25 @@ class KeyGenerationContractTest(unittest.TestCase):
             self.assertIn("chmod 644", source, script_name)
             self.assertIn(".dockerignore", source, script_name)
 
+    def test_project_lifecycle_requires_explicit_operational_inputs(self):
+        generate = (GENERATE / "lib/generate_project_impl.sh").read_text(
+            encoding="utf-8"
+        )
+        duplicate = (GENERATE / "lib/duplicate_project_impl.sh").read_text(
+            encoding="utf-8"
+        )
+        rename = (GENERATE / "lib/rename_project_impl.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn('RECOVER_STALE="${3:-false}"', generate)
+        self.assertNotIn('COPY_MODE="${3:-schema-only}"', duplicate)
+        for source in (generate, duplicate, rename):
+            self.assertNotIn('${MAX_CONCURRENT_USERS:-200}', source)
+            self.assertIn(
+                '[[ "$MAX_CONCURRENT_USERS" =~ ^[1-9][0-9]*$ ]]', source
+            )
+
     def test_unprivileged_nginx_can_read_and_render_its_template(self):
         dockerfile = (GENERATE / "Dockerfile").read_text(encoding="utf-8")
         self.assertIn("--chown=101:101", dockerfile)

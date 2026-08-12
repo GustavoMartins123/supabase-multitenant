@@ -24,6 +24,8 @@ flowchart TB
     Traefik --> ProjectNginx[Nginx do projeto]
 
     ProjectsAPI --> PostgreSQL[(PostgreSQL)]
+    ProjectNginx --> KeyAuthorizer[key-authorizer]
+    KeyAuthorizer --> PostgreSQL
     ProjectsAPI --> LifecycleProxy[Proxy de lifecycle]
     LifecycleProxy --> Docker[(Docker daemon)]
     ProjectsAPI --> Realtime[Realtime global]
@@ -65,8 +67,9 @@ Responsável por administrar a plataforma:
 Os componentes principais são:
 
 - Flutter selector;
-- Nginx/OpenResty com Lua;
+- Nginx/OpenResty com Lua para o Studio;
 - Projects API em FastAPI;
+- `key-authorizer` fail-closed para as API keys dos tenants;
 - database `postgres` como banco do control plane.
 
 Detalhes: [Control plane](architecture/control-plane.md).
@@ -76,7 +79,8 @@ Detalhes: [Control plane](architecture/control-plane.md).
 Responsável por atender as aplicações dos projetos:
 
 - Traefik recebe as rotas públicas;
-- Nginx do projeto valida a API key e encaminha cada rota;
+- Nginx do projeto delega a validação da chave opaca ao `key-authorizer`,
+  traduz o papel para um JWT interno e encaminha cada rota;
 - GoTrue, PostgREST, Storage e ImgProxy rodam por projeto;
 - Realtime, Supavisor e Edge Functions são compartilhados;
 - os dados ficam no database `_supabase_<project_ref>`.
@@ -196,7 +200,8 @@ Cada projeto possui:
 
 O Nginx do projeto é o gateway interno. Ele:
 
-- valida `apikey` ou config token conforme a rota;
+- valida API keys opacas por `auth_request` ou config token conforme a rota;
+- preserva JWTs de sessão e injeta somente JWTs internos anon/service role;
 - trata CORS;
 - reescreve os paths esperados pelo Supabase;
 - encaminha Auth, REST, Storage, Functions e Realtime;
@@ -267,6 +272,18 @@ Os valores persistidos usam envelope encryption:
 
 Detalhes: [Rotação de segredos e conexões](11-rotacao-cripto-conexoes.md).
 
+### Chaves de API opacas
+
+Cada consumidor possui um slot `publishable` ou `secret`, com escopo de
+serviços, expiração, rotação e revogação independentes. O banco guarda somente
+o hash da API key. Um serviço separado, com role PostgreSQL restrita, autentica
+o token exclusivo do gateway e faz o lookup temporal fail-closed.
+
+JWTs `anon` e `service_role` permanecem no servidor. A expiração deles e a
+expiração das sessões do Auth são ciclos separados das API keys externas.
+
+Detalhes: [Operação de chaves de API opacas](12-chaves-api-opacas.md).
+
 ## Fluxos principais
 
 ### Acesso pelo Studio
@@ -289,6 +306,8 @@ Usuário
 Aplicação
   -> Traefik /<project_ref>/...
   -> Nginx do projeto
+  -> key-authorizer
+  -> tradução para JWT interno ou preservação da sessão
   -> Auth, REST, Storage, Functions ou Realtime
 ```
 
@@ -331,8 +350,8 @@ A topologia não deve ser representada por branches permanentes diferentes. A di
 ## Limitações atuais
 
 - serviços globais ainda representam pontos compartilhados de falha;
-- a Projects API ainda controla o Docker daemon diretamente enquanto o host
-  agent de lifecycle não for implementado;
+- o `key-authorizer` ainda faz lookup PostgreSQL por requisição e não possui
+  cache distribuído;
 - não existe escalabilidade horizontal completa do control plane;
 - Storage distribuído não faz parte da configuração padrão;
 - updates do Supabase podem exigir adaptação dos patches de Realtime e dos rewrites do Studio;

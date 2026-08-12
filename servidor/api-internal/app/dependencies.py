@@ -150,7 +150,8 @@ async def get_project_row(conn: asyncpg.Connection, project_name: str) -> asyncp
         SELECT id, tenant_uuid, name, display_name, owner_id,
                automatic_key_rotation_enabled,
                automatic_key_rotation_blocked_at,
-               automatic_key_rotation_last_error
+               automatic_key_rotation_last_error,
+               opaque_gateway_ready_at
         FROM projects WHERE name = $1
         """,
         project_name,

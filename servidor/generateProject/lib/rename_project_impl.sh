@@ -5,6 +5,18 @@ die() { echo "❌  $*" >&2; return 1; }
 say() { echo "ℹ️  $*"; }
 ok() { echo "✅ $*"; }
 
+read_canonical_env_value() {
+  local file="$1" key="$2" assignment_count canonical_count value
+  [[ -f "$file" ]] || die "Arquivo de ambiente ausente: $file"
+  assignment_count="$(grep -Ec "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" "$file" || true)"
+  canonical_count="$(grep -c "^${key}=" "$file" || true)"
+  [[ "$assignment_count" == "1" && "$canonical_count" == "1" ]] \
+    || die "$key deve ter exatamente uma atribuicao canonica em $file"
+  value="$(sed -n "s/^${key}=//p" "$file")"
+  [[ "$value" != *$'\r'* ]] || die "$key contem carriage return em $file"
+  printf '%s' "$value"
+}
+
 OLD_NAME="${1:-}"
 NEW_NAME="${2:-}"
 [[ -n "$OLD_NAME" && -n "$NEW_NAME" ]] || die "Uso: $0 <old_name> <new_name>"
@@ -20,7 +32,7 @@ OLD_DIR="$PROJECTS_ROOT/$OLD_NAME"
 NEW_DIR="$PROJECTS_ROOT/$NEW_NAME"
 OLD_DB="_supabase_$OLD_NAME"
 NEW_DB="_supabase_$NEW_NAME"
-META_DB="${POSTGRES_DB:-postgres}"
+META_DB=""
 BACKUP_DIR="$(mktemp -d /tmp/rename-project.XXXXXX)"
 
 MUTATION_STARTED=0
@@ -78,7 +90,7 @@ build_realtime_payload() {
     --arg uuid "$PROJECT_UUID" --arg secret "$JWT_SECRET_PROJETO" \
     --arg db "_supabase_$project_name" --arg host "$POSTGRES_HOST" \
     --arg port "$POSTGRES_PORT" --arg password "$POSTGRES_PASSWORD" \
-    --arg slot "$slot_name" --argjson max_users "${MAX_CONCURRENT_USERS:-200}" \
+    --arg slot "$slot_name" --argjson max_users "$MAX_CONCURRENT_USERS" \
     '{tenant:{name:$uuid,external_id:$uuid,jwt_secret:$secret,max_concurrent_users:$max_users,extensions:[{type:"postgres_cdc_rls",settings:{db_name:$db,db_host:$host,db_user:"supabase_admin",db_password:$password,db_port:$port,region:"us-west-1",poll_interval_ms:100,poll_max_record_bytes:1048576,ssl_enforced:false,slot_name:$slot}}]}}'
 }
 build_supavisor_payload() {
@@ -122,9 +134,6 @@ rollback_on_error() {
     mv "$NEW_DIR" "$OLD_DIR" || rollback_failed=1
     rm -f "$OLD_DIR/nginx/nginx_${NEW_NAME}.conf"
     cp -a "$BACKUP_DIR/." "$OLD_DIR/" 2>/dev/null || rollback_failed=1
-    set -a
-    source "$OLD_DIR/.env" 2>/dev/null || rollback_failed=1
-    set +a
   fi
   if [[ "$SUPAVISOR_UPDATED" -eq 1 ]]; then
     code=$(http_code supabase-pooler GET "/api/tenants/$NEW_NAME/terminate" \
@@ -210,18 +219,42 @@ done
 
 set -a
 source "$PROJECT_ROOT/.env"
-source "$OLD_DIR/.env"
 set +a
-for variable in POSTGRES_HOST POSTGRES_PASSWORD POSTGRES_PORT SERVER_URL JWT_SECRET \
-  JWT_SECRET_PROJETO PROJECT_UUID ANON_KEY_PROJETO SERVICE_ROLE_KEY_PROJETO CONFIG_TOKEN_PROJETO API_GATEWAY_TOKEN_PROJETO; do
+for variable in POSTGRES_HOST POSTGRES_PASSWORD POSTGRES_PORT POSTGRES_DB POSTGRES_USER \
+  MAX_CONCURRENT_USERS SERVER_URL JWT_SECRET HOST_PROJECT_ROOT; do
   [[ -n "${!variable:-}" ]] || die "$variable ausente"
 done
-vector_ensure_s3_credentials || die "Credenciais SigV4 do projeto invalidas"
+[[ "$MAX_CONCURRENT_USERS" =~ ^[1-9][0-9]*$ ]] \
+  || die "MAX_CONCURRENT_USERS deve ser um inteiro positivo"
+
+JWT_SECRET_PROJETO="$(read_canonical_env_value "$OLD_DIR/.env" JWT_SECRET_PROJETO)"
+PROJECT_UUID="$(read_canonical_env_value "$OLD_DIR/.env" PROJECT_UUID)"
+ANON_KEY_PROJETO="$(read_canonical_env_value "$OLD_DIR/.env" ANON_KEY_PROJETO)"
+SERVICE_ROLE_KEY_PROJETO="$(read_canonical_env_value "$OLD_DIR/.env" SERVICE_ROLE_KEY_PROJETO)"
+CONFIG_TOKEN_PROJETO="$(read_canonical_env_value "$OLD_DIR/.env" CONFIG_TOKEN_PROJETO)"
+API_GATEWAY_TOKEN_PROJETO="$(read_canonical_env_value "$OLD_DIR/.env" API_GATEWAY_TOKEN_PROJETO)"
+S3_PROTOCOL_ACCESS_KEY_ID="$(read_canonical_env_value "$OLD_DIR/.env" S3_PROTOCOL_ACCESS_KEY_ID)"
+S3_PROTOCOL_ACCESS_KEY_SECRET="$(read_canonical_env_value "$OLD_DIR/.env" S3_PROTOCOL_ACCESS_KEY_SECRET)"
+
+[[ "$PROJECT_UUID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] \
+  || die "PROJECT_UUID invalido"
+[[ "$JWT_SECRET_PROJETO" =~ ^[A-Za-z0-9_-]{43}=?$ ]] \
+  || die "JWT_SECRET_PROJETO invalido"
+[[ "$ANON_KEY_PROJETO" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]] \
+  || die "ANON_KEY_PROJETO invalida"
+[[ "$SERVICE_ROLE_KEY_PROJETO" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]] \
+  || die "SERVICE_ROLE_KEY_PROJETO invalida"
+[[ "$CONFIG_TOKEN_PROJETO" =~ ^[0-9a-f]{64}$ ]] \
+  || die "CONFIG_TOKEN_PROJETO invalido"
+[[ "$API_GATEWAY_TOKEN_PROJETO" =~ ^[0-9a-f]{64}$ ]] \
+  || die "API_GATEWAY_TOKEN_PROJETO invalido"
+export S3_PROTOCOL_ACCESS_KEY_ID S3_PROTOCOL_ACCESS_KEY_SECRET
+vector_validate_s3_credentials || die "Credenciais SigV4 do projeto invalidas"
 
 for container in supabase-db supabase-pooler realtime-dev.supabase-realtime; do
   docker inspect "$container" >/dev/null 2>&1 || die "Container $container ausente"
 done
-META_DB="${POSTGRES_DB:-postgres}"
+META_DB="$POSTGRES_DB"
 [[ "$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc "SELECT count(*) FROM pg_database WHERE datname = '$OLD_DB';" | tr -d '[:space:]')" == "1" ]] || die "Banco $OLD_DB nao encontrado"
 [[ "$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc "SELECT count(*) FROM pg_database WHERE datname = '$NEW_DB';" | tr -d '[:space:]')" == "0" ]] || die "Banco $NEW_DB ja existe"
 [[ "$(docker exec supabase-db psql -U supabase_admin -d "$META_DB" -tAc "SELECT count(*) FROM projects WHERE name = '$NEW_NAME';" | tr -d '[:space:]')" == "0" ]] || die "Projeto $NEW_NAME ja existe na metadata"
@@ -305,7 +338,7 @@ template_to_file() {
     -e "s|{{public_base_url}}|$(escape_sed_replacement "$PUBLIC_BASE_URL")|g" \
     -e "s|{{project_public_url}}|$(escape_sed_replacement "$PROJECT_PUBLIC_URL")|g" \
     -e "s|{{project_auth_external_url}}|$(escape_sed_replacement "$PROJECT_AUTH_EXTERNAL_URL")|g" \
-    -e "s|{{project_root}}|$(escape_sed_replacement "${HOST_PROJECT_ROOT:-}")|g" \
+    -e "s|{{project_root}}|$(escape_sed_replacement "$HOST_PROJECT_ROOT")|g" \
     -e "s|{{s3_protocol_access_key_id}}|$(escape_sed_replacement "$S3_PROTOCOL_ACCESS_KEY_ID")|g" \
     -e "s|{{s3_protocol_access_key_secret}}|$(escape_sed_replacement "$S3_PROTOCOL_ACCESS_KEY_SECRET")|g" \
     "$template" > "$output"
@@ -322,10 +355,6 @@ chmod 644 "$NEW_DIR/nginx/nginx_${NEW_NAME}.conf" "$NEW_DIR/.dockerignore"
 grep -qx "PROJECT_ID=$NEW_NAME" "$NEW_DIR/.env" || die "PROJECT_ID nao foi atualizado"
 grep -Eq '^S3_PROTOCOL_ACCESS_KEY_ID=[0-9a-fA-F]{32}$' "$NEW_DIR/.env" || die "Access key SigV4 nao foi preservada"
 grep -Eq '^S3_PROTOCOL_ACCESS_KEY_SECRET=[0-9a-fA-F]{64}$' "$NEW_DIR/.env" || die "Secret SigV4 nao foi preservado"
-
-set -a
-source "$NEW_DIR/.env"
-set +a
 
 updated=$(docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$META_DB" -tAc \
   "WITH changed AS (UPDATE projects SET name = '$NEW_NAME' WHERE name = '$OLD_NAME' RETURNING name) SELECT count(*) FROM changed;" | tr -d '[:space:]')

@@ -97,9 +97,10 @@ class AutomaticRotationContractTest(unittest.TestCase):
             self.main,
         )
         self.assertIn(
-            'args={"trigger": "automatic"} if trigger == "automatic" else {}',
+            'args={"trigger": trigger}',
             self.main,
         )
+        self.assertIn('if trigger not in {"manual", "automatic"}:', self.main)
         self.assertIn('action="project_keys_rotated"', self.main)
 
 

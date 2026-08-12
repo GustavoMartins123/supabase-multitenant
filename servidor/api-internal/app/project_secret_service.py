@@ -11,7 +11,7 @@ from app.runtime_config import project_secret_manager
 
 PROJECT_SECRET_COLUMNS = frozenset({"anon_key", "service_role", "config_token"})
 PROJECT_MATERIAL_PURPOSE_RE = re.compile(
-    r"^opaque-api-key-reveal:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+    r"^opaque-api-key-reveal:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
     r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
 

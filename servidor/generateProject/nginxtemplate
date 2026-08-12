@@ -241,7 +241,7 @@ http {
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, X-Client-Info, X-Supabase-Auth, x-supabase-api-version' always;
         }
         
-        location /auth/v1/verify {
+        location = /auth/v1/verify {
             rewrite ^/auth/v1/(.*)$ /$1?$args break;
             proxy_hide_header Access-Control-Allow-Origin;
             proxy_pass http://$auth_upstream;
@@ -259,7 +259,7 @@ http {
              if ($request_method = 'OPTIONS') { return 204; }
         }
 
-        location /auth/v1/callback {
+        location = /auth/v1/callback {
             rewrite ^/auth/v1/(.*)$ /$1?$args break;
             proxy_hide_header Access-Control-Allow-Origin;
             proxy_pass http://$auth_upstream;
@@ -277,7 +277,7 @@ http {
              if ($request_method = 'OPTIONS') { return 204; }
         }
 
-        location /auth/v1/authorize {
+        location = /auth/v1/authorize {
             rewrite ^/auth/v1/(.*)$ /$1?$args break;
             proxy_hide_header Access-Control-Allow-Origin;
             proxy_pass http://$auth_upstream/authorize;
@@ -394,7 +394,7 @@ http {
             proxy_set_header Host "{{project_uuid}}.localhost"; 
             proxy_set_header apikey $opaque_upstream_apikey;
             proxy_set_header x-api-key $opaque_upstream_apikey;
-            proxy_set_header Authorization $http_authorization;
+            proxy_set_header Authorization $opaque_upstream_authorization;
             proxy_set_header X-Api-Key-Id $opaque_key_id;
             proxy_read_timeout 86400;
 

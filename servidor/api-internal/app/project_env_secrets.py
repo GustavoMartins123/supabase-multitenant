@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import pathlib
+import re
 
 
 PROJECTS_ROOT = pathlib.Path("/docker/projects").resolve()
+PROJECT_NAME_RE = re.compile(r"^[a-z_][a-z0-9_]{2,39}$")
 _REQUIRED_PROJECT_SECRET_KEYS = (
     "PROJECT_UUID",
     "ANON_KEY_PROJETO",
@@ -18,6 +20,10 @@ _REQUIRED_PROJECT_SECRET_KEYS = (
 def read_project_secret_keys(project_name: str) -> dict[str, str]:
     """Read exact, unquoted and unique project secret entries or fail closed."""
 
+    if not isinstance(project_name, str) or not PROJECT_NAME_RE.fullmatch(
+        project_name
+    ):
+        raise RuntimeError("Invalid project name for secret lookup")
     env_path = PROJECTS_ROOT / project_name / ".env"
     env_values: dict[str, str] = {}
     if not env_path.is_file():

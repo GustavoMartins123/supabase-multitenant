@@ -1,0 +1,243 @@
+# Operação de chaves de API opacas
+
+Este runbook cobre criação, migração, rotação, expiração e incidente das chaves
+`sb_publishable_*` e `sb_secret_*` gerenciadas pelo projeto. O desenho completo
+e os critérios de aceite estão na
+[especificação](specs/opaque-api-keys.md).
+
+## Regras operacionais
+
+- Use um slot por aplicação ou serviço consumidor.
+- Nunca reutilize uma `sb_secret_*` em componentes diferentes.
+- Não coloque secret keys em frontend, aplicativos móveis, repositórios, URLs
+  ou logs.
+- Uma chave só pode ser revelada uma vez. Copie-a diretamente para o secret
+  manager do consumidor.
+- Confirme a instalação somente depois de o valor correto estar no consumidor.
+- Não distribua `ANON_KEY_PROJETO`, `SERVICE_ROLE_KEY_PROJETO` ou
+  `API_GATEWAY_TOKEN_PROJETO`; são materiais internos.
+- Falha de autorização não deve ser contornada. Corrija o estado canônico e
+  repita a operação indicada.
+
+## Pré-verificação
+
+Antes de criar ou migrar chaves:
+
+1. confirme que `projects-api`, `host-agent`, PostgreSQL e `key-authorizer`
+   estão saudáveis;
+2. confirme que o relógio do host e do PostgreSQL está sincronizado;
+3. abra o projeto no Studio com uma conta owner/admin;
+4. prepare o secret manager e o deploy de cada consumidor;
+5. reserve uma janela para a migração de projetos legados, pois não existe
+   período de dupla aceitação.
+
+O healthcheck interno do authorizer é `/healthz`. Ele não deve ser publicado na
+Internet.
+
+## Projeto novo ou duplicado
+
+Projetos novos e duplicados já nascem no modo `active`, com:
+
+- `default-publishable`;
+- `default-secret`.
+
+As revelações iniciais expiram em 30 minutos.
+
+1. No Studio, abra as configurações do projeto e a seção de API keys.
+2. Faça claim de cada chave necessária.
+3. Armazene a publishable key na configuração do cliente público.
+4. Armazene a secret key somente no secret manager de um backend confiável.
+5. Crie slots adicionais para consumidores independentes.
+6. Revogue um slot inicial que não será usado.
+
+Se uma revelação expirar, não tente recuperar o plaintext. Faça uma rotação
+imediata do slot e use a nova chave.
+
+## Migração de projeto existente
+
+### 1. Preparar
+
+No Studio, escolha **Preparar migração opaca**. A operação:
+
+- cria o token interno exclusivo do gateway;
+- cria `default-publishable` e `default-secret` como `pending`;
+- não muda o gateway que está atendendo o projeto.
+
+O status passa de `legacy` para `prepared`. As chaves preparadas ainda são
+rejeitadas e não servem como teste paralelo.
+
+### 2. Revelar, instalar e confirmar
+
+Para cada chave:
+
+1. faça claim antes do prazo de sete dias;
+2. coloque o valor no secret manager/configuração do consumidor;
+3. deixe o deploy pronto para usar o novo valor no instante do corte;
+4. confirme no Studio o key ID instalado.
+
+O corte só é liberado quando as duas chaves foram reveladas e confirmadas.
+Confirmação é uma declaração operacional; ela não testa o consumidor.
+
+### 3. Cortar
+
+Acione **Concluir migração** dentro da janela reservada. A Projects API:
+
+1. revalida os dois slots e as confirmações;
+2. marca o início irreversível do corte;
+3. para o Nginx legado;
+4. materializa o gateway opaco;
+5. ativa as duas chaves na mesma transação;
+6. inicia o gateway e marca `active`.
+
+Depois do corte, os JWTs públicos antigos recebem 403 como API key. Atualize os
+consumidores no mesmo evento operacional.
+
+### Abort antes do corte
+
+Enquanto o status for `prepared`, **Abortar preparação** remove o registro
+preparado e retorna o projeto ao estado `legacy`. Depois que
+`cutover_started_at` existe, abort é recusado.
+
+### Recuperação durante o corte
+
+Se o status for `gateway_recovery_required`, corrija a causa indicada pelo job
+e execute **Concluir/recuperar migração** novamente. A operação retoma o mesmo
+estado e não reativa o protocolo legado.
+
+Verificações mínimas após sucesso:
+
+```bash
+curl -i "https://HOST/PROJETO/auth/v1/settings" \
+  -H "apikey: SB_PUBLISHABLE"
+
+curl -i "https://HOST/PROJETO/rest/v1/" \
+  -H "apikey: SB_SECRET"
+```
+
+Também confirme login, uma consulta REST sujeita a RLS, GraphQL, conexão
+Realtime, operação de Storage e uma Function. Um JWT legado usado como
+`apikey` deve receber 403.
+
+## Criar slots adicionais
+
+Escolha nomes ligados ao consumidor, por exemplo:
+
+- `web-production` — publishable;
+- `android-production` — publishable;
+- `billing-worker` — secret;
+- `backup-nightly` — secret.
+
+Restrinja `allowed_services` ao necessário. A criação ativa a chave
+imediatamente e retorna o valor uma única vez. Perder a resposta exige rotação
+imediata; não há endpoint de recuperação do plaintext.
+
+## Rotação manual
+
+### Corte imediato
+
+Use para comprometimento ou troca emergencial. A versão anterior é revogada e
+a nova entra em vigor na mesma transação, sem overlap.
+
+1. execute **Rotacionar agora**;
+2. capture o novo valor;
+3. atualize o consumidor;
+4. valide o serviço.
+
+Existe indisponibilidade entre o corte e a atualização do consumidor. Essa é a
+semântica intencional de hard rotation.
+
+### Corte programado
+
+O agendamento Ã© feito pela API interna
+`POST /internal/projects/{project}/api-key-slots/{slot_id}/rotation`; o Studio
+expÃµe somente o corte imediato nesta fase.
+
+1. envie `activate_at` em ISO 8601 com timezone;
+2. capture a chave `pending` retornada;
+3. instale no consumidor;
+4. confirme o key ID;
+5. aguarde `activate_at` ou execute a ativação quando estiver vencida.
+
+No instante programado, uma pendente confirmada passa a ser aceita e a antiga
+deixa de ser aceita. O scheduler persiste a transição em seguida.
+
+Uma preparação pode ser cancelada antes de ser efetivada. Cancelar revoga
+somente a pendente; não cria outra chave.
+
+## Rotação automática
+
+A automação é habilitada por padrão no projeto e herdada por cada slot.
+
+1. no lead time, o Studio recebe uma notificação de chave pendente;
+2. faça claim e instale a chave;
+3. confirme antes da expiração da versão ativa;
+4. o corte ocorre exatamente na expiração antiga.
+
+Sem confirmação, nenhuma nova chave é aceita e a antiga expira no horário
+original. O slot entra em estado bloqueado com um erro explícito.
+
+O opt-out pode ser feito no projeto inteiro ou no slot. Desabilitar cancela
+somente preparações automáticas pendentes e não prolonga a chave ativa.
+
+## Incidentes
+
+### Secret key exposta
+
+1. identifique o slot pelo `token_hint` e pelos eventos de auditoria;
+2. execute rotação imediata;
+3. distribua a nova chave pelo secret manager;
+4. remova a chave exposta de código, logs e artefatos;
+5. revise `last_used_at`, auditoria e acessos aos serviços permitidos;
+6. corrija a causa do vazamento antes de criar outra credencial.
+
+Não revele nem restaure a versão antiga.
+
+### Chave expirou sem reposição
+
+O authorizer rejeita a chave mesmo que o status persistido ainda apareça como
+`active`. `currently_accepted=false` é a informação efetiva.
+
+- Se não houver pendente: faça rotação imediata.
+- Se houver pendente válida: faça claim, instale, confirme e ative.
+- Se a pendente expirou: cancele-a e faça rotação imediata.
+
+### Authorizer ou banco indisponível
+
+Auth, REST, GraphQL, Realtime e Functions protegidos falham com 5xx; Storage
+continua passando pelo subrequest mesmo quando não recebeu API key. Restaure o
+`key-authorizer` ou sua conexão de banco. Não remova `auth_request`, não injete
+JWT público e não habilite uma rota de bypass.
+
+### Migração interrompida
+
+- `prepared`: conclua a distribuição ou aborte antes do corte.
+- `gateway_recovery_required`: corrija host-agent/Docker/template e repita o
+  cutover.
+- `active`: não execute migração novamente; gerencie slots normalmente.
+
+## Auditoria e dados seguros para diagnóstico
+
+São seguros para tickets e dashboards internos:
+
+- project ref/UUID;
+- slot ID e nome;
+- key ID;
+- `token_hint`;
+- `api_keyset_version`;
+- status, timestamps e error code.
+
+Nunca copie para tickets ou logs:
+
+- chave opaca completa;
+- hash da chave;
+- JWT interno anon/service role;
+- JWT secret;
+- token exclusivo do gateway;
+- ciphertext de revelação.
+
+## Limite desta entrega
+
+API keys opacas não mudam a expiração das sessões dos usuários. A assinatura
+continua HS256 internamente nesta fase. A migração P-256/ES256/JWKS é uma fase
+separada e precisa de corte coordenado entre Auth, PostgREST, Realtime e
+Storage.

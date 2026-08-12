@@ -10,10 +10,10 @@ source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
 
 ORIGINAL_PROJECT="${1:-}"
 NEW_PROJECT="${2:-}"
-COPY_MODE="${3:-schema-only}"
+COPY_MODE="${3:-}"
 PROJECT_UUID="${4:-}"
-[[ -n "$ORIGINAL_PROJECT" && -n "$NEW_PROJECT" && -n "$PROJECT_UUID" ]] \
-  || die "Uso: $0 <original_project> <new_project> [with-data|schema-only] <project_uuid>"
+[[ -n "$ORIGINAL_PROJECT" && -n "$NEW_PROJECT" && -n "$COPY_MODE" && -n "$PROJECT_UUID" ]] \
+  || die "Uso: $0 <original_project> <new_project> <with-data|schema-only> <project_uuid>"
 [[ "$COPY_MODE" == "with-data" || "$COPY_MODE" == "schema-only" ]] \
   || die "copy_mode deve ser with-data ou schema-only"
 
@@ -36,8 +36,12 @@ set -a
 source "$PROJECT_ROOT/.env"
 set +a
 
-[[ -n "${JWT_SECRET:-}" ]] || die "JWT_SECRET ausente"
-[[ -n "${SERVER_URL:-}" ]] || die "SERVER_URL ausente"
+for variable in POSTGRES_HOST POSTGRES_PASSWORD POSTGRES_PORT MAX_CONCURRENT_USERS \
+  SERVER_URL JWT_SECRET HOST_PROJECT_ROOT; do
+  [[ -n "${!variable:-}" ]] || die "$variable ausente"
+done
+[[ "$MAX_CONCURRENT_USERS" =~ ^[1-9][0-9]*$ ]] \
+  || die "MAX_CONCURRENT_USERS deve ser um inteiro positivo"
 
 ORIGINAL_DB="_supabase_$ORIGINAL_PROJECT"
 NEW_DB="_supabase_$NEW_PROJECT"
@@ -307,7 +311,7 @@ realtime_payload=$(jq -cn \
   --arg uuid "$PROJECT_UUID" --arg secret "$JWT_SECRET_PROJETO" \
   --arg db "$NEW_DB" --arg host "$POSTGRES_HOST" --arg port "$POSTGRES_PORT" \
   --arg password "$POSTGRES_PASSWORD" --arg slot "supabase_realtime_replication_slot_$NEW_PROJECT" \
-  --argjson max_users "${MAX_CONCURRENT_USERS:-200}" \
+  --argjson max_users "$MAX_CONCURRENT_USERS" \
   '{tenant:{name:$uuid,external_id:$uuid,jwt_secret:$secret,max_concurrent_users:$max_users,extensions:[{type:"postgres_cdc_rls",settings:{db_name:$db,db_host:$host,db_user:"supabase_admin",db_password:$password,db_port:$port,region:"us-west-1",poll_interval_ms:100,poll_max_record_bytes:1048576,ssl_enforced:false,slot_name:$slot}}]}}')
 CREATED_REALTIME=1
 response=$(docker exec realtime-dev.supabase-realtime curl -sS -w '\n%{http_code}' \

@@ -21,12 +21,18 @@ headers de conexão persistidos para recriptografar: a API gera um novo header a
 cada requisição. A imagem oficial também expõe essa separação como
 `PG_META_CRYPTO_KEY`.
 
-## Rotação automática de anon e service role
+## Rotação automática dos JWTs internos anon e service role
 
-As API keys legadas de cada projeto são JWTs emitidos com o
-`JWT_SECRET_PROJETO` daquele tenant e validade de 90 dias. A rotação automática
-é habilitada por padrão, gera um par novo sete dias antes do `exp` e não altera
-o JWT secret. Por isso ela não encerra sessões de usuários do GoTrue.
+Cada projeto ainda possui JWTs `anon` e `service_role` emitidos com seu
+`JWT_SECRET_PROJETO` e validade de 90 dias. No gateway opaco eles são tokens
+operacionais internos, nunca API keys distribuídas aos clientes. Sua rotação
+automática é habilitada por padrão, gera um par novo sete dias antes do `exp` e
+não altera o JWT secret. Portanto não encerra sessões de usuários do GoTrue nem
+muda qualquer chave opaca externa.
+
+O lifecycle público por slot, inclusive claim, confirmação, corte temporal e
+opt-out, está documentado em
+[Operação de chaves de API opacas](12-chaves-api-opacas.md).
 
 O estado operacional fica em `projects`:
 

@@ -141,7 +141,9 @@ async def authorize(
     gateway_token = x_project_gateway_token or ""
     target_service = x_target_service or ""
     required_role = x_required_role or ""
-    allow_missing_value = x_allow_missing_key or "0"
+    allow_missing_value = (
+        x_allow_missing_key if x_allow_missing_key is not None else ""
+    )
     if any(
         value != value.strip()
         for value in (
@@ -232,7 +234,7 @@ async def authorize(
                         "Authorization contains non-canonical whitespace"
                     )
                 if (
-                    target_service == "storage"
+                    target_service in {"storage", "functions"}
                     and authorization
                     and not re.match(
                         r"^Bearer\s+", authorization, flags=re.IGNORECASE
@@ -266,7 +268,6 @@ async def authorize(
                                 AND due.status = 'pending'
                                 AND due.activate_at <= now()
                                 AND due.confirmed_at IS NOT NULL
-                                AND due.expires_at > now()
                           )
                       )
                       OR (

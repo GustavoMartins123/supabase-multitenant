@@ -28,6 +28,8 @@ A regra é simples: cada assunto deve ter uma fonte canônica. O `00-arquitetura
 - [Gerenciamento de usuários no Authelia](07-gerenciamento-usuarios-authelia.md)
 - [Hardening do Postgres-Meta global](10-hardening-postgres-meta.md)
 - [Rotação de segredos e conexões do Postgres-Meta](11-rotacao-cripto-conexoes.md)
+- [Operação de chaves de API opacas](12-chaves-api-opacas.md)
+- [Spec de múltiplas chaves opacas](specs/opaque-api-keys.md)
 
 ## Operação e troubleshooting
 
@@ -48,6 +50,7 @@ A regra é simples: cada assunto deve ter uma fonte canônica. O `00-arquitetura
 | JWT, UUID do tenant e replication slots | `09-autenticacao-multi-tenant-realtime.md` |
 | fallback seguro do Postgres-Meta | `10-hardening-postgres-meta.md` |
 | envelope encryption e rotação | `11-rotacao-cripto-conexoes.md` |
+| chaves públicas opacas, slots, migração e incidentes | `12-chaves-api-opacas.md` |
 
 ## Regra para novas mudanças
 

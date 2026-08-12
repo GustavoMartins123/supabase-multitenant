@@ -7,6 +7,7 @@ Os componentes principais são:
 - Flutter selector;
 - OpenResty/Lua;
 - Projects API em FastAPI;
+- `key-authorizer` de data plane com privilégio mínimo;
 - database `postgres`;
 - host-agent no servidor, que executa os scripts de lifecycle e o Docker
   (ver [host-agent](host-agent.md));
@@ -65,6 +66,27 @@ tenant externo (`tenant_uuid`), project ref, display name, versão das chaves e
 segredos criptografados. Em projetos novos, `tenant_uuid` recebe exatamente o
 valor de `id`; a coluna separada mantém compatibilidade auditável com projetos
 legados.
+
+### Chaves de API opacas
+
+O registro público não usa as colunas escalares de JWT como credenciais de
+cliente:
+
+- `project_api_key_slots` representa cada consumidor e sua política;
+- `project_api_keys` mantém versões, digest, expiração e linhagem;
+- `project_api_key_reveals` guarda temporariamente o plaintext cifrado;
+- `projects.api_keyset_version` versiona cada mutação;
+- os timestamps `opaque_*` representam preparação, corte, ativação e readiness.
+
+O `key-authorizer` autentica cada Nginx por um token exclusivo cujo hash fica em
+`projects.api_gateway_token_hash`. Sua role possui apenas os `SELECT` de que o
+lookup precisa e `UPDATE(last_used_at)`. Falha de banco ou de subrequest bloqueia
+o acesso; a Projects API não participa do caminho quente.
+
+As rotas administrativas ficam sob `/api/projects/{project_ref}/api-key-*` e
+`/opaque-api-keys/migration`. Todas revalidam owner/admin no estado persistido,
+usam transações e nunca listam plaintext. Veja
+[o runbook](../12-chaves-api-opacas.md).
 
 ### Jobs
 
@@ -163,19 +185,24 @@ Falha na consulta de versão bloqueia a requisição. O OpenResty não usa uma
 service key em cache quando não consegue provar que ela corresponde à versão
 persistida.
 
-### Agendador de API keys
+### Agendadores de chaves
 
-A Projects API mantém `key_expires_at` e verifica projetos habilitados em
-intervalo configurável. Um advisory lock do PostgreSQL e locks de linha fazem a
-eleição de líder e a distribuição segura entre réplicas. Jobs automáticos usam
-o fluxo durável `rotate_key` já existente e aparecem para os membros do projeto
-com `created_by=null` e `trigger=automatic`.
+A Projects API mantém dois ciclos independentes. `key_expires_at` agenda a
+regeneração dos JWTs internos anon/service role pelo fluxo durável
+`rotate_key`. O registro opaco agenda cada slot por `project_api_keys.expires_at`
+e prepara uma versão `pending` que precisa de claim e confirmação.
+
+Os dois scanners usam advisory lock do PostgreSQL e locks de linha para eleição
+de líder e distribuição segura entre réplicas. O scheduler opaco só processa
+projetos cujo gateway possui `opaque_gateway_ready_at`.
 
 Falhas automáticas bloqueiam novas tentativas daquele projeto até intervenção
 explícita. Habilitar novamente limpa o bloqueio e solicita uma nova
 reconciliação; desabilitar impede que o host-agent autorize o ator de sistema.
 
-O comportamento canônico do cache está documentado em [OpenResty/Lua](openresty-lua.md).
+O comportamento canônico do cache interno está documentado em
+[OpenResty/Lua](openresty-lua.md). O lifecycle externo está no
+[runbook de chaves opacas](../12-chaves-api-opacas.md).
 
 ## Settings de projeto
 

@@ -75,6 +75,10 @@ async def scan_automatic_opaque_key_rotations() -> int:
             if not owns_scan:
                 return 0
 
+            await conn.execute(
+                "DELETE FROM project_api_key_reveals WHERE expires_at <= now()"
+            )
+
             due = await conn.fetch(
                 """
                 SELECT s.project_id, s.id AS slot_id, s.name,

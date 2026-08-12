@@ -89,9 +89,10 @@ PROJECT_DIR="$PROJECT_ROOT/projects/$PROJECT_ID"
 get_env_value() {
   local key="$1"
   local file="$2"
-  local value
-  value=$(grep -m1 "^${key}=" "$file" | cut -d'=' -f2- || true)
-  printf '%s' "$value"
+  local count
+  count="$(grep -c "^${key}=" "$file" || true)"
+  [[ "$count" == "1" ]] || die "$key deve existir exatamente uma vez em $file"
+  sed -n "s/^${key}=//p" "$file"
 }
 
 upsert_env_value() {
@@ -99,9 +100,12 @@ upsert_env_value() {
   local value="$2"
   local file="$3"
   local escaped_value
+  local count
   escaped_value=$(escape_sed_replacement "$value")
+  count="$(grep -c "^${key}=" "$file" || true)"
+  [[ "$count" -le 1 ]] || die "$key esta duplicada em $file"
 
-  if grep -q "^${key}=" "$file"; then
+  if [[ "$count" == "1" ]]; then
     sed -i "s|^${key}=.*|${key}=${escaped_value}|" "$file"
   else
     printf '\n%s=%s\n' "$key" "$value" >> "$file"

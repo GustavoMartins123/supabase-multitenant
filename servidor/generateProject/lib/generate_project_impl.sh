@@ -3,6 +3,18 @@ set -Eeuo pipefail
 
 die() { echo "❌  $*" >&2; return 1; }
 
+read_canonical_env_value() {
+  local file="$1" key="$2" assignment_count canonical_count value
+  [[ -f "$file" ]] || die "Arquivo de ambiente ausente: $file"
+  assignment_count="$(grep -Ec "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" "$file" || true)"
+  canonical_count="$(grep -c "^${key}=" "$file" || true)"
+  [[ "$assignment_count" == "1" && "$canonical_count" == "1" ]] \
+    || die "$key deve ter exatamente uma atribuicao canonica em $file"
+  value="$(sed -n "s/^${key}=//p" "$file")"
+  [[ "$value" != *$'\r'* ]] || die "$key contem carriage return em $file"
+  printf '%s' "$value"
+}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 # shellcheck disable=SC1091
@@ -149,15 +161,19 @@ set -a
 source "$PROJECT_ROOT/.env"
 set +a
 
-[[ -n "${JWT_SECRET:-}" ]] || die "JWT_SECRET ausente"
-[[ -n "${SERVER_URL:-}" ]] || die "SERVER_URL ausente"
+for variable in POSTGRES_HOST POSTGRES_PASSWORD POSTGRES_PORT MAX_CONCURRENT_USERS \
+  SERVER_URL JWT_SECRET HOST_PROJECT_ROOT; do
+  [[ -n "${!variable:-}" ]] || die "$variable ausente"
+done
+[[ "$MAX_CONCURRENT_USERS" =~ ^[1-9][0-9]*$ ]] \
+  || die "MAX_CONCURRENT_USERS deve ser um inteiro positivo"
 
 PROJECT_ID="${1:-}"
 PROJECT_UUID="${2:-}"
-RECOVER_STALE="${3:-false}"
+RECOVER_STALE="${3:-}"
 STALE_TENANT_UUIDS=("${@:4}")
-[[ -n "$PROJECT_ID" && -n "$PROJECT_UUID" ]] \
-  || die "Uso: $0 <project_id> <project_uuid> [recover_stale] [stale_tenant_uuid ...]"
+[[ -n "$PROJECT_ID" && -n "$PROJECT_UUID" && -n "$RECOVER_STALE" ]] \
+  || die "Uso: $0 <project_id> <project_uuid> <recover_stale> [stale_tenant_uuid ...]"
 [[ "$PROJECT_UUID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] \
   || die "project_uuid inválido"
 [[ "$RECOVER_STALE" == "true" || "$RECOVER_STALE" == "false" ]] \
@@ -233,8 +249,9 @@ cleanup_stale_state() {
   echo "HOST_AGENT_PROGRESS=create:cleanup_stale"
   if [[ -d "$OUT_DIR" ]]; then
     if [[ -f "$OUT_DIR/.env" ]]; then
-      old_uuid="$(grep -m1 '^PROJECT_UUID=' "$OUT_DIR/.env" | cut -d= -f2- | tr -d '\r' || true)"
-      if [[ -n "$old_uuid" && ! "$old_uuid" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+      old_uuid="$(read_canonical_env_value "$OUT_DIR/.env" PROJECT_UUID)" \
+        || { echo "HOST_AGENT_ROLLBACK_FAILED=stale_project_uuid" >&2; return 1; }
+      if [[ ! "$old_uuid" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
         echo "HOST_AGENT_ROLLBACK_FAILED=stale_project_uuid" >&2
         return 1
       fi
@@ -327,7 +344,7 @@ realtime_tenant() {
     --arg db "_supabase_$PROJECT_ID" --arg host "$POSTGRES_HOST" \
     --arg port "$POSTGRES_PORT" --arg password "$POSTGRES_PASSWORD" \
     --arg slot "supabase_realtime_replication_slot_$PROJECT_ID" \
-    --argjson max_users "${MAX_CONCURRENT_USERS:-200}" \
+    --argjson max_users "$MAX_CONCURRENT_USERS" \
     '{tenant:{name:$uuid,external_id:$uuid,jwt_secret:$secret,max_concurrent_users:$max_users,extensions:[{type:"postgres_cdc_rls",settings:{db_name:$db,db_host:$host,db_user:"supabase_admin",db_password:$password,db_port:$port,region:"us-west-1",poll_interval_ms:100,poll_max_record_bytes:1048576,ssl_enforced:false,slot_name:$slot}}]}}')
   response=$(docker exec realtime-dev.supabase-realtime curl -sS -w '\n%{http_code}' \
     -X POST http://localhost:4000/api/tenants \

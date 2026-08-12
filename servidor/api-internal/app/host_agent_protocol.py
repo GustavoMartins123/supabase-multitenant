@@ -167,7 +167,7 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
         reject_unknown(set())
     elif command == "rotate_keys":
         reject_unknown({"trigger"})
-        if args.get("trigger") not in {None, "automatic"}:
+        if args.get("trigger") not in {"manual", "automatic"}:
             errors.append("invalid_rotation_trigger")
     elif command == "delete_project_files":
         reject_unknown({"tenant_uuid", "project_uuid"})

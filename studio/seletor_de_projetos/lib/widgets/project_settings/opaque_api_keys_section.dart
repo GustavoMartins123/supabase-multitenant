@@ -542,9 +542,8 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
                 SecondaryButton(
                   label: 'Cancelar rotação pendente',
                   icon: Icons.cancel_outlined,
-                  onPressed: _disabled
-                      ? null
-                      : () => _cancelPendingRotation(slot),
+                  onPressed:
+                      _disabled ? null : () => _cancelPendingRotation(slot),
                 ),
               DangerButton(
                 label: 'Revogar slot',
@@ -616,7 +615,7 @@ class _CreateOpaqueSlotDialogState extends State<_CreateOpaqueSlotDialog> {
   }
 
   Future<void> _submit() async {
-    final name = _name.text.trim();
+    final name = _name.text;
     if (!RegExp(r'^[a-z][a-z0-9_-]{2,39}$').hasMatch(name)) {
       setState(() => _error = 'Use 3-40 caracteres: a-z, 0-9, _ ou -.');
       return;

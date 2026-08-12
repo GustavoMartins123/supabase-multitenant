@@ -974,7 +974,7 @@ async def activate_pending_key(
         raise OpaqueKeyLifecycleError("active API key slot not found")
     pending = await conn.fetchrow(
         """
-        SELECT id, activate_at, confirmed_at
+        SELECT id, activate_at, expires_at, confirmed_at
         FROM project_api_keys
         WHERE slot_id = $1 AND status = 'pending'
         FOR UPDATE
@@ -989,6 +989,8 @@ async def activate_pending_key(
         )
     if pending["activate_at"] is None or pending["activate_at"] > _utcnow():
         raise OpaqueKeyLifecycleError("pending API key is not due for activation")
+    if pending["expires_at"] <= _utcnow():
+        raise OpaqueKeyLifecycleError("pending API key has expired")
     await conn.execute(
         """
         UPDATE project_api_keys
@@ -1371,7 +1373,6 @@ async def list_slots(
                         AND due.status = 'pending'
                         AND due.activate_at <= now()
                         AND due.confirmed_at IS NOT NULL
-                        AND due.expires_at > now()
                   ) THEN true
                 ELSE false
             END AS currently_accepted

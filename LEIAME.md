@@ -8,9 +8,10 @@ A stack oficial de auto-hospedagem do Supabase foi projetada para um único proj
 
 Cada projeto recebe seu próprio database PostgreSQL, JWT secret, tenant do Realtime, tenant do Supavisor e containers de Auth, REST, Storage, ImgProxy e Nginx. Um control plane em FastAPI gerencia o ciclo de vida dos projetos, enquanto um gateway dinâmico OpenResty/Lua permite que **uma única instância do Supabase Studio** administre todos eles.
 
-As API keys anon/service são rotacionadas automaticamente antes da expiração
-por padrão. Um administrador pode desativar a opção em cada projeto; falhas na
-automação ficam bloqueadas e visíveis até uma retomada explícita.
+Cada projeto possui múltiplos slots de API keys opacas publishable/secret, com
+rotação automática habilitada por padrão. Os JWTs anon/service permanecem
+internos. Um administrador pode desativar a automação no projeto ou no slot;
+falhas ficam bloqueadas e visíveis até uma retomada explícita.
 
 > Este é um projeto não oficial e ainda está em desenvolvimento ativo.
 

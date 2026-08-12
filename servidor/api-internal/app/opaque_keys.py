@@ -34,7 +34,7 @@ TOKEN_RE = re.compile(
     rf"(?P<checksum>[A-Za-z0-9_-]{{{CHECKSUM_LENGTH}}})$"
 )
 SLOT_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{2,39}$")
-BEARER_RE = re.compile(r"^Bearer ([^ ]+)$", re.IGNORECASE)
+BEARER_RE = re.compile(r"^Bearer ([^\s]+)$", re.IGNORECASE)
 
 
 class OpaqueKeyError(ValueError):

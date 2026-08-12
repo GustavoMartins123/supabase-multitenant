@@ -13,7 +13,10 @@ ok() { echo "OK: $*"; }
 
 env_value() {
   local file="$1" key="$2"
-  sed -n "s/^${key}=//p" "$file" | head -n1
+  local count
+  count="$(grep -c "^${key}=" "$file" || true)"
+  [[ "$count" == "1" ]] || fail "$file: $key deve existir exatamente uma vez"
+  sed -n "s/^${key}=//p" "$file"
 }
 
 [[ -f "$SERVER_ENV" ]] || fail "servidor/.env não encontrado"

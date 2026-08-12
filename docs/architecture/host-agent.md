@@ -37,6 +37,8 @@ verificadas por teste):
 | --- | --- | --- |
 | `start_project` / `stop_project` / `restart_project` | docker start/stop/restart por container do projeto | 600s |
 | `recreate_services` | templates + `docker compose up -d --force-recreate` | 1800s |
+| `ensure_opaque_gateway_token` | valida ou gera o token interno exclusivo do gateway sem imprimi-lo | 120s |
+| `stage_opaque_gateway` | para o Nginx legado e materializa o template opaco | 600s |
 | `create_project` | `generate_project.sh` | 1800s |
 | `duplicate_project` | `duplicate_project.sh` | 3600s |
 | `delete_project_containers` | `docker rm -f` dos containers do projeto | 300s |

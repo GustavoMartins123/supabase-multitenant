@@ -339,9 +339,10 @@ async def _build_recovery_runner(row: asyncpg.Record):
     if action == "delete":
         return lambda: _delete_project_background(job_id, project_name)
     if action == "rotate_key":
-        trigger = str(payload.get("trigger") or "manual")
-        if trigger not in {"manual", "automatic"}:
+        raw_trigger = payload.get("trigger")
+        if raw_trigger not in {"manual", "automatic"}:
             return None
+        trigger = str(raw_trigger)
         actor_user_id = owner_id if trigger == "manual" else None
         return lambda: _rotate_project_key_background(
             job_id,
@@ -3111,6 +3112,12 @@ async def rotate_project_key(
                 auth_user=auth_user,
                 message="Only project admin or system admin can rotate keys",
             )
+            if project_row["opaque_gateway_ready_at"] is None:
+                raise HTTPException(
+                    409,
+                    "Conclua a migracao do gateway opaco antes de rotacionar "
+                    "os tokens internos",
+                )
             await conn.execute(
                 "SELECT id FROM projects WHERE id = $1 FOR UPDATE",
                 project_row["id"],
@@ -3216,6 +3223,16 @@ async def _rotate_project_key_background(
     )
     try:
         pool = await get_pool()
+        gateway_ready = await pool.fetchval(
+            "SELECT opaque_gateway_ready_at FROM projects WHERE name = $1",
+            project_name,
+        )
+        if gateway_ready is None:
+            await fail_rotation(
+                message="Opaque gateway migration is not complete.",
+                error_code="opaque_gateway_not_ready",
+            )
+            return
         record = await run_host_agent_command_for_job(
             pool,
             job_id=job_id,
@@ -3223,7 +3240,7 @@ async def _rotate_project_key_background(
             project=project_name,
             project_uuid=await _get_job_project_uuid(pool, job_id),
             requested_by=actor_user_id,
-            args={"trigger": "automatic"} if trigger == "automatic" else {},
+            args={"trigger": trigger},
             reuse_terminal=True,
             on_progress=_job_progress_mirror(job_id),
         )
@@ -4919,6 +4936,14 @@ async def recreate_project_services(
 
     if not body.services:
         raise HTTPException(400, "Nenhum serviço especificado")
+    if (
+        "nginx" in body.services
+        and project_row["opaque_gateway_ready_at"] is None
+    ):
+        raise HTTPException(
+            409,
+            "Use o cutover coordenado para materializar o gateway opaco",
+        )
 
     services = body.services
     job_id = await _create_project_job(

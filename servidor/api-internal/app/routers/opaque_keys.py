@@ -143,6 +143,13 @@ async def abort_opaque_api_key_migration(
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
+                project = await get_project_row(conn, project_name)
+                await ensure_project_admin_access(
+                    conn,
+                    project_id=project["id"],
+                    auth_user=auth_user,
+                    message="Project admin permission changed during migration abort",
+                )
                 version = await abort_prepared_project_opaque_keys(
                     conn, project_id=project["id"]
                 )
@@ -561,6 +568,13 @@ async def create_api_key_slot(
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
+                project = await get_project_row(conn, project_name)
+                await ensure_project_admin_access(
+                    conn,
+                    project_id=project["id"],
+                    auth_user=auth_user,
+                    message="Project admin permission changed during API key creation",
+                )
                 issued, version = await create_slot_with_active_key(
                     conn,
                     project_id=project["id"],
@@ -605,6 +619,13 @@ async def rotate_api_key_slot(
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
+                project = await get_project_row(conn, project_name)
+                await ensure_project_admin_access(
+                    conn,
+                    project_id=project["id"],
+                    auth_user=auth_user,
+                    message="Project admin permission changed during API key rotation",
+                )
                 if body.activate_at is None:
                     issued, version = await rotate_slot_immediately(
                         conn, project_id=project["id"], slot_id=slot_id
@@ -656,6 +677,13 @@ async def update_api_key_slot_policy(
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
+                project = await get_project_row(conn, project_name)
+                await ensure_project_admin_access(
+                    conn,
+                    project_id=project["id"],
+                    auth_user=auth_user,
+                    message="Project admin permission changed during API key policy update",
+                )
                 version = await update_slot_policy(
                     conn,
                     project_id=project["id"],
@@ -701,6 +729,13 @@ async def activate_api_key_slot(
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
+                project = await get_project_row(conn, project_name)
+                await ensure_project_admin_access(
+                    conn,
+                    project_id=project["id"],
+                    auth_user=auth_user,
+                    message="Project admin permission changed during API key activation",
+                )
                 key_id, version = await activate_pending_key(
                     conn, project_id=project["id"], slot_id=slot_id
                 )
@@ -739,6 +774,13 @@ async def confirm_api_key_slot_installation(
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
+                project = await get_project_row(conn, project_name)
+                await ensure_project_admin_access(
+                    conn,
+                    project_id=project["id"],
+                    auth_user=auth_user,
+                    message="Project admin permission changed during API key confirmation",
+                )
                 version = await confirm_pending_key_installation(
                     conn,
                     project_id=project["id"],
@@ -779,6 +821,13 @@ async def cancel_api_key_slot_rotation(
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
+                project = await get_project_row(conn, project_name)
+                await ensure_project_admin_access(
+                    conn,
+                    project_id=project["id"],
+                    auth_user=auth_user,
+                    message="Project admin permission changed during rotation cancellation",
+                )
                 key_id, version = await cancel_pending_key(
                     conn,
                     project_id=project["id"],
@@ -818,6 +867,13 @@ async def revoke_api_key_slot(
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
+                project = await get_project_row(conn, project_name)
+                await ensure_project_admin_access(
+                    conn,
+                    project_id=project["id"],
+                    auth_user=auth_user,
+                    message="Project admin permission changed during API key revocation",
+                )
                 version = await disable_slot(
                     conn, project_id=project["id"], slot_id=slot_id
                 )
@@ -864,6 +920,13 @@ async def claim_api_key(
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
+                project = await get_project_row(conn, project_name)
+                await ensure_project_admin_access(
+                    conn,
+                    project_id=project["id"],
+                    auth_user=auth_user,
+                    message="Project admin permission changed during API key reveal",
+                )
                 token = await claim_key_reveal(
                     conn, project_id=project["id"], key_id=key_id
                 )

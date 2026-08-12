@@ -25,7 +25,8 @@ Fluxo resumido:
 1. a API valida usuário e nome;
 2. gera uma única vez `projects.id` e persiste o mesmo valor em `tenant_uuid`;
 3. cria o job já com os dois identificadores duráveis;
-4. o script gera JWT secret, anon key, service role e config token;
+4. o script gera JWT secret, JWTs internos anon/service role, config token e
+   token exclusivo do gateway opaco;
 5. cria `_supabase_<project_ref>` a partir de `_supabase_template`;
 6. gera `.env`, compose, Dockerfile e configuração Nginx;
 7. registra o tenant do Realtime com `external_id = tenant_uuid`;
@@ -137,9 +138,22 @@ A migração é best-effort:
 - o job registra um aviso;
 - os diretórios podem exigir correção manual ou retry específico.
 
-## Rotação das API keys
+## Chaves de API opacas
 
-A rotação padrão gera novos tokens anon e service role usando o JWT secret existente.
+Projetos novos e duplicados nascem com slots `default-publishable` e
+`default-secret`. Projetos existentes usam preparação, claim, confirmação e
+corte explícitos; depois do corte, JWTs públicos legados deixam de ser aceitos.
+
+Cada slot possui rotação, expiração, escopo de serviços e revogação próprios. A
+automação é habilitada por padrão e pode ser desativada no projeto ou no slot.
+O protocolo completo está em
+[Operação de chaves de API opacas](../12-chaves-api-opacas.md).
+
+## Rotação dos JWTs internos
+
+A rotação de infraestrutura gera novos JWTs internos anon e service role usando
+o JWT secret existente. Ela só pode recriar o Nginx de um projeto quando o
+gateway opaco está pronto.
 
 Isso evita invalidar imediatamente todas as sessões de usuários finais.
 

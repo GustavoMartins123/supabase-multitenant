@@ -107,6 +107,7 @@ async def scan_automatic_key_rotations(
                 FROM projects p
                 WHERE p.automatic_key_rotation_enabled
                   AND p.automatic_key_rotation_blocked_at IS NULL
+                  AND p.opaque_gateway_ready_at IS NOT NULL
                   AND p.anon_key IS NOT NULL
                   AND p.service_role IS NOT NULL
                   AND (

@@ -170,9 +170,11 @@ Durante rename:
 
 O fluxo completo está em [Lifecycle dos projetos](architecture/project-lifecycle.md).
 
-## Rotação de keys
+## Rotação dos JWTs internos
 
-A rotação comum de anon key e service role reutiliza o JWT secret do projeto.
+A rotação dos JWTs internos anon e service role reutiliza o JWT secret do
+projeto. As aplicações usam chaves opacas; portanto essa operação não exige
+redistribuição de API key.
 
 Ela:
 
@@ -191,7 +193,8 @@ Invariantes:
 - o issuer dos tokens novos é o UUID do projeto;
 - um token de um projeto não valida em outro;
 - tenant identificado não aceita fallback global;
-- o Nginx valida a API key antes do proxy WebSocket;
+- o Nginx delega a chave opaca ao `key-authorizer` antes do proxy WebSocket e
+  injeta o JWT interno em `x-api-key`;
 - o Realtime valida novamente o JWT com o secret do tenant;
 - database e slot principal permanecem isolados pelo project ref;
 - o slot temporário de broadcast permanece isolado pelo hash do UUID.

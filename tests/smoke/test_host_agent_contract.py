@@ -222,17 +222,17 @@ class ClosedCommandSetTest(unittest.TestCase):
         errors = protocol.validate_command_args("run_shell", "meuprojeto", {})
         self.assertEqual(errors, ["unknown_command:run_shell"])
 
-    def test_rotate_keys_accepts_only_the_automatic_system_trigger(self) -> None:
+    def test_rotate_keys_requires_one_explicit_canonical_trigger(self) -> None:
+        for trigger in ("manual", "automatic"):
+            with self.subTest(trigger=trigger):
+                self.assertEqual(
+                    protocol.validate_command_args(
+                        "rotate_keys", "meuprojeto", {"trigger": trigger}
+                    ),
+                    [],
+                )
         self.assertEqual(
-            protocol.validate_command_args(
-                "rotate_keys", "meuprojeto", {"trigger": "automatic"}
-            ),
-            [],
-        )
-        self.assertEqual(
-            protocol.validate_command_args(
-                "rotate_keys", "meuprojeto", {"trigger": "manual"}
-            ),
+            protocol.validate_command_args("rotate_keys", "meuprojeto", {}),
             ["invalid_rotation_trigger"],
         )
 
