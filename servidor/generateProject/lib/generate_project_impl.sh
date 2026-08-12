@@ -286,7 +286,9 @@ cleanup_stale_state() {
 normalize_public_base_url() {
   local url="${1%/}" proto="${2:-}"
   if [[ "$url" =~ ^https?:// ]]; then printf '%s' "$url"; return; fi
-  printf '%s://%s' "${proto:-https}" "$url"
+  [[ "$proto" == "http" || "$proto" == "https" ]] \
+    || die "SERVER_PROTO deve ser http ou https quando SERVER_URL nao inclui esquema"
+  printf '%s://%s' "$proto" "$url"
 }
 escape_sed_replacement() { printf '%s' "$1" | sed -e 's/[&|\\]/\\&/g'; }
 
@@ -303,6 +305,7 @@ template_to_file() {
     -e "s|{{project_uuid}}|$(escape_sed_replacement "$PROJECT_UUID")|g" \
     -e "s|{{config_token}}|$(escape_sed_replacement "$CONFIG_TOKEN_PROJETO")|g" \
     -e "s|{{jwt_secret}}|$(escape_sed_replacement "$JWT_SECRET_PROJETO")|g" \
+    -e "s|{{api_gateway_token}}|$(escape_sed_replacement "$API_GATEWAY_TOKEN_PROJETO")|g" \
     -e "s|{{server_url}}|$(escape_sed_replacement "$SERVER_URL")|g" \
     -e "s|{{public_base_url}}|$(escape_sed_replacement "$PUBLIC_BASE_URL")|g" \
     -e "s|{{project_public_url}}|$(escape_sed_replacement "$PROJECT_PUBLIC_URL")|g" \
@@ -363,6 +366,7 @@ ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":
 SERVICE_TOKEN=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now_epoch,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
 GLOBAL_ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now_epoch,\"exp\":$exp}" "$JWT_SECRET")
 CONFIG_TOKEN_PROJETO=$(openssl rand -hex 32 | tr -d '\n\r')
+API_GATEWAY_TOKEN_PROJETO=$(openssl rand -hex 32 | tr -d '\n\r')
 
 if [[ "$RECOVER_STALE" == "true" ]]; then
   cleanup_stale_state || die "Não foi possível limpar resíduos da tentativa anterior"

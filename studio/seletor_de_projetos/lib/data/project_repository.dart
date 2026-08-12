@@ -6,6 +6,7 @@ import '../models/project_collaboration.dart';
 import '../models/restore_point.dart';
 import '../models/user_models.dart';
 import '../models/project_user_telemetry.dart';
+import '../models/opaque_api_key.dart';
 import '../session.dart';
 import 'api_client.dart';
 
@@ -245,13 +246,6 @@ class ProjectRepository {
     );
   }
 
-  Future<Job> rotateKey(String ref) async {
-    final resp = await _client.post(Uri.parse('/api/projects/$ref/rotate-key'));
-    _ensureCommandSucceeded(resp, allowedStatusCodes: const {202});
-    final job = Job.fromResponse(resp);
-    return job;
-  }
-
   Future<Map<String, dynamic>> updateAutomaticKeyRotation(
     String ref, {
     required bool enabled,
@@ -274,6 +268,194 @@ class ProjectRepository {
       );
     }
     return data;
+  }
+
+  Future<List<OpaqueApiKeySlot>> fetchOpaqueApiKeySlots(String ref) async {
+    final resp = await _client.get(
+      Uri.parse('/api/projects/$ref/api-key-slots'),
+    );
+    _ensureCommandSucceeded(resp);
+    final data = decodeJsonObject(resp, context: 'Slots de API keys');
+    final rawSlots = data['slots'];
+    if (rawSlots is! List) {
+      throw const ApiException(
+        ApiFailureKind.invalidResponse,
+        'Resposta sem lista de slots de API keys',
+      );
+    }
+    return rawSlots
+        .map(
+          (item) => OpaqueApiKeySlot.fromJson(
+            Map<String, dynamic>.from(item as Map),
+          ),
+        )
+        .toList();
+  }
+
+  Future<IssuedOpaqueApiKey> createOpaqueApiKeySlot(
+    String ref, {
+    required String name,
+    required String kind,
+    required List<String> allowedServices,
+    required bool automaticRotationEnabled,
+    required int rotationIntervalDays,
+  }) async {
+    final resp = await _client.post(
+      Uri.parse('/api/projects/$ref/api-key-slots'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'name': name,
+        'kind': kind,
+        'allowed_services': allowedServices,
+        'automatic_rotation_enabled': automaticRotationEnabled,
+        'rotation_interval_days': rotationIntervalDays,
+      }),
+    );
+    _ensureCommandSucceeded(resp, allowedStatusCodes: const {201});
+    return IssuedOpaqueApiKey.fromJson(
+      decodeJsonObject(resp, context: 'Nova API key'),
+    );
+  }
+
+  Future<IssuedOpaqueApiKey> rotateOpaqueApiKeySlot(
+    String ref,
+    String slotId, {
+    DateTime? activateAt,
+  }) async {
+    final resp = await _client.post(
+      Uri.parse('/api/projects/$ref/api-key-slots/$slotId/rotation'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        if (activateAt != null)
+          'activate_at': activateAt.toUtc().toIso8601String(),
+      }),
+    );
+    _ensureCommandSucceeded(resp);
+    return IssuedOpaqueApiKey.fromJson(
+      decodeJsonObject(resp, context: 'Rotacao de API key'),
+    );
+  }
+
+  Future<void> updateOpaqueApiKeySlot(
+    String ref,
+    String slotId, {
+    bool? automaticRotationEnabled,
+    int? rotationIntervalDays,
+    List<String>? allowedServices,
+  }) async {
+    final resp = await _client.patch(
+      Uri.parse('/api/projects/$ref/api-key-slots/$slotId'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        if (automaticRotationEnabled != null)
+          'automatic_rotation_enabled': automaticRotationEnabled,
+        if (rotationIntervalDays != null)
+          'rotation_interval_days': rotationIntervalDays,
+        if (allowedServices != null) 'allowed_services': allowedServices,
+      }),
+    );
+    _ensureCommandSucceeded(resp);
+  }
+
+  Future<void> disableOpaqueApiKeySlot(String ref, String slotId) async {
+    final resp = await _client.delete(
+      Uri.parse('/api/projects/$ref/api-key-slots/$slotId'),
+    );
+    _ensureCommandSucceeded(resp);
+  }
+
+  Future<void> cancelOpaqueApiKeyRotation(String ref, String slotId) async {
+    final resp = await _client.delete(
+      Uri.parse('/api/projects/$ref/api-key-slots/$slotId/rotation'),
+    );
+    _ensureCommandSucceeded(resp);
+  }
+
+  Future<void> confirmOpaqueApiKeyInstallation(
+    String ref,
+    String slotId,
+    String keyId,
+  ) async {
+    final resp = await _client.post(
+      Uri.parse(
+        '/api/projects/$ref/api-key-slots/$slotId/rotation-confirmation',
+      ),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'key_id': keyId}),
+    );
+    _ensureCommandSucceeded(resp);
+  }
+
+  Future<List<OpaqueApiKeyReveal>> fetchOpaqueApiKeyReveals(
+    String ref,
+  ) async {
+    final resp = await _client.get(
+      Uri.parse('/api/projects/$ref/api-key-reveals'),
+    );
+    _ensureCommandSucceeded(resp);
+    final data = decodeJsonObject(resp, context: 'Revelacoes de API keys');
+    final rawReveals = data['reveals'];
+    if (rawReveals is! List) {
+      throw const ApiException(
+        ApiFailureKind.invalidResponse,
+        'Resposta sem lista de revelacoes',
+      );
+    }
+    return rawReveals
+        .map(
+          (item) => OpaqueApiKeyReveal.fromJson(
+            Map<String, dynamic>.from(item as Map),
+          ),
+        )
+        .toList();
+  }
+
+  Future<String> claimOpaqueApiKey(String ref, String keyId) async {
+    final resp = await _client.post(
+      Uri.parse('/api/projects/$ref/api-key-reveals/$keyId/claim'),
+    );
+    _ensureCommandSucceeded(resp);
+    final data = decodeJsonObject(resp, context: 'Revelacao de API key');
+    final apiKey = data['api_key'];
+    if (apiKey is! String || apiKey.isEmpty) {
+      throw const ApiException(
+        ApiFailureKind.invalidResponse,
+        'Resposta sem API key revelada',
+      );
+    }
+    return apiKey;
+  }
+
+  Future<Map<String, dynamic>> fetchOpaqueApiKeyMigration(String ref) async {
+    final resp = await _client.get(
+      Uri.parse('/api/projects/$ref/opaque-api-keys/migration'),
+    );
+    _ensureCommandSucceeded(resp);
+    return decodeJsonObject(resp, context: 'Migracao de API keys opacas');
+  }
+
+  Future<Map<String, dynamic>> prepareOpaqueApiKeyMigration(String ref) async {
+    final resp = await _client.post(
+      Uri.parse('/api/projects/$ref/opaque-api-keys/migration/prepare'),
+    );
+    _ensureCommandSucceeded(resp, allowedStatusCodes: const {201});
+    return decodeJsonObject(resp, context: 'Preparacao da migracao opaca');
+  }
+
+  Future<Map<String, dynamic>> abortOpaqueApiKeyMigration(String ref) async {
+    final resp = await _client.delete(
+      Uri.parse('/api/projects/$ref/opaque-api-keys/migration'),
+    );
+    _ensureCommandSucceeded(resp);
+    return decodeJsonObject(resp, context: 'Cancelamento da migracao opaca');
+  }
+
+  Future<Map<String, dynamic>> cutoverOpaqueApiKeyMigration(String ref) async {
+    final resp = await _client.post(
+      Uri.parse('/api/projects/$ref/opaque-api-keys/migration/cutover'),
+    );
+    _ensureCommandSucceeded(resp);
+    return decodeJsonObject(resp, context: 'Corte da migracao opaca');
   }
 
   Future<ProjectActionResult> doAction(String ref, String action) async {

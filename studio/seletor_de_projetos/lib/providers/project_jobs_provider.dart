@@ -257,7 +257,11 @@ List<Map<String, dynamic>> mergeProjectsWithJobs({
     indexes[project] = result.length;
     result.add({
       'name': project,
-      'anon_token': '',
+      'opaque_api_keys_status': 'provisioning',
+      'opaque_api_key_slot_count': 0,
+      'automatic_key_rotation_enabled': true,
+      'automatic_key_rotation_blocked': false,
+      'automatic_key_rotation_lead_days': 7,
       'file_size_limit': '',
       'storage_limit_token': '',
       'is_loading': true,

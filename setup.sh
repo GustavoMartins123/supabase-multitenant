@@ -143,6 +143,10 @@ generate_postgres_password() {
   openssl rand -base64 32 | tr '/+' '_-' | tr -d '\n'
 }
 
+generate_key_authorizer_password() {
+  openssl rand -hex 32
+}
+
 generate_user_realtime() {
   echo "user_$(openssl rand -hex 4)"
 }
@@ -415,12 +419,14 @@ main() {
     JWT_SECRET=$(generate_jwt_secret)
     POSTGRES_PASSWORD=$(generate_postgres_password)
     META_GUEST_PASSWORD=$(generate_postgres_password)
+    KEY_AUTHORIZER_DB_PASSWORD=$(generate_key_authorizer_password)
 
     cp servidor/.env.example servidor/.env
     cp servidor/.analytics.env.example servidor/.analytics.env
 
     safe_sed "s|POSTGRES_PASSWORD=pass|POSTGRES_PASSWORD=$POSTGRES_PASSWORD|g" servidor/.env
     safe_sed "s|META_GUEST_PASSWORD=pass|META_GUEST_PASSWORD=$META_GUEST_PASSWORD|g" servidor/.env
+    safe_sed "s|KEY_AUTHORIZER_DB_PASSWORD=pass|KEY_AUTHORIZER_DB_PASSWORD=$KEY_AUTHORIZER_DB_PASSWORD|g" servidor/.env
     safe_sed "s|DB_ENC_KEY=pass|DB_ENC_KEY=$DB_ENC_KEY|g" servidor/.env
     safe_sed "s|VAULT_ENC_KEY=pass|VAULT_ENC_KEY=$VAULT_ENC_KEY|g" servidor/.env
     safe_sed "s|SECRET_KEY_BASE=pass|SECRET_KEY_BASE=$SECRET_KEY_BASE|g" servidor/.env

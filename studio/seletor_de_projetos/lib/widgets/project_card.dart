@@ -17,7 +17,8 @@ class ProjectCard extends ConsumerStatefulWidget {
   const ProjectCard({
     super.key,
     required this.refKey,
-    required this.anonKey,
+    required this.opaqueApiKeysStatus,
+    required this.opaqueApiKeySlotCount,
     required this.onTap,
     required this.onDeleted,
     required this.onDuplicate,
@@ -26,29 +27,22 @@ class ProjectCard extends ConsumerStatefulWidget {
     required this.automaticKeyRotationEnabled,
     required this.automaticKeyRotationBlocked,
     required this.automaticKeyRotationLeadDays,
-    required this.keyMetadataValid,
     this.displayName,
     this.serverDomain,
-    this.keyExpiresAtEpoch,
-    this.keyExpiringSoon = false,
-    this.keyExpired = false,
     this.automaticKeyRotationLastError,
     this.isLoading = false,
     this.activeJob,
   });
 
   final String refKey;
-  final String anonKey;
+  final String opaqueApiKeysStatus;
+  final int opaqueApiKeySlotCount;
   final String? displayName;
   final String? serverDomain;
-  final int? keyExpiresAtEpoch;
-  final bool keyExpiringSoon;
-  final bool keyExpired;
   final bool automaticKeyRotationEnabled;
   final bool automaticKeyRotationBlocked;
   final String? automaticKeyRotationLastError;
   final int automaticKeyRotationLeadDays;
-  final bool keyMetadataValid;
   final VoidCallback onTap;
   final VoidCallback onDeleted;
   final VoidCallback onDuplicate;
@@ -64,20 +58,17 @@ class ProjectCard extends ConsumerStatefulWidget {
 class _ProjectCardState extends ConsumerState<ProjectCard>
     with TickerProviderStateMixin {
   bool _hover = false;
-  bool _keyVisible = false;
 
   Future<void> _openSettings() async {
     final deleted = await showDialog<String>(
       context: context,
       builder: (_) => ProjectSettingsDialog(
         ref: widget.refKey,
-        anonKey: widget.anonKey,
         displayName: widget.displayName,
         automaticKeyRotationEnabled: widget.automaticKeyRotationEnabled,
         automaticKeyRotationBlocked: widget.automaticKeyRotationBlocked,
         automaticKeyRotationLastError: widget.automaticKeyRotationLastError,
         automaticKeyRotationLeadDays: widget.automaticKeyRotationLeadDays,
-        keyMetadataValid: widget.keyMetadataValid,
       ),
     );
 
@@ -111,26 +102,34 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
     return '${widget.serverDomain}/${widget.refKey}';
   }
 
-  int? get _daysUntilKeyExpiry {
-    final expiry = widget.keyExpiresAtEpoch;
-    if (expiry == null) return null;
-    final remaining = DateTime.fromMillisecondsSinceEpoch(
-      expiry * 1000,
-      isUtc: true,
-    ).difference(DateTime.now().toUtc());
-    return (remaining.inHours / 24).ceil();
-  }
-
-  String get _keyExpiryMessage {
-    if (!widget.keyMetadataValid) {
-      return 'Metadata de expiração das keys inválida';
-    }
-    if (widget.keyExpired) return 'Keys expiradas — rotacione agora';
-    final days = _daysUntilKeyExpiry;
-    if (days == null) return 'Expiração das keys indisponível';
-    if (days <= 1) return 'Keys expiram em menos de 1 dia';
-    return 'Keys expiram em $days dias';
-  }
+  (String, Color, IconData) get _opaqueKeySummary =>
+      switch (widget.opaqueApiKeysStatus) {
+        'active' => (
+            '${widget.opaqueApiKeySlotCount} slots ativos',
+            SupabaseColors.success,
+            Icons.key_rounded,
+          ),
+        'prepared' => (
+            'Migração preparada',
+            SupabaseColors.warning,
+            Icons.pending_actions_rounded,
+          ),
+        'gateway_recovery_required' => (
+            'Recuperação obrigatória',
+            SupabaseColors.error,
+            Icons.error_rounded,
+          ),
+        'legacy' => (
+            'Migração opaca pendente',
+            SupabaseColors.warning,
+            Icons.warning_amber_rounded,
+          ),
+        _ => (
+            'Estado inválido',
+            SupabaseColors.error,
+            Icons.error_rounded,
+          ),
+      };
 
   @override
   Widget build(BuildContext ctx) {
@@ -240,18 +239,14 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
                                           : SupabaseColors.error),
                                 ),
                               ),
-                              if (widget.keyExpiringSoon) ...[
+                              if (widget.opaqueApiKeysStatus != 'active') ...[
                                 const SizedBox(width: 8),
                                 Tooltip(
-                                  message: _keyExpiryMessage,
+                                  message: _opaqueKeySummary.$1,
                                   child: Icon(
-                                    widget.keyExpired
-                                        ? Icons.error_rounded
-                                        : Icons.warning_amber_rounded,
+                                    _opaqueKeySummary.$3,
                                     size: 17,
-                                    color: widget.keyExpired
-                                        ? SupabaseColors.error
-                                        : SupabaseColors.warning,
+                                    color: _opaqueKeySummary.$2,
                                   ),
                                 ),
                               ],
@@ -364,7 +359,7 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
                 Row(
                   children: [
                     const Text(
-                      'CHAVE ANÔNIMA',
+                      'API KEYS OPACAS',
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
@@ -373,17 +368,18 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
                       ),
                     ),
                     const Spacer(),
-                    if (widget.keyExpiringSoon)
-                      Text(
-                        _keyExpiryMessage.toUpperCase(),
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: widget.keyExpired
-                              ? SupabaseColors.error
-                              : SupabaseColors.warning,
-                        ),
+                    Text(
+                      widget.automaticKeyRotationEnabled
+                          ? 'AUTO ATIVA'
+                          : 'AUTO DESATIVADA',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: widget.automaticKeyRotationEnabled
+                            ? SupabaseColors.success
+                            : SupabaseColors.textMuted,
                       ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -399,44 +395,23 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
                   ),
                   child: Row(
                     children: [
+                      Icon(
+                        _opaqueKeySummary.$3,
+                        size: 17,
+                        color: _opaqueKeySummary.$2,
+                      ),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          _keyVisible
-                              ? widget.anonKey
-                              : '••••••••••••••••••••••••••••••',
-                          style: const TextStyle(
+                          _opaqueKeySummary.$1,
+                          style: TextStyle(
                             fontSize: 13,
-                            color: SupabaseColors.textSecondary,
-                            fontFamily: 'monospace',
-                            letterSpacing: 2,
+                            color: _opaqueKeySummary.$2,
+                            fontWeight: FontWeight.w600,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                      IconBtn(
-                        icon: _keyVisible
-                            ? Icons.visibility_off_outlined
-                            : Icons.visibility_outlined,
-                        tooltip:
-                            _keyVisible ? 'Esconder chave' : 'Mostrar chave',
-                        onPressed: () =>
-                            setState(() => _keyVisible = !_keyVisible),
-                      ),
-                      IconBtn(
-                        icon: Icons.copy_outlined,
-                        tooltip: 'Copiar chave',
-                        onPressed: () {
-                          Clipboard.setData(
-                            ClipboardData(text: widget.anonKey),
-                          );
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Chave copiada!'),
-                              backgroundColor: SupabaseColors.success,
-                            ),
-                          );
-                        },
                       ),
                     ],
                   ),

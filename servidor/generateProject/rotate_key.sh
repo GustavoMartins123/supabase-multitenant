@@ -111,11 +111,15 @@ upsert_env_value() {
 CONFIG_TOKEN=$(get_env_value "CONFIG_TOKEN_PROJETO" "$PROJECT_DIR/.env")
 JWT_SECRET_PROJETO=$(get_env_value "JWT_SECRET_PROJETO" "$PROJECT_DIR/.env")
 PROJECT_UUID=$(get_env_value "PROJECT_UUID" "$PROJECT_DIR/.env")
+API_GATEWAY_TOKEN_PROJETO=$(get_env_value "API_GATEWAY_TOKEN_PROJETO" "$PROJECT_DIR/.env")
 
 [[ -z "$CONFIG_TOKEN" ]] && die "CONFIG_TOKEN_PROJETO não encontrado no .env do projeto"
 [[ -z "$JWT_SECRET_PROJETO" ]]  && die "JWT_SECRET_PROJETO não encontrado no .env do projeto"
 
 [[ -z "$PROJECT_UUID" ]] && die "PROJECT_UUID não encontrado no .env do projeto"
+
+[[ "$API_GATEWAY_TOKEN_PROJETO" =~ ^[a-f0-9]{64}$ ]] \
+  || die "API_GATEWAY_TOKEN_PROJETO ausente ou invalido"
 
 generate_jwt() {
   local payload="$1" secret="$2"
@@ -182,6 +186,7 @@ template_to_file() {
     -e "s|{{project_uuid}}|$project_uuid|g" \
     -e "s|{{config_token}}|$config_token|g" \
     -e "s|{{jwt_secret}}|$jwt_secret|g" \
+    -e "s|{{api_gateway_token}}|$(escape_sed_replacement "$API_GATEWAY_TOKEN_PROJETO")|g" \
     -e "s|{{server_url}}|$server_url|g" \
     -e "s|{{public_base_url}}|$public_base_url|g" \
     -e "s|{{project_public_url}}|$project_public_url|g" \

@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .envfile import read_env_file
+from .envfile import read_canonical_env_value, read_env_file
 from .security import ensure_inside
 
 
@@ -18,10 +18,11 @@ def _normalize_public_base_url(url: str, proto: str | None = None) -> str:
     normalized = url.rstrip("/")
     if not re.match(r"^https?://", normalized):
         normalized_proto = (proto or "").strip().lower()
-        if normalized_proto in {"http", "https"}:
-            normalized = f"{normalized_proto}://{normalized}"
-        else:
-            normalized = f"https://{normalized}"
+        if normalized_proto not in {"http", "https"}:
+            raise RuntimeError(
+                "SERVER_PROTO deve ser http ou https quando SERVER_URL nao inclui esquema"
+            )
+        normalized = f"{normalized_proto}://{normalized}"
     return normalized
 
 
@@ -37,10 +38,6 @@ def _build_replacements(root: Path, project_dir: Path, project: str) -> dict[str
     root_env = read_env_file(root / ".env")
     if not root_env:
         raise RuntimeError("Arquivo .env raiz nao encontrado")
-    project_env = read_env_file(project_dir / ".env")
-    if not project_env:
-        raise RuntimeError(f"Arquivo .env nao encontrado para o projeto '{project}'")
-
     server_url = root_env.get("SERVER_URL", "").strip()
     server_proto = root_env.get("SERVER_PROTO", "").strip()
     host_project_root = root_env.get("HOST_PROJECT_ROOT", "").strip()
@@ -54,12 +51,24 @@ def _build_replacements(root: Path, project_dir: Path, project: str) -> dict[str
         "SERVICE_ROLE_KEY_PROJETO",
         "CONFIG_TOKEN_PROJETO",
         "JWT_SECRET_PROJETO",
+        "API_GATEWAY_TOKEN_PROJETO",
+        "PROJECT_UUID",
     )
-    missing = [key for key in required_project_keys if not project_env.get(key, "").strip()]
+    project_env_path = project_dir / ".env"
+    raw_project_env = {
+        key: read_canonical_env_value(project_env_path, key)
+        for key in required_project_keys
+    }
+    missing = [key for key, value in raw_project_env.items() if not value]
     if missing:
         raise RuntimeError(
             f".env do projeto '{project}' sem chaves obrigatorias: {', '.join(missing)}"
         )
+    project_env = {
+        key: value
+        for key, value in raw_project_env.items()
+        if value is not None
+    }
 
     public_base_url = _normalize_public_base_url(server_url, server_proto)
     project_public_url = f"{public_base_url}/{project}"
@@ -68,9 +77,10 @@ def _build_replacements(root: Path, project_dir: Path, project: str) -> dict[str
         "anon_key": project_env["ANON_KEY_PROJETO"],
         "service_role_key": project_env["SERVICE_ROLE_KEY_PROJETO"],
         "project_id": project,
-        "project_uuid": project_env.get("PROJECT_UUID") or project,
+        "project_uuid": project_env["PROJECT_UUID"],
         "config_token": project_env["CONFIG_TOKEN_PROJETO"],
         "jwt_secret": project_env["JWT_SECRET_PROJETO"],
+        "api_gateway_token": project_env["API_GATEWAY_TOKEN_PROJETO"],
         "server_url": server_url,
         "public_base_url": public_base_url,
         "project_public_url": project_public_url,

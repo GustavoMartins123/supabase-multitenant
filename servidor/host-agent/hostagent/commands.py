@@ -12,6 +12,7 @@ import asyncio
 import json
 import os
 import re
+import secrets
 import shutil
 import signal
 from dataclasses import dataclass, field
@@ -19,7 +20,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping
 
 from .config import AgentConfig
-from .envfile import read_env_file
+from .envfile import read_canonical_env_value, read_env_file, upsert_env_value
 from .host_agent_protocol import (
     COMMAND_TERM_GRACE,
     CONTAINER_LOGS_LIMIT,
@@ -517,6 +518,95 @@ async def handle_recreate_services(ctx: CommandContext, project: str, args: dict
     return CommandOutcome(status="done", exit_code=0, result={"recreated_services": services})
 
 
+async def handle_ensure_opaque_gateway_token(
+    ctx: CommandContext, project: str, args: dict[str, Any]
+) -> CommandOutcome:
+    project_dir = resolve_project_dir(
+        ctx.config.projects_root, project, must_exist=True
+    )
+    env_path = ensure_inside(project_dir, project_dir / ".env")
+    gateway_token = read_canonical_env_value(
+        env_path, "API_GATEWAY_TOKEN_PROJETO"
+    )
+    if gateway_token is not None:
+        if not re.fullmatch(r"[a-f0-9]{64}", gateway_token):
+            return CommandOutcome(
+                status="failed",
+                error_code="invalid_gateway_token",
+                message="API_GATEWAY_TOKEN_PROJETO existente possui formato invalido.",
+            )
+    else:
+        gateway_token = secrets.token_hex(32)
+        upsert_env_value(env_path, "API_GATEWAY_TOKEN_PROJETO", gateway_token)
+    return CommandOutcome(
+        status="done",
+        exit_code=0,
+        result={"gateway_token_ready": True},
+    )
+
+
+async def handle_stage_opaque_gateway(
+    ctx: CommandContext, project: str, args: dict[str, Any]
+) -> CommandOutcome:
+    project_dir = resolve_project_dir(
+        ctx.config.projects_root, project, must_exist=True
+    )
+    gateway_token = read_canonical_env_value(
+        project_dir / ".env", "API_GATEWAY_TOKEN_PROJETO"
+    )
+    if gateway_token is None or not re.fullmatch(
+        r"[a-f0-9]{64}", gateway_token
+    ):
+        return CommandOutcome(
+            status="failed",
+            error_code="gateway_token_not_ready",
+            message="API_GATEWAY_TOKEN_PROJETO ausente ou invalido.",
+        )
+
+    ctx.state.report(
+        progress=15,
+        step="stop_legacy_gateway",
+        message="Parando gateway legado antes do corte opaco...",
+    )
+    stop_result = await run_process(
+        [
+            "docker", "compose", "-p", project,
+            "--env-file", "../../.env", "--env-file", ".env",
+            "stop", "nginx",
+        ],
+        ctx,
+        cwd=project_dir,
+    )
+    if stop_result.timed_out:
+        return CommandOutcome(
+            status="failed", error_code="timeout", exit_code=stop_result.returncode
+        )
+    if stop_result.returncode != 0:
+        return CommandOutcome(
+            status="failed",
+            error_code="legacy_gateway_stop_failed",
+            exit_code=stop_result.returncode,
+            message="Nao foi possivel parar o gateway legado.",
+        )
+
+    ctx.state.report(
+        progress=55,
+        step="render_opaque_gateway",
+        message="Materializando configuracao exclusiva para chaves opacas...",
+    )
+    sync_project_generated_files(
+        root=ctx.config.root,
+        scripts_dir=ctx.config.scripts_dir,
+        project_dir=project_dir,
+        project=project,
+    )
+    return CommandOutcome(
+        status="done",
+        exit_code=0,
+        result={"legacy_gateway_stopped": True, "opaque_gateway_staged": True},
+    )
+
+
 async def _run_lifecycle_script(
     ctx: CommandContext,
     script_name: str,
@@ -872,6 +962,8 @@ COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "stop_project": handle_stop_project,
     "restart_project": handle_restart_project,
     "recreate_services": handle_recreate_services,
+    "ensure_opaque_gateway_token": handle_ensure_opaque_gateway_token,
+    "stage_opaque_gateway": handle_stage_opaque_gateway,
     "create_project": handle_create_project,
     "duplicate_project": handle_duplicate_project,
     "delete_project_containers": handle_delete_project_containers,

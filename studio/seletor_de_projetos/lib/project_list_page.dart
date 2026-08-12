@@ -573,15 +573,13 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
   ) {
     return ProjectCard(
       refKey: project['name'] as String,
-      anonKey: project['anon_token'] ?? '',
+      opaqueApiKeysStatus: project['opaque_api_keys_status'] as String,
+      opaqueApiKeySlotCount: project['opaque_api_key_slot_count'] as int,
       isLoading: project['is_loading'] == true,
       activeJob: project['active_job'],
       isFavorite: isFavorite,
       serverDomain: serverDomain,
       displayName: project['display_name'] as String?,
-      keyExpiresAtEpoch: project['key_expires_at'] as int?,
-      keyExpiringSoon: project['key_expiring_soon'] == true,
-      keyExpired: project['key_expired'] == true,
       automaticKeyRotationEnabled:
           project['automatic_key_rotation_enabled'] as bool,
       automaticKeyRotationBlocked:
@@ -590,7 +588,6 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
           project['automatic_key_rotation_last_error']?.toString(),
       automaticKeyRotationLeadDays:
           project['automatic_key_rotation_lead_days'] as int,
-      keyMetadataValid: project['key_metadata_valid'] as bool,
       onTap: project['is_loading'] == true || project['active_job'] != null
           ? () {}
           : () => _openProject(project['name']),

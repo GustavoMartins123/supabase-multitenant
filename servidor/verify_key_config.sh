@@ -38,6 +38,10 @@ for key in NGINX_SHARED_TOKEN NGINX_HMAC_SECRET INTERNAL_HMAC_SECRET; do
 done
 ok "segredos compartilhados estão presentes e consistentes"
 
+key_authorizer_password="$(env_value "$SERVER_ENV" KEY_AUTHORIZER_DB_PASSWORD)"
+[[ "$key_authorizer_password" =~ ^[A-Za-z0-9_-]{32,128}$ ]] \
+  || fail "KEY_AUTHORIZER_DB_PASSWORD ausente ou fora do formato esperado"
+
 logflare_public="$(env_value "$ANALYTICS_ENV" LOGFLARE_PUBLIC_ACCESS_TOKEN)"
 logflare_private="$(env_value "$ANALYTICS_ENV" LOGFLARE_PRIVATE_ACCESS_TOKEN)"
 logflare_encryption="$(env_value "$ANALYTICS_ENV" LOGFLARE_DB_ENCRYPTION_KEY)"
@@ -59,7 +63,7 @@ for project_env in "$SERVER_DIR"/projects/*/.env; do
   project_dir="$(dirname "$project_env")"
   project_name="$(basename "$project_dir")"
   for key in PROJECT_UUID ANON_KEY_PROJETO SERVICE_ROLE_KEY_PROJETO \
-    CONFIG_TOKEN_PROJETO JWT_SECRET_PROJETO; do
+    CONFIG_TOKEN_PROJETO JWT_SECRET_PROJETO API_GATEWAY_TOKEN_PROJETO; do
     [[ -n "$(env_value "$project_env" "$key")" ]] \
       || fail "$project_name: $key ausente"
   done
@@ -67,6 +71,9 @@ for project_env in "$SERVER_DIR"/projects/*/.env; do
   config_token="$(env_value "$project_env" CONFIG_TOKEN_PROJETO)"
   [[ "$config_token" =~ ^[0-9a-f]{64}$ ]] \
     || fail "$project_name: CONFIG_TOKEN_PROJETO fora do formato esperado"
+  gateway_token="$(env_value "$project_env" API_GATEWAY_TOKEN_PROJETO)"
+  [[ "$gateway_token" =~ ^[0-9a-f]{64}$ ]] \
+    || fail "$project_name: API_GATEWAY_TOKEN_PROJETO fora do formato esperado"
 
   anon_key="$(env_value "$project_env" ANON_KEY_PROJETO)"
   service_key="$(env_value "$project_env" SERVICE_ROLE_KEY_PROJETO)"
@@ -81,9 +88,12 @@ for project_env in "$SERVER_DIR"/projects/*/.env; do
     || fail "$project_name: placeholder runtime da service role ausente no Nginx"
   grep -Fq '${ANON_KEY_PROJETO}' "$nginx_config" \
     || fail "$project_name: placeholder runtime da anon key ausente no Nginx"
+  grep -Fq '${API_GATEWAY_TOKEN_PROJETO}' "$nginx_config" \
+    || fail "$project_name: placeholder runtime do token do gateway ausente no Nginx"
   if grep -Fq "$config_token" "$nginx_config" \
     || grep -Fq "$service_key" "$nginx_config" \
-    || grep -Fq "$anon_key" "$nginx_config"; then
+    || grep -Fq "$anon_key" "$nginx_config" \
+    || grep -Fq "$gateway_token" "$nginx_config"; then
     fail "$project_name: chave secreta foi incorporada na configuração Nginx"
   fi
   ok "$project_name: chaves e templates consistentes"

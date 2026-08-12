@@ -13,7 +13,6 @@ from fastapi import FastAPI, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from app.schemas import NewProject, DuplicateProject, UserSyncPayload, AddMember, TransferBody, UpdateSettings, RecreateServices, ProjectNoteCreate, ProjectTagAssign, ProjectHintCreate, ProjectHintStatusUpdate, ProjectThreadMessageCreate, ProjectRenameRequest, ProjectDisplayNameUpdate, ProjectNotificationRead, RestorePointCreate, AutomaticKeyRotationUpdate
 from typing import Any, List, Dict
-from dotenv import dotenv_values
 from app.pg_meta_crypto import encrypt_postgres_meta_uri
 from app.project_secret_service import (
     decrypt_project_secret,
@@ -57,6 +56,12 @@ from app.database_schema import (
     ensure_identity_schema,
     ensure_restore_points_schema,
 )
+from app.opaque_key_service import (
+    bootstrap_project_opaque_keys,
+    cancel_project_automatic_pending_keys,
+    ensure_key_authorizer_role,
+    ensure_opaque_key_schema,
+)
 from app.control_plane_service import (
     audit_studio_action,
     create_studio_notification,
@@ -70,6 +75,10 @@ from app.project_settings import (
     _write_env_whitelisted,
     get_project_file_size_limit,
 )
+from app.project_env_secrets import (
+    PROJECTS_ROOT,
+    read_project_secret_keys as _read_project_secret_keys,
+)
 from app.service_key_cache import invalidate_service_key_cache
 from app.snippets_migration import rename_project_snippets
 from app.key_rotation import KeyRotationMetadataError, project_key_schedule
@@ -78,6 +87,11 @@ from app.automatic_key_rotation import (
     scan_automatic_key_rotations,
     start_automatic_key_rotation,
     stop_automatic_key_rotation,
+)
+from app.automatic_opaque_key_rotation import (
+    scan_automatic_opaque_key_rotations,
+    start_automatic_opaque_key_rotation,
+    stop_automatic_opaque_key_rotation,
 )
 from app.project_telemetry import (
     TelemetryValidationError,
@@ -122,10 +136,8 @@ from app.routers.collaboration import router as collaboration_router
 from app.routers.internal import router as internal_router
 from app.routers.lifecycle import router as lifecycle_router
 from app.routers.health import router as health_router
+from app.routers.opaque_keys import router as opaque_keys_router
 configure_jobs(get_pool)
-
-PROJECTS_ROOT = pathlib.Path("/docker/projects").resolve()
-
 
 async def _enqueue_project_action(
     project_name: str,
@@ -290,26 +302,12 @@ async def _fail_job_from_command(
     )
 
 
-def _read_project_secret_keys(project_name: str) -> dict[str, str]:
-    """Le as chaves do projeto direto do .env gerado pelos scripts.
-
-    Substitui o antigo extract_token.sh: as chaves nunca mais passam por
-    stdout de subprocesso (que agora e sanitizado pelo host-agent).
-    """
-    env_values = _read_env_file(_get_project_env_path(project_name))
-    return {
-        "tenant_uuid": (env_values.get("PROJECT_UUID") or "").strip(),
-        "anon_key": (env_values.get("ANON_KEY_PROJETO") or "").strip(),
-        "service_role": (env_values.get("SERVICE_ROLE_KEY_PROJETO") or "").strip(),
-        "config_token": (env_values.get("CONFIG_TOKEN_PROJETO") or "").strip(),
-    }
-
-
 app = FastAPI()
 app.include_router(health_router)
 app.include_router(collaboration_router)
 app.include_router(internal_router)
 app.include_router(lifecycle_router)
+app.include_router(opaque_keys_router)
 
 # ``create`` nao e repetivel, mas e retomavel: o runner se religa ao mesmo
 # host_agent_command duravel com ``reuse_terminal=True`` e nunca dispara um
@@ -613,6 +611,15 @@ async def startup():
     pool = await initialize_pool(DB_DSN)
     await ensure_identity_schema(pool)
     await ensure_project_secrets_schema(pool)
+    await ensure_opaque_key_schema(pool)
+    key_authorizer_password = (
+        os.getenv("KEY_AUTHORIZER_DB_PASSWORD") or ""
+    ).strip()
+    if not key_authorizer_password:
+        raise RuntimeError("KEY_AUTHORIZER_DB_PASSWORD is required")
+    await ensure_key_authorizer_role(
+        pool, password=key_authorizer_password
+    )
     await ensure_jobs_schema(pool)
     await ensure_host_agent_schema(pool)
     identity_result = await reconcile_project_tenant_uuids(pool, PROJECTS_ROOT)
@@ -635,9 +642,11 @@ async def startup():
         enqueue_action=_enqueue_project_action,
         rotation_runner=_rotate_project_key_background,
     )
+    await start_automatic_opaque_key_rotation()
 
 @app.on_event("shutdown")
 async def shutdown():
+    await stop_automatic_opaque_key_rotation()
     await stop_automatic_key_rotation()
     await action_queue.shutdown()
     await close_pool()
@@ -690,11 +699,19 @@ async def list_projects(
         async with conn.transaction():
             rows = await conn.fetch("""
                 SELECT p.id, p.tenant_uuid, p.name, p.display_name,
-                       p.anon_key, p.service_role,
                        p.automatic_key_rotation_enabled,
                        p.automatic_key_rotation_blocked_at,
                        p.automatic_key_rotation_last_error,
-                       p.last_key_rotation_at
+                       p.last_key_rotation_at, p.key_expires_at,
+                       p.opaque_keys_prepared_at,
+                       p.opaque_keys_activated_at,
+                       p.opaque_gateway_cutover_started_at,
+                       p.opaque_gateway_ready_at,
+                       (
+                           SELECT count(*)
+                           FROM project_api_key_slots s
+                           WHERE s.project_id = p.id AND s.status = 'active'
+                       ) AS opaque_key_slot_count
                 FROM projects p
                 WHERE p.anon_key IS NOT NULL
                   AND EXISTS (
@@ -707,35 +724,9 @@ async def list_projects(
             """, auth_user["db_user_id"])
             result = []
             for r in rows:
-                anon_token = await decrypt_project_secret(
-                    conn,
-                    project_id=r["id"],
-                    column="anon_key",
-                    ciphertext=r["anon_key"],
-                )
-                service_role_token = (
-                    await decrypt_project_secret(
-                        conn,
-                        project_id=r["id"],
-                        column="service_role",
-                        ciphertext=r["service_role"],
-                    )
-                    if r["service_role"]
-                    else ""
-                )
-                key_metadata_error = None
-                try:
-                    key_schedule = project_key_schedule(
-                        anon_token,
-                        service_role_token,
-                        lead_days=AUTOMATIC_KEY_ROTATION_LEAD_DAYS,
-                    )
-                except KeyRotationMetadataError as exc:
-                    key_schedule = None
-                    key_metadata_error = str(exc)
                 key_expires_at = (
-                    int(key_schedule.expires_at.timestamp())
-                    if key_schedule is not None
+                    int(r["key_expires_at"].timestamp())
+                    if r["key_expires_at"] is not None
                     else None
                 )
                 seconds_remaining = (
@@ -750,25 +741,17 @@ async def list_projects(
                     ),
                     "name": r["name"],
                     "display_name": r["display_name"],
-                    "anon_token": anon_token,
                     "file_size_limit": _get_project_file_size_limit(r["name"]),
                     "storage_limit_token": _get_project_storage_limit_token(r["name"]),
-                    "key_expires_at": key_expires_at,
-                    "key_metadata_valid": key_metadata_error is None,
-                    "key_metadata_error": key_metadata_error,
-                    "key_expired": (
-                        key_metadata_error is not None
-                        or (seconds_remaining is not None and seconds_remaining <= 0)
+                    "internal_token_expires_at": key_expires_at,
+                    "internal_token_expired": (
+                        seconds_remaining is not None and seconds_remaining <= 0
                     ),
-                    "key_expiring_soon": (
-                        key_metadata_error is not None
-                        or (
-                            seconds_remaining is not None
-                            and seconds_remaining
-                            <= KEY_EXPIRY_WARNING_DAYS * 86400
-                        )
+                    "internal_token_expiring_soon": (
+                        seconds_remaining is not None
+                        and seconds_remaining <= KEY_EXPIRY_WARNING_DAYS * 86400
                     ),
-                    "key_expiry_warning_days": KEY_EXPIRY_WARNING_DAYS,
+                    "internal_token_expiry_warning_days": KEY_EXPIRY_WARNING_DAYS,
                     "automatic_key_rotation_enabled": r[
                         "automatic_key_rotation_enabled"
                     ],
@@ -776,8 +759,8 @@ async def list_projects(
                         AUTOMATIC_KEY_ROTATION_LEAD_DAYS
                     ),
                     "automatic_key_rotation_due_at": (
-                        int(key_schedule.rotate_at.timestamp())
-                        if key_schedule is not None
+                        key_expires_at - AUTOMATIC_KEY_ROTATION_LEAD_DAYS * 86400
+                        if key_expires_at is not None
                         else None
                     ),
                     "automatic_key_rotation_blocked": (
@@ -790,6 +773,21 @@ async def list_projects(
                         r["last_key_rotation_at"].isoformat()
                         if r["last_key_rotation_at"]
                         else None
+                    ),
+                    "opaque_api_keys_status": (
+                        "active"
+                        if r["opaque_gateway_ready_at"] is not None
+                        else "gateway_recovery_required"
+                        if (
+                            r["opaque_gateway_cutover_started_at"] is not None
+                            or r["opaque_keys_activated_at"] is not None
+                        )
+                        else "prepared"
+                        if r["opaque_keys_prepared_at"] is not None
+                        else "legacy"
+                    ),
+                    "opaque_api_key_slot_count": int(
+                        r["opaque_key_slot_count"]
                     ),
                 })
     return result
@@ -2530,7 +2528,12 @@ async def _duplicate_and_store_keys(
             )
             await rollback_project_from_db(pool, new_name, project_uuid)
             return
-        if not keys["anon_key"] or not keys["service_role"] or not keys["config_token"]:
+        if not all(
+            keys[name]
+            for name in (
+                "anon_key", "service_role", "config_token", "gateway_token"
+            )
+        ):
             await _set_job_status(
                 job_id,
                 "failed",
@@ -2572,6 +2575,13 @@ async def _duplicate_and_store_keys(
                 service_role=keys["service_role"],
                 config_token=keys["config_token"],
             )
+            async with conn.transaction():
+                await bootstrap_project_opaque_keys(
+                    conn,
+                    project_id=project_id,
+                    created_by=owner_id,
+                    gateway_token=keys["gateway_token"],
+                )
             await conn.execute(
                 "UPDATE projects SET key_expires_at = $2 WHERE id = $1",
                 project_id,
@@ -3045,6 +3055,13 @@ async def update_automatic_key_rotation(
                 project_row["id"],
                 body.enabled,
             )
+            opaque_keyset_version = None
+            if not body.enabled:
+                opaque_keyset_version = (
+                    await cancel_project_automatic_pending_keys(
+                        conn, project_id=project_row["id"]
+                    )
+                )
             await audit_studio_action(
                 conn,
                 project_id=project_row["id"],
@@ -3052,11 +3069,15 @@ async def update_automatic_key_rotation(
                 action="automatic_key_rotation_updated",
                 target_type="project_keys",
                 old_value={"enabled": old_enabled},
-                new_value={"enabled": body.enabled},
+                new_value={
+                    "enabled": body.enabled,
+                    "opaque_api_keyset_version": opaque_keyset_version,
+                },
             )
 
     if body.enabled:
         await _scan_automatic_key_rotations()
+        await scan_automatic_opaque_key_rotations()
     return {
         "automatic_key_rotation_enabled": updated[
             "automatic_key_rotation_enabled"
@@ -3727,7 +3748,12 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
             )
             await rollback_project_from_db(pool, project_name, project_uuid)
             return
-        if not keys["anon_key"] or not keys["service_role"] or not keys["config_token"]:
+        if not all(
+            keys[name]
+            for name in (
+                "anon_key", "service_role", "config_token", "gateway_token"
+            )
+        ):
             await _set_job_status(
                 job_id,
                 "failed",
@@ -3769,6 +3795,13 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
                 service_role=keys["service_role"],
                 config_token=keys["config_token"],
             )
+            async with conn.transaction():
+                await bootstrap_project_opaque_keys(
+                    conn,
+                    project_id=project_id,
+                    created_by=user,
+                    gateway_token=keys["gateway_token"],
+                )
             await conn.execute(
                 "UPDATE projects SET key_expires_at = $2 WHERE id = $1",
                 project_id,
@@ -3897,10 +3930,6 @@ def _extract_project_admin_apikey(request: Request) -> str:
         return authorization[7:].strip()
 
     return ""
-
-
-def _read_env_file(env_path: pathlib.Path) -> dict[str, str]:
-    return {k: (v or "") for k, v in dotenv_values(env_path).items()}
 
 
 async def _container_lifecycle_background(

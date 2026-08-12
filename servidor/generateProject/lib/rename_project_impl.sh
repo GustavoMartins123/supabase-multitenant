@@ -213,7 +213,7 @@ source "$PROJECT_ROOT/.env"
 source "$OLD_DIR/.env"
 set +a
 for variable in POSTGRES_HOST POSTGRES_PASSWORD POSTGRES_PORT SERVER_URL JWT_SECRET \
-  JWT_SECRET_PROJETO PROJECT_UUID ANON_KEY_PROJETO SERVICE_ROLE_KEY_PROJETO CONFIG_TOKEN_PROJETO; do
+  JWT_SECRET_PROJETO PROJECT_UUID ANON_KEY_PROJETO SERVICE_ROLE_KEY_PROJETO CONFIG_TOKEN_PROJETO API_GATEWAY_TOKEN_PROJETO; do
   [[ -n "${!variable:-}" ]] || die "$variable ausente"
 done
 vector_ensure_s3_credentials || die "Credenciais SigV4 do projeto invalidas"
@@ -281,7 +281,13 @@ say "Movendo diretorio e regenerando configuracao..."
 mv "$OLD_DIR" "$NEW_DIR"
 MOVED_DIR=1
 escape_sed_replacement() { printf '%s' "$1" | sed -e 's/[&|\\]/\\&/g'; }
-normalize_public_base_url() { local url="${1%/}" proto="${2:-}"; [[ "$url" =~ ^https?:// ]] && { printf '%s' "$url"; return; }; printf '%s://%s' "${proto:-https}" "$url"; }
+normalize_public_base_url() {
+  local url="${1%/}" proto="${2:-}"
+  [[ "$url" =~ ^https?:// ]] && { printf '%s' "$url"; return; }
+  [[ "$proto" == "http" || "$proto" == "https" ]] \
+    || die "SERVER_PROTO deve ser http ou https quando SERVER_URL nao inclui esquema"
+  printf '%s://%s' "$proto" "$url"
+}
 PUBLIC_BASE_URL=$(normalize_public_base_url "$SERVER_URL" "${SERVER_PROTO:-}")
 PROJECT_PUBLIC_URL="$PUBLIC_BASE_URL/$NEW_NAME"
 PROJECT_AUTH_EXTERNAL_URL="$PROJECT_PUBLIC_URL/auth/v1"
@@ -294,6 +300,7 @@ template_to_file() {
     -e "s|{{project_uuid}}|$(escape_sed_replacement "$PROJECT_UUID")|g" \
     -e "s|{{config_token}}|$(escape_sed_replacement "$CONFIG_TOKEN_PROJETO")|g" \
     -e "s|{{jwt_secret}}|$(escape_sed_replacement "$JWT_SECRET_PROJETO")|g" \
+    -e "s|{{api_gateway_token}}|$(escape_sed_replacement "$API_GATEWAY_TOKEN_PROJETO")|g" \
     -e "s|{{server_url}}|$(escape_sed_replacement "$SERVER_URL")|g" \
     -e "s|{{public_base_url}}|$(escape_sed_replacement "$PUBLIC_BASE_URL")|g" \
     -e "s|{{project_public_url}}|$(escape_sed_replacement "$PROJECT_PUBLIC_URL")|g" \

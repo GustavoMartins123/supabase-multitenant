@@ -90,6 +90,7 @@ class KeyGenerationContractTest(unittest.TestCase):
     def test_rotation_preserves_config_token(self):
         rotation = (GENERATE / "rotate_key.sh").read_text(encoding="utf-8")
         self.assertIn('get_env_value "CONFIG_TOKEN_PROJETO"', rotation)
+        self.assertIn('get_env_value "API_GATEWAY_TOKEN_PROJETO"', rotation)
         self.assertNotRegex(rotation, r"CONFIG_TOKEN(_PROJETO)?=.*openssl rand")
 
     def test_rotation_fails_closed_and_never_prints_generated_keys(self):
@@ -131,7 +132,8 @@ class KeyGenerationContractTest(unittest.TestCase):
         self.assertIn("ENTRYPOINT", dockerfile)
         self.assertIn(
             "envsubst '$FILE_SIZE_LIMIT $SUPABASE_NETWORK_SUBNET "
-            "$ANON_KEY_PROJETO $SERVICE_ROLE_KEY_PROJETO $CONFIG_TOKEN_PROJETO'",
+            "$ANON_KEY_PROJETO $SERVICE_ROLE_KEY_PROJETO $CONFIG_TOKEN_PROJETO "
+            "$API_GATEWAY_TOKEN_PROJETO'",
             dockerfile,
         )
         self.assertNotIn("/etc/nginx/templates/", dockerfile)
@@ -147,6 +149,7 @@ class KeyGenerationContractTest(unittest.TestCase):
             "ANON_KEY_PROJETO",
             "SERVICE_ROLE_KEY_PROJETO",
             "CONFIG_TOKEN_PROJETO",
+            "API_GATEWAY_TOKEN_PROJETO",
         }:
             self.assertIn(f"${{{key}}}", nginx_template)
             self.assertIn(f"{key}: ${{{key}}}", compose_template)
@@ -156,7 +159,7 @@ class KeyGenerationContractTest(unittest.TestCase):
         self.assertIn("!Dockerfile", dockerignore)
         self.assertIn("!nginx/nginx_*.conf", dockerignore)
 
-    def test_key_expiry_and_collaboration_tabs_are_exposed(self):
+    def test_opaque_key_status_and_collaboration_tabs_are_exposed(self):
         main = (ROOT / "servidor" / "api-internal" / "app" / "main.py").read_text(
             encoding="utf-8"
         )
@@ -175,11 +178,13 @@ class KeyGenerationContractTest(unittest.TestCase):
             / "widgets"
             / "project_card.dart"
         ).read_text(encoding="utf-8")
-        self.assertIn('"key_expiring_soon"', main)
+        self.assertIn('"opaque_api_keys_status"', main)
+        self.assertNotIn('"anon_token"', main)
         self.assertIn("length: 5", dialog)
         self.assertIn("text: 'Tags'", dialog)
         self.assertIn("_buildTagsTab(data)", dialog)
-        self.assertIn("Keys expiram", card)
+        self.assertIn("API KEYS OPACAS", card)
+        self.assertNotIn("anonKey", card)
 
 
 if __name__ == "__main__":

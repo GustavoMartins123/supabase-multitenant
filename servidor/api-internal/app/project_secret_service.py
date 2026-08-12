@@ -1,5 +1,6 @@
 """Persistencia criptografada dos segredos de cada projeto."""
 
+import re
 import uuid
 
 import asyncpg
@@ -9,6 +10,10 @@ from app.runtime_config import project_secret_manager
 
 
 PROJECT_SECRET_COLUMNS = frozenset({"anon_key", "service_role", "config_token"})
+PROJECT_MATERIAL_PURPOSE_RE = re.compile(
+    r"^opaque-api-key-reveal:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
 
 
 async def ensure_project_secrets_schema(pool: asyncpg.Pool) -> None:
@@ -141,6 +146,56 @@ async def decrypt_project_secret(
     return project_secret_manager.decrypt(
         project_id=project_id,
         purpose=column,
+        key_id=envelope.key_id,
+        dek=dek,
+        ciphertext=ciphertext,
+    )
+
+
+def _project_material_purpose(purpose: str) -> str:
+    """Restrict non-column AAD purposes to explicitly supported material."""
+
+    if not PROJECT_MATERIAL_PURPOSE_RE.fullmatch(purpose):
+        raise ValueError(f"unsupported project material purpose: {purpose}")
+    return purpose
+
+
+async def encrypt_project_material(
+    conn: asyncpg.Connection,
+    *,
+    project_id: uuid.UUID,
+    purpose: str,
+    plaintext: str,
+) -> str:
+    """Encrypt transient project material with the project's existing DEK."""
+
+    purpose = _project_material_purpose(purpose)
+    envelope, dek = await _get_project_key_envelope(conn, project_id)
+    return project_secret_manager.encrypt(
+        project_id=project_id,
+        purpose=purpose,
+        key_id=envelope.key_id,
+        dek=dek,
+        plaintext=plaintext,
+    )
+
+
+async def decrypt_project_material(
+    conn: asyncpg.Connection,
+    *,
+    project_id: uuid.UUID,
+    purpose: str,
+    ciphertext: str,
+) -> str:
+    """Decrypt explicitly supported transient project material."""
+
+    purpose = _project_material_purpose(purpose)
+    if not project_secret_manager.is_v2(ciphertext):
+        raise ProjectSecretError("project material is not a v2 envelope")
+    envelope, dek = await _get_project_key_envelope(conn, project_id)
+    return project_secret_manager.decrypt(
+        project_id=project_id,
+        purpose=purpose,
         key_id=envelope.key_id,
         dek=dek,
         ciphertext=ciphertext,

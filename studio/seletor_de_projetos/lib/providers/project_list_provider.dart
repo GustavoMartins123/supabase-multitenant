@@ -50,7 +50,11 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
       ...current,
       {
         'name': name,
-        'anon_token': '',
+        'opaque_api_keys_status': 'provisioning',
+        'opaque_api_key_slot_count': 0,
+        'automatic_key_rotation_enabled': true,
+        'automatic_key_rotation_blocked': false,
+        'automatic_key_rotation_lead_days': 7,
         'file_size_limit': '',
         'storage_limit_token': '',
         'is_loading': true,
@@ -76,7 +80,11 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
       ...current,
       {
         'name': newName,
-        'anon_token': '',
+        'opaque_api_keys_status': 'provisioning',
+        'opaque_api_key_slot_count': 0,
+        'automatic_key_rotation_enabled': true,
+        'automatic_key_rotation_blocked': false,
+        'automatic_key_rotation_lead_days': 7,
         'file_size_limit': '',
         'storage_limit_token': '',
         'is_loading': true,
@@ -129,17 +137,5 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
   void removeProjectLocal(String name) {
     final current = state.value ?? [];
     state = AsyncData(current.where((p) => p['name'] != name).toList());
-  }
-
-  void updateProjectKey(String projectRef, String newAnonKey) {
-    final current = state.value ?? [];
-    state = AsyncData(
-      current.map((p) {
-        if (p['name'] == projectRef) {
-          return {...p, 'anon_token': newAnonKey};
-        }
-        return p;
-      }).toList(),
-    );
   }
 }

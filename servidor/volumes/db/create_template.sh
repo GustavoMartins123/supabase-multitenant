@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+: "${KEY_AUTHORIZER_DB_PASSWORD:?KEY_AUTHORIZER_DB_PASSWORD ausente}"
+if [[ ! "$KEY_AUTHORIZER_DB_PASSWORD" =~ ^[A-Za-z0-9_-]{32,128}$ ]]; then
+  echo "KEY_AUTHORIZER_DB_PASSWORD deve ter 32-128 caracteres URL-safe" >&2
+  exit 1
+fi
+
 echo "Criando schema _analytics..."
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
   CREATE SCHEMA IF NOT EXISTS _analytics AUTHORIZATION "$POSTGRES_USER";
@@ -143,7 +149,13 @@ CREATE TABLE IF NOT EXISTS projects (
   key_expires_at TIMESTAMPTZ,
   last_key_rotation_at TIMESTAMPTZ,
   automatic_key_rotation_blocked_at TIMESTAMPTZ,
-  automatic_key_rotation_last_error TEXT
+  automatic_key_rotation_last_error TEXT,
+  api_keyset_version BIGINT NOT NULL DEFAULT 1,
+  api_gateway_token_hash BYTEA,
+  opaque_keys_prepared_at TIMESTAMPTZ,
+  opaque_keys_activated_at TIMESTAMPTZ,
+  opaque_gateway_cutover_started_at TIMESTAMPTZ,
+  opaque_gateway_ready_at TIMESTAMPTZ
 );
 
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS display_name TEXT;
@@ -153,6 +165,12 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS key_expires_at TIMESTAMPTZ;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS last_key_rotation_at TIMESTAMPTZ;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS automatic_key_rotation_blocked_at TIMESTAMPTZ;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS automatic_key_rotation_last_error TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS api_keyset_version BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS api_gateway_token_hash BYTEA;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS opaque_keys_prepared_at TIMESTAMPTZ;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS opaque_keys_activated_at TIMESTAMPTZ;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS opaque_gateway_cutover_started_at TIMESTAMPTZ;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS opaque_gateway_ready_at TIMESTAMPTZ;
 UPDATE projects SET automatic_key_rotation_enabled = true
 WHERE automatic_key_rotation_enabled IS NULL;
 ALTER TABLE projects
@@ -197,6 +215,103 @@ FOR EACH ROW
 EXECUTE FUNCTION set_project_tenant_uuid_from_id();
 
 CREATE INDEX IF NOT EXISTS idx_projects_owner_id ON projects(owner_id);
+EOSQL
+
+echo "Criando registro normalizado de API keys opacas..."
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'EOSQL'
+CREATE TABLE IF NOT EXISTS project_api_key_slots (
+  id UUID PRIMARY KEY,
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  allowed_services TEXT[] NOT NULL,
+  automatic_rotation_enabled BOOLEAN NOT NULL,
+  rotation_interval_days INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  automatic_rotation_blocked_at TIMESTAMPTZ,
+  automatic_rotation_last_error TEXT,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT project_api_key_slots_name_format CHECK (
+    name ~ '^[a-z][a-z0-9_-]{2,39}$'
+  ),
+  CONSTRAINT project_api_key_slots_kind CHECK (
+    kind IN ('publishable', 'secret')
+  ),
+  CONSTRAINT project_api_key_slots_services CHECK (
+    cardinality(allowed_services) > 0
+    AND allowed_services <@ ARRAY[
+      'auth', 'rest', 'graphql', 'realtime', 'storage', 'functions'
+    ]::text[]
+  ),
+  CONSTRAINT project_api_key_slots_rotation_interval CHECK (
+    rotation_interval_days BETWEEN 1 AND 3650
+  ),
+  CONSTRAINT project_api_key_slots_status CHECK (
+    status IN ('active', 'disabled')
+  ),
+  CONSTRAINT project_api_key_slots_project_name_unique
+    UNIQUE(project_id, name)
+);
+
+ALTER TABLE project_api_key_slots
+  ADD COLUMN IF NOT EXISTS automatic_rotation_blocked_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS automatic_rotation_last_error TEXT;
+
+CREATE TABLE IF NOT EXISTS project_api_keys (
+  id UUID PRIMARY KEY,
+  slot_id UUID NOT NULL REFERENCES project_api_key_slots(id) ON DELETE CASCADE,
+  secret_hash BYTEA NOT NULL UNIQUE,
+  token_hint TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  activate_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ NOT NULL,
+  activated_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
+  last_used_at TIMESTAMPTZ,
+  revealed_at TIMESTAMPTZ,
+  confirmed_at TIMESTAMPTZ,
+  replaces_key_id UUID REFERENCES project_api_keys(id) ON DELETE SET NULL,
+  rotation_trigger TEXT NOT NULL DEFAULT 'manual',
+  CONSTRAINT project_api_keys_status CHECK (
+    status IN ('pending', 'active', 'revoked', 'expired')
+  ),
+  CONSTRAINT project_api_keys_lifetime CHECK (expires_at > created_at),
+  CONSTRAINT project_api_keys_rotation_trigger CHECK (
+    rotation_trigger IN ('initial', 'manual', 'automatic')
+  ),
+  CONSTRAINT project_api_keys_state_timestamps CHECK (
+    (status = 'pending' AND activated_at IS NULL AND revoked_at IS NULL)
+    OR (status = 'active' AND activated_at IS NOT NULL AND revoked_at IS NULL)
+    OR (status IN ('revoked', 'expired') AND revoked_at IS NOT NULL)
+  )
+);
+
+ALTER TABLE project_api_keys
+  ADD COLUMN IF NOT EXISTS rotation_trigger TEXT NOT NULL DEFAULT 'manual',
+  ADD COLUMN IF NOT EXISTS revealed_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_project_api_keys_one_active
+  ON project_api_keys(slot_id) WHERE status = 'active';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_project_api_keys_one_pending
+  ON project_api_keys(slot_id) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_project_api_keys_lookup
+  ON project_api_keys(secret_hash) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_project_api_keys_due
+  ON project_api_keys(expires_at) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_project_api_key_slots_project
+  ON project_api_key_slots(project_id, status);
+
+CREATE TABLE IF NOT EXISTS project_api_key_reveals (
+  key_id UUID PRIMARY KEY REFERENCES project_api_keys(id) ON DELETE CASCADE,
+  ciphertext TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  CONSTRAINT project_api_key_reveals_lifetime CHECK (expires_at > created_at)
+);
 EOSQL
 
 echo "Criando tabela dos membros do projeto"
@@ -244,6 +359,54 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
 
   COMMENT ON COLUMN jobs.owner_id IS
     'UUID canonico do usuario que iniciou o job.';
+EOSQL
+
+echo "Criando identidade de banco restrita para o autorizador de API keys..."
+psql -v ON_ERROR_STOP=1 \
+  --set=key_authorizer_password="$KEY_AUTHORIZER_DB_PASSWORD" \
+  --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'EOSQL'
+SELECT format(
+  'CREATE ROLE key_authorizer WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 40 PASSWORD %L',
+  :'key_authorizer_password'
+)
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'key_authorizer')
+\gexec
+
+SELECT format(
+  'ALTER ROLE key_authorizer PASSWORD %L',
+  :'key_authorizer_password'
+)
+\gexec
+
+ALTER ROLE key_authorizer WITH
+  LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT
+  NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 40;
+ALTER ROLE key_authorizer SET search_path = public, pg_catalog;
+ALTER ROLE key_authorizer SET statement_timeout = '3s';
+ALTER ROLE key_authorizer SET lock_timeout = '1s';
+ALTER ROLE key_authorizer SET idle_in_transaction_session_timeout = '3s';
+
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM key_authorizer;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM key_authorizer;
+REVOKE CREATE ON SCHEMA public FROM key_authorizer;
+GRANT USAGE ON SCHEMA public TO key_authorizer;
+GRANT SELECT (
+  id, name, api_gateway_token_hash, api_keyset_version,
+  opaque_keys_activated_at
+) ON projects TO key_authorizer;
+GRANT SELECT (
+  id, project_id, kind, allowed_services, status
+) ON project_api_key_slots TO key_authorizer;
+GRANT SELECT (
+  id, slot_id, secret_hash, status, activated_at, activate_at, expires_at, last_used_at, confirmed_at
+) ON project_api_keys TO key_authorizer;
+GRANT UPDATE (last_used_at) ON project_api_keys TO key_authorizer;
+
+SELECT format(
+  'GRANT CONNECT ON DATABASE %I TO key_authorizer',
+  current_database()
+)
+\gexec
 EOSQL
 
 echo "Transformando _supabase_template em um template de fato..."

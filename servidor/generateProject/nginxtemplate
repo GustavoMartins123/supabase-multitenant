@@ -53,21 +53,34 @@ http {
         ''      close;
     }
 
-    map $http_apikey $is_valid_key {
-        default 0;
-        "${ANON_KEY_PROJETO}" 1;
-        "${SERVICE_ROLE_KEY_PROJETO}" 1;
+    map $opaque_role $opaque_internal_jwt {
+        default "";
+        anon "${ANON_KEY_PROJETO}";
+        service_role "${SERVICE_ROLE_KEY_PROJETO}";
     }
 
-    map $http_apikey $is_admin_key {
-        default 0;
-        "${SERVICE_ROLE_KEY_PROJETO}" 1;
+    map $opaque_key_present $opaque_upstream_apikey {
+        default "";
+        "1" $opaque_internal_jwt;
     }
 
-    map $arg_apikey $is_valid_api_key {
-        default 0;
-        "${ANON_KEY_PROJETO}" 1;
-        "${SERVICE_ROLE_KEY_PROJETO}" 1;
+    map $opaque_preserve_authorization $opaque_upstream_authorization {
+        default "";
+        "0" "Bearer $opaque_internal_jwt";
+        "1" $http_authorization;
+    }
+
+    map $args $opaque_realtime_args_without_apikey {
+        default $args;
+        ~^apikey=[^&]*$ "";
+        ~^apikey=[^&]*&(?<opaque_rt_after>.*)$ $opaque_rt_after;
+        ~^(?<opaque_rt_before>.*)&apikey=[^&]*$ $opaque_rt_before;
+        ~^(?<opaque_rt_before_mid>.*)&apikey=[^&]*&(?<opaque_rt_after_mid>.*)$ $opaque_rt_before_mid&$opaque_rt_after_mid;
+    }
+
+    map $opaque_realtime_args_without_apikey $opaque_realtime_upstream_args {
+        "" "apikey=$opaque_internal_jwt";
+        default "apikey=$opaque_internal_jwt&$opaque_realtime_args_without_apikey";
     }
 
     map $http_x_config_token $is_valid_config_token {
@@ -86,9 +99,32 @@ http {
         absolute_redirect off;
         port_in_redirect off;
 
+        auth_request_set $opaque_role $upstream_http_x_opaque_key_role;
+        auth_request_set $opaque_key_present $upstream_http_x_opaque_key_present;
+        auth_request_set $opaque_key_id $upstream_http_x_opaque_key_id;
+        auth_request_set $opaque_preserve_authorization $upstream_http_x_opaque_preserve_authorization;
+        auth_request_set $opaque_keyset_version $upstream_http_x_opaque_keyset_version;
+
         set $cors_origin "";
         if ($http_origin ~* ^(https?://localhost(:\d+)?|https?://{{server_url}}(:\d+)?)$) {
             set $cors_origin $http_origin;
+        }
+
+        location = /_internal/opaque-key-authorize {
+            internal;
+            proxy_pass http://key-authorizer:18010/v1/authorize;
+            proxy_pass_request_body off;
+            proxy_pass_request_headers off;
+            proxy_set_header Content-Length "";
+            proxy_set_header X-Project-Ref "{{project_id}}";
+            proxy_set_header X-Project-Gateway-Token "${API_GATEWAY_TOKEN_PROJETO}";
+            proxy_set_header X-Api-Key-Header $http_apikey;
+            proxy_set_header X-Api-Key-Query $arg_apikey;
+            proxy_set_header X-Original-Authorization $http_authorization;
+            proxy_set_header X-Original-Args $args;
+            proxy_set_header X-Target-Service $opaque_target_service;
+            proxy_set_header X-Required-Role $opaque_required_role;
+            proxy_set_header X-Allow-Missing-Key $opaque_allow_missing_key;
         }
        
         location /recovery.html {
@@ -168,6 +204,11 @@ http {
 
         
         location /auth/v1/ {
+            set $opaque_target_service auth;
+            set $opaque_required_role "";
+            set $opaque_allow_missing_key 0;
+            auth_request /_internal/opaque-key-authorize;
+
             if ($request_method = 'OPTIONS') {
                 add_header 'Access-Control-Allow-Origin' $cors_origin always;
                 add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, PATCH, DELETE' always;
@@ -175,9 +216,6 @@ http {
                 add_header 'Access-Control-Max-Age' 86400 always;
                 return 204;
             }
-
-            if ($http_apikey = "") { return 401; }
-            if ($is_valid_key != 1) { return 403; }
 
             rewrite ^/auth/v1/(.*)$ /$1?$args break;
             
@@ -194,6 +232,9 @@ http {
             proxy_set_header X-Forwarded-Uri /{{project_id}}$request_uri;
             proxy_set_header X-Original-URI /{{project_id}}$request_uri;
             proxy_set_header X-Original-URL $real_scheme://$host/{{project_id}}$request_uri;
+            proxy_set_header apikey $opaque_upstream_apikey;
+            proxy_set_header Authorization $opaque_upstream_authorization;
+            proxy_set_header X-Api-Key-Id $opaque_key_id;
             
             add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, PATCH, DELETE' always;
@@ -255,16 +296,25 @@ http {
         }
 
         location = /rest/v1/ {
-            if ($is_admin_key = 0) {
-                return 404;
-            }
+            set $opaque_target_service rest;
+            set $opaque_required_role service_role;
+            set $opaque_allow_missing_key 0;
+            auth_request /_internal/opaque-key-authorize;
             rewrite ^/rest/v1/(.*)$ /$1 break; 
             proxy_pass http://$rest_upstream;
+            proxy_set_header apikey $opaque_upstream_apikey;
+            proxy_set_header Authorization $opaque_upstream_authorization;
+            proxy_set_header X-Api-Key-Id $opaque_key_id;
         }
 
 
 
         location /rest/v1/ {
+            set $opaque_target_service rest;
+            set $opaque_required_role "";
+            set $opaque_allow_missing_key 0;
+            auth_request /_internal/opaque-key-authorize;
+
             if ($request_method = 'OPTIONS') {
                 add_header 'Access-Control-Allow-Origin' $cors_origin always;
                 add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, PATCH, DELETE' always;
@@ -272,9 +322,6 @@ http {
                 add_header 'Access-Control-Max-Age' 86400 always;
                 return 204;
             }
-            if ($http_apikey = "") { return 401; }
-            if ($is_valid_key != 1) { return 403; }
-            
             rewrite ^/rest/v1/(.*)$ /$1 break;
             
             proxy_hide_header Access-Control-Allow-Origin;
@@ -284,6 +331,9 @@ http {
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header apikey $opaque_upstream_apikey;
+            proxy_set_header Authorization $opaque_upstream_authorization;
+            proxy_set_header X-Api-Key-Id $opaque_key_id;
             
             add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, PATCH, DELETE' always;
@@ -292,6 +342,11 @@ http {
         }
 
         location /graphql/v1 {
+            set $opaque_target_service graphql;
+            set $opaque_required_role "";
+            set $opaque_allow_missing_key 0;
+            auth_request /_internal/opaque-key-authorize;
+
             if ($request_method = 'OPTIONS') {
                 add_header 'Access-Control-Allow-Origin' $cors_origin always;
                 add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
@@ -299,9 +354,6 @@ http {
                 add_header 'Access-Control-Max-Age' 86400 always;
                 return 204;
             }
-            if ($http_apikey = "") { return 401; }
-            if ($is_valid_key != 1) { return 403; }
-            
             proxy_hide_header Access-Control-Allow-Origin;
             
             proxy_pass http://$rest_upstream/rpc/graphql;
@@ -310,6 +362,9 @@ http {
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
             proxy_set_header Content-Profile graphql_public;
+            proxy_set_header apikey $opaque_upstream_apikey;
+            proxy_set_header Authorization $opaque_upstream_authorization;
+            proxy_set_header X-Api-Key-Id $opaque_key_id;
             
             add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
@@ -317,8 +372,10 @@ http {
         }
 
         location ^~ /realtime/v1/websocket {
-            if ($arg_apikey = "") { return 401; }
-            if ($is_valid_api_key != 1) { return 403; }
+            set $opaque_target_service realtime;
+            set $opaque_required_role "";
+            set $opaque_allow_missing_key 0;
+            auth_request /_internal/opaque-key-authorize;
             
             if ($request_method = 'OPTIONS') {
                 add_header 'Access-Control-Allow-Origin' $cors_origin always;
@@ -328,13 +385,17 @@ http {
             }
 
 
-            rewrite ^/realtime/v1/websocket$ /socket/websocket break;
+            rewrite ^/realtime/v1/websocket$ /socket/websocket?$opaque_realtime_upstream_args break;
 
             proxy_pass http://$realtime_upstream;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection $connection_upgrade;
             proxy_set_header Host "{{project_uuid}}.localhost"; 
+            proxy_set_header apikey $opaque_upstream_apikey;
+            proxy_set_header x-api-key $opaque_upstream_apikey;
+            proxy_set_header Authorization $http_authorization;
+            proxy_set_header X-Api-Key-Id $opaque_key_id;
             proxy_read_timeout 86400;
 
             add_header 'Access-Control-Allow-Origin' $cors_origin always;
@@ -344,6 +405,11 @@ http {
 
 
         location /storage/v1/ {
+            set $opaque_target_service storage;
+            set $opaque_required_role "";
+            set $opaque_allow_missing_key 1;
+            auth_request /_internal/opaque-key-authorize;
+
             if ($request_method = 'OPTIONS') {
                 add_header 'Access-Control-Allow-Origin' $cors_origin always;
                 add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PATCH, HEAD, DELETE, PUT' always;
@@ -352,12 +418,6 @@ http {
                 return 204;
             }
 
-            if ($http_apikey = "") {
-                return 401;
-            }
-            if ($is_valid_key != 1) {
-                return 403;
-            }
             client_max_body_size ${FILE_SIZE_LIMIT};
 
             rewrite ^/storage/v1/(.*)$ /$1 break;
@@ -380,6 +440,9 @@ http {
             proxy_set_header Upload-Concat $http_upload_concat;
             proxy_set_header Upload-Defer-Length $http_upload_defer_length;
             proxy_set_header x-upsert $http_x_upsert;
+            proxy_set_header apikey $opaque_upstream_apikey;
+            proxy_set_header Authorization $opaque_upstream_authorization;
+            proxy_set_header X-Api-Key-Id $opaque_key_id;
 
             proxy_pass http://$storage_upstream;
 
@@ -388,35 +451,12 @@ http {
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, Tus-Resumable, Tus-Version, Tus-Max-Size, Tus-Extension, Upload-Length, Upload-Metadata, Upload-Offset, Upload-Concat, Upload-Defer-Length, x-upsert, X-Requested-With, x-supabase-api-version' always;
         }
         
-        location ~ ^/storage/v1/object/sign/ {
-            rewrite ^/storage/v1/(.*)$ /$1 break;
-            proxy_hide_header Access-Control-Allow-Origin;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $real_scheme;
-            proxy_pass http://$storage_upstream;
-            add_header 'Access-Control-Allow-Origin' $cors_origin always;
-            add_header 'Access-Control-Allow-Methods' 'GET, HEAD, OPTIONS';
-            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, X-Requested-With';
-             if ($request_method = 'OPTIONS') { return 204; }
-        }
-
-        location ~ ^/storage/v1/render/ {
-            rewrite ^/storage/v1/(.*)$ /$1 break;
-            proxy_hide_header Access-Control-Allow-Origin;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $real_scheme;
-            proxy_pass http://$storage_upstream;
-            add_header 'Access-Control-Allow-Origin' $cors_origin always;
-            add_header 'Access-Control-Allow-Methods' 'GET, OPTIONS';
-            add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, X-Requested-With';
-             if ($request_method = 'OPTIONS') { return 204; }
-        }
-
         location /functions/v1/ {
+            set $opaque_target_service functions;
+            set $opaque_required_role "";
+            set $opaque_allow_missing_key 0;
+            auth_request /_internal/opaque-key-authorize;
+
             if ($request_method = 'OPTIONS') {
                 add_header 'Access-Control-Allow-Origin' $cors_origin always;
                 add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, PATCH, DELETE' always;
@@ -425,13 +465,6 @@ http {
                 return 204;
             }
 
-            if ($http_apikey = "") {
-                return 401;
-            }
-            if ($is_valid_key != 1) {
-                return 403;
-            }
-            
             proxy_hide_header Access-Control-Allow-Origin;
             proxy_hide_header Access-Control-Allow-Methods;
             proxy_hide_header Access-Control-Allow-Headers;
@@ -443,6 +476,9 @@ http {
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
             proxy_set_header X-Project-Ref {{project_id}};
+            proxy_set_header apikey $opaque_upstream_apikey;
+            proxy_set_header Authorization $opaque_upstream_authorization;
+            proxy_set_header X-Api-Key-Id $opaque_key_id;
 
             add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, PATCH, DELETE' always;
@@ -458,7 +494,7 @@ http {
             
             default_type application/json;
             add_header Cache-Control "no-store";
-            return 200 '{"supabase_url":"$config_url","anon_key":"${ANON_KEY_PROJETO}"}';
+            return 200 '{"supabase_url":"$config_url"}';
         }
     }
 }

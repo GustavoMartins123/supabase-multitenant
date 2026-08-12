@@ -38,6 +38,8 @@ COMMAND_TIMEOUTS: dict[str, int] = {
     "stop_project": 600,
     "restart_project": 600,
     "recreate_services": 1_800,
+    "ensure_opaque_gateway_token": 120,
+    "stage_opaque_gateway": 600,
     "create_project": 1_800,
     "duplicate_project": 3_600,
     "delete_project_containers": 300,
@@ -159,6 +161,8 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
         "stop_project",
         "restart_project",
         "delete_project_containers",
+        "ensure_opaque_gateway_token",
+        "stage_opaque_gateway",
     }:
         reject_unknown(set())
     elif command == "rotate_keys":

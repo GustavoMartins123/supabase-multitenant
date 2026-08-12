@@ -22,6 +22,7 @@ services:
       ANON_KEY_PROJETO: ${ANON_KEY_PROJETO}
       SERVICE_ROLE_KEY_PROJETO: ${SERVICE_ROLE_KEY_PROJETO}
       CONFIG_TOKEN_PROJETO: ${CONFIG_TOKEN_PROJETO}
+      API_GATEWAY_TOKEN_PROJETO: ${API_GATEWAY_TOKEN_PROJETO}
     volumes:
       - ${HOST_PROJECT_ROOT}/servidor/auth_template:/usr/share/nginx/html:ro
     read_only: true
