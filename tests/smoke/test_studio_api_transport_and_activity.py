@@ -64,13 +64,19 @@ class StudioApiTransportAndActivityTests(unittest.TestCase):
         self.assertIn("idx_users_last_seen_at", source)
 
     def test_gateway_signs_authelia_session_fingerprint(self) -> None:
-        source = (
+        headers_source = (
             ROOT / "studio/nginx/lua/project_context/user_context_headers.lua"
         ).read_text(encoding="utf-8")
-        self.assertIn("ngx.var.cookie_authelia_session", source)
-        self.assertIn('digest.new("sha256")', source)
-        self.assertIn("sha256_bin(session_cookie)", source)
-        self.assertIn("login_session = login_session_fingerprint()", source)
+        fingerprint_source = (
+            ROOT / "studio/nginx/lua/security/login_session.lua"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('require("security.login_session")', headers_source)
+        self.assertIn("login_session.fingerprint()", headers_source)
+        self.assertIn("login_session = session_fingerprint", headers_source)
+        self.assertIn("ngx.var.cookie_authelia_session", fingerprint_source)
+        self.assertIn('digest.new("sha256")', fingerprint_source)
+        self.assertIn("sha256_bin(session_cookie)", fingerprint_source)
 
 
 if __name__ == "__main__":

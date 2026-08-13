@@ -10,6 +10,7 @@ import 'providers/project_settings_provider.dart';
 import 'providers/project_list_provider.dart';
 import 'providers/project_jobs_provider.dart';
 import 'services/project_service.dart';
+import 'services/step_up_authentication_service.dart';
 import 'dialogs/transfer_project_dialog.dart';
 import 'dialogs/rename_project_dialog.dart';
 import 'dialogs/rename_history_dialog.dart';
@@ -216,6 +217,8 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     bool sucesso = await ProjectService.confirmAndDeleteProject(
       context,
       widget.ref,
+      requestStepUpToken:
+          ref.read(stepUpAuthenticationServiceProvider).requestToken,
       submittedJobWaiter: (job) =>
           ref.read(projectJobsProvider.notifier).waitFor(
                 job,

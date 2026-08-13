@@ -183,9 +183,17 @@ final class OpaqueApiKeysController extends AsyncNotifier<OpaqueApiKeysState> {
         },
       );
 
-  Future<String> claimReveal(String keyId) => _runSecretCommand(
+  Future<String> claimReveal(
+    String keyId, {
+    String? stepUpToken,
+  }) =>
+      _runSecretCommand(
         OpaqueApiKeyOperation.reveal(keyId),
-        (repository) => repository.claimOpaqueApiKey(projectRef, keyId),
+        (repository) => repository.claimOpaqueApiKey(
+          projectRef,
+          keyId,
+          stepUpToken: stepUpToken,
+        ),
         onSuccess: (current) => current.copyWith(
           reveals: current.reveals
               .where((reveal) => reveal.keyId != keyId)
@@ -206,12 +214,20 @@ final class OpaqueApiKeysController extends AsyncNotifier<OpaqueApiKeysState> {
         ),
       );
 
-  Future<IssuedOpaqueApiKey> rotateSlot(String slotId) => _runSecretCommand(
+  Future<IssuedOpaqueApiKey> rotateSlot(
+    String slotId, {
+    String? stepUpToken,
+  }) =>
+      _runSecretCommand(
         OpaqueApiKeyOperation.slot(
           OpaqueApiKeyOperationKind.rotateSlot,
           slotId,
         ),
-        (repository) => repository.rotateOpaqueApiKeySlot(projectRef, slotId),
+        (repository) => repository.rotateOpaqueApiKeySlot(
+          projectRef,
+          slotId,
+          stepUpToken: stepUpToken,
+        ),
       );
 
   Future<void> disableSlot(String slotId) => _runAndSynchronize(
@@ -264,6 +280,7 @@ final class OpaqueApiKeysController extends AsyncNotifier<OpaqueApiKeysState> {
     required List<String> allowedServices,
     required bool automaticRotationEnabled,
     required int? rotationIntervalDays,
+    String? stepUpToken,
   }) =>
       _runSecretCommand(
         const OpaqueApiKeyOperation.project(
@@ -276,6 +293,7 @@ final class OpaqueApiKeysController extends AsyncNotifier<OpaqueApiKeysState> {
           allowedServices: allowedServices,
           automaticRotationEnabled: automaticRotationEnabled,
           rotationIntervalDays: rotationIntervalDays,
+          stepUpToken: stepUpToken,
         ),
       );
 

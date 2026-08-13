@@ -7,10 +7,12 @@ import 'package:intl/intl.dart';
 
 import '../../models/opaque_api_key.dart';
 import '../../providers/opaque_api_keys_provider.dart';
+import '../../services/step_up_authentication_service.dart';
 import '../../supabase_colors.dart';
 import '../danger_button.dart';
 import '../secondary_button.dart';
 import '../section_widget.dart';
+import '../step_up_authentication_dialog.dart';
 
 class OpaqueApiKeysSection extends ConsumerStatefulWidget {
   const OpaqueApiKeysSection({
@@ -33,8 +35,11 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
   OpaqueApiKeysController get _controller =>
       ref.read(opaqueApiKeysProvider(widget.projectRef).notifier);
 
-  bool _disabled(OpaqueApiKeysState state) =>
+  bool _interactionDisabled(OpaqueApiKeysState state) =>
       widget.projectBusy || state.actionsLocked;
+
+  bool _managementDisabled(OpaqueApiKeysState state) =>
+      !widget.canManage || _interactionDisabled(state);
 
   void _snack(String message, Color color) {
     if (!mounted) return;
@@ -91,6 +96,26 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
         false;
   }
 
+  Future<String?> _requestStepUp({
+    required StepUpAction action,
+    required String resourceId,
+    required String title,
+    required String description,
+  }) {
+    final service = ref.read(stepUpAuthenticationServiceProvider);
+    return showStepUpAuthenticationDialog(
+      context,
+      title: title,
+      description: description,
+      authenticate: (password) => service.requestToken(
+        password: password,
+        action: action,
+        projectRef: widget.projectRef,
+        resourceId: resourceId,
+      ),
+    );
+  }
+
   Future<void> _prepareMigration() async {
     final confirmed = await _confirm(
       'Preparar chaves opacas?',
@@ -132,7 +157,27 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
 
   Future<void> _claim(OpaqueApiKeyReveal reveal) async {
     try {
-      final secret = await _controller.claimReveal(reveal.keyId);
+      String? stepUpToken;
+      if (reveal.kind == 'secret') {
+        if (!widget.canManage) {
+          throw StateError(
+            'Apenas administradores podem revelar uma secret key.',
+          );
+        }
+        stepUpToken = await _requestStepUp(
+          action: StepUpAction.revealSecretKey,
+          resourceId: reveal.keyId,
+          title: 'Reautenticar para revelar secret key',
+          description:
+              'A chave sera exibida uma unica vez e possui privilegios de service_role.',
+        );
+        if (stepUpToken == null || !mounted) return;
+      }
+      final secret = await _controller.claimReveal(
+        reveal.keyId,
+        stepUpToken: stepUpToken,
+      );
+      stepUpToken = null;
       if (!mounted) return;
 
       var copied = false;
@@ -193,7 +238,22 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
     );
     if (!confirmed) return;
     try {
-      final issued = await _controller.rotateSlot(slot.id);
+      String? stepUpToken;
+      if (slot.kind == 'secret') {
+        stepUpToken = await _requestStepUp(
+          action: StepUpAction.rotateSecretKey,
+          resourceId: slot.id,
+          title: 'Reautenticar para rotacionar secret key',
+          description:
+              'A rotacao revogara a chave atual e exibira o novo plaintext uma unica vez.',
+        );
+        if (stepUpToken == null || !mounted) return;
+      }
+      final issued = await _controller.rotateSlot(
+        slot.id,
+        stepUpToken: stepUpToken,
+      );
+      stepUpToken = null;
       if (!mounted) return;
       await _showIssuedKey(issued);
       if (mounted) unawaited(_refreshAfterSecret());
@@ -268,13 +328,26 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
     );
     if (draft == null || !mounted) return;
     try {
+      String? stepUpToken;
+      if (draft.kind == 'secret') {
+        stepUpToken = await _requestStepUp(
+          action: StepUpAction.createSecretKey,
+          resourceId: draft.name,
+          title: 'Reautenticar para criar secret key',
+          description:
+              'O plaintext da nova secret key sera exibido uma unica vez.',
+        );
+        if (stepUpToken == null || !mounted) return;
+      }
       final issued = await _controller.createSlot(
         name: draft.name,
         kind: draft.kind,
         allowedServices: draft.allowedServices,
         automaticRotationEnabled: draft.automaticRotationEnabled,
         rotationIntervalDays: draft.rotationIntervalDays,
+        stepUpToken: stepUpToken,
       );
+      stepUpToken = null;
       if (!mounted) return;
       await _showIssuedKey(issued);
       if (mounted) unawaited(_refreshAfterSecret());
@@ -334,15 +407,6 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
 
   @override
   Widget build(BuildContext context) {
-    if (!widget.canManage) {
-      return const SectionWidget(
-        title: 'API KEYS OPACAS',
-        child: Text(
-          'Somente administradores do projeto podem consultar ou gerenciar API keys.',
-          style: TextStyle(color: SupabaseColors.textMuted),
-        ),
-      );
-    }
     final asyncState = ref.watch(opaqueApiKeysProvider(widget.projectRef));
     return SectionWidget(
       title: 'API KEYS OPACAS',
@@ -370,7 +434,7 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
 
   Widget _buildContent(OpaqueApiKeysState state) {
     final status = state.migration['status'];
-    final disabled = _disabled(state);
+    final disabled = _managementDisabled(state);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -386,7 +450,18 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           const SizedBox(height: 8),
           _synchronizationError(state),
         ],
-        if (status == 'legacy') ...[
+        if (!widget.canManage) ...[
+          const SizedBox(height: 8),
+          const Text(
+            'Membros podem consultar e revelar chaves publishable. Alteracoes '
+            'e rotacoes exigem admin do projeto ou admin global.',
+            style: TextStyle(
+              color: SupabaseColors.textMuted,
+              fontSize: 11,
+            ),
+          ),
+        ],
+        if (widget.canManage && status == 'legacy') ...[
           const SizedBox(height: 12),
           SecondaryButton(
             label: 'Preparar migracao opaca',
@@ -394,7 +469,7 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
             onPressed: disabled ? null : _prepareMigration,
           ),
         ],
-        if (status == 'prepared') ...[
+        if (widget.canManage && status == 'prepared') ...[
           const SizedBox(height: 8),
           DangerButton(
             label: 'Cancelar preparação',
@@ -412,7 +487,9 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           const SizedBox(height: 16),
           ...state.slots.map((slot) => _slotCard(state, slot)),
         ],
-        if (status == 'prepared' || status == 'gateway_recovery_required') ...[
+        if (widget.canManage &&
+            (status == 'prepared' ||
+                status == 'gateway_recovery_required')) ...[
           const SizedBox(height: 12),
           SecondaryButton(
             label: status == 'gateway_recovery_required'
@@ -425,7 +502,7 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
                 : _cutover,
           ),
         ],
-        if (status == 'active') ...[
+        if (widget.canManage && status == 'active') ...[
           const SizedBox(height: 12),
           SecondaryButton(
             label: 'Criar slot',
@@ -533,7 +610,10 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           SecondaryButton(
             label: busy ? 'Revelando...' : 'Revelar e copiar',
             icon: Icons.copy_rounded,
-            onPressed: _disabled(state) ? null : () => _claim(reveal),
+            onPressed: _interactionDisabled(state) ||
+                    (!widget.canManage && reveal.kind != 'publishable')
+                ? null
+                : () => _claim(reveal),
           ),
         ],
       ),
@@ -597,70 +677,75 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
                   ),
                 ),
               ),
-          for (final key in pending)
-            if (key.revealedAt != null && key.confirmedAt == null)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: SecondaryButton(
-                  label: 'Confirmar instalacao de ${key.tokenHint}',
-                  icon: Icons.check_rounded,
-                  onPressed: _disabled(state)
-                      ? null
-                      : () => _confirmInstallation(slot, key),
+          if (widget.canManage) ...[
+            for (final key in pending)
+              if (key.revealedAt != null && key.confirmedAt == null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: SecondaryButton(
+                    label: 'Confirmar instalacao de ${key.tokenHint}',
+                    icon: Icons.check_rounded,
+                    onPressed: _managementDisabled(state)
+                        ? null
+                        : () => _confirmInstallation(slot, key),
+                  ),
                 ),
-              ),
-          const Divider(color: SupabaseColors.border),
-          Material(
-            type: MaterialType.transparency,
-            child: SwitchListTile.adaptive(
-              contentPadding: EdgeInsets.zero,
-              value: slot.automaticRotationEnabled,
-              onChanged: _disabled(state) || slot.rotationIntervalDays == null
-                  ? null
-                  : (value) => _toggleAutomatic(slot, value),
-              title: const Text('Rotacao automatica',
-                  style: TextStyle(fontSize: 12)),
-              subtitle: slot.rotationIntervalDays == null
-                  ? const Text(
-                      'Defina uma expiração temporal para habilitar.',
-                      style: TextStyle(fontSize: 11),
-                    )
-                  : null,
-            ),
-          ),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              SecondaryButton(
-                label: 'Expiração: '
-                    '${_expirationLabel(slot.rotationIntervalDays)}',
-                icon: Icons.timer_outlined,
-                onPressed:
-                    _disabled(state) ? null : () => _editExpirationPolicy(slot),
-              ),
-              SecondaryButton(
-                label: 'Rotacionar agora',
-                icon: Icons.refresh_rounded,
-                onPressed: _disabled(state) || pending.isNotEmpty
+            const Divider(color: SupabaseColors.border),
+            Material(
+              type: MaterialType.transparency,
+              child: SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: slot.automaticRotationEnabled,
+                onChanged: _managementDisabled(state) ||
+                        slot.rotationIntervalDays == null
                     ? null
-                    : () => _rotate(slot),
+                    : (value) => _toggleAutomatic(slot, value),
+                title: const Text('Rotacao automatica',
+                    style: TextStyle(fontSize: 12)),
+                subtitle: slot.rotationIntervalDays == null
+                    ? const Text(
+                        'Defina uma expiração temporal para habilitar.',
+                        style: TextStyle(fontSize: 11),
+                      )
+                    : null,
               ),
-              if (pending.isNotEmpty && state.migration['status'] == 'active')
+            ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
                 SecondaryButton(
-                  label: 'Cancelar rotação pendente',
-                  icon: Icons.cancel_outlined,
-                  onPressed: _disabled(state)
+                  label: 'Expiração: '
+                      '${_expirationLabel(slot.rotationIntervalDays)}',
+                  icon: Icons.timer_outlined,
+                  onPressed: _managementDisabled(state)
                       ? null
-                      : () => _cancelPendingRotation(slot),
+                      : () => _editExpirationPolicy(slot),
                 ),
-              DangerButton(
-                label: 'Revogar slot',
-                icon: Icons.block_rounded,
-                onPressed: _disabled(state) ? null : () => _disable(slot),
-              ),
-            ],
-          ),
+                SecondaryButton(
+                  label: 'Rotacionar agora',
+                  icon: Icons.refresh_rounded,
+                  onPressed: _managementDisabled(state) || pending.isNotEmpty
+                      ? null
+                      : () => _rotate(slot),
+                ),
+                if (pending.isNotEmpty && state.migration['status'] == 'active')
+                  SecondaryButton(
+                    label: 'Cancelar rotação pendente',
+                    icon: Icons.cancel_outlined,
+                    onPressed: _managementDisabled(state)
+                        ? null
+                        : () => _cancelPendingRotation(slot),
+                  ),
+                DangerButton(
+                  label: 'Revogar slot',
+                  icon: Icons.block_rounded,
+                  onPressed:
+                      _managementDisabled(state) ? null : () => _disable(slot),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );

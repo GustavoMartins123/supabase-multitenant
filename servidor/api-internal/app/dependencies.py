@@ -103,6 +103,7 @@ async def resolve_authenticated_user(
         "display_name": user_row["display_name"],
         "groups": groups,
         "is_global_admin": "admin" in groups,
+        "login_session": login_session,
     }
 
 

@@ -27,9 +27,13 @@ export RUN_TENANT_LIFECYCLE_SMOKE=1
 export SMOKE_API_URL=https://servidor-interno
 export SMOKE_SHARED_TOKEN=...
 export SMOKE_USER_TOKEN=...
-export SMOKE_DELETE_PASSWORD=...
+export SMOKE_NGINX_HMAC_SECRET=...
 python -m unittest tests.smoke.test_tenant_lifecycle -v
 ```
+
+`SMOKE_USER_TOKEN` precisa conter o claim `login_session` emitido pelo gateway.
+O teste direto assina um grant de step-up específico para o projeto; ele não
+possui nem aceita uma senha global de exclusão.
 
 TLS é verificado por padrão. Para CA privada, informe `SMOKE_CA_FILE`. Somente
 em laboratório isolado é possível usar `SMOKE_VERIFY_TLS=false`.

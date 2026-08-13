@@ -1,39 +1,9 @@
 local cjson = require("cjson.safe")
-local digest = require("resty.openssl.digest")
 local user_identity = require("project_context.user_identity")
+local login_session = require("security.login_session")
 local user_hmac_token = require("security.user_hmac_token")
 
 local M = {}
-
-local function sha256_bin(value)
-    local ctx, err = digest.new("sha256")
-    if not ctx then
-        return nil, err
-    end
-
-    local ok, update_err = ctx:update(value)
-    if not ok then
-        return nil, update_err
-    end
-
-    return ctx:final()
-end
-
-local function login_session_fingerprint()
-    local session_cookie = ngx.var.cookie_authelia_session or ""
-    if session_cookie == "" then
-        return nil
-    end
-    local hash, err = sha256_bin(session_cookie)
-    if not hash then
-        ngx.log(ngx.ERR, "[AUTH] Falha ao calcular fingerprint da sessao: ", err or "erro desconhecido")
-        return nil
-    end
-    return (ngx.encode_base64(hash)
-        :gsub("%+", "-")
-        :gsub("/", "_")
-        :gsub("=+$", ""))
-end
 
 function M.apply(email, groups)
     local normalized_email = user_identity.normalize_email(email)
@@ -68,11 +38,15 @@ function M.apply(email, groups)
         pcall(function()
             ngx.var.auth_user_id = user_id
         end)
+        local session_fingerprint, fingerprint_err = login_session.fingerprint()
+        if fingerprint_err then
+            ngx.log(ngx.ERR, "[AUTH] Falha ao calcular fingerprint da sessao: ", fingerprint_err)
+        end
         local token, token_err = user_hmac_token.sign(user_id, {
             username = user_data and user_data.username or nil,
             display_name = user_data and user_data.display_name or nil,
             groups = groups or "",
-            login_session = login_session_fingerprint(),
+            login_session = session_fingerprint,
         })
         if token then
             ngx.req.set_header("X-User-Token", token)

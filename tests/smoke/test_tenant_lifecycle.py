@@ -4,7 +4,12 @@ import os
 import time
 import unittest
 
-from tests.smoke.common import env_flag, request, wait_for_job
+from tests.smoke.common import (
+    build_step_up_token,
+    env_flag,
+    request,
+    wait_for_job,
+)
 
 
 @unittest.skipUnless(
@@ -20,21 +25,30 @@ class TenantLifecycleSmokeTest(unittest.TestCase):
             "X-Shared-Token": os.environ["SMOKE_SHARED_TOKEN"],
             "X-User-Token": os.environ["SMOKE_USER_TOKEN"],
         }
-        cls.delete_password = os.environ["SMOKE_DELETE_PASSWORD"]
+        cls.hmac_secret = os.environ["SMOKE_NGINX_HMAC_SECRET"]
         cls.created = False
+
+    @classmethod
+    def delete_headers(cls) -> dict[str, str]:
+        return {
+            **cls.headers,
+            "X-Step-Up-Token": build_step_up_token(
+                cls.hmac_secret,
+                cls.headers["X-User-Token"],
+                action="delete_project",
+                project=cls.project,
+                resource=cls.project,
+            ),
+        }
 
     @classmethod
     def tearDownClass(cls) -> None:
         if not cls.created:
             return
-        cleanup_headers = {
-            **cls.headers,
-            "X-Delete-Password": cls.delete_password,
-        }
         status, body = request(
             "DELETE",
             f"{cls.api_url}/api/projects/{cls.project}",
-            headers=cleanup_headers,
+            headers=cls.delete_headers(),
         )
         if status == 202 and isinstance(body, dict) and body.get("job_id"):
             wait_for_job(cls.api_url, body["job_id"], cls.headers)
@@ -74,14 +88,10 @@ class TenantLifecycleSmokeTest(unittest.TestCase):
         started = self.run_action("start")
         self.assertEqual(started["progress"], 100)
 
-        delete_headers = {
-            **self.headers,
-            "X-Delete-Password": self.delete_password,
-        }
         status, deleted = request(
             "DELETE",
             f"{self.api_url}/api/projects/{self.project}",
-            headers=delete_headers,
+            headers=self.delete_headers(),
         )
         self.assertEqual(status, 202, deleted)
         wait_for_job(self.api_url, deleted["job_id"], self.headers)

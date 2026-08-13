@@ -38,6 +38,59 @@ def build_user_token(
     return f"v1.{encoded}.{signature}"
 
 
+def build_step_up_token(
+    secret: str,
+    user_token: str,
+    *,
+    action: str,
+    project: str,
+    resource: str,
+    now: int | None = None,
+) -> str:
+    """Build the gateway contract for direct API lifecycle smoke tests."""
+
+    parts = user_token.split(".")
+    if len(parts) != 3 or parts[0] != "v1":
+        raise ValueError("SMOKE_USER_TOKEN is not a canonical user token")
+    expected = hmac.new(
+        secret.encode(), parts[1].encode(), hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(parts[2], expected):
+        raise ValueError("SMOKE_USER_TOKEN signature does not match the HMAC secret")
+    padded = parts[1] + ("=" * (-len(parts[1]) % 4))
+    user_claims = json.loads(base64.urlsafe_b64decode(padded))
+    subject = str(user_claims.get("sub") or "")
+    login_session = str(user_claims.get("login_session") or "")
+    if not subject or len(login_session) != 43:
+        raise ValueError("SMOKE_USER_TOKEN has no step-up session binding")
+
+    issued_at = int(time.time()) if now is None else now
+    jti = base64.urlsafe_b64encode(os.urandom(16)).decode().rstrip("=")
+    payload = json.dumps(
+        {
+            "sub": subject,
+            "iat": issued_at,
+            "exp": issued_at + 300,
+            "login_session": login_session,
+            "action": action,
+            "project": project,
+            "resource": resource,
+            "jti": jti,
+        },
+        separators=(",", ":"),
+    ).encode()
+    encoded = base64.urlsafe_b64encode(payload).decode().rstrip("=")
+    signing_key = hmac.new(
+        secret.encode(),
+        b"supabase-multitenant:step-up-token:v1",
+        hashlib.sha256,
+    ).digest()
+    signature = hmac.new(
+        signing_key, encoded.encode(), hashlib.sha256
+    ).hexdigest()
+    return f"su1.{encoded}.{signature}"
+
+
 def build_internal_push_headers(
     secret: str,
     url: str,

@@ -260,10 +260,18 @@ chave válida. O path exato `/rest/v1/` exige papel `service_role`.
 
 ## 8. APIs canônicas
 
-Somente admin do projeto ou admin global:
+Qualquer membro do projeto pode consultar estas rotas. Para role `member`, a
+resposta é filtrada no servidor e contém somente slots/reveals `publishable`:
 
 ```text
 GET    /api/projects/{project}/api-key-slots
+GET    /api/projects/{project}/api-key-reveals
+GET    /api/projects/{project}/opaque-api-keys/migration
+```
+
+Somente admin do projeto ou admin global pode alterar o lifecycle:
+
+```text
 POST   /api/projects/{project}/api-key-slots
 PATCH  /api/projects/{project}/api-key-slots/{slot_id}
 POST   /api/projects/{project}/api-key-slots/{slot_id}/rotation
@@ -272,14 +280,25 @@ POST   /api/projects/{project}/api-key-slots/{slot_id}/activation
 DELETE /api/projects/{project}/api-key-slots/{slot_id}/rotation
 DELETE /api/projects/{project}/api-key-slots/{slot_id}
 
-GET    /api/projects/{project}/api-key-reveals
-POST   /api/projects/{project}/api-key-reveals/{key_id}/claim
-
-GET    /api/projects/{project}/opaque-api-keys/migration
 POST   /api/projects/{project}/opaque-api-keys/migration/prepare
 POST   /api/projects/{project}/opaque-api-keys/migration/cutover
 DELETE /api/projects/{project}/opaque-api-keys/migration
 ```
+
+O claim de uma `publishable` é permitido a qualquer membro. Claim, criação ou
+rotação que devolva plaintext de `secret` exige simultaneamente admin do
+projeto/admin global e step-up authentication. O navegador envia a senha da
+conta atual somente a `POST /api/security/step-up`; o OpenResty fixa o username
+da sessão, valida a senha no Authelia e descarta o novo cookie produzido pelo
+`/auth/api/firstfactor`.
+
+O grant retornado usa prefixo `su1`, domínio HMAC diferente de `X-User-Token`,
+validade fixa de cinco minutos e binding por UUID do usuário, fingerprint do
+cookie de login, ação, project ref, recurso e nonce. A Projects API revalida
+todos os bindings e consome o nonce uma única vez no PostgreSQL, na transação da
+operação sempre que ela já é transacional. Senha, grant e plaintext não entram
+em provider, cache, banco, auditoria ou logs. Falha no Authelia, assinatura,
+sessão, autorização, expiração ou consumo resulta em erro explícito.
 
 Não existem aliases legados. Listagens retornam metadados; criação, rotação
 imediata e claim são as únicas respostas que podem conter plaintext.
@@ -513,6 +532,9 @@ com rotação própria até uma migração coordenada completa.
 | `OK-SEC-010` | há no máximo uma active e uma pending por slot | coberto por índices parciais |
 | `OK-SEC-011` | token de gateway de outro projeto recebe 403 | coberto por hash vinculado ao projeto |
 | `OK-SEC-012` | checksum inválido é rejeitado antes do lookup | coberto por teste unitário |
+| `OK-SEC-013` | membro vê/gera claim somente de `publishable` | coberto por filtro server-side e teste de widget |
+| `OK-SEC-014` | plaintext `secret` exige admin e step-up vinculado à ação/sessão | coberto por contrato Python/Lua/Flutter |
+| `OK-SEC-015` | grant de step-up é curto, de uso único e não substitui `X-User-Token` | coberto por domínio HMAC, prefixo e ledger PostgreSQL |
 | `OK-FUN-001` | projeto mantém vários slots independentes | implementado |
 | `OK-FUN-002` | revogar um slot não afeta os outros | implementado |
 | `OK-FUN-003` | supabase-js funciona antes/depois do login | E2E pendente |
@@ -527,6 +549,10 @@ com rotação própria até uma migração coordenada completa.
 
 ## 13. Decisões adiadas
 
+- ampliar step-up para restore, revogação, alteração de policy e outras ações
+  destrutivas que não revelam plaintext;
+- decidir se uma futura janela elevada permitirá várias ações, em vez dos
+  grants atuais estritamente vinculados e de uso único;
 - escopo por tabela, schema, função ou linha;
 - restrição por IP e bloqueio de secret key por User-Agent;
 - cache distribuído/Redis no authorizer;

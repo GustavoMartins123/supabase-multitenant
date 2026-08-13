@@ -287,7 +287,7 @@ criar ponto exige admin do projeto, enquanto restaurar ou excluir ponto
 exige o dono ou admin global. `backup` e `restore` não são idempotentes: o recovery da
 API religa na intenção existente do host-agent em vez de reexecutar. O
 delete integral do projeto continua exclusivo de admin global, protegido também
-pela senha de exclusão mantida apenas no servidor, e remove
+por step-up com a senha pessoal da conta Authelia atual, e remove
 `servidor/backups/<uuid>/` junto com os arquivos.
 
 ## Start, stop e restart
@@ -305,7 +305,8 @@ A deleção precisa remover recursos sem permitir que Supavisor ou outros servi�
 
 Fluxo atual:
 
-1. valida admin, membership e senha de deleção;
+1. valida admin global e consome um grant de step-up de uso único, vinculado à
+   sessão, ação e projeto;
 2. cria job de delete;
 3. remove ou encerra os pools do tenant no Supavisor;
 4. drena conexões ativas do database;

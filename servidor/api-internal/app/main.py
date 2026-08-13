@@ -62,6 +62,10 @@ from app.opaque_key_service import (
     ensure_key_authorizer_role,
     ensure_opaque_key_schema,
 )
+from app.step_up_auth import (
+    consume_step_up_grant,
+    ensure_step_up_auth_schema,
+)
 from app.control_plane_service import (
     audit_studio_action,
     create_studio_notification,
@@ -611,6 +615,7 @@ async def _scan_automatic_key_rotations() -> int:
 async def startup():
     pool = await initialize_pool(DB_DSN)
     await ensure_identity_schema(pool)
+    await ensure_step_up_auth_schema(pool)
     await ensure_project_secrets_schema(pool)
     await ensure_opaque_key_schema(pool)
     key_authorizer_password = (
@@ -2950,7 +2955,7 @@ async def drop_supabase_replication_slots(
 async def delete_project(
     project_name: str,
     request: Request,
-    x_delete_password: str = Header(..., alias="X-Delete-Password"),
+    x_step_up_token: str | None = Header(None, alias="X-Step-Up-Token"),
     pool=Depends(get_pool)
 ):
     project_name = validate_project_id(project_name)
@@ -2959,20 +2964,30 @@ async def delete_project(
     if not auth_user["is_global_admin"]:
         raise HTTPException(403, "Admin required")
 
-    DELETE_PASSWORD = os.getenv("PROJECT_DELETE_PASSWORD")
-    if not DELETE_PASSWORD:
-        raise HTTPException(500, "Delete password not configured")
-
-    if not hmac.compare_digest(x_delete_password, DELETE_PASSWORD):
-        raise HTTPException(403, "Invalid delete password")
-
     async with pool.acquire() as conn:
-        project_row = await conn.fetchrow(
-            "SELECT id, tenant_uuid FROM projects WHERE name = $1",
-            project_name,
-        )
-        if not project_row:
-            raise HTTPException(404, "Project not found")
+        async with conn.transaction():
+            project_row = await conn.fetchrow(
+                """
+                SELECT id, tenant_uuid
+                FROM projects
+                WHERE name = $1
+                FOR UPDATE
+                """,
+                project_name,
+            )
+            if not project_row:
+                raise HTTPException(404, "Project not found")
+            await consume_step_up_grant(
+                conn,
+                token=x_step_up_token,
+                secret=NGINX_HMAC_SECRET,
+                max_clock_skew_seconds=USER_TOKEN_MAX_CLOCK_SKEW_SECONDS,
+                auth_user=auth_user,
+                action="delete_project",
+                project_id=project_row["id"],
+                project_ref=project_name,
+                resource_id=project_name,
+            )
 
     project_id = project_row["id"]
     tenant_uuid = parse_tenant_uuid(project_row["tenant_uuid"])

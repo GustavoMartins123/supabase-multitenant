@@ -13,6 +13,10 @@ projeto. O desenho completo e os critérios de aceite estão na
   ou logs.
 - Uma chave só pode ser revelada uma vez. Copie-a diretamente para o secret
   manager do consumidor.
+- Qualquer membro do projeto pode revelar uma `publishable`. Criar, alterar ou
+  rotacionar slots continua exigindo admin do projeto ou admin global.
+- Plaintext de `secret` exige admin e reautenticação com a senha da própria
+  conta. Não existe senha global de chaves nem senha de servidor nesse fluxo.
 - “Não expira” remove somente o vencimento temporal. Não impede rotação,
   revogação, disable, restrição de serviços ou qualquer outro corte explícito.
 - Lifetime da credencial, TTL do reveal e lifetime de JWT/sessão são políticas
@@ -50,6 +54,11 @@ Depois do deploy, confirme que a migration terminou antes de permitir PATCH de
 política. Falha de migration impede a inicialização canônica da Projects API;
 não altere as constraints manualmente para contornar o erro.
 
+O deploy também aplica `20260812_step_up_grants.sql`, que cria somente o ledger
+de consumo dos grants de reautenticação. Ele registra ator, sessão hasheada,
+ação, alvo e timestamps; nunca armazena senha, token bearer ou plaintext da API
+key. Falha dessa migration impede a inicialização da Projects API.
+
 ## Projeto novo ou duplicado
 
 Projetos novos e duplicados já nascem no modo `active`, com:
@@ -63,7 +72,8 @@ existentes. O admin pode selecionar **Não expira** depois da criação. As
 revelações iniciais expiram em 30 minutos em qualquer política.
 
 1. No Studio, abra as configurações do projeto e a seção de API keys.
-2. Faça claim de cada chave necessária.
+2. Faça claim de cada chave necessária. `publishable` está disponível a todos
+   os membros; `secret` solicita a senha pessoal de um admin.
 3. Armazene a publishable key na configuração do cliente público.
 4. Armazene a secret key somente no secret manager de um backend confiável.
 5. Crie slots adicionais para consumidores independentes.
@@ -89,7 +99,8 @@ rejeitadas e não servem como teste paralelo.
 
 Para cada chave:
 
-1. faça claim antes do prazo de sete dias;
+1. faça claim antes do prazo de sete dias; para `secret`, use uma conta admin e
+   reautentique com a senha dessa mesma conta;
 2. coloque o valor no secret manager/configuração do consumidor;
 3. deixe o deploy pronto para usar o novo valor no instante do corte;
 4. confirme no Studio o key ID instalado.
@@ -258,7 +269,8 @@ sendo processados.
 ### Secret key exposta
 
 1. identifique o slot pelo `token_hint` e pelos eventos de auditoria;
-2. execute rotação imediata;
+2. como admin do projeto ou admin global, execute rotação imediata e
+   reautentique com sua senha pessoal antes de receber o novo plaintext;
 3. distribua a nova chave pelo secret manager;
 4. remova a chave exposta de código, logs e artefatos;
 5. revise `last_used_at`, auditoria e acessos aos serviços permitidos;
@@ -270,6 +282,10 @@ Para uma chave sem expiração, não espere um evento temporal: faça hard
 rotation imediatamente. Se o slot não precisar mais existir, use **Revogar
 slot**. Ambas as operações continuam sendo autoritativas sobre
 `expires_at = NULL`.
+
+Se o Authelia ou a validação do grant estiver indisponível, não tente obter a
+secret por outra rota. Preserve/revogue o slot conforme o incidente permitir e
+restaure primeiro o caminho canônico de autenticação.
 
 ### Chave expirou sem reposição
 

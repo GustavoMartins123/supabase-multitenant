@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:seletor_de_projetos/data/project_repository.dart';
 import 'package:seletor_de_projetos/services/project_service.dart';
+import 'package:seletor_de_projetos/services/step_up_authentication_service.dart';
 import 'package:seletor_de_projetos/providers/project_jobs_provider.dart';
 import 'package:seletor_de_projetos/session.dart';
 import 'package:seletor_de_projetos/supabase_colors.dart';
@@ -701,6 +702,8 @@ class _UserProjectsAdminScreenState
     bool sucesso = await ProjectService.confirmAndDeleteProject(
       context,
       projectName,
+      requestStepUpToken:
+          ref.read(stepUpAuthenticationServiceProvider).requestToken,
       submittedJobWaiter: (job) =>
           ref.read(projectJobsProvider.notifier).waitFor(
                 job,

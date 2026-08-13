@@ -78,8 +78,11 @@ class ProjectAccessAndDeletionContractTest(unittest.TestCase):
         function = self.function("delete_project")
         function_source = ast.get_source_segment(self.source, function) or ""
         self.assertIn('if not auth_user["is_global_admin"]', function_source)
-        self.assertIn('alias="X-Delete-Password"', function_source)
-        self.assertIn("hmac.compare_digest", function_source)
+        self.assertIn('alias="X-Step-Up-Token"', function_source)
+        self.assertIn("consume_step_up_grant", function_source)
+        self.assertIn('action="delete_project"', function_source)
+        self.assertNotIn("PROJECT_DELETE_PASSWORD", function_source)
+        self.assertNotIn("X-Delete-Password", function_source)
         self.assertNotIn("ensure_project_owner_access", function_source)
 
     def test_admin_projects_info_uses_one_canonical_path(self) -> None:

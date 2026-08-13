@@ -305,10 +305,14 @@ class ProjectRepository {
     required List<String> allowedServices,
     required bool automaticRotationEnabled,
     required int? rotationIntervalDays,
+    String? stepUpToken,
   }) async {
     final resp = await _client.post(
       Uri.parse('/api/projects/$ref/api-key-slots'),
-      headers: {'Content-Type': 'application/json'},
+      headers: {
+        'Content-Type': 'application/json',
+        if (stepUpToken != null) 'X-Step-Up-Token': stepUpToken,
+      },
       body: jsonEncode({
         'name': name,
         'kind': kind,
@@ -327,10 +331,14 @@ class ProjectRepository {
     String ref,
     String slotId, {
     DateTime? activateAt,
+    String? stepUpToken,
   }) async {
     final resp = await _client.post(
       Uri.parse('/api/projects/$ref/api-key-slots/$slotId/rotation'),
-      headers: {'Content-Type': 'application/json'},
+      headers: {
+        'Content-Type': 'application/json',
+        if (stepUpToken != null) 'X-Step-Up-Token': stepUpToken,
+      },
       body: jsonEncode({
         if (activateAt != null)
           'activate_at': activateAt.toUtc().toIso8601String(),
@@ -416,9 +424,16 @@ class ProjectRepository {
         .toList();
   }
 
-  Future<String> claimOpaqueApiKey(String ref, String keyId) async {
+  Future<String> claimOpaqueApiKey(
+    String ref,
+    String keyId, {
+    String? stepUpToken,
+  }) async {
     final resp = await _client.post(
       Uri.parse('/api/projects/$ref/api-key-reveals/$keyId/claim'),
+      headers: {
+        if (stepUpToken != null) 'X-Step-Up-Token': stepUpToken,
+      },
     );
     _ensureCommandSucceeded(resp);
     final data = decodeJsonObject(resp, context: 'Revelacao de API key');

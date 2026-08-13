@@ -7,7 +7,7 @@ import uuid
 from typing import Literal
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -15,6 +15,8 @@ from app.control_plane_service import audit_studio_action
 from app.database import get_pool
 from app.dependencies import (
     ensure_project_admin_access,
+    ensure_project_member_access,
+    get_project_role,
     get_project_row,
     resolve_authenticated_user,
 )
@@ -41,6 +43,11 @@ from app.opaque_key_service import (
 )
 from app.opaque_keys import ALLOWED_SERVICES, OpaqueKeyError
 from app.project_env_secrets import read_project_secret_keys
+from app.runtime_config import (
+    NGINX_HMAC_SECRET,
+    USER_TOKEN_MAX_CLOCK_SKEW_SECONDS,
+)
+from app.step_up_auth import consume_step_up_grant
 from app.validation import validate_project_id
 
 
@@ -91,7 +98,9 @@ async def get_opaque_api_key_migration(
     pool: asyncpg.Pool = Depends(get_pool),
 ):
     project_name = validate_project_id(project_name)
-    _, project = await _authorize_project_admin(request, pool, project_name)
+    _, project, can_manage = await _authorize_project_access(
+        request, pool, project_name
+    )
     async with pool.acquire() as conn:
         state = await conn.fetchrow(
             """
@@ -107,9 +116,12 @@ async def get_opaque_api_key_migration(
             SELECT count(*)
             FROM project_api_keys k
             JOIN project_api_key_slots s ON s.id = k.slot_id
-            WHERE s.project_id = $1 AND k.status = 'pending'
+            WHERE s.project_id = $1
+              AND k.status = 'pending'
+              AND ($2::boolean OR s.kind = 'publishable')
             """,
             project["id"],
+            can_manage,
         )
         confirmed = await conn.fetchval(
             """
@@ -119,8 +131,10 @@ async def get_opaque_api_key_migration(
             WHERE s.project_id = $1
               AND k.status = 'pending'
               AND k.confirmed_at IS NOT NULL
+              AND ($2::boolean OR s.kind = 'publishable')
             """,
             project["id"],
+            can_manage,
         )
     if state["opaque_gateway_ready_at"] is not None:
         status = "active"
@@ -244,6 +258,29 @@ async def _authorize_project_admin(
             message="Apenas admin do projeto pode gerenciar API keys",
         )
     return auth_user, project
+
+
+async def _authorize_project_access(
+    request: Request,
+    pool: asyncpg.Pool,
+    project_name: str,
+) -> tuple[dict, asyncpg.Record, bool]:
+    auth_user = await resolve_authenticated_user(request, pool)
+    async with pool.acquire() as conn:
+        project = await get_project_row(conn, project_name)
+        await ensure_project_member_access(
+            conn,
+            project_id=project["id"],
+            auth_user=auth_user,
+            message="Apenas membros do projeto podem consultar API keys",
+        )
+        role = await get_project_role(
+            conn,
+            project_id=project["id"],
+            auth_user=auth_user,
+        )
+    can_manage = auth_user["is_global_admin"] or role == "admin"
+    return auth_user, project, can_manage
 
 
 def _migration_lock_name(project_id: uuid.UUID) -> str:
@@ -570,16 +607,23 @@ async def get_api_key_slots(
     pool: asyncpg.Pool = Depends(get_pool),
 ):
     project_name = validate_project_id(project_name)
-    _, project = await _authorize_project_admin(request, pool, project_name)
+    _, project, can_manage = await _authorize_project_access(
+        request, pool, project_name
+    )
     async with pool.acquire() as conn:
         slots = await list_slots(conn, project_id=project["id"])
         keyset_version = await conn.fetchval(
             "SELECT api_keyset_version FROM projects WHERE id = $1", project["id"]
         )
+    visible_slots = (
+        slots
+        if can_manage
+        else [slot for slot in slots if slot["kind"] == "publishable"]
+    )
     return {
         "project": project_name,
         "api_keyset_version": int(keyset_version),
-        "slots": slots,
+        "slots": visible_slots,
     }
 
 
@@ -588,6 +632,7 @@ async def create_api_key_slot(
     project_name: str,
     body: CreateApiKeySlot,
     request: Request,
+    x_step_up_token: str | None = Header(None, alias="X-Step-Up-Token"),
     pool: asyncpg.Pool = Depends(get_pool),
 ):
     project_name = validate_project_id(project_name)
@@ -602,6 +647,20 @@ async def create_api_key_slot(
                     auth_user=auth_user,
                     message="Project admin permission changed during API key creation",
                 )
+                if body.kind == "secret":
+                    await consume_step_up_grant(
+                        conn,
+                        token=x_step_up_token,
+                        secret=NGINX_HMAC_SECRET,
+                        max_clock_skew_seconds=(
+                            USER_TOKEN_MAX_CLOCK_SKEW_SECONDS
+                        ),
+                        auth_user=auth_user,
+                        action="create_secret_key",
+                        project_id=project["id"],
+                        project_ref=project_name,
+                        resource_id=body.name,
+                    )
                 issued, version = await create_slot_with_active_key(
                     conn,
                     project_id=project["id"],
@@ -662,6 +721,7 @@ async def rotate_api_key_slot(
     slot_id: uuid.UUID,
     body: RotateApiKeySlot,
     request: Request,
+    x_step_up_token: str | None = Header(None, alias="X-Step-Up-Token"),
     pool: asyncpg.Pool = Depends(get_pool),
 ):
     project_name = validate_project_id(project_name)
@@ -676,6 +736,34 @@ async def rotate_api_key_slot(
                     auth_user=auth_user,
                     message="Project admin permission changed during API key rotation",
                 )
+                slot_kind = await conn.fetchval(
+                    """
+                    SELECT kind
+                    FROM project_api_key_slots
+                    WHERE id = $1 AND project_id = $2
+                    FOR UPDATE
+                    """,
+                    slot_id,
+                    project["id"],
+                )
+                if slot_kind is None:
+                    raise OpaqueKeyLifecycleError(
+                        "active API key slot not found"
+                    )
+                if slot_kind == "secret":
+                    await consume_step_up_grant(
+                        conn,
+                        token=x_step_up_token,
+                        secret=NGINX_HMAC_SECRET,
+                        max_clock_skew_seconds=(
+                            USER_TOKEN_MAX_CLOCK_SKEW_SECONDS
+                        ),
+                        auth_user=auth_user,
+                        action="rotate_secret_key",
+                        project_id=project["id"],
+                        project_ref=project_name,
+                        resource_id=str(slot_id),
+                    )
                 if body.activate_at is None:
                     issued, version = await rotate_slot_immediately(
                         conn, project_id=project["id"], slot_id=slot_id
@@ -977,10 +1065,21 @@ async def get_api_key_reveals(
     pool: asyncpg.Pool = Depends(get_pool),
 ):
     project_name = validate_project_id(project_name)
-    _, project = await _authorize_project_admin(request, pool, project_name)
+    _, project, can_manage = await _authorize_project_access(
+        request, pool, project_name
+    )
     async with pool.acquire() as conn:
         reveals = await list_reveals(conn, project_id=project["id"])
-    return {"project": project_name, "reveals": reveals}
+    visible_reveals = (
+        reveals
+        if can_manage
+        else [
+            reveal
+            for reveal in reveals
+            if reveal["kind"] == "publishable"
+        ]
+    )
+    return {"project": project_name, "reveals": visible_reveals}
 
 
 @router.post("/{project_name}/api-key-reveals/{key_id}/claim")
@@ -988,20 +1087,63 @@ async def claim_api_key(
     project_name: str,
     key_id: uuid.UUID,
     request: Request,
+    x_step_up_token: str | None = Header(None, alias="X-Step-Up-Token"),
     pool: asyncpg.Pool = Depends(get_pool),
 ):
     project_name = validate_project_id(project_name)
-    auth_user, project = await _authorize_project_admin(request, pool, project_name)
+    auth_user, project, _ = await _authorize_project_access(
+        request, pool, project_name
+    )
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
                 project = await get_project_row(conn, project_name)
-                await ensure_project_admin_access(
+                await ensure_project_member_access(
                     conn,
                     project_id=project["id"],
                     auth_user=auth_user,
-                    message="Project admin permission changed during API key reveal",
+                    message="Project membership changed during API key reveal",
                 )
+                key_kind = await conn.fetchval(
+                    """
+                    SELECT s.kind
+                    FROM project_api_keys k
+                    JOIN project_api_key_slots s ON s.id = k.slot_id
+                    JOIN project_api_key_reveals r ON r.key_id = k.id
+                    WHERE k.id = $1
+                      AND s.project_id = $2
+                      AND r.expires_at > now()
+                    FOR UPDATE OF k, s, r
+                    """,
+                    key_id,
+                    project["id"],
+                )
+                if key_kind is None:
+                    raise OpaqueKeyRevealGone(
+                        "API key reveal is expired, claimed, or absent"
+                    )
+                if key_kind == "secret":
+                    await ensure_project_admin_access(
+                        conn,
+                        project_id=project["id"],
+                        auth_user=auth_user,
+                        message=(
+                            "Apenas admin do projeto pode revelar secret keys"
+                        ),
+                    )
+                    await consume_step_up_grant(
+                        conn,
+                        token=x_step_up_token,
+                        secret=NGINX_HMAC_SECRET,
+                        max_clock_skew_seconds=(
+                            USER_TOKEN_MAX_CLOCK_SKEW_SECONDS
+                        ),
+                        auth_user=auth_user,
+                        action="reveal_secret_key",
+                        project_id=project["id"],
+                        project_ref=project_name,
+                        resource_id=str(key_id),
+                    )
                 token = await claim_key_reveal(
                     conn, project_id=project["id"], key_id=key_id
                 )

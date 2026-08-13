@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 import '../data/api_client.dart';
 import '../models/job.dart';
+import 'step_up_authentication_service.dart';
+import '../widgets/step_up_authentication_dialog.dart';
 
 class JobWaitResult {
   const JobWaitResult({
@@ -27,19 +30,33 @@ class ProjectService {
   static Future<bool> confirmAndDeleteProject(
     BuildContext context,
     String projectRef, {
+    required StepUpTokenRequester requestStepUpToken,
     SubmittedJobWaiter? submittedJobWaiter,
+    ApiClient? apiClient,
   }) async {
     final confirmed = await _showConfirmationDialog(context, projectRef);
     if (!confirmed || !context.mounted) return false;
 
-    final password = await _showPasswordDialog(context);
-    if (password == null || password.isEmpty || !context.mounted) return false;
+    final stepUpToken = await showStepUpAuthenticationDialog(
+      context,
+      title: 'Reautenticar para excluir',
+      description:
+          'Confirme sua identidade antes de excluir permanentemente este projeto.',
+      authenticate: (password) => requestStepUpToken(
+        password: password,
+        action: StepUpAction.deleteProject,
+        projectRef: projectRef,
+        resourceId: projectRef,
+      ),
+    );
+    if (stepUpToken == null || !context.mounted) return false;
 
     return await _executeProjectDeletion(
       context,
       projectRef,
-      password,
+      stepUpToken,
       submittedJobWaiter: submittedJobWaiter,
+      apiClient: apiClient,
     );
   }
 
@@ -88,60 +105,12 @@ class ProjectService {
     ).then((value) => value ?? false);
   }
 
-  static Future<String?> _showPasswordDialog(BuildContext context) async {
-    final passwordController = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-
-    return showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('Senha de Exclusão'),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Digite a senha para confirmar a operação:'),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: passwordController,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Senha de Exclusão',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.lock),
-                ),
-                validator: (value) =>
-                    value == null || value.isEmpty ? 'Senha obrigatória' : null,
-                autofocus: true,
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              if (formKey.currentState!.validate()) {
-                Navigator.pop(context, passwordController.text);
-              }
-            },
-            child: const Text('Confirmar'),
-          ),
-        ],
-      ),
-    );
-  }
-
   static Future<bool> _executeProjectDeletion(
     BuildContext context,
     String projectRef,
-    String password, {
+    String stepUpToken, {
     SubmittedJobWaiter? submittedJobWaiter,
+    ApiClient? apiClient,
   }) async {
     var loadingDialogOpen = true;
     showDialog(
@@ -161,20 +130,20 @@ class ProjectService {
     );
 
     try {
-      final response = await (() async {
-        final client = ApiClient();
-        try {
-          return await client.delete(
-            Uri.parse('/api/admin/projects/$projectRef'),
-            headers: {
-              'X-Delete-Password': password,
-              'Content-Type': 'application/json',
-            },
-          );
-        } finally {
-          client.close();
-        }
-      })();
+      late final http.Response response;
+      final client = apiClient ?? ApiClient();
+      try {
+        response = await client.delete(
+          Uri.parse('/api/admin/projects/$projectRef'),
+          headers: {
+            'X-Step-Up-Token': stepUpToken,
+            'Content-Type': 'application/json',
+          },
+        );
+      } finally {
+        stepUpToken = '';
+        if (apiClient == null) client.close();
+      }
 
       if (response.statusCode != 202) {
         throw ApiException.fromResponse(response);

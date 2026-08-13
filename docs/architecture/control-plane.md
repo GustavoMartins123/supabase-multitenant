@@ -34,6 +34,26 @@ O token é assinado com `NGINX_HMAC_SECRET` e possui validade curta. A API extra
 
 Email, username, display name e grupos são atributos sincronizados. Eles não substituem o UUID canônico.
 
+### Step-up authentication
+
+Autorização responde se o ator pode executar uma operação; step-up confirma
+que o mesmo ator ainda controla a sessão no instante sensível. Nesta etapa ele
+é obrigatório para exclusão integral de projeto e para toda resposta que
+exponha plaintext de `sb_secret_*`.
+
+O Flutter envia a senha pessoal somente ao endpoint do OpenResty. O gateway
+obtém o username do `auth_request`, e não do JSON do cliente, valida a senha no
+`/auth/api/firstfactor` interno do Authelia e não encaminha o `Set-Cookie` dessa
+subrequisição. Depois emite um grant `su1` HMAC de cinco minutos, vinculado ao
+UUID, fingerprint do cookie atual, ação, project ref, recurso e nonce.
+
+A Projects API não confunde esse grant com `X-User-Token`: prefixo e chave
+derivada possuem domínio próprio. Ela revalida autorização no PostgreSQL e
+insere o nonce em `studio_step_up_grant_consumptions` com `ON CONFLICT DO
+NOTHING`. Assim cada grant é aceito uma vez. Indisponibilidade do Authelia,
+binding ausente, token expirado/repetido ou mudança de papel bloqueia a ação.
+Senha, grant completo e plaintext não são persistidos nem auditados.
+
 ### Autorização
 
 A autorização considera:
@@ -59,7 +79,8 @@ Tabelas principais:
 - `user_group_audit`;
 - `projects`;
 - `project_members`;
-- `project_members_audit`.
+- `project_members_audit`;
+- `studio_step_up_grant_consumptions` (ledger sem senha ou bearer).
 
 A tabela `projects` possui o UUID canônico (`id`), o vínculo persistido com o
 tenant externo (`tenant_uuid`), project ref, display name, versão das chaves e
@@ -83,9 +104,11 @@ O `key-authorizer` autentica cada Nginx por um token exclusivo cujo hash fica em
 lookup precisa e `UPDATE(last_used_at)`. Falha de banco ou de subrequest bloqueia
 o acesso; a Projects API não participa do caminho quente.
 
-As rotas administrativas ficam sob `/api/projects/{project_ref}/api-key-*` e
-`/opaque-api-keys/migration`. Todas revalidam owner/admin no estado persistido,
-usam transações e nunca listam plaintext. Veja
+As rotas ficam sob `/api/projects/{project_ref}/api-key-*` e
+`/opaque-api-keys/migration`. Membros recebem somente metadados/reveals
+`publishable`; mutações continuam limitadas a admin do projeto ou admin global.
+Plaintext de `secret` acrescenta step-up, e todas as operações revalidam o
+estado persistido, usam transações e nunca listam plaintext. Veja
 [o runbook](../12-chaves-api-opacas.md).
 
 ### Jobs
