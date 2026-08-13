@@ -35,6 +35,8 @@ const _kIntegerRanges = {
   'PGRST_DB_POOL_TIMEOUT': (min: 1, max: 3153600000),
   'PGRST_DB_POOL_ACQUISITION_TIMEOUT': (min: 1, max: 3153600000),
   'FILE_SIZE_LIMIT': (min: 1, max: 9007199254740991),
+  'VECTOR_MAX_BUCKETS': (min: 1, max: 1000000),
+  'VECTOR_MAX_INDEXES': (min: 1, max: 1000000),
 };
 
 const _kBooleanKeys = {
@@ -46,6 +48,8 @@ const _kBooleanKeys = {
   'ENABLE_PHONE_AUTOCONFIRM',
   'GOTRUE_EXTERNAL_IMPLICIT_FLOW_ENABLED',
   'ENABLE_IMAGE_TRANSFORMATION',
+  'S3_PROTOCOL_ENABLED',
+  'VECTOR_BUCKETS_ENABLED',
 };
 
 const _kSettings = [
@@ -167,6 +171,34 @@ const _kSettings = [
     label: 'Transformação de Imagens',
     description: 'Habilitar resize/otimização de imagens via Storage',
     type: _FieldType.toggle,
+    category: 'Storage',
+  ),
+  _SettingMeta(
+    key: 'S3_PROTOCOL_ENABLED',
+    label: 'Protocolo S3',
+    description: 'Habilitar o endpoint S3 SigV4 deste tenant',
+    type: _FieldType.toggle,
+    category: 'Storage',
+  ),
+  _SettingMeta(
+    key: 'VECTOR_BUCKETS_ENABLED',
+    label: 'Storage Vectors',
+    description: 'Habilitar Vector Buckets neste tenant',
+    type: _FieldType.toggle,
+    category: 'Storage',
+  ),
+  _SettingMeta(
+    key: 'VECTOR_MAX_BUCKETS',
+    label: 'Máx. de Vector Buckets',
+    description: 'Quantidade máxima de Vector Buckets para o tenant',
+    type: _FieldType.number,
+    category: 'Storage',
+  ),
+  _SettingMeta(
+    key: 'VECTOR_MAX_INDEXES',
+    label: 'Máx. de Índices Vetoriais',
+    description: 'Quantidade máxima de índices por Vector Bucket',
+    type: _FieldType.number,
     category: 'Storage',
   ),
 ];

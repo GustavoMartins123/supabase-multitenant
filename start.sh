@@ -61,6 +61,18 @@ esac
 
 require_host_agent_installation
 
+[ -f "$ROOT_DIR/servidor/.storage.env" ] \
+    || die "servidor/.storage.env ausente; execute setup.sh ou a migracao do Storage compartilhado."
+
+# Stacks anteriores precisam ser convertidos pela ferramenta transitoria. O
+# runtime novo recusa explicitamente qualquer compose com Storage por projeto.
+shopt -s nullglob
+for project_compose in "$ROOT_DIR"/servidor/projects/*/docker-compose.yml; do
+    if grep -Eq 'container_name:[[:space:]]*supabase-(storage|imgproxy)-' "$project_compose"; then
+        die "stack por projeto antiga detectada em $project_compose; execute servidor/generateProject/migrate_shared_storage.sh."
+    fi
+done
+
 echo "Iniciando a base de dados e os servicos Supabase..."
 cd "$ROOT_DIR/servidor"
 API_OVERRIDE="docker-compose.${SERVER_TOPOLOGY}.yml"
@@ -78,6 +90,20 @@ until [ "$(docker inspect -f '{{.State.Health.Status}}' supabase-db)" = "healthy
     fi
     printf "."
     sleep 5
+    counter=$((counter + 1))
+done
+
+echo
+echo "Aguardando Storage compartilhado ficar pronto..."
+counter=0
+until [ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' supabase-storage-global 2>/dev/null)" = "healthy" ]; do
+    storage_status="$(docker inspect -f '{{.State.Status}}' supabase-storage-global 2>/dev/null || true)"
+    if [ "$storage_status" = "exited" ] || [ "$counter" -gt 60 ]; then
+        docker logs --tail 100 supabase-storage-global >&2 || true
+        die "Storage compartilhado nao ficou saudavel; em instalacao existente, execute a migracao antes de iniciar projetos."
+    fi
+    printf "."
+    sleep 2
     counter=$((counter + 1))
 done
 

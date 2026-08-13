@@ -25,6 +25,7 @@ CREATED_DIRS=()
 CREATED_DB=""
 CREATED_REALTIME_TENANT=""
 CREATED_SUPAVISOR_TENANT=""
+CREATED_STORAGE_TENANT=""
 COMPOSE_STARTED=0
 
 init_transaction() {
@@ -36,6 +37,7 @@ register_created_dir() { CREATED_DIRS+=("$1"); }
 register_created_db() { CREATED_DB="$1"; }
 register_realtime_tenant() { CREATED_REALTIME_TENANT="$1"; }
 register_supavisor_tenant() { CREATED_SUPAVISOR_TENANT="$1"; }
+register_storage_tenant() { CREATED_STORAGE_TENANT="$1"; }
 
 commit_transaction() {
   rm -rf "$TRANSACTION_DIR"
@@ -135,12 +137,21 @@ rollback_transaction() {
     delete_tenant_metadata "$PROJECT_ID" "$CREATED_REALTIME_TENANT" \
       || rollback_failed=1
   fi
-  if [[ -n "$CREATED_DB" ]]; then
+  if [[ -n "$CREATED_STORAGE_TENANT" ]]; then
+    if ! storage_delete_tenant "$CREATED_STORAGE_TENANT"; then
+      rollback_failed=1
+    else
+      CREATED_STORAGE_TENANT=""
+    fi
+  fi
+  if [[ -n "$CREATED_DB" && -z "$CREATED_STORAGE_TENANT" ]]; then
     drop_project_database "$CREATED_DB" || rollback_failed=1
   fi
-  for ((idx=${#CREATED_DIRS[@]}-1; idx>=0; idx--)); do
-    rm -rf "${CREATED_DIRS[idx]}" || rollback_failed=1
-  done
+  if [[ -z "$CREATED_STORAGE_TENANT" ]]; then
+    for ((idx=${#CREATED_DIRS[@]}-1; idx>=0; idx--)); do
+      rm -rf "${CREATED_DIRS[idx]}" || rollback_failed=1
+    done
+  fi
   rm -rf "$TRANSACTION_DIR" || rollback_failed=1
 
   if [[ "$rollback_failed" -eq 0 ]]; then
@@ -184,6 +195,7 @@ for stale_uuid in "${STALE_TENANT_UUIDS[@]}"; do
 done
 
 PROJECT_ID="$(echo "$PROJECT_ID" | tr '[:upper:]' '[:lower:]')"
+PROJECT_UUID="$(echo "$PROJECT_UUID" | tr '[:upper:]' '[:lower:]')"
 [[ "$PROJECT_ID" =~ ^[a-z_][a-z0-9_]{2,39}$ ]] \
   || die "Nome deve começar com letra minúscula/_ e conter só minúsculas, dígitos ou _ (3–40 chars)"
 [[ "$PROJECT_ID" != *.* ]] || die "Nome não pode conter ponto (.)"
@@ -283,6 +295,15 @@ cleanup_stale_state() {
     delete_tenant_metadata "$PROJECT_ID" "$stale_uuid" \
       || { echo "HOST_AGENT_ROLLBACK_FAILED=stale_metadata" >&2; return 1; }
   done
+  if [[ -n "$old_uuid" ]]; then
+    storage_delete_tenant "$(tr '[:upper:]' '[:lower:]' <<<"$old_uuid")" \
+      || { echo "HOST_AGENT_ROLLBACK_FAILED=stale_storage_tenant" >&2; return 1; }
+  fi
+  for stale_uuid in "${STALE_TENANT_UUIDS[@]}"; do
+    [[ "${stale_uuid,,}" == "${old_uuid,,}" ]] && continue
+    storage_delete_tenant "${stale_uuid,,}" \
+      || { echo "HOST_AGENT_ROLLBACK_FAILED=stale_storage_tenant" >&2; return 1; }
+  done
   if database_exists "$db"; then
     drop_project_database "$db" \
       || { echo "HOST_AGENT_ROLLBACK_FAILED=stale_database" >&2; return 1; }
@@ -328,6 +349,7 @@ template_to_file() {
     -e "s|{{project_public_url}}|$(escape_sed_replacement "$PROJECT_PUBLIC_URL")|g" \
     -e "s|{{project_auth_external_url}}|$(escape_sed_replacement "$PROJECT_AUTH_EXTERNAL_URL")|g" \
     -e "s|{{project_root}}|$(escape_sed_replacement "$HOST_PROJECT_ROOT")|g" \
+    -e "s|{{s3_protocol_credential_id}}|$(escape_sed_replacement "$S3_PROTOCOL_CREDENTIAL_ID")|g" \
     -e "s|{{s3_protocol_access_key_id}}|$(escape_sed_replacement "$S3_PROTOCOL_ACCESS_KEY_ID")|g" \
     -e "s|{{s3_protocol_access_key_secret}}|$(escape_sed_replacement "$S3_PROTOCOL_ACCESS_KEY_SECRET")|g" \
     "$template" > "$output"
@@ -385,6 +407,15 @@ GLOBAL_ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\
 CONFIG_TOKEN_PROJETO=$(openssl rand -hex 32 | tr -d '\n\r')
 API_GATEWAY_TOKEN_PROJETO=$(openssl rand -hex 32 | tr -d '\n\r')
 
+FILE_SIZE_LIMIT="$(read_canonical_env_value "$SCRIPT_DIR/.envtemplate" FILE_SIZE_LIMIT)"
+ENABLE_IMAGE_TRANSFORMATION="$(read_canonical_env_value "$SCRIPT_DIR/.envtemplate" ENABLE_IMAGE_TRANSFORMATION)"
+S3_PROTOCOL_ENABLED="$(read_canonical_env_value "$SCRIPT_DIR/.envtemplate" S3_PROTOCOL_ENABLED)"
+VECTOR_BUCKETS_ENABLED="$(read_canonical_env_value "$SCRIPT_DIR/.envtemplate" VECTOR_BUCKETS_ENABLED)"
+VECTOR_MAX_BUCKETS="$(read_canonical_env_value "$SCRIPT_DIR/.envtemplate" VECTOR_MAX_BUCKETS)"
+VECTOR_MAX_INDEXES="$(read_canonical_env_value "$SCRIPT_DIR/.envtemplate" VECTOR_MAX_INDEXES)"
+
+storage_wait_global || die "Storage compartilhado indisponivel"
+
 if [[ "$RECOVER_STALE" == "true" ]]; then
   cleanup_stale_state || die "Não foi possível limpar resíduos da tentativa anterior"
 else
@@ -403,13 +434,37 @@ else
   fi
 fi
 
-unset S3_PROTOCOL_ACCESS_KEY_ID S3_PROTOCOL_ACCESS_KEY_SECRET
-vector_ensure_s3_credentials || die "Falha ao gerar credenciais SigV4 do projeto"
-
 init_transaction
 echo "HOST_AGENT_PROGRESS=create:transaction_initialized"
-mkdir -p "$OUT_DIR/storage/stub/stub" "$OUT_DIR/nginx" "$OUT_DIR/pooler"
+mkdir -p "$OUT_DIR/nginx" "$OUT_DIR/pooler"
 register_created_dir "$OUT_DIR"
+
+generate_db
+echo "HOST_AGENT_PROGRESS=create:database_created"
+realtime_tenant
+echo "HOST_AGENT_PROGRESS=create:realtime_created"
+supavisor_tenant
+echo "HOST_AGENT_PROGRESS=create:supavisor_created"
+
+# Registra a intencao antes da chamada: uma falha de transporte pode ocorrer
+# depois de o registry ter persistido o tenant.
+storage_assert_tenant_absent "$PROJECT_UUID" \
+  || die "Tenant UUID ja existe no Storage compartilhado"
+register_storage_tenant "$PROJECT_UUID"
+storage_create_empty_tenant_namespace "$PROJECT_UUID" \
+  || die "Falha ao criar namespace fisico do tenant"
+storage_provision_tenant "$PROJECT_UUID" "$PROJECT_ID" "$JWT_SECRET_PROJETO" \
+  "$ANON_TOKEN" "$SERVICE_TOKEN" "$FILE_SIZE_LIMIT" \
+  "$ENABLE_IMAGE_TRANSFORMATION" "$S3_PROTOCOL_ENABLED" "$VECTOR_BUCKETS_ENABLED" \
+  "$VECTOR_MAX_BUCKETS" "$VECTOR_MAX_INDEXES" \
+  || die "Falha ao registrar tenant no Storage compartilhado"
+echo "HOST_AGENT_PROGRESS=create:storage_tenant_created"
+
+IFS=$'\t' read -r S3_PROTOCOL_CREDENTIAL_ID S3_PROTOCOL_ACCESS_KEY_ID \
+  S3_PROTOCOL_ACCESS_KEY_SECRET \
+  <<<"$(storage_create_s3_credentials "$PROJECT_UUID")"
+vector_validate_s3_credentials || die "Storage retornou credenciais SigV4 invalidas"
+echo "HOST_AGENT_PROGRESS=create:storage_credentials_created"
 
 template_to_file "$SCRIPT_DIR/nginxtemplate" "$OUT_DIR/nginx/nginx_${PROJECT_ID}.conf"
 template_to_file "$SCRIPT_DIR/.envtemplate" "$OUT_DIR/.env"
@@ -421,20 +476,18 @@ chmod 600 "$OUT_DIR/.env"
 chmod 644 "$OUT_DIR/nginx/nginx_${PROJECT_ID}.conf" "$OUT_DIR/.dockerignore"
 echo "HOST_AGENT_PROGRESS=create:files_rendered"
 
-generate_db
-echo "HOST_AGENT_PROGRESS=create:database_created"
-realtime_tenant
-echo "HOST_AGENT_PROGRESS=create:realtime_created"
-supavisor_tenant
-echo "HOST_AGENT_PROGRESS=create:supavisor_created"
-
 COMPOSE_STARTED=1
 (
   cd "$OUT_DIR"
   docker compose -p "$PROJECT_ID" --env-file ../../.env --env-file .env up --build -d
 )
 echo "HOST_AGENT_PROGRESS=create:services_started"
-vector_validate_storage_api "$PROJECT_ID" || die "Storage Vectors nao iniciou corretamente"
+vector_validate_storage_api "$PROJECT_UUID" "$SERVICE_TOKEN" \
+  "$S3_PROTOCOL_ACCESS_KEY_ID" "$S3_PROTOCOL_ACCESS_KEY_SECRET" \
+  "$S3_PROTOCOL_ENABLED" "$VECTOR_BUCKETS_ENABLED" \
+  || die "Tenant Storage/S3/Vectors nao iniciou corretamente"
+storage_assert_project_gateway "$PROJECT_UUID" "$PROJECT_ID" "$SERVICE_TOKEN" \
+  || die "Nginx do projeto nao resolveu o tenant Storage correto"
 echo "HOST_AGENT_PROGRESS=create:storage_verified"
 
 echo "✅  Projeto $PROJECT_ID configurado com Storage Vectors e SigV4"

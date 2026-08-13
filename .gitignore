@@ -10,7 +10,9 @@ studio/.analytics.env
 studio/authelia/profile-pictures/
 servidor/.env
 servidor/.analytics.env
+servidor/.storage.env
 servidor/.legacy-migration.env
+servidor/storage-migration-reports/
 servidor/projects/**
 !servidor/projects/.gitkeep
 tarefas.md

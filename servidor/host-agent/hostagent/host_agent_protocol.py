@@ -43,6 +43,7 @@ COMMAND_TIMEOUTS: dict[str, int] = {
     "create_project": 1_800,
     "duplicate_project": 3_600,
     "delete_project_containers": 300,
+    "delete_project_storage": 600,
     "delete_project_files": 300,
     "rotate_keys": 900,
     "rename_project": 3_600,
@@ -69,6 +70,7 @@ DEFAULT_TERM_GRACE = 30
 GLOBAL_ADMIN_COMMANDS = frozenset(
     {
         "delete_project_containers",
+        "delete_project_storage",
         "delete_project_files",
     }
 )
@@ -119,7 +121,7 @@ class ProjectNameValidator:
 
 
 RECREATE_SERVICE_NAMES = frozenset(
-    {"auth", "rest", "storage", "imgproxy", "nginx", "meta"}
+    {"auth", "rest", "storage", "nginx", "meta"}
 )
 COPY_MODES = frozenset({"with-data", "schema-only"})
 UUID_RE = re.compile(
@@ -169,7 +171,7 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
         reject_unknown({"trigger"})
         if args.get("trigger") not in {"manual", "automatic"}:
             errors.append("invalid_rotation_trigger")
-    elif command == "delete_project_files":
+    elif command in {"delete_project_storage", "delete_project_files"}:
         reject_unknown({"tenant_uuid", "project_uuid"})
         if "tenant_uuid" in args and not is_valid_uuid(args.get("tenant_uuid")):
             errors.append("invalid_tenant_uuid")

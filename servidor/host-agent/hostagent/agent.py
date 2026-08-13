@@ -362,7 +362,10 @@ class HostAgent:
         if record["project_uuid"] is not None and auth["project_id"] is not None:
             project_uuid_matches = auth["project_id"] == record["project_uuid"]
         intent_tenant_uuid = args.get("tenant_uuid")
-        if intent_tenant_uuid is None and command == "delete_project_files":
+        if intent_tenant_uuid is None and command in {
+            "delete_project_storage",
+            "delete_project_files",
+        }:
             intent_tenant_uuid = args.get("project_uuid")
         if (
             intent_tenant_uuid is not None

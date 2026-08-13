@@ -5,9 +5,12 @@ die() { echo "❌ $*" >&2; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
 
 TRANSACTION_DIR="$PROJECT_ROOT/.rotate_transaction_$$"
 MODIFIED_FILES=()
+STORAGE_KEYS_UPDATED=false
 
 init_transaction() {
   mkdir -p "$TRANSACTION_DIR"
@@ -36,6 +39,13 @@ rollback_transaction() {
   set +e
   local runtime_restored=true
   echo "❌ Erro detectado! Revertendo alterações..."
+
+  if [[ "$STORAGE_KEYS_UPDATED" == "true" ]]; then
+    if ! storage_patch_tenant_keys "$PROJECT_UUID" "$CURRENT_ANON" "$CURRENT_SERVICE"; then
+      runtime_restored=false
+      echo "❌ Configuracao anterior do tenant Storage nao foi restaurada." >&2
+    fi
+  fi
   
   if [[ -d "$TRANSACTION_DIR" ]]; then
     for file in "${MODIFIED_FILES[@]}"; do
@@ -127,6 +137,12 @@ PROJECT_UUID=$(get_env_value "PROJECT_UUID" "$PROJECT_DIR/.env")
 API_GATEWAY_TOKEN_PROJETO=$(get_env_value "API_GATEWAY_TOKEN_PROJETO" "$PROJECT_DIR/.env")
 CURRENT_ANON=$(get_env_value "ANON_KEY_PROJETO" "$PROJECT_DIR/.env")
 CURRENT_SERVICE=$(get_env_value "SERVICE_ROLE_KEY_PROJETO" "$PROJECT_DIR/.env")
+S3_PROTOCOL_CREDENTIAL_ID=$(get_env_value "S3_PROTOCOL_CREDENTIAL_ID" "$PROJECT_DIR/.env")
+S3_PROTOCOL_ACCESS_KEY_ID=$(get_env_value "S3_PROTOCOL_ACCESS_KEY_ID" "$PROJECT_DIR/.env")
+S3_PROTOCOL_ACCESS_KEY_SECRET=$(get_env_value "S3_PROTOCOL_ACCESS_KEY_SECRET" "$PROJECT_DIR/.env")
+S3_PROTOCOL_ENABLED=$(get_env_value "S3_PROTOCOL_ENABLED" "$PROJECT_DIR/.env")
+VECTOR_BUCKETS_ENABLED=$(get_env_value "VECTOR_BUCKETS_ENABLED" "$PROJECT_DIR/.env")
+PROJECT_UUID="$(tr '[:upper:]' '[:lower:]' <<<"$PROJECT_UUID")"
 
 [[ "$CONFIG_TOKEN" =~ ^[a-f0-9]{64}$ ]] \
   || die "CONFIG_TOKEN_PROJETO invalido"
@@ -140,6 +156,14 @@ CURRENT_SERVICE=$(get_env_value "SERVICE_ROLE_KEY_PROJETO" "$PROJECT_DIR/.env")
   || die "ANON_KEY_PROJETO atual invalida"
 [[ "$CURRENT_SERVICE" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]] \
   || die "SERVICE_ROLE_KEY_PROJETO atual invalida"
+export PROJECT_UUID S3_PROTOCOL_CREDENTIAL_ID S3_PROTOCOL_ACCESS_KEY_ID \
+  S3_PROTOCOL_ACCESS_KEY_SECRET VECTOR_BUCKETS_ENABLED
+storage_validate_bool VECTOR_BUCKETS_ENABLED "$VECTOR_BUCKETS_ENABLED" \
+  || die "VECTOR_BUCKETS_ENABLED invalido"
+storage_validate_bool S3_PROTOCOL_ENABLED "$S3_PROTOCOL_ENABLED" \
+  || die "S3_PROTOCOL_ENABLED invalido"
+vector_validate_s3_credentials || die "Credenciais SigV4 do projeto invalidas"
+storage_wait_global || die "Storage compartilhado indisponivel"
 
 generate_jwt() {
   local payload="$1" secret="$2"
@@ -217,6 +241,10 @@ template_to_file() {
 
 init_transaction
 
+storage_patch_tenant_keys "$PROJECT_UUID" "$NEW_ANON" "$NEW_SERVICE" \
+  || die "Storage nao aceitou os novos JWTs internos"
+STORAGE_KEYS_UPDATED=true
+
 backup_file "$PROJECT_DIR/nginx/nginx_${PROJECT_ID}.conf"
 backup_file "$PROJECT_DIR/Dockerfile"
 backup_file "$PROJECT_DIR/docker-compose.yml"
@@ -238,6 +266,13 @@ docker compose -p "$PROJECT_ID" \
   --env-file ../../.env \
   --env-file .env \
   up --build -d nginx
+
+storage_validate_tenant "$PROJECT_UUID" "$NEW_SERVICE" \
+  "$S3_PROTOCOL_ACCESS_KEY_ID" "$S3_PROTOCOL_ACCESS_KEY_SECRET" \
+  "$S3_PROTOCOL_ENABLED" "$VECTOR_BUCKETS_ENABLED" \
+  || die "Tenant Storage falhou apos rotacao de JWTs"
+storage_assert_project_gateway "$PROJECT_UUID" "$PROJECT_ID" "$NEW_SERVICE" \
+  || die "Nginx nao encaminhou os novos JWTs ao tenant Storage"
 
 echo ""
 echo "✅ Tokens rotacionados com sucesso para projeto $PROJECT_ID"

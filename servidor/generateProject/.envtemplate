@@ -18,31 +18,16 @@ PGRST_DB_SCHEMA_CACHE_DURATION=20
 PGRST_DB_ANON_ROLE=anon
 PGRST_DB_USE_LEGACY_GUCS=false
 PGRST_DB_PREPARED_STATEMENTS=true
-STORAGE_IMAGE=supabase/storage-api:v1.61.12
-STORAGE_DB_USER=supabase_storage_admin
-STORAGE_POSTGREST_URL=http://rest:3000
-STORAGE_BACKEND=file
-REQUEST_ALLOW_X_FORWARDED_PATH=true
-TUS_URL_PATH=/storage/v1/upload/resumable
-FILE_STORAGE_BACKEND_PATH=/var/lib/storage
-STORAGE_TENANT_ID=stub
-STORAGE_REGION=stub
-GLOBAL_S3_BUCKET=stub
-VECTOR_ENABLED=true
-VECTOR_BUCKET_PROVIDER=pgvector
-VECTOR_DATABASE_URL=postgres://${STORAGE_DB_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DATABASE}
-VECTOR_DATABASE_CREATE=false
-VECTOR_STORE_MIGRATIONS_ENABLED=true
-# Credenciais SigV4 exclusivas do projeto. Generate e duplicate criam um par
-# novo; rename preserva o par atual para manter os FDWs existentes funcionais.
+
+# Configuracao do tenant no Storage compartilhado. PROJECT_UUID e a identidade
+# canonica; nao existe TENANT_ID default nem container de Storage por projeto.
+VECTOR_BUCKETS_ENABLED=true
+VECTOR_MAX_BUCKETS=10
+VECTOR_MAX_INDEXES=20
 S3_PROTOCOL_ENABLED=true
+S3_PROTOCOL_CREDENTIAL_ID={{s3_protocol_credential_id}}
 S3_PROTOCOL_ACCESS_KEY_ID={{s3_protocol_access_key_id}}
 S3_PROTOCOL_ACCESS_KEY_SECRET={{s3_protocol_access_key_secret}}
-IMGPROXY_URL=http://imgproxy:5001
-IMGPROXY_IMAGE=darthsim/imgproxy:v4.0.11
-IMGPROXY_BIND=:5001
-IMGPROXY_LOCAL_FILESYSTEM_ROOT=/
-IMGPROXY_USE_ETAG=true
 
 
 
@@ -81,7 +66,6 @@ PGRST_DB_POOL_TIMEOUT=60
 PGRST_DB_POOL_ACQUISITION_TIMEOUT=60
 
 FILE_SIZE_LIMIT=524288000
-IMGPROXY_ENABLE_WEBP_DETECTION=true
 ENABLE_IMAGE_TRANSFORMATION=true
 
 # Optional per-project SMTP override

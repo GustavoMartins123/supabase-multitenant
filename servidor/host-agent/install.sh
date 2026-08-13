@@ -76,7 +76,8 @@ run_as_service_user() {
 migrate_runtime_ownership() {
   local runtime_dir
   say "Ajustando arquivos de lifecycle para $SERVICE_USER:$SERVICE_GROUP ..."
-  for runtime_dir in "$SERVIDOR_DIR/projects" "$SERVIDOR_DIR/backups"; do
+  for runtime_dir in "$SERVIDOR_DIR/projects" "$SERVIDOR_DIR/backups" \
+    "$SERVIDOR_DIR/volumes/storage"; do
     [[ -e "$runtime_dir" ]] || continue
     find "$runtime_dir" -xdev -uid 0 \
       -exec chown "$SERVICE_USER:$SERVICE_GROUP" {} +

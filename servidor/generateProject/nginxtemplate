@@ -44,7 +44,7 @@ http {
     include /etc/nginx/mime.types;
     map "" $auth_upstream     { default "supabase-auth-{{project_id}}:9999"; }
     map "" $rest_upstream     { default "supabase-rest-{{project_id}}:3000"; }
-    map "" $storage_upstream  { default "supabase-storage-{{project_id}}:5000"; }
+    map "" $storage_upstream  { default "supabase-storage-global:5000"; }
     map "" $functions_upstream{ default "functions:9000"; }
     map "" $realtime_upstream { default "realtime-dev.supabase-realtime:4000"; }
 
@@ -427,11 +427,12 @@ http {
             proxy_hide_header Access-Control-Allow-Methods;
             proxy_hide_header Access-Control-Allow-Headers;
 
-            proxy_set_header Host $host;
+            proxy_set_header Host $http_host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $real_scheme;
-            proxy_set_header X-Forwarded-Host $host;
+            proxy_set_header X-Forwarded-Host "{{project_uuid}}.storage.internal";
+            proxy_set_header X-Forwarded-Prefix "/{{project_id}}/storage/v1";
 
             proxy_set_header Tus-Resumable $http_tus_resumable;
             proxy_set_header Tus-Version $http_tus_version;
@@ -450,6 +451,22 @@ http {
             add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PATCH, HEAD, DELETE, PUT' always;
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, Tus-Resumable, Tus-Version, Tus-Max-Size, Tus-Extension, Upload-Length, Upload-Metadata, Upload-Offset, Upload-Concat, Upload-Defer-Length, x-upsert, X-Requested-With, x-supabase-api-version' always;
+        }
+
+        # Endpoint interno dos S3 Vectors Wrappers. O cliente externo nao pode
+        # acessar esta rota nem escolher o tenant por header.
+        location /vector/ {
+            allow ${SUPABASE_NETWORK_SUBNET};
+            deny all;
+
+            proxy_pass http://$storage_upstream;
+            proxy_http_version 1.1;
+            proxy_set_header Host $http_host;
+            proxy_set_header X-Forwarded-Host "{{project_uuid}}.storage.internal";
+            proxy_set_header X-Forwarded-Prefix "";
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto http;
         }
         
         location /functions/v1/ {

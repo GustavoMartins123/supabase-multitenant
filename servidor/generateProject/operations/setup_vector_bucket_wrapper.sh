@@ -26,7 +26,6 @@ BUCKET_NAME="${2:-}"
 PROJECT_DIR="$SERVER_ROOT/projects/$PROJECT_ID"
 GLOBAL_ENV="$SERVER_ROOT/.env"
 PROJECT_ENV="$PROJECT_DIR/.env"
-STORAGE_CONTAINER="supabase-storage-$PROJECT_ID"
 POSTGRES_DATABASE="_supabase_$PROJECT_ID"
 
 [[ -d "$PROJECT_DIR" ]] || fail "Projeto nao encontrado: $PROJECT_DIR"
@@ -43,15 +42,17 @@ source "$GLOBAL_ENV"
 source "$PROJECT_ENV"
 set +a
 
-POSTGRES_USER="${POSTGRES_USER:-supabase_admin}"
-STORAGE_REGION="${STORAGE_REGION:-us-east-1}"
+[[ -n "${POSTGRES_USER:-}" ]] || fail "POSTGRES_USER ausente"
+[[ -n "${STORAGE_S3_REGION:-}" ]] || fail "STORAGE_S3_REGION ausente"
+[[ -n "${PROJECT_UUID:-}" ]] || fail "PROJECT_UUID ausente"
+[[ -n "${SERVICE_ROLE_KEY_PROJETO:-}" ]] || fail "SERVICE_ROLE_KEY_PROJETO ausente"
+STORAGE_REGION="$STORAGE_S3_REGION"
 
 vector_validate_s3_credentials || exit 1
 vector_validate_database "$POSTGRES_DATABASE" || exit 1
 
 docker inspect supabase-db >/dev/null 2>&1 || fail "Container supabase-db nao encontrado"
-docker inspect "$STORAGE_CONTAINER" >/dev/null 2>&1 \
-  || fail "Container $STORAGE_CONTAINER nao encontrado"
+storage_wait_global || fail "Storage compartilhado indisponivel"
 
 mapfile -t VECTOR_NAMES < <(python3 - "$BUCKET_NAME" <<'PY'
 import re
@@ -77,42 +78,12 @@ SERVER_NAME="${VECTOR_NAMES[1]:-}"
 
 ACCESS_SECRET_NAME="${WRAPPER_NAME}_vault_access_key_id"
 SECRET_SECRET_NAME="${WRAPPER_NAME}_vault_secret_access_key"
-VECTOR_ENDPOINT="http://${STORAGE_CONTAINER}:5000/vector"
+VECTOR_ENDPOINT="http://supabase-nginx-${PROJECT_ID}:8080/vector"
 
-# Confirma que o bucket existe no backend real antes de alterar o catalogo do
-# Postgres. A chamada usa a service_role apenas dentro do container do Storage.
+# Confirma que o bucket existe no tenant real antes de alterar o catalogo.
 echo "▶ Validando o vector bucket '$BUCKET_NAME' no Storage API..."
-docker exec \
-  -e VECTOR_BUCKET_NAME="$BUCKET_NAME" \
-  "$STORAGE_CONTAINER" \
-  node -e '
-const key = process.env.SERVICE_KEY;
-const bucket = process.env.VECTOR_BUCKET_NAME;
-if (!key || !bucket) process.exit(2);
-fetch("http://127.0.0.1:5000/vector/GetVectorBucket", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${key}`,
-    "apikey": key,
-  },
-  body: JSON.stringify({ vectorBucketName: bucket }),
-}).then(async (response) => {
-  const text = await response.text();
-  if (!response.ok) {
-    console.error(`GetVectorBucket HTTP ${response.status}: ${text}`);
-    process.exit(3);
-  }
-  const payload = JSON.parse(text);
-  if (payload?.vectorBucket?.vectorBucketName !== bucket) {
-    console.error("GetVectorBucket retornou um bucket inesperado");
-    process.exit(4);
-  }
-}).catch((error) => {
-  console.error(error);
-  process.exit(5);
-});
-'
+storage_assert_vector_bucket "$PROJECT_UUID" "$SERVICE_ROLE_KEY_PROJETO" "$BUCKET_NAME" \
+  || fail "Vector Bucket nao pertence ao tenant do projeto"
 
 # A imagem Supabase Postgres fornece Vault e Wrappers. O Studio exige Wrappers
 # >= 0.5.6 para reconhecer a integracao S3 Vectors.

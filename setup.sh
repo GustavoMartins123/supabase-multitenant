@@ -139,6 +139,14 @@ generate_hmac_secret() {
     openssl rand -hex 32
 }
 
+generate_storage_admin_key() {
+    openssl rand -hex 32
+}
+
+generate_storage_encryption_key() {
+    openssl rand -hex 32
+}
+
 generate_postgres_password() {
   openssl rand -base64 32 | tr '/+' '_-' | tr -d '\n'
 }
@@ -420,9 +428,12 @@ main() {
     POSTGRES_PASSWORD=$(generate_postgres_password)
     META_GUEST_PASSWORD=$(generate_postgres_password)
     KEY_AUTHORIZER_DB_PASSWORD=$(generate_key_authorizer_password)
+    STORAGE_ADMIN_API_KEY=$(generate_storage_admin_key)
+    STORAGE_AUTH_ENCRYPTION_KEY=$(generate_storage_encryption_key)
 
     cp servidor/.env.example servidor/.env
     cp servidor/.analytics.env.example servidor/.analytics.env
+    cp servidor/.storage.env.example servidor/.storage.env
 
     safe_sed "s|POSTGRES_PASSWORD=pass|POSTGRES_PASSWORD=$POSTGRES_PASSWORD|g" servidor/.env
     safe_sed "s|META_GUEST_PASSWORD=pass|META_GUEST_PASSWORD=$META_GUEST_PASSWORD|g" servidor/.env
@@ -433,6 +444,8 @@ main() {
     safe_sed "s|LOGFLARE_PUBLIC_ACCESS_TOKEN=pass|LOGFLARE_PUBLIC_ACCESS_TOKEN=$LOGFLARE_PUBLIC_ACCESS_TOKEN|g" servidor/.analytics.env
     safe_sed "s|LOGFLARE_PRIVATE_ACCESS_TOKEN=pass|LOGFLARE_PRIVATE_ACCESS_TOKEN=$LOGFLARE_PRIVATE_ACCESS_TOKEN|g" servidor/.analytics.env
     safe_sed "s|LOGFLARE_DB_ENCRYPTION_KEY=pass|LOGFLARE_DB_ENCRYPTION_KEY=$LOGFLARE_DB_ENCRYPTION_KEY|g" servidor/.analytics.env
+    safe_sed "s|SERVER_ADMIN_API_KEYS=pass|SERVER_ADMIN_API_KEYS=$STORAGE_ADMIN_API_KEY|g" servidor/.storage.env
+    safe_sed "s|AUTH_ENCRYPTION_KEY=pass|AUTH_ENCRYPTION_KEY=$STORAGE_AUTH_ENCRYPTION_KEY|g" servidor/.storage.env
     safe_sed "s|JWT_SECRET=pass|JWT_SECRET=$JWT_SECRET|g" servidor/.env
     safe_sed "s|PROJECT_SECRETS_MASTER_KEY=pass|PROJECT_SECRETS_MASTER_KEY=$PROJECT_SECRETS_MASTER_KEY|g" servidor/.env
     safe_sed "s|PG_META_CRYPTO_KEY=pass|PG_META_CRYPTO_KEY=$PG_META_CRYPTO_KEY|g" servidor/.env
@@ -499,8 +512,10 @@ main() {
     assert_env_value servidor/.analytics.env LOGFLARE_PUBLIC_ACCESS_TOKEN "$LOGFLARE_PUBLIC_ACCESS_TOKEN"
     assert_env_value servidor/.analytics.env LOGFLARE_PRIVATE_ACCESS_TOKEN "$LOGFLARE_PRIVATE_ACCESS_TOKEN"
     assert_env_value servidor/.analytics.env LOGFLARE_DB_ENCRYPTION_KEY "$LOGFLARE_DB_ENCRYPTION_KEY"
+    assert_env_value servidor/.storage.env SERVER_ADMIN_API_KEYS "$STORAGE_ADMIN_API_KEY"
+    assert_env_value servidor/.storage.env AUTH_ENCRYPTION_KEY "$STORAGE_AUTH_ENCRYPTION_KEY"
     assert_env_value studio/.analytics.env LOGFLARE_PRIVATE_ACCESS_TOKEN "$LOGFLARE_PRIVATE_ACCESS_TOKEN"
-    chmod 600 servidor/.env servidor/.analytics.env studio/.env studio/.analytics.env
+    chmod 600 servidor/.env servidor/.analytics.env servidor/.storage.env studio/.env studio/.analytics.env
     print_success "Arquivo studio/.env configurado com sucesso!"
     
     echo ""
@@ -509,6 +524,7 @@ main() {
     print_status "Arquivos configurados:"
     echo "  ✓ servidor/.env"
     echo "  ✓ servidor/.analytics.env"
+    echo "  ✓ servidor/.storage.env"
     echo "  ✓ studio/.env"
     echo "  ✓ studio/.analytics.env"
     echo ""
@@ -520,6 +536,7 @@ main() {
     echo "  - NGINX_HMAC_SECRET (servidor e studio)"
     echo "  - INTERNAL_HMAC_SECRET (servidor e studio)"
     echo "  - HOST_AGENT_HMAC_SECRET (servidor e host-agent)"
+    echo "  - SERVER_ADMIN_API_KEYS/AUTH_ENCRYPTION_KEY (somente Storage global)"
     echo ""
     print_status "Lifecycle fisico agora roda no host-agent. Instale-o com:"
     echo "  sudo bash servidor/host-agent/install.sh"

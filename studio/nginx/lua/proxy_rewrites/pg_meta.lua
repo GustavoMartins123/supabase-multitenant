@@ -50,10 +50,9 @@ local function convert_fields(value)
     return value
 end
 
--- O SQL gerado pelo Studio self-hosted pressupoe um unico Storage local. Neste
--- projeto o Studio e compartilhado e cada tenant tem seu proprio Storage na
--- rede Docker. O patch e estritamente limitado ao SQL de
--- criacao do S3 Vectors Wrapper e nunca toca consultas SQL comuns.
+-- O wrapper assina o Host do endpoint. Cada projeto usa seu proprio Nginx como
+-- fronteira confiavel; ele fixa o tenant UUID e encaminha ao Storage global.
+-- O patch e limitado ao SQL de criacao do S3 Vectors Wrapper.
 local function patch_s3_vectors_wrapper_query(body)
     if type(body) ~= "table" or type(body.query) ~= "string" then
         return body
@@ -76,7 +75,7 @@ local function patch_s3_vectors_wrapper_query(body)
         return body
     end
 
-    local endpoint = "http://supabase-storage-" .. project_ref .. ":5000/vector"
+    local endpoint = "http://supabase-nginx-" .. project_ref .. ":8080/vector"
     local patched, replacements = query:gsub(
         "(endpoint_url%s+)'[^']*'",
         "%1'" .. endpoint .. "'"

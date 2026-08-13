@@ -12,6 +12,19 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
   CREATE SCHEMA IF NOT EXISTS _analytics AUTHORIZATION "$POSTGRES_USER";
 EOSQL
 
+# Registry oficial do Storage multi-tenant. Ele nao pertence a nenhum projeto e
+# recebe somente configuracao cifrada pelas migrations do proprio Storage API.
+echo "Criando database isolado do registry do Storage..."
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'EOSQL'
+SELECT 'CREATE DATABASE "_supabase_storage"'
+WHERE NOT EXISTS (
+  SELECT 1 FROM pg_database WHERE datname = '_supabase_storage'
+)\gexec
+
+REVOKE ALL ON DATABASE "_supabase_storage" FROM PUBLIC;
+GRANT ALL PRIVILEGES ON DATABASE "_supabase_storage" TO supabase_admin;
+EOSQL
+
 # O Storage API com VECTOR_BUCKET_PROVIDER=pgvector executa suas migrations em
 # cada banco de projeto. Como os projetos nascem de _supabase_template, a
 # extensao precisa existir no banco base antes do pg_dump que forma o template.

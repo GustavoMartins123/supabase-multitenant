@@ -148,16 +148,49 @@ async def _enqueue_project_action(
     job_id: str,
     runner,
 ) -> int:
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        project_id = await conn.fetchval(
-            "SELECT id FROM projects WHERE name = $1",
-            project_name,
-        )
-    if project_id is None:
-        raise HTTPException(404, f"Projeto '{project_name}' nao encontrado")
     try:
-        return await action_queue.submit(project_name, project_id, job_id, runner)
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT p.id, j.action, j.payload
+                FROM projects p
+                JOIN jobs j ON j.job_id = $2
+                WHERE p.name = $1
+                """,
+                project_name,
+                uuid.UUID(str(job_id)),
+            )
+            if row is None:
+                raise RuntimeError(
+                    f"projeto ou job ausente ao enfileirar: {project_name}"
+                )
+            additional_project_ids: tuple[uuid.UUID, ...] = ()
+            if row["action"] == "duplicate":
+                payload = row["payload"] or {}
+                if isinstance(payload, str):
+                    payload = json.loads(payload)
+                if not isinstance(payload, dict):
+                    raise RuntimeError("payload do job de duplicacao invalido")
+                original_name = validate_project_id(
+                    str(payload.get("original_name") or "")
+                )
+                original_id = await conn.fetchval(
+                    "SELECT id FROM projects WHERE name = $1",
+                    original_name,
+                )
+                if original_id is None:
+                    raise RuntimeError(
+                        "projeto de origem da duplicacao nao existe"
+                    )
+                additional_project_ids = (original_id,)
+        return await action_queue.submit(
+            project_name,
+            row["id"],
+            job_id,
+            runner,
+            additional_project_ids=additional_project_ids,
+        )
     except Exception as exc:
         await _set_job_status(
             job_id,
@@ -2665,7 +2698,7 @@ async def _delete_project_impl(
                 message=message,
                 progress=progress,
                 current_step=step,
-                total_steps=8,
+                total_steps=9,
             )
 
     async def agent_step(
@@ -2733,7 +2766,22 @@ async def _delete_project_impl(
         ]
         raise ProjectDeletionError("; ".join(str(item) for item in container_errors))
 
-    await report(30, "remove_tenants", "Removendo tenants globais...")
+    await report(25, "remove_storage_tenant", "Removendo tenant e objetos do Storage...")
+    storage_record = await agent_step(
+        "delete_project_storage",
+        job_project_uuid,
+        {"tenant_uuid": str(tenant_uuid)},
+    )
+    if storage_record["status"] != "done":
+        detail = (
+            (storage_record["stderr_tail"] or "").strip()
+            or (storage_record["message"] or "").strip()
+            or storage_record["error_code"]
+            or "falha ao remover tenant Storage"
+        )
+        raise ProjectDeletionError(detail)
+
+    await report(35, "remove_tenants", "Removendo tenants globais...")
     supavisor_token = build_global_delete_token(tenant_external_id)
     await terminate_supavisor_pools(project_name, supavisor_token)
     await delete_realtime_tenant(
@@ -2744,7 +2792,7 @@ async def _delete_project_impl(
 
     await asyncio.sleep(1)
 
-    await report(50, "clean_global_metadata", "Limpando metadata global...")
+    await report(55, "clean_global_metadata", "Limpando metadata global...")
     async with pool.acquire() as conn:
         deleted_ext = await conn.execute(
             'DELETE FROM _realtime.extensions WHERE tenant_external_id = $1',
@@ -2771,7 +2819,7 @@ async def _delete_project_impl(
             f"supavisor_tenants={deleted_supavisor_tenant}"
         )
 
-        await report(65, "drop_database", "Removendo slots e database...")
+        await report(70, "drop_database", "Removendo slots e database...")
         await drain_database_connections(conn, db_name)
 
         slot_errors = await drop_supabase_replication_slots(conn, project_name)
@@ -2780,7 +2828,7 @@ async def _delete_project_impl(
 
         await drop_database_force(conn, db_name)
 
-    await report(78, "remove_files", "Removendo arquivos do projeto...")
+    await report(82, "remove_files", "Removendo arquivos do projeto...")
     files_record = await agent_step(
         "delete_project_files",
         None,
@@ -4930,7 +4978,7 @@ async def update_project_settings(
     }
 
 
-ALLOWED_RECREATE_SERVICES = {"auth", "rest", "storage", "imgproxy", "nginx", "meta"}
+ALLOWED_RECREATE_SERVICES = {"auth", "rest", "storage", "nginx", "meta"}
 
 @app.post("/api/projects/{project_name}/recreate-services")
 async def recreate_project_services(

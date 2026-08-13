@@ -7,6 +7,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/backup_core.sh"
+
+read_project_env_value() {
+  local file="$1" key="$2" count value
+  count="$(grep -c "^${key}=" "$file" || true)"
+  [[ "$count" == "1" ]] || die "$key deve ter exatamente uma atribuicao em $file"
+  value="$(sed -n "s/^${key}=//p" "$file")"
+  [[ -n "$value" && "$value" != *$'\r'* ]] || die "$key invalido em $file"
+  printf '%s' "$value"
+}
 
 ORIGINAL_PROJECT="${1:-}"
 NEW_PROJECT="${2:-}"
@@ -19,8 +30,10 @@ PROJECT_UUID="${4:-}"
 
 ORIGINAL_PROJECT="$(echo "$ORIGINAL_PROJECT" | tr '[:upper:]' '[:lower:]')"
 NEW_PROJECT="$(echo "$NEW_PROJECT" | tr '[:upper:]' '[:lower:]')"
+PROJECT_UUID="$(echo "$PROJECT_UUID" | tr '[:upper:]' '[:lower:]')"
 [[ "$ORIGINAL_PROJECT" =~ ^[a-z_][a-z0-9_]{2,39}$ ]] || die "Projeto original invalido"
 [[ "$NEW_PROJECT" =~ ^[a-z_][a-z0-9_]{2,39}$ ]] || die "Novo projeto invalido"
+storage_validate_tenant_id "$PROJECT_UUID" || die "project_uuid invalido"
 
 RESERVED=(default select from where insert update delete table create drop join group order limit into index view trigger procedure function database schema primary foreign key constraint unique null not and or in like between exists having union inner left right outer cross on as case when then else end if while for begin commit rollback)
 for word in "${RESERVED[@]}"; do
@@ -56,7 +69,33 @@ CREATED_DB=0
 CREATED_DIR=0
 CREATED_REALTIME=0
 CREATED_SUPAVISOR=0
+CREATED_STORAGE=0
 COMPOSE_STARTED=0
+SOURCE_CONTAINERS=""
+SOURCE_STORAGE_DISCONNECTED=0
+
+resume_source_project() {
+  local failed=0
+  if [[ "$SOURCE_STORAGE_DISCONNECTED" -eq 1 ]]; then
+    storage_patch_tenant_connection "$ORIGINAL_UUID" "$ORIGINAL_PROJECT" || failed=1
+    if [[ "$failed" -eq 0 ]]; then
+      storage_validate_tenant "$ORIGINAL_UUID" "$ORIGINAL_SERVICE_ROLE_KEY" \
+        "$ORIGINAL_S3_ACCESS_KEY" "$ORIGINAL_S3_SECRET_KEY" \
+        "$ORIGINAL_S3_ENABLED" "$ORIGINAL_VECTOR_ENABLED" || failed=1
+    fi
+  fi
+  if [[ -n "$SOURCE_CONTAINERS" ]]; then
+    backup_start_project_containers "$ORIGINAL_PROJECT" "$SOURCE_CONTAINERS" \
+      || failed=1
+  fi
+  if [[ "$failed" -eq 0 && -n "$SOURCE_CONTAINERS" ]]; then
+    storage_assert_project_gateway "$ORIGINAL_UUID" "$ORIGINAL_PROJECT" \
+      "$ORIGINAL_SERVICE_ROLE_KEY" || failed=1
+  fi
+  [[ "$failed" -eq 0 ]] || return 1
+  SOURCE_STORAGE_DISCONNECTED=0
+  SOURCE_CONTAINERS=""
+}
 
 cleanup_tmp() { rm -rf "$TMP_DIR"; }
 rollback() {
@@ -69,6 +108,8 @@ rollback() {
   trap - ERR TERM INT HUP
   set +e
   echo "❌ Duplicacao falhou; limpando recursos do clone..." >&2
+
+  resume_source_project || rollback_failed=1
 
   if [[ "$COMPOSE_STARTED" -eq 1 && -d "$OUT_DIR" ]]; then
     (cd "$OUT_DIR" && docker compose -p "$NEW_PROJECT" \
@@ -91,6 +132,13 @@ rollback() {
       || "$tenant_status" == "204" || "$tenant_status" == "404" ]] \
       || rollback_failed=1
   fi
+  if [[ "$CREATED_STORAGE" -eq 1 ]]; then
+    if ! storage_delete_tenant "$PROJECT_UUID"; then
+      rollback_failed=1
+    else
+      CREATED_STORAGE=0
+    fi
+  fi
   if [[ "$CREATED_SUPAVISOR" -eq 1 || "$CREATED_REALTIME" -eq 1 ]]; then
     docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
       "DELETE FROM _realtime.extensions WHERE tenant_external_id = '$PROJECT_UUID';
@@ -99,7 +147,7 @@ rollback() {
        DELETE FROM _supavisor.tenants WHERE external_id = '$NEW_PROJECT';" \
       >/dev/null || rollback_failed=1
   fi
-  if [[ "$CREATED_DB" -eq 1 ]]; then
+  if [[ "$CREATED_DB" -eq 1 && "$CREATED_STORAGE" -eq 0 ]]; then
     docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
       "ALTER DATABASE \"$NEW_DB\" ALLOW_CONNECTIONS false;" \
       >/dev/null || rollback_failed=1
@@ -123,7 +171,9 @@ rollback() {
       | tr -d '[:space:]')" || rollback_failed=1
     [[ "$remaining" == "0" ]] || rollback_failed=1
   fi
-  if [[ "$CREATED_DIR" -eq 1 ]]; then rm -rf "$OUT_DIR" || rollback_failed=1; fi
+  if [[ "$CREATED_DIR" -eq 1 && "$CREATED_STORAGE" -eq 0 ]]; then
+    rm -rf "$OUT_DIR" || rollback_failed=1
+  fi
   cleanup_tmp || rollback_failed=1
   if [[ "$rollback_failed" -eq 0 ]]; then
     echo "HOST_AGENT_ROLLBACK_COMPLETE=1"
@@ -145,11 +195,43 @@ for container in supabase-db supabase-pooler realtime-dev.supabase-realtime; do
   docker inspect "$container" >/dev/null 2>&1 || die "Container $container ausente"
 done
 [[ -d "$ORIGINAL_DIR" ]] || die "Projeto original nao encontrado: $ORIGINAL_DIR"
+[[ -f "$ORIGINAL_DIR/.env" ]] || die "Ambiente do projeto original ausente"
 [[ ! -e "$OUT_DIR" ]] || die "Projeto $NEW_PROJECT ja existe"
 [[ "$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc "SELECT count(*) FROM pg_database WHERE datname = '$ORIGINAL_DB';" | tr -d '[:space:]')" == "1" ]] \
   || die "Banco original $ORIGINAL_DB nao encontrado"
 [[ "$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc "SELECT count(*) FROM pg_database WHERE datname = '$NEW_DB';" | tr -d '[:space:]')" == "0" ]] \
   || die "Banco $NEW_DB ja existe"
+
+ORIGINAL_UUID="$(read_project_env_value "$ORIGINAL_DIR/.env" PROJECT_UUID \
+  | tr '[:upper:]' '[:lower:]')"
+storage_validate_tenant_id "$ORIGINAL_UUID" || die "PROJECT_UUID do projeto original invalido"
+[[ "$ORIGINAL_UUID" != "$PROJECT_UUID" ]] \
+  || die "Clone deve possuir tenant UUID diferente da origem"
+ORIGINAL_SERVICE_ROLE_KEY="$(read_project_env_value "$ORIGINAL_DIR/.env" SERVICE_ROLE_KEY_PROJETO)"
+ORIGINAL_S3_CREDENTIAL_ID="$(read_project_env_value "$ORIGINAL_DIR/.env" S3_PROTOCOL_CREDENTIAL_ID)"
+ORIGINAL_S3_ACCESS_KEY="$(read_project_env_value "$ORIGINAL_DIR/.env" S3_PROTOCOL_ACCESS_KEY_ID)"
+ORIGINAL_S3_SECRET_KEY="$(read_project_env_value "$ORIGINAL_DIR/.env" S3_PROTOCOL_ACCESS_KEY_SECRET)"
+ORIGINAL_S3_ENABLED="$(read_project_env_value "$ORIGINAL_DIR/.env" S3_PROTOCOL_ENABLED)"
+ORIGINAL_VECTOR_ENABLED="$(read_project_env_value "$ORIGINAL_DIR/.env" VECTOR_BUCKETS_ENABLED)"
+storage_validate_bool S3_PROTOCOL_ENABLED "$ORIGINAL_S3_ENABLED" \
+  || die "S3_PROTOCOL_ENABLED da origem invalido"
+storage_validate_bool VECTOR_BUCKETS_ENABLED "$ORIGINAL_VECTOR_ENABLED" \
+  || die "VECTOR_BUCKETS_ENABLED da origem invalido"
+(
+  S3_PROTOCOL_CREDENTIAL_ID="$ORIGINAL_S3_CREDENTIAL_ID"
+  S3_PROTOCOL_ACCESS_KEY_ID="$ORIGINAL_S3_ACCESS_KEY"
+  S3_PROTOCOL_ACCESS_KEY_SECRET="$ORIGINAL_S3_SECRET_KEY"
+  vector_validate_s3_credentials
+) || die "Credenciais SigV4 da origem invalidas"
+storage_wait_global || die "Storage compartilhado indisponivel"
+storage_validate_tenant "$ORIGINAL_UUID" "$ORIGINAL_SERVICE_ROLE_KEY" \
+  "$ORIGINAL_S3_ACCESS_KEY" "$ORIGINAL_S3_SECRET_KEY" \
+  "$ORIGINAL_S3_ENABLED" "$ORIGINAL_VECTOR_ENABLED" \
+  || die "Tenant Storage da origem nao esta saudavel"
+storage_assert_project_gateway "$ORIGINAL_UUID" "$ORIGINAL_PROJECT" \
+  "$ORIGINAL_SERVICE_ROLE_KEY" || die "Nginx da origem nao resolveu seu tenant"
+storage_assert_tenant_absent "$PROJECT_UUID" || die "Tenant UUID do clone ja existe"
+CREATED_STORAGE=1
 
 normalize_public_base_url() {
   local url="${1%/}" proto="${2:-}"
@@ -181,8 +263,12 @@ SERVICE_TOKEN=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$PROJECT_UUID
 GLOBAL_ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now_epoch,\"exp\":$exp}" "$JWT_SECRET")
 CONFIG_TOKEN_PROJETO=$(openssl rand -hex 32 | tr -d '\n\r')
 API_GATEWAY_TOKEN_PROJETO=$(openssl rand -hex 32 | tr -d '\n\r')
-unset S3_PROTOCOL_ACCESS_KEY_ID S3_PROTOCOL_ACCESS_KEY_SECRET
-vector_ensure_s3_credentials || die "Falha ao gerar credenciais SigV4 exclusivas do clone"
+FILE_SIZE_LIMIT="$(grep -m1 '^FILE_SIZE_LIMIT=' "$SCRIPT_DIR/.envtemplate" | cut -d= -f2-)"
+ENABLE_IMAGE_TRANSFORMATION="$(grep -m1 '^ENABLE_IMAGE_TRANSFORMATION=' "$SCRIPT_DIR/.envtemplate" | cut -d= -f2-)"
+S3_PROTOCOL_ENABLED="$(grep -m1 '^S3_PROTOCOL_ENABLED=' "$SCRIPT_DIR/.envtemplate" | cut -d= -f2-)"
+VECTOR_BUCKETS_ENABLED="$(grep -m1 '^VECTOR_BUCKETS_ENABLED=' "$SCRIPT_DIR/.envtemplate" | cut -d= -f2-)"
+VECTOR_MAX_BUCKETS="$(grep -m1 '^VECTOR_MAX_BUCKETS=' "$SCRIPT_DIR/.envtemplate" | cut -d= -f2-)"
+VECTOR_MAX_INDEXES="$(grep -m1 '^VECTOR_MAX_INDEXES=' "$SCRIPT_DIR/.envtemplate" | cut -d= -f2-)"
 
 template_to_file() {
   local template="$1" output="$2"
@@ -199,6 +285,7 @@ template_to_file() {
     -e "s|{{project_public_url}}|$(escape_sed_replacement "$PROJECT_PUBLIC_URL")|g" \
     -e "s|{{project_auth_external_url}}|$(escape_sed_replacement "$PROJECT_AUTH_EXTERNAL_URL")|g" \
     -e "s|{{project_root}}|$(escape_sed_replacement "$HOST_PROJECT_ROOT")|g" \
+    -e "s|{{s3_protocol_credential_id}}|$(escape_sed_replacement "$S3_PROTOCOL_CREDENTIAL_ID")|g" \
     -e "s|{{s3_protocol_access_key_id}}|$(escape_sed_replacement "$S3_PROTOCOL_ACCESS_KEY_ID")|g" \
     -e "s|{{s3_protocol_access_key_secret}}|$(escape_sed_replacement "$S3_PROTOCOL_ACCESS_KEY_SECRET")|g" \
     "$template" > "$output"
@@ -206,14 +293,6 @@ template_to_file() {
 
 mkdir -p "$OUT_DIR/nginx" "$OUT_DIR/pooler"
 CREATED_DIR=1
-template_to_file "$SCRIPT_DIR/nginxtemplate" "$OUT_DIR/nginx/nginx_${NEW_PROJECT}.conf"
-template_to_file "$SCRIPT_DIR/.envtemplate" "$OUT_DIR/.env"
-template_to_file "$SCRIPT_DIR/dockercomposetemplate" "$OUT_DIR/docker-compose.yml"
-template_to_file "$SCRIPT_DIR/poolertemplate" "$OUT_DIR/pooler/pooler.exs"
-template_to_file "$SCRIPT_DIR/Dockerfile" "$OUT_DIR/Dockerfile"
-template_to_file "$SCRIPT_DIR/.dockerignore" "$OUT_DIR/.dockerignore"
-chmod 600 "$OUT_DIR/.env"
-chmod 644 "$OUT_DIR/nginx/nginx_${NEW_PROJECT}.conf" "$OUT_DIR/.dockerignore"
 
 realtime_tables=$(docker exec supabase-db psql -U supabase_admin -d "$ORIGINAL_DB" -tAc \
   "SELECT string_agg(format('%I.%I', schemaname, tablename), ',') FROM pg_publication_tables WHERE pubname = 'supabase_realtime';")
@@ -226,6 +305,24 @@ docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c
   "REVOKE CONNECT, TEMPORARY ON DATABASE $NEW_DB FROM PUBLIC; GRANT CONNECT, TEMPORARY ON DATABASE $NEW_DB TO pgbouncer; GRANT CONNECT, TEMPORARY ON DATABASE $NEW_DB TO authenticator; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $NEW_DB TO supabase_storage_admin; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $NEW_DB TO supabase_auth_admin;"
 
 if [[ "$COPY_MODE" == "with-data" ]]; then
+  for source_service in nginx rest auth meta; do
+    source_name="supabase-$source_service-$ORIGINAL_PROJECT"
+    if [[ "$(docker inspect -f '{{.State.Running}}' "$source_name" 2>/dev/null || true)" == "true" ]]; then
+      SOURCE_CONTAINERS+="${SOURCE_CONTAINERS:+$'\n'}$source_name"
+    fi
+  done
+  [[ -n "$SOURCE_CONTAINERS" ]] || die "Nenhum servico ativo da origem foi encontrado"
+  backup_stop_project_containers "$ORIGINAL_PROJECT" >/dev/null
+  source_pool_code="$(backup_http_code supabase-pooler GET \
+    "/api/tenants/$ORIGINAL_PROJECT/terminate" "$GLOBAL_ANON_TOKEN")"
+  backup_accepted_code "$source_pool_code" 200 204 404 \
+    || die "Supavisor nao encerrou pools da origem (HTTP $source_pool_code)"
+  storage_disconnect_tenant_pool "$ORIGINAL_UUID" \
+    || die "Storage nao encerrou pool da origem"
+  SOURCE_STORAGE_DISCONNECTED=1
+  docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
+    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$ORIGINAL_DB' AND usename = 'supabase_storage_admin' AND pid <> pg_backend_pid();" \
+    >/dev/null
   docker exec supabase-db pg_dump -U supabase_admin -d "$ORIGINAL_DB" \
     --exclude-schema=realtime > "$DUMP_FILE"
 else
@@ -241,6 +338,12 @@ docker exec supabase-db pg_dump -U supabase_admin -d "$ORIGINAL_DB" \
   --schema=realtime --schema-only > "$RT_STRUCTURE_FILE"
 docker exec supabase-db pg_dump -U supabase_admin -d "$ORIGINAL_DB" --data-only \
   -t 'realtime.schema_migrations' > "$RT_MIGRATIONS_FILE"
+
+if [[ "$COPY_MODE" == "with-data" ]]; then
+  storage_clone_tenant_namespace "$ORIGINAL_UUID" "$PROJECT_UUID" \
+    || die "Falha ao copiar objetos para o namespace do clone"
+  resume_source_project || die "Clone capturado, mas a origem nao foi religada"
+fi
 
 docker exec -i supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$NEW_DB" < "$DUMP_FILE"
 [[ -s "$RT_STRUCTURE_FILE" ]] || die "Dump da estrutura Realtime ficou vazio"
@@ -266,6 +369,10 @@ docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c
 
 vector_validate_database "$NEW_DB" || die "Clone sem pgvector valido"
 vector_strip_copied_wrappers "$NEW_DB" || die "Falha ao remover wrappers/segredos copiados"
+if [[ "$COPY_MODE" == "with-data" ]]; then
+  vector_rekey_physical_tables "$NEW_DB" "$ORIGINAL_UUID" "$PROJECT_UUID" \
+    || die "Falha ao isolar tabelas fisicas de Storage Vectors do clone"
+fi
 
 docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$NEW_DB" -c \
   "TRUNCATE realtime.subscription RESTART IDENTITY CASCADE;"
@@ -300,12 +407,9 @@ if [[ -n "$realtime_tables" ]]; then
   done
 fi
 
-if [[ "$COPY_MODE" == "with-data" && -d "$ORIGINAL_DIR/storage" ]]; then
-  mkdir -p "$OUT_DIR/storage"
-  (cd "$ORIGINAL_DIR/storage" && tar --xattrs --xattrs-include='*' --acls -cpf - .) \
-    | (cd "$OUT_DIR/storage" && tar --xattrs --xattrs-include='*' --acls -xpf -)
-else
-  mkdir -p "$OUT_DIR/storage/stub/stub"
+if [[ "$COPY_MODE" == "schema-only" ]]; then
+  storage_create_empty_tenant_namespace "$PROJECT_UUID" \
+    || die "Falha ao criar namespace vazio do clone"
 fi
 
 realtime_payload=$(jq -cn \
@@ -333,22 +437,41 @@ response=$(docker exec supabase-pooler curl -sS -w '\n%{http_code}' \
 code=$(echo "$response" | tail -n1)
 [[ "$code" == "200" || "$code" == "201" || "$code" == "204" ]] || die "Falha no Supavisor (HTTP $code)"
 
+storage_provision_tenant "$PROJECT_UUID" "$NEW_PROJECT" "$JWT_SECRET_PROJETO" \
+  "$ANON_TOKEN" "$SERVICE_TOKEN" "$FILE_SIZE_LIMIT" \
+  "$ENABLE_IMAGE_TRANSFORMATION" "$S3_PROTOCOL_ENABLED" "$VECTOR_BUCKETS_ENABLED" \
+  "$VECTOR_MAX_BUCKETS" "$VECTOR_MAX_INDEXES" \
+  || die "Falha ao registrar tenant Storage do clone"
+
+IFS=$'\t' read -r S3_PROTOCOL_CREDENTIAL_ID S3_PROTOCOL_ACCESS_KEY_ID \
+  S3_PROTOCOL_ACCESS_KEY_SECRET \
+  <<<"$(storage_create_s3_credentials "$PROJECT_UUID")"
+vector_validate_s3_credentials || die "Credenciais SigV4 do clone invalidas"
+SERVICE_ROLE_KEY_PROJETO="$SERVICE_TOKEN"
+export PROJECT_UUID SERVICE_ROLE_KEY_PROJETO S3_PROTOCOL_CREDENTIAL_ID \
+  S3_PROTOCOL_ACCESS_KEY_ID S3_PROTOCOL_ACCESS_KEY_SECRET
+
+template_to_file "$SCRIPT_DIR/nginxtemplate" "$OUT_DIR/nginx/nginx_${NEW_PROJECT}.conf"
+template_to_file "$SCRIPT_DIR/.envtemplate" "$OUT_DIR/.env"
+template_to_file "$SCRIPT_DIR/dockercomposetemplate" "$OUT_DIR/docker-compose.yml"
+template_to_file "$SCRIPT_DIR/poolertemplate" "$OUT_DIR/pooler/pooler.exs"
+template_to_file "$SCRIPT_DIR/Dockerfile" "$OUT_DIR/Dockerfile"
+template_to_file "$SCRIPT_DIR/.dockerignore" "$OUT_DIR/.dockerignore"
+chmod 600 "$OUT_DIR/.env"
+chmod 644 "$OUT_DIR/nginx/nginx_${NEW_PROJECT}.conf" "$OUT_DIR/.dockerignore"
+
 COMPOSE_STARTED=1
 (
   cd "$OUT_DIR"
   docker compose -p "$NEW_PROJECT" --env-file ../../.env --env-file .env up --build -d
 )
 
-storage_container="supabase-storage-$NEW_PROJECT"
-for _ in $(seq 1 60); do
-  status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$storage_container" 2>/dev/null || true)
-  [[ "$status" == "healthy" ]] && break
-  [[ "$status" == "unhealthy" || "$status" == "exited" || "$status" == "dead" ]] \
-    && die "Storage do clone terminou com status $status"
-  sleep 2
-done
-[[ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$storage_container")" == "healthy" ]] \
-  || die "Storage do clone nao ficou healthy"
+vector_validate_storage_api "$PROJECT_UUID" "$SERVICE_TOKEN" \
+  "$S3_PROTOCOL_ACCESS_KEY_ID" "$S3_PROTOCOL_ACCESS_KEY_SECRET" \
+  "$S3_PROTOCOL_ENABLED" "$VECTOR_BUCKETS_ENABLED" \
+  || die "Tenant Storage/S3/Vectors do clone nao ficou saudavel"
+storage_assert_project_gateway "$PROJECT_UUID" "$NEW_PROJECT" "$SERVICE_TOKEN" \
+  || die "Nginx do clone nao resolveu o tenant Storage correto"
 
 vector_sync_project_wrappers "$NEW_PROJECT" || die "Falha ao recriar wrappers vetoriais do clone"
 

@@ -33,7 +33,7 @@ transforms:
 
       project_match, project_err = parse_regex(
         string!(.appname),
-        r'^supabase-(?:auth|rest|storage|nginx|imgproxy)-(?P<ref>[a-z_][a-z0-9_]{2,39})$'
+        r'^supabase-(?:auth|rest|nginx)-(?P<ref>[a-z_][a-z0-9_]{2,39})$'
       )
       if project_err == null && project_match.ref != null {
         .tenant_project = project_match.ref
@@ -54,7 +54,7 @@ transforms:
     route:
       auth: 'starts_with(string!(.appname), "supabase-auth-")'
       rest: 'starts_with(string!(.appname), "supabase-rest-")'
-      storage: 'starts_with(string!(.appname), "supabase-storage-")'
+      storage: '.appname == "supabase-storage-global"'
       realtime: '.appname == "realtime-dev.supabase-realtime"'
       functions: '.appname == "supabase-edge-functions"'
       db: '.appname == "supabase-db"'
@@ -67,6 +67,7 @@ transforms:
           "projects-api",
           "supabase-studio",
           "supabase-pooler",
+          "supabase-imgproxy-global",
           "traefik-deny-service"
         ], string!(.appname))
 
@@ -106,9 +107,6 @@ transforms:
     type: remap
     inputs: [router.storage]
     source: |-
-      .metadata.project = .project
-      .metadata.tenant_project = .tenant_project
-      .metadata.tenantId = .tenant_project
       parsed, err = parse_json(.event_message)
       if err == null {
         if parsed.msg != null {
@@ -116,7 +114,21 @@ transforms:
         }
         .metadata.level = parsed.level
         .metadata.timestamp = parsed.time
+        if parsed.tenantId != null {
+          tenant = string!(parsed.tenantId)
+          if match(tenant, r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') {
+            .tenant_project = tenant
+            .project = tenant
+            .metadata.tenantId = tenant
+          }
+        }
+        .metadata.request_id = parsed.requestId
+        .metadata.operation = parsed.type
+        .metadata.method = parsed.req.method
+        .metadata.path = parsed.req.url
       }
+      .metadata.project = .project
+      .metadata.tenant_project = .tenant_project
 
   realtime_logs:
     type: remap

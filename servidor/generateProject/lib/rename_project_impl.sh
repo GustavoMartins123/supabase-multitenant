@@ -46,6 +46,7 @@ MOVED_DIR=0
 META_UPDATED=0
 NEW_COMPOSE_STARTED=0
 VECTOR_WRAPPERS_SYNCED=0
+STORAGE_POOL_DISCONNECTED=0
 SLOT_PLUGIN=""
 
 cleanup() { rm -rf "$BACKUP_DIR"; }
@@ -157,6 +158,12 @@ rollback_on_error() {
       "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$NEW_DB' AND pid <> pg_backend_pid(); ALTER DATABASE \"$NEW_DB\" RENAME TO \"$OLD_DB\";" \
       >/dev/null 2>&1 || rollback_failed=1
   fi
+  if [[ "$STORAGE_POOL_DISCONNECTED" -eq 1 ]]; then
+    storage_patch_tenant_connection "$PROJECT_UUID" "$OLD_NAME" \
+      >/dev/null 2>&1 || rollback_failed=1
+    storage_assert_tenant_health "$PROJECT_UUID" \
+      >/dev/null 2>&1 || rollback_failed=1
+  fi
   if [[ "$RENAMED_SLOT" -eq 1 ]]; then
     old_slot_exists=$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc \
       "SELECT count(*) FROM pg_replication_slots WHERE slot_name = '$OLD_SLOT';" | tr -d '[:space:]')
@@ -178,11 +185,6 @@ rollback_on_error() {
   if [[ "$OLD_COMPOSE_STOPPED" -eq 1 && -d "$OLD_DIR" ]]; then
     compose_old up -d >/dev/null 2>&1 || rollback_failed=1
     if [[ "$VECTOR_WRAPPERS_SYNCED" -eq 1 ]]; then
-      for _ in $(seq 1 60); do
-        old_status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "supabase-storage-$OLD_NAME" 2>/dev/null || true)
-        [[ "$old_status" == "healthy" ]] && break
-        sleep 2
-      done
       vector_sync_project_wrappers "$OLD_NAME" >/dev/null 2>&1 || rollback_failed=1
     fi
   fi
@@ -206,7 +208,7 @@ RESERVED=(default select from where insert update delete table create drop join 
 for word in "${RESERVED[@]}"; do [[ "$NEW_NAME" != "$word" ]] || die "'$NEW_NAME' e palavra reservada"; done
 RESERVED_ROUTES=(admin phpmyadmin xmlrpc actuator)
 for word in "${RESERVED_ROUTES[@]}"; do [[ "$NEW_NAME" != "$word" ]] || die "'$NEW_NAME' e rota reservada"; done
-for command in docker jq openssl sed; do command -v "$command" >/dev/null || die "Comando obrigatorio ausente: $command"; done
+for command in docker jq openssl python3 sed; do command -v "$command" >/dev/null || die "Comando obrigatorio ausente: $command"; done
 [[ -f "$PROJECT_ROOT/.env" ]] || die "Arquivo $PROJECT_ROOT/.env ausente"
 [[ -d "$OLD_DIR" ]] || die "Diretorio $OLD_DIR nao encontrado"
 [[ ! -e "$NEW_DIR" ]] || die "Destino $NEW_DIR ja existe"
@@ -235,6 +237,11 @@ CONFIG_TOKEN_PROJETO="$(read_canonical_env_value "$OLD_DIR/.env" CONFIG_TOKEN_PR
 API_GATEWAY_TOKEN_PROJETO="$(read_canonical_env_value "$OLD_DIR/.env" API_GATEWAY_TOKEN_PROJETO)"
 S3_PROTOCOL_ACCESS_KEY_ID="$(read_canonical_env_value "$OLD_DIR/.env" S3_PROTOCOL_ACCESS_KEY_ID)"
 S3_PROTOCOL_ACCESS_KEY_SECRET="$(read_canonical_env_value "$OLD_DIR/.env" S3_PROTOCOL_ACCESS_KEY_SECRET)"
+S3_PROTOCOL_CREDENTIAL_ID="$(read_canonical_env_value "$OLD_DIR/.env" S3_PROTOCOL_CREDENTIAL_ID)"
+S3_PROTOCOL_ENABLED="$(read_canonical_env_value "$OLD_DIR/.env" S3_PROTOCOL_ENABLED)"
+VECTOR_BUCKETS_ENABLED="$(read_canonical_env_value "$OLD_DIR/.env" VECTOR_BUCKETS_ENABLED)"
+
+PROJECT_UUID="$(tr '[:upper:]' '[:lower:]' <<<"$PROJECT_UUID")"
 
 [[ "$PROJECT_UUID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] \
   || die "PROJECT_UUID invalido"
@@ -248,7 +255,12 @@ S3_PROTOCOL_ACCESS_KEY_SECRET="$(read_canonical_env_value "$OLD_DIR/.env" S3_PRO
   || die "CONFIG_TOKEN_PROJETO invalido"
 [[ "$API_GATEWAY_TOKEN_PROJETO" =~ ^[0-9a-f]{64}$ ]] \
   || die "API_GATEWAY_TOKEN_PROJETO invalido"
-export S3_PROTOCOL_ACCESS_KEY_ID S3_PROTOCOL_ACCESS_KEY_SECRET
+export PROJECT_UUID SERVICE_ROLE_KEY_PROJETO S3_PROTOCOL_CREDENTIAL_ID \
+  S3_PROTOCOL_ACCESS_KEY_ID S3_PROTOCOL_ACCESS_KEY_SECRET VECTOR_BUCKETS_ENABLED
+storage_validate_bool S3_PROTOCOL_ENABLED "$S3_PROTOCOL_ENABLED" \
+  || die "S3_PROTOCOL_ENABLED invalido"
+storage_validate_bool VECTOR_BUCKETS_ENABLED "$VECTOR_BUCKETS_ENABLED" \
+  || die "VECTOR_BUCKETS_ENABLED invalido"
 vector_validate_s3_credentials || die "Credenciais SigV4 do projeto invalidas"
 
 for container in supabase-db supabase-pooler realtime-dev.supabase-realtime; do
@@ -259,6 +271,11 @@ META_DB="$POSTGRES_DB"
 [[ "$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc "SELECT count(*) FROM pg_database WHERE datname = '$NEW_DB';" | tr -d '[:space:]')" == "0" ]] || die "Banco $NEW_DB ja existe"
 [[ "$(docker exec supabase-db psql -U supabase_admin -d "$META_DB" -tAc "SELECT count(*) FROM projects WHERE name = '$NEW_NAME';" | tr -d '[:space:]')" == "0" ]] || die "Projeto $NEW_NAME ja existe na metadata"
 vector_validate_database "$OLD_DB" || die "Banco atual sem pgvector valido"
+storage_wait_global || die "Storage compartilhado indisponivel"
+storage_validate_tenant "$PROJECT_UUID" "$SERVICE_ROLE_KEY_PROJETO" \
+  "$S3_PROTOCOL_ACCESS_KEY_ID" "$S3_PROTOCOL_ACCESS_KEY_SECRET" \
+  "$S3_PROTOCOL_ENABLED" "$VECTOR_BUCKETS_ENABLED" \
+  || die "Tenant Storage atual nao esta saudavel"
 
 cp -a "$OLD_DIR/.env" "$BACKUP_DIR/.env"
 cp -a "$OLD_DIR/docker-compose.yml" "$BACKUP_DIR/docker-compose.yml"
@@ -286,12 +303,19 @@ code=$(http_code realtime-dev.supabase-realtime POST "/api/tenants/$PROJECT_UUID
 accepted_code "$code" 200 202 204 404 || die "Realtime nao aceitou shutdown (HTTP $code)"
 code=$(http_code supabase-pooler GET "/api/tenants/$OLD_NAME/terminate" "$GLOBAL_ANON_TOKEN")
 accepted_code "$code" 200 204 404 || die "Supavisor nao encerrou pools antigos (HTTP $code)"
+storage_disconnect_tenant_pool "$PROJECT_UUID" \
+  || die "Storage nao encerrou o pool do tenant antes do rename"
+STORAGE_POOL_DISCONNECTED=1
 
 say "Renomeando database $OLD_DB -> $NEW_DB..."
 docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
   "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$OLD_DB' AND pid <> pg_backend_pid(); ALTER DATABASE \"$OLD_DB\" RENAME TO \"$NEW_DB\";" >/dev/null
 RENAMED_DB=1
 vector_validate_database "$NEW_DB" || die "Banco renomeado perdeu contrato pgvector"
+storage_patch_tenant_connection "$PROJECT_UUID" "$NEW_NAME" \
+  || die "Storage nao atualizou a conexao do tenant renomeado"
+storage_run_and_assert_migrations "$PROJECT_UUID" \
+  || die "Migrations Storage falharam apos rename"
 
 if [[ "$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc "SELECT count(*) FROM pg_replication_slots WHERE slot_name = '$OLD_SLOT';" | tr -d '[:space:]')" == "1" ]]; then
   SLOT_PLUGIN=$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc "SELECT plugin FROM pg_replication_slots WHERE slot_name = '$OLD_SLOT';" | tr -d '[:space:]')
@@ -339,13 +363,41 @@ template_to_file() {
     -e "s|{{project_public_url}}|$(escape_sed_replacement "$PROJECT_PUBLIC_URL")|g" \
     -e "s|{{project_auth_external_url}}|$(escape_sed_replacement "$PROJECT_AUTH_EXTERNAL_URL")|g" \
     -e "s|{{project_root}}|$(escape_sed_replacement "$HOST_PROJECT_ROOT")|g" \
+    -e "s|{{s3_protocol_credential_id}}|$(escape_sed_replacement "$S3_PROTOCOL_CREDENTIAL_ID")|g" \
     -e "s|{{s3_protocol_access_key_id}}|$(escape_sed_replacement "$S3_PROTOCOL_ACCESS_KEY_ID")|g" \
     -e "s|{{s3_protocol_access_key_secret}}|$(escape_sed_replacement "$S3_PROTOCOL_ACCESS_KEY_SECRET")|g" \
     "$template" > "$output"
 }
 rm -f "$NEW_DIR/nginx/nginx_${OLD_NAME}.conf"
 template_to_file "$SCRIPT_DIR/nginxtemplate" "$NEW_DIR/nginx/nginx_${NEW_NAME}.conf"
-template_to_file "$SCRIPT_DIR/.envtemplate" "$NEW_DIR/.env"
+jq -cn \
+  --arg anon_key "$ANON_KEY_PROJETO" \
+  --arg service_role_key "$SERVICE_ROLE_KEY_PROJETO" \
+  --arg project_id "$NEW_NAME" \
+  --arg project_uuid "$PROJECT_UUID" \
+  --arg config_token "$CONFIG_TOKEN_PROJETO" \
+  --arg jwt_secret "$JWT_SECRET_PROJETO" \
+  --arg api_gateway_token "$API_GATEWAY_TOKEN_PROJETO" \
+  --arg server_url "$SERVER_URL" \
+  --arg public_base_url "$PUBLIC_BASE_URL" \
+  --arg project_public_url "$PROJECT_PUBLIC_URL" \
+  --arg project_auth_external_url "$PROJECT_AUTH_EXTERNAL_URL" \
+  --arg project_root "$HOST_PROJECT_ROOT" \
+  --arg s3_protocol_credential_id "$S3_PROTOCOL_CREDENTIAL_ID" \
+  --arg s3_protocol_access_key_id "$S3_PROTOCOL_ACCESS_KEY_ID" \
+  --arg s3_protocol_access_key_secret "$S3_PROTOCOL_ACCESS_KEY_SECRET" \
+  '{anon_key:$anon_key, service_role_key:$service_role_key,
+    project_id:$project_id, project_uuid:$project_uuid,
+    config_token:$config_token, jwt_secret:$jwt_secret,
+    api_gateway_token:$api_gateway_token, server_url:$server_url,
+    public_base_url:$public_base_url, project_public_url:$project_public_url,
+    project_auth_external_url:$project_auth_external_url,
+    project_root:$project_root,
+    s3_protocol_credential_id:$s3_protocol_credential_id,
+    s3_protocol_access_key_id:$s3_protocol_access_key_id,
+    s3_protocol_access_key_secret:$s3_protocol_access_key_secret}' \
+  | python3 "$SCRIPT_DIR/render_migrated_project_env.py" \
+    "$SCRIPT_DIR/.envtemplate" "$NEW_DIR/.env" "$NEW_DIR/.env"
 template_to_file "$SCRIPT_DIR/dockercomposetemplate" "$NEW_DIR/docker-compose.yml"
 template_to_file "$SCRIPT_DIR/poolertemplate" "$NEW_DIR/pooler/pooler.exs"
 template_to_file "$SCRIPT_DIR/Dockerfile" "$NEW_DIR/Dockerfile"
@@ -353,6 +405,7 @@ template_to_file "$SCRIPT_DIR/.dockerignore" "$NEW_DIR/.dockerignore"
 chmod 600 "$NEW_DIR/.env"
 chmod 644 "$NEW_DIR/nginx/nginx_${NEW_NAME}.conf" "$NEW_DIR/.dockerignore"
 grep -qx "PROJECT_ID=$NEW_NAME" "$NEW_DIR/.env" || die "PROJECT_ID nao foi atualizado"
+grep -Eq '^S3_PROTOCOL_CREDENTIAL_ID=[0-9a-f-]{36}$' "$NEW_DIR/.env" || die "Credential ID SigV4 nao foi preservado"
 grep -Eq '^S3_PROTOCOL_ACCESS_KEY_ID=[0-9a-fA-F]{32}$' "$NEW_DIR/.env" || die "Access key SigV4 nao foi preservada"
 grep -Eq '^S3_PROTOCOL_ACCESS_KEY_SECRET=[0-9a-fA-F]{64}$' "$NEW_DIR/.env" || die "Secret SigV4 nao foi preservado"
 
@@ -365,14 +418,12 @@ docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$META_DB" 
 
 NEW_COMPOSE_STARTED=1
 compose_new up --build -d
-storage_container="supabase-storage-$NEW_NAME"
-for _ in $(seq 1 60); do
-  status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$storage_container" 2>/dev/null || true)
-  [[ "$status" == "healthy" ]] && break
-  [[ "$status" == "unhealthy" || "$status" == "exited" || "$status" == "dead" ]] && die "Storage renomeado terminou com status $status"
-  sleep 2
-done
-[[ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$storage_container")" == "healthy" ]] || die "Storage renomeado nao ficou healthy"
+storage_validate_tenant "$PROJECT_UUID" "$SERVICE_ROLE_KEY_PROJETO" \
+  "$S3_PROTOCOL_ACCESS_KEY_ID" "$S3_PROTOCOL_ACCESS_KEY_SECRET" \
+  "$S3_PROTOCOL_ENABLED" "$VECTOR_BUCKETS_ENABLED" \
+  || die "Tenant Storage renomeado nao ficou saudavel"
+storage_assert_project_gateway "$PROJECT_UUID" "$NEW_NAME" "$SERVICE_ROLE_KEY_PROJETO" \
+  || die "Nginx renomeado nao resolveu o tenant Storage correto"
 
 VECTOR_WRAPPERS_SYNCED=1
 vector_sync_project_wrappers "$NEW_NAME" || die "Falha ao atualizar endpoints dos wrappers vetoriais"

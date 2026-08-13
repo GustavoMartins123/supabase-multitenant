@@ -362,12 +362,29 @@ def serialize_job(row: asyncpg.Record, *, include_output: bool = False) -> dict[
 
 
 class _QueuedAction:
-    __slots__ = ("job_id", "project_id", "project_name", "submitted_at", "runner")
+    __slots__ = (
+        "job_id",
+        "project_id",
+        "project_name",
+        "lock_project_ids",
+        "submitted_at",
+        "runner",
+    )
 
-    def __init__(self, job_id: str, project_id: uuid.UUID, project_name: str, runner: JobRunner) -> None:
+    def __init__(
+        self,
+        job_id: str,
+        project_id: uuid.UUID,
+        project_name: str,
+        runner: JobRunner,
+        additional_project_ids: tuple[uuid.UUID, ...],
+    ) -> None:
         self.job_id = job_id
         self.project_id = project_id
         self.project_name = project_name
+        self.lock_project_ids = tuple(
+            sorted({project_id, *additional_project_ids}, key=str)
+        )
         self.submitted_at = time.time()
         self.runner = runner
 
@@ -427,12 +444,22 @@ class ProjectActionQueue:
     async def _run_with_project_lock(self, action: _QueuedAction) -> None:
         pool = await _get_pool()
         async with pool.acquire() as conn:
-            lock_key = str(action.project_id)
-            await conn.execute("SELECT pg_advisory_lock(hashtextextended($1, 0))", lock_key)
+            acquired: list[str] = []
             try:
+                for project_id in action.lock_project_ids:
+                    lock_key = str(project_id)
+                    await conn.execute(
+                        "SELECT pg_advisory_lock(hashtextextended($1, 0))",
+                        lock_key,
+                    )
+                    acquired.append(lock_key)
                 await action.runner()
             finally:
-                await conn.execute("SELECT pg_advisory_unlock(hashtextextended($1, 0))", lock_key)
+                for lock_key in reversed(acquired):
+                    await conn.execute(
+                        "SELECT pg_advisory_unlock(hashtextextended($1, 0))",
+                        lock_key,
+                    )
 
     async def submit(
         self,
@@ -440,10 +467,20 @@ class ProjectActionQueue:
         project_id: uuid.UUID,
         job_id: str,
         runner: JobRunner,
+        *,
+        additional_project_ids: tuple[uuid.UUID, ...] = (),
     ) -> int:
         queue = await self._ensure_worker(project_name)
         position = queue.qsize()
-        await queue.put(_QueuedAction(job_id, project_id, project_name, runner))
+        await queue.put(
+            _QueuedAction(
+                job_id,
+                project_id,
+                project_name,
+                runner,
+                additional_project_ids,
+            )
+        )
         return position
 
     def status(self, project_name: str) -> dict[str, Any]:

@@ -36,7 +36,7 @@ from .security import (
 )
 from .templates import sync_project_generated_files
 
-PROJECT_SERVICE_ORDER = ["meta", "auth", "rest", "imgproxy", "storage", "nginx"]
+PROJECT_SERVICE_ORDER = ["meta", "auth", "rest", "nginx"]
 _OUTPUT_WINDOW_LIMIT = 64_000
 
 ProgressEvent = tuple[int, str, str]
@@ -96,32 +96,42 @@ CREATE_PROGRESS_EVENTS: dict[str, ProgressEvent] = {
         "Preparando arquivos do projeto...",
     ),
     "HOST_AGENT_PROGRESS=create:files_rendered": (
-        25,
+        72,
         "render_project_files",
         "Arquivos do projeto gerados.",
     ),
     "HOST_AGENT_PROGRESS=create:database_created": (
-        40,
+        25,
         "create_database",
         "Banco de dados criado.",
     ),
     "HOST_AGENT_PROGRESS=create:realtime_created": (
-        52,
+        38,
         "create_realtime_tenant",
         "Tenant do Realtime criado.",
     ),
     "HOST_AGENT_PROGRESS=create:supavisor_created": (
-        60,
+        48,
         "create_supavisor_tenant",
         "Pool de conexões configurado.",
     ),
-    "HOST_AGENT_PROGRESS=create:services_started": (
+    "HOST_AGENT_PROGRESS=create:storage_tenant_created": (
+        60,
+        "create_storage_tenant",
+        "Tenant do Storage compartilhado registrado.",
+    ),
+    "HOST_AGENT_PROGRESS=create:storage_credentials_created": (
         66,
+        "create_storage_credentials",
+        "Credenciais SigV4 exclusivas criadas.",
+    ),
+    "HOST_AGENT_PROGRESS=create:services_started": (
+        82,
         "start_project_services",
         "Serviços do projeto iniciados.",
     ),
     "HOST_AGENT_PROGRESS=create:storage_verified": (
-        69,
+        92,
         "verify_storage",
         "Storage validado; finalizando projeto...",
     ),
@@ -482,7 +492,37 @@ async def handle_recreate_services(ctx: CommandContext, project: str, args: dict
     services = [str(service) for service in args["services"]]
     project_dir = resolve_project_dir(ctx.config.projects_root, project, must_exist=True)
 
-    touches_nginx = "nginx" in services
+    storage_requested = "storage" in services
+    compose_services = [service for service in services if service != "storage"]
+    if storage_requested:
+        ctx.state.report(
+            progress=10,
+            step="apply_storage_settings",
+            message="Atualizando configuracao do tenant Storage...",
+        )
+        storage_outcome = await run_process(
+            ["bash", str(ctx.config.scripts_dir / "apply_storage_settings.sh"), project],
+            ctx,
+            cwd=ctx.config.scripts_dir,
+        )
+        if storage_outcome.timed_out:
+            return CommandOutcome(status="failed", error_code="timeout", exit_code=storage_outcome.returncode)
+        if storage_outcome.returncode != 0:
+            return CommandOutcome(
+                status="failed",
+                error_code="storage_settings_failed",
+                exit_code=storage_outcome.returncode,
+                message="Falha ao aplicar settings do tenant Storage; consulte stderr_tail.",
+            )
+
+    if not compose_services:
+        return CommandOutcome(
+            status="done",
+            exit_code=0,
+            result={"updated_tenant_services": ["storage"]},
+        )
+
+    touches_nginx = "nginx" in compose_services
     if touches_nginx:
         ctx.state.report(progress=10, step="render_templates", message="Regenerando templates do projeto...")
         sync_project_generated_files(
@@ -492,7 +532,7 @@ async def handle_recreate_services(ctx: CommandContext, project: str, args: dict
             project=project,
         )
 
-    ctx.state.report(progress=30, step="compose_up", message=f"Recriando servicos: {', '.join(services)}")
+    ctx.state.report(progress=30, step="compose_up", message=f"Recriando servicos: {', '.join(compose_services)}")
     argv = [
         "docker", "compose",
         "-p", project,
@@ -503,7 +543,7 @@ async def handle_recreate_services(ctx: CommandContext, project: str, args: dict
     if touches_nginx:
         argv.append("--build")
     argv.append("--force-recreate")
-    argv += services
+    argv += compose_services
 
     outcome = await run_process(argv, ctx, cwd=project_dir)
     if outcome.timed_out:
@@ -515,7 +555,14 @@ async def handle_recreate_services(ctx: CommandContext, project: str, args: dict
             exit_code=outcome.returncode,
             message="Erro no recreate; consulte stderr_tail.",
         )
-    return CommandOutcome(status="done", exit_code=0, result={"recreated_services": services})
+    return CommandOutcome(
+        status="done",
+        exit_code=0,
+        result={
+            "recreated_services": compose_services,
+            "updated_tenant_services": ["storage"] if storage_requested else [],
+        },
+    )
 
 
 async def handle_ensure_opaque_gateway_token(
@@ -734,6 +781,22 @@ async def handle_delete_project_files(ctx: CommandContext, project: str, args: d
             resolve_backup_project_dir(ctx.config.backups_root, tenant_uuid)
         )
         outcome.result = {**(outcome.result or {}), "backups_removed": removed}
+    return outcome
+
+
+async def handle_delete_project_storage(
+    ctx: CommandContext, project: str, args: dict[str, Any]
+) -> CommandOutcome:
+    resolve_project_dir(ctx.config.projects_root, project, must_exist=True)
+    tenant_uuid = str(
+        args.get("tenant_uuid") or args.get("project_uuid") or ""
+    ).strip()
+    outcome, _ = await _run_lifecycle_script(
+        ctx,
+        "delete_storage_tenant.sh",
+        [project, tenant_uuid],
+        error_code="delete_storage_tenant_failed",
+    )
     return outcome
 
 
@@ -967,6 +1030,7 @@ COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "create_project": handle_create_project,
     "duplicate_project": handle_duplicate_project,
     "delete_project_containers": handle_delete_project_containers,
+    "delete_project_storage": handle_delete_project_storage,
     "delete_project_files": handle_delete_project_files,
     "rotate_keys": handle_rotate_keys,
     "rename_project": handle_rename_project,

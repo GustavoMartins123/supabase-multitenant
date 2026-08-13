@@ -308,6 +308,97 @@ services:
       "--main-service",
       "/home/deno/functions/main"
       ]
+
+  storage:
+    container_name: supabase-storage-global
+    image: ${STORAGE_IMAGE:?defina STORAGE_IMAGE}
+    restart: unless-stopped
+    logging: *vector-logging
+    env_file:
+      - .env
+      - .storage.env
+    networks:
+      - rede-supabase
+      - storage-internal
+    volumes:
+      - ./volumes/storage:/var/lib/storage:z
+    depends_on:
+      db:
+        condition: service_healthy
+      imgproxy:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 5000
+      SERVER_REGION: local
+      SERVER_ADMIN_PORT: 5001
+      MULTI_TENANT: "true"
+      DATABASE_MULTITENANT_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${STORAGE_DATABASE_NAME}
+      ADMIN_RETURN_TENANT_SENSITIVE_DATA: "false"
+      REQUEST_X_FORWARDED_HOST_REGEXP: ${STORAGE_TENANT_HOST_REGEXP:?defina STORAGE_TENANT_HOST_REGEXP}
+      REQUEST_ALLOW_X_FORWARDED_PATH: "true"
+      REQUEST_TRACE_HEADER: x-request-id
+      DB_INSTALL_ROLES: "false"
+      PG_QUEUE_ENABLE: "true"
+      DATABASE_FREE_POOL_AFTER_INACTIVITY: ${STORAGE_TENANT_POOL_IDLE_MS:?defina STORAGE_TENANT_POOL_IDLE_MS}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:?defina STORAGE_BACKEND}
+      STORAGE_FILE_BACKEND_PATH: ${STORAGE_FILE_BACKEND_PATH:?defina STORAGE_FILE_BACKEND_PATH}
+      STORAGE_S3_BUCKET: ${STORAGE_INTERNAL_BUCKET:?defina STORAGE_INTERNAL_BUCKET}
+      STORAGE_S3_REGION: ${STORAGE_S3_REGION:?defina STORAGE_S3_REGION}
+      UPLOAD_FILE_SIZE_LIMIT: ${STORAGE_FILE_SIZE_LIMIT:?defina STORAGE_FILE_SIZE_LIMIT}
+      UPLOAD_FILE_SIZE_LIMIT_STANDARD: ${STORAGE_FILE_SIZE_LIMIT_STANDARD:?defina STORAGE_FILE_SIZE_LIMIT_STANDARD}
+      TUS_URL_PATH: /upload/resumable
+      IMAGE_TRANSFORMATION_ENABLED: ${STORAGE_IMAGE_TRANSFORMATION_ENABLED:?defina STORAGE_IMAGE_TRANSFORMATION_ENABLED}
+      IMGPROXY_URL: http://imgproxy:5001
+      S3_PROTOCOL_ENABLED: "true"
+      VECTOR_ENABLED: ${STORAGE_VECTOR_ENABLED:?defina STORAGE_VECTOR_ENABLED}
+      VECTOR_BUCKET_PROVIDER: pgvector
+      VECTOR_DATABASE_CREATE: "false"
+      VECTOR_STORE_MIGRATIONS_ENABLED: "true"
+      VECTOR_MAX_BUCKETS: ${STORAGE_VECTOR_MAX_BUCKETS:?defina STORAGE_VECTOR_MAX_BUCKETS}
+      VECTOR_MAX_INDEXES: ${STORAGE_VECTOR_MAX_INDEXES:?defina STORAGE_VECTOR_MAX_INDEXES}
+      LOG_LEVEL: ${STORAGE_LOG_LEVEL:?defina STORAGE_LOG_LEVEL}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5000/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  imgproxy:
+    container_name: supabase-imgproxy-global
+    image: ${IMGPROXY_IMAGE:?defina IMGPROXY_IMAGE}
+    restart: unless-stopped
+    logging: *vector-logging
+    networks:
+      - storage-internal
+    volumes:
+      - ./volumes/storage:/var/lib/storage:ro,z
+    environment:
+      IMGPROXY_BIND: ${IMGPROXY_BIND:?defina IMGPROXY_BIND}
+      IMGPROXY_LOCAL_FILESYSTEM_ROOT: ${IMGPROXY_LOCAL_FILESYSTEM_ROOT:?defina IMGPROXY_LOCAL_FILESYSTEM_ROOT}
+      IMGPROXY_USE_ETAG: ${IMGPROXY_USE_ETAG:?defina IMGPROXY_USE_ETAG}
+      IMGPROXY_ENABLE_WEBP_DETECTION: ${IMGPROXY_ENABLE_WEBP_DETECTION:?defina IMGPROXY_ENABLE_WEBP_DETECTION}
+    healthcheck:
+      test: ["CMD", "imgproxy", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
   analytics:
     build:
       context: .
@@ -377,6 +468,10 @@ networks:
           gateway: ${SUPABASE_NETWORK_GATEWAY}
   analytics-internal:
     name: supabase-analytics-internal
+    driver: bridge
+    internal: true
+  storage-internal:
+    name: supabase-storage-internal
     driver: bridge
     internal: true
 volumes:

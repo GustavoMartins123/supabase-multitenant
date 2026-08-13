@@ -10,7 +10,6 @@ from dotenv import dotenv_values
 from fastapi import HTTPException
 
 
-DEFAULT_FILE_SIZE_LIMIT = "524288000"
 DEFAULT_PROJECTS_ROOT = pathlib.Path("/docker/projects")
 
 SETTINGS_WHITELIST = {
@@ -31,6 +30,10 @@ SETTINGS_WHITELIST = {
     "PGRST_DB_POOL_ACQUISITION_TIMEOUT",
     "FILE_SIZE_LIMIT",
     "ENABLE_IMAGE_TRANSFORMATION",
+    "S3_PROTOCOL_ENABLED",
+    "VECTOR_BUCKETS_ENABLED",
+    "VECTOR_MAX_BUCKETS",
+    "VECTOR_MAX_INDEXES",
 }
 
 BOOLEAN_SETTINGS = {
@@ -42,6 +45,8 @@ BOOLEAN_SETTINGS = {
     "ENABLE_PHONE_AUTOCONFIRM",
     "GOTRUE_EXTERNAL_IMPLICIT_FLOW_ENABLED",
     "ENABLE_IMAGE_TRANSFORMATION",
+    "S3_PROTOCOL_ENABLED",
+    "VECTOR_BUCKETS_ENABLED",
 }
 
 INTEGER_SETTING_RANGES = {
@@ -53,6 +58,8 @@ INTEGER_SETTING_RANGES = {
     "PGRST_DB_POOL_TIMEOUT": (1, 3153600000),
     "PGRST_DB_POOL_ACQUISITION_TIMEOUT": (1, 3153600000),
     "FILE_SIZE_LIMIT": (1, 9007199254740991),
+    "VECTOR_MAX_BUCKETS": (1, 1000000),
+    "VECTOR_MAX_INDEXES": (1, 1000000),
 }
 
 SCHEMA_NAME_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
@@ -75,6 +82,10 @@ SETTING_TO_SERVICES: dict[str, list[str]] = {
     "PGRST_DB_POOL_ACQUISITION_TIMEOUT":       ["rest"],
     "FILE_SIZE_LIMIT":                         ["storage", "nginx"],
     "ENABLE_IMAGE_TRANSFORMATION":             ["storage"],
+    "S3_PROTOCOL_ENABLED":                     ["storage"],
+    "VECTOR_BUCKETS_ENABLED":                  ["storage"],
+    "VECTOR_MAX_BUCKETS":                      ["storage"],
+    "VECTOR_MAX_INDEXES":                      ["storage"],
 }
 
 def _read_env_whitelisted(env_path: pathlib.Path) -> dict[str, str]:
@@ -94,13 +105,13 @@ def get_project_file_size_limit(
     """Return the tenant upload limit without exposing the tenant env file."""
     try:
         values = dotenv_values(projects_root / project_name / ".env")
-    except (OSError, ValueError):
-        return DEFAULT_FILE_SIZE_LIMIT
+    except (OSError, ValueError) as exc:
+        raise HTTPException(409, "Configuração de Storage do projeto indisponível") from exc
 
     value = str(values.get("FILE_SIZE_LIMIT") or "").strip()
     if re.fullmatch(r"\d+", value) and int(value) > 0:
         return value
-    return DEFAULT_FILE_SIZE_LIMIT
+    raise HTTPException(409, "FILE_SIZE_LIMIT ausente ou inválido no projeto")
 
 
 def _normalize_setting_value(key: str, raw_value: str) -> str:
@@ -212,6 +223,4 @@ def _get_affected_services(changed_keys: list[str]) -> list[str]:
         for svc in SETTING_TO_SERVICES.get(key, []):
             services.add(svc)
     return sorted(services)
-
-
 

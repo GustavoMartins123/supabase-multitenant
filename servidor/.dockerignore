@@ -1,13 +1,16 @@
 .env
 .analytics.env
+.storage.env
 .legacy-migration.env
 projects/
 backups/
+storage-migration-reports/
 certs/
 host-agent/.venv/
 traefik/acme.json
 volumes/db/data/
 volumes/db/wal_archives/
+volumes/storage/
 **/__pycache__/
 *.zip
 *.tar
