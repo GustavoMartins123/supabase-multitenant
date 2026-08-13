@@ -1,10 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/project_repository.dart';
 import '../../models/opaque_api_key.dart';
+import '../../providers/opaque_api_keys_provider.dart';
 import '../../supabase_colors.dart';
 import '../danger_button.dart';
 import '../secondary_button.dart';
@@ -28,21 +30,11 @@ class OpaqueApiKeysSection extends ConsumerStatefulWidget {
 }
 
 class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
-  bool _loading = true;
-  bool _mutating = false;
-  String? _error;
-  Map<String, dynamic>? _migration;
-  List<OpaqueApiKeySlot> _slots = const [];
-  List<OpaqueApiKeyReveal> _reveals = const [];
-  final Map<String, String> _revealedSecrets = {};
+  OpaqueApiKeysController get _controller =>
+      ref.read(opaqueApiKeysProvider(widget.projectRef).notifier);
 
-  bool get _disabled => _mutating || widget.projectBusy;
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.canManage) _reload();
-  }
+  bool _disabled(OpaqueApiKeysState state) =>
+      widget.projectBusy || state.actionsLocked;
 
   void _snack(String message, Color color) {
     if (!mounted) return;
@@ -51,45 +43,29 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
     );
   }
 
-  Future<void> _reload() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  void _showError(Object error) {
+    _snack(opaqueApiKeyErrorMessage(error), SupabaseColors.error);
+  }
+
+  Future<void> _runCommand(
+    Future<void> Function() command, {
+    String? successMessage,
+  }) async {
     try {
-      final repository = ref.read(projectRepositoryProvider);
-      final values = await Future.wait([
-        repository.fetchOpaqueApiKeyMigration(widget.projectRef),
-        repository.fetchOpaqueApiKeySlots(widget.projectRef),
-        repository.fetchOpaqueApiKeyReveals(widget.projectRef),
-      ]);
-      if (!mounted) return;
-      setState(() {
-        _migration = values[0] as Map<String, dynamic>;
-        _slots = values[1] as List<OpaqueApiKeySlot>;
-        _reveals = values[2] as List<OpaqueApiKeyReveal>;
-      });
+      await command();
+      if (successMessage != null) {
+        _snack(successMessage, SupabaseColors.success);
+      }
     } catch (error) {
-      if (!mounted) return;
-      setState(() => _error = error.toString().replaceFirst('Exception: ', ''));
-    } finally {
-      if (mounted) setState(() => _loading = false);
+      _showError(error);
     }
   }
 
-  Future<void> _mutate(Future<void> Function() operation) async {
-    if (_disabled) return;
-    setState(() => _mutating = true);
+  Future<void> _refreshAfterSecret() async {
     try {
-      await operation();
-      await _reload();
+      await _controller.refresh();
     } catch (error) {
-      _snack(
-        error.toString().replaceFirst('Exception: ', ''),
-        SupabaseColors.error,
-      );
-    } finally {
-      if (mounted) setState(() => _mutating = false);
+      _showError(error);
     }
   }
 
@@ -122,13 +98,10 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           'ativo ate o corte explicito.',
     );
     if (!confirmed) return;
-    await _mutate(() async {
-      await ref
-          .read(projectRepositoryProvider)
-          .prepareOpaqueApiKeyMigration(widget.projectRef);
-      _snack('Migracao preparada. Revele e instale as duas chaves.',
-          SupabaseColors.success);
-    });
+    await _runCommand(
+      _controller.prepareMigration,
+      successMessage: 'Migracao preparada. Revele e instale as duas chaves.',
+    );
   }
 
   Future<void> _cutover() async {
@@ -138,12 +111,10 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           'deixarao de funcionar como API key externa imediatamente.',
     );
     if (!confirmed) return;
-    await _mutate(() async {
-      await ref
-          .read(projectRepositoryProvider)
-          .cutoverOpaqueApiKeyMigration(widget.projectRef);
-      _snack('Gateway ativado em modo opaque-only.', SupabaseColors.success);
-    });
+    await _runCommand(
+      _controller.cutoverMigration,
+      successMessage: 'Gateway ativado em modo opaque-only.',
+    );
   }
 
   Future<void> _abortMigration() async {
@@ -153,28 +124,49 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           'alterado e uma nova preparação poderá ser iniciada.',
     );
     if (!confirmed) return;
-    await _mutate(() async {
-      await ref
-          .read(projectRepositoryProvider)
-          .abortOpaqueApiKeyMigration(widget.projectRef);
-      _revealedSecrets.clear();
-      _snack('Preparação opaca cancelada.', SupabaseColors.success);
-    });
+    await _runCommand(
+      _controller.abortMigration,
+      successMessage: 'Preparação opaca cancelada.',
+    );
   }
 
   Future<void> _claim(OpaqueApiKeyReveal reveal) async {
-    await _mutate(() async {
-      final secret = await ref
-          .read(projectRepositoryProvider)
-          .claimOpaqueApiKey(widget.projectRef, reveal.keyId);
+    try {
+      final secret = await _controller.claimReveal(reveal.keyId);
       if (!mounted) return;
-      setState(() => _revealedSecrets[reveal.keyId] = secret);
-      await Clipboard.setData(ClipboardData(text: secret));
+
+      var copied = false;
+      String? clipboardError;
+      try {
+        await Clipboard.setData(ClipboardData(text: secret));
+        copied = true;
+      } catch (error) {
+        clipboardError = opaqueApiKeyErrorMessage(error);
+      }
+      if (!mounted) return;
+
+      final copiedBeforeClose = await showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => _ClaimedOpaqueApiKeyDialog(
+              secret: secret,
+              reveal: reveal,
+              initiallyCopied: copied,
+              initialClipboardError: clipboardError,
+            ),
+          ) ??
+          copied;
+      if (!mounted) return;
       _snack(
-        'Chave revelada e copiada. Ela nao podera ser exibida novamente.',
-        SupabaseColors.success,
+        copiedBeforeClose
+            ? 'Chave revelada e copiada. Ela não poderá ser exibida novamente.'
+            : 'Chave revelada e consumida no servidor. O valor não foi copiado.',
+        copiedBeforeClose ? SupabaseColors.success : SupabaseColors.warning,
       );
-    });
+      unawaited(_refreshAfterSecret());
+    } catch (error) {
+      _showError(error);
+    }
   }
 
   Future<void> _confirmInstallation(
@@ -187,14 +179,10 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           'nova chave. O corte programado nao sera prorrogado.',
     );
     if (!confirmed) return;
-    await _mutate(() async {
-      await ref.read(projectRepositoryProvider).confirmOpaqueApiKeyInstallation(
-            widget.projectRef,
-            slot.id,
-            key.id,
-          );
-      _snack('Instalacao confirmada.', SupabaseColors.success);
-    });
+    await _runCommand(
+      () => _controller.confirmInstallation(slot.id, key.id),
+      successMessage: 'Instalacao confirmada.',
+    );
   }
 
   Future<void> _rotate(OpaqueApiKeySlot slot) async {
@@ -204,13 +192,14 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           'sera mostrada uma unica vez.',
     );
     if (!confirmed) return;
-    await _mutate(() async {
-      final issued = await ref
-          .read(projectRepositoryProvider)
-          .rotateOpaqueApiKeySlot(widget.projectRef, slot.id);
+    try {
+      final issued = await _controller.rotateSlot(slot.id);
       if (!mounted) return;
       await _showIssuedKey(issued);
-    });
+      if (mounted) unawaited(_refreshAfterSecret());
+    } catch (error) {
+      _showError(error);
+    }
   }
 
   Future<void> _disable(OpaqueApiKeySlot slot) async {
@@ -219,21 +208,13 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
       'Todas as versoes desse slot serao revogadas. Os demais slots nao serao alterados.',
     );
     if (!confirmed) return;
-    await _mutate(() async {
-      await ref
-          .read(projectRepositoryProvider)
-          .disableOpaqueApiKeySlot(widget.projectRef, slot.id);
-    });
+    await _runCommand(() => _controller.disableSlot(slot.id));
   }
 
   Future<void> _toggleAutomatic(OpaqueApiKeySlot slot, bool enabled) async {
-    await _mutate(() async {
-      await ref.read(projectRepositoryProvider).updateOpaqueApiKeySlot(
-            widget.projectRef,
-            slot.id,
-            automaticRotationEnabled: enabled,
-          );
-    });
+    await _runCommand(
+      () => _controller.updateAutomaticRotation(slot.id, enabled),
+    );
   }
 
   Future<void> _editExpirationPolicy(OpaqueApiKeySlot slot) async {
@@ -259,22 +240,12 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
               'alteração. Uma chave já vencida não será reativada.',
     );
     if (!confirmed) return;
-    await _mutate(() async {
-      await ref.read(projectRepositoryProvider).updateOpaqueApiKeySlot(
-            widget.projectRef,
-            slot.id,
-            automaticRotationEnabled: neverExpires ? false : null,
-            expirationPolicy: OpaqueApiKeyExpirationPolicyUpdate(
-              selection.days,
-            ),
-          );
-      _snack(
-        neverExpires
-            ? 'A chave ativa agora não expira.'
-            : 'Expiração temporal atualizada.',
-        SupabaseColors.success,
-      );
-    });
+    await _runCommand(
+      () => _controller.updateExpirationPolicy(slot.id, selection.days),
+      successMessage: neverExpires
+          ? 'A chave ativa agora não expira.'
+          : 'Expiração temporal atualizada.',
+    );
   }
 
   Future<void> _cancelPendingRotation(OpaqueApiKeySlot slot) async {
@@ -284,25 +255,32 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           'de expiração atual.',
     );
     if (!confirmed) return;
-    await _mutate(() async {
-      await ref
-          .read(projectRepositoryProvider)
-          .cancelOpaqueApiKeyRotation(widget.projectRef, slot.id);
-      _snack('Rotação pendente cancelada.', SupabaseColors.success);
-    });
+    await _runCommand(
+      () => _controller.cancelPendingRotation(slot.id),
+      successMessage: 'Rotação pendente cancelada.',
+    );
   }
 
   Future<void> _createSlot() async {
-    final issued = await showDialog<IssuedOpaqueApiKey>(
+    final draft = await showDialog<_CreateOpaqueSlotDraft>(
       context: context,
-      builder: (context) => _CreateOpaqueSlotDialog(
-        projectRef: widget.projectRef,
-        repository: ref.read(projectRepositoryProvider),
-      ),
+      builder: (context) => const _CreateOpaqueSlotDialog(),
     );
-    if (issued == null || !mounted) return;
-    await _showIssuedKey(issued);
-    await _reload();
+    if (draft == null || !mounted) return;
+    try {
+      final issued = await _controller.createSlot(
+        name: draft.name,
+        kind: draft.kind,
+        allowedServices: draft.allowedServices,
+        automaticRotationEnabled: draft.automaticRotationEnabled,
+        rotationIntervalDays: draft.rotationIntervalDays,
+      );
+      if (!mounted) return;
+      await _showIssuedKey(issued);
+      if (mounted) unawaited(_refreshAfterSecret());
+    } catch (error) {
+      _showError(error);
+    }
   }
 
   Future<void> _showIssuedKey(IssuedOpaqueApiKey issued) async {
@@ -365,37 +343,55 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
         ),
       );
     }
+    final asyncState = ref.watch(opaqueApiKeysProvider(widget.projectRef));
     return SectionWidget(
       title: 'API KEYS OPACAS',
-      child: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(_error!,
-                        style: const TextStyle(color: SupabaseColors.error)),
-                    const SizedBox(height: 8),
-                    SecondaryButton(
-                        label: 'Tentar novamente', onPressed: _reload),
-                  ],
-                )
-              : _buildContent(),
+      child: asyncState.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (error, _) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              opaqueApiKeyErrorMessage(error),
+              style: const TextStyle(color: SupabaseColors.error),
+            ),
+            const SizedBox(height: 8),
+            SecondaryButton(
+              label: 'Tentar novamente',
+              onPressed: () =>
+                  ref.invalidate(opaqueApiKeysProvider(widget.projectRef)),
+            ),
+          ],
+        ),
+        data: _buildContent,
+      ),
     );
   }
 
-  Widget _buildContent() {
-    final status = _migration!['status'];
+  Widget _buildContent(OpaqueApiKeysState state) {
+    final status = state.migration['status'];
+    final disabled = _disabled(state);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _statusBanner(status.toString()),
+        if (state.isRefreshing || state.hasProjectOperation) ...[
+          const SizedBox(height: 8),
+          const LinearProgressIndicator(
+            key: ValueKey('opaque-api-keys-project-progress'),
+            minHeight: 2,
+          ),
+        ],
+        if (state.synchronizationError != null) ...[
+          const SizedBox(height: 8),
+          _synchronizationError(state),
+        ],
         if (status == 'legacy') ...[
           const SizedBox(height: 12),
           SecondaryButton(
             label: 'Preparar migracao opaca',
             icon: Icons.security_rounded,
-            onPressed: _disabled ? null : _prepareMigration,
+            onPressed: disabled ? null : _prepareMigration,
           ),
         ],
         if (status == 'prepared') ...[
@@ -403,18 +399,18 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           DangerButton(
             label: 'Cancelar preparação',
             icon: Icons.undo_rounded,
-            onPressed: _disabled ? null : _abortMigration,
+            onPressed: disabled ? null : _abortMigration,
           ),
         ],
-        if (_reveals.isNotEmpty) ...[
+        if (state.reveals.isNotEmpty) ...[
           const SizedBox(height: 16),
           const Text('REVELACOES PENDENTES', style: _captionStyle),
           const SizedBox(height: 8),
-          ..._reveals.map(_revealCard),
+          ...state.reveals.map((reveal) => _revealCard(state, reveal)),
         ],
-        if (_slots.isNotEmpty) ...[
+        if (state.slots.isNotEmpty) ...[
           const SizedBox(height: 16),
-          ..._slots.map(_slotCard),
+          ...state.slots.map((slot) => _slotCard(state, slot)),
         ],
         if (status == 'prepared' || status == 'gateway_recovery_required') ...[
           const SizedBox(height: 12),
@@ -423,8 +419,8 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
                 ? 'Recuperar gateway opaco'
                 : 'Executar corte opaco',
             icon: Icons.swap_horiz_rounded,
-            onPressed: _disabled ||
-                    (status == 'prepared' && !_allMigrationKeysConfirmed)
+            onPressed: disabled ||
+                    (status == 'prepared' && !_allMigrationKeysConfirmed(state))
                 ? null
                 : _cutover,
           ),
@@ -434,17 +430,48 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           SecondaryButton(
             label: 'Criar slot',
             icon: Icons.add_rounded,
-            onPressed: _disabled ? null : _createSlot,
+            onPressed: disabled ? null : _createSlot,
           ),
         ],
       ],
     );
   }
 
-  bool get _allMigrationKeysConfirmed {
-    final pending = _migration!['pending_key_count'];
-    final confirmed = _migration!['confirmed_pending_key_count'];
+  bool _allMigrationKeysConfirmed(OpaqueApiKeysState state) {
+    final pending = state.migration['pending_key_count'];
+    final confirmed = state.migration['confirmed_pending_key_count'];
     return pending is int && pending == 2 && confirmed == 2;
+  }
+
+  Widget _synchronizationError(OpaqueApiKeysState state) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: SupabaseColors.error.withValues(alpha: 0.12),
+        border: Border.all(color: SupabaseColors.error),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            state.synchronizationError!,
+            style: const TextStyle(color: SupabaseColors.error, fontSize: 12),
+          ),
+          const SizedBox(height: 8),
+          SecondaryButton(
+            label: state.isRefreshing
+                ? 'Sincronizando...'
+                : 'Sincronizar novamente',
+            icon: Icons.sync_rounded,
+            onPressed: state.isRefreshing
+                ? null
+                : () => unawaited(_refreshAfterSecret()),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _statusBanner(String status) {
@@ -476,8 +503,11 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
     );
   }
 
-  Widget _revealCard(OpaqueApiKeyReveal reveal) {
-    final secret = _revealedSecrets[reveal.keyId];
+  Widget _revealCard(
+    OpaqueApiKeysState state,
+    OpaqueApiKeyReveal reveal,
+  ) {
+    final busy = state.isRevealBusy(reveal.keyId);
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 8),
@@ -492,28 +522,27 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
             style:
                 const TextStyle(color: SupabaseColors.textMuted, fontSize: 11),
           ),
-          if (secret != null) ...[
+          if (busy) ...[
             const SizedBox(height: 8),
-            SelectableText(secret,
-                style: const TextStyle(fontFamily: 'monospace')),
+            LinearProgressIndicator(
+              key: ValueKey('opaque-reveal-progress-${reveal.keyId}'),
+              minHeight: 2,
+            ),
           ],
           const SizedBox(height: 8),
           SecondaryButton(
-            label: secret == null ? 'Revelar e copiar' : 'Copiar novamente',
+            label: busy ? 'Revelando...' : 'Revelar e copiar',
             icon: Icons.copy_rounded,
-            onPressed: _disabled
-                ? null
-                : secret == null
-                    ? () => _claim(reveal)
-                    : () => Clipboard.setData(ClipboardData(text: secret)),
+            onPressed: _disabled(state) ? null : () => _claim(reveal),
           ),
         ],
       ),
     );
   }
 
-  Widget _slotCard(OpaqueApiKeySlot slot) {
+  Widget _slotCard(OpaqueApiKeysState state, OpaqueApiKeySlot slot) {
     final pending = slot.keys.where((key) => key.status == 'pending').toList();
+    final busy = state.isSlotBusy(slot.id);
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 10),
@@ -529,6 +558,13 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
                   style: const TextStyle(color: SupabaseColors.brand)),
             ],
           ),
+          if (busy) ...[
+            const SizedBox(height: 8),
+            LinearProgressIndicator(
+              key: ValueKey('opaque-slot-progress-${slot.id}'),
+              minHeight: 2,
+            ),
+          ],
           const SizedBox(height: 4),
           Text(
             '${slot.allowedServices.join(', ')} · Expiração: '
@@ -568,25 +604,29 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
                 child: SecondaryButton(
                   label: 'Confirmar instalacao de ${key.tokenHint}',
                   icon: Icons.check_rounded,
-                  onPressed:
-                      _disabled ? null : () => _confirmInstallation(slot, key),
+                  onPressed: _disabled(state)
+                      ? null
+                      : () => _confirmInstallation(slot, key),
                 ),
               ),
           const Divider(color: SupabaseColors.border),
-          SwitchListTile.adaptive(
-            contentPadding: EdgeInsets.zero,
-            value: slot.automaticRotationEnabled,
-            onChanged: _disabled || slot.rotationIntervalDays == null
-                ? null
-                : (value) => _toggleAutomatic(slot, value),
-            title: const Text('Rotacao automatica',
-                style: TextStyle(fontSize: 12)),
-            subtitle: slot.rotationIntervalDays == null
-                ? const Text(
-                    'Defina uma expiração temporal para habilitar.',
-                    style: TextStyle(fontSize: 11),
-                  )
-                : null,
+          Material(
+            type: MaterialType.transparency,
+            child: SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              value: slot.automaticRotationEnabled,
+              onChanged: _disabled(state) || slot.rotationIntervalDays == null
+                  ? null
+                  : (value) => _toggleAutomatic(slot, value),
+              title: const Text('Rotacao automatica',
+                  style: TextStyle(fontSize: 12)),
+              subtitle: slot.rotationIntervalDays == null
+                  ? const Text(
+                      'Defina uma expiração temporal para habilitar.',
+                      style: TextStyle(fontSize: 11),
+                    )
+                  : null,
+            ),
           ),
           Wrap(
             spacing: 8,
@@ -596,26 +636,28 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
                 label: 'Expiração: '
                     '${_expirationLabel(slot.rotationIntervalDays)}',
                 icon: Icons.timer_outlined,
-                onPressed: _disabled ? null : () => _editExpirationPolicy(slot),
+                onPressed:
+                    _disabled(state) ? null : () => _editExpirationPolicy(slot),
               ),
               SecondaryButton(
                 label: 'Rotacionar agora',
                 icon: Icons.refresh_rounded,
-                onPressed: _disabled || pending.isNotEmpty
+                onPressed: _disabled(state) || pending.isNotEmpty
                     ? null
                     : () => _rotate(slot),
               ),
-              if (pending.isNotEmpty && _migration!['status'] == 'active')
+              if (pending.isNotEmpty && state.migration['status'] == 'active')
                 SecondaryButton(
                   label: 'Cancelar rotação pendente',
                   icon: Icons.cancel_outlined,
-                  onPressed:
-                      _disabled ? null : () => _cancelPendingRotation(slot),
+                  onPressed: _disabled(state)
+                      ? null
+                      : () => _cancelPendingRotation(slot),
                 ),
               DangerButton(
                 label: 'Revogar slot',
                 icon: Icons.block_rounded,
-                onPressed: _disabled ? null : () => _disable(slot),
+                onPressed: _disabled(state) ? null : () => _disable(slot),
               ),
             ],
           ),
@@ -644,14 +686,126 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
   );
 }
 
-class _CreateOpaqueSlotDialog extends StatefulWidget {
-  const _CreateOpaqueSlotDialog({
-    required this.projectRef,
-    required this.repository,
+class _ClaimedOpaqueApiKeyDialog extends StatefulWidget {
+  const _ClaimedOpaqueApiKeyDialog({
+    required this.secret,
+    required this.reveal,
+    required this.initiallyCopied,
+    required this.initialClipboardError,
   });
 
-  final String projectRef;
-  final ProjectRepository repository;
+  final String secret;
+  final OpaqueApiKeyReveal reveal;
+  final bool initiallyCopied;
+  final String? initialClipboardError;
+
+  @override
+  State<_ClaimedOpaqueApiKeyDialog> createState() =>
+      _ClaimedOpaqueApiKeyDialogState();
+}
+
+class _ClaimedOpaqueApiKeyDialogState
+    extends State<_ClaimedOpaqueApiKeyDialog> {
+  late bool _copied = widget.initiallyCopied;
+  late String? _clipboardError = widget.initialClipboardError;
+
+  Future<void> _copy() async {
+    try {
+      await Clipboard.setData(ClipboardData(text: widget.secret));
+      if (!mounted) return;
+      setState(() {
+        _copied = true;
+        _clipboardError = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _clipboardError = opaqueApiKeyErrorMessage(error));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      key: const ValueKey('claimed-opaque-api-key-dialog'),
+      backgroundColor: SupabaseColors.bg200,
+      title: const Text('API key revelada uma única vez'),
+      content: SizedBox(
+        width: 560,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'A revelação já foi consumida no servidor. Copie o valor antes '
+              'de fechar; ele não poderá ser recuperado novamente.',
+              style: TextStyle(color: SupabaseColors.warning),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${widget.reveal.slotName} · ${widget.reveal.kind}',
+              style: const TextStyle(
+                color: SupabaseColors.textMuted,
+                fontSize: 11,
+              ),
+            ),
+            const SizedBox(height: 12),
+            SelectableText(
+              widget.secret,
+              key: const ValueKey('claimed-opaque-api-key-plaintext'),
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            ),
+            if (_copied) ...[
+              const SizedBox(height: 8),
+              const Text(
+                'Copiada para a área de transferência.',
+                style: TextStyle(color: SupabaseColors.success, fontSize: 11),
+              ),
+            ],
+            if (_clipboardError != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Não foi possível copiar automaticamente: $_clipboardError',
+                style: const TextStyle(
+                  color: SupabaseColors.error,
+                  fontSize: 11,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _copy,
+          child: Text(_copied ? 'Copiar novamente' : 'Copiar'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, _copied),
+          child: const Text('Fechar'),
+        ),
+      ],
+    );
+  }
+}
+
+final class _CreateOpaqueSlotDraft {
+  const _CreateOpaqueSlotDraft({
+    required this.name,
+    required this.kind,
+    required this.allowedServices,
+    required this.automaticRotationEnabled,
+    required this.rotationIntervalDays,
+  });
+
+  final String name;
+  final String kind;
+  final List<String> allowedServices;
+  final bool automaticRotationEnabled;
+  final int? rotationIntervalDays;
+}
+
+class _CreateOpaqueSlotDialog extends StatefulWidget {
+  const _CreateOpaqueSlotDialog();
 
   @override
   State<_CreateOpaqueSlotDialog> createState() =>
@@ -672,7 +826,6 @@ class _CreateOpaqueSlotDialogState extends State<_CreateOpaqueSlotDialog> {
   String _kind = 'publishable';
   bool _automatic = true;
   int? _interval = 90;
-  bool _saving = false;
   String? _error;
 
   @override
@@ -693,7 +846,7 @@ class _CreateOpaqueSlotDialogState extends State<_CreateOpaqueSlotDialog> {
     });
   }
 
-  Future<void> _submit() async {
+  void _submit() {
     final name = _name.text;
     if (!RegExp(r'^[a-z][a-z0-9_-]{2,39}$').hasMatch(name)) {
       setState(() => _error = 'Use 3-40 caracteres: a-z, 0-9, _ ou -.');
@@ -703,28 +856,16 @@ class _CreateOpaqueSlotDialogState extends State<_CreateOpaqueSlotDialog> {
       setState(() => _error = 'Selecione ao menos um servico.');
       return;
     }
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
-    try {
-      final issued = await widget.repository.createOpaqueApiKeySlot(
-        widget.projectRef,
+    Navigator.pop(
+      context,
+      _CreateOpaqueSlotDraft(
         name: name,
         kind: _kind,
         allowedServices: _selectedServices.toList()..sort(),
         automaticRotationEnabled: _automatic,
         rotationIntervalDays: _interval,
-      );
-      if (mounted) Navigator.pop(context, issued);
-    } catch (error) {
-      if (mounted) {
-        setState(() {
-          _saving = false;
-          _error = error.toString().replaceFirst('Exception: ', '');
-        });
-      }
-    }
+      ),
+    );
   }
 
   @override
@@ -753,8 +894,7 @@ class _CreateOpaqueSlotDialogState extends State<_CreateOpaqueSlotDialog> {
                       value: 'publishable', child: Text('Publishable')),
                   DropdownMenuItem(value: 'secret', child: Text('Secret')),
                 ],
-                onChanged:
-                    _saving ? null : (value) => setState(() => _kind = value!),
+                onChanged: (value) => setState(() => _kind = value!),
               ),
               const SizedBox(height: 12),
               const Text('Servicos permitidos',
@@ -766,15 +906,13 @@ class _CreateOpaqueSlotDialogState extends State<_CreateOpaqueSlotDialog> {
                       (service) => FilterChip(
                         label: Text(service),
                         selected: _selectedServices.contains(service),
-                        onSelected: _saving
-                            ? null
-                            : (selected) => setState(() {
-                                  if (selected) {
-                                    _selectedServices.add(service);
-                                  } else {
-                                    _selectedServices.remove(service);
-                                  }
-                                }),
+                        onSelected: (selected) => setState(() {
+                          if (selected) {
+                            _selectedServices.add(service);
+                          } else {
+                            _selectedServices.remove(service);
+                          }
+                        }),
                       ),
                     )
                     .toList(),
@@ -782,7 +920,7 @@ class _CreateOpaqueSlotDialogState extends State<_CreateOpaqueSlotDialog> {
               SwitchListTile.adaptive(
                 contentPadding: EdgeInsets.zero,
                 value: _automatic,
-                onChanged: _saving || _interval == null
+                onChanged: _interval == null
                     ? null
                     : (value) => setState(() => _automatic = value),
                 title: const Text('Rotacao automatica'),
@@ -795,7 +933,7 @@ class _CreateOpaqueSlotDialogState extends State<_CreateOpaqueSlotDialog> {
               SecondaryButton(
                 label: 'Expiração da chave: ${_expirationLabel(_interval)}',
                 icon: Icons.timer_outlined,
-                onPressed: _saving ? null : _chooseExpirationPolicy,
+                onPressed: _chooseExpirationPolicy,
               ),
               if (_error != null) ...[
                 const SizedBox(height: 10),
@@ -808,12 +946,12 @@ class _CreateOpaqueSlotDialogState extends State<_CreateOpaqueSlotDialog> {
       ),
       actions: [
         TextButton(
-          onPressed: _saving ? null : () => Navigator.pop(context),
+          onPressed: () => Navigator.pop(context),
           child: const Text('Cancelar'),
         ),
         TextButton(
-          onPressed: _saving ? null : _submit,
-          child: Text(_saving ? 'Criando...' : 'Criar e revelar'),
+          onPressed: _submit,
+          child: const Text('Criar e revelar'),
         ),
       ],
     );
