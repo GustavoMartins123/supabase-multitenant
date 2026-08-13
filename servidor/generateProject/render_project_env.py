@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Converte o .env antigo durante a migracao unica do Storage."""
+"""Renderiza um .env canonico sem aceitar configuracao de Storage por projeto."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import sys
 import tempfile
 
 
-REMOVED_KEYS = {
+OBSOLETE_STORAGE_KEYS = {
     "STORAGE_IMAGE",
     "STORAGE_DB_USER",
     "STORAGE_POSTGREST_URL",
@@ -75,8 +75,8 @@ def read_assignments(path: pathlib.Path) -> tuple[dict[str, str], list[str]]:
 
 def main() -> int:
     if len(sys.argv) != 4:
-        raise SystemExit("uso: render_migrated_project_env.py TEMPLATE OLD_ENV OUTPUT")
-    template_path, old_path, output_path = map(pathlib.Path, sys.argv[1:])
+        raise SystemExit("uso: render_project_env.py TEMPLATE CURRENT_ENV OUTPUT")
+    template_path, current_path, output_path = map(pathlib.Path, sys.argv[1:])
     replacements = json.load(sys.stdin)
     if not isinstance(replacements, dict) or not all(
         isinstance(key, str) and isinstance(value, str)
@@ -84,12 +84,23 @@ def main() -> int:
     ):
         raise SystemExit("replacements invalidos")
 
-    old_values, old_order = read_assignments(old_path)
-    lines = template_path.read_text(encoding="utf-8").splitlines()
+    current_values, current_order = read_assignments(current_path)
+    obsolete = sorted(
+        OBSOLETE_STORAGE_KEYS.intersection(current_values)
+        | {
+            key
+            for key in current_values
+            if "LEGACY" in key and ("STORAGE" in key or "IMGPROXY" in key)
+        }
+    )
+    if obsolete:
+        raise SystemExit(
+            "configuracao Storage por projeto nao suportada: " + ", ".join(obsolete)
+        )
+
     rendered: list[str] = []
     template_keys: set[str] = set()
-
-    for raw_line in lines:
+    for raw_line in template_path.read_text(encoding="utf-8").splitlines():
         line = raw_line
         for key, value in replacements.items():
             line = line.replace("{{" + key + "}}", value)
@@ -99,14 +110,14 @@ def main() -> int:
         if active:
             key, value = active.groups()
             template_keys.add(key)
-            if key in old_values and key not in PROTECTED_KEYS:
-                value = old_values[key]
+            if key in current_values and key not in PROTECTED_KEYS:
+                value = current_values[key]
             rendered.append(f"{key}={value}")
         elif commented:
             key, _ = commented.groups()
             template_keys.add(key)
-            if key in old_values and key not in PROTECTED_KEYS:
-                rendered.append(f"{key}={old_values[key]}")
+            if key in current_values and key not in PROTECTED_KEYS:
+                rendered.append(f"{key}={current_values[key]}")
             else:
                 rendered.append(line)
         else:
@@ -116,17 +127,14 @@ def main() -> int:
     if unresolved:
         raise SystemExit("placeholders nao resolvidos: " + ", ".join(unresolved))
 
-    preserved_unknown = [
+    preserved = [
         key
-        for key in old_order
-        if key not in template_keys
-        and key not in PROTECTED_KEYS
-        and key not in REMOVED_KEYS
-        and not ("LEGACY" in key and ("STORAGE" in key or "IMGPROXY" in key))
+        for key in current_order
+        if key not in template_keys and key not in PROTECTED_KEYS
     ]
-    if preserved_unknown:
-        rendered.extend(["", "# Configuracoes adicionais preservadas pela migracao"])
-        rendered.extend(f"{key}={old_values[key]}" for key in preserved_unknown)
+    if preserved:
+        rendered.extend(["", "# Configuracoes adicionais preservadas"])
+        rendered.extend(f"{key}={current_values[key]}" for key in preserved)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(

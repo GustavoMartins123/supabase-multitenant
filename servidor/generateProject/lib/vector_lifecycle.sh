@@ -122,15 +122,15 @@ $drop_vector_secrets$;
 SQL
 }
 
-# O nome fisico do pgvector inclui o tenant imutavel antes do hash. Dumps de
-# clone e a migracao unica precisam renomear essas tabelas; metadata logica nao
-# e alterada. A operacao e transacional e interrompe diante de estado ambiguo.
+# O nome fisico do pgvector inclui o tenant imutavel antes do hash. Um clone
+# with-data precisa renomear essas tabelas para seu novo UUID; metadata logica
+# nao e alterada. A operacao e transacional e falha diante de estado ambiguo.
 vector_rekey_physical_tables() {
   local database="$1" source_tenant="$2" destination_tenant="$3"
   [[ -n "${POSTGRES_USER:-}" ]] || vector_fail "POSTGRES_USER ausente"
-  [[ "$source_tenant" == "stub" || "$source_tenant" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
+  storage_validate_tenant_id "$source_tenant" \
     || vector_fail "tenant de origem invalido para rekey"
-  [[ "$destination_tenant" == "stub" || "$destination_tenant" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
+  storage_validate_tenant_id "$destination_tenant" \
     || vector_fail "tenant de destino invalido para rekey"
   [[ "$source_tenant" != "$destination_tenant" ]] || return 0
   command -v python3 >/dev/null 2>&1 || vector_fail "python3 nao esta instalado"

@@ -6,6 +6,24 @@ O formato deste arquivo segue as diretrizes do [Keep a Changelog](https://keepac
 
 ## [Não lançado]
 
+### 2026-08-13
+
+- Storage API e imgproxy passaram de containers por projeto para instâncias
+  globais compartilhadas, usando sem patches o modo multi-tenant oficial do
+  Storage v1.61.12, registry dedicado cifrado e backend file por namespace UUID.
+- Lifecycle de create, duplicate, rename, delete, settings, backup e restore
+  passou a registrar, validar e remover tenants pela Admin API oficial, com
+  rollback compensatório e sem caminho de runtime para a arquitetura anterior.
+- Credenciais S3/SigV4 e Storage Vectors passaram a ser isolados por tenant;
+  wrappers usam o Nginx do projeto, clones recebem credenciais/namespace novos e
+  rename preserva objetos pela identidade imutável.
+- Adicionada ferramenta transitória, resumível e fail-closed para converter
+  projetos e backups existentes, mantendo Projects API/host-agent quiescentes
+  enquanto houver estado misto.
+- Adicionados contratos estáticos e smoke opt-in de dois tenants cobrindo
+  objetos, opaque keys, S3, Vectors, imagens, limites, clones, rename,
+  backup/restore, delete, headers hostis e indisponibilidade do Storage global.
+
 ### 2026-08-11
 
 - Adicionada rotação automática de anon/service keys, habilitada por padrão e

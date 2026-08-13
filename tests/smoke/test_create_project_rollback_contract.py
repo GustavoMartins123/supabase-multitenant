@@ -50,6 +50,8 @@ class CreateRollbackContractTest(unittest.TestCase):
             "database_created",
             "realtime_created",
             "supavisor_created",
+            "storage_tenant_created",
+            "storage_credentials_created",
             "services_started",
             "storage_verified",
         }

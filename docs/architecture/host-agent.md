@@ -36,25 +36,27 @@ verificadas por teste):
 | Comando | Executa | Timeout |
 | --- | --- | --- |
 | `start_project` / `stop_project` / `restart_project` | docker start/stop/restart por container do projeto | 600s |
-| `recreate_services` | templates + `docker compose up -d --force-recreate` | 1800s |
+| `recreate_services` | aplica settings do tenant Storage pela Admin API e/ou recria somente serviços locais solicitados | 1800s |
 | `ensure_opaque_gateway_token` | valida ou gera o token interno exclusivo do gateway sem imprimi-lo | 120s |
 | `stage_opaque_gateway` | para o Nginx legado e materializa o template opaco | 600s |
 | `create_project` | `generate_project.sh` | 1800s |
 | `duplicate_project` | `duplicate_project.sh` | 3600s |
 | `delete_project_containers` | `docker rm -f` dos containers do projeto | 300s |
+| `delete_project_storage` | revoga credenciais, remove tenant e namespace UUID do Storage global | 600s |
 | `delete_project_files` | `delete_project.sh` | 300s |
 | `rotate_keys` | `rotate_key.sh` | 900s |
 | `rename_project` | `rename_project.sh` (TERM grace de 240s p/ rollback) | 3600s |
-| `backup_project` | `backup_project.sh` (ponto de restauração frio: para os serviços do projeto, captura banco + storage em `servidor/backups/<uuid>/<id>/`, religa) | 1800s |
-| `restore_project` | `restore_project.sh` (cria ponto de segurança, troca banco e storage; TERM grace de 240s p/ rollback) | 3600s |
+| `backup_project` | `backup_project.sh` (captura banco + somente o namespace Storage do UUID) | 1800s |
+| `restore_project` | `restore_project.sh` (cria ponto de segurança, troca banco e somente o namespace do tenant; TERM grace de 240s p/ rollback) | 3600s |
 | `delete_restore_point` | remoção confinada do diretório do ponto | 120s |
 | `container_logs` | docker inspect + logs, saída sanitizada | 60s |
 
 Não existe comando que aceite argv, path ou SQL arbitrário. Os comandos de
 ponto de restauração recebem apenas UUIDs validados nos dois lados; o path resolvido fica confinado a `servidor/backups/<tenant_uuid>/`, onde o
 `tenant_uuid` é recebido do control plane e precisa coincidir com o
-`PROJECT_UUID` do `.env`. Em projetos novos ele equivale a `projects.id`; o
-mapeamento separado existe para preservar projetos legados. Criar um ponto frio
+`PROJECT_UUID` do `.env`. Em projetos novos ele equivale a `projects.id`;
+instalações anteriores são convertidas uma vez e passam pelo mesmo contrato,
+sem caminho alternativo no runtime. Criar um ponto frio
 (`backup_project`) exige admin do projeto, owner ou admin global. Restaurar e
 excluir pontos (`PROJECT_OWNER_COMMANDS`) exigem owner ou admin global.
 

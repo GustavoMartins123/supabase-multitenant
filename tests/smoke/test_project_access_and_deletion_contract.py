@@ -47,8 +47,10 @@ class ProjectAccessAndDeletionContractTest(unittest.TestCase):
         function_source = ast.get_source_segment(self.source, function) or ""
         terminate_at = function_source.index("terminate_supavisor_pools(")
         delete_tenant_at = function_source.index("delete_supavisor_tenant(")
+        delete_storage_at = function_source.index('"delete_project_storage"')
         drop_database_at = function_source.index("drop_database_force(")
 
+        self.assertLess(delete_storage_at, drop_database_at)
         self.assertLess(terminate_at, delete_tenant_at)
         self.assertLess(delete_tenant_at, drop_database_at)
         self.assertIn("drain_database_connections", function_source)
@@ -67,6 +69,7 @@ class ProjectAccessAndDeletionContractTest(unittest.TestCase):
             "delete_realtime_tenant",
         ):
             self.assertNotIn(f'\"{removed_command}\"', self.host_protocol_source)
+        self.assertIn('"delete_project_storage"', self.host_protocol_source)
 
     def test_final_verification_includes_supavisor_metadata(self) -> None:
         function = self.function("_delete_project_impl")

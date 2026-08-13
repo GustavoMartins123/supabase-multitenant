@@ -110,7 +110,7 @@ class KeyGenerationContractTest(unittest.TestCase):
         setup = (ROOT / "setup.sh").read_text(encoding="utf-8")
         self.assertIn(
             "chmod 600 servidor/.env servidor/.analytics.env "
-            "studio/.env studio/.analytics.env",
+            "servidor/.storage.env studio/.env studio/.analytics.env",
             setup,
         )
         for script_name in {

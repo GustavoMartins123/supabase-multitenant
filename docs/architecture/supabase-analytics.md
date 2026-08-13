@@ -69,10 +69,12 @@ O Vector nao monta o Docker socket nem consulta a API Docker. Os servicos usam
 o logging driver `fluentd` com conexao assincrona; o daemon envia os eventos ao
 source `fluent` do Vector. O bind padrao e `127.0.0.1:24224` no node servidor.
 
-As fontes continuam globais e usam os nomes single-tenant esperados pelo
-Logflare. Para Auth, PostgREST, Storage e Nginx, o Vector extrai o ref do sufixo
-do container e grava o valor tanto em `project` quanto em
-`metadata.tenant_project`. Para PostgreSQL, que e compartilhado, o ref e extraido
+As fontes continuam globais e usam os nomes esperados pelo Logflare. Para Auth,
+PostgREST e Nginx, o Vector extrai o ref do sufixo do container. Para o Storage
+global, ele analisa o JSON estruturado do upstream, valida `tenantId` como UUID
+e registra também request ID, operação, método e path; evento sem UUID válido
+permanece global e nunca é atribuído por aproximação. Para PostgreSQL, que é
+compartilhado, o ref é extraído
 do database `_supabase_<project_ref>` presente no `log_line_prefix`. Assim, a
 consulta de um projeto retorna somente seus containers dedicados e as linhas do
 seu database.
@@ -94,8 +96,9 @@ O Vector usa os nomes de fonte esperados pelo Logs Explorer:
 - `postgres.logs`;
 - `cloudflare.logs.prod` para os Nginx de projeto e gateways globais.
 
-Auth, PostgREST, Storage e Nginx usam o sufixo do container. O banco compartilhado
-usa o nome do database registrado no prefixo da linha. Realtime usa um
+Auth, PostgREST e Nginx usam o sufixo do container. Storage usa o tenant UUID do
+evento estruturado. O banco compartilhado usa o nome do database registrado no
+prefixo da linha. Realtime usa um
 `external_id` UUID estavel, e Edge Functions, Supavisor, API interna e
 Postgres-Meta tambem sao compartilhados; linhas desses servicos que nao carregam
 um ref verificavel permanecem classificadas como globais em vez de serem

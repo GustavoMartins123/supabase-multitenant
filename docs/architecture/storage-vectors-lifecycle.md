@@ -1,107 +1,187 @@
-# Storage Vectors lifecycle
+# Storage compartilhado, S3 e Storage Vectors
 
-## Ownership
+## Contrato upstream adotado
 
-Storage Vectors is part of the project lifecycle. It is not an optional manual
-bootstrap performed after project creation.
+A implementacao usa sem patches o modo multi-tenant oficial do
+`supabase/storage-api:v1.61.12`. A referencia foi conferida na tag
+`v1.61.12` do repositorio upstream, nao apenas no HEAD.
 
-The implementation is split by responsibility:
+O servico global usa:
 
-- `servidor/volumes/db/create_template.sh`
-  - installs and validates pgvector before `_supabase_template` is created;
-  - guarantees every database created from the template has pgvector.
-- `servidor/generateProject/lib/vector_lifecycle.sh`
-  - owns shared validation, SigV4 generation, Storage health checks, wrapper
-    cleanup and wrapper reconciliation.
-- `servidor/generateProject/operations/setup_vector_bucket_wrapper.sh`
-  - owns the idempotent setup of one bucket's S3 Vectors FDW;
-  - is called by duplicate/rename reconciliation;
-  - represents an operation, not a second project bootstrap path.
-- `generate_project.sh`, `duplicate_project.sh` and `rename_project.sh`
-  - remain stable public entrypoints used by the Projects API;
-  - delegate to implementations under `lib/`.
+- `MULTI_TENANT=true`;
+- `DATABASE_MULTITENANT_URL` para o registry dedicado `_supabase_storage`;
+- `SERVER_ADMIN_API_KEYS` e a Admin API na porta interna 5001;
+- `AUTH_ENCRYPTION_KEY` para cifrar os campos sensiveis do registry;
+- `REQUEST_X_FORWARDED_HOST_REGEXP` para extrair um UUID de tenant;
+- `STORAGE_BACKEND=file` e `TenantLocation`;
+- `VECTOR_BUCKET_PROVIDER=pgvector`;
+- um unico `IMGPROXY_URL` interno.
 
-Tests live under `tests/smoke/`; no test or migration script is generated inside a
-project directory.
+A Admin API nao e publicada no host. O lifecycle a chama por `docker exec`,
+le a chave apenas dentro do container e nunca a inclui em argv, arquivos de
+projeto, respostas publicas ou logs.
 
-## Create
+## Identidade e localizacao fisica
 
-A clean Postgres initialization installs pgvector before creating
-`_supabase_template`. Project creation then:
+O Storage tenant ID e o `tenant_uuid` imutavel, persistido em `projects.id` e
+materializado como `PROJECT_UUID`. O `project_ref` nao e usado como identidade
+de objetos porque muda em rename.
 
-1. creates `_supabase_<project>` from the validated template;
-2. generates an exclusive SigV4 access/secret pair;
-3. renders that pair into the project's `.env` with mode `0600`;
-4. starts the tenant Storage API with the pgvector provider;
-5. waits for Storage health and calls the real `ListVectorBuckets` endpoint;
-6. rolls back containers, tenants, database and files if validation fails.
-
-No wrapper exists yet because wrapper names depend on a vector bucket name.
-
-## Install wrapper from Studio
-
-The upstream Studio uses the fixed endpoint `/api/get-s3-keys`. OpenResty resolves
-the tab's project from the URL (`X-Studio-Project-Ref`) and internally routes the
-request to:
+Na versao adotada, `TenantLocation` forma a chave fisica como:
 
 ```text
-/api/projects/<project>/storage/s3-keys
+<tenant_uuid>/<bucket_id>/<object_name>
 ```
 
-The Projects API requires project-admin or global-admin access and returns only
-the selected project's SigV4 pair with `Cache-Control: no-store`.
-
-When Studio submits its wrapper SQL through postgres-meta, the compatibility
-layer replaces the single-node `host.docker.internal` endpoint only for SQL that
-contains both `s3_vectors_fdw_handler` and `s3_vectors_fdw_validator`. The final
-FDW endpoint is:
+Com `STORAGE_FILE_BACKEND_PATH=/var/lib/storage` e
+`STORAGE_S3_BUCKET=objects`, o host guarda:
 
 ```text
-http://supabase-storage-<project>:5000/vector
+servidor/volumes/storage/objects/<tenant_uuid>/<bucket_id>/<object_name>
 ```
 
-Normal SQL queries are not modified.
+Os helpers de lifecycle aceitam apenas UUID canonico em minusculas, resolvem a
+raiz real, rejeitam symlinks e validam archives antes de extrair. Nao existe
+tenant padrao e uma identidade ausente ou desconhecida falha.
 
-## Duplicate
+## Resolucao HTTP do tenant
 
-A clone never reuses the original project's SigV4 credentials.
+Cada Nginx de projeto conhece o UUID renderizado no seu proprio arquivo e
+sempre sobrescreve o valor recebido do cliente:
 
-- a new pair is generated for the clone;
-- copied S3 Vectors FDWs and their Vault secrets are removed from the cloned DB;
-- vector data follows the selected copy mode;
-- after the cloned Storage is healthy, wrappers are recreated only for buckets
-  returned by the clone's real `ListVectorBuckets` response;
-- temporary dumps use `mktemp` and are removed by traps;
-- failed clones remove their containers, Realtime/Supavisor tenants, database,
-  directory and temporary files.
+```nginx
+proxy_set_header X-Forwarded-Host "<tenant_uuid>.storage.internal";
+```
 
-## Rename
+O Storage aceita somente hosts que casam integralmente com o regexp de UUID.
+Assim, `X-Forwarded-Host`, `Host` ou qualquer suposto header de tenant enviado
+pelo cliente nao permite selecionar outro projeto.
 
-Rename preserves the project's SigV4 pair because it is the same tenant. The
-project database is renamed and the Storage container DNS name changes. After
-the new Storage is healthy, every existing vector-bucket wrapper is reconciled so
-its `endpoint_url` points to the new tenant container. Rollback restores the old
-name and rebinds wrappers to the old endpoint when necessary.
-
-## Rotate and delete
-
-JWT key rotation does not rotate or erase SigV4 credentials. SigV4 is independent
-from `anon` and `service_role` JWTs.
-
-Project deletion already removes the complete project database and project
-directory. The pgvector tables, FDWs and Vault secrets are database-owned, so they
-are deleted with the database; file-backed Storage data and the project `.env`
-are deleted with the project directory.
-
-## Removed compatibility paths
-
-The old root-level scripts below were removed to avoid two competing bootstrap
-flows:
+O fluxo de chave opaca permanece:
 
 ```text
-servidor/generateProject/enable_vector_storage.sh
-servidor/generateProject/setup_vector_bucket_wrapper.sh
+sb_publishable / sb_secret
+  -> Nginx do projeto
+  -> key-authorizer vinculado ao project_ref
+  -> JWT anon/service_role interno daquele projeto
+  -> Storage global com X-Forwarded-Host sobrescrito
 ```
 
-There is one lifecycle path for create/duplicate/rename and one organized,
-idempotent per-bucket operation under `operations/`.
+O JWT secret, anon key e service key ficam cifrados no registry de cada tenant.
+Nao ha JWT global usado como substituto. Uma chave opaca de A nao e resolvida
+pelo gateway de B e um JWT de A nao valida contra o segredo de B.
+
+## Database e migrations por tenant
+
+O registro do tenant contem duas URLs:
+
+- direta: `supabase_storage_admin` em `_supabase_<project_ref>`;
+- pool: `supabase_storage_admin.<project_ref>` no Supavisor.
+
+Create, duplicate, rename e restore concedem acesso a
+`supabase_storage_admin`, fixam `search_path=storage,public` e validam pgvector.
+O lifecycle registra ou atualiza essas URLs pela Admin API. Rename altera apenas
+as URLs; o tenant UUID e o namespace de objetos permanecem iguais.
+
+As migrations sao executadas pelo endpoint oficial
+`POST /tenants/<uuid>/migrations`. O lifecycle espera
+`migrationsStatus=COMPLETED` e `isLatest=true`. O Storage upstream serializa a
+migration por tenant; projetos diferentes nao precisam de um lock global.
+
+## Credenciais S3/SigV4
+
+Cada tenant recebe pela Admin API oficial uma credencial propria:
+
+```text
+POST /s3/<tenant_uuid>/credentials
+```
+
+O access key e o secret retornados sao gravados apenas no `.env` 0600 do
+projeto e nos Vault secrets dos wrappers. No registry, o secret e cifrado com
+`AUTH_ENCRYPTION_KEY`.
+
+Na verificacao de uma assinatura, o upstream chama
+`getS3CredentialsByAccessKey(tenantId, accessKey)`. Portanto o mesmo access key
+so e pesquisado dentro do tenant ja resolvido pelo host. Credencial A com host
+de B falha; nao existe busca global nem credencial substituta.
+
+Para `/storage/v1/s3`, o cliente assina o host e path publicos. O Nginx:
+
+- preserva `Host`, que faz parte da assinatura canonica;
+- reescreve a rota interna para `/s3`;
+- informa o prefixo publico confiavel em `X-Forwarded-Prefix`;
+- sobrescreve `X-Forwarded-Host` exclusivamente para resolver o tenant.
+
+## Storage Vectors
+
+Storage Vectors usa o mesmo par SigV4 do S3 Protocol, mas o service da
+assinatura e `s3vectors`. O provider `pgvector` grava metadata e tabelas no
+database do proprio projeto.
+
+O FDW de cada projeto aponta para seu Nginx:
+
+```text
+http://supabase-nginx-<project_ref>:8080/vector
+```
+
+O wrapper assina o `Host` desse endpoint. O Nginx preserva esse host canonico e
+injeta o UUID imutavel em `X-Forwarded-Host`. Desse modo o endpoint pode mudar
+no rename sem alterar a identidade do tenant. O lifecycle reconcilia os
+`endpoint_url` depois de duplicate, rename e restore.
+
+O nome fisico de uma tabela pgvector inclui um hash calculado pelo upstream a
+partir de bucket, tenant e index. Um clone `with-data` renomeia essas tabelas em
+transacao para hashes do novo UUID. O clone tambem remove FDWs e Vault secrets
+copiados, cria credenciais novas e recria wrappers somente para seus proprios
+Vector Buckets. `schema-only` cria namespace e metadata vazios.
+
+## Create e validacao
+
+Create executa, na ordem relevante:
+
+1. cria e valida o database;
+2. registra Realtime e Supavisor;
+3. cria o namespace fisico exclusivo;
+4. registra o tenant pela Admin API;
+5. cria a credencial SigV4;
+6. renderiza apenas Auth, PostgREST, Nginx e Postgres-Meta do projeto;
+7. sobe esses containers;
+8. valida migrations, health do tenant, consulta JWT ao database, S3 SigV4,
+   `ListVectorBuckets` e o caminho real pelo Nginx com um header hostil.
+
+Qualquer falha encerra o job e aciona rollback compensatorio. O Storage global
+nao e reiniciado e nenhum container local e iniciado.
+
+## Settings
+
+`FILE_SIZE_LIMIT`, transformacao de imagem, S3 Protocol, Vector Buckets e os
+limites de Vector sao campos do tenant. `apply_storage_settings.sh` envia um
+`PATCH /tenants/<uuid>` e valida o tenant real. Apenas o Nginx do projeto e
+recriado quando seu limite de body precisa mudar; Storage e imgproxy globais nao
+sao reiniciados por settings de projeto.
+
+## Backup, restore e delete
+
+Backup desconecta somente o pool Storage do tenant, para os containers do
+projeto e arquiva somente o conteudo do seu namespace. O manifest formato 2
+vincula `project_uuid`, `storage_tenant_id` e `storage_layout=tenant-namespace`.
+
+Restore rejeita manifests de outro UUID e archives com path absoluto,
+`..`, symlink ou tipo especial. O namespace atual e movido para staging
+transacional, somente o namespace solicitado e extraido, migrations sao
+reexecutadas e wrappers sao reconciliados. Outros tenants permanecem intactos.
+
+Delete revoga todas as credenciais pela Admin API, remove o tenant do registry
+e somente depois remove o diretorio validado daquele UUID. O database do projeto
+so e removido depois dessa etapa concluir.
+
+## Testes
+
+- `test_shared_storage_architecture_contract.py` protege topologia, roteamento,
+  lifecycle, migration e ausencia de caminhos antigos sem precisar de Docker;
+- `test_shared_storage_tenant_integration.py` e opt-in e executa a matriz ativa
+  de dois tenants: objetos privados, mesmos nomes de bucket, opaque keys,
+  SigV4 cruzado, Vectors, limites, imagens, clones, rename, backup/restore,
+  delete, tenant ausente, header hostil e indisponibilidade global.
+
+Nao ha bootstrap alternativo, tenant default ou fallback para Storage local.

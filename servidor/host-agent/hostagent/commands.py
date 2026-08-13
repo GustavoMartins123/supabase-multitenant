@@ -773,9 +773,7 @@ async def handle_delete_project_files(ctx: CommandContext, project: str, args: d
         [project],
         error_code="delete_files_failed",
     )
-    tenant_uuid = str(
-        args.get("tenant_uuid") or args.get("project_uuid") or ""
-    ).strip()
+    tenant_uuid = str(args["tenant_uuid"]).strip()
     if outcome.status == "done" and tenant_uuid:
         removed = await _remove_backup_tree(
             resolve_backup_project_dir(ctx.config.backups_root, tenant_uuid)
@@ -788,9 +786,7 @@ async def handle_delete_project_storage(
     ctx: CommandContext, project: str, args: dict[str, Any]
 ) -> CommandOutcome:
     resolve_project_dir(ctx.config.projects_root, project, must_exist=True)
-    tenant_uuid = str(
-        args.get("tenant_uuid") or args.get("project_uuid") or ""
-    ).strip()
+    tenant_uuid = str(args["tenant_uuid"]).strip()
     outcome, _ = await _run_lifecycle_script(
         ctx,
         "delete_storage_tenant.sh",

@@ -124,6 +124,20 @@ class RestorePointScriptsTest(unittest.TestCase):
         self.assertIn("--exclude-schema=realtime", source)
         self.assertIn("manifest.json", source)
         self.assertIn("storage.tar.gz", source)
+        self.assertIn('storage_namespace="$(storage_assert_namespace_target "$PROJECT_UUID")"', source)
+        self.assertIn('storage_layout: "tenant-namespace"', source)
+        self.assertNotIn('project_dir/storage', source)
+
+    def test_restore_swaps_only_the_requested_tenant_namespace(self) -> None:
+        source = (SCRIPTS_ROOT / "lib" / "restore_project_impl.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('STORAGE_TARGET="$(storage_assert_namespace_target "$PROJECT_UUID")"', source)
+        self.assertIn(
+            'storage_extract_namespace_archive "$PROJECT_UUID" "$SRC_DIR/storage.tar.gz"',
+            source,
+        )
+        self.assertIn('MANIFEST_UUID" == "$PROJECT_UUID', source)
 
     def test_backup_emits_progress_for_real_capture_stages(self) -> None:
         core = (SCRIPTS_ROOT / "lib" / "backup_core.sh").read_text(encoding="utf-8")

@@ -37,8 +37,8 @@ flowchart TB
 
     ProjectNginx --> Auth[GoTrue]
     ProjectNginx --> Rest[PostgREST]
-    ProjectNginx --> Storage[Storage]
-    ProjectNginx --> ImgProxy[ImgProxy]
+    ProjectNginx --> Storage[Storage global\nmulti-tenant]
+    Storage --> ImgProxy[imgproxy global]
     ProjectNginx --> Functions[Edge Functions global]
     ProjectNginx --> Realtime
 
@@ -81,8 +81,8 @@ Responsável por atender as aplicações dos projetos:
 - Traefik recebe as rotas públicas;
 - Nginx do projeto delega a validação da chave opaca ao `key-authorizer`,
   traduz o papel para um JWT interno e encaminha cada rota;
-- GoTrue, PostgREST, Storage e ImgProxy rodam por projeto;
-- Realtime, Supavisor e Edge Functions são compartilhados;
+- GoTrue, PostgREST e Nginx rodam por projeto;
+- Storage, imgproxy, Realtime, Supavisor e Edge Functions são compartilhados;
 - os dados ficam no database `_supabase_<project_ref>`.
 
 O tráfego externo não precisa passar pelo Studio. Aplicações acessam diretamente:
@@ -102,10 +102,11 @@ O sistema não usa um único identificador para todas as finalidades.
 | Conceito | Exemplo | Regra |
 | --- | --- | --- |
 | UUID canônico (`projects.id`) | `0df3...` | não muda durante rename |
-| UUID do tenant (`projects.tenant_uuid`) | `0df3...` | igual ao canônico em projetos novos; preservado no legado |
+| UUID do tenant (`projects.tenant_uuid`) | `0df3...` | identidade imutável de Realtime, Storage e backups |
 | project ref | `cliente_a` | slug usado na URL e nos arquivos |
 | database | `_supabase_cliente_a` | acompanha o project ref |
 | Realtime `external_id` | UUID do tenant | usado para resolver o JWT secret do tenant |
+| Storage tenant ID | UUID do tenant | namespace e configuração imutáveis |
 | Supavisor `external_id` | project ref | usado no sufixo do usuário do pooler |
 | slot principal do CDC | sufixado pelo project ref | acompanha o database físico |
 | slot temporário de broadcast | hash derivado do UUID | permanece estável durante rename |
@@ -116,7 +117,10 @@ O Nginx do projeto injeta o UUID no header `Host` das conexões WebSocket do Rea
 Host: <tenant_uuid>.localhost
 ```
 
-O `tenant_uuid` identifica o tenant. O project ref continua identificando recursos físicos que precisam ser renomeados, como database, diretório, containers, tenant do Supavisor e slot principal.
+O `tenant_uuid` identifica os tenants do Realtime e do Storage. O project ref
+continua identificando recursos que precisam ser renomeados, como database,
+diretório, containers, tenant do Supavisor e slot principal. Objetos do Storage
+não mudam de namespace em um rename.
 
 O control plane persiste o vínculo externo em `projects.tenant_uuid`. Para
 projetos novos, `tenant_uuid = projects.id`; projetos legados preservam o
@@ -131,6 +135,7 @@ Um único cluster hospeda:
 
 - database `postgres` do control plane;
 - database `_supabase_template`;
+- database `_supabase_storage`, registry cifrado do Storage multi-tenant;
 - um database `_supabase_<project_ref>` por projeto;
 - schemas internos do Realtime e Supavisor;
 - database `_supabase`, com schema `_analytics`, para o backend minimo do Logflare;
@@ -159,6 +164,26 @@ O Realtime foi modificado para:
 - impedir fallback global quando uma requisição já identifica um tenant.
 
 Detalhes: [Autenticação multi-tenant no Realtime](09-autenticacao-multi-tenant-realtime.md).
+
+### Storage e imgproxy
+
+Existe um único `supabase-storage-global` no modo multi-tenant oficial do
+Storage API v1.61.12 e um único `supabase-imgproxy-global`. Cada projeto é
+registrado pela Admin API como tenant independente, com database URL, pool URL,
+JWT secret, chaves internas, limites e feature flags próprios.
+
+O Nginx de cada projeto sobrescreve `X-Forwarded-Host` com
+`<tenant_uuid>.storage.internal`. O cliente não controla esse valor. O backend
+file usa o namespace oficial
+`objects/<tenant_uuid>/<bucket_id>/<object_name>`, de modo que buckets com o
+mesmo nome em projetos diferentes continuam fisicamente separados.
+
+O registry vive em `_supabase_storage`; campos sensíveis são cifrados pelo
+Storage com uma chave exclusiva de infraestrutura em `.storage.env`. A Admin
+API não publica porta no host e sua chave nunca entra em containers ou APIs de
+projeto.
+
+Detalhes: [Storage compartilhado, S3 e Storage Vectors](architecture/storage-vectors-lifecycle.md).
 
 ### Edge Functions
 
@@ -193,8 +218,6 @@ Cada projeto possui:
 - `supabase-nginx-<project_ref>`;
 - `supabase-auth-<project_ref>`;
 - `supabase-rest-<project_ref>`;
-- `supabase-storage-<project_ref>`;
-- `supabase-imgproxy-<project_ref>`;
 - diretório `servidor/projects/<project_ref>`;
 - database `_supabase_<project_ref>`.
 
@@ -204,8 +227,9 @@ O Nginx do projeto é o gateway interno. Ele:
 - preserva JWTs de sessão e injeta somente JWTs internos anon/service role;
 - trata CORS;
 - reescreve os paths esperados pelo Supabase;
-- encaminha Auth, REST, Storage, Functions e Realtime;
-- injeta o UUID do tenant no WebSocket do Realtime.
+- encaminha Auth, REST, Storage global, Functions e Realtime;
+- injeta o UUID do tenant no WebSocket do Realtime e no host encaminhado ao
+  Storage.
 
 ## Studio compartilhado
 
@@ -363,6 +387,8 @@ A topologia não deve ser representada por branches permanentes diferentes. A di
 - [Índice da documentação](README.md)
 - [Control plane](architecture/control-plane.md)
 - [Lifecycle dos projetos](architecture/project-lifecycle.md)
+- [Storage compartilhado, S3 e Storage Vectors](architecture/storage-vectors-lifecycle.md)
+- [Migração transitória do Storage](architecture/shared-storage-migration.md)
 - [OpenResty/Lua](architecture/openresty-lua.md)
 - [Realtime multi-tenant](09-autenticacao-multi-tenant-realtime.md)
 - [Hardening do Postgres-Meta](10-hardening-postgres-meta.md)

@@ -4,6 +4,8 @@ import pathlib
 import subprocess
 import unittest
 
+from tests.smoke.common import bash_path, git_compatible_bash
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 ENV_TEMPLATE = ROOT / "servidor/generateProject/.envtemplate"
 CREATE_TEMPLATE_SCRIPT = ROOT / "servidor/volumes/db/create_template.sh"
@@ -15,21 +17,22 @@ GENERATE_IMPL = ROOT / "servidor/generateProject/lib/generate_project_impl.sh"
 DUPLICATE_IMPL = ROOT / "servidor/generateProject/lib/duplicate_project_impl.sh"
 RENAME_IMPL = ROOT / "servidor/generateProject/lib/rename_project_impl.sh"
 API_DOCKERFILE = ROOT / "servidor/api-internal/Dockerfile"
+GLOBAL_COMPOSE = ROOT / "servidor/docker-compose.yml"
+STORAGE_LIBRARY = ROOT / "servidor/generateProject/lib/storage_multitenant.sh"
 
 
 class StorageVectorsBackendContractTests(unittest.TestCase):
     def test_project_template_enables_real_pgvector_backend(self) -> None:
         env = ENV_TEMPLATE.read_text(encoding="utf-8")
+        compose = GLOBAL_COMPOSE.read_text(encoding="utf-8")
 
-        self.assertIn("VECTOR_ENABLED=true", env)
-        self.assertIn("VECTOR_BUCKET_PROVIDER=pgvector", env)
-        self.assertIn("VECTOR_DATABASE_CREATE=false", env)
-        self.assertIn("VECTOR_STORE_MIGRATIONS_ENABLED=true", env)
-        self.assertIn(
-            "VECTOR_DATABASE_URL=postgres://${STORAGE_DB_USER}:${POSTGRES_PASSWORD}"
-            "@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DATABASE}",
-            env,
-        )
+        self.assertIn("VECTOR_BUCKETS_ENABLED=true", env)
+        self.assertIn("VECTOR_MAX_BUCKETS=10", env)
+        self.assertIn("VECTOR_MAX_INDEXES=20", env)
+        self.assertNotIn("VECTOR_DATABASE_URL", env)
+        self.assertIn("VECTOR_BUCKET_PROVIDER: pgvector", compose)
+        self.assertIn('VECTOR_DATABASE_CREATE: "false"', compose)
+        self.assertIn('VECTOR_STORE_MIGRATIONS_ENABLED: "true"', compose)
         self.assertIn("S3_PROTOCOL_ACCESS_KEY_ID={{s3_protocol_access_key_id}}", env)
         self.assertIn("S3_PROTOCOL_ACCESS_KEY_SECRET={{s3_protocol_access_key_secret}}", env)
 
@@ -54,21 +57,25 @@ class StorageVectorsBackendContractTests(unittest.TestCase):
 
     def test_generate_duplicate_and_rename_share_the_vector_contract(self) -> None:
         library = VECTOR_LIBRARY.read_text(encoding="utf-8")
+        storage_library = STORAGE_LIBRARY.read_text(encoding="utf-8")
         generate = GENERATE_IMPL.read_text(encoding="utf-8")
         duplicate = DUPLICATE_IMPL.read_text(encoding="utf-8")
         rename = RENAME_IMPL.read_text(encoding="utf-8")
 
-        self.assertIn("openssl rand -hex 16", library)
-        self.assertIn("openssl rand -hex 32", library)
+        self.assertIn("storage_create_s3_credentials", storage_library)
+        self.assertIn('POST "/s3/$tenant_id/credentials"', storage_library)
         self.assertIn("vector_wait_storage", library)
         self.assertIn("vector_validate_storage_api", library)
 
-        self.assertIn("unset S3_PROTOCOL_ACCESS_KEY_ID S3_PROTOCOL_ACCESS_KEY_SECRET", generate)
+        self.assertIn("storage_provision_tenant", generate)
+        self.assertIn("storage_create_s3_credentials", generate)
         self.assertIn("vector_validate_database", generate)
         self.assertIn("vector_validate_storage_api", generate)
 
-        self.assertIn("unset S3_PROTOCOL_ACCESS_KEY_ID S3_PROTOCOL_ACCESS_KEY_SECRET", duplicate)
+        self.assertIn("storage_provision_tenant", duplicate)
+        self.assertIn("storage_create_s3_credentials", duplicate)
         self.assertIn("vector_strip_copied_wrappers", duplicate)
+        self.assertIn("vector_rekey_physical_tables", duplicate)
         self.assertIn("vector_sync_project_wrappers", duplicate)
         self.assertNotIn("ALTER DATABASE current_database()", duplicate)
 
@@ -187,7 +194,9 @@ class StorageVectorsBackendContractTests(unittest.TestCase):
             RENAME_IMPL,
         )
         for script in scripts:
-            subprocess.run(["bash", "-n", str(script)], check=True)
+            subprocess.run(
+                [git_compatible_bash(), "-n", bash_path(script)], check=True
+            )
 
 
 if __name__ == "__main__":

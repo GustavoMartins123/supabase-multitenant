@@ -215,6 +215,8 @@ for command in docker jq openssl python3 sed; do command -v "$command" >/dev/nul
 for template in nginxtemplate .envtemplate dockercomposetemplate poolertemplate Dockerfile .dockerignore; do
   [[ -f "$SCRIPT_DIR/$template" ]] || die "Template ausente: $template"
 done
+[[ -f "$SCRIPT_DIR/render_project_env.py" ]] \
+  || die "Renderizador canonico de ambiente ausente"
 for file in .env docker-compose.yml Dockerfile pooler/pooler.exs; do
   [[ -f "$OLD_DIR/$file" ]] || die "Arquivo do projeto ausente: $file"
 done
@@ -396,7 +398,7 @@ jq -cn \
     s3_protocol_credential_id:$s3_protocol_credential_id,
     s3_protocol_access_key_id:$s3_protocol_access_key_id,
     s3_protocol_access_key_secret:$s3_protocol_access_key_secret}' \
-  | python3 "$SCRIPT_DIR/render_migrated_project_env.py" \
+  | python3 "$SCRIPT_DIR/render_project_env.py" \
     "$SCRIPT_DIR/.envtemplate" "$NEW_DIR/.env" "$NEW_DIR/.env"
 template_to_file "$SCRIPT_DIR/dockercomposetemplate" "$NEW_DIR/docker-compose.yml"
 template_to_file "$SCRIPT_DIR/poolertemplate" "$NEW_DIR/pooler/pooler.exs"

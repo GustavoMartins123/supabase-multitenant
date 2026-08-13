@@ -172,13 +172,9 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
         if args.get("trigger") not in {"manual", "automatic"}:
             errors.append("invalid_rotation_trigger")
     elif command in {"delete_project_storage", "delete_project_files"}:
-        reject_unknown({"tenant_uuid", "project_uuid"})
-        if "tenant_uuid" in args and not is_valid_uuid(args.get("tenant_uuid")):
+        reject_unknown({"tenant_uuid"})
+        if not is_valid_uuid(args.get("tenant_uuid")):
             errors.append("invalid_tenant_uuid")
-        if "project_uuid" in args and not is_valid_uuid(args.get("project_uuid")):
-            errors.append("invalid_project_uuid")
-        if "tenant_uuid" in args and "project_uuid" in args:
-            errors.append("duplicate_tenant_identity")
     elif command == "recreate_services":
         reject_unknown({"services"})
         services = args.get("services")

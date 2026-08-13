@@ -302,12 +302,15 @@ Confirme se a duplicação foi `schema-only` ou `with-data`.
 No modo com dados, valide:
 
 - registros em `storage.objects`;
-- arquivos no diretório do projeto;
+- arquivos em `servidor/volumes/storage/objects/<tenant_uuid>` do clone, nunca
+  no namespace da origem;
 - ownership e permissões;
 - extended attributes quando usados pela versão atual do Storage;
 - histórico de migrations de Auth e Storage.
 
-Não copie apenas o database e espere que os objetos físicos apareçam.
+Confira também que o clone recebeu tenant e credencial SigV4 próprios e que as
+tabelas físicas de Vector foram reidentificadas. Não copie apenas o database e
+espere que os objetos físicos apareçam.
 
 ## 11. Usuário não consegue entrar no Studio
 

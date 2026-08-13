@@ -225,7 +225,9 @@ class ProjectFileSizeLimitTest(unittest.TestCase):
 
         cls.get_limit = staticmethod(get_project_file_size_limit)
 
-    def test_limit_is_read_server_side_and_has_a_safe_default(self) -> None:
+    def test_limit_is_read_server_side_and_missing_config_fails_closed(self) -> None:
+        from fastapi import HTTPException
+
         root = pathlib.Path("/projects")
         with mock.patch(
             "app.project_settings.dotenv_values",
@@ -241,10 +243,17 @@ class ProjectFileSizeLimitTest(unittest.TestCase):
             "app.project_settings.dotenv_values",
             side_effect=OSError("missing"),
         ):
-            self.assertEqual(
-                self.get_limit("missing", projects_root=root),
-                "524288000",
-            )
+            with self.assertRaises(HTTPException) as context:
+                self.get_limit("missing", projects_root=root)
+            self.assertEqual(context.exception.status_code, 409)
+
+        with mock.patch(
+            "app.project_settings.dotenv_values",
+            return_value={"FILE_SIZE_LIMIT": "invalid"},
+        ):
+            with self.assertRaises(HTTPException) as context:
+                self.get_limit("invalid", projects_root=root)
+            self.assertEqual(context.exception.status_code, 409)
 
 
 if __name__ == "__main__":

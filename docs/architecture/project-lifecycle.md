@@ -14,6 +14,7 @@ Antes de acompanhar qualquer fluxo, diferencie:
 - `project_ref`: slug mutável usado em URL e recursos físicos;
 - `_supabase_<project_ref>`: database;
 - Realtime tenant: identificado pelo UUID;
+- Storage tenant: identificado pelo `tenant_uuid` imutável;
 - Supavisor tenant: identificado pelo project ref;
 - slot principal do CDC: sufixado pelo project ref;
 - slot temporário de broadcast: sufixado por hash derivado do UUID.
@@ -28,12 +29,15 @@ Fluxo resumido:
 4. o script gera JWT secret, JWTs internos anon/service role, config token e
    token exclusivo do gateway opaco;
 5. cria `_supabase_<project_ref>` a partir de `_supabase_template`;
-6. gera `.env`, compose, Dockerfile e configuração Nginx;
-7. registra o tenant do Realtime com `external_id = tenant_uuid`;
-8. registra o tenant do Supavisor com `external_id = project_ref`;
-9. sobe os containers;
-10. persiste os segredos criptografados no registro do projeto;
-11. atualiza status e auditoria.
+6. registra o tenant do Realtime com `external_id = tenant_uuid`;
+7. registra o tenant do Supavisor com `external_id = project_ref`;
+8. cria o namespace físico e registra o tenant no Storage global pela Admin API;
+9. cria credenciais S3/SigV4 exclusivas do tenant;
+10. gera `.env`, compose, Dockerfile e configuração Nginx sem Storage ou
+    imgproxy locais;
+11. sobe Auth, PostgREST, Nginx e Postgres-Meta do projeto;
+12. valida migrations, database, JWT, S3, Vectors e o roteamento do tenant real;
+13. persiste os segredos criptografados no registro do projeto e conclui o job.
 
 O JWT usa o UUID como issuer:
 
@@ -51,6 +55,7 @@ O nome do database e do slot principal continua usando o project ref. O slot tem
 O script mantém estado dos recursos criados e tenta remover, na ordem necessária:
 
 - diretórios;
+- tenant, credenciais e namespace do Storage;
 - database;
 - tenant do Realtime;
 - tenant do Supavisor.
@@ -72,10 +77,16 @@ Mesmo quando os dados são copiados, a identidade do projeto novo é independent
 - novo issuer JWT;
 - novo tenant Realtime;
 - novo tenant Supavisor;
+- novo tenant e namespace Storage;
+- novas credenciais S3/SigV4;
 - novas API keys;
 - novo config token.
 
-A cópia não deve reutilizar segredos do projeto de origem.
+A cópia não reutiliza segredos nem objetos por referência. `schema-only` cria
+namespace vazio. `with-data` captura a origem com seus serviços parados e pool
+Storage desconectado, copia os arquivos para o UUID novo, reidentifica as
+tabelas físicas de Vector e remove FDWs/Vault secrets copiados antes de criar
+credenciais novas.
 
 ## Rename
 
@@ -101,6 +112,8 @@ Recursos que permanecem com a mesma identidade:
 - notas, tags, hints e threads;
 - auditoria;
 - Realtime `external_id`;
+- Storage tenant ID e namespace de objetos;
+- credenciais S3/SigV4;
 - slot temporário de broadcast derivado do UUID;
 - chaves JWT, salvo quando outra operação de rotação for solicitada.
 
@@ -125,6 +138,14 @@ Se houver falha depois da remoção, o rollback tenta restaurar o tenant antigo.
 ### Realtime
 
 O tenant continua identificado pelo UUID. O rename atualiza os recursos ligados ao database, incluindo slot principal e configuração da extensão CDC, sem trocar o `external_id` canônico.
+
+### Storage
+
+O pool do tenant é desconectado antes do rename do database. Depois do rename,
+o lifecycle atualiza `databaseUrl` e `databasePoolUrl` pela Admin API, executa as
+migrations oficiais e valida o mesmo tenant UUID pelo novo Nginx. Nenhum objeto
+é movido; apenas endpoints de wrappers Vector que contêm o project ref são
+reconciliados.
 
 ### Snippets
 
@@ -223,32 +244,37 @@ Exemplos:
 
 - Auth para opções do GoTrue;
 - REST para schemas e pool do PostgREST;
-- Storage e Nginx para limite de arquivo;
-- Storage para transformação de imagens.
+- tenant Storage e Nginx para limite de arquivo;
+- tenant Storage para transformação de imagens, S3 Protocol e Vector Buckets.
 
-A recriação é executada como job idempotente conhecido.
+A atualização de Storage envia `PATCH /tenants/<tenant_uuid>` e não reinicia o
+Storage ou imgproxy globais. A recriação do Nginx continua sendo um job
+idempotente quando sua configuração local muda.
 
 ## Pontos de restauração
 
 Um ponto de restauração captura **dados, não identidade**: o dump do
 database `_supabase_<project_ref>` (sem o schema `realtime`, que é
-capturado à parte como no duplicate) e o tar do diretório `storage/`,
-mais um `manifest.json` com UUID, ref na época, versão do Postgres e as
-tabelas da publication do Realtime.
+capturado à parte como no duplicate) e o tar somente de
+`volumes/storage/objects/<tenant_uuid>/`. O `manifest.json` formato 2 inclui
+UUID, Storage tenant ID, layout, ref na época, versão do Postgres e as tabelas
+da publication do Realtime.
 
 Ficam fora do ponto: `.env`, JWT secret, anon/service keys, config token,
 tenants do Realtime/Supavisor e configuração de containers. Por isso um
 ponto continua restaurável depois de rotação de chaves e de rename — os
 arquivos vivem em `servidor/backups/<tenant_uuid>/<point_id>/`, chaveados
 pelo `tenant_uuid` persistido no control plane e espelhado em `PROJECT_UUID`
-no `.env` do projeto (imutável no rename).
+no `.env` do projeto (imutável no rename). Um backup nunca percorre a raiz
+global nem inclui o namespace de outro tenant.
 
 ### Captura (fria)
 
 O backup é frio por decisão de produto: o script para os serviços do
 projeto (o Postgres compartilhado continua de pé), encerra os pools do
-tenant no Supavisor, captura banco + storage de forma atômica
-(`<id>.tmp` + rename) e religa somente os containers que estavam rodando.
+tenant no Supavisor e no Storage, captura banco + namespace de forma atômica
+(`<id>.tmp` + rename), reconecta o tenant e religa somente os containers que
+estavam rodando.
 
 ### Restauração
 
@@ -263,10 +289,12 @@ tenant no Supavisor, captura banco + storage de forma atômica
    (com as tabelas do manifest), `TRUNCATE realtime.subscription`,
    `search_path`, override do `supabase_storage_admin`, grants e validação
    do contrato pgvector;
-5. recria o slot principal, troca o diretório `storage/`
-   (`storage.prerestore` como fallback), religa os containers, espera o
-   Storage ficar healthy e sincroniza os wrappers vetoriais;
-6. só então remove `_supabase_<ref>_prerestore` e `storage.prerestore`.
+5. recria o slot principal e troca somente o namespace do UUID por staging
+   transacional; o archive é rejeitado se tiver path absoluto, `..`, symlink
+   ou tipo especial;
+6. reconecta o tenant, executa migrations oficiais, religa os containers,
+   valida JWT/S3/Vectors pelo tenant real e sincroniza os wrappers vetoriais;
+7. só então remove `_supabase_<ref>_prerestore` e o staging do namespace.
 
 Falhas disparam rollback compensatório com marker `ROLLBACK_COMPLETE`,
 como no rename. O ponto de segurança sobrevive à falha e vira um ponto
@@ -308,17 +336,16 @@ Fluxo atual:
 1. valida admin global e consome um grant de step-up de uso único, vinculado à
    sessão, ação e projeto;
 2. cria job de delete;
-3. remove ou encerra os pools do tenant no Supavisor;
-4. drena conexões ativas do database;
-5. confirma que o pooler não continua reconectando;
-6. remove containers do projeto;
-7. limpa tenant e extensões do Realtime;
-8. remove replication slots;
-9. remove o database;
-10. limpa tenant e usuários do Supavisor;
-11. remove registros do control plane;
-12. remove diretório físico;
-13. valida o resultado e registra auditoria.
+3. remove os containers do projeto;
+4. revoga credenciais, remove o tenant do registry Storage e apaga somente o
+   namespace validado daquele UUID;
+5. remove ou encerra os pools do tenant no Supavisor;
+6. limpa tenant e extensões do Realtime e metadata do Supavisor;
+7. drena conexões ativas do database e confirma que o pooler não reconecta;
+8. remove replication slots e database;
+9. remove registros do control plane;
+10. remove diretório do projeto e backups do mesmo tenant UUID;
+11. valida o resultado e registra auditoria.
 
 ### Proteção do database
 
@@ -331,7 +358,8 @@ Preservar um database ainda referenciado é mais seguro do que concluir uma dele
 Falhas de infraestrutura podem deixar:
 
 - containers;
-- tenant;
+- tenant Storage ou namespace do tenant;
+- tenants Realtime/Supavisor;
 - slot;
 - diretório;
 - registros centrais.
@@ -371,5 +399,8 @@ O job é marcado com erro de revisão manual, preservando:
 - `tests/smoke/test_service_key_cache_contract.py`
 - `tests/smoke/test_key_generation_contract.py`
 - `tests/smoke/test_project_telemetry.py`
+- `tests/smoke/test_shared_storage_architecture_contract.py`
+- `tests/smoke/test_shared_storage_tenant_integration.py` (opt-in, instalação
+  descartável)
 
 Os nomes dos testes podem evoluir; procure também por contratos de lifecycle em `tests/smoke/`.

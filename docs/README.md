@@ -10,9 +10,10 @@ A regra é simples: cada assunto deve ter uma fonte canônica. O `00-arquitetura
 2. [Control plane](architecture/control-plane.md)
 3. [Lifecycle dos projetos](architecture/project-lifecycle.md)
 4. [Host-agent](architecture/host-agent.md)
-5. [Arquitetura OpenResty/Lua](architecture/openresty-lua.md)
-6. [Supabase Analytics por projeto](architecture/supabase-analytics.md)
-7. [Autenticação multi-tenant no Realtime](09-autenticacao-multi-tenant-realtime.md)
+5. [Storage compartilhado, S3 e Storage Vectors](architecture/storage-vectors-lifecycle.md)
+6. [Arquitetura OpenResty/Lua](architecture/openresty-lua.md)
+7. [Supabase Analytics por projeto](architecture/supabase-analytics.md)
+8. [Autenticação multi-tenant no Realtime](09-autenticacao-multi-tenant-realtime.md)
 
 ## Instalação e configuração
 
@@ -34,6 +35,7 @@ A regra é simples: cada assunto deve ter uma fonte canônica. O `00-arquitetura
 ## Operação e troubleshooting
 
 - [Principais erros](05-principais-erros.md)
+- [Migração transitória para Storage compartilhado](architecture/shared-storage-migration.md)
 - A visão atual de jobs, recovery, rename e deleção fica em [Lifecycle dos projetos](architecture/project-lifecycle.md).
 - A visão atual de segredos, identidade, settings e colaboração fica em [Control plane](architecture/control-plane.md).
 
@@ -45,6 +47,8 @@ A regra é simples: cada assunto deve ter uma fonte canônica. O `00-arquitetura
 | API Python, schema central e autorização | `architecture/control-plane.md` |
 | criação, duplicação, rename, rotação e deleção | `architecture/project-lifecycle.md` |
 | execução física no host, HMAC, lease e comandos fechados | `architecture/host-agent.md` |
+| Storage multi-tenant, S3, Vectors e imgproxy | `architecture/storage-vectors-lifecycle.md` |
+| conversão única de instalações anteriores | `architecture/shared-storage-migration.md` |
 | módulos Lua, rewrites e cache de service key | `architecture/openresty-lua.md` |
 | Logflare, Vector, fontes e acesso aos logs | `architecture/supabase-analytics.md` |
 | JWT, UUID do tenant e replication slots | `09-autenticacao-multi-tenant-realtime.md` |

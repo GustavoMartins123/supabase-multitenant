@@ -4,9 +4,12 @@ import pathlib
 import subprocess
 import unittest
 
+from tests.smoke.common import bash_path, git_compatible_bash
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 ENV_TEMPLATE = ROOT / "servidor/generateProject/.envtemplate"
 VECTOR_LIBRARY = ROOT / "servidor/generateProject/lib/vector_lifecycle.sh"
+STORAGE_LIBRARY = ROOT / "servidor/generateProject/lib/storage_multitenant.sh"
 WRAPPER_SCRIPT = (
     ROOT / "servidor/generateProject/operations/setup_vector_bucket_wrapper.sh"
 )
@@ -26,9 +29,13 @@ class StorageVectorWrapperContractTests(unittest.TestCase):
 
     def test_lifecycle_generates_and_validates_per_project_sigv4_keys(self) -> None:
         library = VECTOR_LIBRARY.read_text(encoding="utf-8")
+        storage = STORAGE_LIBRARY.read_text(encoding="utf-8")
 
-        self.assertIn("openssl rand -hex 16", library)
-        self.assertIn("openssl rand -hex 32", library)
+        self.assertIn("storage_create_s3_credentials", storage)
+        self.assertIn('POST "/s3/$tenant_id/credentials"', storage)
+        self.assertIn("getS3CredentialsByAccessKey", (
+            ROOT / "docs/architecture/storage-vectors-lifecycle.md"
+        ).read_text(encoding="utf-8"))
         self.assertIn("^[0-9a-fA-F]{32}$", library)
         self.assertIn("^[0-9a-fA-F]{64}$", library)
         self.assertNotIn('echo "$S3_PROTOCOL_ACCESS_KEY_SECRET"', library)
@@ -49,7 +56,8 @@ class StorageVectorWrapperContractTests(unittest.TestCase):
         self.assertIn("vault.create_secret", script)
         self.assertIn("vault.update_secret", script)
         self.assertIn(
-            'VECTOR_ENDPOINT="http://${STORAGE_CONTAINER}:5000/vector"', script
+            'VECTOR_ENDPOINT="http://supabase-nginx-${PROJECT_ID}:8080/vector"',
+            script,
         )
         self.assertIn("vault_access_key_id", script)
         self.assertIn("vault_secret_access_key", script)
@@ -58,7 +66,9 @@ class StorageVectorWrapperContractTests(unittest.TestCase):
     def test_wrapper_validates_real_bucket_and_import_foreign_schema(self) -> None:
         script = WRAPPER_SCRIPT.read_text(encoding="utf-8")
 
-        self.assertIn("/vector/GetVectorBucket", script)
+        library = STORAGE_LIBRARY.read_text(encoding="utf-8")
+        self.assertIn('storage_vector_request "$tenant_id" "$service_key" GetVectorBucket', library)
+        self.assertIn('`http://127.0.0.1:5000/vector/${operation}`', library)
         self.assertIn("IMPORT FOREIGN SCHEMA", script)
         self.assertIn("OPTIONS (strict 'true')", script)
         self.assertNotIn("enable_vector_storage.sh", script)
@@ -67,7 +77,9 @@ class StorageVectorWrapperContractTests(unittest.TestCase):
 
     def test_shell_syntax(self) -> None:
         for script in (VECTOR_LIBRARY, WRAPPER_SCRIPT):
-            subprocess.run(["bash", "-n", str(script)], check=True)
+            subprocess.run(
+                [git_compatible_bash(), "-n", bash_path(script)], check=True
+            )
 
 
 if __name__ == "__main__":

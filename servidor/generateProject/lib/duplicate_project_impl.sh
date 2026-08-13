@@ -311,7 +311,6 @@ if [[ "$COPY_MODE" == "with-data" ]]; then
       SOURCE_CONTAINERS+="${SOURCE_CONTAINERS:+$'\n'}$source_name"
     fi
   done
-  [[ -n "$SOURCE_CONTAINERS" ]] || die "Nenhum servico ativo da origem foi encontrado"
   backup_stop_project_containers "$ORIGINAL_PROJECT" >/dev/null
   source_pool_code="$(backup_http_code supabase-pooler GET \
     "/api/tenants/$ORIGINAL_PROJECT/terminate" "$GLOBAL_ANON_TOKEN")"
@@ -447,6 +446,12 @@ IFS=$'\t' read -r S3_PROTOCOL_CREDENTIAL_ID S3_PROTOCOL_ACCESS_KEY_ID \
   S3_PROTOCOL_ACCESS_KEY_SECRET \
   <<<"$(storage_create_s3_credentials "$PROJECT_UUID")"
 vector_validate_s3_credentials || die "Credenciais SigV4 do clone invalidas"
+[[ "$S3_PROTOCOL_CREDENTIAL_ID" != "$ORIGINAL_S3_CREDENTIAL_ID" ]] \
+  || die "Storage reutilizou o identificador SigV4 da origem"
+[[ "$S3_PROTOCOL_ACCESS_KEY_ID" != "$ORIGINAL_S3_ACCESS_KEY" ]] \
+  || die "Storage reutilizou a access key SigV4 da origem"
+[[ "$S3_PROTOCOL_ACCESS_KEY_SECRET" != "$ORIGINAL_S3_SECRET_KEY" ]] \
+  || die "Storage reutilizou o secret SigV4 da origem"
 SERVICE_ROLE_KEY_PROJETO="$SERVICE_TOKEN"
 export PROJECT_UUID SERVICE_ROLE_KEY_PROJETO S3_PROTOCOL_CREDENTIAL_ID \
   S3_PROTOCOL_ACCESS_KEY_ID S3_PROTOCOL_ACCESS_KEY_SECRET

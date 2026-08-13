@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import os
+import shutil
 import ssl
 import time
 import urllib.error
@@ -12,6 +13,30 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+
+
+def git_compatible_bash() -> str:
+    """Resolve Bash without selecting the Windows WSL application alias."""
+
+    if os.name == "nt":
+        candidate = (
+            Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+            / "Git"
+            / "bin"
+            / "bash.exe"
+        )
+        if candidate.is_file():
+            return str(candidate)
+    executable = shutil.which("bash")
+    if executable is None:
+        raise RuntimeError("bash nao esta instalado")
+    return executable
+
+
+def bash_path(path: Path) -> str:
+    """Render an absolute path accepted by Git Bash and POSIX Bash."""
+
+    return path.as_posix()
 
 
 def env_flag(name: str, default: bool = False) -> bool:

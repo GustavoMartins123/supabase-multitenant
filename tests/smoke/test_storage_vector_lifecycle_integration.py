@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import unittest
 
+from tests.smoke.common import bash_path, git_compatible_bash
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 GENERATOR = ROOT / "servidor/generateProject"
 STUDIO_LUA = ROOT / "studio/nginx/lua"
@@ -96,9 +98,10 @@ class StorageVectorLifecycleIntegrationTests(unittest.TestCase):
         self.assertIn("s3_vectors_fdw_validator", pg_meta)
         self.assertIn("endpoint_url", pg_meta)
         self.assertIn(
-            '"http://supabase-storage-" .. project_ref .. ":5000/vector"',
+            '"http://supabase-nginx-" .. project_ref .. ":8080/vector"',
             pg_meta,
         )
+        self.assertNotIn("supabase-storage-", pg_meta)
         self.assertNotIn("host.docker.internal", pg_meta)
 
     def test_project_ref_resolver_rejects_all_refs_without_lua_pattern_bug(self) -> None:
@@ -151,7 +154,9 @@ assert(mismatch_err == "project_ref_mismatch")
             ROOT / "servidor/volumes/db/create_template.sh",
         ]
         for script in scripts:
-            subprocess.run(["bash", "-n", str(script)], check=True)
+            subprocess.run(
+                [git_compatible_bash(), "-n", bash_path(script)], check=True
+            )
 
     def test_lua_syntax_when_compiler_is_available(self) -> None:
         compiler = shutil.which("luac5.1") or shutil.which("luac")

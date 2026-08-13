@@ -31,6 +31,27 @@ export SMOKE_NGINX_HMAC_SECRET=...
 python -m unittest tests.smoke.test_tenant_lifecycle -v
 ```
 
+Para a matriz completa de Storage compartilhado, use exclusivamente uma
+instalacao descartavel e dedicada. O teste cria cinco projetos, exercita
+Storage/S3/Vectors/backup/restore/rename/duplicate/delete e interrompe o
+`supabase-storage-global` por poucos segundos para comprovar fail-closed:
+
+```bash
+export RUN_SHARED_STORAGE_SMOKE=1
+export SMOKE_API_URL=https://servidor-interno
+export SMOKE_PUBLIC_BASE_URL=https://supabase.example.com
+export SMOKE_SERVER_ROOT=/opt/supabase-multitenant/servidor
+export SMOKE_SHARED_TOKEN=...
+export SMOKE_USER_TOKEN=...
+export SMOKE_NGINX_HMAC_SECRET=...
+python -m unittest tests.smoke.test_shared_storage_tenant_integration -v
+```
+
+O runner precisa executar no host do servidor, com `docker`, `bash`, acesso de
+leitura aos diretorios de projeto/backup e permissao para reiniciar somente o
+container global de Storage. Nao execute essa matriz em ambiente compartilhado
+com trafego real.
+
 `SMOKE_USER_TOKEN` precisa conter o claim `login_session` emitido pelo gateway.
 O teste direto assina um grant de step-up específico para o projeto; ele não
 possui nem aceita uma senha global de exclusão.

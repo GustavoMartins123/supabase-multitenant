@@ -212,6 +212,7 @@ class ClosedCommandSetTest(unittest.TestCase):
             "create_project",
             "duplicate_project",
             "delete_project_containers",
+            "delete_project_storage",
             "delete_project_files",
             "rotate_keys",
             "rename_project",
@@ -270,6 +271,8 @@ class ClosedCommandSetTest(unittest.TestCase):
                 "backup_id": "9c8ce9f0-3b4e-4bcb-a739-2c1e8ad0e9aa",
             }),
             ("delete_restore_point", "meuprojeto", {"backup_id": "x; rm -rf /"}),
+            ("delete_project_storage", "meuprojeto", {"project_uuid": "nao-e-uuid"}),
+            ("delete_project_storage", "meuprojeto", {}),
             ("delete_project_files", "meuprojeto", {"project_uuid": "nao-e-uuid"}),
             ("delete_project_files", "meuprojeto", {
                 "project_uuid": "9c8ce9f0-3b4e-4bcb-a739-2c1e8ad0e9aa",
@@ -317,8 +320,7 @@ class ClosedCommandSetTest(unittest.TestCase):
                 "backup_id": tenant_uuid,
                 "tenant_uuid": tenant_uuid,
             }),
-            ("delete_project_files", "meuprojeto", {}),
-            ("delete_project_files", "meuprojeto", {"project_uuid": tenant_uuid}),
+            ("delete_project_storage", "meuprojeto", {"tenant_uuid": tenant_uuid}),
             ("delete_project_files", "meuprojeto", {"tenant_uuid": tenant_uuid}),
         ]
         for command, project, args in cases:

@@ -12,7 +12,7 @@ REPORTS_ROOT="$SERVER_ROOT/storage-migration-reports"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
 
-for command in docker jq openssl python3 tar gzip sed grep; do
+for command in docker jq openssl python3 tar gzip sed grep systemctl; do
   command -v "$command" >/dev/null 2>&1 || die "$command nao esta instalado"
 done
 [[ -f "$SERVER_ROOT/.env" ]] || die "servidor/.env ausente"
@@ -38,8 +38,19 @@ fi
 mkdir -p "$RUN_DIR/state" "$RUN_DIR/config-before" \
   "$RUN_DIR/old-storage" "$RUN_DIR/old-backups"
 chmod 700 "$RUN_DIR"
+[[ ! -f "$RUN_DIR/COMPLETE" ]] \
+  || die "esta migracao ja foi concluida; nao reutilize o report_dir"
 SUMMARY="$RUN_DIR/summary.tsv"
 [[ -f "$SUMMARY" ]] || printf 'scope\tid\tstatus\tdetail\n' > "$SUMMARY"
+
+PROJECTS_API_MARKER="$RUN_DIR/projects-api.was-running"
+HOST_AGENT_MARKER="$RUN_DIR/host-agent.was-active"
+PROJECTS_API_WAS_RUNNING=0
+HOST_AGENT_WAS_ACTIVE=0
+[[ -f "$PROJECTS_API_MARKER" ]] && PROJECTS_API_WAS_RUNNING=1
+[[ -f "$HOST_AGENT_MARKER" ]] && HOST_AGENT_WAS_ACTIVE=1
+LIFECYCLE_QUIESCED=0
+MIGRATION_MUTATIONS_STARTED=0
 
 report() {
   local scope="$1" id="$2" status="$3" detail="$4"
@@ -47,6 +58,126 @@ report() {
   detail="${detail//$'\n'/ }"
   printf '%s\t%s\t%s\t%s\n' "$scope" "$id" "$status" "$detail" >> "$SUMMARY"
 }
+
+run_systemctl() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    systemctl "$@"
+  else
+    command -v sudo >/dev/null 2>&1 \
+      || die "sudo e obrigatorio para controlar o host-agent"
+    sudo systemctl "$@"
+  fi
+}
+
+active_lifecycle_counts() {
+  local table exists count jobs=0 commands=0
+  for table in jobs host_agent_commands; do
+    exists="$(docker exec supabase-db psql -X -q -v ON_ERROR_STOP=1 \
+      -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc \
+      "SELECT to_regclass('public.$table') IS NOT NULL;" | tr -d '[:space:]')"
+    if [[ "$exists" == "t" ]]; then
+      count="$(docker exec supabase-db psql -X -q -v ON_ERROR_STOP=1 \
+        -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc \
+        "SELECT count(*) FROM $table WHERE status IN ('queued','running');" \
+        | tr -d '[:space:]')"
+      [[ "$count" =~ ^[0-9]+$ ]] || die "contagem invalida em $table"
+      if [[ "$table" == "jobs" ]]; then jobs="$count"; else commands="$count"; fi
+    elif [[ "$exists" != "f" ]]; then
+      die "nao foi possivel inspecionar $table"
+    fi
+  done
+  printf '%s\t%s\n' "$jobs" "$commands"
+}
+
+restart_projects_api_without_rebuild() {
+  [[ "$PROJECTS_API_WAS_RUNNING" -eq 1 ]] || return 0
+  docker start projects-api >/dev/null
+  PROJECTS_API_WAS_RUNNING=0
+}
+
+quiesce_lifecycle() {
+  local counts jobs commands
+  counts="$(active_lifecycle_counts)"
+  IFS=$'\t' read -r jobs commands <<<"$counts"
+  [[ "$jobs" == "0" && "$commands" == "0" ]] \
+    || die "existem jobs lifecycle ativos (jobs=$jobs commands=$commands); aguarde e execute novamente"
+
+  if [[ "$(docker inspect -f '{{.State.Running}}' projects-api 2>/dev/null || true)" == "true" ]]; then
+    PROJECTS_API_WAS_RUNNING=1
+    : > "$PROJECTS_API_MARKER"
+    docker stop --time 30 projects-api >/dev/null
+  fi
+
+  # Fecha a pequena janela entre o primeiro preflight e o stop da API. Se
+  # houve corrida, a API original volta e nenhuma mutacao de migracao comeca.
+  counts="$(active_lifecycle_counts)"
+  IFS=$'\t' read -r jobs commands <<<"$counts"
+  if [[ "$jobs" != "0" || "$commands" != "0" ]]; then
+    restart_projects_api_without_rebuild || true
+    die "lifecycle iniciou durante a quiescencia (jobs=$jobs commands=$commands); aguarde sua conclusao"
+  fi
+
+  if systemctl is-active --quiet supabase-host-agent; then
+    HOST_AGENT_WAS_ACTIVE=1
+    : > "$HOST_AGENT_MARKER"
+    run_systemctl stop supabase-host-agent
+  fi
+  LIFECYCLE_QUIESCED=1
+  report infrastructure lifecycle quiesced "Projects API e host-agent sem jobs ativos"
+}
+
+resume_lifecycle_after_success() {
+  local status="" attempts
+  if [[ "$PROJECTS_API_WAS_RUNNING" -eq 1 ]]; then
+    (cd "$SERVER_ROOT" && docker compose \
+      -f docker-compose-api.yml -f docker-compose.single-node.yml \
+      --env-file .env up --build -d projects-api)
+    for attempts in $(seq 1 60); do
+      status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
+        projects-api 2>/dev/null || true)"
+      [[ "$status" == "healthy" ]] && break
+      [[ "$status" != "unhealthy" && "$status" != "exited" && "$status" != "dead" ]] \
+        || die "Projects API terminou com status $status apos a migracao"
+      sleep 2
+    done
+    [[ "$status" == "healthy" ]] \
+      || die "Projects API nao ficou saudavel apos a migracao"
+    PROJECTS_API_WAS_RUNNING=0
+  fi
+  if [[ "$HOST_AGENT_WAS_ACTIVE" -eq 1 ]]; then
+    run_systemctl start supabase-host-agent
+    systemctl is-active --quiet supabase-host-agent \
+      || die "host-agent nao ficou ativo apos a migracao"
+    HOST_AGENT_WAS_ACTIVE=0
+  fi
+  LIFECYCLE_QUIESCED=0
+  report infrastructure lifecycle resumed "runtime novo iniciado apos conversao integral"
+}
+
+migration_exit() {
+  local status="$?"
+  trap - EXIT
+  if [[ "$status" -ne 0 ]]; then
+    if [[ "$MIGRATION_MUTATIONS_STARTED" -eq 0 ]]; then
+      restart_projects_api_without_rebuild || true
+      if [[ "$HOST_AGENT_WAS_ACTIVE" -eq 1 ]]; then
+        run_systemctl start supabase-host-agent >/dev/null 2>&1 || true
+      fi
+    elif [[ "$LIFECYCLE_QUIESCED" -eq 1 ]]; then
+      if [[ "$(docker inspect -f '{{.State.Running}}' projects-api 2>/dev/null || true)" == "true" ]]; then
+        docker stop --time 30 projects-api >/dev/null 2>&1 || true
+      fi
+      if systemctl is-active --quiet supabase-host-agent; then
+        run_systemctl stop supabase-host-agent >/dev/null 2>&1 || true
+      fi
+      report migration all blocked \
+        "estado parcial: Projects API e host-agent permaneceram parados; corrija e use --resume"
+      say "Migracao interrompida. Projects API e host-agent permanecem parados para impedir runtime misto; corrija o erro e use --resume $RUN_DIR."
+    fi
+  fi
+  exit "$status"
+}
+trap migration_exit EXIT
 
 canonical_env_value() {
   local file="$1" key="$2" assignment_count value
@@ -62,7 +193,7 @@ ensure_global_storage_config() {
   local target="$SERVER_ROOT/.env" example="$SERVER_ROOT/.env.example"
   local temp key value count
   local keys=(
-    STORAGE_IMAGE STORAGE_DATABASE_NAME STORAGE_TENANT_DB_USER STORAGE_BACKEND
+    STORAGE_IMAGE STORAGE_TENANT_DB_USER STORAGE_BACKEND
     STORAGE_FILE_BACKEND_PATH STORAGE_INTERNAL_BUCKET STORAGE_S3_REGION
     STORAGE_FILE_SIZE_LIMIT STORAGE_FILE_SIZE_LIMIT_STANDARD
     STORAGE_TENANT_MAX_CONNECTIONS STORAGE_TENANT_POOL_IDLE_MS
@@ -196,6 +327,58 @@ normalize_public_base_url() {
   printf '%s://%s' "$proto" "$url"
 }
 
+# Conversao exclusiva desta ferramenta: o runtime novo nunca aceita o tenant
+# historico "stub". O hash deve ser refeito porque o nome fisico do pgvector
+# incorpora o tenant no indexName oficial do Storage.
+migration_rekey_vector_physical_tables() {
+  local database="$1" source_tenant="$2" destination_tenant="$3"
+  [[ -n "${POSTGRES_USER:-}" ]] || die "POSTGRES_USER ausente"
+  [[ "$source_tenant" == "stub" || "$source_tenant" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
+    || die "tenant de origem invalido para conversao vetorial"
+  [[ "$destination_tenant" == "stub" || "$destination_tenant" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
+    || die "tenant de destino invalido para conversao vetorial"
+  [[ "$source_tenant" != "$destination_tenant" ]] || return 0
+
+  docker exec supabase-db psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" \
+    -d "$database" -c \
+    "COPY (SELECT bucket_id, name FROM storage.vector_indexes ORDER BY bucket_id, name) TO STDOUT WITH (FORMAT csv)" \
+    | python3 -c '
+import csv
+import hashlib
+import sys
+
+source, destination = sys.argv[1:]
+print("BEGIN;")
+for bucket, index in csv.reader(sys.stdin):
+    def physical(tenant):
+        value = f"pgvector__{bucket}".encode() + b"\0" + f"{tenant}-{index}".encode()
+        return "vector_" + hashlib.sha256(value).hexdigest()[:24]
+    old = physical(source)
+    new = physical(destination)
+    print(f"""
+DO $rekey$
+BEGIN
+  IF to_regclass('\''storage_vectors.{old}'\'') IS NOT NULL
+     AND to_regclass('\''storage_vectors.{new}'\'') IS NULL THEN
+    ALTER TABLE storage_vectors.{old} RENAME TO {new};
+    IF to_regclass('\''storage_vectors.{old}_hnsw'\'') IS NOT NULL THEN
+      ALTER INDEX storage_vectors.{old}_hnsw RENAME TO {new}_hnsw;
+    END IF;
+  ELSIF to_regclass('\''storage_vectors.{old}'\'') IS NULL
+        AND to_regclass('\''storage_vectors.{new}'\'') IS NOT NULL THEN
+    NULL;
+  ELSE
+    RAISE EXCEPTION '\''ambiguous vector table rekey: {old} -> {new}'\'';
+  END IF;
+END
+$rekey$;
+""")
+print("COMMIT;")
+' "$source_tenant" "$destination_tenant" \
+    | docker exec -i supabase-db psql -X -q -v ON_ERROR_STOP=1 \
+      -U "$POSTGRES_USER" -d "$database"
+}
+
 restore_project_config() {
   local project="$1" archive="$RUN_DIR/config-before/$1.tar.gz"
   local project_dir="$SERVER_ROOT/projects/$1"
@@ -220,7 +403,7 @@ rollback_partial_project() {
       --env-file ../../.env --env-file .env down --remove-orphans) >/dev/null 2>&1 || true
   fi
   storage_delete_tenant "$tenant_id" || return 1
-  vector_rekey_physical_tables "_supabase_$project" "$tenant_id" stub || return 1
+  migration_rekey_vector_physical_tables "_supabase_$project" "$tenant_id" stub || return 1
   restore_project_config "$project" || return 1
   restore_old_storage_if_needed "$project" || return 1
   (cd "$project_dir" && docker compose -p "$project" \
@@ -333,7 +516,7 @@ migrate_project() (
       storage_delete_tenant "$PROJECT_UUID" >/dev/null 2>&1 || rollback_failed=1
     fi
     if [[ "$vector_rekeyed" -eq 1 ]]; then
-      vector_rekey_physical_tables "_supabase_$project" "$PROJECT_UUID" stub \
+      migration_rekey_vector_physical_tables "_supabase_$project" "$PROJECT_UUID" stub \
         >/dev/null 2>&1 || rollback_failed=1
     fi
     if [[ "$config_changed" -eq 1 ]]; then
@@ -376,7 +559,7 @@ migrate_project() (
   storage_clone_tenant_namespace_from_legacy
   printf 'OBJECTS_COPIED\n' > "$state_file"
 
-  vector_rekey_physical_tables "_supabase_$project" stub "$PROJECT_UUID"
+  migration_rekey_vector_physical_tables "_supabase_$project" stub "$PROJECT_UUID"
   vector_rekeyed=1
   printf 'VECTORS_REKEYED\n' > "$state_file"
 
@@ -471,7 +654,7 @@ convert_backup() (
   gunzip -c "$backup_dir/db.sql.gz" \
     | docker exec -i supabase-db psql -X -q -v ON_ERROR_STOP=1 \
       -U "$POSTGRES_USER" -d "$temp_db" >/dev/null
-  vector_rekey_physical_tables "$temp_db" stub "$tenant"
+  migration_rekey_vector_physical_tables "$temp_db" stub "$tenant"
   docker exec supabase-db pg_dump -U "$POSTGRES_USER" -d "$temp_db" \
     --exclude-schema=realtime | gzip > "$stage/db.sql.gz"
   drop_temp_database "$temp_db"
@@ -493,6 +676,13 @@ convert_backup() (
 )
 
 say "Relatorio interno: $RUN_DIR"
+set -a
+# shellcheck disable=SC1090
+source "$SERVER_ROOT/.env"
+set +a
+docker inspect supabase-db >/dev/null 2>&1 || die "supabase-db nao esta rodando"
+quiesce_lifecycle
+MIGRATION_MUTATIONS_STARTED=1
 ensure_global_storage_config
 ensure_storage_secrets
 create_registry_database
@@ -532,6 +722,7 @@ for backup_dir in "$SERVER_ROOT"/backups/*/*/; do
   backup_count=$((backup_count + 1))
 done
 
+resume_lifecycle_after_success
 printf 'COMPLETE\n' > "$RUN_DIR/COMPLETE"
 report migration all complete "projects=$project_count backups_scanned=$backup_count"
 say "Migracao concluida: $project_count projeto(s); $backup_count backup(s) verificado(s)."
