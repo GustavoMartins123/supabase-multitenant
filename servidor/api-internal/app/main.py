@@ -2467,6 +2467,16 @@ async def _duplicate_and_store_keys(
         if project_uuid != resolved_project_uuid:
             raise ProjectIdentityError("projects.id do job mudou durante duplicacao")
 
+        gateway_token = secrets.token_hex(32)
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await bootstrap_project_opaque_keys(
+                    conn,
+                    project_id=project_uuid,
+                    created_by=owner_id,
+                    gateway_token=gateway_token,
+                )
+
         record = await run_host_agent_command_for_job(
             pool,
             job_id=job_id,
@@ -2478,6 +2488,7 @@ async def _duplicate_and_store_keys(
                 "original_name": original_name,
                 "copy_mode": copy_mode,
                 "tenant_uuid": str(tenant_uuid),
+                "gateway_token": gateway_token,
             },
             reuse_terminal=True,
             on_progress=_job_progress_mirror(job_id),
@@ -2560,12 +2571,6 @@ async def _duplicate_and_store_keys(
                     anon_key=keys["anon_key"],
                     service_role=keys["service_role"],
                     config_token=keys["config_token"],
-                )
-                await bootstrap_project_opaque_keys(
-                    conn,
-                    project_id=project_id,
-                    created_by=owner_id,
-                    gateway_token=keys["gateway_token"],
                 )
                 await conn.execute(
                     "UPDATE projects SET key_expires_at = $2 WHERE id = $1",
@@ -3711,6 +3716,16 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
             created_by=user,
         )
 
+        gateway_token = secrets.token_hex(32)
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await bootstrap_project_opaque_keys(
+                    conn,
+                    project_id=project_uuid,
+                    created_by=user,
+                    gateway_token=gateway_token,
+                )
+
         record = await run_host_agent_command_for_job(
             pool,
             job_id=job_id,
@@ -3722,6 +3737,7 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
                 "tenant_uuid": str(tenant_uuid),
                 "recover_stale": recover_stale,
                 "stale_tenant_uuids": stale_tenant_uuids,
+                "gateway_token": gateway_token,
             },
             reuse_terminal=True,
             on_progress=_job_progress_mirror(job_id),
@@ -3824,12 +3840,6 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
                     anon_key=keys["anon_key"],
                     service_role=keys["service_role"],
                     config_token=keys["config_token"],
-                )
-                await bootstrap_project_opaque_keys(
-                    conn,
-                    project_id=project_id,
-                    created_by=user,
-                    gateway_token=keys["gateway_token"],
                 )
                 await conn.execute(
                     "UPDATE projects SET key_expires_at = $2 WHERE id = $1",

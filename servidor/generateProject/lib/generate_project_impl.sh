@@ -405,7 +405,7 @@ ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":
 SERVICE_TOKEN=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now_epoch,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
 GLOBAL_ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now_epoch,\"exp\":$exp}" "$JWT_SECRET")
 CONFIG_TOKEN_PROJETO=$(openssl rand -hex 32 | tr -d '\n\r')
-API_GATEWAY_TOKEN_PROJETO=$(openssl rand -hex 32 | tr -d '\n\r')
+API_GATEWAY_TOKEN_PROJETO="${API_GATEWAY_TOKEN_PROJETO:-$(openssl rand -hex 32 | tr -d '\n\r')}"
 
 FILE_SIZE_LIMIT="$(read_canonical_env_value "$SCRIPT_DIR/.envtemplate" FILE_SIZE_LIMIT)"
 ENABLE_IMAGE_TRANSFORMATION="$(read_canonical_env_value "$SCRIPT_DIR/.envtemplate" ENABLE_IMAGE_TRANSFORMATION)"

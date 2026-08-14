@@ -256,6 +256,7 @@ async def run_process(
     ctx: CommandContext,
     *,
     cwd: Path | None = None,
+    env: Mapping[str, str] | None = None,
     markers: tuple[str, ...] = (),
     progress_events: Mapping[str, ProgressEvent] | None = None,
 ) -> ProcessResult:
@@ -264,6 +265,7 @@ async def run_process(
     proc = await asyncio.create_subprocess_exec(
         *argv,
         cwd=str(cwd) if cwd else None,
+        env=dict(env) if env is not None else None,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         start_new_session=True,
@@ -659,6 +661,8 @@ async def _run_lifecycle_script(
     script_name: str,
     script_args: list[str],
     *,
+    cwd: Path | None = None,
+    env: Mapping[str, str] | None = None,
     error_code: str,
     markers: tuple[str, ...] = (),
     progress_events: Mapping[str, ProgressEvent] | None = None,
@@ -677,7 +681,8 @@ async def _run_lifecycle_script(
     result = await run_process(
         ["bash", str(script), *script_args],
         ctx,
-        cwd=ctx.config.root,
+        cwd=cwd or ctx.config.root,
+        env=env,
         markers=lifecycle_markers,
         progress_events=progress_events,
     )
@@ -715,6 +720,10 @@ async def handle_create_project(ctx: CommandContext, project: str, args: dict[st
     ctx.state.report(progress=10, step="provision_infrastructure", message="Provisionando infraestrutura do projeto...")
     recover_stale = args["recover_stale"]
     stale_tenant_uuids = [str(item) for item in args["stale_tenant_uuids"]]
+    env = os.environ.copy()
+    gateway_token = args.get("gateway_token")
+    if gateway_token:
+        env["API_GATEWAY_TOKEN_PROJETO"] = str(gateway_token)
     outcome, process = await _run_lifecycle_script(
         ctx,
         "generate_project.sh",
@@ -724,6 +733,7 @@ async def handle_create_project(ctx: CommandContext, project: str, args: dict[st
             "true" if recover_stale else "false",
             *stale_tenant_uuids,
         ],
+        env=env,
         error_code="provision_failed",
         progress_events=CREATE_PROGRESS_EVENTS,
     )
@@ -756,10 +766,15 @@ async def handle_duplicate_project(ctx: CommandContext, project: str, args: dict
     resolve_project_dir(ctx.config.projects_root, original, must_exist=True)
     resolve_project_dir(ctx.config.projects_root, project)
     ctx.state.report(progress=10, step="duplicate_infrastructure", message="Duplicando infraestrutura e banco...")
+    env = os.environ.copy()
+    gateway_token = args.get("gateway_token")
+    if gateway_token:
+        env["API_GATEWAY_TOKEN_PROJETO"] = str(gateway_token)
     outcome, _ = await _run_lifecycle_script(
         ctx,
         "duplicate_project.sh",
         [original, project, str(args["copy_mode"]), str(args["tenant_uuid"])],
+        env=env,
         error_code="duplicate_failed",
     )
     return outcome
