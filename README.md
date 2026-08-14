@@ -6,12 +6,9 @@
 
 The official Supabase self-hosting stack is designed for a single project. This repository extends that architecture to manage multiple isolated projects in the same infrastructure.
 
-Each project receives its own PostgreSQL database, JWT secret, Realtime tenant, Supavisor tenant and containers for Auth, REST, Storage, ImgProxy and Nginx. A FastAPI control plane manages the project lifecycle, while a dynamic OpenResty/Lua gateway allows a **single Supabase Studio instance** to manage every project.
+Each project receives its own PostgreSQL database, JWT secret, Realtime tenant, Storage tenant, Supavisor tenant and dedicated Nginx/Auth/PostgREST services. Services that already support or were adapted for multi-tenancy — including Storage, ImgProxy, Realtime, Supavisor, Edge Functions and Postgres Meta — are shared. A FastAPI control plane manages project lifecycle, while a dynamic OpenResty/Lua gateway allows a **single Supabase Studio instance** to manage every project.
 
-Projects use multiple opaque publishable/secret API-key slots. Each slot rotates
-automatically before expiration by default, while internal anon/service-role
-JWTs remain server-only. Administrators can opt out per project or slot; failed
-rotations stop explicitly and require intervention.
+Projects use multiple opaque publishable/secret API-key slots. Expiration is optional per key; expiring slots can rotate automatically before expiration, while internal anon/service-role JWTs remain server-only. Administrators can disable automatic rotation per project or slot, and failed rotations stop explicitly until intervention.
 
 > This is an unofficial project under active development.
 
@@ -41,37 +38,45 @@ Simplify the creation and management of multiple isolated Supabase projects on i
 
 ```mermaid
 flowchart LR
-    User[Usuário] --> StudioGateway[Studio Gateway\nNginx/OpenResty :9091]
+    User[User] --> StudioGateway[Studio Gateway\nNginx/OpenResty :9091]
     StudioGateway --> Authelia[Authelia]
-    StudioGateway --> Flutter[Seletor Flutter]
+    StudioGateway --> Flutter[Flutter selector]
     StudioGateway --> Studio[Supabase Studio]
 
     StudioGateway --> Traefik[Traefik]
     Traefik --> ProjectsAPI[Projects API\nFastAPI]
-    Traefik --> TenantGateway[Nginx do projeto]
+    Traefik --> TenantGateway[Project Nginx]
 
     ProjectsAPI --> PostgreSQL[(PostgreSQL)]
-    ProjectsAPI --> Docker[Docker Socket]
-    ProjectsAPI --> Realtime[Realtime global]
-    ProjectsAPI --> Supavisor[Supavisor global]
+    ProjectsAPI -->|signed lifecycle intents| PostgreSQL
+    HostAgent[host-agent\nsystemd on host] -->|lease/result| PostgreSQL
+    HostAgent --> Docker[Docker daemon]
 
+    TenantGateway --> KeyAuthorizer[key-authorizer]
+    KeyAuthorizer --> PostgreSQL
     TenantGateway --> Auth[GoTrue]
     TenantGateway --> Rest[PostgREST]
-    TenantGateway --> Storage[Storage]
-    TenantGateway --> ImgProxy[ImgProxy]
-    TenantGateway --> Functions[Edge Functions global]
-    TenantGateway --> Realtime
+    TenantGateway --> StorageDataPlane[Shared Storage data plane]
+    StorageDataPlane --> Storage[Global multi-tenant Storage]
+    Storage --> ImgProxy[Global ImgProxy]
+    TenantGateway --> Functions[Global Edge Functions]
+    TenantGateway --> Realtime[Global Realtime]
 
-    Auth --> Supavisor
+    Auth --> Supavisor[Global Supavisor]
     Rest --> Supavisor
     Storage --> Supavisor
     Supavisor --> PostgreSQL
+
+    ProjectsAPI --> PostgresMeta[Global Postgres Meta]
+    PostgresMeta --> PostgreSQL
 ```
+
+The Projects API does **not** access the Docker socket. Physical lifecycle operations are stored as HMAC-signed intents in PostgreSQL. A host-level systemd service, `host-agent`, leases and revalidates those intents and executes only a closed set of Docker/lifecycle commands.
 
 The platform supports two deployment layouts:
 
-- **Single machine:** Studio, Traefik, API, PostgreSQL and project services run on the same host.
-- **Two machines:** Studio, Authelia and OpenResty run on a local administrative machine, while Traefik, the API and project services run on the main server.
+- **Single machine:** Studio, Traefik, API, PostgreSQL, host-agent and project services run on the same host. The host-agent still runs outside containers.
+- **Two machines:** Studio, Authelia and OpenResty run on a local administrative machine, while Traefik, the API, host-agent and project services run on the main server.
 
 Applications access the project routes through Traefik. The Studio gateway is an administrative interface and does not need to be exposed as part of the public data path.
 
@@ -80,21 +85,27 @@ Applications access the project routes through Traefik. The Studio gateway is an
 - PostgreSQL;
 - Supavisor;
 - modified Realtime;
+- Storage API in official multi-tenant mode;
+- ImgProxy;
+- restricted Storage data-plane proxy;
 - Edge Functions;
 - Postgres Meta;
+- key-authorizer;
 - Projects API;
 - Traefik;
 - Supabase Analytics/Logflare and Vector.
+
+The `host-agent` is also a platform-wide component, but it runs as a systemd service on the main host instead of as a container.
 
 ### Services created per project
 
 - Nginx;
 - GoTrue;
 - PostgREST;
-- Storage;
-- ImgProxy;
 - database `_supabase_<project_ref>`;
 - project configuration directory.
+
+Storage and ImgProxy are no longer created per project. Storage objects are namespaced by the project's immutable tenant UUID, while each project Nginx injects the trusted tenant identity before traffic reaches the shared Storage data plane.
 
 For implementation details, see the [architecture documentation](docs/00-arquitetura.md).
 
@@ -124,10 +135,7 @@ python3 -c 'import sys; assert sys.version_info >= (3, 10), "Python 3.10 or newe
 python3 -m venv --help >/dev/null
 ```
 
-In a two-machine deployment, Python must be installed on both the main server
-and the administrative Studio machine. The main server uses it for the
-host-agent and project lifecycle; the Studio machine uses it to render the
-Authelia runtime configuration and certificates.
+In a two-machine deployment, Python must be installed on both the main server and the administrative Studio machine. The main server uses it for the host-agent and project lifecycle; the Studio machine uses it to render the Authelia runtime configuration and certificates.
 
 ---
 
@@ -152,7 +160,7 @@ For two machines, use `bash setup.sh split-node <server-ip-or-domain>`. Running 
 
 The script also detects the IP of the current machine, used by the local Studio, Authelia, the self-signed certificate and internal integrations.
 
-After the setup, install the **host-agent** on the main server. It is the systemd service that executes the physical project lifecycle (Docker and scripts) — the Projects API only writes signed intents to the database and no longer touches Docker:
+After the setup, install the **host-agent** on the main server. It is the systemd service that executes the physical project lifecycle (Docker and scripts) — the Projects API only writes signed intents to the database and does not touch Docker:
 
 ```bash
 sudo bash servidor/host-agent/install.sh
@@ -163,7 +171,7 @@ In interactive mode:
 - Enter the local machine IP to prepare a single-machine installation.
 - Enter another server IP or domain to prepare the two-machine layout.
 
-The setup generates the server and Studio environment files, including the separate Analytics credentials in `servidor/.analytics.env` and `studio/.analytics.env`.
+The setup generates the server and Studio environment files, including the separate Analytics credentials in `servidor/.analytics.env` and `studio/.analytics.env`. Storage infrastructure secrets are kept separately in `servidor/.storage.env`.
 
 ### 3. Start the Platform
 
@@ -173,9 +181,7 @@ The setup generates the server and Studio environment files, including the separ
 bash start.sh single-node
 ```
 
-`single-node` is the default explicit profile. For two machines, run
-`bash start.sh split-node-server` on the main server and
-`bash start.sh split-node-studio` on the administrative Studio machine.
+`single-node` is the default explicit profile. For two machines, run `bash start.sh split-node-server` on the main server and `bash start.sh split-node-studio` on the administrative Studio machine.
 
 The script starts the shared services and Projects API, waits for PostgreSQL and Supavisor, starts Traefik and existing projects, and finally starts Studio.
 
@@ -233,6 +239,8 @@ Check whether the containers are running:
 docker ps
 ```
 
+For multiple projects, expect one Nginx/Auth/PostgREST set per project but only one `supabase-storage-global` and one `supabase-imgproxy-global`.
+
 Open the Studio endpoint:
 
 ```text
@@ -252,13 +260,16 @@ Important Studio details:
 
 ## Documentation
 
-The README is focused on understanding and starting the platform quickly. Detailed documentation is available in [`docs/README.md`](docs/README.md).
+The README is focused on understanding and starting the platform quickly. Detailed documentation is available in [`docs/README.md`](docs/README.md). The architecture documents are the canonical source when implementation details evolve.
 
 Main references:
 
 - [Architecture overview](docs/00-arquitetura.md)
 - [Control plane](docs/architecture/control-plane.md)
+- [Host-agent](docs/architecture/host-agent.md)
 - [Project lifecycle](docs/architecture/project-lifecycle.md)
+- [Shared Storage, S3 and Storage Vectors](docs/architecture/storage-vectors-lifecycle.md)
+- [Opaque API keys](docs/12-chaves-api-opacas.md)
 - [OpenResty/Lua](docs/architecture/openresty-lua.md)
 - [Supabase Analytics](docs/architecture/supabase-analytics.md)
 - [Multi-tenant Realtime](docs/09-autenticacao-multi-tenant-realtime.md)
