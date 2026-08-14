@@ -560,6 +560,9 @@ main() {
     cp studio/authelia/ssl/ca.pem servidor/certs/ca.pem
     print_success "Certificado copiado para servidor/certs/ca.pem"
 
+    mkdir -p servidor/volumes/storage/objects
+    chmod 777 servidor/volumes/storage servidor/volumes/storage/objects 2>/dev/null || true
+
 
     print_success "Studio e Authelia configurados para $LOCAL_IP."
     print_status "Configurando update_geoip.sh com o caminho real..."

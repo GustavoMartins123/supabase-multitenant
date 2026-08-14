@@ -58,6 +58,9 @@ storage_global_env_value() {
     return 1
   }
   value="$(sed -n "s/^${key}=//p" "$file")"
+  if [[ ( "$value" == \'*\' && "$value" == *\' ) || ( "$value" == \"*\" && "$value" == *\" ) ]]; then
+    value="${value:1:-1}"
+  fi
   [[ -n "$value" && "$value" != *$'\r'* && "$value" == "${value# }" \
     && "$value" == "${value% }" ]] || {
     storage_fail "$key possui valor global invalido"

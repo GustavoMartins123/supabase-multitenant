@@ -84,6 +84,8 @@ migrate_runtime_ownership() {
   done
   find "$SERVIDOR_DIR/projects" -mindepth 2 -maxdepth 2 -type f -name .env \
     -exec chmod 600 {} +
+  mkdir -p "$SERVIDOR_DIR/volumes/storage/objects"
+  chmod 777 "$SERVIDOR_DIR/volumes/storage" "$SERVIDOR_DIR/volumes/storage/objects" 2>/dev/null || true
   ok "Ownership do lifecycle alinhado ao usuario do host-agent."
 }
 

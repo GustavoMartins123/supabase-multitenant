@@ -368,7 +368,7 @@ services:
       VECTOR_MAX_INDEXES: ${STORAGE_VECTOR_MAX_INDEXES:?defina STORAGE_VECTOR_MAX_INDEXES}
       LOG_LEVEL: ${STORAGE_LOG_LEVEL:?defina STORAGE_LOG_LEVEL}
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5000/status"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5000/status"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -428,7 +428,7 @@ services:
       storage:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5000/status"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5000/status"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -494,7 +494,7 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9001/health"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:9001/health"]
       interval: 5s
       timeout: 5s
       retries: 3

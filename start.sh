@@ -74,6 +74,8 @@ for project_compose in "$ROOT_DIR"/servidor/projects/*/docker-compose.yml; do
 done
 
 echo "Iniciando a base de dados e os servicos Supabase..."
+mkdir -p "$ROOT_DIR/servidor/volumes/storage/objects"
+chmod 777 "$ROOT_DIR/servidor/volumes/storage" "$ROOT_DIR/servidor/volumes/storage/objects" 2>/dev/null || true
 cd "$ROOT_DIR/servidor"
 API_OVERRIDE="docker-compose.${SERVER_TOPOLOGY}.yml"
 API_COMPOSE=(docker compose -f docker-compose-api.yml -f "$API_OVERRIDE" --env-file .env)
