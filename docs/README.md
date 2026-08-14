@@ -2,7 +2,9 @@
 
 Esta pasta contém a documentação técnica do `supabase-multitenant`.
 
-A regra é simples: cada assunto deve ter uma fonte canônica. O `00-arquitetura.md` apresenta apenas a visão geral e aponta para documentos especializados. Detalhes operacionais ou de implementação não devem ser copiados para vários arquivos.
+A regra é simples: cada assunto deve ter uma fonte canônica. O `00-arquitetura.md` apresenta a visão geral e aponta para documentos especializados. Detalhes operacionais ou de implementação não devem ser copiados para vários arquivos.
+
+O estado arquitetural atual assume **host-agent no lugar de acesso Docker pela API**, **API keys opacas como credenciais públicas** e **Storage/imgproxy globais multi-tenant**. Documentos que descrevam LifecycleProxy, Docker socket na Projects API ou Storage/imgproxy por projeto devem ser tratados como material histórico e corrigidos, não como caminhos alternativos suportados.
 
 ## Comece por aqui
 
@@ -11,9 +13,10 @@ A regra é simples: cada assunto deve ter uma fonte canônica. O `00-arquitetura
 3. [Lifecycle dos projetos](architecture/project-lifecycle.md)
 4. [Host-agent](architecture/host-agent.md)
 5. [Storage compartilhado, S3 e Storage Vectors](architecture/storage-vectors-lifecycle.md)
-6. [Arquitetura OpenResty/Lua](architecture/openresty-lua.md)
-7. [Supabase Analytics por projeto](architecture/supabase-analytics.md)
-8. [Autenticação multi-tenant no Realtime](09-autenticacao-multi-tenant-realtime.md)
+6. [Operação de chaves de API opacas](12-chaves-api-opacas.md)
+7. [Arquitetura OpenResty/Lua](architecture/openresty-lua.md)
+8. [Supabase Analytics por projeto](architecture/supabase-analytics.md)
+9. [Autenticação multi-tenant no Realtime](09-autenticacao-multi-tenant-realtime.md)
 
 ## Instalação e configuração
 
@@ -26,6 +29,7 @@ A regra é simples: cada assunto deve ter uma fonte canônica. O `00-arquitetura
 
 ## Segurança
 
+- [Política de disclosure do repositório](../SECURITY.md)
 - [Gerenciamento de usuários no Authelia](07-gerenciamento-usuarios-authelia.md)
 - [Hardening do Postgres-Meta global](10-hardening-postgres-meta.md)
 - [Rotação de segredos e conexões do Postgres-Meta](11-rotacao-cripto-conexoes.md)
@@ -36,8 +40,9 @@ A regra é simples: cada assunto deve ter uma fonte canônica. O `00-arquitetura
 
 - [Principais erros](05-principais-erros.md)
 - [Migração transitória para Storage compartilhado](architecture/shared-storage-migration.md)
-- A visão atual de jobs, recovery, rename e deleção fica em [Lifecycle dos projetos](architecture/project-lifecycle.md).
+- A visão atual de jobs, recovery, rename, backup, restore e deleção fica em [Lifecycle dos projetos](architecture/project-lifecycle.md).
 - A visão atual de segredos, identidade, settings e colaboração fica em [Control plane](architecture/control-plane.md).
+- O contrato físico de Docker, lease, timeout e reautorização fica em [Host-agent](architecture/host-agent.md).
 
 ## Fontes canônicas
 
@@ -45,7 +50,7 @@ A regra é simples: cada assunto deve ter uma fonte canônica. O `00-arquitetura
 | --- | --- |
 | visão macro e fronteiras | `00-arquitetura.md` |
 | API Python, schema central e autorização | `architecture/control-plane.md` |
-| criação, duplicação, rename, rotação e deleção | `architecture/project-lifecycle.md` |
+| criação, duplicação, rename, rotação, backup, restore e deleção | `architecture/project-lifecycle.md` |
 | execução física no host, HMAC, lease e comandos fechados | `architecture/host-agent.md` |
 | Storage multi-tenant, S3, Vectors e imgproxy | `architecture/storage-vectors-lifecycle.md` |
 | conversão única de instalações anteriores | `architecture/shared-storage-migration.md` |
@@ -54,7 +59,8 @@ A regra é simples: cada assunto deve ter uma fonte canônica. O `00-arquitetura
 | JWT, UUID do tenant e replication slots | `09-autenticacao-multi-tenant-realtime.md` |
 | fallback seguro do Postgres-Meta | `10-hardening-postgres-meta.md` |
 | envelope encryption e rotação | `11-rotacao-cripto-conexoes.md` |
-| chaves públicas opacas, slots, migração e incidentes | `12-chaves-api-opacas.md` |
+| chaves públicas opacas, slots, expiração opcional, migração e incidentes | `12-chaves-api-opacas.md` |
+| disclosure de vulnerabilidades deste projeto | `../SECURITY.md` |
 
 ## Regra para novas mudanças
 
@@ -62,7 +68,9 @@ Quando uma mudança alterar comportamento real do sistema:
 
 1. atualize primeiro o documento canônico do assunto;
 2. no `00-arquitetura.md`, altere somente a visão geral quando necessário;
-3. evite colar trechos grandes de código que mudam com frequência;
-4. prefira explicar contratos, invariantes, fronteiras e estados;
-5. use links para código apenas como referência de implementação;
-6. mantenha exemplos com `project UUID` e `project ref` claramente separados.
+3. mantenha `README.md` e `LEIAME.md` como resumos de onboarding, sem criar uma segunda especificação;
+4. evite colar trechos grandes de código que mudam com frequência;
+5. prefira explicar contratos, invariantes, fronteiras e estados;
+6. use links para código apenas como referência de implementação;
+7. mantenha `project UUID`, `tenant UUID` e `project ref` claramente separados;
+8. não documente arquitetura antiga como fallback quando a migração é one-way e o runtime novo a rejeita.
