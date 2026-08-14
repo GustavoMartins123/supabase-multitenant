@@ -55,6 +55,7 @@ transforms:
       auth: 'starts_with(string!(.appname), "supabase-auth-")'
       rest: 'starts_with(string!(.appname), "supabase-rest-")'
       storage: '.appname == "supabase-storage-global"'
+      storage_gateway: '.appname == "shared-storage-data-plane"'
       realtime: '.appname == "realtime-dev.supabase-realtime"'
       functions: '.appname == "supabase-edge-functions"'
       db: '.appname == "supabase-db"'
@@ -126,6 +127,34 @@ transforms:
         .metadata.operation = parsed.type
         .metadata.method = parsed.req.method
         .metadata.path = parsed.req.url
+      }
+      .metadata.project = .project
+      .metadata.tenant_project = .tenant_project
+
+  storage_gateway_logs:
+    type: remap
+    inputs: [router.storage_gateway]
+    source: |-
+      parsed, err = parse_json(.event_message)
+      if err == null {
+        .metadata.service = .appname
+        .metadata.request_id = parsed.request_id
+        .metadata.operation = parsed.method
+        .metadata.method = parsed.method
+        .metadata.path = parsed.uri
+        .metadata.status = parsed.status
+        if parsed.tenant_host != null {
+          tenant_match, tenant_err = parse_regex(
+            string!(parsed.tenant_host),
+            r'^(?P<tenant>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})[.]storage[.]internal$'
+          )
+          if tenant_err == null && tenant_match.tenant != null {
+            tenant = string!(tenant_match.tenant)
+            .tenant_project = tenant
+            .project = tenant
+            .metadata.tenantId = tenant
+          }
+        }
       }
       .metadata.project = .project
       .metadata.tenant_project = .tenant_project
@@ -249,7 +278,7 @@ sinks:
 
   logflare_storage:
     type: http
-    inputs: [storage_logs]
+    inputs: [storage_logs, storage_gateway_logs]
     encoding: { codec: json }
     method: post
     request:

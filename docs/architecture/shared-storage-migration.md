@@ -16,10 +16,14 @@ arquitetura. São necessários:
 
 - branch e configuração revisadas;
 - backup externo do host e do PostgreSQL;
-- Docker/Compose, Bash, Python 3, `jq`, `openssl`, `tar`, `gzip`, `sed`, `grep`
-  e `systemctl`;
+- Docker/Compose, Bash, Python 3, `jq`, `openssl`, `tar`, `gzip`, `sed`, `grep`,
+  `find` e `systemctl`;
 - `supabase-db` em execução;
 - Projects API e host-agent instalados no modelo atual;
+- `STORAGE_IMAGE=supabase/storage-api:v1.61.12`, proxy
+  `nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim` e backend file no layout
+  canônico (`/var/lib/storage`, bucket interno `objects`); valores diferentes
+  são recusados antes da conversão;
 - nenhum job ou comando de lifecycle em `queued` ou `running`;
 - espaço para uma segunda cópia temporária dos objetos e backups.
 
@@ -36,10 +40,12 @@ bash servidor/generateProject/migrate_shared_storage.sh
 A ferramenta:
 
 1. verifica que não há lifecycle ativo;
-2. para Projects API e host-agent, impedindo novas intenções;
+2. registra pelos labels do Compose se a Projects API usa `single-node` ou
+   `split-node`, e então para Projects API e host-agent, impedindo novas intenções;
 3. completa somente as chaves globais canônicas em `servidor/.env`;
 4. cria `.storage.env` 0600 com chaves aleatórias se ainda não existir;
-5. cria `_supabase_storage` e inicia Storage/imgproxy globais;
+5. cria `_supabase_storage`, reconcilia as redes internas de DB/Supavisor e
+   inicia Storage, imgproxy e o proxy global restrito à data plane;
 6. descobre os diretórios em `servidor/projects/`;
 7. confere `PROJECT_UUID` contra `projects.tenant_uuid`;
 8. para a stack do projeto;
@@ -56,8 +62,8 @@ A ferramenta:
 16. arquiva o diretório antigo no relatório interno e só então remove a cópia
     do diretório do projeto;
 17. converte backups formato 1 para archives de namespace formato 2;
-18. depois de todos os projetos e backups, reconstrói a Projects API nova e
-    religa o host-agent.
+18. depois de todos os projetos e backups, reconstrói a Projects API com o
+    mesmo override de topologia detectado antes da parada e religa o host-agent.
 
 Cada projeto tem um arquivo de estado. A cópia de origem não é apagada antes de
 o tenant novo passar por validação completa.
@@ -85,6 +91,11 @@ O `--resume` detecta a etapa registrada. Um projeto incompleto é revertido para
 seu estado anterior dentro da ferramenta antes de ser tentado novamente. Estado
 ambíguo — por exemplo, dois namespaces físicos ou tenant existente sem estado —
 é bloqueado para inspeção; nunca é escolhido um lado automaticamente.
+
+O marcador `projects-api.compose-override` aceita somente os overrides
+`docker-compose.single-node.yml` e `docker-compose.split-node.yml`. Marcador
+ausente, adulterado ou topologia ambígua interrompe a retomada; a ferramenta não
+escolhe um perfil padrão.
 
 Se qualquer projeto ficar parcial, Projects API e host-agent permanecem parados.
 Isso é intencional: código novo e stacks antigas não podem operar ao mesmo tempo.

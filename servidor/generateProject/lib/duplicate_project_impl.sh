@@ -72,11 +72,11 @@ CREATED_SUPAVISOR=0
 CREATED_STORAGE=0
 COMPOSE_STARTED=0
 SOURCE_CONTAINERS=""
-SOURCE_STORAGE_DISCONNECTED=0
+SOURCE_STORAGE_QUIESCED=0
 
 resume_source_project() {
   local failed=0
-  if [[ "$SOURCE_STORAGE_DISCONNECTED" -eq 1 ]]; then
+  if [[ "$SOURCE_STORAGE_QUIESCED" -eq 1 ]]; then
     storage_patch_tenant_connection "$ORIGINAL_UUID" "$ORIGINAL_PROJECT" || failed=1
     if [[ "$failed" -eq 0 ]]; then
       storage_validate_tenant "$ORIGINAL_UUID" "$ORIGINAL_SERVICE_ROLE_KEY" \
@@ -93,7 +93,7 @@ resume_source_project() {
       "$ORIGINAL_SERVICE_ROLE_KEY" || failed=1
   fi
   [[ "$failed" -eq 0 ]] || return 1
-  SOURCE_STORAGE_DISCONNECTED=0
+  SOURCE_STORAGE_QUIESCED=0
   SOURCE_CONTAINERS=""
 }
 
@@ -223,6 +223,10 @@ storage_validate_bool VECTOR_BUCKETS_ENABLED "$ORIGINAL_VECTOR_ENABLED" \
   S3_PROTOCOL_ACCESS_KEY_SECRET="$ORIGINAL_S3_SECRET_KEY"
   vector_validate_s3_credentials
 ) || die "Credenciais SigV4 da origem invalidas"
+storage_assert_project_identity "$ORIGINAL_PROJECT" "$ORIGINAL_UUID" \
+  || die "Identidade Storage da origem diverge do control plane"
+storage_assert_project_identity "$NEW_PROJECT" "$PROJECT_UUID" \
+  || die "Identidade Storage do clone diverge do control plane"
 storage_wait_global || die "Storage compartilhado indisponivel"
 storage_validate_tenant "$ORIGINAL_UUID" "$ORIGINAL_SERVICE_ROLE_KEY" \
   "$ORIGINAL_S3_ACCESS_KEY" "$ORIGINAL_S3_SECRET_KEY" \
@@ -316,9 +320,9 @@ if [[ "$COPY_MODE" == "with-data" ]]; then
     "/api/tenants/$ORIGINAL_PROJECT/terminate" "$GLOBAL_ANON_TOKEN")"
   backup_accepted_code "$source_pool_code" 200 204 404 \
     || die "Supavisor nao encerrou pools da origem (HTTP $source_pool_code)"
-  storage_disconnect_tenant_pool "$ORIGINAL_UUID" \
-    || die "Storage nao encerrou pool da origem"
-  SOURCE_STORAGE_DISCONNECTED=1
+  SOURCE_STORAGE_QUIESCED=1
+  storage_quiesce_tenant "$ORIGINAL_UUID" "$ORIGINAL_PROJECT" \
+    "$ORIGINAL_SERVICE_ROLE_KEY" || die "Storage nao bloqueou a data plane da origem"
   docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
     "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$ORIGINAL_DB' AND usename = 'supabase_storage_admin' AND pid <> pg_backend_pid();" \
     >/dev/null

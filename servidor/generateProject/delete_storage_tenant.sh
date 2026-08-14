@@ -15,12 +15,20 @@ TENANT_ID="$(tr '[:upper:]' '[:lower:]' <<<"${2:-}")"
 storage_validate_tenant_id "$TENANT_ID" || die "tenant_uuid invalido"
 
 PROJECT_ENV="$SERVER_ROOT/projects/$PROJECT_ID/.env"
+GLOBAL_ENV="$SERVER_ROOT/.env"
+[[ -f "$GLOBAL_ENV" ]] || die "Ambiente global ausente"
 [[ -f "$PROJECT_ENV" ]] || die "Ambiente do projeto ausente"
+set -a
+# shellcheck disable=SC1090
+source "$GLOBAL_ENV"
+set +a
 ENV_TENANT="$(grep -m1 '^PROJECT_UUID=' "$PROJECT_ENV" | cut -d= -f2- \
   | tr '[:upper:]' '[:lower:]')"
 storage_validate_tenant_id "$ENV_TENANT" || die "PROJECT_UUID do ambiente invalido"
 [[ "$ENV_TENANT" == "$TENANT_ID" ]] \
   || die "tenant_uuid nao pertence ao projeto solicitado"
+storage_assert_project_identity "$PROJECT_ID" "$TENANT_ID" \
+  || die "tenant_uuid diverge do control plane"
 
 storage_wait_global || die "Storage compartilhado indisponivel"
 storage_delete_tenant "$TENANT_ID" || die "Falha ao excluir tenant Storage"

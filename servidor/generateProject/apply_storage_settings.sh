@@ -33,6 +33,8 @@ for variable in FILE_SIZE_LIMIT ENABLE_IMAGE_TRANSFORMATION S3_PROTOCOL_ENABLED 
 done
 
 vector_validate_s3_credentials || die "Credenciais SigV4 invalidas"
+storage_assert_project_identity "$PROJECT_ID" "$PROJECT_UUID" \
+  || die "Identidade Storage diverge do control plane"
 storage_wait_global || die "Storage compartilhado indisponivel"
 storage_patch_tenant_settings "$PROJECT_UUID" "$FILE_SIZE_LIMIT" \
   "$ENABLE_IMAGE_TRANSFORMATION" "$S3_PROTOCOL_ENABLED" "$VECTOR_BUCKETS_ENABLED" \

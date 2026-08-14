@@ -25,6 +25,7 @@ from app.jobs import (
     configure_jobs,
     create_project_job as _create_project_job,
     create_retry_job,
+    enqueue_project_action as _enqueue_project_action,
     ensure_jobs_schema,
     serialize_job,
     set_job_status as _set_job_status,
@@ -142,64 +143,6 @@ from app.routers.lifecycle import router as lifecycle_router
 from app.routers.health import router as health_router
 from app.routers.opaque_keys import router as opaque_keys_router
 configure_jobs(get_pool)
-
-async def _enqueue_project_action(
-    project_name: str,
-    job_id: str,
-    runner,
-) -> int:
-    try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                SELECT p.id, j.action, j.payload
-                FROM projects p
-                JOIN jobs j ON j.job_id = $2
-                WHERE p.name = $1
-                """,
-                project_name,
-                uuid.UUID(str(job_id)),
-            )
-            if row is None:
-                raise RuntimeError(
-                    f"projeto ou job ausente ao enfileirar: {project_name}"
-                )
-            additional_project_ids: tuple[uuid.UUID, ...] = ()
-            if row["action"] == "duplicate":
-                payload = row["payload"] or {}
-                if isinstance(payload, str):
-                    payload = json.loads(payload)
-                if not isinstance(payload, dict):
-                    raise RuntimeError("payload do job de duplicacao invalido")
-                original_name = validate_project_id(
-                    str(payload.get("original_name") or "")
-                )
-                original_id = await conn.fetchval(
-                    "SELECT id FROM projects WHERE name = $1",
-                    original_name,
-                )
-                if original_id is None:
-                    raise RuntimeError(
-                        "projeto de origem da duplicacao nao existe"
-                    )
-                additional_project_ids = (original_id,)
-        return await action_queue.submit(
-            project_name,
-            row["id"],
-            job_id,
-            runner,
-            additional_project_ids=additional_project_ids,
-        )
-    except Exception as exc:
-        await _set_job_status(
-            job_id,
-            "failed",
-            message="Nao foi possivel enfileirar a operacao.",
-            current_step="enqueue_failed",
-            error_code="queue_submit_failed",
-        )
-        raise RuntimeError("falha ao enfileirar operacao do projeto") from exc
 
 
 async def _serialize_queued_job(

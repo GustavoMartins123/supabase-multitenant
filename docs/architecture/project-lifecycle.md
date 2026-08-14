@@ -19,6 +19,11 @@ Antes de acompanhar qualquer fluxo, diferencie:
 - slot principal do CDC: sufixado pelo project ref;
 - slot temporário de broadcast: sufixado por hash derivado do UUID.
 
+Antes de qualquer operação Storage mutável sobre um projeto existente, o
+lifecycle consulta `projects.tenant_uuid` no control plane e exige igualdade
+com o `PROJECT_UUID` canônico do ambiente. Divergência, linha ausente ou falha
+de consulta encerra a operação antes de tocar registry, database ou namespace.
+
 ## Criação
 
 Fluxo resumido:
@@ -83,10 +88,10 @@ Mesmo quando os dados são copiados, a identidade do projeto novo é independent
 - novo config token.
 
 A cópia não reutiliza segredos nem objetos por referência. `schema-only` cria
-namespace vazio. `with-data` captura a origem com seus serviços parados e pool
-Storage desconectado, copia os arquivos para o UUID novo, reidentifica as
-tabelas físicas de Vector e remove FDWs/Vault secrets copiados antes de criar
-credenciais novas.
+namespace vazio. `with-data` captura a origem com seus serviços parados e o
+tenant Storage em manutenção fail-closed, copia os arquivos para o UUID novo,
+reidentifica as tabelas físicas de Vector e remove FDWs/Vault secrets copiados
+antes de criar credenciais novas.
 
 ## Rename
 
@@ -141,11 +146,14 @@ O tenant continua identificado pelo UUID. O rename atualiza os recursos ligados 
 
 ### Storage
 
-O pool do tenant é desconectado antes do rename do database. Depois do rename,
-o lifecycle atualiza `databaseUrl` e `databasePoolUrl` pela Admin API, executa as
-migrations oficiais e valida o mesmo tenant UUID pelo novo Nginx. Nenhum objeto
-é movido; apenas endpoints de wrappers Vector que contêm o project ref são
-reconciliados.
+O tenant é colocado em manutenção fail-closed antes do rename do database. O
+lifecycle troca `databasePoolUrl` por uma URL deliberadamente inalcançável e
+confirma pelo data plane que o tenant responde com erro; `null` não é usado,
+pois o Storage oficial passaria a usar `databaseUrl`. Depois do rename, o
+lifecycle atualiza `databaseUrl` e `databasePoolUrl` canônicos pela Admin API,
+executa as migrations oficiais e valida o mesmo tenant UUID pelo novo Nginx.
+Nenhum objeto é movido; apenas endpoints de wrappers Vector que contêm o
+project ref são reconciliados.
 
 ### Snippets
 
@@ -272,14 +280,16 @@ global nem inclui o namespace de outro tenant.
 
 O backup é frio por decisão de produto: o script para os serviços do
 projeto (o Postgres compartilhado continua de pé), encerra os pools do
-tenant no Supavisor e no Storage, captura banco + namespace de forma atômica
-(`<id>.tmp` + rename), reconecta o tenant e religa somente os containers que
-estavam rodando.
+tenant no Supavisor e coloca somente o tenant Storage em manutenção fail-closed.
+O script confirma pelo data plane que o cache já deixou de aceitar operações,
+encerra as conexões Storage remanescentes, captura banco + namespace de forma
+atômica (`<id>.tmp` + rename), restaura as URLs canônicas do tenant e religa
+somente os containers que estavam rodando.
 
 ### Restauração
 
-1. para os serviços do projeto, shutdown do tenant Realtime e terminate
-   dos pools do Supavisor;
+1. para os serviços do projeto, shutdown do tenant Realtime, terminate
+   dos pools do Supavisor e põe o tenant Storage em manutenção fail-closed;
 2. captura um **ponto automático de segurança** com o estado atual e emite
    `SAFETY_BACKUP_COMPLETE`;
 3. dropa os replication slots, renomeia o database atual para

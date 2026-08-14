@@ -17,9 +17,20 @@ O servico global usa:
 - `VECTOR_BUCKET_PROVIDER=pgvector`;
 - um unico `IMGPROXY_URL` interno.
 
-A Admin API nao e publicada no host. O lifecycle a chama por `docker exec`,
-le a chave apenas dentro do container e nunca a inclui em argv, arquivos de
-projeto, respostas publicas ou logs.
+O lifecycle é deliberadamente acoplado a esse contrato verificado na tag
+`v1.61.12`: exige a imagem canônica, `STORAGE_BACKEND=file`,
+`STORAGE_FILE_BACKEND_PATH=/var/lib/storage` e bucket interno `objects`. Ele
+falha antes de mutar dados se configuração ou imagem efetivamente executada
+divergirem; não tenta interpretar outro backend como layout file.
+
+A Admin API nao e publicada no host nem conectada a `rede-supabase`. O
+container Storage usa redes internas de controle e data plane; um Nginx global
+sem credenciais, com alias `supabase-storage-global` na rede interna exclusiva
+`supabase-storage-gateways`, encaminha exclusivamente para `storage:5000`.
+Somente o Nginx confiavel de cada projeto entra nessa rede; Auth, PostgREST e os
+demais containers de projeto permanecem fora dela. O lifecycle chama a Admin API por
+`docker exec`, le a chave apenas dentro do container e nunca a inclui em argv,
+arquivos de projeto, respostas publicas ou logs.
 
 ## Identidade e localizacao fisica
 
@@ -44,6 +55,10 @@ Os helpers de lifecycle aceitam apenas UUID canonico em minusculas, resolvem a
 raiz real, rejeitam symlinks e validam archives antes de extrair. Nao existe
 tenant padrao e uma identidade ausente ou desconhecida falha.
 
+Para operações de projeto existente, o par `project_ref`/`tenant_uuid` também é
+comparado com `projects.tenant_uuid` no control plane. Um `.env` divergente não
+consegue selecionar o namespace de outro projeto.
+
 ## Resolucao HTTP do tenant
 
 Cada Nginx de projeto conhece o UUID renderizado no seu proprio arquivo e
@@ -54,8 +69,11 @@ proxy_set_header X-Forwarded-Host "<tenant_uuid>.storage.internal";
 ```
 
 O Storage aceita somente hosts que casam integralmente com o regexp de UUID.
-Assim, `X-Forwarded-Host`, `Host` ou qualquer suposto header de tenant enviado
-pelo cliente nao permite selecionar outro projeto.
+O proxy do data plane tambem rejeita com HTTP 421 qualquer request de dados sem
+esse host canonico ou com valor invalido; apenas `/status`, usado pelo
+healthcheck de infraestrutura, nao exige tenant. Assim, `X-Forwarded-Host`,
+`Host` ou qualquer suposto header de tenant enviado pelo cliente nao permite
+selecionar outro projeto.
 
 O fluxo de chave opaca permanece:
 
@@ -75,8 +93,10 @@ pelo gateway de B e um JWT de A nao valida contra o segredo de B.
 
 O registro do tenant contem duas URLs:
 
-- direta: `supabase_storage_admin` em `_supabase_<project_ref>`;
-- pool: `supabase_storage_admin.<project_ref>` no Supavisor.
+- direta: `supabase_storage_admin` em `_supabase_<project_ref>` pelo hostname
+  `db` da rede de controle;
+- pool: `supabase_storage_admin.<project_ref>` pelo hostname `supavisor` da
+  mesma rede.
 
 Create, duplicate, rename e restore concedem acesso a
 `supabase_storage_admin`, fixam `search_path=storage,public` e validam pgvector.
@@ -162,9 +182,12 @@ sao reiniciados por settings de projeto.
 
 ## Backup, restore e delete
 
-Backup desconecta somente o pool Storage do tenant, para os containers do
-projeto e arquiva somente o conteudo do seu namespace. O manifest formato 2
-vincula `project_uuid`, `storage_tenant_id` e `storage_layout=tenant-namespace`.
+Backup coloca somente o tenant Storage solicitado em manutenção fail-closed,
+confirma pelo data plane que ele não aceita novas operações, para os containers
+do projeto e arquiva somente o conteúdo do seu namespace. A manutenção usa uma
+`databasePoolUrl` deliberadamente inalcançável; não usa `null`, porque o Storage
+oficial passaria a consultar `databaseUrl`. O manifest formato 2 vincula
+`project_uuid`, `storage_tenant_id` e `storage_layout=tenant-namespace`.
 
 Restore rejeita manifests de outro UUID e archives com path absoluto,
 `..`, symlink ou tipo especial. O namespace atual e movido para staging
@@ -174,6 +197,15 @@ reexecutadas e wrappers sao reconciliados. Outros tenants permanecem intactos.
 Delete revoga todas as credenciais pela Admin API, remove o tenant do registry
 e somente depois remove o diretorio validado daquele UUID. O database do projeto
 so e removido depois dessa etapa concluir.
+
+## Observabilidade
+
+Os logs JSON do Storage global preservam `tenantId`, request ID, metodo, path e
+tipo de operacao quando fornecidos pelo upstream. O proxy do data plane registra
+somente o path sem query string, o metodo, o status, o request ID e o host de
+tenant ja sobrescrito pelo Nginx confiavel. O Vector extrai desse host apenas o
+UUID canonico e envia ambos os fluxos ao sink de Storage, sem registrar chaves,
+tokens, senhas ou credenciais SigV4.
 
 ## Testes
 

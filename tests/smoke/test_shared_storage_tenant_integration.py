@@ -445,29 +445,42 @@ storage_sigv4_probe {tenant} "$S3_PROTOCOL_ACCESS_KEY_ID" \
 
         # 3-8, 17-18 e 26: objetos, nomes iguais, isolamento e header hostil.
         bucket = "shared-private"
+        object_name = "same-path.txt"
         object_a = b"tenant-a-original"
         object_b = b"tenant-b-original"
         self._create_bucket(self.project_a, keys_a["secret"], bucket)
         self._create_bucket(self.project_b, keys_b["secret"], bucket)
         self.assertIn(
-            self._upload(self.project_a, keys_a["secret"], bucket, "a.txt", object_a)[0],
+            self._upload(self.project_a, keys_a["secret"], bucket, object_name, object_a)[0],
             {200, 201},
         )
         self.assertIn(
-            self._upload(self.project_b, keys_b["secret"], bucket, "b.txt", object_b)[0],
+            self._upload(self.project_b, keys_b["secret"], bucket, object_name, object_b)[0],
             {200, 201},
         )
-        self.assertEqual(self._read_object(self.project_a, keys_a["secret"], bucket, "a.txt"), (200, object_a.decode()))
-        self.assertEqual(self._read_object(self.project_b, keys_b["secret"], bucket, "b.txt"), (200, object_b.decode()))
-        self.assertGreaterEqual(self._read_object(self.project_a, keys_a["secret"], bucket, "b.txt")[0], 400)
-        self.assertGreaterEqual(self._read_object(self.project_b, keys_b["secret"], bucket, "a.txt")[0], 400)
+        self.assertEqual(
+            self._read_object(self.project_a, keys_a["secret"], bucket, object_name),
+            (200, object_a.decode()),
+        )
+        self.assertEqual(
+            self._read_object(self.project_b, keys_b["secret"], bucket, object_name),
+            (200, object_b.decode()),
+        )
+        self.assertGreaterEqual(
+            self._read_object(self.project_b, keys_a["secret"], bucket, object_name)[0],
+            400,
+        )
+        self.assertGreaterEqual(
+            self._read_object(self.project_a, keys_b["secret"], bucket, object_name)[0],
+            400,
+        )
         self.assertGreaterEqual(self._list_buckets(self.project_b, keys_a["publishable"])[0], 400)
         self.assertGreaterEqual(self._list_buckets(self.project_b, keys_a["secret"])[0], 400)
         spoof_status, spoof_body = self._read_object(
             self.project_a,
             keys_a["secret"],
             bucket,
-            "a.txt",
+            object_name,
             forwarded_host=f"{tenant_b}.storage.internal",
         )
         self.assertEqual((spoof_status, spoof_body), (200, object_a.decode()))
@@ -558,10 +571,50 @@ storage_sigv4_probe {tenant} "$S3_PROTOCOL_ACCESS_KEY_ID" \
         self._duplicate_project(self.project_b, self.clone_schema, with_data=False)
         clone_data_keys = self._claim_keys(self.clone_data)
         clone_schema_keys = self._claim_keys(self.clone_schema)
+        clone_data_env = _read_env(
+            self.server_root / "projects" / self.clone_data / ".env"
+        )
+        clone_schema_env = _read_env(
+            self.server_root / "projects" / self.clone_schema / ".env"
+        )
+        clone_data_tenant = clone_data_env["PROJECT_UUID"]
+        clone_schema_tenant = clone_schema_env["PROJECT_UUID"]
         clone_s3 = self._s3_credentials(self.clone_data)
+        clone_schema_s3 = self._s3_credentials(self.clone_schema)
+        self.assertNotEqual(clone_data_tenant, tenant_a)
+        self.assertNotEqual(clone_schema_tenant, tenant_b)
         self.assertNotEqual(clone_s3, s3_a)
+        self.assertNotEqual(clone_schema_s3, s3_b)
+        self.assertEqual(self._s3_request(self.clone_data, **clone_s3)[0], 200)
         self.assertEqual(
-            self._read_object(self.clone_data, clone_data_keys["secret"], bucket, "a.txt"),
+            self._s3_request(self.clone_schema, **clone_schema_s3)[0],
+            200,
+        )
+        self.assertGreaterEqual(self._s3_request(self.clone_data, **s3_a)[0], 400)
+        self.assertGreaterEqual(self._s3_request(self.project_a, **clone_s3)[0], 400)
+        self._vector_probe(
+            self.clone_data,
+            clone_data_tenant,
+            "ListVectorBuckets",
+            {},
+            expect_success=True,
+        )
+        self._vector_probe(
+            self.project_a,
+            clone_data_tenant,
+            "ListVectorBuckets",
+            {},
+            expect_success=False,
+        )
+        self._vector_probe(
+            self.clone_data,
+            tenant_a,
+            "ListVectorBuckets",
+            {},
+            expect_success=False,
+        )
+        self.assertEqual(
+            self._read_object(self.clone_data, clone_data_keys["secret"], bucket, object_name),
             (200, object_a.decode()),
         )
         schema_status, schema_buckets = self._list_buckets(
@@ -587,7 +640,7 @@ storage_sigv4_probe {tenant} "$S3_PROTOCOL_ACCESS_KEY_ID" \
             tenant_a,
         )
         self.assertEqual(
-            self._read_object(self.renamed_a, keys_a["secret"], bucket, "a.txt"),
+            self._read_object(self.renamed_a, keys_a["secret"], bucket, object_name),
             (200, object_a.decode()),
         )
         self.assertEqual(self._s3_request(self.renamed_a, **s3_a)[0], 200)
@@ -598,7 +651,7 @@ storage_sigv4_probe {tenant} "$S3_PROTOCOL_ACCESS_KEY_ID" \
                 self.renamed_a,
                 keys_a["secret"],
                 bucket,
-                "a.txt",
+                object_name,
                 b"tenant-a-after-backup",
                 upsert=True,
             )[0],
@@ -612,18 +665,18 @@ storage_sigv4_probe {tenant} "$S3_PROTOCOL_ACCESS_KEY_ID" \
         self.assertEqual(status, 202, restore_job)
         wait_for_job(self.api_url, restore_job["job_id"], self.headers)
         self.assertEqual(
-            self._read_object(self.renamed_a, keys_a["secret"], bucket, "a.txt"),
+            self._read_object(self.renamed_a, keys_a["secret"], bucket, object_name),
             (200, object_a.decode()),
         )
         self.assertEqual(
-            self._read_object(self.project_b, keys_b["secret"], bucket, "b.txt"),
+            self._read_object(self.project_b, keys_b["secret"], bucket, object_name),
             (200, object_b.decode()),
         )
 
         # 8: remover A apaga somente seu namespace/tenant.
         self._delete_project(self.renamed_a)
         self.assertEqual(
-            self._read_object(self.project_b, keys_b["secret"], bucket, "b.txt"),
+            self._read_object(self.project_b, keys_b["secret"], bucket, object_name),
             (200, object_b.decode()),
         )
 
@@ -662,12 +715,56 @@ let key=""; process.stdin.on("data", c => key += c); process.stdin.on("end", asy
         ).stdout.splitlines()
         self.assertEqual(names.count("supabase-storage-global"), 1)
         self.assertEqual(names.count("supabase-imgproxy-global"), 1)
+        self.assertEqual(names.count("shared-storage-data-plane"), 1)
         self.assertFalse(
             any(
                 (name.startswith("supabase-storage-") and name != "supabase-storage-global")
                 or (name.startswith("supabase-imgproxy-") and name != "supabase-imgproxy-global")
                 for name in names
             )
+        )
+
+        def container_networks(container: str) -> set[str]:
+            inspected = subprocess.run(
+                [
+                    "docker",
+                    "inspect",
+                    "--format",
+                    "{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}",
+                    container,
+                ],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+            ).stdout
+            return set(inspected.splitlines())
+
+        gateway_network = "supabase-storage-gateways"
+        proxy_networks = container_networks("shared-storage-data-plane")
+        nginx_networks = container_networks(f"supabase-nginx-{self.project_b}")
+        auth_networks = container_networks(f"supabase-auth-{self.project_b}")
+        storage_networks = container_networks("supabase-storage-global")
+        self.assertIn(gateway_network, proxy_networks)
+        self.assertIn(gateway_network, nginx_networks)
+        self.assertNotIn(gateway_network, auth_networks)
+        self.assertNotIn(gateway_network, storage_networks)
+        self.assertNotIn("rede-supabase", proxy_networks)
+        self.assertNotIn("rede-supabase", storage_networks)
+        self._bash(
+            f"docker exec supabase-nginx-{project_b} wget -qO- "
+            "http://supabase-storage-global:5001/tenants",
+            expect_success=False,
+        )
+        self._bash(
+            f"docker exec supabase-nginx-{project_b} wget -qO- "
+            "http://supabase-storage-global:5000/bucket",
+            expect_success=False,
+        )
+        self._bash(
+            f"docker exec supabase-nginx-{project_b} wget -qO- "
+            "--header='X-Forwarded-Host: invalid.storage.internal' "
+            "http://supabase-storage-global:5000/bucket",
+            expect_success=False,
         )
         subprocess.run(
             ["docker", "stop", "--time", "30", "supabase-storage-global"],
@@ -693,7 +790,7 @@ let key=""; process.stdin.on("data", c => key += c); process.stdin.on("end", asy
             self.storage_was_stopped = False
             self._wait_storage()
         self.assertEqual(
-            self._read_object(self.project_b, keys_b["secret"], bucket, "b.txt"),
+            self._read_object(self.project_b, keys_b["secret"], bucket, object_name),
             (200, object_b.decode()),
         )
 

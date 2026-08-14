@@ -36,6 +36,7 @@ services:
       - ALL
     networks:
       - rede-supabase
+      - storage-gateways
   auth:
     container_name: supabase-auth-{{project_id}}
     image: ${AUTH_IMAGE}
@@ -173,3 +174,6 @@ services:
 networks:
   rede-supabase:
     external: true
+  storage-gateways:
+    external: true
+    name: supabase-storage-gateways

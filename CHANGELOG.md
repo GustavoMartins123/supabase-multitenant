@@ -10,19 +10,28 @@ O formato deste arquivo segue as diretrizes do [Keep a Changelog](https://keepac
 
 - Storage API e imgproxy passaram de containers por projeto para instâncias
   globais compartilhadas, usando sem patches o modo multi-tenant oficial do
-  Storage v1.61.12, registry dedicado cifrado e backend file por namespace UUID.
+  Storage v1.61.12, registry dedicado cifrado, backend file por namespace UUID
+  e proxy de data plane numa rede exclusiva dos Nginx confiáveis, mantendo a
+  Admin API fora das redes alcançáveis pelos projetos.
 - Lifecycle de create, duplicate, rename, delete, settings, backup e restore
   passou a registrar, validar e remover tenants pela Admin API oficial, com
-  rollback compensatório e sem caminho de runtime para a arquitetura anterior.
+  rollback compensatório, quiescência fail-closed por tenant nas operações
+  consistentes, vínculo obrigatório com `projects.tenant_uuid` e sem caminho de
+  runtime para a arquitetura anterior.
 - Credenciais S3/SigV4 e Storage Vectors passaram a ser isolados por tenant;
   wrappers usam o Nginx do projeto, clones recebem credenciais/namespace novos e
   rename preserva objetos pela identidade imutável.
 - Adicionada ferramenta transitória, resumível e fail-closed para converter
   projetos e backups existentes, mantendo Projects API/host-agent quiescentes
-  enquanto houver estado misto.
+  enquanto houver estado misto e restaurando a mesma topologia Compose detectada.
 - Adicionados contratos estáticos e smoke opt-in de dois tenants cobrindo
   objetos, opaque keys, S3, Vectors, imagens, limites, clones, rename,
   backup/restore, delete, headers hostis e indisponibilidade do Storage global.
+
+- Logs do Storage global e do proxy de data plane passaram a carregar tenant,
+  request ID e operacao sem query strings ou credenciais.
+- O proxy de data plane passou a rejeitar com HTTP 421 requests sem host de
+  tenant UUID canonico, antes que alcancem o Storage compartilhado.
 
 ### 2026-08-11
 

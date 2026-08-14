@@ -46,7 +46,7 @@ MOVED_DIR=0
 META_UPDATED=0
 NEW_COMPOSE_STARTED=0
 VECTOR_WRAPPERS_SYNCED=0
-STORAGE_POOL_DISCONNECTED=0
+STORAGE_TENANT_QUIESCED=0
 SLOT_PLUGIN=""
 
 cleanup() { rm -rf "$BACKUP_DIR"; }
@@ -158,7 +158,7 @@ rollback_on_error() {
       "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$NEW_DB' AND pid <> pg_backend_pid(); ALTER DATABASE \"$NEW_DB\" RENAME TO \"$OLD_DB\";" \
       >/dev/null 2>&1 || rollback_failed=1
   fi
-  if [[ "$STORAGE_POOL_DISCONNECTED" -eq 1 ]]; then
+  if [[ "$STORAGE_TENANT_QUIESCED" -eq 1 ]]; then
     storage_patch_tenant_connection "$PROJECT_UUID" "$OLD_NAME" \
       >/dev/null 2>&1 || rollback_failed=1
     storage_assert_tenant_health "$PROJECT_UUID" \
@@ -264,6 +264,8 @@ storage_validate_bool S3_PROTOCOL_ENABLED "$S3_PROTOCOL_ENABLED" \
 storage_validate_bool VECTOR_BUCKETS_ENABLED "$VECTOR_BUCKETS_ENABLED" \
   || die "VECTOR_BUCKETS_ENABLED invalido"
 vector_validate_s3_credentials || die "Credenciais SigV4 do projeto invalidas"
+storage_assert_project_identity "$OLD_NAME" "$PROJECT_UUID" \
+  || die "Identidade Storage diverge do control plane"
 
 for container in supabase-db supabase-pooler realtime-dev.supabase-realtime; do
   docker inspect "$container" >/dev/null 2>&1 || die "Container $container ausente"
@@ -305,9 +307,9 @@ code=$(http_code realtime-dev.supabase-realtime POST "/api/tenants/$PROJECT_UUID
 accepted_code "$code" 200 202 204 404 || die "Realtime nao aceitou shutdown (HTTP $code)"
 code=$(http_code supabase-pooler GET "/api/tenants/$OLD_NAME/terminate" "$GLOBAL_ANON_TOKEN")
 accepted_code "$code" 200 204 404 || die "Supavisor nao encerrou pools antigos (HTTP $code)"
-storage_disconnect_tenant_pool "$PROJECT_UUID" \
-  || die "Storage nao encerrou o pool do tenant antes do rename"
-STORAGE_POOL_DISCONNECTED=1
+STORAGE_TENANT_QUIESCED=1
+storage_quiesce_tenant "$PROJECT_UUID" "$OLD_NAME" "$SERVICE_ROLE_KEY_PROJETO" \
+  || die "Storage nao bloqueou a data plane do tenant antes do rename"
 
 say "Renomeando database $OLD_DB -> $NEW_DB..."
 docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \

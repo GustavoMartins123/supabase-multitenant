@@ -453,8 +453,8 @@ http {
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, Tus-Resumable, Tus-Version, Tus-Max-Size, Tus-Extension, Upload-Length, Upload-Metadata, Upload-Offset, Upload-Concat, Upload-Defer-Length, x-upsert, X-Requested-With, x-supabase-api-version' always;
         }
 
-        # Endpoint interno dos S3 Vectors Wrappers. O cliente externo nao pode
-        # acessar esta rota nem escolher o tenant por header.
+        # Endpoint SigV4 dos S3 Vectors Wrappers. O gateway fixa o tenant e
+        # ignora qualquer tentativa do cliente de escolher outro por header.
         location /vector/ {
             allow ${SUPABASE_NETWORK_SUBNET};
             deny all;

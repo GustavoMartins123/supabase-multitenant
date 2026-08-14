@@ -50,6 +50,8 @@ STORAGE_REGION="$STORAGE_S3_REGION"
 
 vector_validate_s3_credentials || exit 1
 vector_validate_database "$POSTGRES_DATABASE" || exit 1
+storage_assert_project_identity "$PROJECT_ID" "${PROJECT_UUID,,}" \
+  || fail "Identidade Storage diverge do control plane"
 
 docker inspect supabase-db >/dev/null 2>&1 || fail "Container supabase-db nao encontrado"
 storage_wait_global || fail "Storage compartilhado indisponivel"

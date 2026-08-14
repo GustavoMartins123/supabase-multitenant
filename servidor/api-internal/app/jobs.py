@@ -15,6 +15,8 @@ from typing import Any
 
 import asyncpg
 
+from app.validation import validate_project_id
+
 
 IDEMPOTENT_ACTIONS = frozenset({"start", "stop", "restart", "recreate_services"})
 TERMINAL_STATUSES = frozenset({"done", "failed", "cancelled"})
@@ -513,6 +515,66 @@ class ProjectActionQueue:
 
 
 action_queue = ProjectActionQueue()
+
+
+async def enqueue_project_action(
+    project_name: str,
+    job_id: str,
+    runner: JobRunner,
+) -> int:
+    """Enfileira a acao e inclui a origem no lock de uma duplicacao."""
+    try:
+        pool = await _get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT p.id, j.action, j.payload
+                FROM projects p
+                JOIN jobs j ON j.job_id = $2
+                WHERE p.name = $1
+                """,
+                project_name,
+                uuid.UUID(str(job_id)),
+            )
+            if row is None:
+                raise RuntimeError(
+                    f"projeto ou job ausente ao enfileirar: {project_name}"
+                )
+            additional_project_ids: tuple[uuid.UUID, ...] = ()
+            if row["action"] == "duplicate":
+                payload = row["payload"] or {}
+                if isinstance(payload, str):
+                    payload = json.loads(payload)
+                if not isinstance(payload, dict):
+                    raise RuntimeError("payload do job de duplicacao invalido")
+                original_name = validate_project_id(
+                    str(payload.get("original_name") or "")
+                )
+                original_id = await conn.fetchval(
+                    "SELECT id FROM projects WHERE name = $1",
+                    original_name,
+                )
+                if original_id is None:
+                    raise RuntimeError(
+                        "projeto de origem da duplicacao nao existe"
+                    )
+                additional_project_ids = (original_id,)
+        return await action_queue.submit(
+            project_name,
+            row["id"],
+            job_id,
+            runner,
+            additional_project_ids=additional_project_ids,
+        )
+    except Exception as exc:
+        await set_job_status(
+            job_id,
+            "failed",
+            message="Nao foi possivel enfileirar a operacao.",
+            current_step="enqueue_failed",
+            error_code="queue_submit_failed",
+        )
+        raise RuntimeError("falha ao enfileirar operacao do projeto") from exc
 
 
 async def get_action_queue() -> ProjectActionQueue:

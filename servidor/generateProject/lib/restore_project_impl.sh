@@ -59,6 +59,8 @@ storage_validate_bool VECTOR_BUCKETS_ENABLED "$VECTOR_BUCKETS_ENABLED" \
 storage_validate_bool S3_PROTOCOL_ENABLED "$S3_PROTOCOL_ENABLED" \
   || die "S3_PROTOCOL_ENABLED invalido"
 vector_validate_s3_credentials || die "Credenciais SigV4 invalidas"
+storage_assert_project_identity "$PROJECT" "$PROJECT_UUID" \
+  || die "Identidade Storage diverge do control plane"
 
 SRC_DIR="$BACKUPS_ROOT/$PROJECT_UUID/$BACKUP_ID"
 SAFETY_DIR="$BACKUPS_ROOT/$PROJECT_UUID/$SAFETY_BACKUP_ID"
@@ -110,7 +112,7 @@ SLOT_DROPPED=0
 DB_RENAMED=0
 NEW_DB_CREATED=0
 STORAGE_SWAPPED=0
-STORAGE_POOL_DISCONNECTED=0
+STORAGE_TENANT_QUIESCED=0
 
 terminate_db_conns() {
   docker exec supabase-db psql -U supabase_admin -d postgres -c \
@@ -165,7 +167,7 @@ rollback_on_error() {
     docker exec supabase-db psql -U supabase_admin -d postgres -c \
       "ALTER DATABASE \"$PRERESTORE_DB\" RENAME TO \"$DB\";" >/dev/null 2>&1 || rollback_failed=1
   fi
-  if [[ "$STORAGE_POOL_DISCONNECTED" -eq 1 ]]; then
+  if [[ "$STORAGE_TENANT_QUIESCED" -eq 1 ]]; then
     storage_patch_tenant_connection "$PROJECT_UUID" "$PROJECT" \
       >/dev/null 2>&1 || rollback_failed=1
     storage_assert_tenant_health "$PROJECT_UUID" \
@@ -196,9 +198,9 @@ code="$(backup_http_code realtime-dev.supabase-realtime POST "/api/tenants/$PROJ
 backup_accepted_code "$code" 200 202 204 404 || die "Realtime nao aceitou shutdown (HTTP $code)"
 code="$(backup_http_code supabase-pooler GET "/api/tenants/$PROJECT/terminate" "$GLOBAL_ANON_TOKEN")"
 backup_accepted_code "$code" 200 204 404 || die "Supavisor nao encerrou pools (HTTP $code)"
-storage_disconnect_tenant_pool "$PROJECT_UUID" \
-  || die "Storage nao encerrou pool do tenant"
-STORAGE_POOL_DISCONNECTED=1
+STORAGE_TENANT_QUIESCED=1
+storage_quiesce_tenant "$PROJECT_UUID" "$PROJECT" "$SERVICE_ROLE_KEY_PROJETO" \
+  || die "Storage nao bloqueou a data plane do tenant"
 docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
   "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$DB' AND usename = 'supabase_storage_admin' AND pid <> pg_backend_pid();" \
   >/dev/null

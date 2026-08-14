@@ -44,6 +44,7 @@ SUMMARY="$RUN_DIR/summary.tsv"
 [[ -f "$SUMMARY" ]] || printf 'scope\tid\tstatus\tdetail\n' > "$SUMMARY"
 
 PROJECTS_API_MARKER="$RUN_DIR/projects-api.was-running"
+PROJECTS_API_OVERRIDE_MARKER="$RUN_DIR/projects-api.compose-override"
 HOST_AGENT_MARKER="$RUN_DIR/host-agent.was-active"
 PROJECTS_API_WAS_RUNNING=0
 HOST_AGENT_WAS_ACTIVE=0
@@ -95,6 +96,38 @@ restart_projects_api_without_rebuild() {
   PROJECTS_API_WAS_RUNNING=0
 }
 
+capture_projects_api_override() {
+  local config_files override="" has_single=0 has_split=0
+  config_files="$(docker inspect -f \
+    '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' \
+    projects-api)" || die "nao foi possivel identificar a topologia da Projects API"
+  [[ "$config_files" == *"docker-compose.single-node.yml"* ]] && has_single=1
+  [[ "$config_files" == *"docker-compose.split-node.yml"* ]] && has_split=1
+  if [[ "$has_single" -eq 1 && "$has_split" -eq 0 ]]; then
+    override="docker-compose.single-node.yml"
+  elif [[ "$has_single" -eq 0 && "$has_split" -eq 1 ]]; then
+    override="docker-compose.split-node.yml"
+  else
+    die "topologia da Projects API ausente ou ambigua nos labels do Compose"
+  fi
+  printf '%s\n' "$override" > "$PROJECTS_API_OVERRIDE_MARKER"
+}
+
+read_projects_api_override() {
+  local -a lines=()
+  [[ -f "$PROJECTS_API_OVERRIDE_MARKER" ]] \
+    || die "marcador de topologia da Projects API ausente"
+  mapfile -t lines < "$PROJECTS_API_OVERRIDE_MARKER"
+  [[ "${#lines[@]}" -eq 1 ]] \
+    || die "marcador de topologia da Projects API invalido"
+  case "${lines[0]}" in
+    docker-compose.single-node.yml|docker-compose.split-node.yml)
+      printf '%s' "${lines[0]}"
+      ;;
+    *) die "override da Projects API nao suportado" ;;
+  esac
+}
+
 quiesce_lifecycle() {
   local counts jobs commands
   counts="$(active_lifecycle_counts)"
@@ -103,6 +136,7 @@ quiesce_lifecycle() {
     || die "existem jobs lifecycle ativos (jobs=$jobs commands=$commands); aguarde e execute novamente"
 
   if [[ "$(docker inspect -f '{{.State.Running}}' projects-api 2>/dev/null || true)" == "true" ]]; then
+    capture_projects_api_override
     PROJECTS_API_WAS_RUNNING=1
     : > "$PROJECTS_API_MARKER"
     docker stop --time 30 projects-api >/dev/null
@@ -127,10 +161,11 @@ quiesce_lifecycle() {
 }
 
 resume_lifecycle_after_success() {
-  local status="" attempts
+  local status="" attempts api_override
   if [[ "$PROJECTS_API_WAS_RUNNING" -eq 1 ]]; then
+    api_override="$(read_projects_api_override)"
     (cd "$SERVER_ROOT" && docker compose \
-      -f docker-compose-api.yml -f docker-compose.single-node.yml \
+      -f docker-compose-api.yml -f "$api_override" \
       --env-file .env up --build -d projects-api)
     for attempts in $(seq 1 60); do
       status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
@@ -193,7 +228,7 @@ ensure_global_storage_config() {
   local target="$SERVER_ROOT/.env" example="$SERVER_ROOT/.env.example"
   local temp key value count
   local keys=(
-    STORAGE_IMAGE STORAGE_TENANT_DB_USER STORAGE_BACKEND
+    STORAGE_IMAGE STORAGE_DATA_PLANE_PROXY_IMAGE STORAGE_TENANT_DB_USER STORAGE_BACKEND
     STORAGE_FILE_BACKEND_PATH STORAGE_INTERNAL_BUCKET STORAGE_S3_REGION
     STORAGE_FILE_SIZE_LIMIT STORAGE_FILE_SIZE_LIMIT_STANDARD
     STORAGE_TENANT_MAX_CONNECTIONS STORAGE_TENANT_POOL_IDLE_MS
@@ -258,7 +293,7 @@ SQL
 
 start_global_storage() {
   (cd "$SERVER_ROOT" && docker compose -f docker-compose.yml --env-file .env \
-    up -d imgproxy storage)
+    up -d db supavisor imgproxy storage storage-data-plane)
   storage_wait_global || die "Storage compartilhado nao iniciou"
 }
 
@@ -458,10 +493,7 @@ migrate_project() (
   PROJECT_AUTH_EXTERNAL_URL="$PROJECT_PUBLIC_URL/auth/v1"
   export PROJECT_UUID SERVICE_ROLE_KEY_PROJETO
 
-  db_tenant="$(docker exec supabase-db psql -X -q -v ON_ERROR_STOP=1 \
-    -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc \
-    "SELECT tenant_uuid::text FROM projects WHERE name = '$project';" | tr -d '[:space:]')"
-  [[ "$db_tenant" == "$PROJECT_UUID" ]] \
+  storage_assert_project_identity "$project" "$PROJECT_UUID" \
     || { report project "$project" failed "tenant UUID diverge do control plane"; return 1; }
 
   if ! grep -Eq 'container_name:[[:space:]]*supabase-(storage|imgproxy)-' "$compose_file" \
@@ -550,6 +582,8 @@ migrate_project() (
   storage_owned=1
   storage_clone_tenant_namespace_from_legacy() {
     local destination
+    storage_validate_file_tree "$old_namespace" "namespace Storage antigo" \
+      || return 1
     destination="$(storage_assert_namespace_target "$PROJECT_UUID")"
     [[ ! -e "$destination" ]] || return 1
     mkdir -p "$destination"
@@ -684,6 +718,8 @@ docker inspect supabase-db >/dev/null 2>&1 || die "supabase-db nao esta rodando"
 quiesce_lifecycle
 MIGRATION_MUTATIONS_STARTED=1
 ensure_global_storage_config
+storage_require_canonical_global_config \
+  || die "Configuracao global do Storage nao corresponde ao contrato suportado"
 ensure_storage_secrets
 create_registry_database
 start_global_storage

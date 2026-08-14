@@ -95,17 +95,10 @@ done
 
 echo
 echo "Aguardando Storage compartilhado ficar pronto..."
-counter=0
-until [ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' supabase-storage-global 2>/dev/null)" = "healthy" ]; do
-    storage_status="$(docker inspect -f '{{.State.Status}}' supabase-storage-global 2>/dev/null || true)"
-    if [ "$storage_status" = "exited" ] || [ "$counter" -gt 60 ]; then
-        docker logs --tail 100 supabase-storage-global >&2 || true
-        die "Storage compartilhado nao ficou saudavel; em instalacao existente, execute a migracao antes de iniciar projetos."
-    fi
-    printf "."
-    sleep 2
-    counter=$((counter + 1))
-done
+# shellcheck disable=SC1091
+source "$ROOT_DIR/servidor/generateProject/lib/storage_multitenant.sh"
+storage_wait_global 60 \
+    || die "Storage/data plane compartilhados nao ficaram saudaveis; em instalacao existente, execute a migracao antes de iniciar projetos."
 
 echo
 echo "Aguardando Projects API ficar pronta..."

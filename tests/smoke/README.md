@@ -34,7 +34,8 @@ python -m unittest tests.smoke.test_tenant_lifecycle -v
 Para a matriz completa de Storage compartilhado, use exclusivamente uma
 instalacao descartavel e dedicada. O teste cria cinco projetos, exercita
 Storage/S3/Vectors/backup/restore/rename/duplicate/delete e interrompe o
-`supabase-storage-global` por poucos segundos para comprovar fail-closed:
+`supabase-storage-global` por poucos segundos para comprovar fail-closed. Ele
+também confirma que um Nginx de projeto não alcança a porta administrativa 5001:
 
 ```bash
 export RUN_SHARED_STORAGE_SMOKE=1

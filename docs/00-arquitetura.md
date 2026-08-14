@@ -37,7 +37,8 @@ flowchart TB
 
     ProjectNginx --> Auth[GoTrue]
     ProjectNginx --> Rest[PostgREST]
-    ProjectNginx --> Storage[Storage global\nmulti-tenant]
+    ProjectNginx --> StorageDataPlane[Proxy Storage data plane\nsomente porta 5000]
+    StorageDataPlane --> Storage[Storage global\nmulti-tenant]
     Storage --> ImgProxy[imgproxy global]
     ProjectNginx --> Functions[Edge Functions global]
     ProjectNginx --> Realtime
@@ -179,9 +180,15 @@ file usa o namespace oficial
 mesmo nome em projetos diferentes continuam fisicamente separados.
 
 O registry vive em `_supabase_storage`; campos sensíveis são cifrados pelo
-Storage com uma chave exclusiva de infraestrutura em `.storage.env`. A Admin
-API não publica porta no host e sua chave nunca entra em containers ou APIs de
-projeto.
+Storage com uma chave exclusiva de infraestrutura em `.storage.env`. O
+container Storage fica somente nas redes internas de controle e data plane. Um
+proxy global sem credenciais encaminha apenas a porta 5000 e preserva
+`Host`/`X-Forwarded-Host`. Ele compartilha a rede interna exclusiva
+`supabase-storage-gateways` somente com o Nginx confiável de cada projeto; Auth,
+PostgREST e os demais containers não entram nessa rede. Não há rota dela para a
+porta administrativa 5001. Requests de dados sem host de tenant UUID canônico
+são rejeitados pelo proxy com HTTP 421. A chave administrativa nunca entra em
+containers ou APIs de projeto.
 
 Detalhes: [Storage compartilhado, S3 e Storage Vectors](architecture/storage-vectors-lifecycle.md).
 
@@ -363,7 +370,10 @@ chamadas do Studio para a Projects API usam `SERVER_DOMAIN`.
 
 ### Uma máquina
 
-Todos os componentes rodam no mesmo host e compartilham a rede Docker `rede-supabase`.
+Todos os componentes rodam no mesmo host. Os serviços de projeto compartilham
+`rede-supabase`; somente seus Nginx também entram em
+`supabase-storage-gateways`. Storage usa redes internas separadas de controle e
+data plane, e Analytics usa sua própria rede interna.
 
 ### Duas máquinas
 

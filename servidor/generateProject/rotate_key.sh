@@ -163,6 +163,8 @@ storage_validate_bool VECTOR_BUCKETS_ENABLED "$VECTOR_BUCKETS_ENABLED" \
 storage_validate_bool S3_PROTOCOL_ENABLED "$S3_PROTOCOL_ENABLED" \
   || die "S3_PROTOCOL_ENABLED invalido"
 vector_validate_s3_credentials || die "Credenciais SigV4 do projeto invalidas"
+storage_assert_project_identity "$PROJECT_ID" "$PROJECT_UUID" \
+  || die "Identidade Storage diverge do control plane"
 storage_wait_global || die "Storage compartilhado indisponivel"
 
 generate_jwt() {

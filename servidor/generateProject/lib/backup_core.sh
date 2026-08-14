@@ -84,6 +84,8 @@ backup_capture() {
   storage_namespace="$(storage_assert_namespace_target "$PROJECT_UUID")"
   [[ -d "$storage_namespace" ]] \
     || { echo "Namespace Storage do tenant ausente" >&2; return 1; }
+  storage_validate_file_tree "$storage_namespace" "namespace do backup" \
+    || return 1
   (cd "$storage_namespace" && tar --xattrs --xattrs-include='*' --acls -cpf - .) \
     | gzip > "$tmp_dir/storage.tar.gz"
   storage_validate_namespace_archive "$tmp_dir/storage.tar.gz"

@@ -29,6 +29,7 @@ services:
       rede-supabase:
         ipv4_address: ${POSTGRES_HOST}
       analytics-internal:
+      storage-control:
     volumes:
       - ./volumes/db/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql:Z
       # Must be superuser to create event trigger
@@ -240,13 +241,20 @@ services:
     restart: unless-stopped
     logging: *vector-logging
     networks:
-        rede-supabase:
-          ipv4_address: ${POSTGRES_POOLER}
+      rede-supabase:
+        ipv4_address: ${POSTGRES_POOLER}
+      storage-control:
     volumes:
       - ./volumes/pooler/pooler.exs:/etc/pooler/pooler.exs:ro
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--silent", "--show-error", "--output", "/dev/null", "http://localhost:4000"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     ulimits:
       nofile:
         soft: ${POOLER_NOFILE_SOFT}
@@ -318,12 +326,14 @@ services:
       - .env
       - .storage.env
     networks:
-      - rede-supabase
-      - storage-internal
+      - storage-control
+      - storage-data-plane
     volumes:
       - ./volumes/storage:/var/lib/storage:z
     depends_on:
       db:
+        condition: service_healthy
+      supavisor:
         condition: service_healthy
       imgproxy:
         condition: service_healthy
@@ -332,7 +342,7 @@ services:
       SERVER_REGION: local
       SERVER_ADMIN_PORT: 5001
       MULTI_TENANT: "true"
-      DATABASE_MULTITENANT_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/_supabase_storage
+      DATABASE_MULTITENANT_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:${POSTGRES_PORT}/_supabase_storage
       ADMIN_RETURN_TENANT_SENSITIVE_DATA: "false"
       REQUEST_X_FORWARDED_HOST_REGEXP: ${STORAGE_TENANT_HOST_REGEXP:?defina STORAGE_TENANT_HOST_REGEXP}
       REQUEST_ALLOW_X_FORWARDED_PATH: "true"
@@ -377,7 +387,7 @@ services:
     restart: unless-stopped
     logging: *vector-logging
     networks:
-      - storage-internal
+      - storage-control
     volumes:
       - ./volumes/storage:/var/lib/storage:ro,z
     environment:
@@ -394,6 +404,38 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  storage-data-plane:
+    container_name: shared-storage-data-plane
+    hostname: supabase-storage-global
+    image: ${STORAGE_DATA_PLANE_PROXY_IMAGE:?defina STORAGE_DATA_PLANE_PROXY_IMAGE}
+    restart: unless-stopped
+    logging: *vector-logging
+    entrypoint: ["nginx"]
+    command: ["-g", "daemon off;", "-c", "/etc/nginx/nginx.conf"]
+    networks:
+      storage-gateways:
+        aliases:
+          - supabase-storage-global
+      storage-data-plane:
+    volumes:
+      - ./volumes/storage-proxy/nginx.conf:/etc/nginx/nginx.conf:ro,z
+    depends_on:
+      storage:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5000/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
     cap_drop:
       - ALL
     security_opt:
@@ -470,8 +512,16 @@ networks:
     name: supabase-analytics-internal
     driver: bridge
     internal: true
-  storage-internal:
-    name: supabase-storage-internal
+  storage-control:
+    name: supabase-storage-control
+    driver: bridge
+    internal: true
+  storage-gateways:
+    name: supabase-storage-gateways
+    driver: bridge
+    internal: true
+  storage-data-plane:
+    name: supabase-storage-data-plane
     driver: bridge
     internal: true
 volumes:
