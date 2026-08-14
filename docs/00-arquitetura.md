@@ -8,7 +8,7 @@ Detalhes de implementação ficam nos documentos especializados do [índice da d
 
 A stack oficial de self-hosting do Supabase representa um projeto. Este repositório adiciona um control plane para provisionar e administrar vários projetos isolados em uma infraestrutura compartilhada.
 
-O isolamento principal ocorre por database PostgreSQL, JWT secret, tenant do Realtime, tenant do Supavisor, configuração e containers de serviço do projeto.
+O isolamento principal ocorre por database PostgreSQL, JWT secret, identidade de tenant, configuração e serviços locais do projeto. Serviços preparados para multi-tenancy, como Realtime, Supavisor, Storage e imgproxy, são compartilhados e mantêm identidade e estado independentes por tenant.
 
 ## Visão geral
 
@@ -26,11 +26,16 @@ flowchart TB
     ProjectsAPI --> PostgreSQL[(PostgreSQL)]
     ProjectNginx --> KeyAuthorizer[key-authorizer]
     KeyAuthorizer --> PostgreSQL
-    ProjectsAPI --> LifecycleProxy[Proxy de lifecycle]
-    LifecycleProxy --> Docker[(Docker daemon)]
+
+    HostAgent[host-agent\nsystemd no host] -->|lease, heartbeat e resultado| PostgreSQL
+    HostAgent --> Docker[(Docker daemon)]
+    ProjectsAPI -->|intenções HMAC em host_agent_commands| PostgreSQL
+
     ProjectsAPI --> Realtime[Realtime global]
     ProjectsAPI --> Supavisor[Supavisor global]
+    ProjectsAPI --> PostgresMeta[Postgres-Meta global]
     ProjectsAPI --> StudioGateway
+    PostgresMeta --> PostgreSQL
 
     DynamicConfig[File Provider] --> Traefik
     Docker -->|logging driver Fluent| Vector[Vector]
@@ -49,6 +54,8 @@ flowchart TB
     Supavisor --> PostgreSQL
 ```
 
+A Projects API não acessa o Docker daemon. Operações físicas são materializadas como intenções assinadas no banco; o `host-agent`, executado fora dos containers, faz o lease, revalida o contrato e executa apenas o conjunto fechado de comandos permitido.
+
 ## Planos do sistema
 
 ### Control plane
@@ -63,7 +70,8 @@ Responsável por administrar a plataforma:
 - jobs persistentes, retries e recuperação após restart;
 - armazenamento criptografado dos segredos;
 - notas, tags, hints, threads e notificações do Studio;
-- telemetria administrativa do Auth dos projetos.
+- telemetria administrativa do Auth dos projetos;
+- emissão de intenções de lifecycle para o host-agent.
 
 Os componentes principais são:
 
@@ -71,20 +79,21 @@ Os componentes principais são:
 - Nginx/OpenResty com Lua para o Studio;
 - Projects API em FastAPI;
 - `key-authorizer` fail-closed para as API keys dos tenants;
+- host-agent no servidor principal;
 - database `postgres` como banco do control plane.
 
-Detalhes: [Control plane](architecture/control-plane.md).
+Detalhes: [Control plane](architecture/control-plane.md) e [Host-agent](architecture/host-agent.md).
 
 ### Data plane
 
 Responsável por atender as aplicações dos projetos:
 
 - Traefik recebe as rotas públicas;
-- Nginx do projeto delega a validação da chave opaca ao `key-authorizer`,
-  traduz o papel para um JWT interno e encaminha cada rota;
+- Nginx do projeto delega a validação da chave opaca ao `key-authorizer`, traduz o papel para um JWT interno e encaminha cada rota;
 - GoTrue, PostgREST e Nginx rodam por projeto;
 - Storage, imgproxy, Realtime, Supavisor e Edge Functions são compartilhados;
-- os dados ficam no database `_supabase_<project_ref>`.
+- o Storage usa um data plane interno próprio para impedir acesso à porta administrativa e para fixar a identidade do tenant;
+- os dados ficam no database `_supabase_<project_ref>` e no namespace Storage do `tenant_uuid`.
 
 O tráfego externo não precisa passar pelo Studio. Aplicações acessam diretamente:
 
@@ -118,15 +127,9 @@ O Nginx do projeto injeta o UUID no header `Host` das conexões WebSocket do Rea
 Host: <tenant_uuid>.localhost
 ```
 
-O `tenant_uuid` identifica os tenants do Realtime e do Storage. O project ref
-continua identificando recursos que precisam ser renomeados, como database,
-diretório, containers, tenant do Supavisor e slot principal. Objetos do Storage
-não mudam de namespace em um rename.
+O `tenant_uuid` identifica os tenants do Realtime e do Storage. O project ref continua identificando recursos que precisam ser renomeados, como database, diretório, containers, tenant do Supavisor e slot principal. Objetos do Storage não mudam de namespace em um rename.
 
-O control plane persiste o vínculo externo em `projects.tenant_uuid`. Para
-projetos novos, `tenant_uuid = projects.id`; projetos legados preservam o
-`PROJECT_UUID` já usado pelo Realtime, JWTs e backups até uma migração
-explícita. O UUID nunca é regenerado dentro do worker ou de um retry.
+O control plane persiste o vínculo externo em `projects.tenant_uuid`. Para projetos novos, `tenant_uuid = projects.id`; projetos legados preservam o `PROJECT_UUID` já usado pelo Realtime, JWTs e backups até uma migração explícita. O UUID nunca é regenerado dentro do worker ou de um retry.
 
 ## Serviços compartilhados
 
@@ -139,7 +142,7 @@ Um único cluster hospeda:
 - database `_supabase_storage`, registry cifrado do Storage multi-tenant;
 - um database `_supabase_<project_ref>` por projeto;
 - schemas internos do Realtime e Supavisor;
-- database `_supabase`, com schema `_analytics`, para o backend minimo do Logflare;
+- database `_supabase`, com schema `_analytics`, para o backend mínimo do Logflare;
 - fallback `meta_trap` do Postgres-Meta.
 
 As roles de serviço são globais ao cluster PostgreSQL. O isolamento não depende de criar uma cópia da role para cada database, mas das permissões, credenciais, tenants e databases usados por cada serviço.
@@ -168,27 +171,13 @@ Detalhes: [Autenticação multi-tenant no Realtime](09-autenticacao-multi-tenant
 
 ### Storage e imgproxy
 
-Existe um único `supabase-storage-global` no modo multi-tenant oficial do
-Storage API v1.61.12 e um único `supabase-imgproxy-global`. Cada projeto é
-registrado pela Admin API como tenant independente, com database URL, pool URL,
-JWT secret, chaves internas, limites e feature flags próprios.
+Existe um único `supabase-storage-global` no modo multi-tenant oficial do Storage API v1.61.12 e um único `supabase-imgproxy-global`. Cada projeto é registrado pela Admin API como tenant independente, com database URL, pool URL, JWT secret, chaves internas, limites e feature flags próprios.
 
-O Nginx de cada projeto sobrescreve `X-Forwarded-Host` com
-`<tenant_uuid>.storage.internal`. O cliente não controla esse valor. O backend
-file usa o namespace oficial
-`objects/<tenant_uuid>/<bucket_id>/<object_name>`, de modo que buckets com o
-mesmo nome em projetos diferentes continuam fisicamente separados.
+O Nginx de cada projeto sobrescreve `X-Forwarded-Host` com `<tenant_uuid>.storage.internal`. O cliente não controla esse valor. O backend file usa o namespace oficial `objects/<tenant_uuid>/<bucket_id>/<object_name>`, de modo que buckets com o mesmo nome em projetos diferentes continuam fisicamente separados.
 
-O registry vive em `_supabase_storage`; campos sensíveis são cifrados pelo
-Storage com uma chave exclusiva de infraestrutura em `.storage.env`. O
-container Storage fica somente nas redes internas de controle e data plane. Um
-proxy global sem credenciais encaminha apenas a porta 5000 e preserva
-`Host`/`X-Forwarded-Host`. Ele compartilha a rede interna exclusiva
-`supabase-storage-gateways` somente com o Nginx confiável de cada projeto; Auth,
-PostgREST e os demais containers não entram nessa rede. Não há rota dela para a
-porta administrativa 5001. Requests de dados sem host de tenant UUID canônico
-são rejeitados pelo proxy com HTTP 421. A chave administrativa nunca entra em
-containers ou APIs de projeto.
+O registry vive em `_supabase_storage`; campos sensíveis são cifrados pelo Storage com uma chave exclusiva de infraestrutura em `.storage.env`. O container Storage fica somente nas redes internas de controle e data plane. Um proxy global sem credenciais encaminha apenas a porta 5000 e preserva `Host`/`X-Forwarded-Host`. Ele compartilha a rede interna exclusiva `supabase-storage-gateways` somente com o Nginx confiável de cada projeto; Auth, PostgREST e os demais containers não entram nessa rede. Não há rota dela para a porta administrativa 5001. Requests de dados sem host de tenant UUID canônico são rejeitados pelo proxy com HTTP 421. A chave administrativa nunca entra em containers ou APIs de projeto.
+
+O compartilhamento reduz containers e simplifica upgrades, mas aumenta o blast radius operacional: falha, saturação de pool, I/O ou capacidade no Storage/imgproxy pode afetar vários tenants. O isolamento de dados continua por tenant; capacidade, disponibilidade e noisy-neighbor passam a ser preocupações de infraestrutura compartilhada.
 
 Detalhes: [Storage compartilhado, S3 e Storage Vectors](architecture/storage-vectors-lifecycle.md).
 
@@ -209,24 +198,21 @@ Detalhes:
 
 ### Supabase Analytics e Vector
 
-O serviço global Logflare/Supabase Analytics persiste no schema `_analytics` do
-database `_supabase`. O Vector classifica os eventos pelo sufixo dos containers
-dedicados ou pelo database `_supabase_<project_ref>` do PostgreSQL compartilhado.
-O Lua entrega o ref selecionado ao Studio, e as consultas do Logflare retornam
-somente os eventos classificados para esse projeto. A interface e os endpoints
-de Analytics são exclusivos de admins globais.
+O serviço global Logflare/Supabase Analytics persiste no schema `_analytics` do database `_supabase`. O Vector classifica os eventos pelo sufixo dos containers dedicados ou pelo database `_supabase_<project_ref>` do PostgreSQL compartilhado. O Lua entrega o ref selecionado ao Studio, e as consultas do Logflare retornam somente os eventos classificados para esse projeto. A interface e os endpoints de Analytics são exclusivos de admins globais.
 
 Detalhes: [Supabase Analytics por projeto](architecture/supabase-analytics.md).
 
 ## Serviços por projeto
 
-Cada projeto possui:
+Cada projeto possui somente os serviços que ainda dependem de configuração/processo dedicado:
 
 - `supabase-nginx-<project_ref>`;
 - `supabase-auth-<project_ref>`;
 - `supabase-rest-<project_ref>`;
 - diretório `servidor/projects/<project_ref>`;
 - database `_supabase_<project_ref>`.
+
+Storage, imgproxy, Realtime, Supavisor, Edge Functions e Postgres-Meta não são recriados por projeto.
 
 O Nginx do projeto é o gateway interno. Ele:
 
@@ -235,8 +221,7 @@ O Nginx do projeto é o gateway interno. Ele:
 - trata CORS;
 - reescreve os paths esperados pelo Supabase;
 - encaminha Auth, REST, Storage global, Functions e Realtime;
-- injeta o UUID do tenant no WebSocket do Realtime e no host encaminhado ao
-  Storage.
+- injeta o UUID do tenant no WebSocket do Realtime e no host encaminhado ao Storage.
 
 ## Studio compartilhado
 
@@ -260,8 +245,7 @@ Ele é responsável por:
 - armazenamento de snippets separado por usuário e projeto;
 - rotas administrativas do Flutter.
 
-Detalhes: [Arquitetura OpenResty/Lua](architecture/openresty-lua.md) e
-[Contexto do Supabase Studio por aba](architecture/studio-slug-context.md).
+Detalhes: [Arquitetura OpenResty/Lua](architecture/openresty-lua.md) e [Contexto do Supabase Studio por aba](architecture/studio-slug-context.md).
 
 ## Segurança e fronteiras de confiança
 
@@ -284,12 +268,7 @@ Integrações como push worker e invalidação de cache usam contratos internos 
 
 ### Acesso ao Docker daemon
 
-Nenhum componente em container acessa o Docker daemon. Traefik observa
-somente arquivos dinamicos; Vector recebe eventos pelo protocolo Fluent; e a
-Projects API grava intencoes assinadas no banco para o
-[host-agent](architecture/host-agent.md), o servico no host que executa o
-conjunto fechado de comandos de lifecycle. O antigo proxy Docker de
-lifecycle foi removido.
+Nenhum componente em container acessa o Docker daemon. Traefik observa somente arquivos dinâmicos; Vector recebe eventos pelo protocolo Fluent; e a Projects API grava intenções assinadas no banco para o [host-agent](architecture/host-agent.md), o serviço no host que executa o conjunto fechado de comandos de lifecycle. O antigo proxy Docker de lifecycle foi removido.
 
 ### Segredos de projeto
 
@@ -305,13 +284,9 @@ Detalhes: [Rotação de segredos e conexões](11-rotacao-cripto-conexoes.md).
 
 ### Chaves de API opacas
 
-Cada consumidor possui um slot `publishable` ou `secret`, com escopo de
-serviços, expiração, rotação e revogação independentes. O banco guarda somente
-o hash da API key. Um serviço separado, com role PostgreSQL restrita, autentica
-o token exclusivo do gateway e faz o lookup temporal fail-closed.
+Cada consumidor possui um slot `publishable` ou `secret`, com escopo de serviços, expiração opcional, rotação e revogação independentes. `expires_at = NULL` significa que a chave não expira por tempo; ela continua revogável e rotacionável. O banco guarda somente o hash da API key. Um serviço separado, com role PostgreSQL restrita, autentica o token exclusivo do gateway e faz o lookup temporal fail-closed.
 
-JWTs `anon` e `service_role` permanecem no servidor. A expiração deles e a
-expiração das sessões do Auth são ciclos separados das API keys externas.
+JWTs `anon` e `service_role` permanecem no servidor. A expiração deles e a expiração das sessões do Auth são ciclos separados das API keys externas.
 
 Detalhes: [Operação de chaves de API opacas](12-chaves-api-opacas.md).
 
@@ -349,46 +324,47 @@ Flutter
   -> OpenResty
   -> Projects API
   -> job persistido
-  -> script ou rotina de domínio
-  -> PostgreSQL / Docker / Realtime / Supavisor / Studio
-  -> status e auditoria
+  -> intenção HMAC em host_agent_commands
+  -> host-agent no servidor principal
+  -> comando fechado / script de lifecycle
+  -> Docker / PostgreSQL / Realtime / Supavisor / Storage / Studio
+  -> resultado persistido, status e auditoria
 ```
 
-Detalhes: [Lifecycle dos projetos](architecture/project-lifecycle.md).
+A API pode reiniciar enquanto um comando continua no host-agent. O recovery religa o job à mesma intenção persistida; ele não dispara automaticamente um segundo script para operações distribuídas não idempotentes.
+
+Detalhes: [Lifecycle dos projetos](architecture/project-lifecycle.md) e [Host-agent](architecture/host-agent.md).
 
 ## Topologias
 
-Os perfis operacionais sao explicitos:
+Os perfis operacionais são explícitos:
 
 - `./start.sh single-node` inicia servidor e Studio no mesmo host;
 - `./start.sh split-node-server` inicia o servidor principal;
-- `./start.sh split-node-studio` inicia Studio, OpenResty e Authelia no node
-  administrativo.
+- `./start.sh split-node-studio` inicia Studio, OpenResty e Authelia no node administrativo.
 
-Os mesmos perfis sao aceitos por `stop_containers.sh`. No split-node, todas as
-chamadas do Studio para a Projects API usam `SERVER_DOMAIN`.
+Os mesmos perfis são aceitos por `stop_containers.sh`. No split-node, todas as chamadas do Studio para a Projects API usam `SERVER_DOMAIN`.
 
 ### Uma máquina
 
-Todos os componentes rodam no mesmo host. Os serviços de projeto compartilham
-`rede-supabase`; somente seus Nginx também entram em
-`supabase-storage-gateways`. Storage usa redes internas separadas de controle e
-data plane, e Analytics usa sua própria rede interna.
+Todos os componentes rodam no mesmo host. Os serviços de projeto compartilham `rede-supabase`; somente seus Nginx também entram em `supabase-storage-gateways`. Storage usa redes internas separadas de controle e data plane, e Analytics usa sua própria rede interna.
+
+O host-agent continua fora dos containers, como serviço systemd, mesmo na topologia single-node.
 
 ### Duas máquinas
 
-A máquina local executa Studio, OpenResty e Authelia. O servidor principal executa o data plane e a Projects API.
+A máquina local executa Studio, OpenResty e Authelia. O servidor principal executa o data plane, a Projects API e o host-agent.
 
 A topologia não deve ser representada por branches permanentes diferentes. A distinção fica na configuração dos endereços, certificados e rotas.
 
 ## Limitações atuais
 
-- serviços globais ainda representam pontos compartilhados de falha;
-- o `key-authorizer` ainda faz lookup PostgreSQL por requisição e não possui
-  cache distribuído;
+- serviços globais representam pontos compartilhados de falha e ampliam o blast radius operacional;
+- o `key-authorizer` ainda faz lookup PostgreSQL por requisição e não possui cache distribuído;
 - não existe escalabilidade horizontal completa do control plane;
 - Storage distribuído não faz parte da configuração padrão;
-- updates do Supabase podem exigir adaptação dos patches de Realtime e dos rewrites do Studio;
+- isolamento lógico por tenant não elimina risco de noisy-neighbor em recursos globais como pools, disco, I/O e CPU;
+- updates do Supabase podem exigir adaptação dos patches de Realtime e dos rewrites/compat layers do Studio;
 - a compatibilidade precisa ser validada com smoke tests e projetos reais;
 - backup, restore e disaster recovery dependem da operação do ambiente.
 
@@ -396,9 +372,11 @@ A topologia não deve ser representada por branches permanentes diferentes. A di
 
 - [Índice da documentação](README.md)
 - [Control plane](architecture/control-plane.md)
+- [Host-agent](architecture/host-agent.md)
 - [Lifecycle dos projetos](architecture/project-lifecycle.md)
 - [Storage compartilhado, S3 e Storage Vectors](architecture/storage-vectors-lifecycle.md)
 - [Migração transitória do Storage](architecture/shared-storage-migration.md)
+- [Operação de chaves de API opacas](12-chaves-api-opacas.md)
 - [OpenResty/Lua](architecture/openresty-lua.md)
 - [Realtime multi-tenant](09-autenticacao-multi-tenant-realtime.md)
 - [Hardening do Postgres-Meta](10-hardening-postgres-meta.md)
