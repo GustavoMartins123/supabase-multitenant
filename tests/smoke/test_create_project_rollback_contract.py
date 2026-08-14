@@ -68,6 +68,13 @@ class CreateRollbackContractTest(unittest.TestCase):
         )
         self.assertIn("reuse_terminal=True", source)
 
+    def test_create_worker_imports_the_cryptographic_token_generator(self) -> None:
+        source = API_MAIN.read_text(encoding="utf-8")
+        create_worker = source[source.index("async def _provision_and_store_keys"):]
+
+        self.assertIn("import secrets", source)
+        self.assertIn("secrets.token_hex(32)", create_worker)
+
 
 if __name__ == "__main__":
     unittest.main()
