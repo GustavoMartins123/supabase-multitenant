@@ -27,12 +27,14 @@ flowchart TB
     ProjectNginx --> KeyAuthorizer[key-authorizer]
     KeyAuthorizer --> PostgreSQL
 
+    ProjectsAPI -->|intenções HMAC em host_agent_commands| PostgreSQL
     HostAgent[host-agent\nsystemd no host] -->|lease, heartbeat e resultado| PostgreSQL
     HostAgent --> Docker[(Docker daemon)]
-    ProjectsAPI -->|intenções HMAC em host_agent_commands| PostgreSQL
 
-    ProjectsAPI --> Realtime[Realtime global]
-    ProjectsAPI --> Supavisor[Supavisor global]
+    HostAgent -->|lifecycle do tenant| Realtime[Realtime global]
+    HostAgent -->|lifecycle do tenant| Supavisor[Supavisor global]
+    HostAgent -->|Admin API / lifecycle| Storage[Storage global\nmulti-tenant]
+
     ProjectsAPI --> PostgresMeta[Postgres-Meta global]
     ProjectsAPI --> StudioGateway
     PostgresMeta --> PostgreSQL
@@ -43,7 +45,7 @@ flowchart TB
     ProjectNginx --> Auth[GoTrue]
     ProjectNginx --> Rest[PostgREST]
     ProjectNginx --> StorageDataPlane[Proxy Storage data plane\nsomente porta 5000]
-    StorageDataPlane --> Storage[Storage global\nmulti-tenant]
+    StorageDataPlane --> Storage
     Storage --> ImgProxy[imgproxy global]
     ProjectNginx --> Functions[Edge Functions global]
     ProjectNginx --> Realtime
@@ -54,7 +56,7 @@ flowchart TB
     Supavisor --> PostgreSQL
 ```
 
-A Projects API não acessa o Docker daemon. Operações físicas são materializadas como intenções assinadas no banco; o `host-agent`, executado fora dos containers, faz o lease, revalida o contrato e executa apenas o conjunto fechado de comandos permitido.
+A Projects API não acessa o Docker daemon nem executa shell. Operações físicas são materializadas como intenções assinadas no banco; o `host-agent`, executado fora dos containers, faz o lease, revalida o contrato e executa apenas o conjunto fechado de comandos permitido. Os scripts executados por essa fronteira também registram e reconciliam tenants dos serviços globais quando necessário.
 
 ## Planos do sistema
 
