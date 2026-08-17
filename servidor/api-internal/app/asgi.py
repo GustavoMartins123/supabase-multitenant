@@ -14,6 +14,7 @@ from dotenv import dotenv_values
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from app.internal_service_auth import InternalServiceAuthenticationMiddleware
 from app.main import (
     app,
     ensure_project_admin_access,
@@ -58,8 +59,8 @@ async def get_project_s3_vector_keys(
     """Return the selected tenant's SigV4 pair to an authorized Studio admin.
 
     OpenResty rewrites the Studio's fixed ``/api/get-s3-keys`` endpoint to this
-    project-scoped route. The global shared-token middleware authenticates the
-    Studio-to-control-plane hop and the signed user token is checked here.
+    project-scoped route. The service HMAC authenticates the Studio-to-control-
+    plane hop and the signed user token is checked here.
     """
 
     project_name = validate_project_id(project_name)
@@ -86,3 +87,8 @@ async def get_project_s3_vector_keys(
             "X-Content-Type-Options": "nosniff",
         },
     )
+
+
+# Registrado por ultimo para ser a camada mais externa: valida a identidade
+# criptografica do caller antes do middleware legado definido em app.main.
+app.add_middleware(InternalServiceAuthenticationMiddleware)
