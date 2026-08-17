@@ -12,6 +12,9 @@ VECTOR_PLATFORM = ROOT / "studio/nginx/lua/proxy_rewrites/storage_vector_platfor
 HEADER_FILTER = ROOT / "studio/nginx/lua/proxy_rewrites/storage_header_filter.lua"
 BODY_FILTER = ROOT / "studio/nginx/lua/proxy_rewrites/storage_body_filter.lua"
 KEY_INJECTOR = ROOT / "studio/nginx/lua/security/inject_service_key_storage.lua"
+UPLOAD_GUARD = ROOT / "studio/nginx/lua/security/upload_route_guard.lua"
+INTERNAL_HMAC = ROOT / "studio/nginx/lua/security/internal_hmac.lua"
+PROJECTS_API_SIGNER = ROOT / "studio/nginx/lua/security/projects_api_signer.lua"
 NGINX = ROOT / "studio/nginx/nginx.conf"
 
 
@@ -24,6 +27,18 @@ class StoragePlatformRouterTests(unittest.TestCase):
         self.assertIn('/storage/v1/vector/ListVectorBuckets', router)
         self.assertIn('/storage/v1/vector/CreateVectorBucket', router)
         self.assertNotIn('vector-buckets', nginx)
+
+    def test_object_sign_alias_is_normalized_before_legacy_nginx_rewrite(self) -> None:
+        nginx = NGINX.read_text(encoding="utf-8")
+        guard = UPLOAD_GUARD.read_text(encoding="utf-8")
+
+        self.assertIn("server_rewrite_by_lua_file", nginx)
+        self.assertIn('== "/object/sign"', guard)
+        self.assertIn('ngx.req.set_uri("/storage/v1/object/sign", true)', guard)
+        self.assertLess(
+            guard.index('== "/object/sign"'),
+            guard.index("projects_api_signer.maybe_sign"),
+        )
 
     def test_get_is_adapted_to_the_storage_vector_post_contract(self) -> None:
         router = ROUTER.read_text(encoding="utf-8")
@@ -171,6 +186,9 @@ assert(indexes.vector_bucket_name == "rrrr", indexes.vector_bucket_name)
             HEADER_FILTER,
             BODY_FILTER,
             KEY_INJECTOR,
+            UPLOAD_GUARD,
+            INTERNAL_HMAC,
+            PROJECTS_API_SIGNER,
         ):
             subprocess.run([compiler, "-p", str(path)], check=True)
 
