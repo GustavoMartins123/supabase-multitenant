@@ -170,5 +170,77 @@ class InternalPushHmacContractTest(unittest.TestCase):
         )
 
 
+class InternalServiceHmacContractTest(unittest.TestCase):
+    def test_service_identity_method_target_and_body_are_bound_to_mac(self) -> None:
+        secret = "studio-gateway-derived-secret"
+        body = b'{"project":"demo"}'
+        timestamp = 1_750_000_123
+        nonce = "cd" * 16
+        url = "https://api.example/api/projects/demo/start?force=1"
+
+        headers = internal_hmac.build_internal_hmac_headers(
+            secret,
+            "POST",
+            url,
+            body,
+            service="studio-gateway",
+            timestamp=timestamp,
+            nonce=nonce,
+        )
+        self.assertEqual(headers["X-Internal-Version"], "internal-hmac-v1")
+        self.assertEqual(headers["X-Internal-Service"], "studio-gateway")
+        self.assertEqual(headers["X-Internal-Caller"], "studio-gateway")
+
+        target = "/api/projects/demo/start?force=1"
+        self.assertTrue(
+            internal_hmac.verify_internal_hmac_signature(
+                secret,
+                service="studio-gateway",
+                method="POST",
+                target=target,
+                body=body,
+                timestamp=timestamp,
+                nonce=nonce,
+                signature=headers["X-Internal-Signature"],
+            )
+        )
+
+        for changed in (
+            {"service": "projects-api"},
+            {"method": "DELETE"},
+            {"target": "/api/projects/demo/stop?force=1"},
+            {"body": body + b"!"},
+        ):
+            values = {
+                "service": "studio-gateway",
+                "method": "POST",
+                "target": target,
+                "body": body,
+            }
+            values.update(changed)
+            self.assertFalse(
+                internal_hmac.verify_internal_hmac_signature(
+                    secret,
+                    service=values["service"],
+                    method=values["method"],
+                    target=values["target"],
+                    body=values["body"],
+                    timestamp=timestamp,
+                    nonce=nonce,
+                    signature=headers["X-Internal-Signature"],
+                )
+            )
+
+    def test_scope_target_preserves_raw_path_and_query(self) -> None:
+        target = internal_hmac.request_target_from_scope(
+            {
+                "path": "/api/projects/demo",
+                "raw_path": b"/api/projects/demo",
+                "query_string": b"cursor=a%2Fb&limit=20",
+            }
+        )
+        self.assertEqual(target, "/api/projects/demo?cursor=a%2Fb&limit=20")
+
+
 if __name__ == "__main__":
     unittest.main()
