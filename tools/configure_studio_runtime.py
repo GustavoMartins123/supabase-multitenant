@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import os
+import re
 import secrets
 import subprocess
 import sys
@@ -16,12 +17,18 @@ from urllib.parse import urlsplit
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 STUDIO_ROOT = REPO_ROOT / "studio"
+SERVER_ENV = REPO_ROOT / "servidor" / ".env"
+STUDIO_ENV = STUDIO_ROOT / ".env"
 CONFIG_TEMPLATE = STUDIO_ROOT / "authelia" / "configuration.yml.template"
 CONFIG_TARGET = STUDIO_ROOT / "authelia" / "configuration.runtime.yml"
 SECRETS_ROOT = STUDIO_ROOT / "secrets" / "authelia"
 SSL_ROOT = STUDIO_ROOT / "authelia" / "ssl"
 
 SECRET_FILES = ("JWT_SECRET", "SESSION_SECRET", "STORAGE_ENCRYPTION_KEY")
+INTERNAL_SERVICE_HMAC_KEYS = (
+    "STUDIO_GATEWAY_HMAC_SECRET",
+    "PROJECTS_API_HMAC_SECRET",
+)
 
 
 class RuntimeConfigError(RuntimeError):
@@ -67,6 +74,77 @@ def atomic_write(path: Path, content: str, *, mode: int, replace: bool) -> None:
     finally:
         if temporary.exists():
             temporary.unlink()
+
+
+def _read_env_value(content: str, key: str) -> str | None:
+    match = re.search(rf"(?m)^{re.escape(key)}=(.*)$", content)
+    if match is None:
+        return None
+    return match.group(1).strip()
+
+
+def _set_env_value(content: str, key: str, value: str) -> str:
+    pattern = re.compile(rf"(?m)^{re.escape(key)}=.*$")
+    replacement = f"{key}={value}"
+    if pattern.search(content):
+        return pattern.sub(replacement, content, count=1)
+    separator = "" if not content or content.endswith("\n") else "\n"
+    return f"{content}{separator}{replacement}\n"
+
+
+def ensure_internal_service_hmac_secrets(
+    server_env: Path = SERVER_ENV,
+    studio_env: Path = STUDIO_ENV,
+) -> bool:
+    """Sincroniza chaves HMAC independentes entre Studio e Projects API.
+
+    Instalacoes novas recebem dois segredos aleatorios distintos. Instalacoes
+    antigas podem continuar usando a derivacao domain-separated em runtime ate
+    que esse configurador seja executado; se apenas um lado ja possuir uma chave
+    explicita, ela e copiada para o outro lado sem rotacao implicita.
+    """
+
+    if not server_env.exists() and not studio_env.exists():
+        return False
+    if not server_env.is_file() or not studio_env.is_file():
+        # O utilitario tambem pode ser usado isoladamente apenas para renderizar
+        # Authelia/TLS; nesse caso nao transformamos ausencia de um .env em erro.
+        return False
+
+    server_content = server_env.read_text(encoding="utf-8")
+    studio_content = studio_env.read_text(encoding="utf-8")
+    resolved: dict[str, str] = {}
+
+    for key in INTERNAL_SERVICE_HMAC_KEYS:
+        server_value = _read_env_value(server_content, key) or ""
+        studio_value = _read_env_value(studio_content, key) or ""
+        if server_value and studio_value and server_value != studio_value:
+            raise RuntimeConfigError(
+                f"{key} diverge entre servidor/.env e studio/.env"
+            )
+        value = server_value or studio_value or secrets.token_hex(32)
+        resolved[key] = value
+        server_content = _set_env_value(server_content, key, value)
+        studio_content = _set_env_value(studio_content, key, value)
+
+    if resolved[INTERNAL_SERVICE_HMAC_KEYS[0]] == resolved[INTERNAL_SERVICE_HMAC_KEYS[1]]:
+        raise RuntimeConfigError("segredos HMAC de servicos distintos nao podem ser iguais")
+
+    server_mode = server_env.stat().st_mode & 0o777
+    studio_mode = studio_env.stat().st_mode & 0o777
+    atomic_write(
+        server_env,
+        server_content,
+        mode=server_mode or 0o600,
+        replace=True,
+    )
+    atomic_write(
+        studio_env,
+        studio_content,
+        mode=studio_mode or 0o600,
+        replace=True,
+    )
+    return True
 
 
 def ensure_secret_files(root: Path, *, rotate: bool) -> tuple[Path, ...]:
@@ -169,6 +247,7 @@ def configure_runtime(
 
     if target.exists() and not force:
         raise RuntimeConfigError(f"configuracao local ja existe: {target}")
+    hmac_configured = ensure_internal_service_hmac_secrets()
     ensure_secret_files(secrets_root, rotate=rotate_secrets)
     generate_certificate(ssl_root, host=host, replace=force)
     # This file contains only non-secret Authelia settings. Both the Authelia
@@ -180,6 +259,8 @@ def configure_runtime(
     print(f"Configuracao: {target}")
     print(f"Segredos: {secrets_root} (mode 0600)")
     print(f"TLS: {ssl_root}")
+    if hmac_configured:
+        print("HMAC interno por servico sincronizado entre Studio e Projects API")
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
