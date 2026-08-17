@@ -1,16 +1,25 @@
 local cjson = require("cjson.safe")
+local internal_hmac = require("security.internal_hmac")
 local service_key_version = require("cache.service_key_version")
-local shared_token = require("security.shared_token")
 
-local headers = ngx.req.get_headers()
-local supplied_token = headers["X-Shared-Token"] or ""
-local internal_service = headers["X-Internal-Service"]
-
-if internal_service ~= "projects-api" or not shared_token.matches(supplied_token) then
-    return ngx.exit(ngx.HTTP_FORBIDDEN)
-end
 if ngx.req.get_method() ~= "POST" then
     return ngx.exit(ngx.HTTP_METHOD_NOT_ALLOWED)
+end
+
+local verified, verify_status, verify_err = internal_hmac.verify_current_request(
+    os.getenv("PROJECTS_API_HMAC_SECRET") or "",
+    "projects-api",
+    {
+        max_skew = tonumber(os.getenv("INTERNAL_HMAC_MAX_SKEW_SECONDS")) or 60,
+    }
+)
+if not verified then
+    ngx.log(
+        ngx.WARN,
+        "[INTERNAL-HMAC] Cache invalidation rejected: ",
+        verify_err or "unknown"
+    )
+    return ngx.exit(verify_status or ngx.HTTP_FORBIDDEN)
 end
 
 local project_ref = ngx.var.cache_ref
