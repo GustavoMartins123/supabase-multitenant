@@ -19,6 +19,10 @@ NGINX = ROOT / "studio/nginx/nginx.conf"
 
 
 class StoragePlatformRouterTests(unittest.TestCase):
+    def test_dead_object_sign_rewrite_is_removed(self) -> None:
+        nginx = (ROOT / "studio/nginx/nginx.conf").read_text(encoding="utf-8")
+        self.assertNotIn("rewrite ^/object/sign$ /storage/v1/$1 break;", nginx)
+
     def test_vector_buckets_are_mapped_in_lua_not_nginx(self) -> None:
         router = ROUTER.read_text(encoding="utf-8")
         nginx = NGINX.read_text(encoding="utf-8")

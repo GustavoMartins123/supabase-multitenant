@@ -1,11 +1,12 @@
 local cjson = require("cjson.safe")
 local http = require("resty.http")
+local internal_hmac = require("security.internal_hmac")
 
 local _M = {}
 
 local server_domain = (os.getenv("SERVER_DOMAIN") or ""):gsub("/+$", "")
 local server_hostname = string.match(server_domain, "//([^/:]+)") or "localhost"
-local shared_token = os.getenv("NGINX_SHARED_TOKEN") or ""
+local service_hmac_secret = os.getenv("STUDIO_GATEWAY_HMAC_SECRET") or ""
 local verify_tls = (os.getenv("SERVICE_KEY_VERIFY_TLS") or "true"):lower() ~= "false"
 local cache_ttl = tonumber(os.getenv("STUDIO_CONTEXT_CACHE_TTL_SECONDS")) or 5
 local cache = ngx.shared.service_keys
@@ -35,7 +36,7 @@ function _M.load(ref)
     if user_id == "" or user_token == "" then
         return nil, "authenticated user context unavailable", ngx.HTTP_UNAUTHORIZED
     end
-    if server_domain == "" or shared_token == "" then
+    if server_domain == "" or service_hmac_secret == "" then
         return nil, "Studio context service is not configured", ngx.HTTP_INTERNAL_SERVER_ERROR
     end
 
@@ -52,19 +53,28 @@ function _M.load(ref)
         end
     end
 
+    local target = "/api/projects/internal/studio-context/" .. ref
+    local signed_headers, sign_err = internal_hmac.sign_headers(
+        service_hmac_secret,
+        "studio-gateway",
+        "GET",
+        target,
+        ""
+    )
+    if not signed_headers then
+        return nil, sign_err or "failed to sign Studio context request", ngx.HTTP_INTERNAL_SERVER_ERROR
+    end
+    signed_headers["Accept"] = "application/json"
+    signed_headers["Host"] = server_hostname
+    signed_headers["X-User-Token"] = user_token
+
     local httpc = http.new()
     httpc:set_timeout(2000)
     local response, request_err = httpc:request_uri(
-        server_domain .. "/api/projects/internal/studio-context/" .. ref,
+        server_domain .. target,
         {
             method = "GET",
-            headers = {
-                ["Accept"] = "application/json",
-                ["Host"] = server_hostname,
-                ["X-Internal-Service"] = "studio-nginx",
-                ["X-Shared-Token"] = shared_token,
-                ["X-User-Token"] = user_token,
-            },
+            headers = signed_headers,
             ssl_verify = verify_tls,
             ssl_server_name = server_hostname,
             keepalive = true,

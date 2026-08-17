@@ -88,12 +88,16 @@ class ServiceKeyCacheContractTest(unittest.TestCase):
         self.assertIn("InternalServiceAuthenticationMiddleware", asgi)
         self.assertIn("app.add_middleware", asgi)
         self.assertIn("X-Internal-Version", auth)
-        self.assertIn("X-Internal-Caller", auth)
+        self.assertNotIn("X-Internal-Caller", auth)
         self.assertIn("Replayed internal HMAC signature", auth)
-        self.assertIn("INTERNAL_HMAC_ALLOW_LEGACY_SHARED_TOKEN", auth)
+        self.assertNotIn("INTERNAL_HMAC_ALLOW_LEGACY_SHARED_TOKEN", auth)
+        self.assertNotIn("X-Shared-Token", auth)
         self.assertIn('SERVICE = "studio-gateway"', signer)
         self.assertIn("clear_untrusted_internal_headers", signer)
         self.assertIn("projects_api_signer.maybe_sign", upload_guard)
+        metrics = (LUA / "cache" / "service_key_metrics.lua").read_text(encoding="utf-8")
+        self.assertIn("verify_current_request", metrics)
+        self.assertNotIn("security.shared_token", metrics)
 
     def test_direct_user_sync_is_hmac_authenticated(self):
         source = (LUA / "admin_api" / "user_sync.lua").read_text(

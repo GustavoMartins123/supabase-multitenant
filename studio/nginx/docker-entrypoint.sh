@@ -73,23 +73,9 @@ case "${SERVER_DOMAIN:-}" in
         ;;
 esac
 
-if [ -z "${NGINX_HMAC_SECRET:-}" ]; then
-    echo "[entrypoint] ERRO: NGINX_HMAC_SECRET ausente para derivar HMAC interno" >&2
+if [ -z "${STUDIO_GATEWAY_HMAC_SECRET:-}" ] || [ -z "${PROJECTS_API_HMAC_SECRET:-}" ]; then
+    echo "[entrypoint] ERRO: HMAC interno por servico ausente; rode tools/migrate_internal_hmac_v1.py antes do upgrade" >&2
     exit 1
-fi
-
-derive_service_hmac() {
-    service="$1"
-    printf '%s' "internal-hmac-v1:${service}" \
-        | openssl dgst -sha256 -hmac "$NGINX_HMAC_SECRET" \
-        | awk '{print $NF}'
-}
-
-if [ -z "${STUDIO_GATEWAY_HMAC_SECRET:-}" ]; then
-    STUDIO_GATEWAY_HMAC_SECRET="$(derive_service_hmac studio-gateway)"
-fi
-if [ -z "${PROJECTS_API_HMAC_SECRET:-}" ]; then
-    PROJECTS_API_HMAC_SECRET="$(derive_service_hmac projects-api)"
 fi
 export STUDIO_GATEWAY_HMAC_SECRET PROJECTS_API_HMAC_SECRET
 

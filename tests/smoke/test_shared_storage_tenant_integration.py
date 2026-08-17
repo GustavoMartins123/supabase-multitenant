@@ -124,12 +124,12 @@ class SharedStorageTenantIntegrationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.api_url = os.environ["SMOKE_API_URL"].rstrip("/")
+        os.environ["SMOKE_STUDIO_GATEWAY_HMAC_SECRET"]
         cls.public_base = os.environ["SMOKE_PUBLIC_BASE_URL"].rstrip("/")
         cls.server_root = pathlib.Path(
             os.getenv("SMOKE_SERVER_ROOT", str(ROOT / "servidor"))
         ).resolve()
         cls.headers = {
-            "X-Shared-Token": os.environ["SMOKE_SHARED_TOKEN"],
             "X-User-Token": os.environ["SMOKE_USER_TOKEN"],
         }
         cls.hmac_secret = os.environ["SMOKE_NGINX_HMAC_SECRET"]

@@ -246,7 +246,7 @@ Traefik usa exclusivamente o File Provider. Vector recebe logs pelo logging driv
 
 ### OpenResty para Projects API
 
-Usa `X-Shared-Token` e, nas rotas de usuário, `X-User-Token`.
+Usa `internal-hmac-v1` com identidade `studio-gateway`; nas rotas de usuário, `X-User-Token` continua obrigatório separadamente.
 
 ### Projects API para OpenResty
 
@@ -256,7 +256,7 @@ Usado para:
 - consultar métricas internas;
 - migrar diretórios de snippets durante rename.
 
-A rota valida `X-Shared-Token` e `X-Internal-Service: projects-api`.
+A rota valida `internal-hmac-v1` com `X-Internal-Service: projects-api`, timestamp, nonce e hash do body.
 
 ### Push worker
 

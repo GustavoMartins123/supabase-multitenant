@@ -99,9 +99,8 @@ def ensure_internal_service_hmac_secrets(
     """Sincroniza chaves HMAC independentes entre Studio e Projects API.
 
     Instalacoes novas recebem dois segredos aleatorios distintos. Instalacoes
-    antigas podem continuar usando a derivacao domain-separated em runtime ate
-    que esse configurador seja executado; se apenas um lado ja possuir uma chave
-    explicita, ela e copiada para o outro lado sem rotacao implicita.
+    existentes devem executar tools/migrate_internal_hmac_v1.py antes de subir a
+    versao com o cutover estrito; valores explicitos existentes sao preservados.
     """
 
     if not server_env.exists() and not studio_env.exists():

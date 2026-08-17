@@ -90,5 +90,5 @@ async def get_project_s3_vector_keys(
 
 
 # Registrado por ultimo para ser a camada mais externa: valida a identidade
-# criptografica do caller antes do middleware legado definido em app.main.
+# criptografica do caller antes das rotas e dependencias da aplicacao.
 app.add_middleware(InternalServiceAuthenticationMiddleware)

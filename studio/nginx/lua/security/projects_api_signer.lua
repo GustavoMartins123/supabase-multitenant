@@ -72,7 +72,6 @@ local function clear_untrusted_internal_headers()
     for _, name in ipairs({
         "X-Internal-Version",
         "X-Internal-Service",
-        "X-Internal-Caller",
         "X-Internal-Timestamp",
         "X-Internal-Nonce",
         "X-Internal-Signature",

@@ -260,13 +260,13 @@ Detalhes: [Arquitetura OpenResty/Lua](architecture/openresty-lua.md) e [Contexto
 
 ### OpenResty para Projects API
 
-- `X-Shared-Token` identifica a integração autorizada;
+- `internal-hmac-v1` autentica `studio-gateway` e vincula método, path/query, timestamp, nonce e hash do body;
 - `X-User-Token` carrega o UUID do usuário com assinatura HMAC e validade curta;
-- grupos e atributos textuais não substituem a identidade assinada.
+- identidade de serviço não substitui autorização do usuário e grupos textuais não substituem identidade assinada.
 
 ### Serviços backend para OpenResty
 
-Integrações como push worker e invalidação de cache usam contratos internos próprios, incluindo identificação do serviço e assinatura ou shared token conforme a rota.
+Projects API usa `internal-hmac-v1` com identidade `projects-api`. O push worker mantém seu contrato HMAC `push-v2`, separado do token de usuário.
 
 ### Acesso ao Docker daemon
 

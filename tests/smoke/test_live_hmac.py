@@ -7,6 +7,7 @@ import unittest
 
 from tests.smoke.common import (
     build_internal_push_headers,
+    build_internal_service_headers,
     build_user_token,
     env_flag,
     request,
@@ -19,12 +20,9 @@ class LiveHmacSmokeTest(unittest.TestCase):
         api_url = os.environ["SMOKE_API_URL"].rstrip("/")
         user_id = os.environ["SMOKE_USER_ID"]
         secret = os.environ["SMOKE_NGINX_HMAC_SECRET"]
-        shared_token = os.environ["SMOKE_SHARED_TOKEN"]
+        os.environ["SMOKE_STUDIO_GATEWAY_HMAC_SECRET"]
         token = build_user_token(secret, user_id)
-        headers = {
-            "X-Shared-Token": shared_token,
-            "X-User-Token": token,
-        }
+        headers = {"X-User-Token": token}
         status, body = request(
             "GET",
             f"{api_url}/api/projects",
@@ -42,6 +40,49 @@ class LiveHmacSmokeTest(unittest.TestCase):
             headers=bad_headers,
         )
         self.assertEqual(status, 401)
+
+    def test_service_hmac_rejects_tamper_expiration_and_replay(self) -> None:
+        api_url = os.environ["SMOKE_API_URL"].rstrip("/")
+        service_secret = os.environ["SMOKE_STUDIO_GATEWAY_HMAC_SECRET"]
+        user_token = build_user_token(
+            os.environ["SMOKE_NGINX_HMAC_SECRET"],
+            os.environ["SMOKE_USER_ID"],
+        )
+        url = f"{api_url}/api/projects"
+        timestamp = int(time.time())
+        nonce = os.urandom(16).hex()
+        signed = {
+            "X-User-Token": user_token,
+            **build_internal_service_headers(
+                service_secret,
+                "GET",
+                url,
+                timestamp=timestamp,
+                nonce=nonce,
+            ),
+        }
+
+        tampered = dict(signed)
+        tampered["X-Internal-Signature"] = "0" * 64
+        status, _ = request("GET", url, headers=tampered, sign_internal=False)
+        self.assertEqual(status, 403)
+
+        expired = {
+            "X-User-Token": user_token,
+            **build_internal_service_headers(
+                service_secret,
+                "GET",
+                url,
+                timestamp=timestamp - 600,
+            ),
+        }
+        status, _ = request("GET", url, headers=expired, sign_internal=False)
+        self.assertEqual(status, 401)
+
+        first_status, _ = request("GET", url, headers=signed, sign_internal=False)
+        self.assertEqual(first_status, 200)
+        replay_status, _ = request("GET", url, headers=signed, sign_internal=False)
+        self.assertEqual(replay_status, 401)
 
     def test_internal_push_hmac_rejects_tamper_and_replay(self) -> None:
         push_url = os.environ["SMOKE_PUSH_URL"]
@@ -70,6 +111,7 @@ class LiveHmacSmokeTest(unittest.TestCase):
             push_url,
             headers=signed_headers,
             raw_body=body + b" ",
+            sign_internal=False,
         )
         self.assertEqual(tampered_status, 403)
 
@@ -78,6 +120,7 @@ class LiveHmacSmokeTest(unittest.TestCase):
             push_url,
             headers=signed_headers,
             raw_body=body,
+            sign_internal=False,
         )
         self.assertNotIn(first_status, {401, 403, 405})
 
@@ -86,6 +129,7 @@ class LiveHmacSmokeTest(unittest.TestCase):
             push_url,
             headers=signed_headers,
             raw_body=body,
+            sign_internal=False,
         )
         self.assertEqual(replay_status, 401)
 

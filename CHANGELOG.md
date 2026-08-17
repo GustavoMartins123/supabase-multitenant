@@ -1,3 +1,11 @@
+## 2026-08-17 — Cutover HMAC interno estrito
+
+- removido `NGINX_SHARED_TOKEN` do runtime, Traefik e OpenResty;
+- removido o middleware bearer legado e qualquer fallback por derivação;
+- `STUDIO_GATEWAY_HMAC_SECRET` e `PROJECTS_API_HMAC_SECRET` passam a ser obrigatórios e independentes;
+- instalações existentes devem executar `python3 tools/migrate_internal_hmac_v1.py` antes do rebuild/restart;
+- removida a regra morta `rewrite ^/object/sign$ /storage/v1/$1 break;`.
+
 # Changelog
 
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.

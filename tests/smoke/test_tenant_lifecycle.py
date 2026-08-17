@@ -20,9 +20,9 @@ class TenantLifecycleSmokeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.api_url = os.environ["SMOKE_API_URL"].rstrip("/")
+        os.environ["SMOKE_STUDIO_GATEWAY_HMAC_SECRET"]
         cls.project = os.getenv("SMOKE_PROJECT_NAME") or f"smoke_{int(time.time())}"
         cls.headers = {
-            "X-Shared-Token": os.environ["SMOKE_SHARED_TOKEN"],
             "X-User-Token": os.environ["SMOKE_USER_TOKEN"],
         }
         cls.hmac_secret = os.environ["SMOKE_NGINX_HMAC_SECRET"]

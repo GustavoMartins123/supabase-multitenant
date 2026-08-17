@@ -38,13 +38,17 @@ studio_transport_key="$(env_value "$STUDIO_ENV" STUDIO_SERVICE_KEY_ENCRYPTION_KE
 [[ "$server_transport_key" == "$studio_transport_key" ]] \
   || fail "STUDIO_SERVICE_KEY_ENCRYPTION_KEY diverge entre servidor e Studio"
 
-for key in NGINX_SHARED_TOKEN NGINX_HMAC_SECRET INTERNAL_HMAC_SECRET; do
+for key in NGINX_HMAC_SECRET INTERNAL_HMAC_SECRET STUDIO_GATEWAY_HMAC_SECRET PROJECTS_API_HMAC_SECRET; do
   server_value="$(env_value "$SERVER_ENV" "$key")"
   studio_value="$(env_value "$STUDIO_ENV" "$key")"
   [[ -n "$server_value" && "$server_value" == "$studio_value" ]] \
     || fail "$key ausente ou divergente entre servidor e Studio"
 done
-ok "segredos compartilhados estão presentes e consistentes"
+studio_gateway_hmac="$(env_value "$SERVER_ENV" STUDIO_GATEWAY_HMAC_SECRET)"
+projects_api_hmac="$(env_value "$SERVER_ENV" PROJECTS_API_HMAC_SECRET)"
+[[ "$studio_gateway_hmac" != "$projects_api_hmac" ]] \
+  || fail "STUDIO_GATEWAY_HMAC_SECRET e PROJECTS_API_HMAC_SECRET devem ser distintos"
+ok "segredos HMAC estão presentes, consistentes e separados por serviço"
 
 key_authorizer_password="$(env_value "$SERVER_ENV" KEY_AUTHORIZER_DB_PASSWORD)"
 [[ "$key_authorizer_password" =~ ^[A-Za-z0-9_-]{32,128}$ ]] \

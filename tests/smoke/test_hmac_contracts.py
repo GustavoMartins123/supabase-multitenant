@@ -189,7 +189,7 @@ class InternalServiceHmacContractTest(unittest.TestCase):
         )
         self.assertEqual(headers["X-Internal-Version"], "internal-hmac-v1")
         self.assertEqual(headers["X-Internal-Service"], "studio-gateway")
-        self.assertEqual(headers["X-Internal-Caller"], "studio-gateway")
+        self.assertNotIn("X-Internal-Caller", headers)
 
         target = "/api/projects/demo/start?force=1"
         self.assertTrue(

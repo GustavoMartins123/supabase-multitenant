@@ -1,12 +1,13 @@
 local cjson = require("cjson.safe")
 local http = require("resty.http")
 local outbound_tls = require("utils.outbound_tls")
+local internal_hmac = require("security.internal_hmac")
 
 local M = {}
 
 local SERVER_DOMAIN = (os.getenv("SERVER_DOMAIN") or ""):gsub("/+$", "")
 local SERVER_HOSTNAME = string.match(SERVER_DOMAIN, "//([^/:]+)") or "localhost"
-local SHARED_TOKEN = os.getenv("NGINX_SHARED_TOKEN") or ""
+local SERVICE_HMAC_SECRET = os.getenv("STUDIO_GATEWAY_HMAC_SECRET") or ""
 local CACHE_TTL_SECONDS = 30
 local cache = ngx.shared.service_keys
 
@@ -66,24 +67,31 @@ local function normalize_identity(payload, requested_ref)
 end
 
 local function fetch_identity(project_ref)
-    if SERVER_DOMAIN == "" or SHARED_TOKEN == "" then
+    if SERVER_DOMAIN == "" or SERVICE_HMAC_SECRET == "" then
         return nil, "content identity configuration is missing"
     end
+
+    local target = "/api/projects/internal/content-identity/" .. ngx.escape_uri(project_ref)
+    local signed_headers, sign_err = internal_hmac.sign_headers(
+        SERVICE_HMAC_SECRET,
+        "studio-gateway",
+        "GET",
+        target,
+        ""
+    )
+    if not signed_headers then
+        return nil, "content identity signing failed: " .. (sign_err or "unknown error")
+    end
+    signed_headers["Accept"] = "application/json"
+    signed_headers["Host"] = SERVER_HOSTNAME
 
     local client = http.new()
     client:set_timeout(2000)
     local response, err = client:request_uri(
-        SERVER_DOMAIN
-            .. "/api/projects/internal/content-identity/"
-            .. ngx.escape_uri(project_ref),
+        SERVER_DOMAIN .. target,
         outbound_tls.apply_internal(SERVER_DOMAIN, {
             method = "GET",
-            headers = {
-                ["Accept"] = "application/json",
-                ["Host"] = SERVER_HOSTNAME,
-                ["X-Shared-Token"] = SHARED_TOKEN,
-                ["X-Internal-Service"] = "studio-nginx",
-            },
+            headers = signed_headers,
             keepalive = true,
         })
     )

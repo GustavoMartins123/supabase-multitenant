@@ -153,6 +153,46 @@ def build_internal_push_headers(
     }
 
 
+
+def build_internal_service_headers(
+    secret: str,
+    method: str,
+    url: str,
+    body: bytes = b"",
+    *,
+    service: str = "studio-gateway",
+    timestamp: int | None = None,
+    nonce: str | None = None,
+) -> dict[str, str]:
+    signed_at = int(time.time()) if timestamp is None else timestamp
+    signed_nonce = nonce or os.urandom(16).hex()
+    parsed = urlparse(url)
+    target = parsed.path or "/"
+    if parsed.query:
+        target = f"{target}?{parsed.query}"
+    canonical = "\n".join(
+        [
+            "internal-hmac-v1",
+            service,
+            method.upper(),
+            target,
+            str(signed_at),
+            signed_nonce,
+            hashlib.sha256(body).hexdigest(),
+        ]
+    )
+    signature = hmac.new(
+        secret.encode(), canonical.encode(), hashlib.sha256
+    ).hexdigest()
+    return {
+        "X-Internal-Version": "internal-hmac-v1",
+        "X-Internal-Service": service,
+        "X-Internal-Timestamp": str(signed_at),
+        "X-Internal-Nonce": signed_nonce,
+        "X-Internal-Signature": signature,
+    }
+
+
 def ssl_context() -> ssl.SSLContext:
     if not env_flag("SMOKE_VERIFY_TLS", True):
         return ssl._create_unverified_context()
@@ -170,12 +210,27 @@ def request(
     payload: dict[str, Any] | None = None,
     raw_body: bytes | None = None,
     timeout: float = 30,
+    sign_internal: bool = True,
 ) -> tuple[int, Any]:
     body = raw_body
     request_headers = dict(headers or {})
     if payload is not None:
         body = json.dumps(payload, separators=(",", ":")).encode()
         request_headers.setdefault("Content-Type", "application/json")
+
+    if sign_internal:
+        api_base = os.getenv("SMOKE_API_URL", "").rstrip("/")
+        service_secret = os.getenv("SMOKE_STUDIO_GATEWAY_HMAC_SECRET", "")
+        if api_base and service_secret and (url == api_base or url.startswith(api_base + "/")):
+            request_headers.update(
+                build_internal_service_headers(
+                    service_secret,
+                    method,
+                    url,
+                    body or b"",
+                )
+            )
+
     req = urllib.request.Request(
         url,
         data=body,

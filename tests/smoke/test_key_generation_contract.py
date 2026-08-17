@@ -8,18 +8,18 @@ GENERATE = ROOT / "servidor" / "generateProject"
 
 
 class KeyGenerationContractTest(unittest.TestCase):
-    def test_setup_replaces_shared_transport_secrets_by_key_name(self):
+    def test_setup_and_runtime_config_require_explicit_internal_hmac_keys(self):
         setup = (ROOT / "setup.sh").read_text(encoding="utf-8")
-        studio_example = (ROOT / "studio" / ".env.example").read_text(
-            encoding="utf-8"
-        )
+        studio_example = (ROOT / "studio" / ".env.example").read_text(encoding="utf-8")
+        server_example = (ROOT / "servidor" / ".env.example").read_text(encoding="utf-8")
+        runtime_tool = (ROOT / "tools" / "configure_studio_runtime.py").read_text(encoding="utf-8")
         self.assertIn("STUDIO_SERVICE_KEY_ENCRYPTION_KEY=pass", studio_example)
-        for key in {
-            "STUDIO_SERVICE_KEY_ENCRYPTION_KEY",
-            "NGINX_SHARED_TOKEN",
-            "NGINX_HMAC_SECRET",
-            "INTERNAL_HMAC_SECRET",
-        }:
+        self.assertNotIn("NGINX_SHARED_TOKEN", setup + studio_example + server_example)
+        for key in {"STUDIO_GATEWAY_HMAC_SECRET", "PROJECTS_API_HMAC_SECRET"}:
+            self.assertIn(f"{key}=", studio_example)
+            self.assertIn(f"{key}=", server_example)
+            self.assertIn(key, runtime_tool)
+        for key in {"STUDIO_SERVICE_KEY_ENCRYPTION_KEY", "NGINX_HMAC_SECRET", "INTERNAL_HMAC_SECRET"}:
             self.assertIn(f"s|^{key}=.*|", setup)
             self.assertIn(f"assert_env_value servidor/.env {key}", setup)
             self.assertIn(f"assert_env_value studio/.env {key}", setup)

@@ -5,6 +5,7 @@
 local http = require("resty.http")
 local cjson = require("cjson.safe")
 local outbound_tls = require("utils.outbound_tls")
+local internal_hmac = require("security.internal_hmac")
 
 local _M = {}
 
@@ -12,10 +13,25 @@ local functions_cache = ngx.shared.service_keys
 
 local SERVER_DOMAIN = (os.getenv("SERVER_DOMAIN") or ""):gsub("/+$", "")
 local SERVER_HOSTNAME = string.match(SERVER_DOMAIN, "//([^/:]+)") or "localhost"
-local NGINX_SHARED_TOKEN = os.getenv("NGINX_SHARED_TOKEN")
+local STUDIO_GATEWAY_HMAC_SECRET = os.getenv("STUDIO_GATEWAY_HMAC_SECRET") or ""
 local get_service_key = require("security.get_service_key")
 local user_identity = require("project_context.user_identity")
 local user_hmac_token = require("security.user_hmac_token")
+
+local function signed_internal_headers(method, target, body, user_token)
+    local headers, err = internal_hmac.sign_headers(
+        STUDIO_GATEWAY_HMAC_SECRET,
+        "studio-gateway",
+        method,
+        target,
+        body or ""
+    )
+    if not headers then return nil, err end
+    headers["X-User-Token"] = user_token
+    headers["Content-Type"] = "application/json"
+    headers["Host"] = SERVER_HOSTNAME
+    return headers
+end
 
 local function current_user_id()
     local email = user_identity.normalize_email(ngx.var.authelia_email or "")
@@ -65,17 +81,17 @@ function _M.get_available_functions(project_ref)
 
     ngx.log(ngx.WARN, "[PROJECT-DB] user_id='", user_id, "' project_ref='", project_ref, "'")
 
-    local url = SERVER_DOMAIN .. "/api/projects/" .. project_ref .. "/functions"
+    local target = "/api/projects/" .. project_ref .. "/functions"
+    local url = SERVER_DOMAIN .. target
     ngx.log(ngx.INFO, "[PROJECT-DB] Fetching AI functions: ", url)
+    local request_headers, sign_err = signed_internal_headers("GET", target, "", user_token)
+    if not request_headers then
+        return {}, sign_err or "failed to sign internal request"
+    end
     
     local res, err = httpc:request_uri(url, outbound_tls.apply_internal(url, {
         method = "GET",
-        headers = {
-            ["X-User-Token"] = user_token,
-            ["Content-Type"] = "application/json",
-            ["X-Shared-Token"] = NGINX_SHARED_TOKEN,
-            ["Host"] = SERVER_HOSTNAME
-        }
+        headers = request_headers
     }))
 
     
@@ -255,21 +271,27 @@ function _M.execute_function(project_ref, func_name, arguments)
     local exec_user_id = current_user_id()
     local exec_user_token = current_user_token(exec_user_id)
 
-    local url = SERVER_DOMAIN .. "/api/projects/" .. project_ref .. "/execute-function"
+    local target = "/api/projects/" .. project_ref .. "/execute-function"
+    local url = SERVER_DOMAIN .. target
+    local request_body = cjson.encode({
+        function_name = safe_name,
+        arguments = args_object
+    })
     ngx.log(ngx.INFO, "[PROJECT-DB] Executing function: ", safe_name, " with args: ", cjson.encode(args_object))
+    local request_headers, sign_err = signed_internal_headers(
+        "POST",
+        target,
+        request_body,
+        exec_user_token
+    )
+    if not request_headers then
+        return nil, sign_err or "failed to sign internal request"
+    end
     
     local res, err = httpc:request_uri(url, outbound_tls.apply_internal(url, {
         method = "POST",
-        headers = {
-            ["X-User-Token"] = exec_user_token,
-            ["Content-Type"] = "application/json",
-            ["X-Shared-Token"] = NGINX_SHARED_TOKEN,
-            ["Host"] = SERVER_HOSTNAME
-        },
-        body = cjson.encode({ 
-            function_name = safe_name,
-            arguments = args_object 
-        })
+        headers = request_headers,
+        body = request_body
     }))
     
     if not res then

@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 
 INTERNAL_HMAC_VERSION = "internal-hmac-v1"
-LEGACY_PUSH_HMAC_VERSION = "push-v2"
+PUSH_HMAC_VERSION = "push-v2"
 
 
 def request_target_from_url(url: str) -> str:
@@ -50,8 +50,8 @@ def canonical_internal_request(
     body_hash: str,
     version: str = INTERNAL_HMAC_VERSION,
 ) -> str:
-    if version == LEGACY_PUSH_HMAC_VERSION:
-        # Compatibilidade com o contrato ja publicado do push-worker.
+    if version == PUSH_HMAC_VERSION:
+        # Contrato publicado do push-worker, separado do HMAC entre servicos.
         parts = [
             version,
             method.upper(),
@@ -150,7 +150,7 @@ def build_internal_hmac_headers(
     signed_at = int(time.time()) if timestamp is None else timestamp
     signed_nonce = secrets.token_hex(16) if nonce is None else nonce
     signed_version = version or (
-        LEGACY_PUSH_HMAC_VERSION
+        PUSH_HMAC_VERSION
         if service == "push-worker"
         else INTERNAL_HMAC_VERSION
     )
@@ -173,5 +173,4 @@ def build_internal_hmac_headers(
     }
     if signed_version == INTERNAL_HMAC_VERSION:
         headers["X-Internal-Version"] = signed_version
-        headers["X-Internal-Caller"] = service
     return headers

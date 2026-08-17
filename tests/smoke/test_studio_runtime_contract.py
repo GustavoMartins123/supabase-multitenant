@@ -36,9 +36,12 @@ class StudioRuntimeContractTests(unittest.TestCase):
         jobs_block = nginx_conf[jobs_start:jobs_end]
 
         self.assertIn("security/check_authenticated.lua", jobs_block)
-        self.assertIn("X-Shared-Token $nginx_shared_token", jobs_block)
+        self.assertNotIn("X-Shared-Token", jobs_block)
         self.assertIn("X-User-Token $auth_user_token", jobs_block)
         self.assertIn("proxy_pass $server_domain/api/jobs$1;", jobs_block)
+        self.assertNotIn("NGINX_SHARED_TOKEN", nginx_conf)
+        signer = (ROOT / "studio/nginx/lua/security/projects_api_signer.lua").read_text(encoding="utf-8")
+        self.assertIn("STUDIO_GATEWAY_HMAC_SECRET", signer)
 
     def test_api_auth_failure_is_json_while_pages_redirect_to_login(self) -> None:
         nginx_conf = (ROOT / "studio/nginx/nginx.conf").read_text(encoding="utf-8")

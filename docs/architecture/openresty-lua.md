@@ -147,7 +147,7 @@ que persiste as chaves e chama:
 
 `POST /internal/cache/service-key/{project_ref}`
 
-O endpoint exige `X-Shared-Token` e `X-Internal-Service: projects-api`, remove
+O endpoint exige `internal-hmac-v1` com `X-Internal-Service: projects-api`, remove
 a chave anterior e publica a nova versão mínima no shared dictionary. A
 invalidação afeta todos os workers do OpenResty sem restart ou reload do Nginx.
 

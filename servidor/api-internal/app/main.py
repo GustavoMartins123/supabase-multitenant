@@ -34,7 +34,7 @@ from app.jobs import (
 from app.runtime_config import (
     ANALYTICS_INTERNAL_URL, BASE_DIR, DB_DSN,
     AUTOMATIC_KEY_ROTATION_LEAD_DAYS,
-    KEY_EXPIRY_WARNING_DAYS, NGINX_HMAC_SECRET, NGINX_SHARED_TOKEN, PG_META_CRYPTO_KEY,
+    KEY_EXPIRY_WARNING_DAYS, NGINX_HMAC_SECRET, PG_META_CRYPTO_KEY,
     LOGFLARE_PRIVATE_ACCESS_TOKEN, PG_META_INTERNAL_URL,
     USER_TOKEN_MAX_CLOCK_SKEW_SECONDS,
     service_key_transport_fernet,
@@ -635,27 +635,6 @@ async def shutdown():
     await close_pool()
     print("✅ Database pool closed")
 
-@app.middleware("http")
-async def validate_shared_token(request: Request, call_next):
-    if request.url.path == "/healthz":
-        return await call_next(request)
-
-    token = request.headers.get("X-Shared-Token")
-    
-    if not token:
-        return JSONResponse(
-            status_code=401,
-            content={"detail": "Unauthorized: Missing X-Shared-Token"}
-        )
-    
-    if not hmac.compare_digest(token, NGINX_SHARED_TOKEN):
-        return JSONResponse(
-            status_code=403,
-            content={"detail": "Forbidden: Invalid X-Shared-Token"}
-        )
-    
-    response = await call_next(request)
-    return response
 
 
 # Rota extraída para app.routers.internal.

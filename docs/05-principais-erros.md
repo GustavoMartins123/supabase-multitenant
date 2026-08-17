@@ -171,7 +171,7 @@ Nginx limpa o cache, mas não corrige a dependência indisponível e não é o
 mecanismo normal de consistência. Valide:
 
 - `STUDIO_CACHE_INVALIDATION_URL`;
-- `NGINX_SHARED_TOKEN` nos dois lados;
+- `STUDIO_GATEWAY_HMAC_SECRET` e `PROJECTS_API_HMAC_SECRET` sincronizados entre os dois lados e distintos entre si;
 - `X-Internal-Service: projects-api`;
 - conectividade entre Projects API e Studio;
 - endpoint de versão da chave.

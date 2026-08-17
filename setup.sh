@@ -360,7 +360,6 @@ main() {
     PROJECT_SECRETS_MASTER_KEY=$(generate_fernet_key)
     STUDIO_SERVICE_KEY_ENCRYPTION_KEY=$(generate_fernet_key)
     PG_META_CRYPTO_KEY=$(generate_hmac_secret)
-    SHARED_NGINX_TOKEN=$(generate_logflare_api_key)
     SHARED_NGINX_HMAC_SECRET=$(generate_hmac_secret)
     SHARED_INTERNAL_HMAC_SECRET=$(generate_hmac_secret)
     HOST_AGENT_HMAC_SECRET=$(generate_hmac_secret)
@@ -450,7 +449,6 @@ main() {
     safe_sed "s|PROJECT_SECRETS_MASTER_KEY=pass|PROJECT_SECRETS_MASTER_KEY=$PROJECT_SECRETS_MASTER_KEY|g" servidor/.env
     safe_sed "s|PG_META_CRYPTO_KEY=pass|PG_META_CRYPTO_KEY=$PG_META_CRYPTO_KEY|g" servidor/.env
     safe_sed "s|^STUDIO_SERVICE_KEY_ENCRYPTION_KEY=.*|STUDIO_SERVICE_KEY_ENCRYPTION_KEY=$STUDIO_SERVICE_KEY_ENCRYPTION_KEY|g" servidor/.env
-    safe_sed "s|^NGINX_SHARED_TOKEN=.*|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" servidor/.env
     safe_sed "s|^NGINX_HMAC_SECRET=.*|NGINX_HMAC_SECRET=$SHARED_NGINX_HMAC_SECRET|g" servidor/.env
     safe_sed "s|^INTERNAL_HMAC_SECRET=.*|INTERNAL_HMAC_SECRET=$SHARED_INTERNAL_HMAC_SECRET|g" servidor/.env
     safe_sed "s|^HOST_AGENT_HMAC_SECRET=.*|HOST_AGENT_HMAC_SECRET=$HOST_AGENT_HMAC_SECRET|g" servidor/.env
@@ -488,7 +486,6 @@ main() {
     cp studio/.env.example studio/.env
     cp studio/.analytics.env.example studio/.analytics.env
     safe_sed "s|^STUDIO_SERVICE_KEY_ENCRYPTION_KEY=.*|STUDIO_SERVICE_KEY_ENCRYPTION_KEY=$STUDIO_SERVICE_KEY_ENCRYPTION_KEY|g" studio/.env
-    safe_sed "s|^NGINX_SHARED_TOKEN=.*|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" studio/.env
     safe_sed "s|^NGINX_HMAC_SECRET=.*|NGINX_HMAC_SECRET=$SHARED_NGINX_HMAC_SECRET|g" studio/.env
     safe_sed "s|^INTERNAL_HMAC_SECRET=.*|INTERNAL_HMAC_SECRET=$SHARED_INTERNAL_HMAC_SECRET|g" studio/.env
     safe_sed "s|^LOGFLARE_PRIVATE_ACCESS_TOKEN=.*|LOGFLARE_PRIVATE_ACCESS_TOKEN=$LOGFLARE_PRIVATE_ACCESS_TOKEN|g" studio/.analytics.env
@@ -502,8 +499,6 @@ main() {
 
     assert_env_value servidor/.env STUDIO_SERVICE_KEY_ENCRYPTION_KEY "$STUDIO_SERVICE_KEY_ENCRYPTION_KEY"
     assert_env_value studio/.env STUDIO_SERVICE_KEY_ENCRYPTION_KEY "$STUDIO_SERVICE_KEY_ENCRYPTION_KEY"
-    assert_env_value servidor/.env NGINX_SHARED_TOKEN "$SHARED_NGINX_TOKEN"
-    assert_env_value studio/.env NGINX_SHARED_TOKEN "$SHARED_NGINX_TOKEN"
     assert_env_value servidor/.env NGINX_HMAC_SECRET "$SHARED_NGINX_HMAC_SECRET"
     assert_env_value studio/.env NGINX_HMAC_SECRET "$SHARED_NGINX_HMAC_SECRET"
     assert_env_value servidor/.env INTERNAL_HMAC_SECRET "$SHARED_INTERNAL_HMAC_SECRET"
@@ -532,8 +527,9 @@ main() {
     echo "  - PROJECT_SECRETS_MASTER_KEY (somente servidor)"
     echo "  - PG_META_CRYPTO_KEY (servidor e Postgres-Meta)"
     echo "  - STUDIO_SERVICE_KEY_ENCRYPTION_KEY (servidor e Studio)"
-    echo "  - NGINX_SHARED_TOKEN (servidor e studio)"
-    echo "  - NGINX_HMAC_SECRET (servidor e studio)"
+    echo "  - NGINX_HMAC_SECRET (servidor e studio; tokens de usuario)"
+    echo "  - STUDIO_GATEWAY_HMAC_SECRET (servidor e studio; gerado pelo configurador)"
+    echo "  - PROJECTS_API_HMAC_SECRET (servidor e studio; gerado pelo configurador)"
     echo "  - INTERNAL_HMAC_SECRET (servidor e studio)"
     echo "  - HOST_AGENT_HMAC_SECRET (servidor e host-agent)"
     echo "  - SERVER_ADMIN_API_KEYS/AUTH_ENCRYPTION_KEY (somente Storage global)"

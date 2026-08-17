@@ -40,11 +40,6 @@ def render(root_env: pathlib.Path, projects_dir: pathlib.Path) -> str:
     api_port = settings.get("PROJECTS_API_PORT", "18000")
     if not api_port.isdigit():
         raise ValueError("PROJECTS_API_PORT deve ser numerica")
-    shared_token = settings.get("NGINX_SHARED_TOKEN", "")
-    if not shared_token:
-        raise ValueError("NGINX_SHARED_TOKEN ausente")
-    if "`" in shared_token or "\n" in shared_token or "\r" in shared_token:
-        raise ValueError("NGINX_SHARED_TOKEN contem caractere invalido")
     allowed_ranges = [
         item.strip()
         for item in settings.get(
@@ -87,9 +82,8 @@ def render(root_env: pathlib.Path, projects_dir: pathlib.Path) -> str:
         "  routers:",
         "    projects-api:",
         "      rule: " + yaml_quote(
-            "(PathPrefix(`/api/projects`) || PathPrefix(`/api/jobs`) || "
-            "PathPrefix(`/api/admin`) || PathPrefix(`/api/internal/analytics`)) "
-            f"&& Header(`X-Shared-Token`, `{shared_token}`)"
+            "PathPrefix(`/api/projects`) || PathPrefix(`/api/jobs`) || "
+            "PathPrefix(`/api/admin`) || PathPrefix(`/api/internal/analytics`)"
         ),
         "      entryPoints:",
         "        - web",

@@ -23,7 +23,7 @@ class FileProviderRendererTests(unittest.TestCase):
         output = root / "dynamic" / "routes.yml"
         projects.mkdir(parents=True, exist_ok=True)
         root_env.write_text(
-            "NGINX_SHARED_TOKEN=test-token\nPROJECTS_API_PORT=18000\n",
+            "PROJECTS_API_PORT=18000\n",
             encoding="utf-8",
         )
         middlewares.write_text("http:\n  middlewares: {}\n", encoding="utf-8")
@@ -63,7 +63,6 @@ class FileProviderRendererTests(unittest.TestCase):
         project.mkdir(parents=True, exist_ok=True)
         root_env = fixture_root / "server.env"
         root_env.write_text(
-            "NGINX_SHARED_TOKEN=test-token\n"
             "PROJECTS_API_PORT=18000\n"
             "PROJECTS_API_ALLOWED_IP_RANGES=127.0.0.1/32,172.50.0.0/16\n",
             encoding="utf-8",
@@ -91,6 +90,7 @@ class FileProviderRendererTests(unittest.TestCase):
         self.assertIn("PathPrefix(`/api/jobs`)", result)
         self.assertIn("PathPrefix(`/api/admin`)", result)
         self.assertIn("PathPrefix(`/api/internal/analytics`)", result)
+        self.assertNotIn("X-Shared-Token", result)
 
 
 if __name__ == "__main__":

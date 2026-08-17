@@ -4,7 +4,6 @@ Falhas de configuracao sao detectadas na importacao, antes de a aplicacao
 aceitar trafego.
 """
 
-import hashlib
 import hmac
 import os
 import pathlib
@@ -30,18 +29,6 @@ def _read_bounded_integer(name: str, *, default: int, minimum: int) -> int:
     return value
 
 
-def _derive_internal_service_secret(root_secret: str | None, service: str) -> str | None:
-    """Deriva uma chave distinta por servico sem transmitir o segredo raiz."""
-
-    if not root_secret:
-        return None
-    return hmac.new(
-        root_secret.encode("utf-8"),
-        f"internal-hmac-v1:{service}".encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
-
-
 DB_DSN = os.getenv("DB_DSN")
 HOST_AGENT_HMAC_SECRET = os.getenv("HOST_AGENT_HMAC_SECRET")
 PROJECT_SECRETS_MASTER_KEY = os.getenv("PROJECT_SECRETS_MASTER_KEY")
@@ -55,22 +42,12 @@ PROJECT_SECRETS_PREVIOUS_MASTER_KEYS = tuple(
 )
 PG_META_CRYPTO_KEY = os.getenv("PG_META_CRYPTO_KEY")
 STUDIO_SERVICE_KEY_ENCRYPTION_KEY = os.getenv("STUDIO_SERVICE_KEY_ENCRYPTION_KEY")
-NGINX_SHARED_TOKEN = os.getenv("NGINX_SHARED_TOKEN")
 NGINX_HMAC_SECRET = os.getenv("NGINX_HMAC_SECRET")
-STUDIO_GATEWAY_HMAC_SECRET = (
-    os.getenv("STUDIO_GATEWAY_HMAC_SECRET")
-    or _derive_internal_service_secret(NGINX_HMAC_SECRET, "studio-gateway")
-)
-PROJECTS_API_HMAC_SECRET = (
-    os.getenv("PROJECTS_API_HMAC_SECRET")
-    or _derive_internal_service_secret(NGINX_HMAC_SECRET, "projects-api")
-)
+STUDIO_GATEWAY_HMAC_SECRET = os.getenv("STUDIO_GATEWAY_HMAC_SECRET")
+PROJECTS_API_HMAC_SECRET = os.getenv("PROJECTS_API_HMAC_SECRET")
 INTERNAL_HMAC_MAX_SKEW_SECONDS = _read_bounded_integer(
     "INTERNAL_HMAC_MAX_SKEW_SECONDS", default=60, minimum=5
 )
-INTERNAL_HMAC_ALLOW_LEGACY_SHARED_TOKEN = os.getenv(
-    "INTERNAL_HMAC_ALLOW_LEGACY_SHARED_TOKEN", "true"
-).strip().lower() in {"1", "true", "yes", "on"}
 LOGFLARE_PRIVATE_ACCESS_TOKEN = os.getenv("LOGFLARE_PRIVATE_ACCESS_TOKEN")
 ANALYTICS_INTERNAL_URL = os.getenv(
     "ANALYTICS_INTERNAL_URL", "http://analytics:4000"
@@ -163,7 +140,6 @@ for key_name, key_value in {
     "PROJECT_SECRETS_MASTER_KEY": PROJECT_SECRETS_MASTER_KEY,
     "PG_META_CRYPTO_KEY": PG_META_CRYPTO_KEY,
     "STUDIO_SERVICE_KEY_ENCRYPTION_KEY": STUDIO_SERVICE_KEY_ENCRYPTION_KEY,
-    "NGINX_SHARED_TOKEN": NGINX_SHARED_TOKEN,
     "NGINX_HMAC_SECRET": NGINX_HMAC_SECRET,
     "STUDIO_GATEWAY_HMAC_SECRET": STUDIO_GATEWAY_HMAC_SECRET,
     "PROJECTS_API_HMAC_SECRET": PROJECTS_API_HMAC_SECRET,
@@ -177,12 +153,6 @@ if hmac.compare_digest(STUDIO_GATEWAY_HMAC_SECRET, PROJECTS_API_HMAC_SECRET):
     raise RuntimeError(
         "STUDIO_GATEWAY_HMAC_SECRET and PROJECTS_API_HMAC_SECRET must be distinct"
     )
-for key_name, key_value in {
-    "STUDIO_GATEWAY_HMAC_SECRET": STUDIO_GATEWAY_HMAC_SECRET,
-    "PROJECTS_API_HMAC_SECRET": PROJECTS_API_HMAC_SECRET,
-}.items():
-    if hmac.compare_digest(key_value, NGINX_SHARED_TOKEN):
-        raise RuntimeError(f"{key_name} must be distinct from NGINX_SHARED_TOKEN")
 
 try:
     project_secret_manager = ProjectSecretManager(
