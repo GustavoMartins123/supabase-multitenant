@@ -73,6 +73,15 @@ case "${SERVER_DOMAIN:-}" in
         ;;
 esac
 
+if [ -z "${STUDIO_GATEWAY_HMAC_SECRET:-}" ] || [ -z "${PROJECTS_API_HMAC_SECRET:-}" ]; then
+    echo "[entrypoint] ERRO: segredos HMAC por serviço ausentes" >&2
+    exit 1
+fi
+if [ "$STUDIO_GATEWAY_HMAC_SECRET" = "$PROJECTS_API_HMAC_SECRET" ]; then
+    echo "[entrypoint] ERRO: STUDIO_GATEWAY_HMAC_SECRET e PROJECTS_API_HMAC_SECRET devem ser distintos" >&2
+    exit 1
+fi
+
 CA_BUNDLE="/var/run/studio-ca-bundle.pem"
 cat /etc/ssl/certs/ca-certificates.crt "$EXTRA_CA_CERT_FILE" > "$CA_BUNDLE"
 chmod 644 "$CA_BUNDLE"
@@ -97,4 +106,4 @@ chown -R 65534:65534 "$PROFILE_PICTURES_DIR" 2>/dev/null || true
 find "$PROFILE_PICTURES_DIR" -type d -exec chmod 700 {} +
 find "$PROFILE_PICTURES_DIR" -type f -exec chmod 600 {} +
 
-exec openresty -g "daemon off;"
+exec openresty -g "env STUDIO_GATEWAY_HMAC_SECRET; env PROJECTS_API_HMAC_SECRET; daemon off;"
