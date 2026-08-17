@@ -15,6 +15,8 @@ from collections import OrderedDict
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.responses import Response
 
 from app.internal_hmac import (
     INTERNAL_HMAC_VERSION,
@@ -45,6 +47,17 @@ _MAX_TRACKED_NONCES = 20_000
 
 def _json_error(status_code: int, detail: str) -> JSONResponse:
     return JSONResponse(status_code=status_code, content={"detail": detail})
+
+
+def _replace_scope_header(scope: dict, name: bytes, value: bytes) -> None:
+    lowered_name = name.lower()
+    headers = [
+        (header_name, header_value)
+        for header_name, header_value in scope.get("headers", [])
+        if header_name.lower() != lowered_name
+    ]
+    headers.append((lowered_name, value))
+    scope["headers"] = headers
 
 
 async def _claim_nonce(service: str, nonce: str, *, now: float) -> bool:
@@ -144,3 +157,31 @@ async def authenticate_internal_request(request: Request) -> JSONResponse | None
 
     request.state.internal_service = service
     return None
+
+
+class InternalServiceAuthenticationMiddleware(BaseHTTPMiddleware):
+    """Outer middleware do composition root da Projects API.
+
+    O middleware legado em ``app.main`` continua existindo durante o rollout.
+    Depois que o HMAC e validado, este bridge substitui qualquer X-Shared-Token
+    recebido pelo valor interno correto, de modo que o bearer legado nunca
+    precise ser enviado por callers ja migrados.
+    """
+
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: RequestResponseEndpoint,
+    ) -> Response:
+        auth_error = await authenticate_internal_request(request)
+        if auth_error is not None:
+            return auth_error
+
+        if getattr(request.state, "internal_service", None) == "studio-gateway":
+            _replace_scope_header(
+                request.scope,
+                b"x-shared-token",
+                NGINX_SHARED_TOKEN.encode("utf-8"),
+            )
+
+        return await call_next(request)
