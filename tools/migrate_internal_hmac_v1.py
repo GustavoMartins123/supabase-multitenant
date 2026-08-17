@@ -1,4 +1,3 @@
-\
 #!/usr/bin/env python3
 """Migra uma instalacao existente para internal-hmac-v1 estrito.
 
