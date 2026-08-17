@@ -25,19 +25,25 @@ local function target_for_request(uri)
         return append_query("/api/admin/projects-info")
     end
 
-    local admin_slug = uri:match("^/api/admin/projects/([^/]+)/?$")
-    if admin_slug then
-        return append_query("/api/projects/" .. admin_slug)
-    end
-
     local transfer_slug = uri:match("^/api/admin/projects/([^/]+)/transfer/?$")
     if transfer_slug then
         return append_query("/api/projects/" .. transfer_slug .. "/transfer")
     end
 
+    local admin_slug = uri:match("^/api/admin/projects/([^/]+)/?$")
+    if admin_slug then
+        return append_query("/api/projects/" .. admin_slug)
+    end
+
     local meta_slug, meta_resource = uri:match(
-        "^/api/platform/pg%-meta/([a-z_][a-z0-9_]*)(/.*)?$"
+        "^/api/platform/pg%-meta/([a-z_][a-z0-9_]*)(/.*)$"
     )
+    if not meta_slug then
+        meta_slug = uri:match(
+            "^/api/platform/pg%-meta/([a-z_][a-z0-9_]*)/?$"
+        )
+        meta_resource = ""
+    end
     if meta_slug then
         return append_query(
             "/api/projects/" .. meta_slug .. "/meta" .. (meta_resource or "")
@@ -66,6 +72,7 @@ local function clear_untrusted_internal_headers()
     for _, name in ipairs({
         "X-Internal-Version",
         "X-Internal-Service",
+        "X-Internal-Caller",
         "X-Internal-Timestamp",
         "X-Internal-Nonce",
         "X-Internal-Signature",
