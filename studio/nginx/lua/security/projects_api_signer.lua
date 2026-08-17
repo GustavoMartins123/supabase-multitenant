@@ -14,10 +14,10 @@ local function append_query(target)
 end
 
 local function target_for_request(uri)
-    if uri:find("^/api/projects(?:/|$)") then
+    if uri == "/api/projects" or uri:find("^/api/projects/") then
         return append_query(uri)
     end
-    if uri:find("^/api/jobs(?:/|$)") then
+    if uri == "/api/jobs" or uri:find("^/api/jobs/") then
         return append_query(uri)
     end
 
