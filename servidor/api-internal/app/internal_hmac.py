@@ -173,4 +173,5 @@ def build_internal_hmac_headers(
     }
     if signed_version == INTERNAL_HMAC_VERSION:
         headers["X-Internal-Version"] = signed_version
+        headers["X-Internal-Caller"] = service
     return headers
