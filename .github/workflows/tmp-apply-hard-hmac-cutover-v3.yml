@@ -1,0 +1,99 @@
+name: Temporary strict internal HMAC cutover v3
+
+on:
+  push:
+    branches: [opaque-keys]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: opaque-keys
+          fetch-depth: 1
+
+      - name: Run corrected cutover applicator
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          workflow = Path('.github/workflows/tmp-apply-hard-hmac-cutover.yml').read_text(encoding='utf-8')
+          start_marker = "          python3 - <<'PY'\n"
+          end_marker = "\n          PY\n"
+          start = workflow.index(start_marker) + len(start_marker)
+          end = workflow.index(end_marker, start)
+          lines = workflow[start:end].splitlines()
+          source = "\n".join(line[10:] if line.startswith("          ") else line for line in lines) + "\n"
+
+          sign_block_text = '''    if sign_internal:
+              api_base = os.getenv("SMOKE_API_URL", "").rstrip("/")
+              service_secret = os.getenv("SMOKE_STUDIO_GATEWAY_HMAC_SECRET", "")
+              if api_base and service_secret and (url == api_base or url.startswith(api_base + "/")):
+                  request_headers.update(
+                      build_internal_service_headers(
+                          service_secret,
+                          method,
+                          url,
+                          body or b"",
+                      )
+                  )
+          '''
+          anchor_text = "    req = urllib.request.Request(\n"
+          replacement = (
+              "sign_block = " + repr(sign_block_text) + "\n"
+              "anchor = " + repr(anchor_text) + "\n"
+              "if common.count(anchor) != 1:\n"
+              "    raise AssertionError(f\"common.py request anchor count={common.count(anchor)}\")\n"
+              "common = common.replace(anchor, sign_block + anchor, 1)\n"
+              "write(\"tests/smoke/common.py\", common)"
+          )
+          source, count = re.subn(
+              r'request_marker = .*?write\("tests/smoke/common\.py", common\)',
+              lambda _: replacement,
+              source,
+              count=1,
+              flags=re.S,
+          )
+          if count != 1:
+              raise SystemExit(f'could not patch smoke request block in applicator: {count}')
+          exec(compile(source, '<strict-hmac-cutover>', 'exec'), {})
+          PY
+
+      - name: Validate Python and static smoke contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m compileall -q servidor/api-internal/app tools tests/smoke
+          python3 -m unittest \
+            tests.smoke.test_internal_hmac_migration \
+            tests.smoke.test_traefik_guard_migration \
+            tests.smoke.test_studio_runtime_contract \
+            tests.smoke.test_key_generation_contract \
+            tests.smoke.test_service_key_cache_contract \
+            tests.smoke.test_storage_platform_router
+          git diff --check
+
+      - name: Validate HMAC Python contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install -q -r servidor/api-internal/requirements.txt
+          python3 -m unittest tests.smoke.test_hmac_contracts
+
+      - name: Commit strict cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Gustavo Henrique Martins"
+          git config user.email "99695758+GustavoMartins123@users.noreply.github.com"
+          git add -A
+          git status --short
+          git commit -m "security: remove legacy shared-token authentication"
+          git push origin HEAD:opaque-keys
