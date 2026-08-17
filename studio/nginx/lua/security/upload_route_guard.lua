@@ -1,4 +1,17 @@
 local cjson = require("cjson.safe")
+local projects_api_signer = require("security.projects_api_signer")
+
+local signed, sign_err = projects_api_signer.maybe_sign()
+if not signed then
+    ngx.log(ngx.ERR, "[INTERNAL-HMAC] Failed to sign Projects API request: ", sign_err or "unknown")
+    ngx.status = ngx.HTTP_SERVICE_UNAVAILABLE
+    ngx.header["Content-Type"] = "application/json"
+    ngx.say(cjson.encode({
+        error = "internal_service_signing_failed",
+        message = "Internal service authentication is unavailable",
+    }))
+    return ngx.exit(ngx.HTTP_SERVICE_UNAVAILABLE)
+end
 
 local method = ngx.req.get_method()
 local uri = ngx.var.uri or ""
