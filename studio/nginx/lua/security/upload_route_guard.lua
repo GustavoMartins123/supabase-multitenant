@@ -1,6 +1,14 @@
 local cjson = require("cjson.safe")
 local projects_api_signer = require("security.projects_api_signer")
 
+-- Compatibilidade do Studio: /object/sign e um alias local do endpoint real
+-- do Storage. A antiga diretiva nginx usava $1 sem capture group; corrigimos
+-- antes da selecao de location para cair diretamente em /storage/v1.
+if (ngx.var.uri or "") == "/object/sign" then
+    ngx.req.set_uri("/storage/v1/object/sign", true)
+    return
+end
+
 local signed, sign_err = projects_api_signer.maybe_sign()
 if not signed then
     ngx.log(ngx.ERR, "[INTERNAL-HMAC] Failed to sign Projects API request: ", sign_err or "unknown")
