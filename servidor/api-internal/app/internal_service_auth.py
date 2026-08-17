@@ -34,6 +34,7 @@ from app.runtime_config import (
 _HMAC_HEADER_NAMES = (
     "X-Internal-Version",
     "X-Internal-Service",
+    "X-Internal-Caller",
     "X-Internal-Timestamp",
     "X-Internal-Nonce",
     "X-Internal-Signature",
@@ -114,7 +115,11 @@ async def authenticate_internal_request(request: Request) -> JSONResponse | None
         return _json_error(401, "Unauthorized: Missing internal HMAC signature")
 
     version = headers.get("X-Internal-Version") or ""
-    service = headers.get("X-Internal-Service") or ""
+    service = (
+        headers.get("X-Internal-Service")
+        or headers.get("X-Internal-Caller")
+        or ""
+    )
     raw_timestamp = headers.get("X-Internal-Timestamp") or ""
     nonce = headers.get("X-Internal-Nonce") or ""
     signature = headers.get("X-Internal-Signature") or ""
