@@ -69,6 +69,9 @@ function M.sign_headers(secret, service, method, target, body, timestamp, nonce)
     return {
         ["X-Internal-Version"] = M.VERSION,
         ["X-Internal-Service"] = service,
+        -- Compatibilidade com locations antigas que zeram X-Internal-Service.
+        -- O valor continua protegido porque a identidade entra no canonical HMAC.
+        ["X-Internal-Caller"] = service,
         ["X-Internal-Timestamp"] = tostring(timestamp),
         ["X-Internal-Nonce"] = nonce,
         ["X-Internal-Signature"] = signature,
@@ -93,7 +96,9 @@ function M.verify_current_request(secret, expected_service, options)
     end
     local headers = ngx.req.get_headers()
     local version = get_header(headers, "X-Internal-Version") or ""
-    local service = get_header(headers, "X-Internal-Service") or ""
+    local service = get_header(headers, "X-Internal-Service")
+        or get_header(headers, "X-Internal-Caller")
+        or ""
     local timestamp = tonumber(get_header(headers, "X-Internal-Timestamp") or "")
     local nonce = get_header(headers, "X-Internal-Nonce") or ""
     local provided_signature = get_header(headers, "X-Internal-Signature") or ""
