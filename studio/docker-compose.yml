@@ -105,8 +105,6 @@ services:
       interval: 5s
       retries: 3
       start_period: 20s
-    env_file:
-      - .analytics.env
     networks: [default, rede-supabase]
     environment:
       HOSTNAME: "0.0.0.0"
