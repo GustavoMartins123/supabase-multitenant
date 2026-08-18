@@ -7,6 +7,9 @@ local M = {}
 local function respond(status, payload)
     ngx.status = status
     ngx.header.content_type = "application/json; charset=utf-8"
+    if status == ngx.HTTP_SERVICE_UNAVAILABLE then
+        ngx.header["Retry-After"] = "1"
+    end
     ngx.say(cjson.encode(payload))
     return ngx.exit(status)
 end
@@ -52,6 +55,9 @@ end
 
 local function update_error_status(message)
     local value = tostring(message or "")
+    if value:find("busy", 1, true) then
+        return ngx.HTTP_SERVICE_UNAVAILABLE
+    end
     if value:find("immutable", 1, true) then
         return 409
     end
@@ -80,7 +86,10 @@ function M.handle()
     if method == "GET" then
         local profile, err = store.get(email)
         if not profile then
-            return respond(500, { error = err or "failed to load profile" })
+            local status = tostring(err or ""):find("busy", 1, true)
+                and ngx.HTTP_SERVICE_UNAVAILABLE
+                or ngx.HTTP_INTERNAL_SERVER_ERROR
+            return respond(status, { error = err or "failed to load profile" })
         end
         return respond(200, profile)
     end

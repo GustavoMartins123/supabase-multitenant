@@ -29,14 +29,25 @@ class UserProfileContractTests(unittest.TestCase):
         self.assertIn('"changed_fields": changed_fields', service)
         self.assertIn("PROFILE_FIELDS", service)
 
-    def test_authelia_store_keeps_immutable_identity_and_atomic_writes(self) -> None:
+    def test_authelia_store_keeps_immutable_identity_and_shared_atomic_writes(self) -> None:
         source = (
             ROOT / "studio/nginx/lua/admin_api/user_profile_store.lua"
         ).read_text(encoding="utf-8")
+        shared_store = (
+            ROOT / "studio/nginx/lua/admin_api/authelia_user_store.lua"
+        ).read_text(encoding="utf-8")
+        file_store = (
+            ROOT / "studio/nginx/lua/admin_api/authelia_file_store.lua"
+        ).read_text(encoding="utf-8")
 
         self.assertIn("username, email and picture are immutable", source)
-        self.assertIn("os.rename(temp_path, YAML_PATH)", source)
-        self.assertIn("lock_dict:add(LOCK_KEY, token, 8)", source)
+        self.assertIn('require("admin_api.authelia_user_store")', source)
+        self.assertNotIn("lock_dict:add(", source)
+        self.assertNotIn("os.rename(temp_path, YAML_PATH)", source)
+        self.assertIn("user_store.with_lock(function()", source)
+        self.assertIn("user_store.restore(original)", source)
+        self.assertIn("file_store.atomic_write(YAML_PATH, serialized, FILE_MODE)", shared_store)
+        self.assertIn("os.rename(temp_path, path)", file_store)
         self.assertIn("authelia_identifiers.ensure_identifier(username)", source)
         self.assertIn("user.picture = value", source)
         self.assertIn('local address = type(user.address) == "table"', source)
@@ -96,7 +107,7 @@ class UserProfileContractTests(unittest.TestCase):
         self.assertNotIn("PROJECTS_API_INTERNAL_URL", source)
         self.assertNotIn("projects-api:18000", source)
         self.assertNotIn("origins", source)
-        self.assertIn('"User-Agent"] = "studio-nginx-internal/1.0"', source)
+        self.assertIn('"User-Agent"] = "studio-nginx-internal/2.0"', source)
 
     def test_flutter_loads_profile_and_exposes_editor(self) -> None:
         main = (

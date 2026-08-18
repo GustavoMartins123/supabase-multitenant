@@ -1,11 +1,14 @@
 local lyaml = require("lyaml")
 local shell = require("resty.shell")
+local file_store = require("admin_api.authelia_file_store")
 
 local IDS_PATH = "/config/ids.yml"
 local CONFIG_PATH = "/config/configuration.runtime.yml"
 local AUTHELIA_BIN = "/usr/local/bin/authelia"
 local OPENID_SERVICE = "openid"
 local COMMAND_TIMEOUT_MS = 10000
+local IDS_LOCK = "ids.yml"
+local FILE_MODE = 438 -- 0666
 
 local M = {}
 
@@ -14,7 +17,7 @@ local function trim(value)
 end
 
 local function read_document()
-    local handle, err = io.open(IDS_PATH, "r")
+    local handle, err = io.open(IDS_PATH, "rb")
     if not handle then
         return { identifiers = {} }, nil
     end
@@ -26,8 +29,8 @@ local function read_document()
         return { identifiers = {} }, nil
     end
 
-    local document = lyaml.load(content)
-    if type(document) ~= "table" then
+    local ok, document = pcall(lyaml.load, content)
+    if not ok or type(document) ~= "table" then
         return nil, "ids.yml invalido"
     end
 
@@ -39,15 +42,11 @@ local function read_document()
 end
 
 local function write_document(document)
-    local serialized = lyaml.dump({ document })
-    local handle, err = io.open(IDS_PATH, "w")
-    if not handle then
-        return nil, err
+    local ok, serialized = pcall(lyaml.dump, { document })
+    if not ok or type(serialized) ~= "string" then
+        return nil, serialized or "falha ao serializar ids.yml"
     end
-
-    handle:write(serialized)
-    handle:close()
-    return true
+    return file_store.atomic_write(IDS_PATH, serialized, FILE_MODE)
 end
 
 local function is_safe_username(username)
@@ -55,7 +54,8 @@ local function is_safe_username(username)
 end
 
 local function run_authelia_command(args)
-    local ok, stdout, stderr, reason, status = shell.run(args, nil, COMMAND_TIMEOUT_MS, 65536)
+    local ok, stdout, stderr, reason, status =
+        shell.run(args, nil, COMMAND_TIMEOUT_MS, 65536)
     if ok and status == 0 then
         return true, stdout
     end
@@ -70,7 +70,12 @@ local function run_authelia_command(args)
 end
 
 local function export_identifiers()
-    local tmp_path = string.format("%s.tmp.%s.%s", IDS_PATH, tostring(ngx.worker.pid()), tostring(math.random(10000, 99999)))
+    local tmp_path = string.format(
+        "%s.tmp.%s.%s",
+        IDS_PATH,
+        tostring(ngx.worker.pid()),
+        tostring(math.floor(ngx.now() * 1000000))
+    )
     os.remove(tmp_path)
 
     local ok, err = run_authelia_command({
@@ -87,6 +92,12 @@ local function export_identifiers()
     if not ok then
         os.remove(tmp_path)
         return nil, err
+    end
+
+    local mode_ok, mode_err = file_store.chmod(tmp_path, FILE_MODE)
+    if not mode_ok then
+        os.remove(tmp_path)
+        return nil, mode_err
     end
 
     local renamed, rename_err = os.rename(tmp_path, IDS_PATH)
@@ -125,7 +136,7 @@ local function generate_identifier(username)
     return export_identifiers()
 end
 
-function M.list_identifiers_by_username()
+local function identifiers_by_username()
     local document, err = read_document()
     if not document then
         return nil, err
@@ -135,12 +146,19 @@ function M.list_identifiers_by_username()
     for _, entry in ipairs(document.identifiers or {}) do
         local username = trim(entry.username)
         local identifier = trim(entry.identifier)
-        if entry.service == OPENID_SERVICE and username ~= "" and identifier ~= "" then
+        if entry.service == OPENID_SERVICE
+            and username ~= ""
+            and identifier ~= ""
+        then
             identifiers[username] = identifier
         end
     end
 
     return identifiers, nil
+end
+
+function M.list_identifiers_by_username()
+    return identifiers_by_username()
 end
 
 function M.find_identifier(username)
@@ -149,7 +167,7 @@ function M.find_identifier(username)
         return nil, "username ausente"
     end
 
-    local identifiers, err = M.list_identifiers_by_username()
+    local identifiers, err = identifiers_by_username()
     if not identifiers then
         return nil, err
     end
@@ -163,30 +181,52 @@ function M.ensure_identifier(username)
         return nil, false, "username ausente"
     end
 
-    local document, err = read_document()
-    if not document then
-        return nil, false, err
-    end
-
-    for _, entry in ipairs(document.identifiers or {}) do
-        local entry_username = trim(entry.username)
-        local entry_identifier = trim(entry.identifier)
-        if entry.service == OPENID_SERVICE and entry_username == clean_username and entry_identifier ~= "" then
-            return entry_identifier, false, nil
+    local result, lock_err = file_store.with_lock(IDS_LOCK, function()
+        local document, read_err = read_document()
+        if not document then
+            return { error = read_err }
         end
-    end
 
-    local ok, generate_err = generate_identifier(clean_username)
-    if not ok then
-        return nil, false, generate_err
-    end
+        for _, entry in ipairs(document.identifiers or {}) do
+            local entry_username = trim(entry.username)
+            local entry_identifier = trim(entry.identifier)
+            if entry.service == OPENID_SERVICE
+                and entry_username == clean_username
+                and entry_identifier ~= ""
+            then
+                return {
+                    identifier = entry_identifier,
+                    created = false
+                }
+            end
+        end
 
-    local identifier, find_err = M.find_identifier(clean_username)
-    if not identifier or identifier == "" then
-        return nil, true, find_err or "opaque identifier nao encontrado apos generate/export"
-    end
+        local generated, generate_err = generate_identifier(clean_username)
+        if not generated then
+            return { error = generate_err }
+        end
 
-    return identifier, true, nil
+        local identifier, find_err = M.find_identifier(clean_username)
+        if not identifier or identifier == "" then
+            return {
+                error = find_err
+                    or "opaque identifier nao encontrado apos generate/export"
+            }
+        end
+
+        return {
+            identifier = identifier,
+            created = true
+        }
+    end)
+
+    if not result then
+        return nil, false, lock_err
+    end
+    if result.error then
+        return nil, false, result.error
+    end
+    return result.identifier, result.created, nil
 end
 
 function M.remove_identifier(username)
@@ -195,29 +235,37 @@ function M.remove_identifier(username)
         return nil, "username ausente"
     end
 
-    local document, err = read_document()
-    if not document then
-        return nil, err
-    end
-
-    local filtered = {}
-    local removed = false
-
-    for _, entry in ipairs(document.identifiers or {}) do
-        local entry_username = trim(entry.username)
-        if entry.service == OPENID_SERVICE and entry_username == clean_username then
-            removed = true
-        else
-            table.insert(filtered, entry)
+    local result, lock_err = file_store.with_lock(IDS_LOCK, function()
+        local document, read_err = read_document()
+        if not document then
+            return nil, read_err
         end
-    end
 
-    if not removed then
-        return true
-    end
+        local filtered = {}
+        local removed = false
+        for _, entry in ipairs(document.identifiers or {}) do
+            local entry_username = trim(entry.username)
+            if entry.service == OPENID_SERVICE
+                and entry_username == clean_username
+            then
+                removed = true
+            else
+                table.insert(filtered, entry)
+            end
+        end
 
-    document.identifiers = filtered
-    return write_document(document)
+        if not removed then
+            return true
+        end
+
+        document.identifiers = filtered
+        return write_document(document)
+    end)
+
+    if result == nil then
+        return nil, lock_err
+    end
+    return result, lock_err
 end
 
 return M

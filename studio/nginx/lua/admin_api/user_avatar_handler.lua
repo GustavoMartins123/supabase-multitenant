@@ -19,6 +19,13 @@ local function respond_json(status, payload)
     return ngx.exit(status)
 end
 
+local function mutation_error_status(message)
+    if tostring(message or ""):find("busy", 1, true) then
+        return ngx.HTTP_SERVICE_UNAVAILABLE
+    end
+    return ngx.HTTP_BAD_GATEWAY
+end
+
 local function sync_profile(profile)
     return user_sync.sync_user({
         id = profile.user_id,
@@ -81,7 +88,11 @@ local function serve(path)
         return respond_json(415, { error = "stored avatar is invalid" })
     end
     local attributes = lfs.attributes(path) or {}
-    local etag = string.format('"%s-%s"', tostring(attributes.modification or 0), tostring(attributes.size or #data))
+    local etag = string.format(
+        '"%s-%s"',
+        tostring(attributes.modification or 0),
+        tostring(attributes.size or #data)
+    )
     ngx.header["ETag"] = etag
     ngx.header["Cache-Control"] = "private, max-age=3600"
     if ngx.var.http_if_none_match == etag then
@@ -103,14 +114,24 @@ local function upload(email, profile, path)
     end
     local normalized, normalize_err, normalize_status = processor.normalize_image(data)
     if not normalized then
-        return respond_json(normalize_status or 422, { error = normalize_err or "avatar is invalid" })
+        return respond_json(
+            normalize_status or 422,
+            { error = normalize_err or "avatar is invalid" }
+        )
     end
     data = normalized
     local ready, directory_err = ensure_directory()
     if not ready then
-        return respond_json(500, { error = directory_err or "avatar directory unavailable" })
+        return respond_json(
+            500,
+            { error = directory_err or "avatar directory unavailable" }
+        )
     end
-    local suffix = string.format("%s.%s", ngx.worker.pid(), math.floor(ngx.now() * 1000000))
+    local suffix = string.format(
+        "%s.%s",
+        ngx.worker.pid(),
+        math.floor(ngx.now() * 1000000)
+    )
     local temp_path = path .. ".tmp." .. suffix
     local backup_path = path .. ".bak." .. suffix
     local file, open_err = io.open(temp_path, "wb")
@@ -129,7 +150,10 @@ local function upload(email, profile, path)
         local backed, backup_err = os.rename(path, backup_path)
         if not backed then
             os.remove(temp_path)
-            return respond_json(500, { error = backup_err or "failed to preserve previous avatar" })
+            return respond_json(
+                500,
+                { error = backup_err or "failed to preserve previous avatar" }
+            )
         end
     end
     local installed, install_err = os.rename(temp_path, path)
@@ -153,7 +177,8 @@ local function upload(email, profile, path)
         return respond_json(500, { error = marker_err or "failed to finalize avatar" })
     end
     local canonical_id = processor.normalize_uuid(profile.user_id)
-    local origin = ngx.var.studio_public_origin or (ngx.var.scheme .. "://" .. ngx.var.http_host)
+    local origin = ngx.var.studio_public_origin
+        or (ngx.var.scheme .. "://" .. ngx.var.http_host)
     local picture = origin
         .. "/api/users/"
         .. canonical_id
@@ -169,7 +194,10 @@ local function upload(email, profile, path)
                 processor.write_marker(path)
             end
         end
-        return respond_json(502, { error = update_err or "failed to update avatar profile" })
+        return respond_json(
+            mutation_error_status(update_err),
+            { error = update_err or "failed to update avatar profile" }
+        )
     end
     if had_previous then
         os.remove(backup_path)
@@ -178,7 +206,11 @@ local function upload(email, profile, path)
 end
 
 local function remove_avatar(email, path)
-    local suffix = string.format("%s.%s", ngx.worker.pid(), math.floor(ngx.now() * 1000000))
+    local suffix = string.format(
+        "%s.%s",
+        ngx.worker.pid(),
+        math.floor(ngx.now() * 1000000)
+    )
     local backup_path = path .. ".delete." .. suffix
     local backup_marker = marker_path(path) .. ".delete." .. suffix
     local had_avatar = lfs.attributes(path, "mode") == "file"
@@ -186,7 +218,10 @@ local function remove_avatar(email, path)
     if had_avatar then
         local moved, move_err = os.rename(path, backup_path)
         if not moved then
-            return respond_json(500, { error = move_err or "failed to stage avatar removal" })
+            return respond_json(
+                500,
+                { error = move_err or "failed to stage avatar removal" }
+            )
         end
     end
     if had_marker then
@@ -195,7 +230,10 @@ local function remove_avatar(email, path)
             if had_avatar then
                 os.rename(backup_path, path)
             end
-            return respond_json(500, { error = move_err or "failed to stage avatar metadata removal" })
+            return respond_json(
+                500,
+                { error = move_err or "failed to stage avatar metadata removal" }
+            )
         end
     end
     local updated, update_err = store.set_picture(email, "", sync_profile)
@@ -206,7 +244,10 @@ local function remove_avatar(email, path)
         if had_marker then
             os.rename(backup_marker, marker_path(path))
         end
-        return respond_json(502, { error = update_err or "failed to remove avatar profile" })
+        return respond_json(
+            mutation_error_status(update_err),
+            { error = update_err or "failed to remove avatar profile" }
+        )
     end
     if had_avatar then
         os.remove(backup_path)
@@ -238,7 +279,11 @@ function M.handle()
     end
     local profile, path_or_err = get_profile(email)
     if not profile then
-        return respond_json(500, { error = path_or_err or "failed to load profile" })
+        local status = mutation_error_status(path_or_err)
+        if status == ngx.HTTP_BAD_GATEWAY then
+            status = ngx.HTTP_INTERNAL_SERVER_ERROR
+        end
+        return respond_json(status, { error = path_or_err or "failed to load profile" })
     end
     if profile.is_active ~= true then
         return respond_json(403, { error = "active profile is required" })
