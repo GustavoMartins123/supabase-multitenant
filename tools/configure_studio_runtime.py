@@ -29,6 +29,7 @@ INTERNAL_SERVICE_HMAC_KEYS = (
     "STUDIO_GATEWAY_HMAC_SECRET",
     "PROJECTS_API_HMAC_SECRET",
 )
+STUDIO_ANALYTICS_HMAC_KEY = "STUDIO_ANALYTICS_HMAC_SECRET"
 
 
 class RuntimeConfigError(RuntimeError):
@@ -96,18 +97,16 @@ def ensure_internal_service_hmac_secrets(
     server_env: Path = SERVER_ENV,
     studio_env: Path = STUDIO_ENV,
 ) -> bool:
-    """Sincroniza chaves HMAC independentes entre Studio e Projects API.
+    """Sincroniza chaves HMAC internas e mantém Analytics isolado no Studio.
 
-    Instalacoes novas recebem dois segredos aleatorios distintos. Instalacoes
-    existentes devem executar tools/migrate_internal_hmac_v1.py antes de subir a
-    versao com o cutover estrito; valores explicitos existentes sao preservados.
+    Instalacoes novas recebem segredos aleatorios distintos. Instalacoes
+    existentes devem executar os scripts de migracao antes de subir uma versao
+    que exija os novos valores; segredos explicitos nunca sao rotacionados aqui.
     """
 
     if not server_env.exists() and not studio_env.exists():
         return False
     if not server_env.is_file() or not studio_env.is_file():
-        # O utilitario tambem pode ser usado isoladamente apenas para renderizar
-        # Authelia/TLS; nesse caso nao transformamos ausencia de um .env em erro.
         return False
 
     server_content = server_env.read_text(encoding="utf-8")
@@ -128,6 +127,21 @@ def ensure_internal_service_hmac_secrets(
 
     if resolved[INTERNAL_SERVICE_HMAC_KEYS[0]] == resolved[INTERNAL_SERVICE_HMAC_KEYS[1]]:
         raise RuntimeConfigError("segredos HMAC de servicos distintos nao podem ser iguais")
+
+    analytics_secret = _read_env_value(studio_content, STUDIO_ANALYTICS_HMAC_KEY) or ""
+    if not analytics_secret:
+        analytics_secret = secrets.token_hex(32)
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", analytics_secret):
+        raise RuntimeConfigError("STUDIO_ANALYTICS_HMAC_SECRET deve conter 32 bytes em hexadecimal")
+    if analytics_secret in resolved.values():
+        raise RuntimeConfigError(
+            "STUDIO_ANALYTICS_HMAC_SECRET deve ser distinto dos segredos de outros servicos"
+        )
+    studio_content = _set_env_value(
+        studio_content,
+        STUDIO_ANALYTICS_HMAC_KEY,
+        analytics_secret,
+    )
 
     server_mode = server_env.stat().st_mode & 0o777
     studio_mode = studio_env.stat().st_mode & 0o777
@@ -249,9 +263,6 @@ def configure_runtime(
     hmac_configured = ensure_internal_service_hmac_secrets()
     ensure_secret_files(secrets_root, rotate=rotate_secrets)
     generate_certificate(ssl_root, host=host, replace=force)
-    # This file contains only non-secret Authelia settings. Both the Authelia
-    # process and the OpenResty worker need to read it from the shared bind
-    # mount; secrets remain in the dedicated mode-0600 files below.
     atomic_write(target, rendered, mode=0o644, replace=force)
 
     print(f"Authelia renderizado para {host}; valores de segredo omitidos")
@@ -259,7 +270,7 @@ def configure_runtime(
     print(f"Segredos: {secrets_root} (mode 0600)")
     print(f"TLS: {ssl_root}")
     if hmac_configured:
-        print("HMAC interno por servico sincronizado entre Studio e Projects API")
+        print("HMAC interno por servico e Studio Analytics configurado")
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
