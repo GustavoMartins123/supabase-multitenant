@@ -48,6 +48,14 @@ studio_gateway_hmac="$(env_value "$SERVER_ENV" STUDIO_GATEWAY_HMAC_SECRET)"
 projects_api_hmac="$(env_value "$SERVER_ENV" PROJECTS_API_HMAC_SECRET)"
 [[ "$studio_gateway_hmac" != "$projects_api_hmac" ]] \
   || fail "STUDIO_GATEWAY_HMAC_SECRET e PROJECTS_API_HMAC_SECRET devem ser distintos"
+
+studio_analytics_hmac="$(env_value "$STUDIO_ENV" STUDIO_ANALYTICS_HMAC_SECRET)"
+[[ "$studio_analytics_hmac" =~ ^[0-9A-Fa-f]{64}$ ]] \
+  || fail "STUDIO_ANALYTICS_HMAC_SECRET deve conter 32 bytes em hexadecimal"
+[[ "$studio_analytics_hmac" != "$studio_gateway_hmac" ]] \
+  || fail "STUDIO_ANALYTICS_HMAC_SECRET deve ser distinto de STUDIO_GATEWAY_HMAC_SECRET"
+[[ "$studio_analytics_hmac" != "$projects_api_hmac" ]] \
+  || fail "STUDIO_ANALYTICS_HMAC_SECRET deve ser distinto de PROJECTS_API_HMAC_SECRET"
 ok "segredos HMAC estão presentes, consistentes e separados por serviço"
 
 key_authorizer_password="$(env_value "$SERVER_ENV" KEY_AUTHORIZER_DB_PASSWORD)"
