@@ -116,6 +116,7 @@ services:
       DEFAULT_PROJECT_NAME: postgres
       SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
       LOGFLARE_URL: https://nginx:443/_internal/logflare
+      LOGFLARE_PRIVATE_ACCESS_TOKEN: "internal-proxy-authenticated"
       STUDIO_ANALYTICS_HMAC_SECRET: "${STUDIO_ANALYTICS_HMAC_SECRET:?STUDIO_ANALYTICS_HMAC_SECRET is required}"
       NODE_OPTIONS: "--require=/usr/local/lib/studio-logflare-hmac.cjs"
       NEXT_PUBLIC_ENABLE_LOGS: "true"
