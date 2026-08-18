@@ -91,7 +91,15 @@ class SupabaseAnalyticsContractTest(unittest.TestCase):
         self.assertIn("LOGFLARE_PUBLIC_ACCESS_TOKEN=$(generate_logflare_api_key)", setup)
         self.assertIn("LOGFLARE_PRIVATE_ACCESS_TOKEN=$(generate_logflare_api_key)", setup)
         self.assertIn(".analytics.env", self.server_compose)
-        self.assertIn(".analytics.env", self.studio_compose)
+
+        studio_service = self.studio_compose[self.studio_compose.index("  studio:\n") :]
+        self.assertNotIn("- .analytics.env", studio_service)
+        self.assertIn(
+            'LOGFLARE_PRIVATE_ACCESS_TOKEN: "internal-proxy-authenticated"',
+            studio_service,
+        )
+        self.assertIn("STUDIO_ANALYTICS_HMAC_SECRET:", studio_service)
+
         root_env = (ROOT / "servidor" / ".env.example").read_text(
             encoding="utf-8"
         )
@@ -102,14 +110,13 @@ class SupabaseAnalyticsContractTest(unittest.TestCase):
         self.assertIn("LOGFLARE_PUBLIC_ACCESS_TOKEN", analytics_env)
         self.assertIn("LOGFLARE_PRIVATE_ACCESS_TOKEN", analytics_env)
         self.assertIn("LOGFLARE_DB_ENCRYPTION_KEY", analytics_env)
+
         studio_root_env = (ROOT / "studio" / ".env.example").read_text(
             encoding="utf-8"
         )
-        studio_analytics_env = (
-            ROOT / "studio" / ".analytics.env.example"
-        ).read_text(encoding="utf-8")
         self.assertNotIn("LOGFLARE_PRIVATE_ACCESS_TOKEN", studio_root_env)
-        self.assertIn("LOGFLARE_PRIVATE_ACCESS_TOKEN", studio_analytics_env)
+        self.assertIn("STUDIO_ANALYTICS_HMAC_SECRET=", studio_root_env)
+
         self.assertIn("analytics-internal", self.server_compose)
         self.assertNotIn("analytics-internal", self.studio_compose)
         self.assertIn(
