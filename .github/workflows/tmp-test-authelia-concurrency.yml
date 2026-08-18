@@ -5,7 +5,7 @@ on:
     branches: [opaque-keys]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   test:
@@ -14,6 +14,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: opaque-keys
+          fetch-depth: 10
       - name: Install LuaJIT
         run: |
           sudo apt-get update -qq
@@ -43,3 +44,12 @@ jobs:
           cat "$target"
       - name: Repository diff sanity
         run: git diff --check
+      - name: Remove temporary workflow after successful validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Gustavo Henrique Martins"
+          git config user.email "99695758+GustavoMartins123@users.noreply.github.com"
+          git rm .github/workflows/tmp-test-authelia-concurrency.yml
+          git commit -m "chore: remove temporary Authelia concurrency workflow"
+          git push origin HEAD:opaque-keys
