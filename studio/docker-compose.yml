@@ -116,6 +116,8 @@ services:
       DEFAULT_PROJECT_NAME: postgres
       SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
       LOGFLARE_URL: https://nginx:443/_internal/logflare
+      STUDIO_ANALYTICS_HMAC_SECRET: "${STUDIO_ANALYTICS_HMAC_SECRET:?STUDIO_ANALYTICS_HMAC_SECRET is required}"
+      NODE_OPTIONS: "--require=/usr/local/lib/studio-logflare-hmac.cjs"
       NEXT_PUBLIC_ENABLE_LOGS: "true"
       ENABLED_FEATURES_LOGS_ALL: "true"
       NEXT_ANALYTICS_BACKEND_PROVIDER: postgres
@@ -134,8 +136,8 @@ services:
   #     POSTGRES_USER: ${POSTGRES_USER}
   #     POSTGRES_PASSWORD: ${POSTGRES_NGINX_PASSWORD}
   #   volumes:
-  #     - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-  #     - ./postgres/entrypoint.sh:/docker-entrypoint-initdb.d/entrypoint.sh:ro
+  #     - ./postgres/init.sql:/docker-entrypoint.d/init.sql:ro
+  #     - ./postgres/entrypoint.sh:/docker-entrypoint.d/entrypoint.sh:ro
   #     - ./postgres/logs:/var/log/postgresql
   #     - ./postgres/data:/var/lib/postgresql/data:Z
   #   expose:
