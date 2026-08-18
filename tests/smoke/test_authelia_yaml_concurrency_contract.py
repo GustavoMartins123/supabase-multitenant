@@ -41,12 +41,25 @@ class AutheliaYamlConcurrencyContractTests(unittest.TestCase):
         self.assertIn("ffi.C.flock(fd, LOCK_UN)", file_store)
         self.assertIn("O_NOFOLLOW", file_store)
         self.assertIn("O_CLOEXEC", file_store)
+        self.assertIn("O_EXCL", file_store)
         self.assertIn('clean:gsub("%.yml$", "")', file_store)
-        self.assertIn("handle:flush()", file_store)
+        self.assertIn("ffi.C.fsync(fd)", file_store)
+        self.assertIn("fsync_parent_directory(path)", file_store)
         self.assertIn("os.rename(temp_path, path)", file_store)
-        self.assertIn("ffi.C.chmod", file_store)
+        self.assertIn("ffi.C.fchmod", file_store)
         self.assertNotIn("ngx.shared.service_keys", file_store)
         self.assertNotIn('return "unlocked"', file_store)
+
+    def test_atomic_write_fsyncs_before_rename_and_directory_after(self) -> None:
+        source = (ADMIN / "authelia_file_store.lua").read_text(encoding="utf-8")
+        atomic = source[source.index("function M.atomic_write") :]
+        file_fsync = atomic.index("ffi.C.fsync(fd)")
+        rename = atomic.index("os.rename(temp_path, path)")
+        dir_fsync = atomic.index("fsync_parent_directory(path)")
+        self.assertLess(file_fsync, rename)
+        self.assertLess(rename, dir_fsync)
+        self.assertIn("O_EXCL", atomic)
+        self.assertIn("O_NOFOLLOW", atomic)
 
     def test_rollbacks_use_the_same_locked_store(self) -> None:
         for name in (
