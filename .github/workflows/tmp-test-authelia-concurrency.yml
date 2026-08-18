@@ -1,0 +1,45 @@
+name: Temporary Authelia concurrency validation
+
+on:
+  push:
+    branches: [opaque-keys]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: opaque-keys
+      - name: Install LuaJIT
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq luajit
+          sudo mkdir -p /config
+          sudo chmod 0777 /config
+      - name: Static concurrency contracts
+        run: python3 -m unittest tests.smoke.test_authelia_yaml_concurrency_contract
+      - name: Real cross-process flock and atomic-write probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=/tmp/authelia-users-concurrency.yml
+          printf 'base\n' > "$target"
+
+          luajit tests/smoke/test_authelia_file_store_runtime.lua "$target" mutation-a 0.40 &
+          p1=$!
+          sleep 0.05
+          luajit tests/smoke/test_authelia_file_store_runtime.lua "$target" mutation-b 0 &
+          p2=$!
+          wait "$p1"
+          wait "$p2"
+
+          test "$(grep -c '^mutation-a$' "$target")" -eq 1
+          test "$(grep -c '^mutation-b$' "$target")" -eq 1
+          test "$(wc -l < "$target")" -eq 3
+          cat "$target"
+      - name: Repository diff sanity
+        run: git diff --check
