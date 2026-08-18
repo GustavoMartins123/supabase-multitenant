@@ -2,7 +2,10 @@ local bit = require("bit")
 local ffi = require("ffi")
 
 ffi.cdef[[
+typedef long ssize_t;
 int open(const char *pathname, int flags, ...);
+ssize_t write(int fd, const void *buf, size_t count);
+int fsync(int fd);
 int flock(int fd, int operation);
 int close(int fd);
 int fchmod(int fd, unsigned int mode);
@@ -18,9 +21,13 @@ local LOCK_FILE_MODE = 384 -- 0600
 local DEFAULT_MODE = 438 -- 0666; /config e compartilhado com o container Authelia.
 
 -- Linux flags usados pela imagem Debian do OpenResty.
+local O_RDONLY = 0
+local O_WRONLY = 1
 local O_RDWR = 2
 local O_CREAT = 64
+local O_EXCL = 128
 local O_NOFOLLOW = 131072
+local O_DIRECTORY = 65536
 local O_CLOEXEC = 524288
 local LOCK_EX = 2
 local LOCK_NB = 4
@@ -48,6 +55,62 @@ local function lock_path(resource)
     return LOCK_DIR .. "/.authelia-" .. clean .. ".lock"
 end
 
+local function close_fd(fd)
+    if fd ~= nil and fd >= 0 then
+        ffi.C.close(fd)
+    end
+end
+
+local function write_all(fd, content)
+    local offset = 0
+    local length = #content
+    while offset < length do
+        local chunk = content:sub(offset + 1)
+        local written = ffi.C.write(fd, chunk, #chunk)
+        if written < 0 then
+            local errno = ffi.errno()
+            if errno ~= EINTR then
+                return nil, "write failed errno=" .. tostring(errno)
+            end
+        elseif written == 0 then
+            return nil, "write returned zero bytes"
+        else
+            offset = offset + tonumber(written)
+        end
+    end
+    return true
+end
+
+local function parent_directory(path)
+    return tostring(path):match("^(.*)/[^/]+$") or "."
+end
+
+local function fsync_parent_directory(path)
+    local directory = parent_directory(path)
+    local flags = bit.bor(O_RDONLY, O_DIRECTORY, O_CLOEXEC)
+    local fd = ffi.C.open(directory, flags)
+    if fd < 0 then
+        return nil,
+            "failed to open parent directory "
+            .. directory
+            .. " errno="
+            .. tostring(ffi.errno())
+    end
+
+    if ffi.C.fsync(fd) ~= 0 then
+        local errno = ffi.errno()
+        close_fd(fd)
+        return nil,
+            "failed to fsync parent directory "
+            .. directory
+            .. " errno="
+            .. tostring(errno)
+    end
+
+    close_fd(fd)
+    return true
+end
+
 function M.acquire(resource)
     local path, path_err = lock_path(resource)
     if not path then
@@ -69,7 +132,7 @@ function M.acquire(resource)
 
     if ffi.C.fchmod(fd, LOCK_FILE_MODE) ~= 0 then
         local errno = ffi.errno()
-        ffi.C.close(fd)
+        close_fd(fd)
         return nil,
             "failed to secure Authelia mutation lock "
             .. path
@@ -86,7 +149,7 @@ function M.acquire(resource)
 
         local errno = ffi.errno()
         if errno ~= EAGAIN and errno ~= EINTR then
-            ffi.C.close(fd)
+            close_fd(fd)
             return nil,
                 "failed to acquire Authelia mutation lock "
                 .. path
@@ -95,7 +158,7 @@ function M.acquire(resource)
         end
 
         if ngx.now() >= deadline then
-            ffi.C.close(fd)
+            close_fd(fd)
             return nil, "Authelia mutation is busy: " .. tostring(resource)
         end
         ngx.sleep(LOCK_RETRY_SECONDS)
@@ -118,7 +181,7 @@ function M.release(lock)
             tostring(ffi.errno())
         )
     end
-    ffi.C.close(fd)
+    close_fd(fd)
 end
 
 function M.with_lock(resource, callback)
@@ -168,41 +231,63 @@ function M.atomic_write(path, content, mode)
         tostring(next_sequence())
     )
     local temp_path = path .. ".tmp." .. suffix
-    local handle, open_err = io.open(temp_path, "wb")
-    if not handle then
-        return nil, open_err
+    local flags = bit.bor(O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW, O_CLOEXEC)
+    local target_mode = mode or DEFAULT_MODE
+    local open_mode = ffi.new("unsigned int", target_mode)
+    local fd = ffi.C.open(temp_path, flags, open_mode)
+    if fd < 0 then
+        return nil,
+            "failed to create temporary Authelia file "
+            .. temp_path
+            .. " errno="
+            .. tostring(ffi.errno())
     end
 
-    local written, write_err = handle:write(content)
+    local written, write_err = write_all(fd, content)
     if not written then
-        handle:close()
+        close_fd(fd)
         os.remove(temp_path)
-        return nil, write_err or "failed to write temporary Authelia file"
+        return nil, write_err
     end
 
-    local flushed, flush_err = handle:flush()
-    local closed, close_err = handle:close()
-    if not flushed then
+    if ffi.C.fchmod(fd, target_mode) ~= 0 then
+        local errno = ffi.errno()
+        close_fd(fd)
         os.remove(temp_path)
-        return nil, flush_err or "failed to flush temporary Authelia file"
-    end
-    if closed == nil then
-        os.remove(temp_path)
-        return nil, close_err or "failed to close temporary Authelia file"
+        return nil,
+            "failed to chmod temporary Authelia file errno=" .. tostring(errno)
     end
 
-    local mode_ok, mode_err = M.chmod(temp_path, mode or DEFAULT_MODE)
-    if not mode_ok then
+    -- fsync antes do rename garante que o snapshot novo ja esteja persistido.
+    if ffi.C.fsync(fd) ~= 0 then
+        local errno = ffi.errno()
+        close_fd(fd)
         os.remove(temp_path)
-        return nil, mode_err
+        return nil,
+            "failed to fsync temporary Authelia file errno=" .. tostring(errno)
     end
+    close_fd(fd)
 
-    -- temp e destino ficam no mesmo diretorio/volume; rename troca o snapshot
+    -- Temp e destino ficam no mesmo diretorio/volume; rename troca o snapshot
     -- de forma atomica para leitores (Authelia e init_worker).
     local renamed, rename_err = os.rename(temp_path, path)
     if not renamed then
         os.remove(temp_path)
         return nil, rename_err or "failed to atomically replace Authelia file"
+    end
+
+    -- Persistir a entrada de diretorio fecha a janela em que o conteudo ja foi
+    -- fsyncado, mas o rename poderia se perder num crash do host. Se esse fsync
+    -- falhar, o arquivo novo ja esta visivel; nao reportamos a mutacao como
+    -- inexistente para evitar que o caller tome decisoes com um estado falso.
+    local directory_synced, directory_err = fsync_parent_directory(path)
+    if not directory_synced then
+        ngx.log(
+            ngx.CRIT,
+            "[AUTHELIA-STORE] atomic rename completed but parent fsync failed: ",
+            tostring(directory_err)
+        )
+        return true, directory_err
     end
 
     return true
