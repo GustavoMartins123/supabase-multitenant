@@ -1,6 +1,6 @@
 """Rotas internas consumidas por Nginx, Studio e serviços do control plane."""
 
-import hmac
+import re
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -32,31 +32,71 @@ def _require_studio_nginx(request: Request) -> None:
         raise HTTPException(403, "Internal service access required")
 
 
+def _analytics_allowed_methods(analytics_path: str) -> set[str] | None:
+    safe_segment = r"[A-Za-z0-9_.-]{1,128}"
+    if re.fullmatch(rf"api/endpoints/query/{safe_segment}", analytics_path):
+        return {"GET"}
+    if analytics_path == "api/backends":
+        return {"GET", "POST"}
+    if re.fullmatch(rf"api/backends/{safe_segment}", analytics_path):
+        return {"GET", "PUT", "DELETE"}
+    if analytics_path == "api/sources":
+        return {"GET"}
+    if analytics_path == "api/rules":
+        return {"POST"}
+    return None
+
+
 @router.api_route(
     "/api/internal/analytics/{analytics_path:path}",
-    methods=["GET", "POST"],
+    methods=["GET", "POST", "PUT", "DELETE"],
 )
 async def proxy_global_analytics(
     analytics_path: str,
     request: Request,
 ):
-    if not analytics_path.startswith("api/") or ".." in analytics_path:
+    if getattr(request.state, "internal_service", None) != "studio-gateway":
+        raise HTTPException(403, "Internal service access required")
+
+    allowed_methods = _analytics_allowed_methods(analytics_path)
+    if allowed_methods is None:
         raise HTTPException(404, "Analytics path not allowed")
+    if request.method not in allowed_methods:
+        raise HTTPException(405, "Analytics method not allowed")
 
-    provided_token = request.headers.get("x-api-key", "")
-    authorization = request.headers.get("authorization", "")
-    if not provided_token and authorization.lower().startswith("bearer "):
-        provided_token = authorization[7:].strip()
-    if not provided_token or not hmac.compare_digest(
-        provided_token,
-        LOGFLARE_PRIVATE_ACCESS_TOKEN,
-    ):
-        raise HTTPException(403, "Invalid Analytics token")
+    raw_query = request.scope.get("query_string", b"")
+    if len(raw_query) > 16 * 1024:
+        raise HTTPException(414, "Analytics query is too large")
+    query_items = list(request.query_params.multi_items())
+    if len(query_items) > 64:
+        raise HTTPException(400, "Too many Analytics query parameters")
 
-    upstream_headers = {"x-api-key": LOGFLARE_PRIVATE_ACCESS_TOKEN}
-    content_type = request.headers.get("content-type")
-    if content_type:
-        upstream_headers["content-type"] = content_type
+    raw_content_length = request.headers.get("content-length")
+    if raw_content_length:
+        try:
+            content_length = int(raw_content_length)
+        except ValueError as exc:
+            raise HTTPException(400, "Invalid Content-Length") from exc
+        if content_length < 0 or content_length > 256 * 1024:
+            raise HTTPException(413, "Analytics request body is too large")
+
+    body = await request.body()
+    if len(body) > 256 * 1024:
+        raise HTTPException(413, "Analytics request body is too large")
+
+    if request.method in {"POST", "PUT"}:
+        content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        if content_type != "application/json":
+            raise HTTPException(415, "Analytics mutations require application/json")
+    elif body:
+        raise HTTPException(400, "Request body is not allowed for this Analytics method")
+
+    upstream_headers = {
+        "x-api-key": LOGFLARE_PRIVATE_ACCESS_TOKEN,
+        "accept": "application/json",
+    }
+    if body:
+        upstream_headers["content-type"] = "application/json"
 
     try:
         async with httpx.AsyncClient(
@@ -65,9 +105,9 @@ async def proxy_global_analytics(
             upstream = await client.request(
                 request.method,
                 f"{ANALYTICS_INTERNAL_URL}/{analytics_path}",
-                params=list(request.query_params.multi_items()),
+                params=query_items,
                 headers=upstream_headers,
-                content=await request.body(),
+                content=body,
             )
     except httpx.HTTPError as exc:
         raise HTTPException(502, "Analytics service unavailable") from exc
