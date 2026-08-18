@@ -107,6 +107,8 @@ def ensure_internal_service_hmac_secrets(
     if not server_env.exists() and not studio_env.exists():
         return False
     if not server_env.is_file() or not studio_env.is_file():
+        # O utilitario tambem pode ser usado isoladamente apenas para renderizar
+        # Authelia/TLS; nesse caso nao transformamos ausencia de um .env em erro.
         return False
 
     server_content = server_env.read_text(encoding="utf-8")
@@ -263,6 +265,9 @@ def configure_runtime(
     hmac_configured = ensure_internal_service_hmac_secrets()
     ensure_secret_files(secrets_root, rotate=rotate_secrets)
     generate_certificate(ssl_root, host=host, replace=force)
+    # This file contains only non-secret Authelia settings. Both the Authelia
+    # process and the OpenResty worker need to read it from the shared bind
+    # mount; secrets remain in the dedicated mode-0600 files below.
     atomic_write(target, rendered, mode=0o644, replace=force)
 
     print(f"Authelia renderizado para {host}; valores de segredo omitidos")
