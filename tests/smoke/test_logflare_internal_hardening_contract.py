@@ -24,6 +24,10 @@ class LogflareInternalHardeningContractTest(unittest.TestCase):
         self.assertIn("'x-api-key'", hook)
         self.assertIn("'cookie'", hook)
         self.assertIn("STUDIO_ANALYTICS_HMAC_SECRET:", compose)
+        self.assertIn(
+            'LOGFLARE_PRIVATE_ACCESS_TOKEN: "internal-proxy-authenticated"',
+            compose,
+        )
         self.assertIn("--require=/usr/local/lib/studio-logflare-hmac.cjs", compose)
         self.assertIn(
             "COPY logflare-hmac-hook.cjs /usr/local/lib/studio-logflare-hmac.cjs",
