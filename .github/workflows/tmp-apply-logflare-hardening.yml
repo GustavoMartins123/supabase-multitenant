@@ -1,0 +1,773 @@
+name: Temporary Logflare internal hardening
+
+on:
+  push:
+    branches: [opaque-keys]
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: opaque-keys
+          fetch-depth: 20
+
+      - name: Apply Logflare hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('.')
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = root / path
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one match, got {count}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          # Studio server-side fetch hook: signs only LOGFLARE_URL traffic.
+          (root / 'studio/studio-slug/logflare-hmac-hook.cjs').write_text(r'''\
+          'use strict'
+
+          const crypto = require('node:crypto')
+
+          const VERSION = 'internal-hmac-v1'
+          const SERVICE = 'studio-server'
+          const originalFetch = globalThis.fetch.bind(globalThis)
+
+          function parseTarget(input) {
+            if (input instanceof URL) return new URL(input.toString())
+            if (typeof Request !== 'undefined' && input instanceof Request) return new URL(input.url)
+            return new URL(String(input))
+          }
+
+          function logflareBase() {
+            const raw = process.env.LOGFLARE_URL
+            if (!raw) return null
+            const base = new URL(raw)
+            base.pathname = base.pathname.replace(/\/+$/, '') || '/'
+            return base
+          }
+
+          function isLogflareTarget(url) {
+            const base = logflareBase()
+            if (!base || url.origin !== base.origin) return false
+            if (base.pathname === '/') return true
+            return url.pathname === base.pathname || url.pathname.startsWith(`${base.pathname}/`)
+          }
+
+          function bodyBuffer(body) {
+            if (body === undefined || body === null) return Buffer.alloc(0)
+            if (typeof body === 'string') return Buffer.from(body)
+            if (Buffer.isBuffer(body)) return body
+            if (body instanceof Uint8Array) return Buffer.from(body)
+            if (body instanceof ArrayBuffer) return Buffer.from(new Uint8Array(body))
+            if (body instanceof URLSearchParams) return Buffer.from(body.toString())
+            throw new Error('Unsupported LOGFLARE request body for internal HMAC signing')
+          }
+
+          function secret() {
+            const value = process.env.STUDIO_ANALYTICS_HMAC_SECRET || ''
+            if (!/^[0-9a-f]{64}$/i.test(value)) {
+              throw new Error('STUDIO_ANALYTICS_HMAC_SECRET must be a 32-byte hex secret')
+            }
+            return value
+          }
+
+          globalThis.fetch = async function signedStudioFetch(input, init = {}) {
+            const url = parseTarget(input)
+            if (!isLogflareTarget(url)) return originalFetch(input, init)
+
+            if (typeof Request !== 'undefined' && input instanceof Request && init.body == null) {
+              throw new Error('Request objects are not supported for LOGFLARE internal HMAC signing')
+            }
+
+            const method = String(init.method || 'GET').toUpperCase()
+            const body = bodyBuffer(init.body)
+            const headers = new Headers(init.headers || {})
+
+            // O private access token continua apenas dentro do Studio/Projects API.
+            // Ele nunca cruza a borda Nginx como credencial fornecida pelo caller.
+            for (const name of [
+              'authorization',
+              'x-api-key',
+              'cookie',
+              'proxy-authorization',
+              'x-user-token',
+              'x-user-groups',
+              'x-user-username',
+              'x-user-display-name',
+              'remote-groups',
+            ]) {
+              headers.delete(name)
+            }
+
+            const timestamp = Math.floor(Date.now() / 1000).toString()
+            const nonce = crypto.randomBytes(16).toString('hex')
+            const bodyHash = crypto.createHash('sha256').update(body).digest('hex')
+            const target = `${url.pathname}${url.search}`
+            const canonical = [VERSION, SERVICE, method, target, timestamp, nonce, bodyHash].join('\n')
+            const signature = crypto.createHmac('sha256', secret()).update(canonical).digest('hex')
+
+            headers.set('X-Internal-Version', VERSION)
+            headers.set('X-Internal-Service', SERVICE)
+            headers.set('X-Internal-Timestamp', timestamp)
+            headers.set('X-Internal-Nonce', nonce)
+            headers.set('X-Internal-Signature', signature)
+
+            return originalFetch(input, { ...init, headers })
+          }
+          ''', encoding='utf-8')
+
+          # Ship the preload hook in the Studio image.
+          replace_once(
+              'studio/studio-slug/Dockerfile',
+              'COPY --from=builder /app/apps/studio/.next/static ./apps/studio/.next/static\n\nEXPOSE 3000',
+              'COPY --from=builder /app/apps/studio/.next/static ./apps/studio/.next/static\nCOPY logflare-hmac-hook.cjs /usr/local/lib/studio-logflare-hmac.cjs\n\nEXPOSE 3000',
+          )
+
+          # Pass only the dedicated Studio->Nginx secret to the Studio process.
+          replace_once(
+              'studio/docker-compose.yml',
+              '      LOGFLARE_URL: https://nginx:443/_internal/logflare\n      NEXT_PUBLIC_ENABLE_LOGS: "true"',
+              '      LOGFLARE_URL: https://nginx:443/_internal/logflare\n      STUDIO_ANALYTICS_HMAC_SECRET: "${STUDIO_ANALYTICS_HMAC_SECRET:?STUDIO_ANALYTICS_HMAC_SECRET is required}"\n      NODE_OPTIONS: "--require=/usr/local/lib/studio-logflare-hmac.cjs"\n      NEXT_PUBLIC_ENABLE_LOGS: "true"',
+          )
+
+          # Dedicated ingress verifier before the gateway re-signs for Projects API.
+          (root / 'studio/nginx/lua/security/logflare_internal_guard.lua').write_text(r'''\
+          local internal_hmac = require("security.internal_hmac")
+
+          local M = {}
+          local SECRET = os.getenv("STUDIO_ANALYTICS_HMAC_SECRET") or ""
+          local SERVICE = "studio-server"
+          local MAX_BODY_BYTES = 256 * 1024
+          local MAX_QUERY_BYTES = 16 * 1024
+          local MAX_HEADER_BYTES = 16 * 1024
+          local MAX_HEADERS = 64
+          local MAX_SKEW = tonumber(os.getenv("INTERNAL_HMAC_MAX_SKEW_SECONDS") or "60") or 60
+
+          local function header_value(headers, name)
+              local value = headers[name] or headers[string.lower(name)]
+              if type(value) == "table" then
+                  return value[1]
+              end
+              return value
+          end
+
+          local function error_result(status, code, message, allow)
+              return nil, status, code, message, allow
+          end
+
+          local function allowed_methods(path)
+              local endpoint = path:match("^api/endpoints/query/([%w._%-]+)$")
+              if endpoint and #endpoint <= 128 then
+                  return { GET = true }, "GET"
+              end
+              if path == "api/backends" then
+                  return { GET = true, POST = true }, "GET, POST"
+              end
+              local backend_id = path:match("^api/backends/([%w_%-]+)$")
+              if backend_id and #backend_id <= 128 then
+                  return { GET = true, PUT = true, DELETE = true }, "GET, PUT, DELETE"
+              end
+              if path == "api/sources" then
+                  return { GET = true }, "GET"
+              end
+              if path == "api/rules" then
+                  return { POST = true }, "POST"
+              end
+              return nil
+          end
+
+          local function header_size(headers)
+              local total = 0
+              for name, value in pairs(headers) do
+                  total = total + #tostring(name)
+                  if type(value) == "table" then
+                      for _, item in ipairs(value) do
+                          total = total + #tostring(item)
+                      end
+                  else
+                      total = total + #tostring(value)
+                  end
+                  if total > MAX_HEADER_BYTES then
+                      return total
+                  end
+              end
+              return total
+          end
+
+          function M.check()
+              local uri = ngx.var.uri or ""
+              local path = uri:match("^/_internal/logflare/(.+)$")
+              if not path then
+                  return true
+              end
+
+              if #path > 256 or path:find("..", 1, true) then
+                  return error_result(ngx.HTTP_NOT_FOUND, "analytics_path_not_allowed", "Analytics path not allowed")
+              end
+
+              local methods, allow = allowed_methods(path)
+              if not methods then
+                  return error_result(ngx.HTTP_NOT_FOUND, "analytics_path_not_allowed", "Analytics path not allowed")
+              end
+
+              local method = ngx.req.get_method()
+              if not methods[method] then
+                  return error_result(ngx.HTTP_NOT_ALLOWED, "analytics_method_not_allowed", "Analytics method not allowed", allow)
+              end
+
+              local args = ngx.var.args or ""
+              if #args > MAX_QUERY_BYTES then
+                  return error_result(ngx.HTTP_REQUEST_URI_TOO_LARGE, "analytics_query_too_large", "Analytics query is too large")
+              end
+
+              local headers, headers_err = ngx.req.get_headers(MAX_HEADERS, true)
+              if headers_err == "truncated" or header_size(headers) > MAX_HEADER_BYTES then
+                  return error_result(ngx.HTTP_REQUEST_HEADER_FIELDS_TOO_LARGE, "analytics_headers_too_large", "Analytics request headers are too large")
+              end
+
+              local transfer_encoding = tostring(header_value(headers, "Transfer-Encoding") or "")
+              if transfer_encoding ~= "" then
+                  return error_result(ngx.HTTP_BAD_REQUEST, "analytics_transfer_encoding_forbidden", "Transfer-Encoding is not allowed")
+              end
+
+              local raw_length = header_value(headers, "Content-Length")
+              local content_length = raw_length and tonumber(raw_length) or nil
+              if raw_length and (not content_length or content_length < 0 or content_length ~= math.floor(content_length)) then
+                  return error_result(ngx.HTTP_BAD_REQUEST, "analytics_invalid_content_length", "Invalid Content-Length")
+              end
+
+              if method == "POST" or method == "PUT" then
+                  if content_length == nil then
+                      return error_result(ngx.HTTP_LENGTH_REQUIRED, "analytics_content_length_required", "Content-Length is required")
+                  end
+                  if content_length > MAX_BODY_BYTES then
+                      return error_result(ngx.HTTP_REQUEST_ENTITY_TOO_LARGE, "analytics_body_too_large", "Analytics request body is too large")
+                  end
+                  local content_type = tostring(header_value(headers, "Content-Type") or ""):lower()
+                  if not content_type:match("^application/json%s*;?.*$") then
+                      return error_result(ngx.HTTP_UNSUPPORTED_MEDIA_TYPE, "analytics_content_type_not_allowed", "Analytics mutations require application/json")
+                  end
+              elseif content_length and content_length > 0 then
+                  return error_result(ngx.HTTP_BAD_REQUEST, "analytics_body_not_allowed", "Request body is not allowed for this Analytics method")
+              end
+
+              local verified, verify_status, verify_err = internal_hmac.verify_current_request(
+                  SECRET,
+                  SERVICE,
+                  { max_skew = MAX_SKEW, nonce_cache = ngx.shared.internal_hmac_nonces }
+              )
+              if not verified then
+                  return error_result(
+                      verify_status or ngx.HTTP_UNAUTHORIZED,
+                      "analytics_internal_auth_failed",
+                      verify_err or "Internal Analytics authentication failed"
+                  )
+              end
+
+              -- Nenhuma credencial do Studio/browser segue para Projects API. O
+              -- proximo passo cria uma nova assinatura com identidade studio-gateway.
+              for _, name in ipairs({
+                  "Authorization",
+                  "X-API-KEY",
+                  "Cookie",
+                  "Proxy-Authorization",
+                  "X-User-Token",
+                  "X-User-Groups",
+                  "X-User-Username",
+                  "X-User-Display-Name",
+                  "Remote-Groups",
+                  "X-Project-Ref",
+              }) do
+                  ngx.req.clear_header(name)
+              end
+
+              return true
+          end
+
+          M.allowed_methods = allowed_methods
+          return M
+          ''', encoding='utf-8')
+
+          # Verify Studio's HMAC before projects_api_signer clears/replaces internal headers.
+          p = root / 'studio/nginx/lua/security/upload_route_guard.lua'
+          text = p.read_text(encoding='utf-8')
+          text = text.replace(
+              'local projects_api_signer = require("security.projects_api_signer")\n',
+              'local projects_api_signer = require("security.projects_api_signer")\nlocal logflare_internal_guard = require("security.logflare_internal_guard")\n',
+              1,
+          )
+          marker = 'local signed, sign_err = projects_api_signer.maybe_sign()\n'
+          if text.count(marker) != 1:
+              raise SystemExit('upload_route_guard.lua: signer marker mismatch')
+          guard_block = '''local analytics_ok, analytics_status, analytics_code, analytics_message, analytics_allow =\n    logflare_internal_guard.check()\nif not analytics_ok then\n    ngx.status = analytics_status or ngx.HTTP_UNAUTHORIZED\n    ngx.header["Content-Type"] = "application/json"\n    if analytics_allow then\n        ngx.header["Allow"] = analytics_allow\n    end\n    ngx.say(cjson.encode({\n        error = analytics_code or "analytics_internal_auth_failed",\n        message = analytics_message or "Internal Analytics request rejected",\n    }))\n    return ngx.exit(ngx.status)\nend\n\n'''
+          text = text.replace(marker, guard_block + marker, 1)
+          p.write_text(text, encoding='utf-8')
+
+          # Harden the public-facing internal route. Custom HMAC auth happens in server_rewrite.
+          p = root / 'studio/nginx/nginx.conf'
+          text = p.read_text(encoding='utf-8')
+          old = '''        location ~ ^/_internal/logflare/(?<logflare_path>.*)$ {\n            auth_request off;\n            proxy_ssl_server_name on;\n            proxy_ssl_name        $server_hostname;\n            proxy_set_header      Host $server_hostname;\n            proxy_set_header      X-API-KEY $http_x_api_key;\n            proxy_set_header      Authorization $http_authorization;\n            proxy_pass $server_domain/api/internal/analytics/$logflare_path$is_args$args;\n            proxy_set_header X-Real-IP $remote_addr;\n            proxy_set_header X-Forwarded-Proto $scheme;\n        }'''
+          new = '''        location ~ ^/_internal/logflare/(?<logflare_path>.*)$ {\n            # O server_rewrite valida HMAC studio-server antes de a request ser\n            # re-assinada como studio-gateway para a Projects API.\n            auth_request off;\n            client_max_body_size 256k;\n            client_body_buffer_size 64k;\n            client_body_timeout 15s;\n            proxy_request_buffering on;\n\n            proxy_ssl_server_name on;\n            proxy_ssl_name        $server_hostname;\n            proxy_set_header      Host $server_hostname;\n\n            # Defense in depth: credenciais do caller nunca sao encaminhadas.\n            proxy_set_header Authorization \"\";\n            proxy_set_header X-API-KEY \"\";\n            proxy_set_header Cookie \"\";\n            proxy_set_header Proxy-Authorization \"\";\n            proxy_set_header X-User-Token \"\";\n            proxy_set_header X-User-Groups \"\";\n            proxy_set_header X-User-Username \"\";\n            proxy_set_header X-User-Display-Name \"\";\n            proxy_set_header Remote-Groups \"\";\n            proxy_set_header X-Project-Ref \"\";\n\n            proxy_pass $server_domain/api/internal/analytics/$logflare_path$is_args$args;\n            proxy_set_header X-Real-IP $remote_addr;\n            proxy_set_header X-Forwarded-Proto $scheme;\n        }'''
+          if text.count(old) != 1:
+              raise SystemExit(f'nginx.conf: old logflare block count={text.count(old)}')
+          p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          # Nginx requires the dedicated secret and preserves it into workers.
+          p = root / 'studio/nginx/docker-entrypoint.sh'
+          text = p.read_text(encoding='utf-8')
+          old = '''if [ -z "${STUDIO_GATEWAY_HMAC_SECRET:-}" ] || [ -z "${PROJECTS_API_HMAC_SECRET:-}" ]; then\n    echo "[entrypoint] ERRO: HMAC interno por servico ausente; rode tools/migrate_internal_hmac_v1.py antes do upgrade" >&2\n    exit 1\nfi\nexport STUDIO_GATEWAY_HMAC_SECRET PROJECTS_API_HMAC_SECRET\n\nif [ -z "$STUDIO_GATEWAY_HMAC_SECRET" ] || [ -z "$PROJECTS_API_HMAC_SECRET" ]; then\n    echo "[entrypoint] ERRO: falha ao preparar segredos HMAC por serviço" >&2\n    exit 1\nfi\nif [ "$STUDIO_GATEWAY_HMAC_SECRET" = "$PROJECTS_API_HMAC_SECRET" ]; then\n    echo "[entrypoint] ERRO: STUDIO_GATEWAY_HMAC_SECRET e PROJECTS_API_HMAC_SECRET devem ser distintos" >&2\n    exit 1\nfi'''
+          new = '''if [ -z "${STUDIO_GATEWAY_HMAC_SECRET:-}" ] || [ -z "${PROJECTS_API_HMAC_SECRET:-}" ]; then\n    echo "[entrypoint] ERRO: HMAC interno por servico ausente; rode tools/migrate_internal_hmac_v1.py antes do upgrade" >&2\n    exit 1\nfi\nif [ -z "${STUDIO_ANALYTICS_HMAC_SECRET:-}" ]; then\n    echo "[entrypoint] ERRO: HMAC Studio Analytics ausente; rode tools/migrate_studio_analytics_hmac.py antes do upgrade" >&2\n    exit 1\nfi\nexport STUDIO_GATEWAY_HMAC_SECRET PROJECTS_API_HMAC_SECRET STUDIO_ANALYTICS_HMAC_SECRET\n\nif [ "$STUDIO_GATEWAY_HMAC_SECRET" = "$PROJECTS_API_HMAC_SECRET" ]; then\n    echo "[entrypoint] ERRO: STUDIO_GATEWAY_HMAC_SECRET e PROJECTS_API_HMAC_SECRET devem ser distintos" >&2\n    exit 1\nfi\nif [ "$STUDIO_ANALYTICS_HMAC_SECRET" = "$STUDIO_GATEWAY_HMAC_SECRET" ] \\\n    || [ "$STUDIO_ANALYTICS_HMAC_SECRET" = "$PROJECTS_API_HMAC_SECRET" ]; then\n    echo "[entrypoint] ERRO: STUDIO_ANALYTICS_HMAC_SECRET deve ser distinto dos segredos de outros servicos" >&2\n    exit 1\nfi'''
+          if text.count(old) != 1:
+              raise SystemExit('docker-entrypoint.sh: HMAC block mismatch')
+          text = text.replace(old, new, 1)
+          text = text.replace(
+              'exec openresty -g "env STUDIO_GATEWAY_HMAC_SECRET; env PROJECTS_API_HMAC_SECRET; daemon off;"',
+              'exec openresty -g "env STUDIO_GATEWAY_HMAC_SECRET; env PROJECTS_API_HMAC_SECRET; env STUDIO_ANALYTICS_HMAC_SECRET; daemon off;"',
+              1,
+          )
+          p.write_text(text, encoding='utf-8')
+
+          # New installations get a dedicated secret in studio/.env.
+          replace_once(
+              'studio/.env.example',
+              'STUDIO_GATEWAY_HMAC_SECRET=\nPROJECTS_API_HMAC_SECRET=\n',
+              'STUDIO_GATEWAY_HMAC_SECRET=\nPROJECTS_API_HMAC_SECRET=\nSTUDIO_ANALYTICS_HMAC_SECRET=\n',
+          )
+
+          # Runtime configurator generates the Studio-only secret without copying it to servidor/.env.
+          p = root / 'tools/configure_studio_runtime.py'
+          text = p.read_text(encoding='utf-8')
+          text = text.replace(
+              'INTERNAL_SERVICE_HMAC_KEYS = (\n    "STUDIO_GATEWAY_HMAC_SECRET",\n    "PROJECTS_API_HMAC_SECRET",\n)\n',
+              'INTERNAL_SERVICE_HMAC_KEYS = (\n    "STUDIO_GATEWAY_HMAC_SECRET",\n    "PROJECTS_API_HMAC_SECRET",\n)\nSTUDIO_ANALYTICS_HMAC_KEY = "STUDIO_ANALYTICS_HMAC_SECRET"\n',
+              1,
+          )
+          needle = '''    if resolved[INTERNAL_SERVICE_HMAC_KEYS[0]] == resolved[INTERNAL_SERVICE_HMAC_KEYS[1]]:\n        raise RuntimeConfigError("segredos HMAC de servicos distintos nao podem ser iguais")\n\n    server_mode = server_env.stat().st_mode & 0o777\n'''
+          replacement = '''    if resolved[INTERNAL_SERVICE_HMAC_KEYS[0]] == resolved[INTERNAL_SERVICE_HMAC_KEYS[1]]:\n        raise RuntimeConfigError("segredos HMAC de servicos distintos nao podem ser iguais")\n\n    analytics_secret = _read_env_value(studio_content, STUDIO_ANALYTICS_HMAC_KEY) or secrets.token_hex(32)\n    if analytics_secret in resolved.values():\n        raise RuntimeConfigError("STUDIO_ANALYTICS_HMAC_SECRET deve ser distinto dos segredos de outros servicos")\n    studio_content = _set_env_value(\n        studio_content,\n        STUDIO_ANALYTICS_HMAC_KEY,\n        analytics_secret,\n    )\n\n    server_mode = server_env.stat().st_mode & 0o777\n'''
+          if text.count(needle) != 1:
+              raise SystemExit('configure_studio_runtime.py: insertion point mismatch')
+          p.write_text(text.replace(needle, replacement, 1), encoding='utf-8')
+
+          # Explicit migration for existing installations; no fallback path exists.
+          (root / 'tools/migrate_studio_analytics_hmac.py').write_text(r'''\
+          #!/usr/bin/env python3
+          """Configura o HMAC Studio -> Nginx usado pela rota interna de Analytics."""
+
+          from __future__ import annotations
+
+          import argparse
+          import os
+          import re
+          import secrets
+          import shutil
+          import tempfile
+          from pathlib import Path
+
+          ROOT = Path(__file__).resolve().parents[1]
+          DEFAULT_STUDIO_ENV = ROOT / "studio" / ".env"
+          KEY = "STUDIO_ANALYTICS_HMAC_SECRET"
+          DISTINCT_FROM = ("STUDIO_GATEWAY_HMAC_SECRET", "PROJECTS_API_HMAC_SECRET")
+          HEX_SECRET = re.compile(r"^[0-9a-fA-F]{64}$")
+
+
+          class MigrationError(RuntimeError):
+              pass
+
+
+          def _value(content: str, key: str) -> str:
+              matches = re.findall(rf"(?m)^(?:export[ \t]+)?{re.escape(key)}[ \t]*=(.*)$", content)
+              if len(matches) > 1:
+                  raise MigrationError(f"{key} possui atribuicoes duplicadas")
+              return matches[0].strip() if matches else ""
+
+
+          def _set_value(content: str, key: str, value: str) -> str:
+              pattern = re.compile(rf"(?m)^(?:export[ \t]+)?{re.escape(key)}[ \t]*=.*$")
+              replacement = f"{key}={value}"
+              if pattern.search(content):
+                  return pattern.sub(replacement, content, count=1)
+              separator = "" if not content or content.endswith("\n") else "\n"
+              return f"{content}{separator}{replacement}\n"
+
+
+          def _atomic_write(path: Path, content: str) -> None:
+              fd, name = tempfile.mkstemp(prefix=f".{path.name}.analytics-hmac.", dir=path.parent)
+              temporary = Path(name)
+              try:
+                  with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+                      handle.write(content)
+                      if content and not content.endswith("\n"):
+                          handle.write("\n")
+                      handle.flush()
+                      os.fsync(handle.fileno())
+                  temporary.chmod(0o600)
+                  os.replace(temporary, path)
+              finally:
+                  temporary.unlink(missing_ok=True)
+
+
+          def migrate(studio_env: Path, *, dry_run: bool = False) -> bool:
+              if not studio_env.is_file():
+                  raise MigrationError(f"arquivo ausente: {studio_env}")
+              original = studio_env.read_text(encoding="utf-8")
+              current = _value(original, KEY)
+              if current and not HEX_SECRET.fullmatch(current):
+                  raise MigrationError(f"{KEY} deve conter 32 bytes em hexadecimal")
+              resolved = current or secrets.token_hex(32)
+              for other_key in DISTINCT_FROM:
+                  other = _value(original, other_key)
+                  if other and secrets.compare_digest(resolved, other):
+                      raise MigrationError(f"{KEY} deve ser distinto de {other_key}")
+              updated = _set_value(original, KEY, resolved)
+              changed = updated != original
+              if dry_run or not changed:
+                  return changed
+
+              backup = studio_env.with_name(studio_env.name + ".pre-studio-analytics-hmac")
+              if not backup.exists():
+                  shutil.copy2(studio_env, backup)
+                  backup.chmod(0o600)
+              _atomic_write(studio_env, updated)
+              return True
+
+
+          def main() -> int:
+              parser = argparse.ArgumentParser(description="Migra studio/.env para HMAC interno de Analytics.")
+              parser.add_argument("--studio-env", type=Path, default=DEFAULT_STUDIO_ENV)
+              parser.add_argument("--dry-run", action="store_true")
+              args = parser.parse_args()
+              try:
+                  changed = migrate(args.studio_env, dry_run=args.dry_run)
+              except (MigrationError, OSError) as exc:
+                  print(f"erro: {exc}")
+                  return 1
+              if args.dry_run:
+                  print("migracao necessaria" if changed else "ambiente ja migrado")
+              elif changed:
+                  print("HMAC interno do Studio Analytics configurado; backup .pre-studio-analytics-hmac criado")
+                  print("agora faca rebuild/restart do Studio e do nginx")
+              else:
+                  print("ambiente ja migrado; nenhuma alteracao necessaria")
+              return 0
+
+
+          if __name__ == "__main__":
+              raise SystemExit(main())
+          ''', encoding='utf-8')
+          (root / 'tools/migrate_studio_analytics_hmac.py').chmod(0o755)
+
+          # Projects API: only gateway HMAC is trusted; caller credentials are ignored.
+          p = root / 'servidor/api-internal/app/routers/internal.py'
+          text = p.read_text(encoding='utf-8')
+          text = text.replace('import hmac\n\nimport httpx', 'import re\n\nimport httpx', 1)
+          start = text.index('@router.api_route(\n    "/api/internal/analytics/{analytics_path:path}",')
+          end = text.index('\n\n@router.post("/api/projects/internal/users/sync")', start)
+          analytics_block = r'''@router.api_route(
+              "/api/internal/analytics/{analytics_path:path}",
+              methods=["GET", "POST", "PUT", "DELETE"],
+          )
+          async def proxy_global_analytics(
+              analytics_path: str,
+              request: Request,
+          ):
+              if getattr(request.state, "internal_service", None) != "studio-gateway":
+                  raise HTTPException(403, "Internal service access required")
+
+              safe_segment = r"[A-Za-z0-9_.-]{1,128}"
+              allowed_methods: set[str] | None = None
+              if re.fullmatch(rf"api/endpoints/query/{safe_segment}", analytics_path):
+                  allowed_methods = {"GET"}
+              elif analytics_path == "api/backends":
+                  allowed_methods = {"GET", "POST"}
+              elif re.fullmatch(rf"api/backends/{safe_segment}", analytics_path):
+                  allowed_methods = {"GET", "PUT", "DELETE"}
+              elif analytics_path == "api/sources":
+                  allowed_methods = {"GET"}
+              elif analytics_path == "api/rules":
+                  allowed_methods = {"POST"}
+
+              if allowed_methods is None:
+                  raise HTTPException(404, "Analytics path not allowed")
+              if request.method not in allowed_methods:
+                  raise HTTPException(405, "Analytics method not allowed")
+
+              raw_query = request.scope.get("query_string", b"")
+              if len(raw_query) > 16 * 1024:
+                  raise HTTPException(414, "Analytics query is too large")
+              query_items = list(request.query_params.multi_items())
+              if len(query_items) > 64:
+                  raise HTTPException(400, "Too many Analytics query parameters")
+
+              raw_content_length = request.headers.get("content-length")
+              if raw_content_length:
+                  try:
+                      content_length = int(raw_content_length)
+                  except ValueError as exc:
+                      raise HTTPException(400, "Invalid Content-Length") from exc
+                  if content_length < 0 or content_length > 256 * 1024:
+                      raise HTTPException(413, "Analytics request body is too large")
+
+              body = await request.body()
+              if len(body) > 256 * 1024:
+                  raise HTTPException(413, "Analytics request body is too large")
+
+              if request.method in {"POST", "PUT"}:
+                  content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+                  if content_type != "application/json":
+                      raise HTTPException(415, "Analytics mutations require application/json")
+              elif body:
+                  raise HTTPException(400, "Request body is not allowed for this Analytics method")
+
+              # Only the Projects API injects the real Logflare credential.
+              upstream_headers = {
+                  "x-api-key": LOGFLARE_PRIVATE_ACCESS_TOKEN,
+                  "accept": "application/json",
+              }
+              if body:
+                  upstream_headers["content-type"] = "application/json"
+
+              try:
+                  async with httpx.AsyncClient(
+                      timeout=httpx.Timeout(60.0, connect=5.0)
+                  ) as client:
+                      upstream = await client.request(
+                          request.method,
+                          f"{ANALYTICS_INTERNAL_URL}/{analytics_path}",
+                          params=query_items,
+                          headers=upstream_headers,
+                          content=body,
+                      )
+              except httpx.HTTPError as exc:
+                  raise HTTPException(502, "Analytics service unavailable") from exc
+
+              response_headers = {"Cache-Control": "no-store"}
+              if upstream.headers.get("content-type"):
+                  response_headers["Content-Type"] = upstream.headers["content-type"]
+              return Response(
+                  content=upstream.content,
+                  status_code=upstream.status_code,
+                  headers=response_headers,
+              )'''
+          analytics_block = '\n'.join(line[10:] if line.startswith('          ') else line for line in analytics_block.splitlines())
+          text = text[:start] + analytics_block + text[end:]
+          p.write_text(text, encoding='utf-8')
+
+          # Extend analytics contract tests.
+          p = root / 'tests/smoke/test_global_admin_and_analytics_contract.py'
+          text = p.read_text(encoding='utf-8')
+          anchor = '''        self.assertIn(\n            "LOGFLARE_URL: https://nginx:443/_internal/logflare",\n            self.studio_compose,\n        )\n'''
+          addition = anchor + '''        self.assertIn("STUDIO_ANALYTICS_HMAC_SECRET:", self.studio_compose)\n        self.assertIn("--require=/usr/local/lib/studio-logflare-hmac.cjs", self.studio_compose)\n        self.assertIn("STUDIO_ANALYTICS_HMAC_SECRET=", studio_root_env)\n\n        internal_start = nginx.index("location ~ ^/_internal/logflare/")\n        internal_end = nginx.index("location ~* ^/api/platform/projects/ {", internal_start)\n        internal_route = nginx[internal_start:internal_end]\n        self.assertIn("client_max_body_size 256k", internal_route)\n        self.assertIn('proxy_set_header Authorization ""', internal_route)\n        self.assertIn('proxy_set_header X-API-KEY ""', internal_route)\n        self.assertNotIn("$http_authorization", internal_route)\n        self.assertNotIn("$http_x_api_key", internal_route)\n\n        guard = (\n            ROOT / "studio" / "nginx" / "lua" / "security" / "logflare_internal_guard.lua"\n        ).read_text(encoding="utf-8")\n        self.assertIn('SERVICE = "studio-server"', guard)\n        self.assertIn('internal_hmac.verify_current_request(', guard)\n        self.assertIn('path == "api/backends"', guard)\n        self.assertIn('path == "api/sources"', guard)\n        self.assertIn('path == "api/rules"', guard)\n        self.assertIn('^api/endpoints/query/', guard)\n        self.assertIn('ngx.req.clear_header(name)', guard)\n\n        api_internal = (\n            ROOT / "servidor" / "api-internal" / "app" / "routers" / "internal.py"\n        ).read_text(encoding="utf-8")\n        analytics_api = api_internal[\n            api_internal.index('/api/internal/analytics/{analytics_path:path}'):\n            api_internal.index('@router.post("/api/projects/internal/users/sync")')\n        ]\n        self.assertIn('internal_service", None) != "studio-gateway"', analytics_api)\n        self.assertIn('LOGFLARE_PRIVATE_ACCESS_TOKEN', analytics_api)\n        self.assertNotIn('request.headers.get("x-api-key"', analytics_api)\n        self.assertNotIn('request.headers.get("authorization"', analytics_api)\n'''
+          if text.count(anchor) != 1:
+              raise SystemExit('analytics contract anchor mismatch')
+          p.write_text(text.replace(anchor, addition, 1), encoding='utf-8')
+
+          # Migration unit tests.
+          (root / 'tests/smoke/test_studio_analytics_hmac_migration.py').write_text(r'''\
+          from __future__ import annotations
+
+          import importlib.util
+          import tempfile
+          import unittest
+          from pathlib import Path
+
+          ROOT = Path(__file__).resolve().parents[2]
+          MODULE_PATH = ROOT / "tools" / "migrate_studio_analytics_hmac.py"
+          SPEC = importlib.util.spec_from_file_location("migrate_studio_analytics_hmac", MODULE_PATH)
+          assert SPEC is not None and SPEC.loader is not None
+          migration = importlib.util.module_from_spec(SPEC)
+          SPEC.loader.exec_module(migration)
+
+
+          class StudioAnalyticsHmacMigrationTest(unittest.TestCase):
+              def env(self, content: str) -> tuple[Path, tempfile.TemporaryDirectory[str]]:
+                  temp = tempfile.TemporaryDirectory()
+                  path = Path(temp.name) / ".env"
+                  path.write_text(content, encoding="utf-8")
+                  path.chmod(0o644)
+                  return path, temp
+
+              def test_generates_secret_atomically_and_is_idempotent(self) -> None:
+                  path, temp = self.env(
+                      f"STUDIO_GATEWAY_HMAC_SECRET={'aa' * 32}\n"
+                      f"PROJECTS_API_HMAC_SECRET={'bb' * 32}\n"
+                  )
+                  self.addCleanup(temp.cleanup)
+                  self.assertTrue(migration.migrate(path))
+                  content = path.read_text(encoding="utf-8")
+                  value = migration._value(content, migration.KEY)
+                  self.assertRegex(value, r"^[0-9a-f]{64}$")
+                  self.assertNotEqual(value, "aa" * 32)
+                  self.assertNotEqual(value, "bb" * 32)
+                  self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                  self.assertTrue(path.with_name(".env.pre-studio-analytics-hmac").exists())
+                  self.assertFalse(migration.migrate(path))
+
+              def test_dry_run_does_not_write(self) -> None:
+                  path, temp = self.env("")
+                  self.addCleanup(temp.cleanup)
+                  before = path.read_text(encoding="utf-8")
+                  self.assertTrue(migration.migrate(path, dry_run=True))
+                  self.assertEqual(path.read_text(encoding="utf-8"), before)
+
+              def test_rejects_shared_or_invalid_secret(self) -> None:
+                  shared = "cc" * 32
+                  path, temp = self.env(
+                      f"STUDIO_GATEWAY_HMAC_SECRET={shared}\n"
+                      f"STUDIO_ANALYTICS_HMAC_SECRET={shared}\n"
+                  )
+                  self.addCleanup(temp.cleanup)
+                  with self.assertRaises(migration.MigrationError):
+                      migration.migrate(path)
+
+                  path2, temp2 = self.env("STUDIO_ANALYTICS_HMAC_SECRET=short\n")
+                  self.addCleanup(temp2.cleanup)
+                  with self.assertRaises(migration.MigrationError):
+                      migration.migrate(path2)
+
+
+          if __name__ == "__main__":
+              unittest.main()
+          ''', encoding='utf-8')
+
+          # Node runtime contract: old bearer headers are removed and signature verifies.
+          (root / 'tests/smoke/test_studio_logflare_hmac_hook.cjs').write_text(r'''\
+          'use strict'
+
+          const assert = require('node:assert/strict')
+          const crypto = require('node:crypto')
+
+          process.env.LOGFLARE_URL = 'https://nginx:443/_internal/logflare'
+          process.env.STUDIO_ANALYTICS_HMAC_SECRET = 'ab'.repeat(32)
+
+          let captured
+          globalThis.fetch = async (input, init) => {
+            captured = { url: new URL(input.toString()), init }
+            return { ok: true, status: 200 }
+          }
+
+          require('../../studio/studio-slug/logflare-hmac-hook.cjs')
+
+          ;(async () => {
+            const body = JSON.stringify({ config: { url: 'https://example.invalid' } })
+            await globalThis.fetch(
+              new URL('https://nginx:443/_internal/logflare/api/backends?x=1'),
+              {
+                method: 'POST',
+                body,
+                headers: {
+                  Authorization: 'Bearer must-not-cross',
+                  'x-api-key': 'must-not-cross',
+                  Cookie: 'session=must-not-cross',
+                  'Content-Type': 'application/json',
+                },
+              }
+            )
+
+            assert(captured)
+            const headers = new Headers(captured.init.headers)
+            assert.equal(headers.has('authorization'), false)
+            assert.equal(headers.has('x-api-key'), false)
+            assert.equal(headers.has('cookie'), false)
+            assert.equal(headers.get('x-internal-service'), 'studio-server')
+            assert.equal(headers.get('x-internal-version'), 'internal-hmac-v1')
+
+            const timestamp = headers.get('x-internal-timestamp')
+            const nonce = headers.get('x-internal-nonce')
+            const target = `${captured.url.pathname}${captured.url.search}`
+            const bodyHash = crypto.createHash('sha256').update(Buffer.from(body)).digest('hex')
+            const canonical = [
+              'internal-hmac-v1',
+              'studio-server',
+              'POST',
+              target,
+              timestamp,
+              nonce,
+              bodyHash,
+            ].join('\n')
+            const expected = crypto
+              .createHmac('sha256', process.env.STUDIO_ANALYTICS_HMAC_SECRET)
+              .update(canonical)
+              .digest('hex')
+            assert.equal(headers.get('x-internal-signature'), expected)
+
+            // Non-Logflare traffic is untouched.
+            captured = null
+            await globalThis.fetch('https://example.com/test', { headers: { Authorization: 'keep' } })
+            assert(captured)
+            assert.equal(new Headers(captured.init.headers).get('authorization'), 'keep')
+            console.log('studio logflare hmac hook: ok')
+          })().catch((error) => {
+            console.error(error)
+            process.exit(1)
+          })
+          ''', encoding='utf-8')
+
+          # Extend existing configure-runtime test expectation for the Studio-only secret.
+          p = root / 'tests/smoke/test_internal_service_hmac_config.py'
+          text = p.read_text(encoding='utf-8')
+          needle = '''        self.assertNotEqual(\n            server["STUDIO_GATEWAY_HMAC_SECRET"],\n            server["PROJECTS_API_HMAC_SECRET"],\n        )\n'''
+          replacement = needle + '''        self.assertNotIn(runtime_config.STUDIO_ANALYTICS_HMAC_KEY, server)\n        self.assertRegex(\n            studio[runtime_config.STUDIO_ANALYTICS_HMAC_KEY],\n            r"^[0-9a-f]{64}$",\n        )\n        self.assertNotIn(\n            studio[runtime_config.STUDIO_ANALYTICS_HMAC_KEY],\n            {server["STUDIO_GATEWAY_HMAC_SECRET"], server["PROJECTS_API_HMAC_SECRET"]},\n        )\n'''
+          if text.count(needle) != 1:
+              raise SystemExit('test_internal_service_hmac_config.py anchor mismatch')
+          p.write_text(text.replace(needle, replacement, 1), encoding='utf-8')
+          PY
+
+      - name: Validate hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq luajit
+          python3 -m compileall -q servidor/api-internal/app tools tests/smoke
+          python3 -m unittest \
+            tests.smoke.test_global_admin_and_analytics_contract \
+            tests.smoke.test_internal_service_hmac_config \
+            tests.smoke.test_studio_analytics_hmac_migration
+          node tests/smoke/test_studio_logflare_hmac_hook.cjs
+          luajit -b studio/nginx/lua/security/logflare_internal_guard.lua /tmp/logflare_internal_guard.luac
+          luajit -b studio/nginx/lua/security/upload_route_guard.lua /tmp/upload_route_guard.luac
+          ./tools/migrate_studio_analytics_hmac.py --help >/dev/null
+          git diff --check
+
+          ! grep -A40 'location ~ ^/_internal/logflare/' studio/nginx/nginx.conf | grep -F '$http_authorization'
+          ! grep -A40 'location ~ ^/_internal/logflare/' studio/nginx/nginx.conf | grep -F '$http_x_api_key'
+          grep -q 'studio-server' studio/nginx/lua/security/logflare_internal_guard.lua
+          grep -q 'studio-gateway' servidor/api-internal/app/routers/internal.py
+
+      - name: Commit and remove temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Gustavo Henrique Martins"
+          git config user.email "99695758+GustavoMartins123@users.noreply.github.com"
+          git rm .github/workflows/tmp-apply-logflare-hardening.yml
+          git add \
+            studio/studio-slug/Dockerfile \
+            studio/studio-slug/logflare-hmac-hook.cjs \
+            studio/docker-compose.yml \
+            studio/.env.example \
+            studio/nginx/nginx.conf \
+            studio/nginx/docker-entrypoint.sh \
+            studio/nginx/lua/security/logflare_internal_guard.lua \
+            studio/nginx/lua/security/upload_route_guard.lua \
+            servidor/api-internal/app/routers/internal.py \
+            tools/configure_studio_runtime.py \
+            tools/migrate_studio_analytics_hmac.py \
+            tests/smoke/test_global_admin_and_analytics_contract.py \
+            tests/smoke/test_internal_service_hmac_config.py \
+            tests/smoke/test_studio_analytics_hmac_migration.py \
+            tests/smoke/test_studio_logflare_hmac_hook.cjs
+          git commit -m "security: harden internal Logflare proxy"
+          git push origin HEAD:opaque-keys
