@@ -123,6 +123,7 @@ class LogflareInternalHardeningContractTest(unittest.TestCase):
 
         self.assertIn("STUDIO_ANALYTICS_HMAC_SECRET=", env_example)
         self.assertIn("migrate_studio_analytics_hmac.py", entrypoint)
+        self.assertIn("grep -Eq '^[0-9A-Fa-f]{64}$'", entrypoint)
         self.assertIn("STUDIO_ANALYTICS_HMAC_KEY", configurator)
         self.assertIn("secrets.token_hex(32)", configurator)
         self.assertIn(".pre-studio-analytics-hmac", migration)
