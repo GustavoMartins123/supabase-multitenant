@@ -81,6 +81,10 @@ if [ -z "${STUDIO_ANALYTICS_HMAC_SECRET:-}" ]; then
     echo "[entrypoint] ERRO: HMAC Studio Analytics ausente; rode tools/migrate_studio_analytics_hmac.py antes do upgrade" >&2
     exit 1
 fi
+if ! printf '%s' "$STUDIO_ANALYTICS_HMAC_SECRET" | grep -Eq '^[0-9A-Fa-f]{64}$'; then
+    echo "[entrypoint] ERRO: STUDIO_ANALYTICS_HMAC_SECRET deve conter 32 bytes em hexadecimal" >&2
+    exit 1
+fi
 export STUDIO_GATEWAY_HMAC_SECRET PROJECTS_API_HMAC_SECRET STUDIO_ANALYTICS_HMAC_SECRET
 
 if [ "$STUDIO_GATEWAY_HMAC_SECRET" = "$PROJECTS_API_HMAC_SECRET" ]; then
