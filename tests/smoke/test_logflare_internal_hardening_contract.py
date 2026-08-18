@@ -54,6 +54,19 @@ class LogflareInternalHardeningContractTest(unittest.TestCase):
         self.assertIn('"/_internal/logflare/', signer)
         self.assertIn('"/api/internal/analytics/', signer)
 
+    def test_nginx_proxy_never_forwards_caller_credentials(self) -> None:
+        nginx = (ROOT / "studio/nginx/nginx.conf").read_text(encoding="utf-8")
+        start = nginx.index("location ~ ^/_internal/logflare/")
+        end = nginx.index("location ~* ^/api/platform/projects/ {", start)
+        block = nginx[start:end]
+
+        self.assertIn("client_max_body_size 256k", block)
+        self.assertIn('proxy_set_header Authorization ""', block)
+        self.assertIn('proxy_set_header X-API-KEY ""', block)
+        self.assertIn('proxy_set_header Cookie ""', block)
+        self.assertNotIn("$http_authorization", block)
+        self.assertNotIn("$http_x_api_key", block)
+
     def test_ingress_has_explicit_allowlist_and_limits(self) -> None:
         guard = (
             ROOT / "studio/nginx/lua/security/logflare_internal_guard.lua"
