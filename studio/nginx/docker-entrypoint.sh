@@ -77,14 +77,19 @@ if [ -z "${STUDIO_GATEWAY_HMAC_SECRET:-}" ] || [ -z "${PROJECTS_API_HMAC_SECRET:
     echo "[entrypoint] ERRO: HMAC interno por servico ausente; rode tools/migrate_internal_hmac_v1.py antes do upgrade" >&2
     exit 1
 fi
-export STUDIO_GATEWAY_HMAC_SECRET PROJECTS_API_HMAC_SECRET
-
-if [ -z "$STUDIO_GATEWAY_HMAC_SECRET" ] || [ -z "$PROJECTS_API_HMAC_SECRET" ]; then
-    echo "[entrypoint] ERRO: falha ao preparar segredos HMAC por serviço" >&2
+if [ -z "${STUDIO_ANALYTICS_HMAC_SECRET:-}" ]; then
+    echo "[entrypoint] ERRO: HMAC Studio Analytics ausente; rode tools/migrate_studio_analytics_hmac.py antes do upgrade" >&2
     exit 1
 fi
+export STUDIO_GATEWAY_HMAC_SECRET PROJECTS_API_HMAC_SECRET STUDIO_ANALYTICS_HMAC_SECRET
+
 if [ "$STUDIO_GATEWAY_HMAC_SECRET" = "$PROJECTS_API_HMAC_SECRET" ]; then
     echo "[entrypoint] ERRO: STUDIO_GATEWAY_HMAC_SECRET e PROJECTS_API_HMAC_SECRET devem ser distintos" >&2
+    exit 1
+fi
+if [ "$STUDIO_ANALYTICS_HMAC_SECRET" = "$STUDIO_GATEWAY_HMAC_SECRET" ] \
+    || [ "$STUDIO_ANALYTICS_HMAC_SECRET" = "$PROJECTS_API_HMAC_SECRET" ]; then
+    echo "[entrypoint] ERRO: STUDIO_ANALYTICS_HMAC_SECRET deve ser distinto dos segredos de outros servicos" >&2
     exit 1
 fi
 
@@ -112,4 +117,4 @@ chown -R 65534:65534 "$PROFILE_PICTURES_DIR" 2>/dev/null || true
 find "$PROFILE_PICTURES_DIR" -type d -exec chmod 700 {} +
 find "$PROFILE_PICTURES_DIR" -type f -exec chmod 600 {} +
 
-exec openresty -g "env STUDIO_GATEWAY_HMAC_SECRET; env PROJECTS_API_HMAC_SECRET; daemon off;"
+exec openresty -g "env STUDIO_GATEWAY_HMAC_SECRET; env PROJECTS_API_HMAC_SECRET; env STUDIO_ANALYTICS_HMAC_SECRET; daemon off;"
