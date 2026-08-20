@@ -5,8 +5,9 @@ Run inside the projects-api image after adding the new environment variables:
     python -m app.migrate_project_secrets --dry-run
     python -m app.migrate_project_secrets --apply
 
-The command never prints plaintext secrets. A dry-run creates any required
-schema inside a transaction and rolls the whole transaction back. The apply
+The command never prints plaintext secrets and never changes schema: the
+control-plane migrations own `project_key_envelopes`. A dry-run runs inside a
+transaction and rolls the whole transaction back. The apply
 mode is atomic and resumable: already-v2 rows are authenticated and skipped,
 while a changed master key only rewraps each tenant DEK without re-encrypting
 the individual values.
@@ -47,22 +48,17 @@ def _legacy_keyring() -> MultiFernet | None:
     return MultiFernet([Fernet(key.encode("ascii")) for key in keys])
 
 
-async def ensure_schema(conn: asyncpg.Connection) -> None:
-    await conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS project_key_envelopes (
-            project_id UUID PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
-            key_id UUID NOT NULL UNIQUE,
-            wrapped_dek TEXT NOT NULL,
-            wrapping_key_id TEXT NOT NULL,
-            algorithm TEXT NOT NULL DEFAULT 'aes-256-gcm',
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-        CREATE INDEX IF NOT EXISTS idx_project_key_envelopes_wrapping_key
-            ON project_key_envelopes(wrapping_key_id);
-        """
-    )
+async def assert_schema(conn: asyncpg.Connection) -> None:
+    """Confere o schema exigido. Esta ferramenta nao cria tabela."""
+
+    if not await conn.fetchval(
+        "SELECT to_regclass('public.project_key_envelopes')"
+    ):
+        raise RuntimeError(
+            "project_key_envelopes ausente: aplique as migrations do control "
+            "plane com `python -m app.schema_migrations apply` antes desta "
+            "ferramenta"
+        )
 
 
 async def get_envelope(
@@ -147,7 +143,7 @@ async def migrate(
             outer_transaction = conn.transaction()
             await outer_transaction.start()
             try:
-                await ensure_schema(conn)
+                await assert_schema(conn)
                 rows = await conn.fetch(
                     """
                     SELECT id, name, anon_key, service_role, config_token

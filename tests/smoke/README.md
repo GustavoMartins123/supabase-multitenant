@@ -59,3 +59,31 @@ possui nem aceita uma senha global de exclusão.
 
 TLS é verificado por padrão. Para CA privada, informe `SMOKE_CA_FILE`. Somente
 em laboratório isolado é possível usar `SMOKE_VERIFY_TLS=false`.
+
+## Migrations do control plane contra Postgres real
+
+`tests/integration/test_control_plane_migrations_postgres.py` cria dois
+databases temporarios a partir do DSN administrativo, aplica as migrations e
+remove tudo no final. Ele cobre instalacao limpa, upgrade de instalacao
+existente, convergencia entre os dois caminhos e recusa de migration editada.
+Nenhum objeto do control plane em uso e tocado, mas o DSN precisa poder criar e
+remover databases:
+
+```bash
+export RUN_MIGRATIONS_INTEGRATION=1
+export MIGRATIONS_ADMIN_DSN=postgres://supabase_admin:...@127.0.0.1:5432/postgres
+python -m unittest tests.integration.test_control_plane_migrations_postgres -v
+```
+
+O teste precisa de `asyncpg`. Sem instalar nada no host, rode dentro da imagem
+da Projects API:
+
+```bash
+docker run --rm --network rede-supabase \
+  -v "$PWD:/repo:ro" -w /repo \
+  -e PYTHONDONTWRITEBYTECODE=1 \
+  -e RUN_MIGRATIONS_INTEGRATION=1 \
+  -e MIGRATIONS_ADMIN_DSN=postgres://supabase_admin:...@172.50.200.10:6755/postgres \
+  servidor-projects-api:latest \
+  python -m unittest tests.integration.test_control_plane_migrations_postgres -v
+```

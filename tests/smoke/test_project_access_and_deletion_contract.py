@@ -91,7 +91,7 @@ class ProjectAccessAndDeletionContractTest(unittest.TestCase):
     def test_admin_projects_info_uses_one_canonical_path(self) -> None:
         self.assertIn('@app.post("/api/admin/projects-info")', self.source)
         self.assertIn(
-            "proxy_pass $server_domain/api/admin/projects-info;",
+            "proxy_pass $server_domain/api/admin/projects-info$is_args$args;",
             self.nginx_source,
         )
         self.assertNotIn("/api/projects/admin/projects-info", self.nginx_source)

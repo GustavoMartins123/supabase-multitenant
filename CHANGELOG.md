@@ -1,3 +1,14 @@
+## 2026-08-20 — Migrations versionadas do control plane
+
+- schema do control plane saiu do startup da Projects API e passou a viver em `servidor/api-internal/app/migrations`, com ledger `control_plane_schema_migrations`, checksum por versão, advisory lock e uma transação por versão;
+- o boot da API apenas verifica a versão aplicada e recusa servir quando o banco está atrás da imagem; nenhum DDL sai do processo que atende requisições;
+- `create_template.sh` ficou restrito ao bootstrap de cluster, e a identidade `key_authorizer` passou a ser provisionada pelo mesmo comando privilegiado das migrations;
+- novo serviço efêmero `control-plane-migrations` no Compose: `key-authorizer` e `projects-api` só sobem depois que ele conclui com sucesso;
+- corrigido o cálculo de `is_idempotent`/`retryable` no schema de `jobs`, que violava `NOT NULL` em instalações com jobs anteriores à coluna `action`;
+- `jobs` convergiu para a definição canônica em instalações existentes: `NOT NULL` em `action` e `updated_at` e os `CHECK` de progresso, etapas e tentativa;
+- `python -m app.migrate_project_secrets` deixou de criar schema e passou a exigir a migration aplicada;
+- instalações existentes: aplique as migrations antes de subir a Projects API desta versão, com `start.sh` ou `docker compose -f docker-compose-api.yml -f <perfil> --env-file .env run --rm control-plane-migrations`.
+
 ## 2026-08-17 — Cutover HMAC interno estrito
 
 - removido `NGINX_SHARED_TOKEN` do runtime, Traefik e OpenResty;

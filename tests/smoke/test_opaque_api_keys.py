@@ -150,6 +150,12 @@ class OpaqueKeyContractTest(unittest.TestCase):
         cls.service = (API_ROOT / "app" / "opaque_key_service.py").read_text(
             encoding="utf-8"
         )
+        cls.baseline = (
+            API_ROOT / "app" / "migrations" / "0001_control_plane_baseline.sql"
+        ).read_text(encoding="utf-8")
+        cls.roles = (API_ROOT / "app" / "control_plane_roles.py").read_text(
+            encoding="utf-8"
+        )
         cls.router = (
             API_ROOT / "app" / "routers" / "opaque_keys.py"
         ).read_text(encoding="utf-8")
@@ -181,11 +187,11 @@ class OpaqueKeyContractTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
     def test_schema_enforces_one_active_and_pending_key_per_slot(self) -> None:
-        self.assertIn("idx_project_api_keys_one_active", self.service)
-        self.assertIn("WHERE status = 'active'", self.service)
-        self.assertIn("idx_project_api_keys_one_pending", self.service)
-        self.assertIn("WHERE status = 'pending'", self.service)
-        self.assertIn("secret_hash BYTEA NOT NULL UNIQUE", self.service)
+        self.assertIn("idx_project_api_keys_one_active", self.baseline)
+        self.assertIn("WHERE status = 'active'", self.baseline)
+        self.assertIn("idx_project_api_keys_one_pending", self.baseline)
+        self.assertIn("WHERE status = 'pending'", self.baseline)
+        self.assertIn("secret_hash BYTEA NOT NULL UNIQUE", self.baseline)
 
     def test_management_routes_are_canonical_and_no_store(self) -> None:
         self.assertIn('/{project_name}/api-key-slots"', self.router)
@@ -198,9 +204,21 @@ class OpaqueKeyContractTest(unittest.TestCase):
         self.assertNotIn('command["message"]\n                or', self.router)
         self.assertNotIn("/legacy-api-key", self.router.lower())
 
-    def test_schema_and_router_are_registered_at_startup(self) -> None:
+    def test_router_is_registered_and_schema_comes_from_migrations(self) -> None:
         self.assertIn("app.include_router(opaque_keys_router)", self.main)
-        self.assertIn("await ensure_opaque_key_schema(pool)", self.main)
+        self.assertIn("await verify_control_plane_schema(pool)", self.main)
+        for table in (
+            "project_api_key_slots",
+            "project_api_keys",
+            "project_api_key_reveals",
+        ):
+            with self.subTest(table=table):
+                self.assertIn(
+                    f"CREATE TABLE IF NOT EXISTS {table}", self.baseline
+                )
+                self.assertNotIn(
+                    f"CREATE TABLE IF NOT EXISTS {table}", self.service
+                )
 
     def test_authorizer_binds_key_to_project_gateway_and_service(self) -> None:
         for contract in (
@@ -286,7 +304,7 @@ class OpaqueKeyContractTest(unittest.TestCase):
             "GRANT UPDATE (last_used_at)",
         ):
             with self.subTest(contract=contract):
-                self.assertIn(contract, self.service)
+                self.assertIn(contract, self.roles)
         self.assertIn("read_only: true", self.compose)
         self.assertIn("no-new-privileges:true", self.compose)
         self.assertIn("cap_drop:", self.compose)

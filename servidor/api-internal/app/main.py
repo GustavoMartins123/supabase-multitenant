@@ -1,4 +1,3 @@
-import os
 import secrets
 import uuid
 import pathlib
@@ -17,7 +16,6 @@ from typing import Any, List, Dict
 from app.pg_meta_crypto import encrypt_postgres_meta_uri
 from app.project_secret_service import (
     decrypt_project_secret,
-    ensure_project_secrets_schema,
     store_project_secrets,
 )
 from app.jobs import (
@@ -27,7 +25,6 @@ from app.jobs import (
     create_project_job as _create_project_job,
     create_retry_job,
     enqueue_project_action as _enqueue_project_action,
-    ensure_jobs_schema,
     serialize_job,
     set_job_status as _set_job_status,
 )
@@ -43,7 +40,6 @@ from app.host_agent import (
     HostAgentError,
     HostAgentOffline,
     command_result,
-    ensure_host_agent_schema,
     fetch_project_containers,
     run_command as run_host_agent_command,
     run_command_for_job as run_host_agent_command_for_job,
@@ -53,21 +49,11 @@ from app.validation import (
     normalize_groups, parse_uuid_value, validate_project_id,
     validate_service_name,
 )
-from app.database_schema import (
-    ensure_collaboration_schema,
-    ensure_identity_schema,
-    ensure_restore_points_schema,
-)
 from app.opaque_key_service import (
     bootstrap_project_opaque_keys,
     cancel_project_automatic_pending_keys,
-    ensure_key_authorizer_role,
-    ensure_opaque_key_schema,
 )
-from app.step_up_auth import (
-    consume_step_up_grant,
-    ensure_step_up_auth_schema,
-)
+from app.step_up_auth import consume_step_up_grant
 from app.control_plane_service import (
     audit_studio_action,
     create_studio_notification,
@@ -123,6 +109,7 @@ from app.project_identity import (
     reconcile_project_tenant_uuids,
 )
 from app.database import close_pool, get_pool, initialize_pool
+from app.schema_migrations import verify_control_plane_schema
 from app.dependencies import (
     audit_project_member_change,
     ensure_project_admin_access,
@@ -591,20 +578,17 @@ async def _scan_automatic_key_rotations() -> int:
 @app.on_event("startup")
 async def startup():
     pool = await initialize_pool(DB_DSN)
-    await ensure_identity_schema(pool)
-    await ensure_step_up_auth_schema(pool)
-    await ensure_project_secrets_schema(pool)
-    await ensure_opaque_key_schema(pool)
-    key_authorizer_password = (
-        os.getenv("KEY_AUTHORIZER_DB_PASSWORD") or ""
-    ).strip()
-    if not key_authorizer_password:
-        raise RuntimeError("KEY_AUTHORIZER_DB_PASSWORD is required")
-    await ensure_key_authorizer_role(
-        pool, password=key_authorizer_password
+    schema = await verify_control_plane_schema(pool)
+    print(
+        "[migrations] control plane na versao "
+        f"{schema.current_version} "
+        f"({len(schema.applied_versions)} aplicadas)"
     )
-    await ensure_jobs_schema(pool)
-    await ensure_host_agent_schema(pool)
+    if schema.unknown_versions:
+        print(
+            "[migrations] banco a frente desta imagem: "
+            + ", ".join(schema.unknown_versions)
+        )
     identity_result = await reconcile_project_tenant_uuids(pool, PROJECTS_ROOT)
     print(
         "[identity] tenant UUIDs: "
@@ -617,8 +601,6 @@ async def startup():
             "[identity] projetos sem tenant UUID verificavel: "
             + ", ".join(identity_result.unresolved)
         )
-    await ensure_collaboration_schema(pool)
-    await ensure_restore_points_schema(pool)
     print("✅ Database pool initialized")
     await _recover_pending_jobs()
     await start_automatic_key_rotation(

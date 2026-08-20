@@ -21,7 +21,12 @@ AUTHORIZER = ROOT / "servidor/key-authorizer/app.py"
 MIGRATION = (
     ROOT
     / "servidor/api-internal/app/migrations"
-    / "20260812_opaque_api_key_optional_expiration.sql"
+    / "0003_opaque_api_key_optional_expiration.sql"
+)
+BASELINE = (
+    ROOT
+    / "servidor/api-internal/app/migrations"
+    / "0001_control_plane_baseline.sql"
 )
 STUDIO_MODEL = (
     ROOT / "studio/seletor_de_projetos/lib/models/opaque_api_key.dart"
@@ -245,7 +250,8 @@ class OptionalOpaqueKeyExpirationContractTest(unittest.TestCase):
         self.assertIn("SET status = 'revoked', revoked_at = now()", rotation)
 
     def test_reveal_ttl_remains_independent_and_non_nullable(self) -> None:
-        reveals = self.service[self.service.index("project_api_key_reveals") :]
+        baseline = BASELINE.read_text(encoding="utf-8")
+        reveals = baseline[baseline.index("project_api_key_reveals") :]
         self.assertIn("expires_at TIMESTAMPTZ NOT NULL", reveals)
         self.assertIn("REVEAL_TTL_MINUTES = 30", self.service)
         self.assertIn("r.expires_at > now()", self.service)

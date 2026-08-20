@@ -200,7 +200,7 @@ class StepUpAuthenticationContractTest(unittest.IsolatedAsyncioTestCase):
             API_ROOT
             / "app"
             / "migrations"
-            / "20260812_step_up_grants.sql"
+            / "0002_step_up_grants.sql"
         ).read_text(encoding="utf-8")
         self.assertIn("studio_step_up_grant_consumptions", migration)
         self.assertIn("login_session_hash", migration)

@@ -215,9 +215,9 @@ class ProjectIdentityMigrationTest(unittest.IsolatedAsyncioTestCase):
 class ProjectIdentitySourceContractTest(unittest.TestCase):
     def setUp(self) -> None:
         self.main = (API_ROOT / "app" / "main.py").read_text(encoding="utf-8")
-        self.schema = (API_ROOT / "app" / "database_schema.py").read_text(
-            encoding="utf-8"
-        )
+        self.schema = (
+            API_ROOT / "app" / "migrations" / "0001_control_plane_baseline.sql"
+        ).read_text(encoding="utf-8")
 
     def test_new_projects_use_one_uuid_for_project_and_tenant(self) -> None:
         self.assertGreaterEqual(

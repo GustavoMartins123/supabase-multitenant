@@ -8,9 +8,11 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 class UserProfileContractTests(unittest.TestCase):
     def test_control_plane_persists_profile_projection(self) -> None:
-        schema = (ROOT / "servidor/api-internal/app/database_schema.py").read_text(
-            encoding="utf-8"
-        )
+        schema = (
+            ROOT
+            / "servidor/api-internal/app/migrations"
+            / "0001_control_plane_baseline.sql"
+        ).read_text(encoding="utf-8")
         service = (
             ROOT / "servidor/api-internal/app/control_plane_service.py"
         ).read_text(encoding="utf-8")

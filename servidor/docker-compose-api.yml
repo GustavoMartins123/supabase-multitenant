@@ -7,6 +7,26 @@ x-vector-logging: &vector-logging
     fluentd-sub-second-precision: "true"
 
 services:
+  control-plane-migrations:
+    container_name: control-plane-migrations
+    build:
+      context: .
+      dockerfile: ./api-internal/Dockerfile
+    restart: "no"
+    logging: *vector-logging
+    networks: [rede-supabase]
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      PYTHONUNBUFFERED: 1
+      PYTHONDONTWRITEBYTECODE: 1
+      DB_DSN: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      KEY_AUTHORIZER_DB_PASSWORD: ${KEY_AUTHORIZER_DB_PASSWORD:?defina KEY_AUTHORIZER_DB_PASSWORD}
+    command: ["python", "-m", "app.schema_migrations", "apply"]
+
   key-authorizer:
     container_name: key-authorizer
     build:
@@ -16,6 +36,9 @@ services:
     logging: *vector-logging
     networks: [rede-supabase]
     expose: ["18010"]
+    depends_on:
+      control-plane-migrations:
+        condition: service_completed_successfully
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=32m
@@ -44,6 +67,9 @@ services:
       - .analytics.env
     networks: [rede-supabase, analytics-internal]
     expose: ["${PROJECTS_API_PORT}"]
+    depends_on:
+      control-plane-migrations:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18000/healthz', timeout=2)"]
       interval: 30s
@@ -52,7 +78,6 @@ services:
       start_period: 20s
     environment:
       DB_DSN: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
-      KEY_AUTHORIZER_DB_PASSWORD: ${KEY_AUTHORIZER_DB_PASSWORD:?defina KEY_AUTHORIZER_DB_PASSWORD}
       HOST_AGENT_HMAC_SECRET: ${HOST_AGENT_HMAC_SECRET}
       JWT_SECRET: ${JWT_SECRET}
       PROJECT_SECRETS_MASTER_KEY: ${PROJECT_SECRETS_MASTER_KEY}

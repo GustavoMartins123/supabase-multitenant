@@ -81,7 +81,6 @@ API_OVERRIDE="docker-compose.${SERVER_TOPOLOGY}.yml"
 API_COMPOSE=(docker compose -f docker-compose-api.yml -f "$API_OVERRIDE" --env-file .env)
 
 docker compose -f docker-compose.yml --env-file .env up --build -d
-"${API_COMPOSE[@]}" up --build -d
 
 echo "Aguardando o banco de dados ficar pronto..."
 counter=0
@@ -96,6 +95,10 @@ until [ "$(docker inspect -f '{{.State.Health.Status}}' supabase-db)" = "healthy
 done
 
 echo
+echo "Aplicando migrations do control plane e iniciando a Projects API..."
+"${API_COMPOSE[@]}" up --build -d \
+    || die "falha ao migrar o control plane ou iniciar a Projects API. Consulte: docker logs control-plane-migrations"
+
 echo "Aguardando Storage compartilhado ficar pronto..."
 # shellcheck disable=SC1091
 source "$ROOT_DIR/servidor/generateProject/lib/storage_multitenant.sh"

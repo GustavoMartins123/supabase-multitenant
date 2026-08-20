@@ -49,7 +49,9 @@ class ServiceKeyCacheContractTest(unittest.TestCase):
         nginx = (ROOT / "studio" / "nginx" / "nginx.conf").read_text(
             encoding="utf-8"
         )
-        schema = (APP / "database_schema.py").read_text(encoding="utf-8")
+        schema = (
+            APP / "migrations" / "0001_control_plane_baseline.sql"
+        ).read_text(encoding="utf-8")
         self.assertIn("/internal/cache/service-key/", nginx)
         self.assertIn("service_key_metrics", nginx)
         self.assertIn("project_key_version BIGINT", schema)

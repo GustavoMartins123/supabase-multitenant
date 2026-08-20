@@ -24,11 +24,16 @@ class StatusAndAvatarRegressionTests(unittest.TestCase):
         status_start = source.index('location ~ ^/api/projects/(?<slug>[^/]+)/status$')
         status_end = source.index('location ~ ^/api/projects/(?<slug>[^/]+)/logs/', status_start)
         status_block = source[status_start:status_end]
-        self.assertIn('proxy_pass $server_domain/api/projects/$slug/status;', status_block)
+        self.assertIn(
+            'proxy_pass $server_domain/api/projects/$slug/status$is_args$args;',
+            status_block,
+        )
         generic_start = source.index('location ~ ^/api/projects(/.*)?$')
         generic_end = source.index('location = /api/platform/profile', generic_start)
         generic_block = source[generic_start:generic_end]
-        self.assertIn('proxy_pass $server_domain/api/projects$1;', generic_block)
+        self.assertIn(
+            'proxy_pass $server_domain/api/projects$1$is_args$args;', generic_block
+        )
         self.assertNotIn('projects-api:18000', source)
 
     def test_flutter_reads_browser_file_without_deprecated_dart_html(self) -> None:

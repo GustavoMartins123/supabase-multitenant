@@ -67,16 +67,20 @@ class RestorePointApiSurfaceTest(unittest.TestCase):
             self.assertIn(runner, self.main_source)
 
     def test_schema_declares_restore_points_table(self) -> None:
-        schema_source = (API_ROOT / "app" / "database_schema.py").read_text(
-            encoding="utf-8"
-        )
+        schema_source = (
+            API_ROOT / "app" / "migrations" / "0001_control_plane_baseline.sql"
+        ).read_text(encoding="utf-8")
         self.assertIn("project_restore_points", schema_source)
         self.assertIn(
             "created_by UUID REFERENCES users(id) ON DELETE SET NULL",
             schema_source,
         )
-        self.assertIn("ensure_restore_points_schema", schema_source)
-        self.assertIn("ensure_restore_points_schema", self.main_source)
+        self.assertIn(
+            "idx_project_restore_points_project_created", schema_source
+        )
+        self.assertNotIn("project_restore_points", self.main_source.split(
+            "async def startup()", 1
+        )[1].split("async def shutdown()", 1)[0])
 
     def test_api_exposes_restore_point_creator_name(self) -> None:
         self.assertIn('"created_by_name": row["created_by_name"]', self.main_source)

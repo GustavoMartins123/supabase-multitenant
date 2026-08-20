@@ -8,7 +8,6 @@ import datetime as dt
 import hashlib
 import hmac
 import json
-import pathlib
 import re
 import time
 import uuid
@@ -32,21 +31,11 @@ STEP_UP_ACTIONS = frozenset(
     }
 )
 
-_MIGRATION_PATH = (
-    pathlib.Path(__file__).with_name("migrations")
-    / "20260812_step_up_grants.sql"
-)
 _PROJECT_REF_PATTERN = re.compile(r"^[a-z_][a-z0-9_]{2,39}$")
 _SLOT_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{2,39}$")
 _SESSION_PATTERN = re.compile(r"^[A-Za-z0-9_-]{43}$")
 _JTI_PATTERN = re.compile(r"^[A-Za-z0-9_-]{22}$")
 _HEX_SIGNATURE_PATTERN = re.compile(r"^[0-9a-f]{64}$")
-
-
-async def ensure_step_up_auth_schema(pool: asyncpg.Pool) -> None:
-    migration = _MIGRATION_PATH.read_text(encoding="utf-8")
-    async with pool.acquire() as conn:
-        await conn.execute(migration)
 
 
 def _forbidden(

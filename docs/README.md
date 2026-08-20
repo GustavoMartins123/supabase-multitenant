@@ -10,13 +10,14 @@ O estado arquitetural atual assume **host-agent no lugar de acesso Docker pela A
 
 1. [Arquitetura do sistema](00-arquitetura.md)
 2. [Control plane](architecture/control-plane.md)
-3. [Lifecycle dos projetos](architecture/project-lifecycle.md)
-4. [Host-agent](architecture/host-agent.md)
-5. [Storage compartilhado, S3 e Storage Vectors](architecture/storage-vectors-lifecycle.md)
-6. [Operação de chaves de API opacas](12-chaves-api-opacas.md)
-7. [Arquitetura OpenResty/Lua](architecture/openresty-lua.md)
-8. [Supabase Analytics por projeto](architecture/supabase-analytics.md)
-9. [Autenticação multi-tenant no Realtime](09-autenticacao-multi-tenant-realtime.md)
+3. [Migrations do control plane](architecture/control-plane-migrations.md)
+4. [Lifecycle dos projetos](architecture/project-lifecycle.md)
+5. [Host-agent](architecture/host-agent.md)
+6. [Storage compartilhado, S3 e Storage Vectors](architecture/storage-vectors-lifecycle.md)
+7. [Operação de chaves de API opacas](12-chaves-api-opacas.md)
+8. [Arquitetura OpenResty/Lua](architecture/openresty-lua.md)
+9. [Supabase Analytics por projeto](architecture/supabase-analytics.md)
+10. [Autenticação multi-tenant no Realtime](09-autenticacao-multi-tenant-realtime.md)
 
 ## Instalação e configuração
 
@@ -42,6 +43,7 @@ O estado arquitetural atual assume **host-agent no lugar de acesso Docker pela A
 - [Migração transitória para Storage compartilhado](architecture/shared-storage-migration.md)
 - A visão atual de jobs, recovery, rename, backup, restore e deleção fica em [Lifecycle dos projetos](architecture/project-lifecycle.md).
 - A visão atual de segredos, identidade, settings e colaboração fica em [Control plane](architecture/control-plane.md).
+- A ordem de aplicação do schema, o ledger e o procedimento de forward-fix ficam em [Migrations do control plane](architecture/control-plane-migrations.md).
 - O contrato físico de Docker, lease, timeout e reautorização fica em [Host-agent](architecture/host-agent.md).
 
 ## Fontes canônicas
@@ -50,6 +52,7 @@ O estado arquitetural atual assume **host-agent no lugar de acesso Docker pela A
 | --- | --- |
 | visão macro e fronteiras | `00-arquitetura.md` |
 | API Python, schema central e autorização | `architecture/control-plane.md` |
+| versionamento de schema, ordem do deploy e forward-fix | `architecture/control-plane-migrations.md` |
 | criação, duplicação, rename, rotação, backup, restore e deleção | `architecture/project-lifecycle.md` |
 | execução física no host, HMAC, lease e comandos fechados | `architecture/host-agent.md` |
 | Storage multi-tenant, S3, Vectors e imgproxy | `architecture/storage-vectors-lifecycle.md` |

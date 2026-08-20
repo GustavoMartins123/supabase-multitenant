@@ -38,7 +38,9 @@ class StudioRuntimeContractTests(unittest.TestCase):
         self.assertIn("security/check_authenticated.lua", jobs_block)
         self.assertNotIn("X-Shared-Token", jobs_block)
         self.assertIn("X-User-Token $auth_user_token", jobs_block)
-        self.assertIn("proxy_pass $server_domain/api/jobs$1;", jobs_block)
+        self.assertIn(
+            "proxy_pass $server_domain/api/jobs$1$is_args$args;", jobs_block
+        )
         self.assertNotIn("NGINX_SHARED_TOKEN", nginx_conf)
         signer = (ROOT / "studio/nginx/lua/security/projects_api_signer.lua").read_text(encoding="utf-8")
         self.assertIn("STUDIO_GATEWAY_HMAC_SECRET", signer)

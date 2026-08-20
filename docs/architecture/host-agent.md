@@ -120,6 +120,6 @@ Configuração e requisitos do host: `servidor/host-agent/README.md`.
 ## Código relacionado
 
 - `servidor/host-agent/hostagent/` (agent)
-- `servidor/api-internal/app/host_agent.py` (cliente e schema)
+- `servidor/api-internal/app/host_agent.py` (cliente; o schema vem das [migrations do control plane](control-plane-migrations.md))
 - `servidor/api-internal/app/host_agent_protocol.py` (contrato compartilhado)
 - `tests/smoke/test_host_agent_contract.py` (contrato fixado em teste)

@@ -54,6 +54,8 @@ A API não confia apenas nos grupos enviados pelo gateway. Ela consulta o estado
 
 O database `postgres` guarda o estado do control plane.
 
+O schema pertence às migrations versionadas em `servidor/api-internal/app/migrations`. Um passo privilegiado e efêmero do deploy as aplica e provisiona a identidade `key_authorizer`; o boot da Projects API apenas confere a versão registrada no ledger e recusa servir quando o banco está atrás da imagem. Nenhum DDL sai do processo que atende requisições. Veja [Migrations do control plane](control-plane-migrations.md).
+
 ### Identidade e acesso
 
 Tabelas principais:

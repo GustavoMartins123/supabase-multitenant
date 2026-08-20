@@ -1,8 +1,9 @@
 """Acesso do host-agent ao Postgres do control plane.
 
 O agent nao cria schema: as tabelas ``host_agent_commands``,
-``host_agent_workers`` e ``project_container_state`` sao criadas pela
-Projects API no startup (``app/host_agent.py``).
+``host_agent_workers`` e ``project_container_state`` sao criadas pelas
+migrations do control plane, aplicadas por
+``python -m app.schema_migrations apply`` antes de a Projects API subir.
 """
 
 from __future__ import annotations
@@ -50,7 +51,7 @@ async def wait_for_host_agent_schema(
     timeout: float,
     poll_interval: float = 2.0,
 ) -> None:
-    """Aguarda a migracao da Projects API antes de iniciar o worker."""
+    """Aguarda as migrations do control plane antes de iniciar o worker."""
     timeout = max(0.0, timeout)
     poll_interval = max(0.1, poll_interval)
     loop = asyncio.get_running_loop()

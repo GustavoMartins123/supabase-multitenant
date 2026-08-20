@@ -59,9 +59,9 @@ class AutomaticRotationContractTest(unittest.TestCase):
         cls.scheduler = (API_ROOT / "app" / "automatic_key_rotation.py").read_text(
             encoding="utf-8"
         )
-        cls.schema = (API_ROOT / "app" / "database_schema.py").read_text(
-            encoding="utf-8"
-        )
+        cls.schema = (
+            API_ROOT / "app" / "migrations" / "0001_control_plane_baseline.sql"
+        ).read_text(encoding="utf-8")
 
     def test_each_project_is_enabled_by_default(self) -> None:
         self.assertIn(

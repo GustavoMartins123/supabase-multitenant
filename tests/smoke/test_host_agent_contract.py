@@ -600,7 +600,23 @@ class ApiNoLongerExecutesDockerOrShellTest(unittest.TestCase):
     def test_main_delegates_lifecycle_to_host_agent(self) -> None:
         main_source = (API_ROOT / "app" / "main.py").read_text(encoding="utf-8")
         self.assertIn("run_host_agent_command_for_job", main_source)
-        self.assertIn("ensure_host_agent_schema", main_source)
+
+    def test_agent_tables_belong_to_the_control_plane_migrations(self) -> None:
+        baseline = (
+            API_ROOT / "app" / "migrations" / "0001_control_plane_baseline.sql"
+        ).read_text(encoding="utf-8")
+        app_sources = "".join(
+            path.read_text(encoding="utf-8")
+            for path in sorted((API_ROOT / "app").rglob("*.py"))
+        )
+        for table in (
+            "host_agent_workers",
+            "host_agent_commands",
+            "project_container_state",
+        ):
+            with self.subTest(table=table):
+                self.assertIn(f"CREATE TABLE IF NOT EXISTS {table}", baseline)
+                self.assertNotIn(f"CREATE TABLE IF NOT EXISTS {table}", app_sources)
 
 
 if __name__ == "__main__":

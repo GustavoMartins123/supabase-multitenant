@@ -204,6 +204,8 @@ docker compose -f docker-compose.yml --env-file .env up --build -d
 docker compose -f docker-compose-api.yml -f docker-compose.single-node.yml --env-file .env up --build -d
 ```
 
+O segundo comando executa antes o serviço efêmero `control-plane-migrations`, que aplica as migrations versionadas do schema e provisiona as identidades restritas de banco; `key-authorizer` e `projects-api` só sobem depois que ele termina com sucesso. Veja [Migrations do control plane](docs/architecture/control-plane-migrations.md).
+
 Inicie o Traefik:
 
 ```bash

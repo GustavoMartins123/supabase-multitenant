@@ -57,7 +57,9 @@ class StudioApiTransportAndActivityTests(unittest.TestCase):
 
     def test_identity_schema_exposes_last_seen_at(self) -> None:
         source = (
-            ROOT / "servidor/api-internal/app/database_schema.py"
+            ROOT
+            / "servidor/api-internal/app/migrations"
+            / "0001_control_plane_baseline.sql"
         ).read_text(encoding="utf-8")
         self.assertIn("ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ", source)
         self.assertIn("ADD COLUMN IF NOT EXISTS last_login_session_hash TEXT", source)

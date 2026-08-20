@@ -242,5 +242,55 @@ class InternalServiceHmacContractTest(unittest.TestCase):
         self.assertEqual(target, "/api/projects/demo?cursor=a%2Fb&limit=20")
 
 
+class GatewayProxyTargetContractTest(unittest.TestCase):
+    """A assinatura cobre o request-target que o upstream realmente recebe.
+
+    `projects_api_signer.lua` sempre acrescenta `ngx.var.args` ao alvo
+    assinado. Um `proxy_pass` com URI descarta a query string a menos que ela
+    seja repassada, e nesse caso a Projects API calcula um alvo diferente do
+    assinado e recusa a requisicao com 403.
+    """
+
+    def setUp(self) -> None:
+        self.nginx = (ROOT / "studio" / "nginx" / "nginx.conf").read_text(
+            encoding="utf-8"
+        )
+        self.signer = (
+            ROOT
+            / "studio"
+            / "nginx"
+            / "lua"
+            / "security"
+            / "projects_api_signer.lua"
+        ).read_text(encoding="utf-8")
+
+    def test_signer_binds_the_query_string_to_the_target(self) -> None:
+        self.assertIn("local args = ngx.var.args", self.signer)
+        self.assertIn('return target .. "?" .. args', self.signer)
+
+    def test_every_signed_proxy_pass_forwards_the_query_string(self) -> None:
+        offenders = [
+            f"{number}: {line.strip()}"
+            for number, line in enumerate(self.nginx.splitlines(), start=1)
+            if "proxy_pass" in line
+            and "$server_domain" in line
+            and "$is_args$args" not in line
+        ]
+        self.assertEqual(
+            offenders,
+            [],
+            "proxy_pass com URI descarta a query string e quebra o HMAC:\n"
+            + "\n".join(offenders),
+        )
+
+    def test_project_and_job_listings_keep_their_filters(self) -> None:
+        for route in ("/api/jobs$1", "/api/projects$1"):
+            with self.subTest(route=route):
+                self.assertIn(
+                    f"proxy_pass $server_domain{route}$is_args$args;",
+                    self.nginx,
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

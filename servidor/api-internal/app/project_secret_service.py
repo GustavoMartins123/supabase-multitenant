@@ -16,25 +16,6 @@ PROJECT_MATERIAL_PURPOSE_RE = re.compile(
 )
 
 
-async def ensure_project_secrets_schema(pool: asyncpg.Pool) -> None:
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS project_key_envelopes (
-                project_id UUID PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
-                key_id UUID NOT NULL UNIQUE,
-                wrapped_dek TEXT NOT NULL,
-                wrapping_key_id TEXT NOT NULL,
-                algorithm TEXT NOT NULL DEFAULT 'aes-256-gcm',
-                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-            );
-            CREATE INDEX IF NOT EXISTS idx_project_key_envelopes_wrapping_key
-                ON project_key_envelopes(wrapping_key_id);
-            """
-        )
-
-
 def _project_secret_column(column: str) -> str:
     if column not in PROJECT_SECRET_COLUMNS:
         raise ValueError(f"unsupported project secret column: {column}")

@@ -202,6 +202,8 @@ docker compose -f docker-compose.yml --env-file .env up --build -d
 docker compose -f docker-compose-api.yml -f docker-compose.single-node.yml --env-file .env up --build -d
 ```
 
+The second command runs the one-shot `control-plane-migrations` service first. It applies the versioned schema migrations and provisions the restricted database identities; `key-authorizer` and `projects-api` start only after it succeeds. See [Migrations do control plane](docs/architecture/control-plane-migrations.md).
+
 Start Traefik:
 
 ```bash
