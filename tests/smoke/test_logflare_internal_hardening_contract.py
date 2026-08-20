@@ -37,8 +37,8 @@ class LogflareInternalHardeningContractTest(unittest.TestCase):
         )
 
     def test_gateway_verifies_before_resigning(self) -> None:
-        upload_guard = (
-            ROOT / "studio/nginx/lua/security/upload_route_guard.lua"
+        access_handler = (
+            ROOT / "studio/nginx/lua/security/logflare_gateway_access.lua"
         ).read_text(encoding="utf-8")
         ingress_guard = (
             ROOT / "studio/nginx/lua/security/logflare_internal_guard.lua"
@@ -47,8 +47,8 @@ class LogflareInternalHardeningContractTest(unittest.TestCase):
             ROOT / "studio/nginx/lua/security/projects_api_signer.lua"
         ).read_text(encoding="utf-8")
 
-        verify_at = upload_guard.index("logflare_internal_guard.check()")
-        sign_at = upload_guard.index("projects_api_signer.maybe_sign()")
+        verify_at = access_handler.index("logflare_internal_guard.check()")
+        sign_at = access_handler.index("projects_api_signer.enforce()")
         self.assertLess(verify_at, sign_at)
         self.assertIn('SERVICE = "studio-server"', ingress_guard)
         self.assertIn("internal_hmac.verify_current_request(", ingress_guard)

@@ -13,4 +13,8 @@ if not key or key == "" then
     return ngx.exit(ngx.HTTP_SERVICE_UNAVAILABLE)
 end
 ngx.req.set_header("Authorization", "Bearer " .. key)
-ngx.req.set_header("apikey", key)
+if (ngx.var.uri or ""):find("^/storage/v1") or (ngx.var.uri or ""):find("^/object/sign") then
+    ngx.req.clear_header("apikey")
+else
+    ngx.req.set_header("apikey", key)
+end

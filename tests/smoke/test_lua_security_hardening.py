@@ -50,7 +50,7 @@ class ConstantTimeHmacTest(unittest.TestCase):
 
         validators = (
             LUA / "security" / "check_push_worker.lua",
-            LUA / "security" / "shared_token.lua",
+            LUA / "security" / "internal_hmac.lua",
             LUA / "resty" / "fernet.lua",
         )
         for validator in validators:

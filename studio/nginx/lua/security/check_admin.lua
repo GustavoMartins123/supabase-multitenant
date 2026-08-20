@@ -19,3 +19,5 @@ if not is_admin then
         return ngx.exit(ngx.HTTP_FORBIDDEN)
     end
 end
+
+require("security.projects_api_signer").enforce()

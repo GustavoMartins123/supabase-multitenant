@@ -6,3 +6,5 @@ end
 
 local user_context_headers = require("project_context.user_context_headers")
 user_context_headers.apply(email, ngx.var.authelia_groups or "")
+
+require("security.projects_api_signer").enforce()

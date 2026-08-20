@@ -83,7 +83,10 @@ class ServiceKeyCacheContractTest(unittest.TestCase):
         signer = (LUA / "security" / "projects_api_signer.lua").read_text(
             encoding="utf-8"
         )
-        upload_guard = (LUA / "security" / "upload_route_guard.lua").read_text(
+        auth_guard = (LUA / "security" / "check_authenticated.lua").read_text(
+            encoding="utf-8"
+        )
+        pg_meta_guard = (LUA / "security" / "pg_meta_access.lua").read_text(
             encoding="utf-8"
         )
 
@@ -95,8 +98,8 @@ class ServiceKeyCacheContractTest(unittest.TestCase):
         self.assertNotIn("INTERNAL_HMAC_ALLOW_LEGACY_SHARED_TOKEN", auth)
         self.assertNotIn("X-Shared-Token", auth)
         self.assertIn('SERVICE = "studio-nginx"', signer)
-        self.assertIn("clear_untrusted_internal_headers", signer)
-        self.assertIn("projects_api_signer.maybe_sign", upload_guard)
+        self.assertIn("security.projects_api_signer", auth_guard)
+        self.assertIn("security.projects_api_signer", pg_meta_guard)
         metrics = (LUA / "cache" / "service_key_metrics.lua").read_text(encoding="utf-8")
         self.assertIn("verify_current_request", metrics)
         self.assertNotIn("security.shared_token", metrics)

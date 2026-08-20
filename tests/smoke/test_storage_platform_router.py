@@ -41,7 +41,7 @@ class StoragePlatformRouterTests(unittest.TestCase):
         self.assertIn('ngx.req.set_uri("/storage/v1/object/sign", true)', guard)
         self.assertLess(
             guard.index('== "/object/sign"'),
-            guard.index("projects_api_signer.maybe_sign"),
+            guard.index("looks_like_file_upload"),
         )
 
     def test_get_is_adapted_to_the_storage_vector_post_contract(self) -> None:

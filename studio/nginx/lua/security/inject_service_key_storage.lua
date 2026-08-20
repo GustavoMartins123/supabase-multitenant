@@ -13,7 +13,7 @@ if not key or key == "" then
     return ngx.exit(ngx.HTTP_SERVICE_UNAVAILABLE)
 end
 ngx.req.set_header("Authorization", "Bearer " .. key)
-ngx.req.set_header("apikey", key)
+ngx.req.clear_header("apikey")
 ngx.ctx.service_key = key
 
 -- Algumas rotas de plataforma precisam combinar mais de uma operacao real do

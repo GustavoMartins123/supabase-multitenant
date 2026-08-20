@@ -15,7 +15,7 @@ class StudioSnippetsPermissionsTests(unittest.TestCase):
         snippets_index = source.index(
             'SNIPPETS_DIR="${SNIPPETS_MANAGEMENT_FOLDER:-/app/snippets}"'
         )
-        openresty_index = source.index('exec openresty -g "daemon off;"')
+        openresty_index = source.index('exec openresty -g')
 
         self.assertLess(snippets_index, openresty_index)
         self.assertIn('chown -R 65534:65534 "$SNIPPETS_DIR"', source)

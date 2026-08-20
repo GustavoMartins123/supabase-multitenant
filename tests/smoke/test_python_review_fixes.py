@@ -98,11 +98,11 @@ class SignedContractHardeningTest(unittest.TestCase):
 
 class HealthAndRouterArchitectureTest(unittest.TestCase):
     def test_healthz_bypasses_auth_and_is_used_by_compose(self) -> None:
-        main = read("servidor/api-internal/app/main.py")
+        auth = read("servidor/api-internal/app/internal_service_auth.py")
         health = read("servidor/api-internal/app/routers/health.py")
         compose = read("servidor/docker-compose-api.yml")
         self.assertIn('@router.get("/healthz"', health)
-        self.assertIn('request.url.path == "/healthz"', main)
+        self.assertIn('request.url.path == "/healthz"', auth)
         self.assertIn("127.0.0.1:18000/healthz", compose)
 
     def test_large_domains_use_dedicated_routers_and_dependencies(self) -> None:

@@ -21,3 +21,5 @@ if not key or key == "" then
     return ngx.exit(ngx.HTTP_SERVICE_UNAVAILABLE)
 end
 ngx.req.set_header("apikey", key)
+
+require("security.projects_api_signer").enforce()

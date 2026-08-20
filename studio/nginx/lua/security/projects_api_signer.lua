@@ -45,8 +45,12 @@ local function target_for_request(uri)
         meta_resource = ""
     end
     if meta_slug then
+        local res = ngx.var.resource
+        if not res or res == "" then
+            res = meta_resource or ""
+        end
         return append_query(
-            "/api/projects/" .. meta_slug .. "/meta" .. (meta_resource or "")
+            "/api/projects/" .. meta_slug .. "/meta" .. res
         )
     end
 
@@ -92,6 +96,18 @@ function M.maybe_sign()
 
     clear_untrusted_internal_headers()
     return internal_hmac.apply_current_request(SECRET, SERVICE, target)
+end
+
+function M.enforce()
+    local signed, sign_err = M.maybe_sign()
+    if not signed then
+        ngx.log(ngx.ERR, "[INTERNAL-HMAC] Falha ao assinar chamada para Projects API: ", sign_err or "unknown")
+        ngx.status = ngx.HTTP_SERVICE_UNAVAILABLE
+        ngx.header["Content-Type"] = "application/json; charset=utf-8"
+        ngx.say('{"error":"internal_service_signing_failed","message":"Internal service authentication is unavailable"}')
+        return ngx.exit(ngx.HTTP_SERVICE_UNAVAILABLE)
+    end
+    return true
 end
 
 -- Exportado apenas para testes de contrato sem precisar simular o proxy inteiro.

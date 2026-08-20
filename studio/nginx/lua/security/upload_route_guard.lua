@@ -1,6 +1,4 @@
 local cjson = require("cjson.safe")
-local projects_api_signer = require("security.projects_api_signer")
-local logflare_internal_guard = require("security.logflare_internal_guard")
 
 -- Compatibilidade do Studio: /object/sign e um alias local do endpoint real
 -- do Storage. A antiga diretiva nginx usava $1 sem capture group; corrigimos
@@ -8,36 +6,6 @@ local logflare_internal_guard = require("security.logflare_internal_guard")
 if (ngx.var.uri or "") == "/object/sign" then
     ngx.req.set_uri("/storage/v1/object/sign", true)
     return
-end
-
--- /_internal/logflare recebe trafego do processo server-side do Studio. A
--- assinatura studio-server precisa ser verificada antes de projects_api_signer
--- limpar os headers e criar uma nova assinatura com identidade studio-nginx.
-local analytics_ok, analytics_status, analytics_code, analytics_message, analytics_allow =
-    logflare_internal_guard.check()
-if not analytics_ok then
-    ngx.status = analytics_status or ngx.HTTP_UNAUTHORIZED
-    ngx.header["Content-Type"] = "application/json"
-    if analytics_allow then
-        ngx.header["Allow"] = analytics_allow
-    end
-    ngx.say(cjson.encode({
-        error = analytics_code or "analytics_internal_auth_failed",
-        message = analytics_message or "Internal Analytics request rejected",
-    }))
-    return ngx.exit(ngx.status)
-end
-
-local signed, sign_err = projects_api_signer.maybe_sign()
-if not signed then
-    ngx.log(ngx.ERR, "[INTERNAL-HMAC] Failed to sign Projects API request: ", sign_err or "unknown")
-    ngx.status = ngx.HTTP_SERVICE_UNAVAILABLE
-    ngx.header["Content-Type"] = "application/json"
-    ngx.say(cjson.encode({
-        error = "internal_service_signing_failed",
-        message = "Internal service authentication is unavailable",
-    }))
-    return ngx.exit(ngx.HTTP_SERVICE_UNAVAILABLE)
 end
 
 local method = ngx.req.get_method()
