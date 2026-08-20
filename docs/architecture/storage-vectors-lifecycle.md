@@ -55,6 +55,14 @@ Os helpers de lifecycle aceitam apenas UUID canonico em minusculas, resolvem a
 raiz real, rejeitam symlinks e validam archives antes de extrair. Nao existe
 tenant padrao e uma identidade ausente ou desconhecida falha.
 
+O container do Storage roda com `cap_drop: ALL`, portanto sem
+`CAP_DAC_OVERRIDE`: ele so grava no namespace se for dono dos diretorios.
+`STORAGE_RUN_AS_USER` (formato `UID:GID`) declara essa identidade no compose e
+precisa casar com o dono de `servidor/volumes/storage` no host. Toda
+materializacao de namespace — criacao vazia, clone e restore — passa por
+`storage_enforce_namespace_ownership`, que ajusta o dono ou falha antes de
+entregar um tenant onde o Storage nao consegue escrever.
+
 Para operações de projeto existente, o par `project_ref`/`tenant_uuid` também é
 comparado com `projects.tenant_uuid` no control plane. Um `.env` divergente não
 consegue selecionar o namespace de outro projeto.

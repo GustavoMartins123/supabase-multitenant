@@ -448,6 +448,10 @@ http {
 
             proxy_pass http://$storage_upstream;
 
+            proxy_redirect ~^https?://[^/]+/{{project_id}}/storage/v1/upload/resumable/(.*)$ $real_scheme://$http_host/{{project_id}}/storage/v1/upload/resumable/$1;
+
+            proxy_request_buffering off;
+
             add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PATCH, HEAD, DELETE, PUT' always;
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, Tus-Resumable, Tus-Version, Tus-Max-Size, Tus-Extension, Upload-Length, Upload-Metadata, Upload-Offset, Upload-Concat, Upload-Defer-Length, x-upsert, X-Requested-With, x-supabase-api-version' always;

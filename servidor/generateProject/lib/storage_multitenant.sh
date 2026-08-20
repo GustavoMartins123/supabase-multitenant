@@ -75,6 +75,7 @@ storage_global_env_value() {
 # fosse equivalente.
 storage_require_canonical_global_config() {
   local image proxy_image backend backend_path internal_bucket tenant_db_user tenant_host_regexp
+  local run_as_user
   image="$(storage_global_env_value STORAGE_IMAGE)" || return 1
   proxy_image="$(storage_global_env_value STORAGE_DATA_PLANE_PROXY_IMAGE)" \
     || return 1
@@ -83,6 +84,11 @@ storage_require_canonical_global_config() {
   internal_bucket="$(storage_global_env_value STORAGE_INTERNAL_BUCKET)" || return 1
   tenant_db_user="$(storage_global_env_value STORAGE_TENANT_DB_USER)" || return 1
   tenant_host_regexp="$(storage_global_env_value STORAGE_TENANT_HOST_REGEXP)" || return 1
+  run_as_user="$(storage_global_env_value STORAGE_RUN_AS_USER)" || return 1
+  [[ "$run_as_user" =~ ^[0-9]+:[0-9]+$ ]] || {
+    storage_fail "STORAGE_RUN_AS_USER deve estar no formato UID:GID"
+    return 1
+  }
   [[ "$image" == "$STORAGE_SUPPORTED_IMAGE" ]] || {
     storage_fail "STORAGE_IMAGE deve ser $STORAGE_SUPPORTED_IMAGE"
     return 1
@@ -658,6 +664,20 @@ storage_validate_file_tree() {
   }
 }
 
+storage_enforce_namespace_ownership() {
+  local target="$1" expected owner
+  expected="$(storage_global_env_value STORAGE_RUN_AS_USER)" || return 1
+  owner="$(stat -c '%u:%g' "$target")" || {
+    storage_fail "nao foi possivel ler o dono de $target"
+    return 1
+  }
+  [[ "$owner" != "$expected" ]] || return 0
+  chown -R "$expected" "$target" 2>/dev/null || {
+    storage_fail "namespace $target pertence a $owner e o Storage roda como $expected"
+    return 1
+  }
+}
+
 storage_remove_tenant_namespace() {
   local tenant_id="$1" target
   target="$(storage_assert_namespace_target "$tenant_id")" || return 1
@@ -701,6 +721,7 @@ storage_clone_tenant_namespace() {
     return 1
   fi
   mv -- "$staging" "$destination_path"
+  storage_enforce_namespace_ownership "$destination_path"
 }
 
 storage_create_empty_tenant_namespace() {
@@ -710,7 +731,8 @@ storage_create_empty_tenant_namespace() {
     storage_fail "namespace $tenant_id ja existe"
     return 1
   }
-  mkdir "$target"
+  mkdir "$target" || return 1
+  storage_enforce_namespace_ownership "$target"
 }
 
 storage_validate_namespace_archive() {
@@ -761,6 +783,7 @@ storage_extract_namespace_archive() {
     return 1
   fi
   mv -- "$staging" "$target"
+  storage_enforce_namespace_ownership "$target"
 }
 
 storage_delete_tenant() {

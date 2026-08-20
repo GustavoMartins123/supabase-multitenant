@@ -321,6 +321,7 @@ services:
     image: ${STORAGE_IMAGE:?defina STORAGE_IMAGE}
     restart: unless-stopped
     logging: *vector-logging
+    user: ${STORAGE_RUN_AS_USER:?defina STORAGE_RUN_AS_USER}
     env_file:
       - .env
       - .storage.env

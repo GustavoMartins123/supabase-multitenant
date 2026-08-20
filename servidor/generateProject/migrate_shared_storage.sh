@@ -224,12 +224,21 @@ canonical_env_value() {
   printf '%s' "$value"
 }
 
+storage_volume_owner() {
+  local volume="$SERVER_ROOT/volumes/storage"
+  if [[ -d "$volume" ]]; then
+    stat -c '%u:%g' "$volume"
+    return
+  fi
+  printf '%s:%s' "$(id -u)" "$(id -g)"
+}
+
 ensure_global_storage_config() {
   local target="$SERVER_ROOT/.env" example="$SERVER_ROOT/.env.example"
   local temp key value count
   local keys=(
     STORAGE_IMAGE STORAGE_DATA_PLANE_PROXY_IMAGE STORAGE_TENANT_DB_USER STORAGE_BACKEND
-    STORAGE_FILE_BACKEND_PATH STORAGE_INTERNAL_BUCKET STORAGE_S3_REGION
+    STORAGE_FILE_BACKEND_PATH STORAGE_RUN_AS_USER STORAGE_INTERNAL_BUCKET STORAGE_S3_REGION
     STORAGE_FILE_SIZE_LIMIT STORAGE_FILE_SIZE_LIMIT_STANDARD
     STORAGE_TENANT_MAX_CONNECTIONS STORAGE_TENANT_POOL_IDLE_MS
     STORAGE_TENANT_HOST_REGEXP STORAGE_IMAGE_TRANSFORMATION_ENABLED
@@ -248,8 +257,13 @@ ensure_global_storage_config() {
     count="$(grep -c "^${key}=" "$temp" || true)"
     [[ "$count" -le 1 ]] || die "$key duplicada em servidor/.env"
     if [[ "$count" == "0" ]]; then
-      value="$(canonical_env_value "$example" "$key")" \
-        || die "$key ausente em servidor/.env.example"
+      if [[ "$key" == "STORAGE_RUN_AS_USER" ]]; then
+        value="$(storage_volume_owner)" \
+          || die "nao foi possivel determinar o dono de servidor/volumes/storage"
+      else
+        value="$(canonical_env_value "$example" "$key")" \
+          || die "$key ausente em servidor/.env.example"
+      fi
       printf '%s=%s\n' "$key" "$value" >> "$temp"
     fi
   done

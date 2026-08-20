@@ -60,6 +60,18 @@ assinatura e movimentação de objetos. A rota de movimentação carrega o bucke
 no path do Studio, mas o upstream espera `bucketId` no corpo. Atualizações de
 bucket também são convertidas de `PATCH` para `PUT`.
 
+O upload de arquivo do Storage Explorer é sempre resumable (tus) e usa
+`/storage/v1/upload/resumable` na própria origem do Studio, com o ref da aba em
+`X-Studio-Project-Ref`. A rota injeta a service key, aplica o
+`FILE_SIZE_LIMIT` do projeto por `security/storage_upload_limit.lua` e repassa
+os chunks em fluxo (`proxy_request_buffering off`). O Storage monta o `Location`
+do create a partir do `X-Forwarded-Host`/`X-Forwarded-Prefix` do gateway do
+projeto, que aponta para o host interno do tenant;
+`proxy_rewrites/storage_resumable_location.lua` reancora esse header na origem
+pública do Studio para que os `PATCH` seguintes voltem por este gateway. O
+gateway do projeto faz a etapa equivalente com `proxy_redirect`, publicando a
+URL pública do tenant para clientes que falam direto com a API.
+
 ### Auth
 
 `proxy_rewrites/auth.lua` traduz as rotas administrativas do Studio para os

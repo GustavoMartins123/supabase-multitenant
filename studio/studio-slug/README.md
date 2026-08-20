@@ -12,7 +12,10 @@ O contrato do patch é intencionalmente estrito:
 - caches que retornam dados dependentes do projeto incluem o ref na chave;
 - o código não lê cookie de projeto, `Referer` nem usa `default` como projeto;
 - as credenciais S3 locais são solicitadas pela rota explícita
-  `/api/projects/<ref>/storage/s3-keys`.
+  `/api/projects/<ref>/storage/s3-keys`;
+- o upload resumable (tus) do Storage Explorer aponta para
+  `/storage/v1/upload/resumable` na origem do Studio e envia
+  `X-Studio-Project-Ref`, de modo que a service key permaneça no gateway.
 
 O Dockerfile verifica o patch contra o SHA fixado antes de aplicá-lo. Se o
 upstream mudar, o build falha em vez de produzir uma imagem parcialmente

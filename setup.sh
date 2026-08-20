@@ -472,6 +472,7 @@ main() {
     safe_sed "s|^STUDIO_CACHE_INVALIDATION_CA_FILE=.*|STUDIO_CACHE_INVALIDATION_CA_FILE=/docker/push-certs/ca.pem|g" servidor/.env
     safe_sed "s|DASHBOARD_USER=pass|DASHBOARD_USER=${DASHBOARD_USER}|g" servidor/.env
     safe_sed "s|DASHBOARD_PASSWORD=pass|DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD}|g" servidor/.env
+    safe_sed "s|^STORAGE_RUN_AS_USER=.*|STORAGE_RUN_AS_USER=$(id -u):$(id -g)|g" servidor/.env
     print_success "Arquivo servidor/.env configurado com sucesso!"
 
     print_status "Configurando studio..."

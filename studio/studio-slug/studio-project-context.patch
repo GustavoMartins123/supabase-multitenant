@@ -556,3 +556,24 @@ index a786fac35d..782359628e 100644
    { source: '/project/:ref/building', destination: '/project/:ref', permanent: false },
  ]
  
+diff --git a/apps/studio/state/storage-explorer.tsx b/apps/studio/state/storage-explorer.tsx
+index 1bb58b1..802c7e1 100644
+--- a/apps/studio/state/storage-explorer.tsx
++++ b/apps/studio/state/storage-explorer.tsx
+@@ -1175,6 +1175,7 @@ function createStorageExplorerState({
+               retryDelays: [0, 200, 500, 1500, 3000, 5000],
+               headers: {
+                 'x-source': 'supabase-dashboard',
++                'X-Studio-Project-Ref': state.projectRef,
+               },
+               uploadDataDuringCreation: uploadDataDuringCreation,
+               removeFingerprintOnSuccess: true,
+@@ -1876,7 +1877,7 @@ export const StorageExplorerStateContextProvider = ({ children }: PropsWithChild
+ 
+     if (!isPaused && hasDataReady && !storeAlreadyLoaded && isSuccessSettings) {
+       const clientEndpoint = storageEndpoint ?? hostEndpoint ?? ''
+-      const resumableUploadUrl = `${clientEndpoint}/storage/v1/upload/resumable`
++      const resumableUploadUrl = `${window.location.origin}/storage/v1/upload/resumable`
+ 
+       setState(
+         createStorageExplorerState({
