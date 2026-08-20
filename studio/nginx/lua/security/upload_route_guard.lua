@@ -12,7 +12,7 @@ end
 
 -- /_internal/logflare recebe trafego do processo server-side do Studio. A
 -- assinatura studio-server precisa ser verificada antes de projects_api_signer
--- limpar os headers e criar uma nova assinatura com identidade studio-gateway.
+-- limpar os headers e criar uma nova assinatura com identidade studio-nginx.
 local analytics_ok, analytics_status, analytics_code, analytics_message, analytics_allow =
     logflare_internal_guard.check()
 if not analytics_ok then

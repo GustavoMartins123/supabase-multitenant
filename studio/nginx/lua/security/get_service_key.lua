@@ -31,7 +31,7 @@ end
 local function internal_request(path)
     local signed_headers, sign_err = internal_hmac.sign_headers(
         hmac_secret,
-        "studio-gateway",
+        "studio-nginx",
         "GET",
         path,
         ""

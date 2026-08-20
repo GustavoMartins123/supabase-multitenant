@@ -55,7 +55,7 @@ async def proxy_global_analytics(
     analytics_path: str,
     request: Request,
 ):
-    if getattr(request.state, "internal_service", None) != "studio-gateway":
+    if getattr(request.state, "internal_service", None) != "studio-nginx":
         raise HTTPException(403, "Internal service access required")
 
     allowed_methods = _analytics_allowed_methods(analytics_path)

@@ -56,7 +56,7 @@ function _M.load(ref)
     local target = "/api/projects/internal/studio-context/" .. ref
     local signed_headers, sign_err = internal_hmac.sign_headers(
         service_hmac_secret,
-        "studio-gateway",
+        "studio-nginx",
         "GET",
         target,
         ""

@@ -1,7 +1,7 @@
 local internal_hmac = require("security.internal_hmac")
 
 local SECRET = os.getenv("STUDIO_GATEWAY_HMAC_SECRET") or ""
-local SERVICE = "studio-gateway"
+local SERVICE = "studio-nginx"
 
 local M = {}
 

@@ -30,7 +30,7 @@ class ServiceKeyCacheContractTest(unittest.TestCase):
             'return nil, "version_check_failed"',
             "Service key bloqueada por falha na verificacao de versao",
             "STUDIO_GATEWAY_HMAC_SECRET",
-            '"studio-gateway"',
+            '"studio-nginx"',
             "internal_hmac.sign_headers",
         }:
             self.assertIn(contract, source)
@@ -94,7 +94,7 @@ class ServiceKeyCacheContractTest(unittest.TestCase):
         self.assertIn("Replayed internal HMAC signature", auth)
         self.assertNotIn("INTERNAL_HMAC_ALLOW_LEGACY_SHARED_TOKEN", auth)
         self.assertNotIn("X-Shared-Token", auth)
-        self.assertIn('SERVICE = "studio-gateway"', signer)
+        self.assertIn('SERVICE = "studio-nginx"', signer)
         self.assertIn("clear_untrusted_internal_headers", signer)
         self.assertIn("projects_api_signer.maybe_sign", upload_guard)
         metrics = (LUA / "cache" / "service_key_metrics.lua").read_text(encoding="utf-8")
@@ -107,7 +107,7 @@ class ServiceKeyCacheContractTest(unittest.TestCase):
         )
         self.assertIn("STUDIO_GATEWAY_HMAC_SECRET", source)
         self.assertIn("internal_hmac.sign_headers", source)
-        self.assertIn('"studio-gateway"', source)
+        self.assertIn('"studio-nginx"', source)
         self.assertNotIn("NGINX_SHARED_TOKEN", source)
 
 

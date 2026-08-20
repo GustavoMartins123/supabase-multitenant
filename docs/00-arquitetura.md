@@ -260,7 +260,7 @@ Detalhes: [Arquitetura OpenResty/Lua](architecture/openresty-lua.md) e [Contexto
 
 ### OpenResty para Projects API
 
-- `internal-hmac-v1` autentica `studio-gateway` e vincula método, path/query, timestamp, nonce e hash do body;
+- `internal-hmac-v1` autentica `studio-nginx` e vincula método, path/query, timestamp, nonce e hash do body;
 - `X-User-Token` carrega o UUID do usuário com assinatura HMAC e validade curta;
 - identidade de serviço não substitui autorização do usuário e grupos textuais não substituem identidade assinada.
 

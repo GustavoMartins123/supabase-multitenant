@@ -74,7 +74,7 @@ local function fetch_identity(project_ref)
     local target = "/api/projects/internal/content-identity/" .. ngx.escape_uri(project_ref)
     local signed_headers, sign_err = internal_hmac.sign_headers(
         SERVICE_HMAC_SECRET,
-        "studio-gateway",
+        "studio-nginx",
         "GET",
         target,
         ""

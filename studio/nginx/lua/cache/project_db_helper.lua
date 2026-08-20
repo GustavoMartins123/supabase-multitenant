@@ -21,7 +21,7 @@ local user_hmac_token = require("security.user_hmac_token")
 local function signed_internal_headers(method, target, body, user_token)
     local headers, err = internal_hmac.sign_headers(
         STUDIO_GATEWAY_HMAC_SECRET,
-        "studio-gateway",
+        "studio-nginx",
         method,
         target,
         body or ""

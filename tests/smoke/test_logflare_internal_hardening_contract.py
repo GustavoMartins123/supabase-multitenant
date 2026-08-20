@@ -57,8 +57,8 @@ class LogflareInternalHardeningContractTest(unittest.TestCase):
         self.assertIn('"X-API-KEY"', ingress_guard)
         self.assertIn('"Cookie"', ingress_guard)
         self.assertIn('"X-User-Token"', ingress_guard)
-        self.assertIn('"/_internal/logflare/', signer)
-        self.assertIn('"/api/internal/analytics/', signer)
+        self.assertIn('/_internal/logflare/', signer)
+        self.assertIn('/api/internal/analytics/', signer)
 
     def test_nginx_proxy_never_forwards_caller_credentials(self) -> None:
         nginx = (ROOT / "studio/nginx/nginx.conf").read_text(encoding="utf-8")
@@ -101,7 +101,7 @@ class LogflareInternalHardeningContractTest(unittest.TestCase):
         end = internal.index('@router.post("/api/projects/internal/users/sync")')
         block = internal[start:end]
 
-        self.assertIn('internal_service", None) != "studio-gateway"', block)
+        self.assertIn('internal_service", None) != "studio-nginx"', block)
         self.assertIn("_analytics_allowed_methods", block)
         self.assertIn('"x-api-key": LOGFLARE_PRIVATE_ACCESS_TOKEN', block)
         self.assertNotIn('request.headers.get("x-api-key")', block)

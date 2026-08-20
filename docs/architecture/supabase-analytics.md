@@ -19,7 +19,7 @@ do setup novo. O Logflare persiste seus metadados e tabelas no schema
 - logging driver Fluent: envia nome, stream e mensagem de cada container para
   a porta de ingestao do Vector sem acesso a API Docker;
 - `supabase-studio`: consulta Analytics pelo Nginx interno do Studio;
-- Projects API: valida a identidade `studio-gateway`, aplica a allowlist e injeta
+- Projects API: valida a identidade `studio-nginx`, aplica a allowlist e injeta
   a credencial privada usada para falar com o Logflare;
 - PostgreSQL global: backend minimo do Logflare em `_supabase._analytics`.
 
@@ -51,7 +51,7 @@ A autenticacao Studio -> Nginx usa um segredo separado:
 Depois de validar essa assinatura, o Nginx remove os headers HMAC recebidos e
 cria uma nova assinatura com `STUDIO_GATEWAY_HMAC_SECRET`:
 
-- identidade assinada no segundo hop: `studio-gateway`;
+- identidade assinada no segundo hop: `studio-nginx`;
 - destino: Projects API.
 
 A Projects API nao aceita `Authorization` ou `X-API-KEY` do caller para essa

@@ -74,7 +74,7 @@ async def authenticate_internal_request(request: Request) -> JSONResponse | None
 
     if version != INTERNAL_HMAC_VERSION:
         return _json_error(401, "Unauthorized: Missing or unsupported internal HMAC version")
-    if service != "studio-gateway":
+    if service != "studio-nginx":
         return _json_error(403, "Forbidden: Internal service is not allowed")
     if not _NONCE_RE.fullmatch(nonce):
         return _json_error(401, "Unauthorized: Invalid internal HMAC nonce")

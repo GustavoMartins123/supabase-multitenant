@@ -16,7 +16,7 @@ local function request_sync(body)
 
     local signed_headers, sign_err = internal_hmac.sign_headers(
         HMAC_SECRET,
-        "studio-gateway",
+        "studio-nginx",
         "POST",
         TARGET,
         body

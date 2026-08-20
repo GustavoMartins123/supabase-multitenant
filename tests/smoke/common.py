@@ -160,7 +160,7 @@ def build_internal_service_headers(
     url: str,
     body: bytes = b"",
     *,
-    service: str = "studio-gateway",
+    service: str = "studio-nginx",
     timestamp: int | None = None,
     nonce: str | None = None,
 ) -> dict[str, str]:

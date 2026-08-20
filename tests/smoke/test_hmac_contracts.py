@@ -183,19 +183,19 @@ class InternalServiceHmacContractTest(unittest.TestCase):
             "POST",
             url,
             body,
-            service="studio-gateway",
+            service="studio-nginx",
             timestamp=timestamp,
             nonce=nonce,
         )
         self.assertEqual(headers["X-Internal-Version"], "internal-hmac-v1")
-        self.assertEqual(headers["X-Internal-Service"], "studio-gateway")
+        self.assertEqual(headers["X-Internal-Service"], "studio-nginx")
         self.assertNotIn("X-Internal-Caller", headers)
 
         target = "/api/projects/demo/start?force=1"
         self.assertTrue(
             internal_hmac.verify_internal_hmac_signature(
                 secret,
-                service="studio-gateway",
+                service="studio-nginx",
                 method="POST",
                 target=target,
                 body=body,
@@ -212,7 +212,7 @@ class InternalServiceHmacContractTest(unittest.TestCase):
             {"body": body + b"!"},
         ):
             values = {
-                "service": "studio-gateway",
+                "service": "studio-nginx",
                 "method": "POST",
                 "target": target,
                 "body": body,
