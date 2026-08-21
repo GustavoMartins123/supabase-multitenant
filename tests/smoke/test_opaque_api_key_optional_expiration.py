@@ -28,6 +28,11 @@ BASELINE = (
     / "servidor/api-internal/app/migrations"
     / "0001_control_plane_baseline.sql"
 )
+PERSISTENT_REVEALS = (
+    ROOT
+    / "servidor/api-internal/app/migrations"
+    / "0004_persistent_api_key_reveals.sql"
+)
 STUDIO_MODEL = (
     ROOT / "studio/seletor_de_projetos/lib/models/opaque_api_key.dart"
 )
@@ -249,13 +254,23 @@ class OptionalOpaqueKeyExpirationContractTest(unittest.TestCase):
         self.assertIn('slot["rotation_interval_days"]', rotation)
         self.assertIn("SET status = 'revoked', revoked_at = now()", rotation)
 
-    def test_reveal_ttl_remains_independent_and_non_nullable(self) -> None:
-        baseline = BASELINE.read_text(encoding="utf-8")
-        reveals = baseline[baseline.index("project_api_key_reveals") :]
-        self.assertIn("expires_at TIMESTAMPTZ NOT NULL", reveals)
-        self.assertIn("REVEAL_TTL_MINUTES = 30", self.service)
-        self.assertIn("r.expires_at > now()", self.service)
-        self.assertIn('"reveal_once": True', self.router)
+    def test_key_plaintext_survives_every_read(self) -> None:
+        migration = PERSISTENT_REVEALS.read_text(encoding="utf-8")
+        self.assertIn(
+            "ALTER TABLE project_api_key_reveals\n    DROP COLUMN IF EXISTS expires_at",
+            migration,
+        )
+        self.assertNotIn("REVEAL_TTL_MINUTES", self.service)
+        self.assertNotIn("r.expires_at", self.service)
+        self.assertNotIn("reveal_once", self.router)
+
+        claim = self.service[
+            self.service.index("async def claim_key_reveal") :
+            self.service.index("async def list_slots")
+        ]
+        self.assertNotIn("DELETE FROM project_api_key_reveals", claim)
+        self.assertIn("SELECT r.ciphertext", claim)
+        self.assertIn("coalesce(revealed_at, now())", claim)
 
     def test_api_and_studio_serialize_and_render_never(self) -> None:
         self.assertIn(
@@ -284,7 +299,7 @@ class OptionalOpaqueKeyExpirationContractTest(unittest.TestCase):
         )
         payload = json.loads(response.body)
         self.assertIsNone(payload["expires_at"])
-        self.assertTrue(payload["reveal_once"])
+        self.assertNotIn("reveal_once", payload)
 
     def test_api_distinguishes_omitted_interval_from_explicit_null(self) -> None:
         models = _load_router_models()

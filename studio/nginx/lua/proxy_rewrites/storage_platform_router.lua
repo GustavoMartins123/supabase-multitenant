@@ -73,6 +73,32 @@ function _M.resolve(uri, method)
         end
     end
 
+    local sign_multi_bucket = path:match("^/buckets/([^/]+)/objects/sign%-multi$")
+    if sign_multi_bucket then
+        if method ~= "POST" then
+            return method_not_allowed("sign-multi", "POST")
+        end
+
+        return target("/storage/v1/object/sign/" .. sign_multi_bucket, {
+            route_name = "object_sign_multi",
+        })
+    end
+
+    local public_url_bucket = path:match("^/buckets/([^/]+)/objects/public%-url$")
+    if public_url_bucket then
+        if method ~= "POST" then
+            return method_not_allowed("public-url", "POST")
+        end
+
+        -- O Storage nao expoe a URL publica: ela e derivada do bucket e do
+        -- caminho, entao a resposta e montada pelo proprio gateway.
+        return target(nil, {
+            route_name = "object_public_url",
+            local_response = "object_public_url",
+            bucket_id = public_url_bucket,
+        })
+    end
+
     object_bucket = path:match("^/buckets/([^/]+)/objects$")
     if object_bucket then
         return target("/storage/v1/object/" .. object_bucket)

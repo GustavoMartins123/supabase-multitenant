@@ -9,7 +9,7 @@ import 'package:seletor_de_projetos/data/project_repository.dart';
 import 'package:seletor_de_projetos/providers/opaque_api_keys_provider.dart';
 
 void main() {
-  test('claim removes only the consumed reveal without a global reload',
+  test('claim keeps the key readable and marks it delivered',
       () async {
     final api = _OpaqueApiKeysApi();
     final repository = ProjectRepository(
@@ -41,7 +41,8 @@ void main() {
     expect(secret, _OpaqueApiKeysApi.secret);
     expect(api.claimCalls, 1);
     expect(api.getCalls, 3);
-    expect(claimed.reveals, isEmpty);
+    expect(claimed.reveals.single.keyId, 'key-1');
+    expect(claimed.reveals.single.revealedAt, isNotNull);
     expect(claimed.hasActiveOperation, isFalse);
   });
 }
@@ -120,7 +121,8 @@ final class _OpaqueApiKeysApi {
         'slot_name': 'default-publishable',
         'kind': 'publishable',
         'created_at': '2026-08-12T10:00:00Z',
-        'expires_at': '2026-08-12T10:30:00Z',
+        'key_status': 'active',
+        'revealed_at': null,
       };
 
   static http.Response _json(Object body, [int statusCode = 200]) =>

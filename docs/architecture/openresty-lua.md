@@ -1,129 +1,130 @@
-# Arquitetura OpenResty/Lua
+# OpenResty/Lua architecture
 
-O Nginx do Studio usa Lua em fases diferentes do ciclo de uma requisição. Os
-arquivos ficam em `studio/nginx/lua` e são carregados pelo `lua_package_path`
-definido em `studio/nginx/nginx.conf`.
+Studio Nginx uses Lua in different phases of a request lifecycle. Files live in
+`studio/nginx/lua` and are loaded through the `lua_package_path` defined in
+`studio/nginx/nginx.conf`.
 
-## Organização dos módulos
+## Module organization
 
-| Diretório | Responsabilidade |
+| Directory | Responsibility |
 | --- | --- |
-| `project_context/` | Resolução do projeto pela URL da aba e pelo header `X-Studio-Project-Ref`, referência ativa e headers de contexto. |
-| `security/` | Autenticação, autorização, HMAC, service keys e limites de upload. |
-| `studio_compat/` | Respostas e endpoints de compatibilidade esperados pelo Supabase Studio. |
-| `proxy_rewrites/` | Tradução de URI, método, query string e payload antes do proxy. |
-| `admin_api/` | Operações administrativas, usuários, membros e integração com Authelia. |
-| `cache/` | Acesso aos caches e bancos usados pelos handlers Lua. |
-| `api/` | Handlers de API que não pertencem aos domínios anteriores, como IA. |
-| `init/` | Inicialização global e de workers do OpenResty. |
-| `resty/` | Bibliotecas compatíveis com o namespace OpenResty. |
-| `utils/` | Utilitários pequenos sem estado ou regra de domínio. |
+| `project_context/` | Project resolution from the tab URL and `X-Studio-Project-Ref` header, active ref, and context headers. |
+| `security/` | Authentication, authorization, HMAC, service keys, and upload limits. |
+| `studio_compat/` | Compatibility responses and endpoints expected by Supabase Studio. |
+| `proxy_rewrites/` | URI, method, query-string, and payload translation before proxying. |
+| `admin_api/` | Administrative operations, users, members, and Authelia integration. |
+| `cache/` | Access to caches and databases used by Lua handlers. |
+| `api/` | API handlers outside the previous domains, such as AI. |
+| `init/` | Global and OpenResty-worker initialization. |
+| `resty/` | Libraries compatible with the OpenResty namespace. |
+| `utils/` | Small utilities without state or domain rules. |
 
-Módulos carregados com `require` usam o nome completo do domínio, por exemplo
-`require("security.get_service_key")`. Arquivos chamados diretamente pelo
-Nginx usam o caminho absoluto sob `/usr/local/openresty/lualib`.
+Modules loaded with `require` use the full domain name, for example
+`require("security.get_service_key")`. Files called directly by Nginx use the
+absolute path under `/usr/local/openresty/lualib`.
 
-## Fluxo de uma requisição
+## Request flow
 
-1. `init/init.lua` valida, na inicialização, a chave Fernet usada para
-   transportar a `service_role`.
-2. `project_context/` resolve o ref pela URL (`request_uri`) e/ou pelo header
-   `X-Studio-Project-Ref` e determina `ngx.var.project_ref`.
-3. `security/` autentica o usuário, restringe a rota e injeta credenciais
-   internas quando necessário.
-4. `proxy_rewrites/` adapta o contrato do Studio ao contrato do upstream.
-5. O proxy encaminha a requisição para Auth, REST, Storage ou PG Meta.
-6. Filtros de resposta podem adaptar headers ou payloads para o Studio.
+1. `init/init.lua` validates at startup the Fernet key used to transport
+   `service_role`.
+2. `project_context/` resolves the ref from the URL (`request_uri`) and/or
+   `X-Studio-Project-Ref` header and sets `ngx.var.project_ref`.
+3. `security/` authenticates the user, restricts the route, and injects
+   internal credentials when needed.
+4. `proxy_rewrites/` adapts the Studio contract to the upstream contract.
+5. The proxy forwards the request to Auth, REST, Storage, or PG Meta.
+6. Response filters can adapt headers or payloads for Studio.
 
-## Rewrites que exigem cuidado
+## Rewrites requiring care
 
 ### Analytics
 
-`proxy_rewrites/analytics.lua` troca o `default` do path self-hosted pelo
-`project_ref` resolvido pelo contexto da aba antes de encaminhar a requisição
-ao Studio. O
-backend do Studio reutiliza esse segmento como parâmetro `project` ao consultar
-o Logflare. Sem esse rewrite, todos os painéis consultariam o contexto
-single-tenant `default`, independentemente do projeto selecionado.
+`proxy_rewrites/analytics.lua` replaces `default` in the self-hosted path with
+the `project_ref` resolved from the tab context before forwarding the request
+to Studio. Studio's backend reuses this segment as the `project` parameter
+when querying Logflare. Without this rewrite, every dashboard would query the
+single-tenant `default` context regardless of the selected project.
 
 ### PG Meta
 
-`proxy_rewrites/pg_meta.lua` converte campos recursivamente de camelCase para
-snake_case. Também transforma o argumento `id` em um segmento do path porque
-o Studio e o postgres-meta representam recursos individuais de formas
-diferentes.
+`proxy_rewrites/pg_meta.lua` recursively converts fields from camelCase to
+snake_case. It also turns the `id` argument into a path segment because Studio
+and postgres-meta represent individual resources differently.
 
 ### Storage
 
-`proxy_rewrites/storage.lua` adapta payloads de bucket, listagem, remoção,
-assinatura e movimentação de objetos. A rota de movimentação carrega o bucket
-no path do Studio, mas o upstream espera `bucketId` no corpo. Atualizações de
-bucket também são convertidas de `PATCH` para `PUT`.
+`proxy_rewrites/storage.lua` adapts bucket, listing, removal, signing, and
+object-move payloads. The move route carries the bucket in the Studio path, but
+the upstream expects `bucketId` in the body. Bucket updates are also converted
+from `PATCH` to `PUT`.
 
-O upload de arquivo do Storage Explorer é sempre resumable (tus) e usa
-`/storage/v1/upload/resumable` na própria origem do Studio, com o ref da aba em
-`X-Studio-Project-Ref`. A rota injeta a service key, aplica o
-`FILE_SIZE_LIMIT` do projeto por `security/storage_upload_limit.lua` e repassa
-os chunks em fluxo (`proxy_request_buffering off`). O Storage monta o `Location`
-do create a partir do `X-Forwarded-Host`/`X-Forwarded-Prefix` do gateway do
-projeto, que aponta para o host interno do tenant;
-`proxy_rewrites/storage_resumable_location.lua` reancora esse header na origem
-pública do Studio para que os `PATCH` seguintes voltem por este gateway. O
-gateway do projeto faz a etapa equivalente com `proxy_redirect`, publicando a
-URL pública do tenant para clientes que falam direto com a API.
+File uploads from Storage Explorer are always resumable (tus) and use
+`/storage/v1/upload/resumable` on Studio's own origin, with the tab ref in
+`X-Studio-Project-Ref`. The route injects the service key, applies the
+project's `FILE_SIZE_LIMIT` through `security/storage_upload_limit.lua`, and
+streams the chunks (`proxy_request_buffering off`). Storage builds the create
+`Location` from the project gateway's
+`X-Forwarded-Host`/`X-Forwarded-Prefix`, which points to the tenant's
+internal host; `proxy_rewrites/storage_resumable_location.lua` reanchors this
+header at Studio's public origin so subsequent `PATCH` requests return
+through this gateway. The project gateway performs the equivalent step with
+`proxy_redirect`, publishing the tenant's public URL to clients that speak
+directly to the API.
 
 ### Auth
 
-`proxy_rewrites/auth.lua` traduz as rotas administrativas do Studio para os
-paths do GoTrue e injeta a service key do projeto. Métodos ou paths fora da
-lista conhecida são rejeitados com HTTP 400.
+`proxy_rewrites/auth.lua` translates Studio administrative routes to GoTrue
+paths and injects the project service key. Methods or paths outside the known
+list are rejected with HTTP 400.
 
-### Grupos administrativos
+### Administrative groups
 
-O header `Remote-Groups` do Authelia é tratado como uma lista CSV, normalizada
-com trim e lowercase. A comparação é exata contra `ADMIN_GROUPS` (padrão:
-`admin`); múltiplos grupos administrativos podem ser configurados como
-`ADMIN_GROUPS=admin,superadmins`. Formatos inesperados falham fechados e são
-registrados no log do Nginx.
+Authelia's `Remote-Groups` header is treated as a CSV list, normalized with
+trim and lowercase. Comparison is exact against `ADMIN_GROUPS` (default:
+`admin`); multiple administrative groups can be configured as
+`ADMIN_GROUPS=admin,superadmins`. Unexpected formats fail closed and are
+recorded in the Nginx log.
 
-### Avatares do diretório autenticado
+### Avatars from the authenticated directory
 
-`GET /api/users/{uuid}/avatar` é a rota canônica de leitura. Qualquer usuário
-com sessão e perfil administrativo ativos pode ler o avatar de outra conta
-ativa, mesmo sem projeto em comum, pois a seleção de membros consulta o
-diretório administrativo completo. UUID identifica o objeto; a sessão e o
-estado ativo autorizam a leitura. UUID malformado recebe 400 e conta inexistente
-ou inativa recebe 404. `/api/user/me/avatar` aceita apenas upload e remoção
-próprios; não existe uma segunda rota de leitura.
+`GET /api/users/{uuid}/avatar` is the canonical read route. Any user with an
+active session and administrative profile can read another active account's
+avatar, even without a project in common, because member selection queries the
+full administrative directory. The UUID identifies the object; the session and
+active state authorize the read. A malformed UUID receives 400, and a missing
+or inactive account receives 404. `/api/user/me/avatar` accepts only the
+current user's upload and removal; there is no second read route.
 
-`admin_api/user_avatar_handler.lua` mantém apenas rota, autorização, armazenamento
-e sincronização de perfil. `admin_api/avatar_processor.lua` concentra leitura,
-limites e todo o processamento libvips;
+`admin_api/user_avatar_handler.lua` contains only routing, authorization,
+storage, and profile synchronization. `admin_api/avatar_processor.lua`
+contains reading, limits, and all libvips processing.
 
-O processador Lua limita o corpo a 2 MB, valida PNG/JPEG/WebP e usa `ngx.pipe` com
-argv fechado para chamar `vipsheader` e `vipsthumbnail`, sem shell. A imagem é
-decodificada por completo, limitada por pixels, reduzida, auto-orientada e
-reencodificada como WebP sem EXIF, ICC ou XMP. Avatares animados são rejeitados.
-O limite global de subprocessos (`AVATAR_PROCESS_MAX_CONCURRENCY`) impede que
-uploads ocupem toda a capacidade; `VIPS_CONCURRENCY` limita as threads de cada
-processo. `worker_processes auto` mantém os workers HTTP por CPU — não existe
-worker Nginx reservado por rota — e o pipe não bloqueia o event loop. A leitura
-aceita somente WebP acompanhado do marcador de normalização atual; arquivos
-antigos ou incompletos falham fechados com 415 e não são convertidos sob demanda.
+The Lua processor limits the body to 2 MB, validates PNG/JPEG/WebP, and uses
+`ngx.pipe` with a closed argv to call `vipsheader` and `vipsthumbnail`,
+without a shell. The image is fully decoded, pixel-limited, resized,
+auto-oriented, and re-encoded as WebP without EXIF, ICC, or XMP. Animated
+avatars are rejected. The global subprocess limit
+(`AVATAR_PROCESS_MAX_CONCURRENCY`) prevents uploads from consuming all
+capacity; `VIPS_CONCURRENCY` limits each process's threads.
+`worker_processes auto` keeps HTTP workers per CPU — there is no Nginx worker
+reserved per route — and the pipe does not block the event loop. Reads accept
+only WebP accompanied by the current normalization marker; old or incomplete
+files fail closed with 415 and are not converted on demand.
 
-### TLS de saídas
+### Outbound TLS
 
-Chamadas HTTPS Lua passam por `utils.outbound_tls`: endpoints públicos sempre
-validam certificado e hostname; endpoints internos respeitam
-`SERVICE_KEY_VERIFY_TLS`, cujo padrão é ativo. O entrypoint recusa iniciar com
-`SERVER_DOMAIN=https://...` e validação desabilitada. O trust store combina as
-CAs do sistema com o arquivo montado por `STUDIO_CA_CERT_PATH`; o backend Node
-recebe a mesma CA via `NODE_EXTRA_CA_CERTS`. O certificado local inclui o SAN
-`DNS:nginx`, usado nas chamadas internas do Studio. Falha de certificado,
-hostname ou CA é terminal para a requisição, sem fallback inseguro.
+Lua HTTPS calls go through `utils.outbound_tls`: public endpoints always
+validate the certificate and hostname; internal endpoints respect
+`SERVICE_KEY_VERIFY_TLS`, enabled by default. The entrypoint refuses to start
+with `SERVER_DOMAIN=https://...` and validation disabled. The trust store
+combines system CAs with the file mounted through `STUDIO_CA_CERT_PATH`; the
+Node backend receives the same CA through `NODE_EXTRA_CA_CERTS`. The local
+certificate includes the `DNS:nginx` SAN used by internal Studio calls.
+Certificate, hostname, or CA failure is terminal for the request, with no
+insecure fallback.
 
-Instalações anteriores a essa regra devem regenerar somente configuração e
-certificado (os secrets permanecem) antes de subir os containers:
+Installations predating this rule must regenerate only configuration and the
+certificate (secrets remain) before starting the containers:
 
 ```bash
 python tools/configure_studio_runtime.py \
@@ -131,97 +132,99 @@ python tools/configure_studio_runtime.py \
   --force
 ```
 
-O entrypoint verifica o SAN `DNS:nginx` e recusa iniciar com um certificado
-legado incompatível.
+The entrypoint checks the `DNS:nginx` SAN and refuses to start with an
+incompatible legacy certificate.
 
-## Convenções
+## Conventions
 
-- Indentação de quatro espaços e nenhuma tabulação.
-- `require("modulo")` com parênteses e nome completo do domínio.
-- Variáveis em `snake_case`; evite nomes genéricos como `get`, `data` e `obj`.
-- Dependências devem ser declaradas uma única vez no início do módulo quando
-  não houver motivo para carregamento tardio.
-- Handlers curtos permanecem em múltiplas linhas; arquivos minificados não são
-  aceitos.
-- Rewrites devem ter um comentário curto explicando incompatibilidades entre
-  o contrato público e o upstream.
-- Nunca registrar cookies, HMACs, JWTs, service keys ou corpos que possam
-  conter segredos.
+- Four-space indentation and no tabs.
+- `require("module")` with parentheses and the full domain name.
+- Variables in `snake_case`; avoid generic names such as `get`, `data`, and
+  `obj`.
+- Declare dependencies once at the beginning of the module unless there is a
+  reason for late loading.
+- Keep short handlers across multiple lines; minified files are not accepted.
+- Rewrites must have a short comment explaining incompatibilities between the
+  public contract and the upstream.
+- Never log cookies, HMACs, JWTs, service keys, or bodies that may contain
+  secrets.
 
-## Cache de service role
+## Service-role cache
 
-`security/get_service_key.lua` armazena a chave descriptografada no
-`lua_shared_dict service_keys`. As entradas usam namespace próprio e carregam
-o `project_key_version` persistido na tabela `projects`.
+`security/get_service_key.lua` stores the decrypted key in
+`lua_shared_dict service_keys`. Entries use their own namespace and carry the
+`project_key_version` persisted in the `projects` table.
 
-Após uma rotação bem-sucedida, a API incrementa a versão na mesma transação
-que persiste as chaves e chama:
+After a successful rotation, the API increments the version in the same
+transaction that persists the keys and calls:
 
 `POST /internal/cache/service-key/{project_ref}`
 
-O endpoint exige `internal-hmac-v1` com `X-Internal-Service: projects-api`, remove
-a chave anterior e publica a nova versão mínima no shared dictionary. A
-invalidação afeta todos os workers do OpenResty sem restart ou reload do Nginx.
+The endpoint requires `internal-hmac-v1` with
+`X-Internal-Service: projects-api`, removes the previous key, and publishes the
+new minimum version to the shared dictionary. Invalidation affects all
+OpenResty workers without an Nginx restart or reload.
 
-Antes de usar uma entrada, o cache consulta a versão canônica em
-`GET /api/projects/internal/key-version/{project_ref}`. Quando a versão
-persistida for maior, a chave antiga é descartada e recarregada. Se a consulta
-falhar, o módulo retorna chave vazia e a requisição falha fechada, mesmo que
-exista uma entrada local ainda dentro do TTL.
+Before using an entry, the cache queries the canonical version at
+`GET /api/projects/internal/key-version/{project_ref}`. When the persisted
+version is greater, the old key is discarded and reloaded. If the query fails,
+the module returns an empty key and the request fails closed, even if a local
+entry is still within its TTL.
 
-Os tempos são configuráveis:
+The timings are configurable:
 
-- `SERVICE_KEY_CACHE_TTL_SECONDS`: TTL da chave; padrão de 60 segundos;
-- `SERVICE_KEY_FETCH_ERROR_TTL_SECONDS`: backoff curto depois de uma falha no
-  `enc-key`; padrão de 2 segundos (limitado a 10 segundos).
+- `SERVICE_KEY_CACHE_TTL_SECONDS`: key TTL; default 60 seconds;
+- `SERVICE_KEY_FETCH_ERROR_TTL_SECONDS`: short backoff after an `enc-key`
+  failure; default 2 seconds (capped at 10 seconds).
 
-Em operação normal, a consistência é imediata após a notificação. Se as três
-tentativas de invalidação falharem, o job termina com
-`service_key_cache_invalidation_failed`. Se a API de versão estiver
-indisponível, a service key não é usada.
+In normal operation, consistency is immediate after notification. If all three
+invalidation attempts fail, the job ends with
+`service_key_cache_invalidation_failed`. If the version API is unavailable,
+the service key is not used.
 
-Contadores de `hit`, `miss`, `version_reload`, `invalidation`, `fetch_error`,
-`fetch_error_backoff`, `stale_fetch` e `version_check_error` ficam no
-`lua_shared_dict service_key_metrics` e podem ser consultados, com o token
-interno, em `GET /internal/cache/service-key-metrics`.
+Counters for `hit`, `miss`, `version_reload`, `invalidation`,
+`fetch_error`, `fetch_error_backoff`, `stale_fetch`, and
+`version_check_error` live in `lua_shared_dict service_key_metrics` and can
+be queried with the internal token at
+`GET /internal/cache/service-key-metrics`.
 
-A versão requerida é monotônica entre workers. Uma resposta `enc-key` com
-versão anterior à invalidação corrente é descartada, em vez de recolocar a
-chave antiga no cache.
+The required version is monotonic across workers. An `enc-key` response with a
+version older than the current invalidation is discarded instead of putting the
+old key back into the cache.
 
-### Credenciais e config token
+### Credentials and config token
 
-`service_role` é a credencial administrativa do tenant. Ela é gerada a partir
-de `JWT_SECRET_PROJETO`, armazenada criptografada no control plane e nunca deve
-ser entregue ao navegador. O gateway a obtém pelo endpoint interno `enc-key`,
-descriptografa com `STUDIO_SERVICE_KEY_ENCRYPTION_KEY` e injeta `apikey` apenas
-depois da autenticação e da autorização do usuário.
+`service_role` is the tenant's administrative credential. It is generated from
+`JWT_SECRET_PROJETO`, stored encrypted in the control plane, and must never be
+delivered to the browser. The gateway obtains it through the internal
+`enc-key` endpoint, decrypts it with `STUDIO_SERVICE_KEY_ENCRYPTION_KEY`, and
+injects `apikey` only after user authentication and authorization.
 
-`CONFIG_TOKEN_PROJETO` tem outro escopo: é um segredo compartilhado entre os
-membros do projeto para consultar o `/config` do Nginx do tenant. Ele não pode
-ser aceito como `apikey`, `Authorization` ou substituto da `service_role`.
-Rotação de anon/service role preserva esse token.
+`CONFIG_TOKEN_PROJETO` has a different scope: it is a secret shared among
+project members to query the tenant Nginx `/config`. It must not be accepted
+as `apikey`, `Authorization`, or a replacement for `service_role`.
+Anon/service-role rotation preserves this token.
 
-Se PG Meta responder `apikey administrativa ausente`, valide a instalação sem
-imprimir segredos:
+If PG Meta responds with `apikey administrativa ausente`, verify the
+installation without printing secrets:
 
 ```bash
 bash servidor/verify_key_config.sh
 ```
 
-Em instalações antigas, confirme especialmente que
-`STUDIO_SERVICE_KEY_ENCRYPTION_KEY` é uma chave Fernet válida e idêntica em
-`servidor/.env` e `studio/.env`. Depois de corrigir os arquivos, recrie os
-containers `projects-api` e `nginx`; apenas reiniciar um container sem recriá-lo
-pode manter o ambiente antigo.
+On older installations, especially confirm that
+`STUDIO_SERVICE_KEY_ENCRYPTION_KEY` is a valid Fernet key and identical in
+`servidor/.env` and `studio/.env`. After fixing the files, recreate the
+`projects-api` and `nginx` containers; merely restarting a container without
+recreating it may keep the old environment.
 
-## Validação de mudanças
+## Validating changes
 
-Ao mover um módulo, atualize tanto os `require(...)` quanto todas as diretivas
-`*_by_lua_file` do `nginx.conf`. Antes do deploy:
+When moving a module, update both the `require(...)` calls and all
+`*_by_lua_file` directives in `nginx.conf`. Before deployment:
 
-1. confirme que todo arquivo referenciado pelo Nginx existe;
-2. valide a sintaxe de todos os arquivos com `luac -p` ou equivalente;
-3. execute os testes de contexto por aba e rewrites;
-4. carregue a configuração com `nginx -t` no container do Studio;
-5. teste ao menos Auth, REST, Storage e PG Meta com um projeto real.
+1. confirm that every file referenced by Nginx exists;
+2. validate every file's syntax with `luac -p` or equivalent;
+3. run tab-context and rewrite tests;
+4. load the configuration with `nginx -t` in the Studio container;
+5. test at least Auth, REST, Storage, and PG Meta with a real project.

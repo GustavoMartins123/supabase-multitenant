@@ -1,90 +1,92 @@
-# Supabase Analytics por contexto de projeto
+# Supabase Analytics by project context
 
-## Objetivo
+## Objective
 
-O stack global executa Logflare como backend do Supabase Analytics e Vector como
-coletor. A implementacao segue o modo self-hosted single-tenant do Supabase, mas
-adapta a classificacao dos containers para a topologia multi-tenant deste
-repositorio.
+The global stack runs Logflare as the Supabase Analytics backend and Vector as
+the collector. The implementation follows Supabase's self-hosted single-tenant
+mode but adapts container classification to this repository's multi-tenant
+topology.
 
-O pipeline antigo que gravava diretamente em `logs_db.public.logs` foi removido
-do setup novo. O Logflare persiste seus metadados e tabelas no schema
-`_analytics` do database `_supabase`.
+The old pipeline that wrote directly to `logs_db.public.logs` was removed from
+the new setup. Logflare persists its metadata and tables in the `_analytics`
+schema of the `_supabase` database.
 
-## Componentes
+## Components
 
-- `supabase-analytics`: Logflare `v1.47.1`, compilado pelo Dockerfile local com
-  as adaptacoes SQL em `servidor/volumes/analytics`;
+- `supabase-analytics`: Logflare `v1.47.1`, built by the local Dockerfile with
+  SQL adaptations in `servidor/volumes/analytics`;
 - `supabase-vector-global`: `timberio/vector:0.53.0-alpine`;
-- logging driver Fluent: envia nome, stream e mensagem de cada container para
-  a porta de ingestao do Vector sem acesso a API Docker;
-- `supabase-studio`: consulta Analytics pelo Nginx interno do Studio;
-- Projects API: valida a identidade `studio-nginx`, aplica a allowlist e injeta
-  a credencial privada usada para falar com o Logflare;
-- PostgreSQL global: backend minimo do Logflare em `_supabase._analytics`.
+- Fluent logging driver: sends each container's name, stream, and message to
+  Vector's ingestion port without Docker API access;
+- `supabase-studio`: queries Analytics through Studio's internal Nginx;
+- Projects API: validates the `studio-nginx` identity, applies the allowlist,
+  and injects the private credential used to talk to Logflare;
+- global PostgreSQL: minimal Logflare backend in `_supabase._analytics`.
 
-O container do Analytics nao publica portas no host. A UI interna do Logflare
-tambem nao e exposta, pois o modo self-hosted desabilita autenticacao de browser.
+The Analytics container does not publish ports on the host. Logflare's internal
+UI is also not exposed because self-hosted mode disables browser authentication.
 
-## Segredos
+## Secrets
 
-O `setup.sh` gera dois tokens diferentes, ambos com pelo menos 32 caracteres:
+`setup.sh` generates two different tokens, both at least 32 characters long:
 
-- `LOGFLARE_PUBLIC_ACCESS_TOKEN`: somente ingestao pelo Vector;
-- `LOGFLARE_PRIVATE_ACCESS_TOKEN`: consultas administrativas feitas pela
+- `LOGFLARE_PUBLIC_ACCESS_TOKEN`: ingestion by Vector only;
+- `LOGFLARE_PRIVATE_ACCESS_TOKEN`: administrative queries made by the
   Projects API;
-- `LOGFLARE_DB_ENCRYPTION_KEY`: chave Base64 de 32 bytes para colunas sensiveis
-  mantidas pelo Logflare.
+- `LOGFLARE_DB_ENCRYPTION_KEY`: Base64 32-byte key for sensitive columns
+  maintained by Logflare.
 
-Os tokens reais ficam no lado servidor em `servidor/.analytics.env`, fora do
-`.env` raiz herdado pelos containers de projeto. O processo do Studio nao usa o
-token privado como credencial: o Compose sobrescreve a variavel exigida pelo
-upstream com um valor nao secreto, e o hook server-side remove `Authorization`,
-`X-API-KEY`, cookies e headers de identidade antes de chamar o Nginx.
+Real tokens live server-side in `servidor/.analytics.env`, outside the root
+`.env` inherited by project containers. The Studio process does not use the
+private token as a credential: Compose overrides the variable required by
+upstream with a non-secret value, and the server-side hook removes
+`Authorization`, `X-API-KEY`, cookies, and identity headers before calling
+Nginx.
 
-A autenticacao Studio -> Nginx usa um segredo separado:
+Studio -> Nginx authentication uses a separate secret:
 
-- `STUDIO_ANALYTICS_HMAC_SECRET`: conhecido somente pelo processo server-side do
-  Studio e pelo Nginx do Studio;
-- identidade assinada: `studio-server`.
+- `STUDIO_ANALYTICS_HMAC_SECRET`: known only by Studio's server-side process
+  and Studio Nginx;
+- signed identity: `studio-server`.
 
-Depois de validar essa assinatura, o Nginx remove os headers HMAC recebidos e
-cria uma nova assinatura com `STUDIO_GATEWAY_HMAC_SECRET`:
+After validating this signature, Nginx removes the received HMAC headers and
+creates a new signature with `STUDIO_GATEWAY_HMAC_SECRET`:
 
-- identidade assinada no segundo hop: `studio-nginx`;
-- destino: Projects API.
+- signed identity on the second hop: `studio-nginx`;
+- destination: Projects API.
 
-A Projects API nao aceita `Authorization` ou `X-API-KEY` do caller para essa
-rota. Ela injeta `LOGFLARE_PRIVATE_ACCESS_TOKEN` localmente ao criar a request
-para `ANALYTICS_INTERNAL_URL`.
+The Projects API does not accept the caller's `Authorization` or `X-API-KEY`
+for this route. It injects `LOGFLARE_PRIVATE_ACCESS_TOKEN` locally when
+creating the request to `ANALYTICS_INTERNAL_URL`.
 
-`STUDIO_ANALYTICS_HMAC_SECRET` precisa ser diferente de
-`STUDIO_GATEWAY_HMAC_SECRET` e `PROJECTS_API_HMAC_SECRET`. O Nginx falha fechado
-no startup se o segredo estiver ausente ou reutilizado.
+`STUDIO_ANALYTICS_HMAC_SECRET` must differ from
+`STUDIO_GATEWAY_HMAC_SECRET` and `PROJECTS_API_HMAC_SECRET`. Nginx fails
+closed at startup if the secret is missing or reused.
 
-Para rotacionar a chave de criptografia do Logflare, mova temporariamente a
-chave antiga para `LOGFLARE_DB_ENCRYPTION_KEY_RETIRED`, gere a nova chave e
-reinicie o Analytics. Remova a chave aposentada somente depois de o Logflare
-confirmar a migracao.
+To rotate Logflare's encryption key, temporarily move the old key to
+`LOGFLARE_DB_ENCRYPTION_KEY_RETIRED`, generate the new key, and restart
+Analytics. Remove the retired key only after Logflare confirms the migration.
 
-## Contexto, isolamento e autorizacao
+## Context, isolation, and authorization
 
-O servico e o armazenamento do Analytics sao globais, mas cada consulta e
-obrigatoriamente contextualizada pelo projeto selecionado. O Nginx do Studio
-intercepta `/api/platform/projects/<ref>/analytics/...` e exige grupo Authelia
-`admin` antes de encaminhar a requisicao ao backend do Studio. O rewrite Lua
-substitui o `default` usado pelo Studio self-hosted pelo `project_ref` resolvido
-pelo contexto da aba. O Studio envia esse valor ao endpoint do Logflare como
-parametro `project`, usado pelas CTEs nativas de `logs.all` para filtrar os
-eventos. Membros e admins apenas de projeto nao podem consultar o Logflare
-global.
+The Analytics service and storage are global, but every query must be
+contextualized by the selected project. Studio Nginx intercepts
+`/api/platform/projects/<ref>/analytics/...` and requires the Authelia
+`admin` group before forwarding the request to Studio's backend. The Lua
+rewrite replaces the `default` used by self-hosted Studio with the
+`project_ref` resolved from the tab context. Studio sends this value to the
+Logflare endpoint as the `project` parameter, used by the native `logs.all`
+CTEs to filter events. Project-only members and admins cannot query global
+Logflare.
 
-A rota tecnica `/_internal/logflare/` nao depende de sessao de browser. Ela e
-protegida por HMAC de servico antes de qualquer re-assinatura pelo gateway. Uma
-request direta sem a identidade `studio-server`, com assinatura invalida,
-timestamp expirado ou nonce repetido e rejeitada antes de chegar a Projects API.
+The technical route `/_internal/logflare/` does not depend on a browser
+session. It is protected by a service HMAC before any gateway re-signing. A
+direct request without the `studio-server` identity, with an invalid
+signature, expired timestamp, or repeated nonce is rejected before reaching the
+Projects API.
 
-O guard aceita somente os endpoints que o Studio fixado neste repositorio usa:
+The guard accepts only the endpoints used by the Studio version fixed in this
+repository:
 
 - `GET /api/endpoints/query/<name>`;
 - `GET|POST /api/backends`;
@@ -92,37 +94,38 @@ O guard aceita somente os endpoints que o Studio fixado neste repositorio usa:
 - `GET /api/sources`;
 - `POST /api/rules`.
 
-Qualquer outro path ou combinacao de metodo retorna erro. O guard tambem limita
-query a 16 KiB, headers a 64 entradas/16 KiB e body a 256 KiB; mutacoes exigem
-`Content-Length` e `application/json`, e `Transfer-Encoding` nao e aceito nessa
-fronteira.
+Any other path or method combination returns an error. The guard also limits
+queries to 16 KiB, headers to 64 entries/16 KiB, and bodies to 256 KiB;
+mutations require `Content-Length` and `application/json`, and
+`Transfer-Encoding` is not accepted at this boundary.
 
-Uma rede Docker interna dedicada conecta PostgreSQL, Analytics, Vector e a API
-Python do servidor. O Studio permanece fora dessa rede: seu backend chama o
-Nginx local, que encaminha para a API Python remota, e somente a API acessa o
-Logflare. Os containers de projeto permanecem fora da rede interna.
+An exclusive internal Docker network connects PostgreSQL, Analytics, Vector, and
+the server's Python API. Studio remains outside this network: its backend calls
+the local Nginx, which forwards to the remote Python API, and only the API
+accesses Logflare. Project containers remain outside the internal network.
 
-O Vector nao monta o Docker socket nem consulta a API Docker. Os servicos usam
-o logging driver `fluentd` com conexao assincrona; o daemon envia os eventos ao
-source `fluent` do Vector. O bind padrao e `127.0.0.1:24224` no node servidor.
+Vector does not mount the Docker socket or query the Docker API. Services use
+the `fluentd` logging driver with an asynchronous connection; the daemon sends
+events to Vector's `fluent` source. The default bind is `127.0.0.1:24224` on
+the server node.
 
-As fontes continuam globais e usam os nomes esperados pelo Logflare. Para Auth,
-PostgREST e Nginx, o Vector extrai o ref do sufixo do container. Para o Storage
-global, ele analisa o JSON estruturado do upstream, valida `tenantId` como UUID
-e registra também request ID, operação, método e path; evento sem UUID válido
-permanece global e nunca é atribuído por aproximação. Para PostgreSQL, que é
-compartilhado, o ref é extraído do database `_supabase_<project_ref>` presente
-no `log_line_prefix`. Assim, a consulta de um projeto retorna somente seus
-containers dedicados e as linhas do seu database.
+Sources remain global and use the names expected by Logflare. For Auth,
+PostgREST, and Nginx, Vector extracts the ref from the container suffix. For
+global Storage, it parses upstream's structured JSON, validates `tenantId` as a
+UUID, and also records request ID, operation, method, and path; an event
+without a valid UUID remains global and is never assigned by approximation. For
+shared PostgreSQL, the ref is extracted from the `_supabase_<project_ref>`
+database in `log_line_prefix`. Therefore, a project query returns only its
+dedicated containers and its database rows.
 
-O backend PostgreSQL do Logflare permanece em `_supabase._analytics`; ele e o
-armazenamento central dos eventos e nao deve ser confundido com o database da
-aplicacao. A selecao do database do projeto acontece na classificacao de cada
-evento de log, nao trocando a conexao de metadados do Logflare por requisicao.
+Logflare's PostgreSQL backend remains in `_supabase._analytics`; it is the
+central event store and must not be confused with the application database.
+Project database selection happens while classifying each log event, not by
+switching Logflare's metadata connection per request.
 
-## Fontes encaminhadas
+## Forwarded sources
 
-O Vector usa os nomes de fonte esperados pelo Logs Explorer:
+Vector uses the source names expected by Logs Explorer:
 
 - `gotrue.logs.prod`;
 - `postgREST.logs.prod`;
@@ -130,25 +133,25 @@ O Vector usa os nomes de fonte esperados pelo Logs Explorer:
 - `realtime.logs.prod`;
 - `deno-relay-logs`;
 - `postgres.logs`;
-- `cloudflare.logs.prod` para os Nginx de projeto e gateways globais.
+- `cloudflare.logs.prod` for project Nginx instances and global gateways.
 
-Auth, PostgREST e Nginx usam o sufixo do container. Storage usa o tenant UUID do
-evento estruturado. O banco compartilhado usa o nome do database registrado no
-prefixo da linha. Realtime usa um `external_id` UUID estavel, e Edge Functions,
-Supavisor, API interna e Postgres-Meta tambem sao compartilhados; linhas desses
-servicos que nao carregam um ref verificavel permanecem classificadas como
-globais em vez de serem atribuidas ao projeto errado.
+Auth, PostgREST, and Nginx use the container suffix. Storage uses the tenant
+UUID from the structured event. The shared database uses the database name
+recorded in the line prefix. Realtime uses a stable UUID `external_id`, and
+Edge Functions, Supavisor, the internal API, and Postgres-Meta are also shared;
+lines from these services that do not carry a verifiable ref remain classified
+as global rather than being assigned to the wrong project.
 
-Somente eventos novos recebem a classificacao por projeto. Instalacoes que ja
-tenham historico gravado com `project=default` precisam manter esse historico
-como legado ou executar uma migracao de dados especifica antes de esperar que as
-linhas antigas aparecam nas consultas contextualizadas.
+Only new events receive per-project classification. Installations with history
+already recorded as `project=default` must keep that history as legacy or run a
+specific data migration before expecting old rows to appear in contextualized
+queries.
 
-## Operacao
+## Operations
 
-Em uma instalacao nova, `tools/configure_studio_runtime.py`, chamado pelo setup,
-gera `STUDIO_ANALYTICS_HMAC_SECRET` junto da configuracao local do Studio. Depois,
-inicie ou recrie os stacks na ordem servidor e Studio:
+In a new installation, `tools/configure_studio_runtime.py`, called by setup,
+generates `STUDIO_ANALYTICS_HMAC_SECRET` with the local Studio configuration.
+Then start or recreate the stacks in server-then-Studio order:
 
 ```bash
 cd servidor
@@ -158,7 +161,7 @@ cd ../studio
 docker compose --env-file .env up -d --build --force-recreate studio nginx
 ```
 
-Verificacoes uteis:
+Useful checks:
 
 ```bash
 docker compose --env-file servidor/.env -f servidor/docker-compose.yml ps analytics vector
@@ -166,45 +169,45 @@ docker logs --tail 100 supabase-analytics
 docker logs --tail 100 supabase-vector-global
 ```
 
-Os healthchecks sao internos; as portas `4000` do Analytics e `9001` do Vector
-nao sao publicadas no host.
+Healthchecks are internal; Analytics port `4000` and Vector port `9001` are
+not published on the host.
 
-## Upgrade de instalacoes existentes
+## Upgrade existing installations
 
-Antes de subir a versao que exige HMAC na rota interna de Analytics:
+Before starting the version that requires HMAC on the internal Analytics route:
 
 ```bash
 python3 tools/migrate_studio_analytics_hmac.py --dry-run
 python3 tools/migrate_studio_analytics_hmac.py
 ```
 
-O script gera o segredo somente quando necessario, preserva valores explicitos,
-recusa reutilizacao dos outros segredos HMAC, cria backup do `studio/.env` e nao
-imprime o segredo. Depois da migracao, faça rebuild/restart de Studio, Nginx e
-Projects API.
+The script generates the secret only when necessary, preserves explicit values,
+rejects reuse of the other HMAC secrets, backs up `studio/.env`, and does not
+print the secret. After migration, rebuild/restart Studio, Nginx, and Projects
+API.
 
-Instalacoes antigas podem conservar o database `logs_db` e a role
-`vector_writer`. Eles nao sao apagados automaticamente, pois isso destruiria o
-historico legado. Depois de confirmar que o novo pipeline esta saudavel e que os
-dados antigos nao precisam ser retidos, a remocao deve ser feita manualmente com
-backup previo.
+Older installations may retain the `logs_db` database and `vector_writer`
+role. They are not deleted automatically because that would destroy legacy
+history. After confirming that the new pipeline is healthy and old data need
+not be retained, remove them manually with a prior backup.
 
-## Limitacoes e producao
+## Limitations and production
 
-- A porta Fluent deve permanecer limitada ao host ou a rede administrativa. No
-  split-node, publique-a somente entre os nodes e aplique firewall.
-- O backend minimo usa o mesmo cluster PostgreSQL observado. Se o banco falhar,
-  o Analytics tambem falha; para producao critica, use um PostgreSQL separado.
-- Retencao e limites de disco do Logflare precisam ser definidos conforme a
-  carga real antes de habilitar logs muito verbosos.
-- Logs podem conter dados pessoais ou operacionais. Mantenha redaction nos
-  servicos de origem e nao exponha o dashboard direto do Logflare.
+- The Fluent port must remain limited to the host or administrative network. In
+  split-node mode, publish it only between nodes and apply a firewall.
+- The minimal backend uses the same observed PostgreSQL cluster. If the
+  database fails, Analytics also fails; for critical production, use a
+  separate PostgreSQL instance.
+- Logflare retention and disk limits must be defined according to real load
+  before enabling highly verbose logs.
+- Logs may contain personal or operational data. Keep redaction in source
+  services and do not expose the Logflare dashboard directly.
 
-## Referencias oficiais
+## Official references
 
-- [Self-hosting com Docker](https://supabase.com/docs/guides/self-hosting/docker)
-- [Configuracao self-hosted do Analytics](https://supabase.com/docs/guides/self-hosting/analytics/config)
-- [Self-hosting do Logflare](https://docs.logflare.app/self-hosting/)
-- [Compose oficial de logs](https://github.com/supabase/supabase/blob/master/docker/docker-compose.logs.yml)
-- [Pipeline Vector oficial](https://github.com/supabase/supabase/blob/master/docker/volumes/logs/vector.yml)
-- [Configuracao runtime do Logflare](https://github.com/Logflare/logflare/blob/master/config/runtime.exs)
+- [Self-hosting with Docker](https://supabase.com/docs/guides/self-hosting/docker)
+- [Self-hosted Analytics configuration](https://supabase.com/docs/guides/self-hosting/analytics/config)
+- [Logflare self-hosting](https://docs.logflare.app/self-hosting/)
+- [Official logs Compose](https://github.com/supabase/supabase/blob/master/docker/docker-compose.logs.yml)
+- [Official Vector pipeline](https://github.com/supabase/supabase/blob/master/docker/volumes/logs/vector.yml)
+- [Logflare runtime configuration](https://github.com/Logflare/logflare/blob/master/config/runtime.exs)

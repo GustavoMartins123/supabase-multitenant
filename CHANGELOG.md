@@ -1,3 +1,11 @@
+## 2026-08-21 — Chave opaca deixa de ter visualização única
+
+- `claim` passou a descriptografar sem consumir: a `publishable` é legível por qualquer membro do projeto e a `secret` exige admin mais step-up a cada leitura;
+- a revelação cifrada não tem mais TTL e vive enquanto a versão da chave existir; rotação, revogação, disable de slot e expiração apagam o material da versão que deixa de autenticar;
+- respostas de criação, rotação e claim não trazem mais `reveal_once`, e a preparação da migração não devolve `reveal_deadline`;
+- `GET /api/projects/{project}/api-key-reveals` troca `expires_at` por `key_status` e `revealed_at`, e lista somente versões que ainda autenticam;
+- instalações existentes: aplique a migration `0004_persistent_api_key_reveals` antes de subir a Projects API desta versão.
+
 ## 2026-08-20 — Migrations versionadas do control plane
 
 - schema do control plane saiu do startup da Projects API e passou a viver em `servidor/api-internal/app/migrations`, com ledger `control_plane_schema_migrations`, checksum por versão, advisory lock e uma transação por versão;

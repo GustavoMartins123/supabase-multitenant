@@ -52,7 +52,7 @@ void main() {
         findsOneWidget);
     expect(find.text('default-publishable · publishable'), findsOneWidget);
 
-    await tester.tap(find.text('Revelar e copiar'));
+    await tester.tap(find.text('Ver e copiar'));
     await tester.pump();
 
     expect(api.claimCalls, 1);
@@ -84,7 +84,7 @@ void main() {
       findsNothing,
     );
     expect(find.text(_ControlledOpaqueApiKeysApi.secret), findsNothing);
-    expect(find.text('Revelar e copiar'), findsNothing);
+    expect(find.text('Ver e copiar'), findsOneWidget);
     expect(api.claimCalls, 1);
     expect(api.getCalls, 6);
     expect(find.byType(CircularProgressIndicator), findsNothing);
@@ -123,11 +123,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('default-publishable · publishable'), findsOneWidget);
-    expect(find.text('Revelar e copiar'), findsOneWidget);
+    expect(find.text('Ver e copiar'), findsOneWidget);
     expect(find.text('Rotacionar agora'), findsNothing);
     expect(find.text('Revogar slot'), findsNothing);
 
-    await tester.tap(find.text('Revelar e copiar'));
+    await tester.tap(find.text('Ver e copiar'));
     await tester.pump();
     expect(api.claimCalls, 1);
     expect(
@@ -183,7 +183,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Revelar e copiar'));
+    await tester.tap(find.text('Ver e copiar'));
     await tester.pumpAndSettle();
     expect(api.claimCalls, 0);
     expect(
@@ -240,7 +240,7 @@ final class _ControlledOpaqueApiKeysApi {
       }
       if (path.endsWith('/api-key-reveals')) {
         return _json({
-          'reveals': claimed ? <Object>[] : [_revealJson()],
+          'reveals': [_revealJson(revealed: claimed)],
         });
       }
     }
@@ -288,13 +288,14 @@ final class _ControlledOpaqueApiKeysApi {
         ],
       };
 
-  static Map<String, dynamic> _revealJson() => {
+  static Map<String, dynamic> _revealJson({bool revealed = false}) => {
         'key_id': 'key-1',
         'slot_id': 'slot-1',
         'slot_name': 'default-publishable',
         'kind': 'publishable',
         'created_at': '2026-08-12T10:00:00Z',
-        'expires_at': '2026-08-12T10:30:00Z',
+        'key_status': 'pending',
+        'revealed_at': revealed ? '2026-08-12T10:05:00Z' : null,
       };
 
   static http.Response _json(Object body, [int statusCode = 200]) =>
@@ -362,18 +363,17 @@ final class _SecretOpaqueApiKeysApi {
       }
       if (path.endsWith('/api-key-reveals')) {
         return _json({
-          'reveals': claimed
-              ? <Object>[]
-              : [
-                  {
-                    'key_id': keyId,
-                    'slot_id': slotId,
-                    'slot_name': 'backend-worker',
-                    'kind': 'secret',
-                    'created_at': '2026-08-12T10:00:00Z',
-                    'expires_at': '2026-08-12T10:30:00Z',
-                  },
-                ],
+          'reveals': [
+            {
+              'key_id': keyId,
+              'slot_id': slotId,
+              'slot_name': 'backend-worker',
+              'kind': 'secret',
+              'created_at': '2026-08-12T10:00:00Z',
+              'key_status': 'active',
+              'revealed_at': claimed ? '2026-08-12T10:05:00Z' : null,
+            },
+          ],
         });
       }
     }

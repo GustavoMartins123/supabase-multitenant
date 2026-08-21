@@ -133,6 +133,11 @@ end
 local original_uri = ngx.var.uri or ""
 local route, route_error = platform_router.resolve(original_uri, ngx.req.get_method())
 
+if route and route.local_response then
+    ngx.ctx.storage_platform_local_response = route
+    return
+end
+
 if route then
     local ok, err, status, code = set_route_body(route)
     if not ok then
@@ -156,6 +161,9 @@ if route then
     ngx.ctx.storage_platform_vector_bucket_name = route.vector_bucket_name
     ngx.ctx.storage_platform_index_name = route.index_name
     ngx.ctx.storage_platform_original_uri = original_uri
+    if route.route_name == "object_sign_multi" then
+        ngx.ctx.sign_response_mode = "multi"
+    end
     ngx.req.set_uri(route.uri, false)
 elseif route_error then
     return reject(route_error)
@@ -197,8 +205,17 @@ if body_data then
 
         if ngx.var.request_method == "POST" and ngx.re.match(path, "^/object/sign/") then
             if type(body.path) == "string" then
-                local clean_path = ngx.re.gsub(body.path, "^/", "", "jo")
-                body.paths = { clean_path }
+                body.paths = json_array({ ngx.re.gsub(body.path, "^/", "", "jo") })
+                body.path = nil
+                body_changed = true
+            elseif type(body.path) == "table" then
+                local paths = json_array({})
+                for _, item in ipairs(body.path) do
+                    if type(item) == "string" then
+                        paths[#paths + 1] = ngx.re.gsub(item, "^/", "", "jo")
+                    end
+                end
+                body.paths = paths
                 body.path = nil
                 body_changed = true
             end

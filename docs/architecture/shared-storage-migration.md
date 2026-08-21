@@ -1,134 +1,133 @@
-# Migração transitória para Storage compartilhado
+# Transitional migration to shared Storage
 
-Este procedimento existe somente para converter instalações criadas com
-Storage API e imgproxy por projeto. Ele não é carregado pelo runtime e não cria
-modo legacy, feature flag ou rota alternativa.
+This procedure exists only to convert installations created with per-project
+Storage API and imgproxy. It is not loaded by the runtime and does not create a
+legacy mode, feature flag, or alternate route.
 
-Depois de concluída, a instalação opera exclusivamente com
-`supabase-storage-global` e `supabase-imgproxy-global`. O `start.sh` rejeita
-explicitamente qualquer compose de projeto que ainda declare os containers
-antigos.
+After completion, the installation operates exclusively with
+`supabase-storage-global` and `supabase-imgproxy-global`. `start.sh`
+explicitly rejects any project compose that still declares the old containers.
 
-## Pré-condições
+## Preconditions
 
-Execute no host Linux da instalação, a partir do checkout que contém a nova
-arquitetura. São necessários:
+Run on the installation's Linux host, from the checkout containing the new
+architecture. Required:
 
-- branch e configuração revisadas;
-- backup externo do host e do PostgreSQL;
-- Docker/Compose, Bash, Python 3, `jq`, `openssl`, `tar`, `gzip`, `sed`, `grep`,
-  `find` e `systemctl`;
-- `supabase-db` em execução;
-- Projects API e host-agent instalados no modelo atual;
+- reviewed branch and configuration;
+- external backup of the host and PostgreSQL;
+- Docker/Compose, Bash, Python 3, `jq`, `openssl`, `tar`, `gzip`, `sed`,
+  `grep`, `find`, and `systemctl`;
+- `supabase-db` running;
+- Projects API and host-agent installed in the current model;
 - `STORAGE_IMAGE=supabase/storage-api:v1.61.12`, proxy
-  `nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim` e backend file no layout
-  canônico (`/var/lib/storage`, bucket interno `objects`); valores diferentes
-  são recusados antes da conversão;
-- nenhum job ou comando de lifecycle em `queued` ou `running`;
-- espaço para uma segunda cópia temporária dos objetos e backups.
+  `nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim`, and file backend in
+  the canonical layout (`/var/lib/storage`, internal `objects` bucket);
+  different values are rejected before conversion;
+- no lifecycle job or command in `queued` or `running`;
+- space for a second temporary copy of objects and backups.
 
-Não inicie create, duplicate, rename, delete, backup, restore, settings ou
-rotação durante a janela.
+Do not start create, duplicate, rename, delete, backup, restore, settings, or
+rotation during the window.
 
-## Execução
+## Execution
 
 ```bash
-cd /caminho/supabase-multitenant
+cd /path/to/supabase-multitenant
 bash servidor/generateProject/migrate_shared_storage.sh
 ```
 
-A ferramenta:
+The tool:
 
-1. verifica que não há lifecycle ativo;
-2. registra pelos labels do Compose se a Projects API usa `single-node` ou
-   `split-node`, e então para Projects API e host-agent, impedindo novas intenções;
-3. completa somente as chaves globais canônicas em `servidor/.env`;
-4. cria `.storage.env` 0600 com chaves aleatórias se ainda não existir;
-5. cria `_supabase_storage`, reconcilia as redes internas de DB/Supavisor e
-   inicia Storage, imgproxy e o proxy global restrito à data plane;
-6. descobre os diretórios em `servidor/projects/`;
-7. confere `PROJECT_UUID` contra `projects.tenant_uuid`;
-8. para a stack do projeto;
-9. copia `storage/stub/stub` para
-   `volumes/storage/objects/<PROJECT_UUID>` sem remover a origem;
-10. reidentifica tabelas físicas pgvector de `stub` para o UUID;
-11. registra o tenant, executa migrations e cria credencial SigV4 nova pela
-    Admin API oficial;
-12. renderiza compose/env/Nginx somente na arquitetura compartilhada;
-13. inicia Auth, PostgREST, Nginx e Postgres-Meta;
-14. valida health do tenant, database, JWT, S3, Vectors e o Nginx com tentativa
-    de sobrescrever `X-Forwarded-Host`;
-15. reconcilia wrappers Vector;
-16. arquiva o diretório antigo no relatório interno e só então remove a cópia
-    do diretório do projeto;
-17. converte backups formato 1 para archives de namespace formato 2;
-18. depois de todos os projetos e backups, reconstrói a Projects API com o
-    mesmo override de topologia detectado antes da parada e religa o host-agent.
+1. verifies that no lifecycle is active;
+2. records from Compose labels whether the Projects API uses `single-node` or
+   `split-node`, then stops Projects API and host-agent, preventing new intents;
+3. completes only canonical global keys in `servidor/.env`;
+4. creates `.storage.env` with mode 0600 and random keys if it does not exist;
+5. creates `_supabase_storage`, reconciles the internal DB/Supavisor networks,
+   and starts Storage, imgproxy, and the global proxy restricted to the data plane;
+6. discovers directories under `servidor/projects/`;
+7. checks `PROJECT_UUID` against `projects.tenant_uuid`;
+8. stops the project stack;
+9. copies `storage/stub/stub` to
+   `volumes/storage/objects/<PROJECT_UUID>` without removing the source;
+10. reidentifies physical pgvector tables from `stub` to the UUID;
+11. registers the tenant, runs migrations, and creates a new SigV4 credential
+    through the official Admin API;
+12. renders compose/env/Nginx only for the shared architecture;
+13. starts Auth, PostgREST, Nginx, and Postgres-Meta;
+14. validates tenant health, database, JWT, S3, Vectors, and Nginx while
+    attempting to overwrite `X-Forwarded-Host`;
+15. reconciles Vector wrappers;
+16. archives the old directory in the internal report and only then removes the
+    project-directory copy;
+17. converts format-1 backups to format-2 namespace archives;
+18. after all projects and backups, rebuilds the Projects API with the same
+    topology override detected before stopping and restarts the host-agent.
 
-Cada projeto tem um arquivo de estado. A cópia de origem não é apagada antes de
-o tenant novo passar por validação completa.
+Each project has a state file. The source copy is not deleted until the new
+tenant passes complete validation.
 
-## Relatório e retomada
+## Report and resume
 
-Cada execução cria:
+Each execution creates:
 
 ```text
 servidor/storage-migration-reports/<timestamp-pid>/
 ```
 
-O diretório contém `summary.tsv`, estados por projeto, configurações anteriores,
-archives do Storage antigo e backups substituídos. Ele é interno, ignorado pelo
-Git e pode conter dados sensíveis; nunca deve ser publicado.
+The directory contains `summary.tsv`, per-project states, previous
+configurations, old Storage archives, and replaced backups. It is internal,
+ignored by Git, and may contain sensitive data; never publish it.
 
-Se houver interrupção, use exatamente o diretório informado no erro:
+If interrupted, use exactly the directory reported in the error:
 
 ```bash
 bash servidor/generateProject/migrate_shared_storage.sh \
   --resume servidor/storage-migration-reports/<timestamp-pid>
 ```
 
-O `--resume` detecta a etapa registrada. Um projeto incompleto é revertido para
-seu estado anterior dentro da ferramenta antes de ser tentado novamente. Estado
-ambíguo — por exemplo, dois namespaces físicos ou tenant existente sem estado —
-é bloqueado para inspeção; nunca é escolhido um lado automaticamente.
+`--resume` detects the recorded stage. An incomplete project is reverted to its
+previous state inside the tool before being attempted again. Ambiguous state —
+for example, two physical namespaces or an existing tenant without state — is
+blocked for inspection; a side is never chosen automatically.
 
-O marcador `projects-api.compose-override` aceita somente os overrides
-`docker-compose.single-node.yml` e `docker-compose.split-node.yml`. Marcador
-ausente, adulterado ou topologia ambígua interrompe a retomada; a ferramenta não
-escolhe um perfil padrão.
+The `projects-api.compose-override` marker accepts only the
+`docker-compose.single-node.yml` and `docker-compose.split-node.yml`
+overrides. A missing or tampered marker, or ambiguous topology, interrupts the
+resume; the tool does not choose a default profile.
 
-Se qualquer projeto ficar parcial, Projects API e host-agent permanecem parados.
-Isso é intencional: código novo e stacks antigas não podem operar ao mesmo tempo.
-Corrija a causa e retome o mesmo relatório.
+If any project remains partial, Projects API and host-agent stay stopped. This
+is intentional: new code and old stacks cannot operate at the same time. Fix
+the cause and resume the same report.
 
-## Rollback operacional da migração
+## Operational migration rollback
 
-Antes do marker global `COMPLETE`, o rollback suportado é por projeto e faz
-parte da própria ferramenta: remove o tenant novo, devolve os hashes Vector para
-`stub`, restaura compose/env e repõe o diretório antigo a partir do archive.
+Before the global `COMPLETE` marker, supported rollback is per project and part
+of the tool itself: it removes the new tenant, returns Vector hashes to
+`stub`, restores compose/env, and replaces the old directory from the archive.
 
-Se for necessário abandonar toda a mudança depois de projetos já concluídos,
-mantenha o runtime parado e restaure o snapshot externo integral do host,
-PostgreSQL e checkout anterior. Não tente iniciar a aplicação nova sobre esse
-estado e não copie arquivos manualmente entre namespaces. Depois que o marker
-`COMPLETE` existe, não há caminho de runtime para a arquitetura antiga; uma
-reversão é exclusivamente recuperação operacional do snapshot completo.
+If the entire change must be abandoned after projects have completed, keep the
+runtime stopped and restore the complete external snapshot of the host,
+PostgreSQL, and previous checkout. Do not start the new application on this
+state or manually copy files between namespaces. Once the `COMPLETE` marker
+exists, there is no runtime path to the old architecture; reverting is
+exclusively operational recovery from the complete snapshot.
 
-## Verificações depois da conclusão
+## Post-completion checks
 
-Confirme:
+Confirm:
 
 ```bash
 docker ps --format '{{.Names}}'
 ```
 
-Para N projetos devem existir N containers Auth, PostgREST e Nginx, mas apenas:
+For N projects there should be N Auth, PostgREST, and Nginx containers, but only:
 
 ```text
 supabase-storage-global
 supabase-imgproxy-global
 ```
 
-Também execute os smoke tests ativos descritos em
-[`tests/smoke/README.md`](../../tests/smoke/README.md), confira `summary.tsv` e
-preserve o relatório até o encerramento formal da janela de mudança.
+Also run the active smoke tests described in
+[`tests/smoke/README.md`](../../tests/smoke/README.md), check `summary.tsv`, and
+retain the report until the change window is formally closed.

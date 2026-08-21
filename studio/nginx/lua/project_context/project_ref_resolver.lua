@@ -7,6 +7,7 @@ local path_patterns = {
     "^/api/platform/pg%-meta/([^/]+)",
     "^/api/platform/auth/([^/]+)",
     "^/api/platform/storage/([^/]+)",
+    "^/storage/v1/([^/]+)/object/",
     "^/api/v1/projects/([^/]+)",
 }
 

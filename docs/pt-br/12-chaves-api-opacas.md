@@ -11,15 +11,15 @@ projeto. O desenho completo e os critérios de aceite estão na
 - Nunca reutilize uma `sb_secret_*` em componentes diferentes.
 - Não coloque secret keys em frontend, aplicativos móveis, repositórios, URLs
   ou logs.
-- Uma chave só pode ser revelada uma vez. Copie-a diretamente para o secret
-  manager do consumidor.
+- Uma chave segue legível enquanto a versão dela existir. Copie-a direto para
+  o secret manager do consumidor em vez de deixá-la na tela.
 - Qualquer membro do projeto pode revelar uma `publishable`. Criar, alterar ou
   rotacionar slots continua exigindo admin do projeto ou admin global.
 - Plaintext de `secret` exige admin e reautenticação com a senha da própria
   conta. Não existe senha global de chaves nem senha de servidor nesse fluxo.
 - “Não expira” remove somente o vencimento temporal. Não impede rotação,
   revogação, disable, restrição de serviços ou qualquer outro corte explícito.
-- Lifetime da credencial, TTL do reveal e lifetime de JWT/sessão são políticas
+- Lifetime da credencial e lifetime de JWT/sessão são políticas
   independentes.
 - Confirme a instalação somente depois de o valor correto estar no consumidor.
 - Não distribua `ANON_KEY_PROJETO`, `SERVICE_ROLE_KEY_PROJETO` ou
@@ -68,8 +68,7 @@ Projetos novos e duplicados já nascem no modo `active`, com:
 
 Os slots iniciais preservam o padrão temporizado de 90 dias com automação
 habilitada; isso evita mudar silenciosamente a política de instalações
-existentes. O admin pode selecionar **Não expira** depois da criação. As
-revelações iniciais expiram em 30 minutos em qualquer política.
+existentes. O admin pode selecionar **Não expira** depois da criação.
 
 1. No Studio, abra as configurações do projeto e a seção de API keys.
 2. Faça claim de cada chave necessária. `publishable` está disponível a todos
@@ -79,8 +78,8 @@ revelações iniciais expiram em 30 minutos em qualquer política.
 5. Crie slots adicionais para consumidores independentes.
 6. Revogue um slot inicial que não será usado.
 
-Se uma revelação expirar, não tente recuperar o plaintext. Faça uma rotação
-imediata do slot e use a nova chave.
+A rotação apaga o plaintext da versão substituída: depois de rotacionar,
+somente a chave nova pode ser lida.
 
 ## Migração de projeto existente
 
@@ -158,8 +157,8 @@ Escolha nomes ligados ao consumidor, por exemplo:
 - `backup-nightly` — secret.
 
 Restrinja `allowed_services` ao necessário. A criação ativa a chave
-imediatamente e retorna o valor uma única vez. Perder a resposta exige rotação
-imediata; não há endpoint de recuperação do plaintext.
+imediatamente e retorna o valor; o mesmo valor pode ser lido de novo na seção de
+API keys.
 
 Escolha também a expiração do slot:
 
@@ -201,7 +200,7 @@ falhar explicitamente. Para chave vencida, execute hard rotation.
 4. valide a data exibida, o consumidor e a auditoria.
 
 Se houver pending, conclua ou cancele esse lifecycle antes de mudar a política.
-Alterar a política não revela novamente o plaintext.
+Alterar a política não muda o material da chave.
 
 ## Rotação manual
 

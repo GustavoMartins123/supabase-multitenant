@@ -169,7 +169,7 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           resourceId: reveal.keyId,
           title: 'Reautenticar para revelar secret key',
           description:
-              'A chave sera exibida uma unica vez e possui privilegios de service_role.',
+              'A chave possui privilegios de service_role.',
         );
         if (stepUpToken == null || !mounted) return;
       }
@@ -204,8 +204,8 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
       if (!mounted) return;
       _snack(
         copiedBeforeClose
-            ? 'Chave revelada e copiada. Ela não poderá ser exibida novamente.'
-            : 'Chave revelada e consumida no servidor. O valor não foi copiado.',
+            ? 'Chave copiada para a área de transferência.'
+            : 'Chave exibida. O valor não foi copiado.',
         copiedBeforeClose ? SupabaseColors.success : SupabaseColors.warning,
       );
       unawaited(_refreshAfterSecret());
@@ -233,8 +233,8 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
   Future<void> _rotate(OpaqueApiKeySlot slot) async {
     final confirmed = await _confirm(
       'Rotacionar ${slot.name} agora?',
-      'A chave atual sera revogada sem periodo de sobreposicao. A nova chave '
-          'sera mostrada uma unica vez.',
+      'A chave atual sera revogada sem periodo de sobreposicao e deixa de '
+          'ser consultavel.',
     );
     if (!confirmed) return;
     try {
@@ -245,7 +245,7 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           resourceId: slot.id,
           title: 'Reautenticar para rotacionar secret key',
           description:
-              'A rotacao revogara a chave atual e exibira o novo plaintext uma unica vez.',
+              'A rotacao revogara a chave atual e emitira uma nova secret key.',
         );
         if (stepUpToken == null || !mounted) return;
       }
@@ -335,7 +335,7 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           resourceId: draft.name,
           title: 'Reautenticar para criar secret key',
           description:
-              'O plaintext da nova secret key sera exibido uma unica vez.',
+              'A nova secret key tera privilegios de service_role.',
         );
         if (stepUpToken == null || !mounted) return;
       }
@@ -479,7 +479,7 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
         ],
         if (state.reveals.isNotEmpty) ...[
           const SizedBox(height: 16),
-          const Text('REVELACOES PENDENTES', style: _captionStyle),
+          const Text('CHAVES DISPONIVEIS', style: _captionStyle),
           const SizedBox(height: 8),
           ...state.reveals.map((reveal) => _revealCard(state, reveal)),
         ],
@@ -595,7 +595,10 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
         children: [
           Text('${reveal.slotName} · ${reveal.kind}', style: _titleStyle),
           Text(
-            'Disponivel ate ${_date(reveal.expiresAt)}',
+            reveal.revealedAt == null
+                ? 'Chave ${reveal.keyStatus}'
+                : 'Chave ${reveal.keyStatus} · revelada em '
+                    '${_date(reveal.revealedAt!)}',
             style:
                 const TextStyle(color: SupabaseColors.textMuted, fontSize: 11),
           ),
@@ -608,7 +611,7 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           ],
           const SizedBox(height: 8),
           SecondaryButton(
-            label: busy ? 'Revelando...' : 'Revelar e copiar',
+            label: busy ? 'Revelando...' : 'Ver e copiar',
             icon: Icons.copy_rounded,
             onPressed: _interactionDisabled(state) ||
                     (!widget.canManage && reveal.kind != 'publishable')
@@ -813,7 +816,7 @@ class _ClaimedOpaqueApiKeyDialogState
     return AlertDialog(
       key: const ValueKey('claimed-opaque-api-key-dialog'),
       backgroundColor: SupabaseColors.bg200,
-      title: const Text('API key revelada uma única vez'),
+      title: const Text('API key do projeto'),
       content: SizedBox(
         width: 560,
         child: Column(
@@ -821,8 +824,8 @@ class _ClaimedOpaqueApiKeyDialogState
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'A revelação já foi consumida no servidor. Copie o valor antes '
-              'de fechar; ele não poderá ser recuperado novamente.',
+              'Trate o valor como segredo: qualquer pessoa com ele fala com o '
+              'projeto até a chave ser rotacionada.',
               style: TextStyle(color: SupabaseColors.warning),
             ),
             const SizedBox(height: 8),

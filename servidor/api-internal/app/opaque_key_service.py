@@ -29,10 +29,9 @@ KeyStatus = Literal["pending", "active", "revoked", "expired"]
 SlotStatus = Literal["active", "disabled"]
 RotationTrigger = Literal["initial", "manual", "automatic"]
 DEFAULT_ROTATION_INTERVAL_DAYS = 90
+MIGRATION_PREPARATION_WINDOW_DAYS = 7
 MIN_ROTATION_INTERVAL_DAYS = 1
 MAX_ROTATION_INTERVAL_DAYS = 3650
-REVEAL_TTL_MINUTES = 30
-MIGRATION_REVEAL_TTL_DAYS = 7
 PROJECT_GATEWAY_TOKEN_RE = re.compile(r"^[a-f0-9]{64}$")
 
 
@@ -136,15 +135,14 @@ async def _insert_key(
     expires_at: dt.datetime | None,
     replaces_key_id: uuid.UUID | None,
     activate_at: dt.datetime | None = None,
-    retain_reveal: bool = False,
+    disclosed_inline: bool = False,
     rotation_trigger: RotationTrigger = "manual",
-    reveal_expires_at: dt.datetime | None = None,
 ) -> IssuedOpaqueKey:
     generated: GeneratedOpaqueKey = generate_opaque_key(project_id, kind)
     key_id = uuid.uuid4()
     now = await _database_now(conn)
     activated_at = now if status == "active" else None
-    revealed_at = now if status == "pending" and not retain_reveal else None
+    revealed_at = now if status == "pending" and disclosed_inline else None
     await conn.execute(
         """
         INSERT INTO project_api_keys(
@@ -166,30 +164,20 @@ async def _insert_key(
         rotation_trigger,
         revealed_at,
     )
-    if retain_reveal:
-        ciphertext = await encrypt_project_material(
-            conn,
-            project_id=project_id,
-            purpose=_reveal_purpose(key_id),
-            plaintext=generated.token,
-        )
-        if reveal_expires_at is None:
-            reveal_expires_at = (
-                activate_at
-                if status == "pending" and activate_at is not None
-                else now + dt.timedelta(minutes=REVEAL_TTL_MINUTES)
-            )
-        if reveal_expires_at <= now:
-            raise OpaqueKeyLifecycleError("reveal expiration must be in the future")
-        await conn.execute(
-            """
-            INSERT INTO project_api_key_reveals(key_id, ciphertext, expires_at)
-            VALUES($1, $2, $3)
-            """,
-            key_id,
-            ciphertext,
-            reveal_expires_at,
-        )
+    ciphertext = await encrypt_project_material(
+        conn,
+        project_id=project_id,
+        purpose=_reveal_purpose(key_id),
+        plaintext=generated.token,
+    )
+    await conn.execute(
+        """
+        INSERT INTO project_api_key_reveals(key_id, ciphertext)
+        VALUES($1, $2)
+        """,
+        key_id,
+        ciphertext,
+    )
     return IssuedOpaqueKey(
         slot_id=slot_id,
         key_id=key_id,
@@ -212,7 +200,7 @@ async def create_slot_with_active_key(
     created_by: uuid.UUID,
     automatic_rotation_enabled: bool | None = None,
     rotation_interval_days: int | None = DEFAULT_ROTATION_INTERVAL_DAYS,
-    retain_reveal: bool = False,
+    disclosed_inline: bool = True,
     rotation_trigger: RotationTrigger = "manual",
     initializing_project: bool = False,
 ) -> tuple[IssuedOpaqueKey, int]:
@@ -287,7 +275,7 @@ async def create_slot_with_active_key(
         status="active",
         expires_at=_expiration_from_policy(now, interval),
         replaces_key_id=None,
-        retain_reveal=retain_reveal,
+        disclosed_inline=disclosed_inline,
         rotation_trigger=rotation_trigger,
     )
     version = await _increment_keyset_version(conn, project_id)
@@ -338,7 +326,7 @@ async def bootstrap_project_opaque_keys(
         kind="publishable",
         allowed_services=sorted(ALLOWED_SERVICES),
         created_by=created_by,
-        retain_reveal=True,
+        disclosed_inline=False,
         rotation_trigger="initial",
         initializing_project=True,
     )
@@ -349,7 +337,7 @@ async def bootstrap_project_opaque_keys(
         kind="secret",
         allowed_services=sorted(ALLOWED_SERVICES),
         created_by=created_by,
-        retain_reveal=True,
+        disclosed_inline=False,
         rotation_trigger="initial",
         initializing_project=True,
     )
@@ -413,7 +401,6 @@ async def prepare_project_opaque_key_migration(
         )
 
     now = await _database_now(conn)
-    reveal_expires_at = now + dt.timedelta(days=MIGRATION_REVEAL_TTL_DAYS)
     issued: list[IssuedOpaqueKey] = []
     for name, kind in (
         ("default-publishable", "publishable"),
@@ -444,12 +431,13 @@ async def prepare_project_opaque_key_migration(
             kind=kind,
             status="pending",
             activate_at=None,
-            expires_at=reveal_expires_at
-            + dt.timedelta(days=DEFAULT_ROTATION_INTERVAL_DAYS),
+            expires_at=now
+            + dt.timedelta(
+                days=MIGRATION_PREPARATION_WINDOW_DAYS
+                + DEFAULT_ROTATION_INTERVAL_DAYS
+            ),
             replaces_key_id=None,
-            retain_reveal=True,
             rotation_trigger="initial",
-            reveal_expires_at=reveal_expires_at,
         )
         issued.append(issued_key)
         await _increment_keyset_version(conn, project_id)
@@ -644,13 +632,6 @@ async def activate_prepared_project_opaque_keys(
             row["key_id"],
             row["rotation_interval_days"],
         )
-    await conn.execute(
-        """
-        DELETE FROM project_api_key_reveals
-        WHERE key_id = ANY($1::uuid[])
-        """,
-        [row["key_id"] for row in rows],
-    )
     result = await conn.execute(
         """
         UPDATE projects
@@ -743,6 +724,10 @@ async def rotate_slot_immediately(
     )
     if active_id is None:
         raise OpaqueKeyLifecycleError("slot has no active API key")
+    await conn.execute(
+        "DELETE FROM project_api_key_reveals WHERE key_id = $1",
+        active_id,
+    )
     if replaces_effective_pending_id is not None:
         replaces_key_id = replaces_effective_pending_id
     else:
@@ -768,7 +753,7 @@ async def prepare_slot_rotation(
     project_id: uuid.UUID,
     slot_id: uuid.UUID,
     activate_at: dt.datetime,
-    retain_reveal: bool,
+    disclosed_inline: bool,
     rotation_trigger: RotationTrigger = "manual",
 ) -> tuple[IssuedOpaqueKey, int]:
     """Create a pending version for a future deterministic cutover."""
@@ -834,7 +819,7 @@ async def prepare_slot_rotation(
             activate_at, slot["rotation_interval_days"]
         ),
         replaces_key_id=active["id"],
-        retain_reveal=retain_reveal,
+        disclosed_inline=disclosed_inline,
         rotation_trigger=rotation_trigger,
     )
     version = await _increment_keyset_version(conn, project_id)
@@ -906,7 +891,10 @@ async def activate_pending_key(
     )
     if activated_id is None:
         raise OpaqueKeyLifecycleError("pending API key activation conflicted")
-    await conn.execute("DELETE FROM project_api_key_reveals WHERE key_id = $1", pending["id"])
+    await conn.execute(
+        "DELETE FROM project_api_key_reveals WHERE key_id = $1",
+        revoked_id,
+    )
     version = await _increment_keyset_version(conn, project_id)
     return pending["id"], version
 
@@ -1296,26 +1284,25 @@ async def claim_key_reveal(
     project_id: uuid.UUID,
     key_id: uuid.UUID,
 ) -> str:
-    """Delete and decrypt one reveal in the caller's transaction."""
+    """Decrypt one reveal in the caller's transaction, without consuming it."""
 
     row = await conn.fetchrow(
         """
-        DELETE FROM project_api_key_reveals r
-        USING project_api_keys k, project_api_key_slots s
+        SELECT r.ciphertext
+        FROM project_api_key_reveals r
+        JOIN project_api_keys k ON k.id = r.key_id
+        JOIN project_api_key_slots s ON s.id = k.slot_id
         WHERE r.key_id = $1
-          AND r.key_id = k.id
-          AND k.slot_id = s.id
           AND s.project_id = $2
-          AND r.expires_at > now()
-        RETURNING r.ciphertext
+          AND k.status IN ('active', 'pending')
         """,
         key_id,
         project_id,
     )
     if row is None:
-        raise OpaqueKeyRevealGone("API key reveal is expired, claimed, or absent")
+        raise OpaqueKeyRevealGone("API key plaintext is no longer stored")
     await conn.execute(
-        "UPDATE project_api_keys SET revealed_at = now() WHERE id = $1",
+        "UPDATE project_api_keys SET revealed_at = coalesce(revealed_at, now()) WHERE id = $1",
         key_id,
     )
     return await decrypt_project_material(
@@ -1450,11 +1437,13 @@ async def list_reveals(
 ) -> list[dict[str, Any]]:
     rows = await conn.fetch(
         """
-        SELECT r.key_id, r.created_at, r.expires_at, s.id AS slot_id, s.name, s.kind
+        SELECT r.key_id, r.created_at, k.status, k.revealed_at,
+               s.id AS slot_id, s.name, s.kind
         FROM project_api_key_reveals r
         JOIN project_api_keys k ON k.id = r.key_id
         JOIN project_api_key_slots s ON s.id = k.slot_id
-        WHERE s.project_id = $1 AND r.expires_at > now()
+        WHERE s.project_id = $1
+          AND k.status IN ('active', 'pending')
         ORDER BY r.created_at
         """,
         project_id,
@@ -1466,7 +1455,10 @@ async def list_reveals(
             "slot_name": row["name"],
             "kind": row["kind"],
             "created_at": row["created_at"].isoformat(),
-            "expires_at": row["expires_at"].isoformat(),
+            "key_status": row["status"],
+            "revealed_at": (
+                row["revealed_at"].isoformat() if row["revealed_at"] else None
+            ),
         }
         for row in rows
     ]

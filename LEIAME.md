@@ -107,7 +107,7 @@ O `host-agent` também é um componente global da plataforma, mas roda como serv
 
 Storage e ImgProxy não são mais criados por projeto. Os objetos do Storage são namespaced pelo UUID imutável do tenant, e o Nginx de cada projeto injeta a identidade confiável do tenant antes de o tráfego chegar ao data plane compartilhado do Storage.
 
-Para os detalhes de implementação, consulte a [documentação da arquitetura](docs/00-arquitetura.md).
+Para os detalhes de implementação, consulte a [documentação da arquitetura](docs/pt-br/00-arquitetura.md).
 
 ---
 
@@ -268,18 +268,18 @@ O README é focado em entender e iniciar a plataforma rapidamente. A documentaç
 
 Referências principais:
 
-- [Visão geral da arquitetura](docs/00-arquitetura.md)
+- [Visão geral da arquitetura](docs/pt-br/00-arquitetura.md)
 - [Control plane](docs/architecture/control-plane.md)
 - [Host-agent](docs/architecture/host-agent.md)
 - [Lifecycle dos projetos](docs/architecture/project-lifecycle.md)
 - [Storage compartilhado, S3 e Storage Vectors](docs/architecture/storage-vectors-lifecycle.md)
-- [Chaves de API opacas](docs/12-chaves-api-opacas.md)
+- [Chaves de API opacas](docs/pt-br/12-chaves-api-opacas.md)
 - [OpenResty/Lua](docs/architecture/openresty-lua.md)
 - [Supabase Analytics](docs/architecture/supabase-analytics.md)
-- [Realtime multi-tenant](docs/09-autenticacao-multi-tenant-realtime.md)
-- [Hardening do Postgres Meta](docs/10-hardening-postgres-meta.md)
-- [Criptografia e rotação de segredos](docs/11-rotacao-cripto-conexoes.md)
-- [Principais erros](docs/05-principais-erros.md)
+- [Realtime multi-tenant](docs/pt-br/09-autenticacao-multi-tenant-realtime.md)
+- [Hardening do Postgres Meta](docs/pt-br/10-hardening-postgres-meta.md)
+- [Criptografia e rotação de segredos](docs/pt-br/11-rotacao-cripto-conexoes.md)
+- [Principais erros](docs/pt-br/05-principais-erros.md)
 
 ---
 

@@ -107,7 +107,7 @@ The `host-agent` is also a platform-wide component, but it runs as a systemd ser
 
 Storage and ImgProxy are no longer created per project. Storage objects are namespaced by the project's immutable tenant UUID, while each project Nginx injects the trusted tenant identity before traffic reaches the shared Storage data plane.
 
-For implementation details, see the [architecture documentation](docs/00-arquitetura.md).
+For implementation details, see the [architecture documentation](docs/00-architecture.md).
 
 ---
 
@@ -266,18 +266,18 @@ The README is focused on understanding and starting the platform quickly. Detail
 
 Main references:
 
-- [Architecture overview](docs/00-arquitetura.md)
+- [Architecture overview](docs/00-architecture.md)
 - [Control plane](docs/architecture/control-plane.md)
 - [Host-agent](docs/architecture/host-agent.md)
 - [Project lifecycle](docs/architecture/project-lifecycle.md)
 - [Shared Storage, S3 and Storage Vectors](docs/architecture/storage-vectors-lifecycle.md)
-- [Opaque API keys](docs/12-chaves-api-opacas.md)
+- [Opaque API keys](docs/12-opaque-api-key-operations.md)
 - [OpenResty/Lua](docs/architecture/openresty-lua.md)
 - [Supabase Analytics](docs/architecture/supabase-analytics.md)
-- [Multi-tenant Realtime](docs/09-autenticacao-multi-tenant-realtime.md)
-- [Postgres Meta hardening](docs/10-hardening-postgres-meta.md)
-- [Secret rotation and encryption](docs/11-rotacao-cripto-conexoes.md)
-- [Troubleshooting](docs/05-principais-erros.md)
+- [Multi-tenant Realtime](docs/09-multi-tenant-realtime-authentication.md)
+- [Postgres Meta hardening](docs/10-postgres-meta-hardening.md)
+- [Secret rotation and encryption](docs/11-project-secret-and-connection-rotation.md)
+- [Troubleshooting](docs/05-common-errors.md)
 
 ---
 

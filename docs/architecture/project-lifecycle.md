@@ -1,44 +1,44 @@
-# Lifecycle dos projetos
+# Project lifecycle
 
-O lifecycle é orquestrado pela Projects API, mas a execução física (Docker e os scripts em `servidor/generateProject/`) acontece no [host-agent](host-agent.md): a API grava a intenção assinada no banco e aguarda o agent executar o comando fechado.
+The lifecycle is orchestrated by the Projects API, but physical execution (Docker and the scripts in `servidor/generateProject/`) happens on the [host-agent](host-agent.md): the API writes the signed intent to the database and waits for the agent to execute the closed command.
 
-Operações longas são representadas por jobs persistentes. O endpoint HTTP normalmente cria o job e retorna seu identificador; a execução continua na fila serializada do projeto.
+Long-running operations are represented by persistent jobs. The HTTP endpoint normally creates the job and returns its identifier; execution continues in the project's serialized queue.
 
-## Identificadores usados
+## Identifiers in use
 
-Antes de acompanhar qualquer fluxo, diferencie:
+Before following any flow, distinguish:
 
-- `project_uuid`: `projects.id`, identidade canônica e imutável;
-- `tenant_uuid`: vínculo persistido com Realtime/JWT/backups; equivale a `projects.id` nos projetos novos e pode preservar o UUID legado;
-- `project_ref`: slug mutável usado em URL e recursos físicos;
+- `project_uuid`: `projects.id`, canonical and immutable identity;
+- `tenant_uuid`: persisted binding for Realtime/JWT/backups; equals `projects.id` for new projects and may preserve the legacy UUID;
+- `project_ref`: mutable slug used in URLs and physical resources;
 - `_supabase_<project_ref>`: database;
-- Realtime tenant: identificado pelo UUID;
-- Storage tenant: identificado pelo `tenant_uuid` imutável;
-- Supavisor tenant: identificado pelo project ref;
-- slot principal do CDC: sufixado pelo project ref;
-- slot temporário de broadcast: sufixado por hash derivado do UUID.
+- Realtime tenant: identified by UUID;
+- Storage tenant: identified by the immutable `tenant_uuid`;
+- Supavisor tenant: identified by the project ref;
+- main CDC slot: suffixed by the project ref;
+- temporary broadcast slot: suffixed by a UUID-derived hash.
 
-Antes de qualquer operação Storage mutável sobre um projeto existente, o lifecycle consulta `projects.tenant_uuid` no control plane e exige igualdade com o `PROJECT_UUID` canônico do ambiente. Divergência, linha ausente ou falha de consulta encerra a operação antes de tocar registry, database ou namespace.
+Before any mutable Storage operation on an existing project, the lifecycle queries `projects.tenant_uuid` in the control plane and requires it to equal the environment's canonical `PROJECT_UUID`. A mismatch, missing row, or query failure ends the operation before touching the registry, database, or namespace.
 
-## Criação
+## Creation
 
-Fluxo resumido:
+Summary:
 
-1. a API valida usuário e nome;
-2. gera uma única vez `projects.id` e persiste o mesmo valor em `tenant_uuid`;
-3. cria o job já com os dois identificadores duráveis;
-4. o script gera JWT secret, JWTs internos anon/service role, config token e token exclusivo do gateway opaco;
-5. cria `_supabase_<project_ref>` a partir de `_supabase_template`;
-6. registra o tenant do Realtime com `external_id = tenant_uuid`;
-7. registra o tenant do Supavisor com `external_id = project_ref`;
-8. cria o namespace físico e registra o tenant no Storage global pela Admin API;
-9. cria credenciais S3/SigV4 exclusivas do tenant;
-10. gera `.env`, compose, Dockerfile e configuração Nginx sem Storage ou imgproxy locais;
-11. sobe somente os serviços locais do projeto: Auth, PostgREST e Nginx; Postgres-Meta, Storage, imgproxy, Realtime, Supavisor e Edge Functions permanecem globais;
-12. valida migrations, database, JWT, S3, Vectors e o roteamento do tenant real;
-13. persiste os segredos criptografados no registro do projeto e conclui o job.
+1. the API validates the user and name;
+2. generates `projects.id` once and persists the same value in `tenant_uuid`;
+3. creates the job with both durable identifiers;
+4. the script generates the JWT secret, internal anon/service-role JWTs, config token, and opaque gateway-exclusive token;
+5. creates `_supabase_<project_ref>` from `_supabase_template`;
+6. registers the Realtime tenant with `external_id = tenant_uuid`;
+7. registers the Supavisor tenant with `external_id = project_ref`;
+8. creates the physical namespace and registers the tenant in global Storage through the Admin API;
+9. creates tenant-exclusive S3/SigV4 credentials;
+10. generates `.env`, compose, Dockerfile, and Nginx configuration without local Storage or imgproxy;
+11. starts only the project's local services: Auth, PostgREST, and Nginx; Postgres-Meta, Storage, imgproxy, Realtime, Supavisor, and Edge Functions remain global;
+12. validates migrations, database, JWT, S3, Vectors, and routing for the real tenant;
+13. persists encrypted secrets in the project record and completes the job.
 
-O JWT usa o UUID como issuer:
+The JWT uses the UUID as its issuer:
 
 ```json
 {
@@ -47,294 +47,294 @@ O JWT usa o UUID como issuer:
 }
 ```
 
-O nome do database e do slot principal continua usando o project ref. O slot temporário de broadcast usa um hash derivado do UUID do tenant.
+The database name and main slot continue to use the project ref. The temporary broadcast slot uses a hash derived from the tenant UUID.
 
 ### Rollback
 
-O script mantém estado dos recursos criados e tenta remover, na ordem necessária:
+The script tracks created resources and attempts to remove them in the required order:
 
-- diretórios;
-- tenant, credenciais e namespace do Storage;
+- directories;
+- Storage tenant, credentials, and namespace;
 - database;
-- tenant do Realtime;
-- tenant do Supavisor.
+- Realtime tenant;
+- Supavisor tenant.
 
-O rollback de shell não substitui a validação final da API. Falhas parciais devem aparecer no job.
+Shell rollback does not replace the API's final validation. Partial failures must appear in the job.
 
-## Duplicação
+## Duplication
 
-A duplicação cria outro projeto, com novo UUID, novas chaves e novos tenants.
+Duplication creates another project with a new UUID, new keys, and new tenants.
 
-Modos:
+Modes:
 
-- `schema-only`: copia estrutura e históricos de migration necessários;
-- `with-data`: copia schema, dados e storage.
+- `schema-only`: copies the required structure and migration history;
+- `with-data`: copies the schema, data, and storage.
 
-Mesmo quando os dados são copiados, a identidade do projeto novo é independente:
+Even when data is copied, the new project's identity is independent:
 
-- novo UUID;
-- novo issuer JWT;
-- novo tenant Realtime;
-- novo tenant Supavisor;
-- novo tenant e namespace Storage;
-- novas credenciais S3/SigV4;
-- novas API keys;
-- novo config token.
+- new UUID;
+- new JWT issuer;
+- new Realtime tenant;
+- new Supavisor tenant;
+- new Storage tenant and namespace;
+- new S3/SigV4 credentials;
+- new API keys;
+- new config token.
 
-A cópia não reutiliza segredos nem objetos por referência. `schema-only` cria namespace vazio. `with-data` captura a origem com seus serviços parados e o tenant Storage em manutenção fail-closed, copia os arquivos para o UUID novo, reidentifica as tabelas físicas de Vector e remove FDWs/Vault secrets copiados antes de criar credenciais novas.
+The copy does not reuse secrets or object references. `schema-only` creates an empty namespace. `with-data` captures the source with its services stopped and the Storage tenant in fail-closed maintenance, copies files to the new UUID, reidentifies Vector's physical tables, and removes copied FDWs/Vault secrets before creating new credentials.
 
 ## Rename
 
-Rename altera o project ref, mas preserva tanto `projects.id` quanto `projects.tenant_uuid`.
+Rename changes the project ref but preserves both `projects.id` and `projects.tenant_uuid`.
 
-Recursos que acompanham o novo nome:
+Resources that follow the new name:
 
-- diretório do projeto;
-- `.env` e templates;
-- nomes dos containers;
-- rota do Traefik;
-- database `_supabase_<project_ref>`;
-- tenant do Supavisor;
-- slot principal do Realtime;
-- referências físicas usadas pelos serviços;
-- diretórios de snippets do Studio.
+- project directory;
+- `.env` and templates;
+- container names;
+- Traefik route;
+- `_supabase_<project_ref>` database;
+- Supavisor tenant;
+- Realtime main slot;
+- physical references used by services;
+- Studio snippet directories.
 
-Recursos que permanecem com a mesma identidade:
+Resources that retain the same identity:
 
-- UUID do projeto;
+- project UUID;
 - membership;
-- notas, tags, hints e threads;
-- auditoria;
+- notes, tags, hints, and threads;
+- audit records;
 - Realtime `external_id`;
-- Storage tenant ID e namespace de objetos;
-- credenciais S3/SigV4;
-- slot temporário de broadcast derivado do UUID;
-- chaves JWT, salvo quando outra operação de rotação for solicitada.
+- Storage tenant ID and object namespace;
+- S3/SigV4 credentials;
+- UUID-derived temporary broadcast slot;
+- JWT keys, unless another rotation operation is requested.
 
-### Histórico
+### History
 
-Cada rename cria um registro em `project_name_history` com:
+Each rename creates a record in `project_name_history` with:
 
-- nome anterior;
-- nome novo;
-- path anterior;
-- path novo;
-- job associado;
+- previous name;
+- new name;
+- previous path;
+- new path;
+- associated job;
 - status;
-- erro e timestamps.
+- error and timestamps.
 
 ### Supavisor
 
-O tenant antigo do Supavisor precisa ser removido antes da criação do novo para evitar conflito de identidade.
+The old Supavisor tenant must be removed before creating the new one to avoid an identity conflict.
 
-Se houver falha depois da remoção, o rollback tenta restaurar o tenant antigo.
+If a failure occurs after removal, rollback attempts to restore the old tenant.
 
 ### Realtime
 
-O tenant continua identificado pelo UUID. O rename atualiza os recursos ligados ao database, incluindo slot principal e configuração da extensão CDC, sem trocar o `external_id` canônico.
+The tenant remains identified by UUID. Rename updates database-bound resources, including the main slot and CDC extension configuration, without changing the canonical `external_id`.
 
 ### Storage
 
-O tenant é colocado em manutenção fail-closed antes do rename do database. O lifecycle troca `databasePoolUrl` por uma URL deliberadamente inalcançável e confirma pelo data plane que o tenant responde com erro; `null` não é usado, pois o Storage oficial passaria a usar `databaseUrl`. Depois do rename, o lifecycle atualiza `databaseUrl` e `databasePoolUrl` canônicos pela Admin API, executa as migrations oficiais e valida o mesmo tenant UUID pelo novo Nginx. Nenhum objeto é movido; apenas endpoints de wrappers Vector que contêm o project ref são reconciliados.
+The tenant is put into fail-closed maintenance before the database rename. The lifecycle replaces `databasePoolUrl` with a deliberately unreachable URL and confirms through the data plane that the tenant responds with an error; `null` is not used because official Storage would fall back to `databaseUrl`. After the rename, the lifecycle updates canonical `databaseUrl` and `databasePoolUrl` through the Admin API, runs the official migrations, and validates the same tenant UUID through the new Nginx. No object is moved; only Vector-wrapper endpoints containing the project ref are reconciled.
 
 ### Snippets
 
-O Supabase Studio armazena snippets em diretórios que incluem usuário e slug do projeto.
+Supabase Studio stores snippets in directories that include the user and project slug.
 
-Depois do rename principal, a API chama o endpoint interno do OpenResty para renomear esses diretórios.
+After the main rename, the API calls OpenResty's internal endpoint to rename these directories.
 
-A migração é best-effort:
+The migration is best-effort:
 
-- falha de snippets não invalida o projeto já renomeado;
-- o job registra um aviso;
-- os diretórios podem exigir correção manual ou retry específico.
+- a snippet failure does not invalidate the already-renamed project;
+- the job records a warning;
+- the directories may require manual correction or a dedicated retry.
 
-## Chaves de API opacas
+## Opaque API keys
 
-Projetos novos e duplicados nascem com slots `default-publishable` e `default-secret`. Projetos existentes usam preparação, claim, confirmação e corte explícitos; depois do corte, JWTs públicos legados deixam de ser aceitos.
+New and duplicated projects start with `default-publishable` and `default-secret` slots. Existing projects use explicit preparation, claim, confirmation, and cutover; after cutover, legacy public JWTs are no longer accepted.
 
-Cada slot possui rotação, **expiração temporal opcional**, escopo de serviços e revogação próprios. `expires_at = NULL` significa que a chave permanece válida até revogação, rotação, desativação ou outro bloqueio de política; não significa chave irremovível. Para slots com timestamp, a automação pode preparar a próxima versão antes do vencimento. A automação pode ser desativada no projeto ou no slot.
+Each slot has its own rotation, **optional time-based expiration**, service scope, and revocation. `expires_at = NULL` means the key remains valid until revocation, rotation, disabling, or another policy block; it does not mean the key cannot be removed. For timestamped slots, automation can prepare the next version before expiration. Automation can be disabled at the project or slot level.
 
-O protocolo completo está em [Operação de chaves de API opacas](../12-chaves-api-opacas.md).
+The complete protocol is in [Opaque API key operations](../12-opaque-api-key-operations.md).
 
-## Rotação dos JWTs internos
+## Internal JWT rotation
 
-A rotação de infraestrutura gera novos JWTs internos anon e service role usando o JWT secret existente. Ela só pode recriar o Nginx de um projeto quando o gateway opaco está pronto.
+Infrastructure rotation generates new internal anon and service-role JWTs using the existing JWT secret. It can recreate a project's Nginx only when the opaque gateway is ready.
 
-Isso evita invalidar imediatamente todas as sessões de usuários finais.
+This avoids immediately invalidating all end-user sessions.
 
-Fluxo:
+Flow:
 
-1. gera novos tokens;
-2. atualiza arquivos do projeto;
-3. atualiza configuração do Nginx;
-4. persiste os segredos com envelope encryption;
-5. incrementa `project_key_version`;
-6. invalida o cache de service key do Studio;
-7. persiste a nova expiração, conclui o job e grava a auditoria.
+1. generates new tokens;
+2. updates project files;
+3. updates Nginx configuration;
+4. persists secrets with envelope encryption;
+5. increments `project_key_version`;
+6. invalidates the Studio service-key cache;
+7. persists the new expiration, completes the job, and records the audit event.
 
-A invalidação do cache faz parte do sucesso da operação. Antes de usar qualquer entrada, o OpenResty precisa confirmar a versão canônica na Projects API. Se a consulta falhar, a requisição é bloqueada; uma chave em cache nunca substitui a validação de versão.
+Cache invalidation is part of operation success. Before using any entry, OpenResty must confirm the canonical version in the Projects API. If the query fails, the request is blocked; a cached key never replaces version validation.
 
-### Rotação automática
+### Automatic rotation
 
-Todo projeto nasce com `automatic_key_rotation_enabled=true`. A Projects API calcula a agenda pelo claim `exp`, persiste `key_expires_at` e cria um job no mesmo runner da rotação manual sete dias antes do vencimento. O scanner:
+Every project starts with `automatic_key_rotation_enabled=true`. The Projects API calculates the schedule from the `exp` claim, persists `key_expires_at`, and creates a job in the same runner as manual rotation seven days before expiration. The scanner:
 
-- usa advisory lock do PostgreSQL para haver um único líder;
-- bloqueia a linha com `FOR UPDATE SKIP LOCKED`;
-- não cria um segundo job enquanto houver ação ativa no projeto;
-- limita a concorrência global;
-- registra ator de sistema, versão e expiração na auditoria.
+- uses a PostgreSQL advisory lock to ensure a single leader;
+- locks the row with `FOR UPDATE SKIP LOCKED`;
+- does not create a second job while an action is active in the project;
+- limits global concurrency;
+- records the system actor, version, and expiration in the audit log.
 
-Uma falha automática grava `automatic_key_rotation_blocked_at` e `automatic_key_rotation_last_error`. O scanner não repete a operação até um admin retomar explicitamente a automação ou concluir uma rotação manual. Não há loop silencioso nem uso da chave anterior como caminho secundário.
+An automatic failure records `automatic_key_rotation_blocked_at` and `automatic_key_rotation_last_error`. The scanner does not repeat the operation until an admin explicitly resumes automation or completes a manual rotation. There is no silent loop or use of the previous key as a secondary path.
 
-A opção pode ser desativada no Studio ou por `PUT /api/projects/{project_ref}/automatic-key-rotation` com `{"enabled": false}`. Os parâmetros globais são:
+The option can be disabled in Studio or through `PUT /api/projects/{project_ref}/automatic-key-rotation` with `{"enabled": false}`. Global parameters are:
 
 - `AUTOMATIC_KEY_ROTATION_LEAD_DAYS=7`;
 - `AUTOMATIC_KEY_ROTATION_CHECK_INTERVAL_SECONDS=300`;
 - `AUTOMATIC_KEY_ROTATION_MAX_CONCURRENT=3`.
 
-### Expiração
+### Expiration
 
-A API extrai metadata de expiração dos JWTs, agenda a rotação automática e avisa o Studio quando as chaves estão expiradas ou próximas do vencimento.
+The API extracts expiration metadata from JWTs, schedules automatic rotation, and notifies Studio when keys are expired or near expiration.
 
-A janela é configurada por `KEY_EXPIRY_WARNING_DAYS`.
+The window is configured by `KEY_EXPIRY_WARNING_DAYS`.
 
-### Rotação do JWT secret
+### JWT-secret rotation
 
-Trocar o JWT secret é uma operação diferente e de impacto maior:
+Changing the JWT secret is a different, higher-impact operation:
 
-- invalida tokens existentes;
-- exige sincronização com Realtime e serviços;
-- encerra sessões de Auth;
-- precisa de janela de manutenção e plano de rollback.
+- invalidates existing tokens;
+- requires synchronization with Realtime and services;
+- ends Auth sessions;
+- requires a maintenance window and rollback plan.
 
-Ela não deve ser confundida com a rotação comum das API keys.
+It must not be confused with ordinary API-key rotation.
 
-## Settings e recriação de serviços
+## Settings and service recreation
 
-A alteração de settings grava o `.env` atomicamente e informa os serviços afetados.
+Changing settings writes the `.env` atomically and reports the affected services.
 
-Exemplos:
+Examples:
 
-- Auth para opções do GoTrue;
-- REST para schemas e pool do PostgREST;
-- tenant Storage e Nginx para limite de arquivo;
-- tenant Storage para transformação de imagens, S3 Protocol e Vector Buckets.
+- Auth for GoTrue options;
+- REST for PostgREST schemas and pool;
+- Storage tenant and Nginx for the file limit;
+- Storage tenant for image transformations, S3 Protocol, and Vector Buckets.
 
-A atualização de Storage envia `PATCH /tenants/<tenant_uuid>` e não reinicia o Storage ou imgproxy globais. A recriação do Nginx continua sendo um job idempotente quando sua configuração local muda.
+The Storage update sends `PATCH /tenants/<tenant_uuid>` and does not restart global Storage or imgproxy. Nginx recreation remains an idempotent job when its local configuration changes.
 
-## Pontos de restauração
+## Restore points
 
-Um ponto de restauração captura **dados, não identidade**: o dump do database `_supabase_<project_ref>` (sem o schema `realtime`, que é capturado à parte como no duplicate) e o tar somente de `volumes/storage/objects/<tenant_uuid>/`. O `manifest.json` formato 2 inclui UUID, Storage tenant ID, layout, ref na época, versão do Postgres e as tabelas da publication do Realtime.
+A restore point captures **data, not identity**: a dump of the `_supabase_<project_ref>` database (without the `realtime` schema, which is captured separately as in duplication) and a tar containing only `volumes/storage/objects/<tenant_uuid>/`. Format-2 `manifest.json` includes the UUID, Storage tenant ID, layout, ref at capture time, Postgres version, and the tables in the Realtime publication.
 
-Ficam fora do ponto: `.env`, JWT secret, anon/service keys, config token, tenants do Realtime/Supavisor e configuração de containers. Por isso um ponto continua restaurável depois de rotação de chaves e de rename — os arquivos vivem em `servidor/backups/<tenant_uuid>/<point_id>/`, chaveados pelo `tenant_uuid` persistido no control plane e espelhado em `PROJECT_UUID` no `.env` do projeto (imutável no rename). Um backup nunca percorre a raiz global nem inclui o namespace de outro tenant.
+The point excludes: `.env`, JWT secret, anon/service keys, config token, Realtime/Supavisor tenants, and container configuration. Therefore a point remains restorable after key rotation and rename — files live in `servidor/backups/<tenant_uuid>/<point_id>/`, keyed by the `tenant_uuid` persisted in the control plane and mirrored in `PROJECT_UUID` in the project `.env` (immutable during rename). A backup never traverses the global root or includes another tenant's namespace.
 
-### Captura (fria)
+### Capture (cold)
 
-O backup é frio por decisão de produto: o script para os serviços do projeto (o Postgres compartilhado continua de pé), encerra os pools do tenant no Supavisor e coloca somente o tenant Storage em manutenção fail-closed. O script confirma pelo data plane que o cache já deixou de aceitar operações, encerra as conexões Storage remanescentes, captura banco + namespace de forma atômica (`<id>.tmp` + rename), restaura as URLs canônicas do tenant e religa somente os containers que estavam rodando.
+The backup is cold by product decision: the script stops project services (shared Postgres remains up), terminates the tenant's Supavisor pools, and places only the Storage tenant into fail-closed maintenance. The script confirms through the data plane that the cache no longer accepts operations, closes remaining Storage connections, captures database + namespace atomically (`<id>.tmp` + rename), restores the tenant's canonical URLs, and restarts only containers that were running.
 
-### Restauração
+### Restoration
 
-1. para os serviços do projeto, shutdown do tenant Realtime, terminate dos pools do Supavisor e põe o tenant Storage em manutenção fail-closed;
-2. captura um **ponto automático de segurança** com o estado atual e emite `SAFETY_BACKUP_COMPLETE`;
-3. dropa os replication slots, renomeia o database atual para `_supabase_<ref>_prerestore` (é o plano de rollback, não um DROP);
-4. cria o database novo, restaura o dump e reaplica as correções conhecidas do duplicate: partições de `realtime.messages`, publications (com as tabelas do manifest), `TRUNCATE realtime.subscription`, `search_path`, override do `supabase_storage_admin`, grants e validação do contrato pgvector;
-5. recria o slot principal e troca somente o namespace do UUID por staging transacional; o archive é rejeitado se tiver path absoluto, `..`, symlink ou tipo especial;
-6. reconecta o tenant, executa migrations oficiais, religa os containers, valida JWT/S3/Vectors pelo tenant real e sincroniza os wrappers vetoriais;
-7. só então remove `_supabase_<ref>_prerestore` e o staging do namespace.
+1. stop project services, shut down the Realtime tenant, terminate Supavisor pools, and put the Storage tenant into fail-closed maintenance;
+2. capture an **automatic safety point** with the current state and emit `SAFETY_BACKUP_COMPLETE`;
+3. drop replication slots and rename the current database to `_supabase_<ref>_prerestore` (the rollback plan, not a DROP);
+4. create the new database, restore the dump, and reapply known duplication fixes: `realtime.messages` partitions, publications (with manifest tables), `TRUNCATE realtime.subscription`, `search_path`, `supabase_storage_admin` override, grants, and pgvector contract validation;
+5. recreate the main slot and swap only the UUID namespace through transactional staging; reject the archive if it has an absolute path, `..`, symlink, or special type;
+6. reconnect the tenant, run official migrations, restart containers, validate JWT/S3/Vectors through the real tenant, and synchronize vector wrappers;
+7. only then remove `_supabase_<ref>_prerestore` and namespace staging.
 
-Falhas disparam rollback compensatório com marker `ROLLBACK_COMPLETE`, como no rename. O ponto de segurança sobrevive à falha e vira um ponto normal na listagem.
+Failures trigger compensating rollback with the `ROLLBACK_COMPLETE` marker, as in rename. The safety point survives the failure and becomes a normal point in the list.
 
-A restauração reverte também os usuários e sessões do Auth (o schema `auth` faz parte do banco). Keys e URL do projeto não mudam.
+Restoration also reverts Auth users and sessions (the `auth` schema is part of the database). Project keys and URL do not change.
 
 ### Control plane
 
-A tabela `project_restore_points` guarda título (default: data/hora), descrição, status (`creating`, `ready`, `restoring`, `deleting`, `failed`), flag de ponto automático, tamanho, contadores de restauração e o job associado. Limite de 15 pontos ativos por projeto; a restauração exige uma vaga livre para o ponto automático. Todas as operações são auditadas em `studio_audit_log`. A listagem é acessível a qualquer membro; criar ponto exige admin do projeto, enquanto restaurar ou excluir ponto exige o dono ou admin global. `backup` e `restore` não são idempotentes: o recovery da API religa na intenção existente do host-agent em vez de reexecutar. O delete integral do projeto continua exclusivo de admin global, protegido também por step-up com a senha pessoal da conta Authelia atual, e remove `servidor/backups/<uuid>/` junto com os arquivos.
+The `project_restore_points` table stores title (default: date/time), description, status (`creating`, `ready`, `restoring`, `deleting`, `failed`), automatic-point flag, size, restore counters, and the associated job. There is a limit of 15 active points per project; restoration requires a free slot for the automatic point. All operations are audited in `studio_audit_log`. Listing is available to any member; creating a point requires a project admin, while restoring or deleting a point requires the owner or global admin. `backup` and `restore` are not idempotent: API recovery reconnects to the existing host-agent intent rather than rerunning it. Full project deletion remains exclusive to global admins, also protected by step-up with the current Authelia account's personal password, and removes `servidor/backups/<uuid>/` with the files.
 
-## Start, stop e restart
+## Start, stop, and restart
 
-Essas operações:
+These operations:
 
-- consultam o estado dos containers associado ao projeto;
-- são serializadas na fila do projeto;
-- atualizam status e auditoria;
-- são marcadas como idempotentes e retryable.
+- query the container state associated with the project;
+- are serialized in the project queue;
+- update status and audit records;
+- are marked idempotent and retryable.
 
-O estado exibido pela API vem do snapshot `project_container_state` mantido pelo host-agent; a Projects API não consulta Docker diretamente.
+The state displayed by the API comes from the `project_container_state` snapshot maintained by the host-agent; the Projects API does not query Docker directly.
 
-## Deleção
+## Deletion
 
-A deleção precisa remover recursos sem permitir que Supavisor ou outros serviços recriem conexões no meio do processo.
+Deletion must remove resources without allowing Supavisor or other services to recreate connections during the process.
 
-Fluxo atual:
+Current flow:
 
-1. valida admin global e consome um grant de step-up de uso único, vinculado à sessão, ação e projeto;
-2. cria job de delete;
-3. remove os containers do projeto;
-4. revoga credenciais, remove o tenant do registry Storage e apaga somente o namespace validado daquele UUID;
-5. remove ou encerra os pools do tenant no Supavisor;
-6. limpa tenant e extensões do Realtime e metadata do Supavisor;
-7. drena conexões ativas do database e confirma que o pooler não reconecta;
-8. remove replication slots e database;
-9. remove registros do control plane;
-10. remove diretório do projeto e backups do mesmo tenant UUID;
-11. valida o resultado e registra auditoria.
+1. validate global admin and consume a one-time step-up grant bound to the session, action, and project;
+2. create the delete job;
+3. remove project containers;
+4. revoke credentials, remove the tenant from the Storage registry, and delete only that UUID's validated namespace;
+5. remove or terminate the tenant's Supavisor pools;
+6. clean the Realtime tenant and extensions and Supavisor metadata;
+7. drain active database connections and confirm the pooler does not reconnect;
+8. remove replication slots and the database;
+9. remove control-plane records;
+10. remove the project directory and backups for the same tenant UUID;
+11. validate the result and record the audit event.
 
-### Proteção do database
+### Database protection
 
-Se o Supavisor continuar abrindo conexões mesmo após a remoção do tenant e drenagem, a deleção deve falhar antes do `DROP DATABASE`.
+If Supavisor continues opening connections after tenant removal and draining, deletion must fail before `DROP DATABASE`.
 
-Preservar um database ainda referenciado é mais seguro do que concluir uma deleção parcial e inconsistente.
+Preserving a still-referenced database is safer than completing a partial, inconsistent deletion.
 
-### Resultado parcial
+### Partial result
 
-Falhas de infraestrutura podem deixar:
+Infrastructure failures may leave:
 
 - containers;
-- tenant Storage ou namespace do tenant;
-- tenants Realtime/Supavisor;
+- Storage tenant or tenant namespace;
+- Realtime/Supavisor tenants;
 - slot;
-- diretório;
-- registros centrais.
+- directory;
+- central records.
 
-O job deve expor etapa, mensagem, código de erro e tails de saída para permitir recuperação manual.
+The job must expose the stage, message, error code, and output tails to support manual recovery.
 
-## Recovery e retry
+## Recovery and retry
 
-O recovery possui duas camadas diferentes e elas não devem ser confundidas.
+Recovery has two different layers, which must not be confused.
 
-### API reiniciada enquanto o host-agent continua executando
+### API restarted while the host-agent continues executing
 
-A intenção de lifecycle já existe em `host_agent_commands`. O host-agent pode continuar executando mesmo com a Projects API fora do ar. Quando a API volta, o recovery religa o job à **mesma intenção persistida**, reutiliza o resultado terminal se ele já existir e não dispara um segundo script.
+The lifecycle intent already exists in `host_agent_commands`. The host-agent can continue executing while the Projects API is down. When the API returns, recovery reconnects the job to the **same persisted intent**, reuses the terminal result if one exists, and does not launch a second script.
 
-Esse comportamento é especialmente importante para operações distribuídas como create, duplicate, rename, rotate, backup, restore e delete.
+This behavior is especially important for distributed operations such as create, duplicate, rename, rotate, backup, restore, and delete.
 
-### Ações idempotentes
+### Idempotent actions
 
-Atualmente o sistema trata como idempotentes:
+The system currently treats these as idempotent:
 
 - start;
 - stop;
 - restart;
 - recreate services.
 
-Essas ações podem ser retomadas ou repetidas com controle de tentativa.
+These actions can be resumed or repeated with attempt control.
 
-### Estado incerto ou falha terminal do host-agent
+### Uncertain state or terminal host-agent failure
 
-Create, duplicate, rename, rotate, backup, restore e delete possuem efeitos distribuídos. Se a intenção terminar com falha, lease expirado ou outro estado em que o resultado físico não possa ser provado, a API **não reexecuta cegamente** a operação.
+Create, duplicate, rename, rotate, backup, restore, and delete have distributed effects. If the intent ends in failure, an expired lease, or another state where the physical result cannot be proven, the API **does not blindly rerun** the operation.
 
-O job preserva:
+The job preserves:
 
-- etapa atual;
-- progresso;
-- stdout/stderr sanitizados;
-- código de erro;
-- histórico de rename ou ponto de restauração, quando aplicável.
+- current stage;
+- progress;
+- sanitized stdout/stderr;
+- error code;
+- rename or restore-point history, when applicable.
 
-A recuperação passa então pelo rollback/reconciliação específica do domínio ou por revisão manual. A persistência da intenção evita confundir um restart normal da API com autorização para repetir uma operação não idempotente.
+Recovery then proceeds through domain-specific rollback/reconciliation or manual review. Persisting the intent prevents a normal API restart from being mistaken for authorization to repeat a non-idempotent operation.
 
-## Testes relevantes
+## Relevant tests
 
 - `tests/smoke/test_tenant_lifecycle.py`
 - `tests/smoke/test_host_agent_contract.py`
@@ -347,7 +347,7 @@ A recuperação passa então pelo rollback/reconciliação específica do domín
 - `tests/smoke/test_opaque_api_key_optional_expiration.py`
 - `tests/smoke/test_project_telemetry.py`
 - `tests/smoke/test_shared_storage_architecture_contract.py`
-- `tests/smoke/test_shared_storage_tenant_integration.py` (opt-in, instalação descartável)
+- `tests/smoke/test_shared_storage_tenant_integration.py` (opt-in, disposable installation)
 - `tests/smoke/test_storage_vector_lifecycle_integration.py`
 
-Os nomes dos testes podem evoluir; procure também por contratos de lifecycle em `tests/smoke/`.
+Test names may evolve; also look for lifecycle contracts in `tests/smoke/`.

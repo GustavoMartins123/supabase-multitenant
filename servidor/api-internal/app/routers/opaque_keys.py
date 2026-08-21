@@ -360,14 +360,6 @@ async def prepare_opaque_api_key_migration(
                     created_by=auth_user["db_user_id"],
                     gateway_token=gateway_token,
                 )
-                reveal_deadline = await conn.fetchval(
-                    """
-                    SELECT min(r.expires_at)
-                    FROM project_api_key_reveals r
-                    WHERE r.key_id = ANY($1::uuid[])
-                    """,
-                    [publishable.key_id, secret.key_id],
-                )
                 await audit_studio_action(
                     conn,
                     project_id=current_project["id"],
@@ -384,7 +376,6 @@ async def prepare_opaque_api_key_migration(
                             publishable.token_hint,
                             secret.token_hint,
                         ],
-                        "reveal_deadline": reveal_deadline.isoformat(),
                     },
                 )
         except OpaqueKeyLifecycleError as exc:
@@ -393,7 +384,6 @@ async def prepare_opaque_api_key_migration(
             "project": project_name,
             "status": "prepared",
             "key_ids": [str(publishable.key_id), str(secret.key_id)],
-            "reveal_deadline": reveal_deadline.isoformat(),
             "next": (
                 "claim both keys, install them, and confirm both installations"
             ),
@@ -595,7 +585,6 @@ def _issued_response(issued, keyset_version: int, *, status_code: int) -> JSONRe
                 issued.expires_at.isoformat() if issued.expires_at else None
             ),
             "api_keyset_version": keyset_version,
-            "reveal_once": True,
         },
     )
 
@@ -775,7 +764,7 @@ async def rotate_api_key_slot(
                         project_id=project["id"],
                         slot_id=slot_id,
                         activate_at=body.activate_at,
-                        retain_reveal=False,
+                        disclosed_inline=True,
                     )
                     action = "opaque_api_key_rotation_prepared"
                 await audit_studio_action(
@@ -1112,7 +1101,7 @@ async def claim_api_key(
                     JOIN project_api_key_reveals r ON r.key_id = k.id
                     WHERE k.id = $1
                       AND s.project_id = $2
-                      AND r.expires_at > now()
+                      AND k.status IN ('active', 'pending')
                     FOR UPDATE OF k, s, r
                     """,
                     key_id,
@@ -1120,7 +1109,7 @@ async def claim_api_key(
                 )
                 if key_kind is None:
                     raise OpaqueKeyRevealGone(
-                        "API key reveal is expired, claimed, or absent"
+                        "API key plaintext is no longer stored"
                     )
                 if key_kind == "secret":
                     await ensure_project_admin_access(
@@ -1162,6 +1151,5 @@ async def claim_api_key(
         content={
             "key_id": str(key_id),
             "api_key": token,
-            "reveal_once": True,
         },
     )

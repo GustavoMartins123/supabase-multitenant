@@ -3,6 +3,7 @@ if type(context) ~= "table" then
     return
 end
 require("security.storage_upload_limit").enforce(context)
+require("proxy_rewrites.storage_public_url").handle(context)
 
 local get_service_key = require("security.get_service_key")
 local key = get_service_key(context.ref)

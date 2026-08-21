@@ -196,7 +196,11 @@ final class OpaqueApiKeysController extends AsyncNotifier<OpaqueApiKeysState> {
         ),
         onSuccess: (current) => current.copyWith(
           reveals: current.reveals
-              .where((reveal) => reveal.keyId != keyId)
+              .map(
+                (reveal) => reveal.keyId == keyId
+                    ? reveal.copyWith(revealedAt: DateTime.now().toUtc())
+                    : reveal,
+              )
               .toList(growable: false),
         ),
       );

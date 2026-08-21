@@ -1,93 +1,93 @@
-# Migrations do control plane
+# Control-plane migrations
 
-O schema do database `postgres` — usuários, projetos, jobs, intenções do host-agent, chaves opacas, colaboração e restore points — pertence a arquivos `.sql` versionados em `servidor/api-internal/app/migrations`.
+The `postgres` database schema — users, projects, jobs, host-agent intents, opaque keys, collaboration, and restore points — belongs to versioned `.sql` files in `servidor/api-internal/app/migrations`.
 
-Iniciar ou reiniciar a Projects API não altera schema. O processo que atende requisições apenas confere a versão aplicada e falha fechado quando o banco está atrás da imagem.
+Starting or restarting the Projects API does not change the schema. The request-serving process only checks the applied version and fails closed when the database is behind the image.
 
-## Fronteiras
+## Boundaries
 
-| Camada | Responsável | Quando roda |
+| Layer | Owner | When it runs |
 | --- | --- | --- |
-| Objetos de cluster: schemas internos, `_supabase_storage`, `_supabase_template`, `meta_trap`, `meta_guest`, pgvector | `servidor/volumes/db/create_template.sh` | uma única vez, no initdb do Postgres |
-| Tabelas, índices, constraints, triggers e seeds do control plane | `app/migrations/NNNN_*.sql` | a cada deploy, pelo comando privilegiado |
-| Identidade de banco `key_authorizer` | `app/control_plane_roles.py`, chamado pelo mesmo comando | a cada deploy |
-| Verificação de compatibilidade | `verify_control_plane_schema()` no startup da API | a cada boot, sem escrever |
+| Cluster objects: internal schemas, `_supabase_storage`, `_supabase_template`, `meta_trap`, `meta_guest`, pgvector | `servidor/volumes/db/create_template.sh` | once, during Postgres initdb |
+| Control-plane tables, indexes, constraints, triggers, and seeds | `app/migrations/NNNN_*.sql` | every deployment, through the privileged command |
+| `key_authorizer` database identity | `app/control_plane_roles.py`, called by the same command | every deployment |
+| Compatibility check | `verify_control_plane_schema()` at API startup | every boot, without writing |
 
-O bootstrap histórico não cria mais nenhuma tabela do control plane. Uma instalação limpa fica idêntica a uma instalação existente migrada.
+The historical bootstrap no longer creates any control-plane table. A clean installation is identical to an existing migrated installation.
 
 ## Ledger
 
-`control_plane_schema_migrations` registra, por versão: nome, checksum SHA-256 do arquivo, timestamp, `current_user` e duração.
+`control_plane_schema_migrations` records, per version: name, SHA-256 file checksum, timestamp, `current_user`, and duration.
 
-O checksum é a trava contra edição retroativa. Alterar um arquivo já aplicado faz `apply` e o boot recusarem explicitamente, porque o banco deixaria de corresponder ao que o repositório descreve.
+The checksum prevents retroactive editing. Changing an already-applied file makes `apply` and boot reject it explicitly because the database would no longer match the repository's description.
 
-## Comandos
+## Commands
 
-O comando roda dentro da imagem da Projects API, com o DSN administrativo:
+The command runs inside the Projects API image with the administrative DSN:
 
 ```bash
 docker compose -f docker-compose-api.yml -f docker-compose.single-node.yml \
   --env-file .env run --rm control-plane-migrations
 ```
 
-Os três modos:
+The three modes:
 
 ```bash
-python -m app.schema_migrations apply    # aplica pendências e provisiona identidades
-python -m app.schema_migrations status   # lista o ledger contra os arquivos da imagem
-python -m app.schema_migrations verify   # confere sem alterar nada; sai 3 se houver pendência
+python -m app.schema_migrations apply    # applies pending migrations and provisions identities
+python -m app.schema_migrations status   # lists the ledger against the image files
+python -m app.schema_migrations verify   # verifies without changing anything; exits 3 if pending
 ```
 
-`apply` toma um advisory lock, de modo que dois migradores simultâneos não se atropelam, e usa `lock_timeout` de 30 segundos: se o processo anterior ainda segurar um lock de tabela, o deploy falha com diagnóstico em vez de travar indefinidamente.
+`apply` takes an advisory lock so simultaneous migrators do not conflict, and uses a 30-second `lock_timeout`: if the previous process still holds a table lock, deployment fails with a diagnostic instead of hanging indefinitely.
 
-Cada versão roda na sua própria transação, junto com o registro no ledger. Uma versão que falha é revertida inteira e nada é marcado como aplicado.
+Each version runs in its own transaction together with its ledger entry. A failed version is fully rolled back and nothing is marked as applied.
 
-## Ordem no deploy
+## Deployment order
 
-O serviço efêmero `control-plane-migrations` faz esse passo dentro do próprio Compose:
+The ephemeral `control-plane-migrations` service performs this step inside Compose:
 
 ```text
-supabase-db saudável
+supabase-db healthy
         │
         ▼
-control-plane-migrations  (DSN administrativo, aplica NNNN pendentes, provisiona key_authorizer)
+control-plane-migrations  (administrative DSN, applies pending NNNN, provisions key_authorizer)
         │ service_completed_successfully
         ├────────────────► key-authorizer
-        └────────────────► projects-api  (verifica a versão e serve tráfego)
+        └────────────────► projects-api  (verifies the version and serves traffic)
 ```
 
-`start.sh` espera o banco ficar saudável antes de subir esse Compose. `key-authorizer` e `projects-api` só iniciam depois que o migrador termina com sucesso; se ele falhar, nenhum dos dois sobe.
+`start.sh` waits for the database to become healthy before starting this Compose. `key-authorizer` and `projects-api` start only after the migrator succeeds; if it fails, neither starts.
 
-O host-agent continua esperando as tabelas existirem (`--check-schema`), agora publicadas pelo migrador e não mais pelo boot da API.
+The host-agent continues to wait for the tables to exist (`--check-schema`), now published by the migrator rather than by API boot.
 
-## Adicionar uma migration
+## Add a migration
 
-1. crie `NNNN_nome_curto.sql` com o próximo número de quatro dígitos, sem buracos na sequência;
-2. escreva DDL idempotente (`IF NOT EXISTS`, `DO $$` com checagem em `pg_constraint`/`pg_trigger`), porque a mesma versão precisa atravessar instalações em estados diferentes;
-3. faça o backfill de dados **antes** de apertar `NOT NULL` ou adicionar `CHECK`, e lembre que `NULL IN (...)` devolve `NULL`;
-4. conceda na própria migration os privilégios das tabelas que ela cria;
-5. exercite os dois caminhos com `tests/integration/test_control_plane_migrations_postgres.py`.
+1. create `NNNN_short_name.sql` with the next four-digit number, without gaps in the sequence;
+2. write idempotent DDL (`IF NOT EXISTS`, `DO $$` with checks in `pg_constraint`/`pg_trigger`) because the same version must work across installations in different states;
+3. backfill data **before** tightening `NOT NULL` or adding `CHECK`, and remember that `NULL IN (...)` returns `NULL`;
+4. grant privileges for the tables it creates inside the migration itself;
+5. exercise both paths with `tests/integration/test_control_plane_migrations_postgres.py`.
 
-Nunca edite um arquivo já aplicado em produção. Renomear ou reordenar versões também quebra o ledger.
+Never edit a file already applied in production. Renaming or reordering versions also breaks the ledger.
 
-## Rollback e forward-fix
+## Rollback and forward-fix
 
-Não existe `downgrade`. Reverter schema com dados vivos é o caminho que perde informação em silêncio, e o ledger não descreve o inverso de uma migration.
+There is no `downgrade`. Reverting a schema with live data can silently lose information, and the ledger does not describe the inverse of a migration.
 
-O procedimento é sempre avançar:
+The procedure is always to move forward:
 
-1. **Falha durante o `apply`**: a versão foi revertida pela transação e não entrou no ledger. Corrija o arquivo, que ainda não foi aplicado em lugar nenhum, e rode `apply` de novo.
-2. **Versão aplicada que se revelou errada**: escreva uma nova versão que corrija o estado, com o mesmo cuidado de idempotência. O arquivo original permanece intacto no histórico.
-3. **Imagem antiga contra banco novo** — um rollback de release: o boot registra `banco a frente desta imagem` e continua servindo, porque o schema é compatível para frente. Se a imagem antiga precisar de uma coluna que a versão nova removeu, o caminho é avançar a imagem, não reverter o banco.
-4. **Imagem nova contra banco antigo**: o boot recusa com a lista de versões faltando. Rode `apply` antes de subir a API.
+1. **Failure during `apply`**: the version was rolled back by the transaction and did not enter the ledger. Fix the file, which has not been applied anywhere yet, and run `apply` again.
+2. **An applied version proved incorrect**: write a new version that fixes the state with the same idempotency care. The original file remains intact in history.
+3. **Old image against a new database** — a release rollback: boot records `database ahead of this image` and continues serving because the schema is forward-compatible. If the old image needs a column removed by the new version, advance the image rather than reverting the database.
+4. **New image against an old database**: boot rejects with the list of missing versions. Run `apply` before starting the API.
 
-Restaurar backup do database `postgres` continua sendo a única forma de voltar o schema no tempo, e volta os dados junto.
+Restoring a backup of the `postgres` database remains the only way to move the schema back in time, and it moves the data back with it.
 
-## Instalações anteriores às migrations
+## Installations predating migrations
 
-A primeira execução do `apply` numa instalação existente aplica as três versões atuais sobre o schema que o boot já havia criado. As criações são no-op e restam apenas as convergências que faltavam, todas em `0001`:
+The first `apply` run on an existing installation applies the three current versions to the schema already created by boot. The creations are no-ops and only missing convergence remains, all in `0001`:
 
-- `jobs.action` e `jobs.updated_at` passam a `NOT NULL`. Jobs anteriores à coluna `action` não registraram a operação e recebem o marcador `unknown`, que não pertence a nenhuma ação executável nem à lista de ações idempotentes;
-- `jobs` recebe os `CHECK` de `progress`, `total_steps` e `attempt`, que só existiam em instalações criadas do zero.
+- `jobs.action` and `jobs.updated_at` become `NOT NULL`. Jobs created before the `action` column did not record the operation and receive the `unknown` marker, which belongs to neither an executable action nor the idempotent-action list;
+- `jobs` receives the `CHECK` constraints for `progress`, `total_steps`, and `attempt`, which existed only on installations created from scratch.
 
-Antes disso, o cálculo de `is_idempotent` no boot quebrava numa instalação com jobs anteriores à coluna `action`, porque `NULL IN (...)` viola o `NOT NULL` da coluna. O backfill passou a vir antes do recálculo.
+Before this, the boot calculation of `is_idempotent` failed on an installation with jobs created before the `action` column because `NULL IN (...)` violates the column's `NOT NULL`. The backfill now happens before recalculation.

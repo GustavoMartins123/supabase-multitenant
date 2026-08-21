@@ -76,17 +76,22 @@ async def scan_automatic_opaque_key_rotations() -> int:
                 return 0
 
             await conn.execute(
-                "DELETE FROM project_api_key_reveals WHERE expires_at <= now()"
+                """
+                DELETE FROM project_api_key_reveals r
+                USING project_api_keys k
+                WHERE r.key_id = k.id
+                  AND (
+                      k.status IN ('revoked', 'expired')
+                      OR (k.expires_at IS NOT NULL AND k.expires_at <= now())
+                  )
+                """
             )
 
             due = await conn.fetch(
                 """
                 SELECT s.project_id, s.id AS slot_id, s.name,
                        k.id AS pending_key_id, k.rotation_trigger,
-                       EXISTS (
-                           SELECT 1 FROM project_api_key_reveals r
-                           WHERE r.key_id = k.id AND r.expires_at > now()
-                       ) AS reveal_unclaimed
+                       k.revealed_at IS NULL AS reveal_unclaimed
                 FROM project_api_key_slots s
                 JOIN projects p ON p.id = s.project_id
                 JOIN project_api_keys k ON k.slot_id = s.id
@@ -375,7 +380,7 @@ async def scan_automatic_opaque_key_rotations() -> int:
                     project_id=row["project_id"],
                     slot_id=row["slot_id"],
                     activate_at=row["expires_at"],
-                    retain_reveal=True,
+                    disclosed_inline=False,
                     rotation_trigger="automatic",
                 )
                 await audit_studio_action(

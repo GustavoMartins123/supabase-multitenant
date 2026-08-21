@@ -1,64 +1,64 @@
 # Control plane
 
-O control plane administra projetos e usuários. Ele não atende diretamente as APIs públicas de Auth, REST ou Storage das aplicações.
+The control plane manages projects and users. It does not directly serve the public Auth, REST, or Storage APIs used by applications.
 
-Os componentes principais são:
+The main components are:
 
 - Flutter selector;
 - OpenResty/Lua;
-- Projects API em FastAPI;
-- `key-authorizer` de data plane com privilégio mínimo;
-- database `postgres`;
-- host-agent no servidor, que executa os scripts de lifecycle e o Docker (ver [host-agent](host-agent.md));
-- integrações internas com Realtime, Supavisor, Storage global, Postgres-Meta e Studio.
+- Projects API on FastAPI;
+- least-privilege data-plane `key-authorizer`;
+- `postgres` database;
+- host-agent on the server, which runs lifecycle scripts and Docker (see [host-agent](host-agent.md));
+- internal integrations with Realtime, Supavisor, global Storage, Postgres-Meta, and Studio.
 
-## Responsabilidades
+## Responsibilities
 
-### Identidade
+### Identity
 
-`last_login_at` muda somente quando o token HMAC carrega um fingerprint de uma nova sessão Authelia. O fingerprint é derivado por SHA-256 e o cookie nunca sai do gateway. Requisições normais atualizam `last_seen_at` com amostragem de cinco minutos.
+`last_login_at` changes only when the HMAC token carries a fingerprint for a new Authelia session. The fingerprint is derived with SHA-256 and the cookie never leaves the gateway. Normal requests update `last_seen_at` with five-minute sampling.
 
-O Authelia autentica o usuário, mas a autorização interna usa um UUID estável salvo na tabela `users`.
+Authelia authenticates the user, but internal authorization uses a stable UUID stored in the `users` table.
 
-O OpenResty resolve e sincroniza a identidade, depois envia para a API:
+OpenResty resolves and synchronizes the identity, then sends the API:
 
 ```text
 X-User-Token: v1.<payload>.<assinatura>
 ```
 
-O token é assinado com `NGINX_HMAC_SECRET` e possui validade curta. A API extrai o UUID, valida a assinatura e consulta o usuário no banco.
+The token is signed with `NGINX_HMAC_SECRET` and has short validity. The API extracts the UUID, validates the signature, and queries the user in the database.
 
-Email, username, display name e grupos são atributos sincronizados. Eles não substituem o UUID canônico.
+Email, username, display name, and groups are synchronized attributes. They do not replace the canonical UUID.
 
 ### Step-up authentication
 
-Autorização responde se o ator pode executar uma operação; step-up confirma que o mesmo ator ainda controla a sessão no instante sensível. Nesta etapa ele é obrigatório para exclusão integral de projeto e para toda resposta que exponha plaintext de `sb_secret_*`.
+Authorization answers whether the actor may perform an operation; step-up confirms that the same actor still controls the session at the sensitive moment. At this stage it is required for full project deletion and for every response exposing `sb_secret_*` plaintext.
 
-O Flutter envia a senha pessoal somente ao endpoint do OpenResty. O gateway obtém o username do `auth_request`, e não do JSON do cliente, valida a senha no `/auth/api/firstfactor` interno do Authelia e não encaminha o `Set-Cookie` dessa subrequisição. Depois emite um grant `su1` HMAC de cinco minutos, vinculado ao UUID, fingerprint do cookie atual, ação, project ref, recurso e nonce.
+Flutter sends the personal password only to the OpenResty endpoint. The gateway obtains the username from `auth_request), not from the client's JSON, validates the password at Authelia's internal `/auth/api/firstfactor`, and does not forward that subrequest's `Set-Cookie`. It then issues a five-minute `su1` HMAC grant bound to the UUID, current-cookie fingerprint, action, project ref, resource, and nonce.
 
-A Projects API não confunde esse grant com `X-User-Token`: prefixo e chave derivada possuem domínio próprio. Ela revalida autorização no PostgreSQL e insere o nonce em `studio_step_up_grant_consumptions` com `ON CONFLICT DO NOTHING`. Assim cada grant é aceito uma vez. Indisponibilidade do Authelia, binding ausente, token expirado/repetido ou mudança de papel bloqueia a ação. Senha, grant completo e plaintext não são persistidos nem auditados.
+The Projects API does not confuse this grant with `X-User-Token`: the prefix and derived key have their own domain. It revalidates authorization in PostgreSQL and inserts the nonce into `studio_step_up_grant_consumptions` with `ON CONFLICT DO NOTHING`. Each grant is therefore accepted once. Authelia unavailability, missing binding, an expired/repeated token, or a role change blocks the action. Password, complete grant, and plaintext are not persisted or audited.
 
-### Autorização
+### Authorization
 
-A autorização considera:
+Authorization considers:
 
-- administrador global;
-- owner do projeto;
-- membro com role `admin`;
-- membro com role `member`;
-- regras específicas da operação.
+- global administrator;
+- project owner;
+- member with `admin` role;
+- member with `member` role;
+- operation-specific rules.
 
-A API não confia apenas nos grupos enviados pelo gateway. Ela consulta o estado persistido e valida ownership ou membership antes de acessar segredos, settings, telemetria ou metadata.
+The API does not trust only the groups sent by the gateway. It queries persisted state and validates ownership or membership before accessing secrets, settings, telemetry, or metadata.
 
-## Schema central
+## Central schema
 
-O database `postgres` guarda o estado do control plane.
+The `postgres` database stores control-plane state.
 
-O schema pertence às migrations versionadas em `servidor/api-internal/app/migrations`. Um passo privilegiado e efêmero do deploy as aplica e provisiona a identidade `key_authorizer`; o boot da Projects API apenas confere a versão registrada no ledger e recusa servir quando o banco está atrás da imagem. Nenhum DDL sai do processo que atende requisições. Veja [Migrations do control plane](control-plane-migrations.md).
+The schema belongs to versioned migrations in `servidor/api-internal/app/migrations`. A privileged, ephemeral deployment step applies them and provisions the `key_authorizer` identity; Projects API boot only checks the version recorded in the ledger and refuses to serve when the database is behind the image. No DDL runs in the request-serving process. See [Control-plane migrations](control-plane-migrations.md).
 
-### Identidade e acesso
+### Identity and access
 
-Tabelas principais:
+Main tables:
 
 - `users`;
 - `user_groups`;
@@ -66,46 +66,46 @@ Tabelas principais:
 - `projects`;
 - `project_members`;
 - `project_members_audit`;
-- `studio_step_up_grant_consumptions` (ledger sem senha ou bearer).
+- `studio_step_up_grant_consumptions` (ledger without passwords or bearer tokens).
 
-A tabela `projects` possui o UUID canônico (`id`), o vínculo persistido com o tenant externo (`tenant_uuid`), project ref, display name, versão das chaves e segredos criptografados. Em projetos novos, `tenant_uuid` recebe exatamente o valor de `id`; a coluna separada mantém compatibilidade auditável com projetos legados.
+The `projects` table contains the canonical UUID (`id`), persisted binding to the external tenant (`tenant_uuid`), project ref, display name, key version, and encrypted secrets. For new projects, `tenant_uuid` receives exactly `id`; the separate column preserves auditable compatibility with legacy projects.
 
-### Chaves de API opacas
+### Opaque API keys
 
-O registro público não usa as colunas escalares de JWT como credenciais de cliente:
+The public registry does not use scalar JWT columns as client credentials:
 
-- `project_api_key_slots` representa cada consumidor e sua política;
-- `project_api_keys` mantém versões, digest, expiração opcional e linhagem;
-- `project_api_key_reveals` guarda temporariamente o plaintext cifrado;
-- `projects.api_keyset_version` versiona cada mutação;
-- os timestamps `opaque_*` representam preparação, corte, ativação e readiness.
+- `project_api_key_slots` represents each consumer and its policy;
+- `project_api_keys` maintains versions, digest, optional expiration, and lineage;
+- `project_api_key_reveals` temporarily stores encrypted plaintext;
+- `projects.api_keyset_version` versions each mutation;
+- `opaque_*` timestamps represent preparation, cutover, activation, and readiness.
 
-O `key-authorizer` autentica cada Nginx por um token exclusivo cujo hash fica em `projects.api_gateway_token_hash`. Sua role possui apenas os `SELECT` de que o lookup precisa e `UPDATE(last_used_at)`. Falha de banco ou de subrequest bloqueia o acesso; a Projects API não participa do caminho quente.
+The `key-authorizer` authenticates each Nginx with an exclusive token whose hash is stored in `projects.api_gateway_token_hash`. Its role has only the `SELECT` permissions required by the lookup and `UPDATE(last_used_at)`. A database or subrequest failure blocks access; the Projects API is not on the hot path.
 
-As rotas ficam sob `/api/projects/{project_ref}/api-key-*` e `/opaque-api-keys/migration`. Membros recebem somente metadados/reveals `publishable`; mutações continuam limitadas a admin do projeto ou admin global. Plaintext de `secret` acrescenta step-up, e todas as operações revalidam o estado persistido, usam transações e nunca listam plaintext. Veja [o runbook](../12-chaves-api-opacas.md).
+Routes live under `/api/projects/{project_ref}/api-key-*` and `/opaque-api-keys/migration`. Members receive only `publishable` metadata/reveals; mutations remain limited to project or global admins. `secret` plaintext adds step-up, and every operation revalidates persisted state, uses transactions, and never lists plaintext. See [the runbook](../12-opaque-api-key-operations.md).
 
 ### Jobs
 
-A tabela `jobs` persiste:
+The `jobs` table persists:
 
-- ação;
+- action;
 - payload;
 - status;
-- progresso;
-- etapa atual;
-- total de etapas;
+- progress;
+- current stage;
+- total stages;
 - timestamps;
-- tails de stdout e stderr;
-- código de erro;
-- idempotência;
+- stdout and stderr tails;
+- error code;
+- idempotency;
 - retry;
-- tentativa atual.
+- current attempt.
 
-A intenção física correspondente fica em `host_agent_commands`, com assinatura, lease, heartbeat, resultado e ligação ao `job_id`. Essa separação permite que o job administrativo sobreviva a restart da API sem transformar restart em autorização para executar novamente um script distribuído.
+The corresponding physical intent lives in `host_agent_commands`, with signature, lease, heartbeat, result, and `job_id` link. This separation lets the administrative job survive an API restart without turning restart into authorization to run a distributed script again.
 
-### Colaboração no Studio
+### Studio collaboration
 
-O control plane também mantém recursos administrativos que não pertencem aos databases dos tenants:
+The control plane also maintains administrative resources that do not belong to tenant databases:
 
 - `studio_project_tags`;
 - `studio_project_tag_assignments`;
@@ -117,13 +117,13 @@ O control plane também mantém recursos administrativos que não pertencem aos 
 - `project_name_history`;
 - `project_restore_points`.
 
-Esses recursos usam o UUID do projeto como referência. Um rename não cria um novo projeto e não deve quebrar notas, tags, histórico ou auditoria.
+These resources use the project UUID as their reference. A rename does not create a new project and must not break notes, tags, history, or audit records.
 
-## Jobs e fila por projeto
+## Jobs and per-project queue
 
-A Projects API serializa operações de lifecycle por projeto. Isso evita executar, por exemplo, rename e delete simultaneamente para o mesmo tenant.
+The Projects API serializes lifecycle operations per project. This prevents, for example, rename and delete from running simultaneously for the same tenant.
 
-Estados principais:
+Main states:
 
 ```text
 queued -> running -> done
@@ -131,167 +131,167 @@ queued -> running -> done
                   -> cancelled
 ```
 
-A API registra progresso e etapa atual durante operações longas.
+The API records progress and the current stage during long operations.
 
-### Recovery no startup
+### Startup recovery
 
-Ao iniciar, a API procura jobs em `queued` ou `running` e separa duas situações:
+At startup, the API looks for jobs in `queued` or `running` and separates two situations:
 
-- se já existe uma intenção `host_agent_commands` correspondente, o recovery religa o job à **mesma intenção**, acompanha o comando ainda ativo ou reutiliza o resultado persistido; não dispara uma segunda execução;
-- ações idempotentes conhecidas podem ser retomadas ou repetidas de forma controlada quando não há comando físico em andamento;
-- operações distribuídas não idempotentes com resultado realmente incerto não são reexecutadas cegamente; o estado é preservado para rollback/reconciliação específica ou revisão manual;
-- rename mantém histórico separado em `project_name_history`, e backup/restore preservam seus registros próprios.
+- if a corresponding `host_agent_commands` intent already exists, recovery reconnects the job to the **same intent**, follows the command while active, or reuses the persisted result; it does not launch a second execution;
+- known idempotent actions can be resumed or repeated in a controlled way when no physical command is in progress;
+- non-idempotent distributed operations with genuinely uncertain results are not blindly rerun; state is preserved for domain-specific rollback/reconciliation or manual review;
+- rename keeps separate history in `project_name_history`, and backup/restore preserve their own records.
 
-O recovery não deve presumir que repetir qualquer script é seguro.
+Recovery must not assume that rerunning any script is safe.
 
-## Segredos
+## Secrets
 
-### Persistência
+### Persistence
 
-`anon_key`, `service_role` e `config_token` são armazenados com envelope encryption.
+`anon_key`, `service_role`, and `config_token` are stored with envelope encryption.
 
-Cada projeto possui um DEK. O DEK é envelopado pela `PROJECT_SECRETS_MASTER_KEY`. Os segredos usam AES-256-GCM com AAD contendo o projeto e a finalidade do valor.
+Each project has a DEK. The DEK is wrapped by `PROJECT_SECRETS_MASTER_KEY`. Secrets use AES-256-GCM with AAD containing the project and the value's purpose.
 
-### Transporte da service role
+### Service-role transport
 
-O OpenResty precisa da `service_role` para reproduzir operações administrativas do Supabase Studio.
+OpenResty needs `service_role` to reproduce Supabase Studio administrative operations.
 
-A API:
+The API:
 
-1. valida usuário e acesso ao projeto;
-2. descriptografa o segredo persistido;
-3. cifra o valor para transporte com `STUDIO_SERVICE_KEY_ENCRYPTION_KEY`;
-4. retorna somente para a rota interna autorizada.
+1. validates the user and project access;
+2. decrypts the persisted secret;
+3. encrypts the value for transport with `STUDIO_SERVICE_KEY_ENCRYPTION_KEY`;
+4. returns it only to the authorized internal route.
 
-O Nginx descriptografa, guarda no cache compartilhado e injeta no upstream. O navegador não recebe a chave.
+Nginx decrypts it, stores it in the shared cache, and injects it into upstream. The browser does not receive the key.
 
-### Cache versionado
+### Versioned cache
 
-A tabela `projects` mantém `project_key_version`.
+The `projects` table maintains `project_key_version`.
 
-Depois de uma rotação:
+After a rotation:
 
-1. a API persiste as novas chaves e incrementa a versão;
-2. chama o endpoint interno de invalidação no Studio;
-3. o OpenResty remove a entrada anterior e publica a versão mínima;
-4. os workers descartam chaves abaixo dessa versão;
-5. toda utilização confirma a versão canônica na Projects API.
+1. the API persists the new keys and increments the version;
+2. calls the internal invalidation endpoint in Studio;
+3. OpenResty removes the previous entry and publishes the minimum version;
+4. workers discard keys below that version;
+5. every use confirms the canonical version in the Projects API.
 
-Falha na consulta de versão bloqueia a requisição. O OpenResty não usa uma service key em cache quando não consegue provar que ela corresponde à versão persistida.
+Failure of the version query blocks the request. OpenResty does not use a cached service key when it cannot prove that it matches the persisted version.
 
-### Agendadores de chaves
+### Key schedulers
 
-A Projects API mantém dois ciclos independentes. `key_expires_at` agenda a regeneração dos JWTs internos anon/service role pelo fluxo durável `rotate_key`. O registro opaco agenda cada slot por `project_api_keys.expires_at` quando esse campo possui timestamp e prepara uma versão `pending` que precisa de claim e confirmação. `expires_at = NULL` representa um slot sem expiração temporal e fica fora das consultas de lead time e vencimento.
+The Projects API maintains two independent cycles. `key_expires_at` schedules regeneration of internal anon/service-role JWTs through the durable `rotate_key` flow. The opaque registry schedules each slot through `project_api_keys.expires_at` when that field has a timestamp and prepares a `pending` version requiring claim and confirmation. `expires_at = NULL` represents a slot without time-based expiration and is excluded from lead-time and expiration queries.
 
-Os dois scanners usam advisory lock do PostgreSQL e locks de linha para eleição de líder e distribuição segura entre réplicas. O scheduler opaco só processa projetos cujo gateway possui `opaque_gateway_ready_at`. Pending manual com cutover explícito continua convergindo mesmo quando a nova versão não expira.
+Both scanners use a PostgreSQL advisory lock and row locks for leader election and safe distribution across replicas. The opaque scheduler processes only projects whose gateway has `opaque_gateway_ready_at`. A manual pending version with explicit cutover continues converging even when the new version does not expire.
 
-Falhas automáticas bloqueiam novas tentativas daquele projeto até intervenção explícita. Habilitar novamente limpa o bloqueio e solicita uma nova reconciliação; desabilitar impede que o host-agent autorize o ator de sistema.
+Automatic failures block new attempts for that project until explicit intervention. Re-enabling clears the block and requests a new reconciliation; disabling prevents the host-agent from authorizing the system actor.
 
-O comportamento canônico do cache interno está documentado em [OpenResty/Lua](openresty-lua.md). O lifecycle externo está no [runbook de chaves opacas](../12-chaves-api-opacas.md).
+The canonical internal-cache behavior is documented in [OpenResty/Lua](openresty-lua.md). The external lifecycle is in the [opaque-key runbook](../12-opaque-api-key-operations.md).
 
-## Settings de projeto
+## Project settings
 
-A API permite alterar apenas uma whitelist de variáveis conhecidas.
+The API allows changing only a whitelist of known variables.
 
-Categorias atuais:
+Current categories:
 
-- signup e auto-confirmação do GoTrue;
-- usuários anônimos e telefone;
-- expiração de JWT e OTP;
-- tamanho mínimo da senha;
-- schemas e limites do PostgREST;
-- pool do PostgREST;
-- limite de upload;
-- transformação de imagens.
+- GoTrue signup and auto-confirmation;
+- anonymous users and phone;
+- JWT and OTP expiration;
+- minimum password length;
+- PostgREST schemas and limits;
+- PostgREST pool;
+- upload limit;
+- image transformation.
 
-Os valores locais são normalizados, validados e gravados de forma atômica no `.env` do projeto. Settings pertencentes ao Storage compartilhado são aplicados ao tenant canônico pela Admin API durante o comando fechado do host-agent, sem recriar o Storage ou o imgproxy globais.
+Local values are normalized, validated, and written atomically to the project's `.env`. Settings belonging to shared Storage are applied to the canonical tenant through the Admin API during the host-agent's closed command, without recreating global Storage or imgproxy.
 
-A API calcula quais serviços foram afetados e enfileira somente a recriação ou reconciliação necessária.
+The API calculates which services were affected and queues only the required recreation or reconciliation.
 
-## Telemetria administrativa
+## Administrative telemetry
 
-Owners, admins do projeto e administradores globais podem consultar telemetria de usuários do Auth.
+Owners, project admins, and global administrators can query Auth user telemetry.
 
-A API conecta diretamente no database do projeto e consulta `auth.users` e `auth.sessions` para intervalos:
+The API connects directly to the project database and queries `auth.users` and `auth.sessions` for:
 
-- 24 horas;
-- 7 dias;
-- 30 dias;
-- período customizado limitado.
+- 24 hours;
+- 7 days;
+- 30 days;
+- a limited custom period.
 
-A leitura é auditada e não usa cache no navegador. Falhas de compatibilidade do schema do GoTrue retornam erro explícito sem alterar o projeto.
+The read is audited and does not use a browser cache. GoTrue schema compatibility failures return an explicit error without changing the project.
 
 ## Postgres-Meta
 
-O OpenResty encaminha chamadas do Studio para a Projects API. A API:
+OpenResty forwards Studio calls to the Projects API. The API:
 
-1. valida o project ref;
-2. valida identidade e membership;
-3. confere a service role do projeto;
-4. monta internamente a conexão de `_supabase_<project_ref>`;
-5. cifra a conexão com `PG_META_CRYPTO_KEY`;
-6. chama o `postgres-meta-global`.
+1. validates the project ref;
+2. validates identity and membership;
+3. checks the project's service role;
+4. builds the connection to `_supabase_<project_ref>` internally;
+5. encrypts the connection with `PG_META_CRYPTO_KEY`;
+6. calls `postgres-meta-global`.
 
-O cliente não controla host, usuário, database ou header de conexão.
+The client cannot control the host, user, database, or connection header.
 
-## Integrações internas
+## Internal integrations
 
-### Projects API para o host-agent
+### Projects API to host-agent
 
-A Projects API não executa Docker nem shell. Ela grava intenções assinadas com `HOST_AGENT_HMAC_SECRET` na tabela `host_agent_commands` e o host-agent (serviço systemd no host) faz o lease, revalida assinatura, argumentos e autorização e executa o comando fechado. O contrato completo (comandos, lease/heartbeat/timeout, confinamento de paths e sanitização de saída) está em [host-agent](host-agent.md).
+The Projects API does not execute Docker or a shell. It writes intents signed with `HOST_AGENT_HMAC_SECRET` to `host_agent_commands`, and the host-agent (a systemd service on the host) claims the lease, revalidates the signature, arguments, and authorization, and executes the closed command. The complete contract (commands, lease/heartbeat/timeout, path confinement, and output sanitization) is in [host-agent](host-agent.md).
 
-Criação, duplicação, rename, backup, restore, deleção, reconciliação de settings e outros efeitos físicos passam por essa fronteira. Os scripts executados pelo agent registram/reconciliam tenants do Realtime, Supavisor e Storage quando a operação exige.
+Creation, duplication, rename, backup, restore, deletion, settings reconciliation, and other physical effects cross this boundary. Agent scripts register/reconcile Realtime, Supavisor, and Storage tenants when required.
 
-O proxy Docker de lifecycle foi removido junto com o `DOCKER_HOST` da API. O estado dos containers exibido nos endpoints de status vem do snapshot `project_container_state`, mantido pelo agent.
+The lifecycle Docker proxy was removed together with the API's `DOCKER_HOST`. Container state shown by status endpoints comes from the `project_container_state` snapshot maintained by the agent.
 
-Traefik usa exclusivamente o File Provider. Vector recebe logs pelo logging driver Fluent. Nenhum componente em container consulta a API Docker.
+Traefik uses only the File Provider. Vector receives logs through the Fluent logging driver. No container component queries the Docker API.
 
-### OpenResty para Projects API
+### OpenResty to Projects API
 
-Usa `internal-hmac-v1` com identidade `studio-nginx`; nas rotas de usuário, `X-User-Token` continua obrigatório separadamente.
+Uses `internal-hmac-v1` with the `studio-nginx` identity; on user routes, `X-User-Token` remains separately required.
 
-### Projects API para OpenResty
+### Projects API to OpenResty
 
-Usado para:
+Used to:
 
-- invalidar cache de service key;
-- consultar métricas internas;
-- migrar diretórios de snippets durante rename.
+- invalidate the service-key cache;
+- query internal metrics;
+- migrate snippet directories during rename.
 
-A rota valida `internal-hmac-v1` com `X-Internal-Service: projects-api`, timestamp, nonce e hash do body.
+The route validates `internal-hmac-v1` with `X-Internal-Service: projects-api`, timestamp, nonce, and body hash.
 
 ### Push worker
 
-O push worker usa uma assinatura HMAC backend-to-backend com timestamp, nonce e hash do body. Esse contrato é separado do token de usuário.
+The push worker uses a backend-to-backend HMAC signature with timestamp, nonce, and body hash. This contract is separate from the user token.
 
-## Auditoria
+## Auditing
 
-Ações relevantes devem registrar:
+Relevant actions must record:
 
-- projeto;
-- usuário executor;
-- ação;
-- tipo e id do alvo;
-- valor anterior;
-- valor novo;
+- project;
+- executing user;
+- action;
+- target type and ID;
+- previous value;
+- new value;
 - timestamp.
 
-A auditoria é parte do control plane, não dos databases dos projetos.
+Auditing is part of the control plane, not the project databases.
 
-## Invariantes
+## Invariants
 
-- UUID do projeto não muda durante rename.
-- `tenant_uuid` não muda durante rename e identifica o namespace do Storage.
-- Service role não é enviada ao navegador.
-- Project ref é validado antes de formar paths ou nomes de database.
-- Segredos persistidos não usam a chave de transporte do Studio.
-- Header do Postgres-Meta usa uma chave separada dos segredos persistidos.
-- Operações por projeto são serializadas.
-- A Projects API não acessa Docker nem executa shell.
-- Recovery automático é limitado a ações conhecidas como seguras ou à mesma intenção já persistida no host-agent.
-- Autorização consulta estado persistido, não apenas headers textuais.
+- Project UUID does not change during rename.
+- `tenant_uuid` does not change during rename and identifies the Storage namespace.
+- Service role is not sent to the browser.
+- Project ref is validated before forming paths or database names.
+- Persisted secrets do not use the Studio transport key.
+- The Postgres-Meta header uses a key separate from persisted secrets.
+- Operations are serialized per project.
+- The Projects API does not access Docker or execute a shell.
+- Automatic recovery is limited to known-safe actions or the same intent already persisted on the host-agent.
+- Authorization queries persisted state, not only textual headers.
 
-## Código relacionado
+## Related code
 
 - `servidor/api-internal/app/main.py`
 - `servidor/api-internal/app/jobs.py`

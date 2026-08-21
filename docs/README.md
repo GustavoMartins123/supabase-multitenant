@@ -1,79 +1,79 @@
-# Índice da documentação
+# Documentation index
 
-Esta pasta contém a documentação técnica do `supabase-multitenant`.
+This folder contains the technical documentation for `supabase-multitenant`.
 
-A regra é simples: cada assunto deve ter uma fonte canônica. O `00-arquitetura.md` apresenta a visão geral e aponta para documentos especializados. Detalhes operacionais ou de implementação não devem ser copiados para vários arquivos.
+The rule is simple: each topic must have one canonical source. `00-architecture.md` presents the overview and points to specialized documents. Operational or implementation details should not be copied across multiple files.
 
-O estado arquitetural atual assume **host-agent no lugar de acesso Docker pela API**, **API keys opacas como credenciais públicas** e **Storage/imgproxy globais multi-tenant**. Documentos que descrevam LifecycleProxy, Docker socket na Projects API ou Storage/imgproxy por projeto devem ser tratados como material histórico e corrigidos, não como caminhos alternativos suportados.
+The current architectural state assumes **a host-agent instead of API-side Docker access**, **opaque API keys as public credentials**, and **global multi-tenant Storage/imgproxy**. Documents describing LifecycleProxy, the Docker socket in the Projects API, or per-project Storage/imgproxy must be treated as historical material and corrected, not as supported alternative paths.
 
-## Comece por aqui
+## Start here
 
-1. [Arquitetura do sistema](00-arquitetura.md)
+1. [System architecture](00-architecture.md)
 2. [Control plane](architecture/control-plane.md)
-3. [Migrations do control plane](architecture/control-plane-migrations.md)
-4. [Lifecycle dos projetos](architecture/project-lifecycle.md)
+3. [Control-plane migrations](architecture/control-plane-migrations.md)
+4. [Project lifecycle](architecture/project-lifecycle.md)
 5. [Host-agent](architecture/host-agent.md)
-6. [Storage compartilhado, S3 e Storage Vectors](architecture/storage-vectors-lifecycle.md)
-7. [Operação de chaves de API opacas](12-chaves-api-opacas.md)
-8. [Arquitetura OpenResty/Lua](architecture/openresty-lua.md)
-9. [Supabase Analytics por projeto](architecture/supabase-analytics.md)
-10. [Autenticação multi-tenant no Realtime](09-autenticacao-multi-tenant-realtime.md)
+6. [Shared Storage, S3, and Storage Vectors](architecture/storage-vectors-lifecycle.md)
+7. [Opaque API key operations](12-opaque-api-key-operations.md)
+8. [OpenResty/Lua architecture](architecture/openresty-lua.md)
+9. [Per-project Supabase Analytics](architecture/supabase-analytics.md)
+10. [Multi-tenant Realtime authentication](09-multi-tenant-realtime-authentication.md)
 
-## Instalação e configuração
+## Installation and configuration
 
-- [Setup com HTTPS](01-setup-https.md)
-- [Limite de conexões do PostgreSQL](02-Como-aumentar-o-limite-conexoes-postgres.md)
-- [Limite de conexões do Supavisor](03-Como-aumentar-o-limite-conexoes-pooler.md)
-- [Limite de conexões do Realtime](04-Como-aumentar-o-limite-conexoes-realtime.md)
-- [Setup de notificações](06-setup-notification.md)
-- [Erro de CRLF no setup](08-erro-setup-crlf.md)
+- [HTTPS setup](01-https-setup.md)
+- [PostgreSQL connection limit](02-postgresql-connection-limit.md)
+- [Supavisor connection limit](03-pooler-connection-limit.md)
+- [Realtime connection limit](04-realtime-connection-limit.md)
+- [Notification setup](06-notification-setup.md)
+- [CRLF setup error](08-crlf-setup-error.md)
 
-## Segurança
+## Security
 
-- [Política de disclosure do repositório](../SECURITY.md)
-- [Gerenciamento de usuários no Authelia](07-gerenciamento-usuarios-authelia.md)
-- [Hardening do Postgres-Meta global](10-hardening-postgres-meta.md)
-- [Rotação de segredos e conexões do Postgres-Meta](11-rotacao-cripto-conexoes.md)
-- [Operação de chaves de API opacas](12-chaves-api-opacas.md)
-- [Spec de múltiplas chaves opacas](specs/opaque-api-keys.md)
+- [Repository disclosure policy](../SECURITY.md)
+- [Authelia user management](07-authelia-user-management.md)
+- [Global Postgres-Meta hardening](10-postgres-meta-hardening.md)
+- [Postgres-Meta secret and connection rotation](11-project-secret-and-connection-rotation.md)
+- [Opaque API key operations](12-opaque-api-key-operations.md)
+- [Multiple opaque keys specification](specs/opaque-api-keys.md)
 
-## Operação e troubleshooting
+## Operations and troubleshooting
 
-- [Principais erros](05-principais-erros.md)
-- [Migração transitória para Storage compartilhado](architecture/shared-storage-migration.md)
-- A visão atual de jobs, recovery, rename, backup, restore e deleção fica em [Lifecycle dos projetos](architecture/project-lifecycle.md).
-- A visão atual de segredos, identidade, settings e colaboração fica em [Control plane](architecture/control-plane.md).
-- A ordem de aplicação do schema, o ledger e o procedimento de forward-fix ficam em [Migrations do control plane](architecture/control-plane-migrations.md).
-- O contrato físico de Docker, lease, timeout e reautorização fica em [Host-agent](architecture/host-agent.md).
+- [Common errors](05-common-errors.md)
+- [Transitional shared Storage migration](architecture/shared-storage-migration.md)
+- The current view of jobs, recovery, rename, backup, restore, and deletion is in [Project lifecycle](architecture/project-lifecycle.md).
+- The current view of secrets, identity, settings, and collaboration is in [Control plane](architecture/control-plane.md).
+- The schema application order, ledger, and forward-fix procedure are in [Control-plane migrations](architecture/control-plane-migrations.md).
+- The physical Docker, lease, timeout, and reauthorization contract is in [Host-agent](architecture/host-agent.md).
 
-## Fontes canônicas
+## Canonical sources
 
-| Assunto | Documento canônico |
+| Topic | Canonical document |
 | --- | --- |
-| visão macro e fronteiras | `00-arquitetura.md` |
-| API Python, schema central e autorização | `architecture/control-plane.md` |
-| versionamento de schema, ordem do deploy e forward-fix | `architecture/control-plane-migrations.md` |
-| criação, duplicação, rename, rotação, backup, restore e deleção | `architecture/project-lifecycle.md` |
-| execução física no host, HMAC, lease e comandos fechados | `architecture/host-agent.md` |
-| Storage multi-tenant, S3, Vectors e imgproxy | `architecture/storage-vectors-lifecycle.md` |
-| conversão única de instalações anteriores | `architecture/shared-storage-migration.md` |
-| módulos Lua, rewrites e cache de service key | `architecture/openresty-lua.md` |
-| Logflare, Vector, fontes e acesso aos logs | `architecture/supabase-analytics.md` |
-| JWT, UUID do tenant e replication slots | `09-autenticacao-multi-tenant-realtime.md` |
-| fallback seguro do Postgres-Meta | `10-hardening-postgres-meta.md` |
-| envelope encryption e rotação | `11-rotacao-cripto-conexoes.md` |
-| chaves públicas opacas, slots, expiração opcional, migração e incidentes | `12-chaves-api-opacas.md` |
-| disclosure de vulnerabilidades deste projeto | `../SECURITY.md` |
+| high-level view and boundaries | `00-architecture.md` |
+| Python API, central schema, and authorization | `architecture/control-plane.md` |
+| schema versioning, deployment order, and forward-fix | `architecture/control-plane-migrations.md` |
+| creation, duplication, rename, rotation, backup, restore, and deletion | `architecture/project-lifecycle.md` |
+| physical execution on the host, HMAC, lease, and closed commands | `architecture/host-agent.md` |
+| multi-tenant Storage, S3, Vectors, and imgproxy | `architecture/storage-vectors-lifecycle.md` |
+| one-way conversion of previous installations | `architecture/shared-storage-migration.md` |
+| Lua modules, rewrites, and service-key cache | `architecture/openresty-lua.md` |
+| Logflare, Vector, sources, and log access | `architecture/supabase-analytics.md` |
+| JWT, tenant UUID, and replication slots | `09-multi-tenant-realtime-authentication.md` |
+| safe Postgres-Meta fallback | `10-postgres-meta-hardening.md` |
+| envelope encryption and rotation | `11-project-secret-and-connection-rotation.md` |
+| opaque public keys, slots, optional expiration, migration, and incidents | `12-opaque-api-key-operations.md` |
+| vulnerability disclosure for this project | `../SECURITY.md` |
 
-## Regra para novas mudanças
+## Rule for new changes
 
-Quando uma mudança alterar comportamento real do sistema:
+When a change alters real system behavior:
 
-1. atualize primeiro o documento canônico do assunto;
-2. no `00-arquitetura.md`, altere somente a visão geral quando necessário;
-3. mantenha `README.md` e `LEIAME.md` como resumos de onboarding, sem criar uma segunda especificação;
-4. evite colar trechos grandes de código que mudam com frequência;
-5. prefira explicar contratos, invariantes, fronteiras e estados;
-6. use links para código apenas como referência de implementação;
-7. mantenha `project UUID`, `tenant UUID` e `project ref` claramente separados;
-8. não documente arquitetura antiga como fallback quando a migração é one-way e o runtime novo a rejeita.
+1. update the topic's canonical document first;
+2. in `00-architecture.md`, change only the overview when necessary;
+3. keep `README.md` and `LEIAME.md` as onboarding summaries, without creating a second specification;
+4. avoid embedding large code snippets that change frequently;
+5. prefer explaining contracts, invariants, boundaries, and states;
+6. use links to code only as implementation references;
+7. keep `project UUID`, `tenant UUID`, and `project ref` clearly separate;
+8. do not document the old architecture as a fallback when the migration is one-way and the new runtime rejects it.

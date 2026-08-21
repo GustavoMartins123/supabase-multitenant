@@ -152,7 +152,8 @@ class OpaqueApiKeyReveal {
     required this.slotName,
     required this.kind,
     required this.createdAt,
-    required this.expiresAt,
+    required this.keyStatus,
+    this.revealedAt,
   });
 
   final String keyId;
@@ -160,7 +161,8 @@ class OpaqueApiKeyReveal {
   final String slotName;
   final String kind;
   final DateTime createdAt;
-  final DateTime expiresAt;
+  final String keyStatus;
+  final DateTime? revealedAt;
 
   factory OpaqueApiKeyReveal.fromJson(Map<String, dynamic> json) {
     return OpaqueApiKeyReveal(
@@ -169,7 +171,20 @@ class OpaqueApiKeyReveal {
       slotName: _requiredString(json, 'slot_name'),
       kind: _requiredString(json, 'kind'),
       createdAt: _requiredDate(json, 'created_at'),
-      expiresAt: _requiredDate(json, 'expires_at'),
+      keyStatus: _requiredString(json, 'key_status'),
+      revealedAt: _optionalDate(json, 'revealed_at'),
+    );
+  }
+
+  OpaqueApiKeyReveal copyWith({DateTime? revealedAt}) {
+    return OpaqueApiKeyReveal(
+      keyId: keyId,
+      slotId: slotId,
+      slotName: slotName,
+      kind: kind,
+      createdAt: createdAt,
+      keyStatus: keyStatus,
+      revealedAt: revealedAt ?? this.revealedAt,
     );
   }
 }

@@ -1,227 +1,230 @@
-# Storage compartilhado, S3 e Storage Vectors
+# Shared Storage, S3, and Storage Vectors
 
-## Contrato upstream adotado
+## Adopted upstream contract
 
-A implementacao usa sem patches o modo multi-tenant oficial do
-`supabase/storage-api:v1.61.12`. A referencia foi conferida na tag
-`v1.61.12` do repositorio upstream, nao apenas no HEAD.
+The implementation uses the official multi-tenant mode of
+`supabase/storage-api:v1.61.12` without patches. The reference was checked at
+the upstream repository's `v1.61.12` tag, not only at HEAD.
 
-O servico global usa:
+The global service uses:
 
 - `MULTI_TENANT=true`;
-- `DATABASE_MULTITENANT_URL` para o registry dedicado `_supabase_storage`;
-- `SERVER_ADMIN_API_KEYS` e a Admin API na porta interna 5001;
-- `AUTH_ENCRYPTION_KEY` para cifrar os campos sensiveis do registry;
-- `REQUEST_X_FORWARDED_HOST_REGEXP` para extrair um UUID de tenant;
-- `STORAGE_BACKEND=file` e `TenantLocation`;
+- `DATABASE_MULTITENANT_URL` for the dedicated `_supabase_storage` registry;
+- `SERVER_ADMIN_API_KEYS` and the Admin API on internal port 5001;
+- `AUTH_ENCRYPTION_KEY` to encrypt sensitive registry fields;
+- `REQUEST_X_FORWARDED_HOST_REGEXP` to extract a tenant UUID;
+- `STORAGE_BACKEND=file` and `TenantLocation`;
 - `VECTOR_BUCKET_PROVIDER=pgvector`;
-- um unico `IMGPROXY_URL` interno.
+- one internal `IMGPROXY_URL`.
 
-O lifecycle é deliberadamente acoplado a esse contrato verificado na tag
-`v1.61.12`: exige a imagem canônica, `STORAGE_BACKEND=file`,
-`STORAGE_FILE_BACKEND_PATH=/var/lib/storage` e bucket interno `objects`. Ele
-falha antes de mutar dados se configuração ou imagem efetivamente executada
-divergirem; não tenta interpretar outro backend como layout file.
+The lifecycle is deliberately coupled to this contract verified at the
+`v1.61.12` tag: it requires the canonical image, `STORAGE_BACKEND=file`,
+`STORAGE_FILE_BACKEND_PATH=/var/lib/storage`, and internal `objects` bucket.
+It fails before mutating data if the configuration or actually running image
+differs; it does not interpret another backend as a file layout.
 
-A Admin API nao e publicada no host nem conectada a `rede-supabase`. O
-container Storage usa redes internas de controle e data plane; um Nginx global
-sem credenciais, com alias `supabase-storage-global` na rede interna exclusiva
-`supabase-storage-gateways`, encaminha exclusivamente para `storage:5000`.
-Somente o Nginx confiavel de cada projeto entra nessa rede; Auth, PostgREST e os
-demais containers de projeto permanecem fora dela. O lifecycle chama a Admin API por
-`docker exec`, le a chave apenas dentro do container e nunca a inclui em argv,
-arquivos de projeto, respostas publicas ou logs.
+The Admin API is not published on the host or connected to `rede-supabase`.
+The Storage container uses internal control and data-plane networks; a
+credentialless global Nginx, aliased as `supabase-storage-global` on the
+exclusive `supabase-storage-gateways` internal network, forwards exclusively
+to `storage:5000`. Only each project's trusted Nginx joins this network;
+Auth, PostgREST, and the other project containers remain outside it. The
+lifecycle calls the Admin API through `docker exec`, reads the key only inside
+the container, and never includes it in argv, project files, public responses,
+or logs.
 
-## Identidade e localizacao fisica
+## Identity and physical location
 
-O Storage tenant ID e o `tenant_uuid` imutavel, persistido em `projects.id` e
-materializado como `PROJECT_UUID`. O `project_ref` nao e usado como identidade
-de objetos porque muda em rename.
+The Storage tenant ID is the immutable `tenant_uuid`, persisted in
+`projects.id` and materialized as `PROJECT_UUID`. `project_ref` is not used
+as object identity because it changes during rename.
 
-Na versao adotada, `TenantLocation` forma a chave fisica como:
+In the adopted version, `TenantLocation` forms the physical key as:
 
 ```text
 <tenant_uuid>/<bucket_id>/<object_name>
 ```
 
-Com `STORAGE_FILE_BACKEND_PATH=/var/lib/storage` e
-`STORAGE_S3_BUCKET=objects`, o host guarda:
+With `STORAGE_FILE_BACKEND_PATH=/var/lib/storage` and
+`STORAGE_S3_BUCKET=objects`, the host stores:
 
 ```text
 servidor/volumes/storage/objects/<tenant_uuid>/<bucket_id>/<object_name>
 ```
 
-Os helpers de lifecycle aceitam apenas UUID canonico em minusculas, resolvem a
-raiz real, rejeitam symlinks e validam archives antes de extrair. Nao existe
-tenant padrao e uma identidade ausente ou desconhecida falha.
+Lifecycle helpers accept only lowercase canonical UUIDs, resolve the real root,
+reject symlinks, and validate archives before extraction. There is no default
+tenant, and a missing or unknown identity fails.
 
-O container do Storage roda com `cap_drop: ALL`, portanto sem
-`CAP_DAC_OVERRIDE`: ele so grava no namespace se for dono dos diretorios.
-`STORAGE_RUN_AS_USER` (formato `UID:GID`) declara essa identidade no compose e
-precisa casar com o dono de `servidor/volumes/storage` no host. Toda
-materializacao de namespace — criacao vazia, clone e restore — passa por
-`storage_enforce_namespace_ownership`, que ajusta o dono ou falha antes de
-entregar um tenant onde o Storage nao consegue escrever.
+The Storage container runs with `cap_drop: ALL`, therefore without
+`CAP_DAC_OVERRIDE`: it can write to a namespace only if it owns the
+directories. `STORAGE_RUN_AS_USER` (format `UID:GID`) declares this identity
+in Compose and must match the owner of `servidor/volumes/storage` on the host.
+Every namespace materialization — empty creation, clone, and restore — passes
+through `storage_enforce_namespace_ownership`, which adjusts ownership or
+fails before delivering a tenant that Storage cannot write to.
 
-Para operações de projeto existente, o par `project_ref`/`tenant_uuid` também é
-comparado com `projects.tenant_uuid` no control plane. Um `.env` divergente não
-consegue selecionar o namespace de outro projeto.
+For operations on an existing project, the `project_ref`/`tenant_uuid` pair is
+also compared with `projects.tenant_uuid` in the control plane. A divergent
+`.env` cannot select another project's namespace.
 
-## Resolucao HTTP do tenant
+## Tenant HTTP resolution
 
-Cada Nginx de projeto conhece o UUID renderizado no seu proprio arquivo e
-sempre sobrescreve o valor recebido do cliente:
+Each project Nginx knows the UUID rendered in its own file and always overwrites
+the value received from the client:
 
 ```nginx
 proxy_set_header X-Forwarded-Host "<tenant_uuid>.storage.internal";
 ```
 
-O Storage aceita somente hosts que casam integralmente com o regexp de UUID.
-O proxy do data plane tambem rejeita com HTTP 421 qualquer request de dados sem
-esse host canonico ou com valor invalido; apenas `/status`, usado pelo
-healthcheck de infraestrutura, nao exige tenant. Assim, `X-Forwarded-Host`,
-`Host` ou qualquer suposto header de tenant enviado pelo cliente nao permite
-selecionar outro projeto.
+Storage accepts only hosts that fully match the UUID regexp. The data-plane
+proxy also rejects with HTTP 421 any data request without this canonical host
+or with an invalid value; only `/status`, used by the infrastructure
+healthcheck, does not require a tenant. Therefore, `X-Forwarded-Host`,
+`Host`, or any purported tenant header sent by the client cannot select
+another project.
 
-O fluxo de chave opaca permanece:
+The opaque-key flow remains:
 
 ```text
 sb_publishable / sb_secret
-  -> Nginx do projeto
-  -> key-authorizer vinculado ao project_ref
-  -> JWT anon/service_role interno daquele projeto
-  -> Storage global com X-Forwarded-Host sobrescrito
+  -> project Nginx
+  -> key-authorizer bound to project_ref
+  -> internal anon/service_role JWT for that project
+  -> global Storage with X-Forwarded-Host overwritten
 ```
 
-O JWT secret, anon key e service key ficam cifrados no registry de cada tenant.
-Nao ha JWT global usado como substituto. Uma chave opaca de A nao e resolvida
-pelo gateway de B e um JWT de A nao valida contra o segredo de B.
+The JWT secret, anon key, and service key are encrypted in each tenant's
+registry. No global JWT is used as a substitute. An opaque key from A is not
+resolved by B's gateway, and A's JWT does not validate against B's secret.
 
-## Database e migrations por tenant
+## Database and per-tenant migrations
 
-O registro do tenant contem duas URLs:
+The tenant record contains two URLs:
 
-- direta: `supabase_storage_admin` em `_supabase_<project_ref>` pelo hostname
-  `db` da rede de controle;
-- pool: `supabase_storage_admin.<project_ref>` pelo hostname `supavisor` da
-  mesma rede.
+- direct: `supabase_storage_admin` in `_supabase_<project_ref>` through the
+  `db` hostname on the control network;
+- pool: `supabase_storage_admin.<project_ref>` through the `supavisor`
+  hostname on the same network.
 
-Create, duplicate, rename e restore concedem acesso a
-`supabase_storage_admin`, fixam `search_path=storage,public` e validam pgvector.
-O lifecycle registra ou atualiza essas URLs pela Admin API. Rename altera apenas
-as URLs; o tenant UUID e o namespace de objetos permanecem iguais.
+Create, duplicate, rename, and restore grant access to
+`supabase_storage_admin`, set `search_path=storage,public`, and validate
+pgvector. The lifecycle registers or updates these URLs through the Admin API.
+Rename changes only the URLs; the tenant UUID and object namespace remain the
+same.
 
-As migrations sao executadas pelo endpoint oficial
-`POST /tenants/<uuid>/migrations`. O lifecycle espera
-`migrationsStatus=COMPLETED` e `isLatest=true`. O Storage upstream serializa a
-migration por tenant; projetos diferentes nao precisam de um lock global.
+Migrations run through the official endpoint
+`POST /tenants/<uuid>/migrations`. The lifecycle expects
+`migrationsStatus=COMPLETED` and `isLatest=true`. Upstream Storage serializes
+migrations per tenant; different projects do not need a global lock.
 
-## Credenciais S3/SigV4
+## S3/SigV4 credentials
 
-Cada tenant recebe pela Admin API oficial uma credencial propria:
+Each tenant receives its own credential through the official Admin API:
 
 ```text
 POST /s3/<tenant_uuid>/credentials
 ```
 
-O access key e o secret retornados sao gravados apenas no `.env` 0600 do
-projeto e nos Vault secrets dos wrappers. No registry, o secret e cifrado com
-`AUTH_ENCRYPTION_KEY`.
+The returned access key and secret are written only to the project's mode-0600
+`.env` and the wrappers' Vault secrets. In the registry, the secret is
+encrypted with `AUTH_ENCRYPTION_KEY`.
 
-Na verificacao de uma assinatura, o upstream chama
-`getS3CredentialsByAccessKey(tenantId, accessKey)`. Portanto o mesmo access key
-so e pesquisado dentro do tenant ja resolvido pelo host. Credencial A com host
-de B falha; nao existe busca global nem credencial substituta.
+When verifying a signature, upstream calls
+`getS3CredentialsByAccessKey(tenantId, accessKey)`. Therefore the access key
+is searched only within the tenant already resolved by the host. Credential A
+with B's host fails; there is no global lookup or substitute credential.
 
-Para `/storage/v1/s3`, o cliente assina o host e path publicos. O Nginx:
+For `/storage/v1/s3`, the client signs the public host and path. Nginx:
 
-- preserva `Host`, que faz parte da assinatura canonica;
-- reescreve a rota interna para `/s3`;
-- informa o prefixo publico confiavel em `X-Forwarded-Prefix`;
-- sobrescreve `X-Forwarded-Host` exclusivamente para resolver o tenant.
+- preserves `Host`, which is part of the canonical signature;
+- rewrites the internal route to `/s3`;
+- provides the trusted public prefix in `X-Forwarded-Prefix`;
+- overwrites `X-Forwarded-Host` exclusively to resolve the tenant.
 
 ## Storage Vectors
 
-Storage Vectors usa o mesmo par SigV4 do S3 Protocol, mas o service da
-assinatura e `s3vectors`. O provider `pgvector` grava metadata e tabelas no
-database do proprio projeto.
+Storage Vectors uses the same SigV4 pair as the S3 Protocol, but the signing
+service is `s3vectors`. The `pgvector` provider writes metadata and tables to
+the project's own database.
 
-O FDW de cada projeto aponta para seu Nginx:
+Each project's FDW points to its Nginx:
 
 ```text
 http://supabase-nginx-<project_ref>:8080/vector
 ```
 
-O wrapper assina o `Host` desse endpoint. O Nginx preserva esse host canonico e
-injeta o UUID imutavel em `X-Forwarded-Host`. Desse modo o endpoint pode mudar
-no rename sem alterar a identidade do tenant. O lifecycle reconcilia os
-`endpoint_url` depois de duplicate, rename e restore.
+The wrapper signs this endpoint's `Host`. Nginx preserves this canonical host
+and injects the immutable UUID into `X-Forwarded-Host`. This allows the
+endpoint to change during rename without changing tenant identity. The
+lifecycle reconciles `endpoint_url` after duplicate, rename, and restore.
 
-O nome fisico de uma tabela pgvector inclui um hash calculado pelo upstream a
-partir de bucket, tenant e index. Um clone `with-data` renomeia essas tabelas em
-transacao para hashes do novo UUID. O clone tambem remove FDWs e Vault secrets
-copiados, cria credenciais novas e recria wrappers somente para seus proprios
-Vector Buckets. `schema-only` cria namespace e metadata vazios.
+The physical name of a pgvector table includes a hash calculated by upstream
+from the bucket, tenant, and index. A `with-data` clone renames these tables in
+a transaction to hashes for the new UUID. The clone also removes copied FDWs
+and Vault secrets, creates new credentials, and recreates wrappers only for its
+own Vector Buckets. `schema-only` creates an empty namespace and metadata.
 
-## Create e validacao
+## Create and validation
 
-Create executa, na ordem relevante:
+Create runs, in the relevant order:
 
-1. cria e valida o database;
-2. registra Realtime e Supavisor;
-3. cria o namespace fisico exclusivo;
-4. registra o tenant pela Admin API;
-5. cria a credencial SigV4;
-6. renderiza apenas Auth, PostgREST, Nginx e Postgres-Meta do projeto;
-7. sobe esses containers;
-8. valida migrations, health do tenant, consulta JWT ao database, S3 SigV4,
-   `ListVectorBuckets` e o caminho real pelo Nginx com um header hostil.
+1. creates and validates the database;
+2. registers Realtime and Supavisor;
+3. creates the exclusive physical namespace;
+4. registers the tenant through the Admin API;
+5. creates the SigV4 credential;
+6. renders only the project's Auth, PostgREST, Nginx, and Postgres-Meta;
+7. starts these containers;
+8. validates migrations, tenant health, JWT-to-database access, S3 SigV4,
+   `ListVectorBuckets`, and the real Nginx path with a hostile host header.
 
-Qualquer falha encerra o job e aciona rollback compensatorio. O Storage global
-nao e reiniciado e nenhum container local e iniciado.
+Any failure ends the job and triggers compensating rollback. Global Storage is
+not restarted and no local container is started.
 
 ## Settings
 
-`FILE_SIZE_LIMIT`, transformacao de imagem, S3 Protocol, Vector Buckets e os
-limites de Vector sao campos do tenant. `apply_storage_settings.sh` envia um
-`PATCH /tenants/<uuid>` e valida o tenant real. Apenas o Nginx do projeto e
-recriado quando seu limite de body precisa mudar; Storage e imgproxy globais nao
-sao reiniciados por settings de projeto.
+`FILE_SIZE_LIMIT`, image transformation, S3 Protocol, Vector Buckets, and
+Vector limits are tenant fields. `apply_storage_settings.sh` sends a
+`PATCH /tenants/<uuid>` and validates the real tenant. Only the project Nginx
+is recreated when its body limit must change; global Storage and imgproxy are
+not restarted for project settings.
 
-## Backup, restore e delete
+## Backup, restore, and delete
 
-Backup coloca somente o tenant Storage solicitado em manutenção fail-closed,
-confirma pelo data plane que ele não aceita novas operações, para os containers
-do projeto e arquiva somente o conteúdo do seu namespace. A manutenção usa uma
-`databasePoolUrl` deliberadamente inalcançável; não usa `null`, porque o Storage
-oficial passaria a consultar `databaseUrl`. O manifest formato 2 vincula
-`project_uuid`, `storage_tenant_id` e `storage_layout=tenant-namespace`.
+Backup places only the requested Storage tenant into fail-closed maintenance,
+confirms through the data plane that it accepts no new operations, stops the
+project containers, and archives only the contents of its namespace.
+Maintenance uses a deliberately unreachable `databasePoolUrl`; it does not
+use `null`, because official Storage would query `databaseUrl`. Format-2
+manifest binds `project_uuid`, `storage_tenant_id`, and
+`storage_layout=tenant-namespace`.
 
-Restore rejeita manifests de outro UUID e archives com path absoluto,
-`..`, symlink ou tipo especial. O namespace atual e movido para staging
-transacional, somente o namespace solicitado e extraido, migrations sao
-reexecutadas e wrappers sao reconciliados. Outros tenants permanecem intactos.
+Restore rejects manifests from another UUID and archives with absolute paths,
+`..`, symlinks, or special types. The current namespace is moved to
+transactional staging, only the requested namespace is extracted, migrations
+are rerun, and wrappers are reconciled. Other tenants remain intact.
 
-Delete revoga todas as credenciais pela Admin API, remove o tenant do registry
-e somente depois remove o diretorio validado daquele UUID. O database do projeto
-so e removido depois dessa etapa concluir.
+Delete revokes all credentials through the Admin API, removes the tenant from
+the registry, and only then removes the validated directory for that UUID. The
+project database is removed only after this step completes.
 
-## Observabilidade
+## Observability
 
-Os logs JSON do Storage global preservam `tenantId`, request ID, metodo, path e
-tipo de operacao quando fornecidos pelo upstream. O proxy do data plane registra
-somente o path sem query string, o metodo, o status, o request ID e o host de
-tenant ja sobrescrito pelo Nginx confiavel. O Vector extrai desse host apenas o
-UUID canonico e envia ambos os fluxos ao sink de Storage, sem registrar chaves,
-tokens, senhas ou credenciais SigV4.
+Global Storage JSON logs preserve `tenantId`, request ID, method, path, and
+operation type when provided by upstream. The data-plane proxy records only the
+path without query string, method, status, request ID, and the tenant host
+already overwritten by trusted Nginx. Vector extracts only the canonical UUID
+from this host and sends both streams to the Storage sink without recording
+keys, tokens, passwords, or SigV4 credentials.
 
-## Testes
+## Tests
 
-- `test_shared_storage_architecture_contract.py` protege topologia, roteamento,
-  lifecycle, migration e ausencia de caminhos antigos sem precisar de Docker;
-- `test_shared_storage_tenant_integration.py` e opt-in e executa a matriz ativa
-  de dois tenants: objetos privados, mesmos nomes de bucket, opaque keys,
-  SigV4 cruzado, Vectors, limites, imagens, clones, rename, backup/restore,
-  delete, tenant ausente, header hostil e indisponibilidade global.
+- `test_shared_storage_architecture_contract.py` protects topology, routing,
+  lifecycle, migration, and the absence of old paths without requiring Docker;
+- `test_shared_storage_tenant_integration.py` is opt-in and runs the active
+  two-tenant matrix: private objects, same bucket names, opaque keys,
+  cross-tenant SigV4, Vectors, limits, images, clones, rename, backup/restore,
+  delete, missing tenant, hostile header, and global unavailability.
 
-Nao ha bootstrap alternativo, tenant default ou fallback para Storage local.
+There is no alternate bootstrap, default tenant, or fallback to local Storage.

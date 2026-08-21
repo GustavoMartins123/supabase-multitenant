@@ -323,6 +323,35 @@ class OpaqueKeyContractTest(unittest.TestCase):
         self.assertIn("confirmed_at", self.service)
         self.assertIn("cannot be aborted after cutover starts", self.service)
 
+    def test_reveals_live_as_long_as_the_key_version(self) -> None:
+        activate = self.service[
+            self.service.index("async def activate_pending_key") :
+            self.service.index("async def confirm_pending_key_installation")
+        ]
+        self.assertIn(
+            'DELETE FROM project_api_key_reveals WHERE key_id = $1",\n'
+            "        revoked_id,",
+            activate,
+        )
+        self.assertNotIn(
+            'DELETE FROM project_api_key_reveals WHERE key_id = $1",\n'
+            '        pending["id"],',
+            activate,
+        )
+
+        migration_activation = self.service[
+            self.service.index("async def activate_prepared_project_opaque_keys") :
+            self.service.index("async def rotate_slot_immediately")
+        ]
+        self.assertNotIn("DELETE FROM project_api_key_reveals", migration_activation)
+
+        rotation = self.service[
+            self.service.index("async def rotate_slot_immediately") :
+            self.service.index("async def prepare_slot_rotation")
+        ]
+        self.assertIn("DELETE FROM project_api_key_reveals WHERE key_id = $1", rotation)
+        self.assertIn("active_id,", rotation)
+
     def test_automatic_rotation_only_runs_for_ready_opaque_gateways(self) -> None:
         self.assertIn(
             "p.opaque_gateway_ready_at IS NOT NULL",
@@ -330,10 +359,11 @@ class OpaqueKeyContractTest(unittest.TestCase):
         )
         self.assertIn("pending_replacement_not_confirmed_before_cutover", self.scheduler)
         self.assertIn("active_key_expired_without_pending_replacement", self.scheduler)
-        self.assertIn(
-            "DELETE FROM project_api_key_reveals WHERE expires_at <= now()",
-            self.scheduler,
-        )
+        sweep = self.scheduler[
+            self.scheduler.index("DELETE FROM project_api_key_reveals r") :
+        ]
+        self.assertIn("k.status IN ('revoked', 'expired')", sweep)
+        self.assertIn("k.expires_at IS NOT NULL AND k.expires_at <= now()", sweep)
         self.assertGreaterEqual(
             self.scheduler.count("k.rotation_trigger = 'automatic'"), 2
         )

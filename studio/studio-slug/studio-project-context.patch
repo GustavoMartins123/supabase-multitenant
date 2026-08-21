@@ -577,3 +577,31 @@ index 1bb58b1..802c7e1 100644
  
        setState(
          createStorageExplorerState({
+diff --git a/apps/studio/components/interfaces/Storage/StorageExplorer/useCopyUrl.tsx b/apps/studio/components/interfaces/Storage/StorageExplorer/useCopyUrl.tsx
+index 5581a9c..df196e1 100644
+--- a/apps/studio/components/interfaces/Storage/StorageExplorer/useCopyUrl.tsx
++++ b/apps/studio/components/interfaces/Storage/StorageExplorer/useCopyUrl.tsx
+@@ -23,16 +23,20 @@ export const useCopyUrl = () => {
+   const onCopyUrl = useCallback(
+     (filePath: string, expiresIn?: URL_EXPIRY_DURATION) => {
+       const formattedUrl = getFileUrl(filePath, expiresIn).then((url) => {
+-        return isCustomDomainActive && hostEndpoint
+-          ? url.replace(hostEndpoint, customEndpoint)
++        const projectUrl = hostEndpoint
++          ? url.replace(`${window.location.origin}/storage/v1/${projectRef}`, `${hostEndpoint}/storage/v1`)
+           : url
++
++        return isCustomDomainActive && hostEndpoint
++          ? projectUrl.replace(hostEndpoint, customEndpoint)
++          : projectUrl
+       })
+ 
+       return copyToClipboard(formattedUrl, () => {
+         toast.success(`Copied URL for ${filePath} to clipboard.`)
+       })
+     },
+-    [customEndpoint, getFileUrl, hostEndpoint, isCustomDomainActive]
++    [customEndpoint, getFileUrl, hostEndpoint, isCustomDomainActive, projectRef]
+   )
+ 
+   return { onCopyUrl }

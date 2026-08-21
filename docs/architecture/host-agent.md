@@ -1,125 +1,124 @@
 # Host-agent
 
-Documento canônico do host-agent: o serviço que executa, no host do
-servidor principal, todo o lifecycle físico dos projetos (Docker e
-scripts). Depois desta fronteira, a Projects API **não executa Docker nem
-shell** — ela apenas grava intenções no banco.
+Canonical host-agent document: the service that runs the projects' entire
+physical lifecycle (Docker and scripts) on the main server host. Beyond this
+boundary, the Projects API **does not execute Docker or a shell** — it only
+writes intents to the database.
 
-## Fluxo
+## Flow
 
 ```text
 Projects API (container)
-    | grava intenção assinada (HMAC) em host_agent_commands + NOTIFY
+    | writes signed intent (HMAC) to host_agent_commands + NOTIFY
     v
-Postgres do control plane
+Control-plane Postgres
     ^
-    | LISTEN/NOTIFY + poll, lease com FOR UPDATE SKIP LOCKED
+    | LISTEN/NOTIFY + poll, lease with FOR UPDATE SKIP LOCKED
     |
-host-agent (systemd, no host, com Docker)
-    | revalida assinatura, argumentos e autorização
-    | executa o comando fechado (docker/compose/scripts)
-    | heartbeat estende o lease; timeout mata o process group
+host-agent (systemd, on host, with Docker)
+    | revalidates signature, arguments, and authorization
+    | executes the closed command (docker/compose/scripts)
+    | heartbeat extends the lease; timeout kills the process group
     v
-progresso, tails sanitizados e resultado de volta na mesma linha
+progress, sanitized tails, and result back on the same row
 ```
 
-A Projects API espera o desfecho na própria linha (`wait_command`),
-espelhando progresso no job correspondente. A fila FIFO por projeto da API
-continua valendo; o agent também recusa dois comandos simultâneos do mesmo
-projeto no lease.
+The Projects API waits for the outcome on the same row (`wait_command`),
+mirroring progress into the corresponding job. The API's per-project FIFO
+queue remains in effect; the agent also rejects two simultaneous commands for
+the same project during lease acquisition.
 
-## Conjunto fechado de comandos
+## Closed command set
 
-Definido em `host_agent_protocol.py` (cópias idênticas na API e no agent,
-verificadas por teste):
+Defined in `host_agent_protocol.py` (identical copies in the API and agent,
+verified by a test):
 
-| Comando | Executa | Timeout |
+| Command | Executes | Timeout |
 | --- | --- | --- |
-| `start_project` / `stop_project` / `restart_project` | docker start/stop/restart por container do projeto | 600s |
-| `recreate_services` | aplica settings do tenant Storage pela Admin API e/ou recria somente serviços locais solicitados | 1800s |
-| `ensure_opaque_gateway_token` | valida ou gera o token interno exclusivo do gateway sem imprimi-lo | 120s |
-| `stage_opaque_gateway` | para o Nginx legado e materializa o template opaco | 600s |
+| `start_project` / `stop_project` / `restart_project` | docker start/stop/restart per project container | 600s |
+| `recreate_services` | applies Storage tenant settings through the Admin API and/or recreates only requested local services | 1800s |
+| `ensure_opaque_gateway_token` | validates or generates the gateway-exclusive internal token without printing it | 120s |
+| `stage_opaque_gateway` | stops the legacy Nginx and materializes the opaque template | 600s |
 | `create_project` | `generate_project.sh` | 1800s |
 | `duplicate_project` | `duplicate_project.sh` | 3600s |
-| `delete_project_containers` | `docker rm -f` dos containers do projeto | 300s |
-| `delete_project_storage` | revoga credenciais, remove tenant e namespace UUID do Storage global | 600s |
+| `delete_project_containers` | `docker rm -f` for project containers | 300s |
+| `delete_project_storage` | revokes credentials and removes the tenant and UUID namespace from global Storage | 600s |
 | `delete_project_files` | `delete_project.sh` | 300s |
 | `rotate_keys` | `rotate_key.sh` | 900s |
-| `rename_project` | `rename_project.sh` (TERM grace de 240s p/ rollback) | 3600s |
-| `backup_project` | `backup_project.sh` (captura banco + somente o namespace Storage do UUID) | 1800s |
-| `restore_project` | `restore_project.sh` (cria ponto de segurança, troca banco e somente o namespace do tenant; TERM grace de 240s p/ rollback) | 3600s |
-| `delete_restore_point` | remoção confinada do diretório do ponto | 120s |
-| `container_logs` | docker inspect + logs, saída sanitizada | 60s |
+| `rename_project` | `rename_project.sh` (240s TERM grace for rollback) | 3600s |
+| `backup_project` | `backup_project.sh` (captures the database and only the UUID's Storage namespace) | 1800s |
+| `restore_project` | `restore_project.sh` (creates a safety point, swaps the database and only the tenant namespace; 240s TERM grace for rollback) | 3600s |
+| `delete_restore_point` | confined removal of the point directory | 120s |
+| `container_logs` | docker inspect + logs, sanitized output | 60s |
 
-Não existe comando que aceite argv, path ou SQL arbitrário. Os comandos de
-ponto de restauração recebem apenas UUIDs validados nos dois lados; o path resolvido fica confinado a `servidor/backups/<tenant_uuid>/`, onde o
-`tenant_uuid` é recebido do control plane e precisa coincidir com o
-`PROJECT_UUID` do `.env`. Em projetos novos ele equivale a `projects.id`;
-instalações anteriores são convertidas uma vez e passam pelo mesmo contrato,
-sem caminho alternativo no runtime. Criar um ponto frio
-(`backup_project`) exige admin do projeto, owner ou admin global. Restaurar e
-excluir pontos (`PROJECT_OWNER_COMMANDS`) exigem owner ou admin global.
+No command accepts arbitrary argv, paths, or SQL. Restore-point commands receive
+only UUIDs validated on both sides; the resolved path is confined to
+`servidor/backups/<tenant_uuid>/`, where `tenant_uuid` is received from the
+control plane and must match the project's `PROJECT_UUID` in `.env`. For new
+projects it equals `projects.id`; older installations are converted once and
+use the same contract, with no alternate runtime path. Creating a cold point
+(`backup_project`) requires a project admin, owner, or global admin. Restoring
+and deleting points (`PROJECT_OWNER_COMMANDS`) require an owner or global
+admin.
 
-## Segurança
+## Security
 
-1. **HMAC fail-closed** — cada intenção é assinada pela API com
-   `HOST_AGENT_HMAC_SECRET` sobre (id, comando, projeto, project UUID,
-   solicitante, hash canônico dos args, issued_at). O agent recusa
-   assinatura inválida; um escritor arbitrário no Postgres não consegue
-   forjar execução no host.
-2. **Reautorização no agent** — o agent reconsulta `users`, `user_groups`,
-   `projects` e `project_members` e aplica a mesma matriz da API:
-   admin global para o fluxo de exclusão integral do projeto; owner ou admin
-   global para restaurar/excluir pontos; owner, admin
-   do projeto ou admin global para os demais comandos. O `project_uuid` da intenção
-   precisa bater com `projects.id` (exceto nos passos do delete que rodam
-   após a remoção da linha); quando os args carregam `tenant_uuid`, ele também
-   precisa bater com `projects.tenant_uuid`.
-   A única intenção sem usuário é `rotate_keys` com
-   `args.trigger=automatic`; ela só é aceita quando
-   `projects.automatic_key_rotation_enabled=true`. Qualquer outro comando de
-   sistema é recusado.
-3. **Paths confinados** — nomes passam pela mesma regex/reservas da API e
-   o path resolvido precisa ficar sob `servidor/projects`; componentes
-   symlink e traversal são rejeitados antes de qualquer script.
-4. **Saída sanitizada** — stdout/stderr passam por redação (JWTs,
-   `CHAVE=valor` sensível, credenciais em URI, Bearer) antes de qualquer
-   persistência; as chaves de projeto não passam mais por stdout — a API
-   as lê do `.env` do projeto após o comando.
-5. **Lease, heartbeat e timeout** — lease de 60s renovado a cada 15s;
-   comandos com lease expirado são marcados `failed` (`lease_expired`);
-   timeout duro por comando com SIGTERM → SIGKILL no process group.
+1. **HMAC fail-closed** — each intent is signed by the API with
+   `HOST_AGENT_HMAC_SECRET` over (id, command, project, project UUID,
+   requester, canonical args hash, issued_at). The agent rejects an invalid
+   signature; an arbitrary PostgreSQL writer cannot forge host execution.
+2. **Reauthorization in the agent** — the agent re-queries `users`,
+   `user_groups`, `projects`, and `project_members` and applies the same API
+   matrix: global admin for full project deletion; owner or global admin for
+   restoring/deleting points; owner, project admin, or global admin for other
+   commands. The intent's `project_uuid` must match `projects.id` (except for
+   delete steps that run after the row is removed); when args carry
+   `tenant_uuid`, it must also match `projects.tenant_uuid`.
+   The only userless intent is `rotate_keys` with
+   `args.trigger=automatic`; it is accepted only when
+   `projects.automatic_key_rotation_enabled=true`. Any other system command is
+   rejected.
+3. **Confined paths** — names pass the same API regex/reservations and the
+   resolved path must remain under `servidor/projects`; symlink and traversal
+   components are rejected before any script.
+4. **Sanitized output** — stdout/stderr is redacted (JWTs, sensitive
+   `KEY=value`, URI credentials, Bearer) before persistence; project keys are
+   no longer written to stdout — the API reads them from the project's
+   `.env` after the command.
+5. **Lease, heartbeat, and timeout** — a 60s lease renewed every 15s; commands
+   with an expired lease are marked `failed` (`lease_expired`); hard
+   per-command timeout with SIGTERM → SIGKILL on the process group.
 
-## Estado de containers
+## Container state
 
-O agent mantém `project_container_state` (snapshot de `docker ps` por
-projeto, ~10s). Os endpoints de status da API leem essa tabela; sem
-heartbeat de agent há 45s a API responde `503`/estado `unknown` em vez de
-mentir.
+The agent maintains `project_container_state` (a per-project `docker ps`
+snapshot, ~10s). API status endpoints read this table; without an agent
+heartbeat for 45s, the API responds with `503`/state `unknown` instead of
+lying.
 
-## Recuperação
+## Recovery
 
-- API reiniciada no meio de um comando: o agent continua executando; o
-  recovery religa o job na mesma intenção (`job_id` + comando) e finaliza
-  com o resultado persistido. Rename e rotação de chaves são retomáveis por
-  esse mecanismo sem disparar um segundo script.
-- Agent reiniciado no meio de um comando: o lease expira, a linha vira
-  `failed (lease_expired)` e o job falha com esse código.
-- Agent offline: intenções em fila são canceladas após 60s sem worker e a
-  API responde `host_agent_offline`.
+- API restarted in the middle of a command: the agent continues executing;
+  recovery reconnects the job to the same intent (`job_id` + command) and
+  finishes with the persisted result. Rename and key rotation can resume
+  through this mechanism without launching a second script.
+- Agent restarted in the middle of a command: the lease expires, the row
+  becomes `failed (lease_expired)`, and the job fails with that code.
+- Agent offline: queued intents are canceled after 60s without a worker and the
+  API responds with `host_agent_offline`.
 
-## Operação
+## Operations
 
 ```bash
 sudo bash servidor/host-agent/install.sh   # venv + systemd + enable/start
 journalctl -u supabase-host-agent -f
 ```
 
-Configuração e requisitos do host: `servidor/host-agent/README.md`.
+Host configuration and requirements: `servidor/host-agent/README.md`.
 
-## Código relacionado
+## Related code
 
 - `servidor/host-agent/hostagent/` (agent)
-- `servidor/api-internal/app/host_agent.py` (cliente; o schema vem das [migrations do control plane](control-plane-migrations.md))
-- `servidor/api-internal/app/host_agent_protocol.py` (contrato compartilhado)
-- `tests/smoke/test_host_agent_contract.py` (contrato fixado em teste)
+- `servidor/api-internal/app/host_agent.py` (client; the schema comes from [control-plane migrations](control-plane-migrations.md))
+- `servidor/api-internal/app/host_agent_protocol.py` (shared contract)
+- `tests/smoke/test_host_agent_contract.py` (contract fixed by a test)
