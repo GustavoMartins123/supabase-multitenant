@@ -152,6 +152,14 @@ Recovery must not assume that rerunning any script is safe.
 
 Each project has a DEK. The DEK is wrapped by `PROJECT_SECRETS_MASTER_KEY`. Secrets use AES-256-GCM with AAD containing the project and the value's purpose.
 
+### Distribution to containers
+
+`servidor/.env` holds the control-plane secrets: `PROJECT_SECRETS_MASTER_KEY`, `STUDIO_SERVICE_KEY_ENCRYPTION_KEY`, `HOST_AGENT_HMAC_SECRET`, the internal HMACs, and the global PostgreSQL password. No container that serves a tenant receives this file.
+
+Compose is invoked with `--env-file`, which resolves `${VAR}` interpolation in the `environment:` blocks at parse time. Declaring `env_file:` on a service is therefore not required to render the file: it only injects every variable into the container process. Each service declares exactly the variables it consumes, and `storage` reads its own scoped `.storage.env`.
+
+The project's `auth` and `rest` receive only their explicit `environment:` block. Edge Functions workers receive the tenant contract — `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL`, `JWT_SECRET`, and `PROJECT_REF` — and never the environment of the runtime that spawns them.
+
 ### Service-role transport
 
 OpenResty needs `service_role` to reproduce Supabase Studio administrative operations.

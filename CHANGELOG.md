@@ -1,3 +1,13 @@
+## 2026-08-21 — `.env` global deixa de ser distribuido aos containers
+
+- `auth` e `rest` de cada projeto nao recebem mais `env_file`: passam a rodar somente com o bloco `environment:` declarado, que ja cobria tudo que os dois consomem (222 -> 43 variaveis no `auth`, 194 -> 13 no `rest`);
+- `db`, `realtime`, `supavisor`, `functions` e `storage` deixaram de montar o `.env` global; `storage` mantem o `.storage.env`, de escopo proprio;
+- variaveis que so chegavam pelo `env_file` passaram a ser declaradas: `POSTGRES_USER` e `META_GUEST_PASSWORD` no `db`, os quatro `POSTGRES_*` no `functions` e `GOTRUE_MAILER_EXTERNAL_HOSTS` no `auth`;
+- o worker de Edge Functions nao herda mais o ambiente do runtime: recebe `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL`, `JWT_SECRET` e `PROJECT_REF`, e nada alem disso;
+- com isso, 14 segredos do control plane — entre eles `PROJECT_SECRETS_MASTER_KEY`, `STUDIO_SERVICE_KEY_ENCRYPTION_KEY` e `HOST_AGENT_HMAC_SECRET` — deixam de existir no ambiente dos containers de tenant;
+- novo `tests/smoke/test_global_env_scope_contract.py` impede a volta do `env_file` global e do `...globalEnv` no runtime de functions;
+- instalacoes existentes: os projetos ja criados mantem o `docker-compose.yml` antigo ate serem re-renderizados. Use Recreate com todos os servicos (ou `rotate_key.sh`, duplicate e rename, que tambem re-renderizam) e recrie a stack global com `docker compose up -d --force-recreate`.
+
 ## 2026-08-21 — Chave opaca deixa de ter visualização única
 
 - `claim` passou a descriptografar sem consumir: a `publishable` é legível por qualquer membro do projeto e a `secret` exige admin mais step-up a cada leitura;

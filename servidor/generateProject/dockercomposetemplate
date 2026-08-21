@@ -42,9 +42,6 @@ services:
     image: ${AUTH_IMAGE}
     restart: unless-stopped
     logging: *vector-logging
-    env_file:
-      - ../../.env
-      - .env
     networks:
       - rede-supabase
     healthcheck:
@@ -85,6 +82,7 @@ services:
       GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: ${ENABLE_ANONYMOUS_USERS}
       GOTRUE_MAILER_AUTOCONFIRM: ${ENABLE_EMAIL_AUTOCONFIRM}
       GOTRUE_MAILER_OTP_EXP: ${GOTRUE_MAILER_OTP_EXP}
+      GOTRUE_MAILER_EXTERNAL_HOSTS: ${GOTRUE_MAILER_EXTERNAL_HOSTS}
       GOTRUE_PASSWORD_MIN_LENGTH: ${GOTRUE_PASSWORD_MIN_LENGTH}
       GOTRUE_EXTERNAL_IMPLICIT_FLOW_ENABLED: ${GOTRUE_EXTERNAL_IMPLICIT_FLOW_ENABLED}
 
@@ -142,9 +140,6 @@ services:
     image: ${POSTGREST_IMAGE}
     restart: unless-stopped
     logging: *vector-logging
-    env_file:
-      - ../../.env
-      - .env
     networks:
       - rede-supabase
     # depends_on:

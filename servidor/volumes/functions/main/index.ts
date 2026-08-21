@@ -84,7 +84,6 @@ async function loadTenant(ref: string): Promise<TenantConfig | null> {
   const dbPass = globalEnv['POSTGRES_PASSWORD'] ?? ''
 
   const env: Record<string, string> = {
-    ...globalEnv,
     SUPABASE_URL: `http://supabase-nginx-${ref}:8080`,
     SUPABASE_ANON_KEY: anon,
     SUPABASE_SERVICE_ROLE_KEY: service,
@@ -128,7 +127,7 @@ serve(async (req: Request) => {
   const url = new URL(req.url)
   const ref = resolveRef(req, url)
 
-  let workerEnv = globalEnv
+  let workerEnv: Record<string, string> = {}
   let jwtSecret = globalEnv['JWT_SECRET'] ?? ''
 
   if (ref) {

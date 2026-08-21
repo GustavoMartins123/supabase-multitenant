@@ -23,8 +23,6 @@ services:
       context: ./volumes/db
     restart: unless-stopped
     logging: *vector-logging
-    env_file:
-      - .env
     networks:
       rede-supabase:
         ipv4_address: ${POSTGRES_HOST}
@@ -66,6 +64,8 @@ services:
       timeout: 5s
       retries: 10
     environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      META_GUEST_PASSWORD: ${META_GUEST_PASSWORD}
       POSTGRES_HOST: /var/run/postgresql
       PGPORT: ${POSTGRES_PORT}
       POSTGRES_PORT: ${POSTGRES_PORT}
@@ -190,8 +190,6 @@ services:
     #image: supabase/realtime:v2.34.41
     restart: unless-stopped
     logging: *vector-logging
-    env_file:
-      - .env
     networks:
       - rede-supabase
     depends_on:
@@ -235,8 +233,6 @@ services:
   supavisor:
     container_name: supabase-pooler
     image: ${POOLER_IMAGE}
-    env_file:
-      - .env
     restart: unless-stopped
     logging: *vector-logging
     networks:
@@ -290,8 +286,6 @@ services:
   functions:
     container_name: supabase-edge-functions
     image: ${FUNCTIONS_IMAGE}
-    env_file:
-      - .env
     restart: unless-stopped
     logging: *vector-logging
     networks:
@@ -303,6 +297,10 @@ services:
       db:
         condition: service_healthy  
     environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       SUPABASE_URL: ${FUNCTIONS_SUPABASE_URL}
       SUPABASE_ANON_KEY: ${FUNCTIONS_SUPABASE_ANON_KEY}
@@ -323,7 +321,6 @@ services:
     logging: *vector-logging
     user: ${STORAGE_RUN_AS_USER:?defina STORAGE_RUN_AS_USER}
     env_file:
-      - .env
       - .storage.env
     networks:
       - storage-control
