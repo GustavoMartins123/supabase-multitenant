@@ -2,6 +2,8 @@
 
 The lifecycle is orchestrated by the Projects API, but physical execution (Docker and the scripts in `servidor/generateProject/`) happens on the [host-agent](host-agent.md): the API writes the signed intent to the database and waits for the agent to execute the closed command.
 
+The Vector steps embedded in create, duplicate, rename, and restore — S3 buckets/indexes, per-project SigV4 credentials, and FDW wrappers — are specified in [Shared Storage, S3, and Storage Vectors](storage-vectors-lifecycle.md), the canonical source for that topic. This document describes when those steps run, not how they are implemented.
+
 Long-running operations are represented by persistent jobs. The HTTP endpoint normally creates the job and returns its identifier; execution continues in the project's serialized queue.
 
 ## Identifiers in use

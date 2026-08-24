@@ -24,6 +24,22 @@ NoNewPrivileges=true
 ProtectKernelModules=true
 ProtectKernelTunables=true
 ProtectControlGroups=true
+# Sandbox: o agent roda como usuario comum, fala com o Docker pelo socket de
+# grupo e grava apenas dentro do repositorio (SERVIDOR_DIR/AGENT_DIR podem
+# viver sob /home, por isso o ReadWritePaths explicito).
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=-__SERVIDOR_DIR__
+ReadWritePaths=-__AGENT_DIR__
+PrivateTmp=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
 
 [Install]
 WantedBy=multi-user.target

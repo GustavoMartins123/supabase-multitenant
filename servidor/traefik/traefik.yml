@@ -1,10 +1,21 @@
 entryPoints:
   web:
     address: ":80"
+  websecure:
+    address: ":443"
 providers:
   file:
     directory: /etc/traefik/dynamic
     watch: true
+
+# Inerte enquanto nenhum router referencia o resolver; so entra em uso com
+# TRAEFIK_ENABLE_TLS=true e TRAEFIK_TLS_MODE=acme.
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      storage: /acme.json
+      httpChallenge:
+        entryPoint: web
 
 experimental:
   localPlugins:

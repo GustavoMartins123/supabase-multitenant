@@ -75,7 +75,15 @@ done
 
 echo "Iniciando a base de dados e os servicos Supabase..."
 mkdir -p "$ROOT_DIR/servidor/volumes/storage/objects"
-chmod 777 "$ROOT_DIR/servidor/volumes/storage" "$ROOT_DIR/servidor/volumes/storage/objects" 2>/dev/null || true
+storage_run_as="$(sed -n 's/^STORAGE_RUN_AS_USER=//p' "$ROOT_DIR/servidor/.env" | head -1 | tr -d '\"')"
+storage_uid="${storage_run_as%%:*}"
+case "$storage_uid" in
+    ''|*[!0-9]*) storage_uid=1000 ;;
+esac
+if [ "$(id -u)" != "$storage_uid" ]; then
+    die "o volume do Storage exige que o operador seja o UID de STORAGE_RUN_AS_USER ($storage_uid em servidor/.env); alinhe o usuario ou ajuste a variavel."
+fi
+chmod 2775 "$ROOT_DIR/servidor/volumes/storage" "$ROOT_DIR/servidor/volumes/storage/objects"
 cd "$ROOT_DIR/servidor"
 API_OVERRIDE="docker-compose.${SERVER_TOPOLOGY}.yml"
 API_COMPOSE=(docker compose -f docker-compose-api.yml -f "$API_OVERRIDE" --env-file .env)

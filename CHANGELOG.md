@@ -1,3 +1,12 @@
+## 2026-08-24 — Volume do Storage sem world-writable, perfil TLS de produção e sandbox do host-agent
+
+- `chmod 777` removido de `start.sh`, `setup.sh` e `servidor/host-agent/install.sh`: os diretorios `servidor/volumes/storage{,/objects}` passam a ser `2775` (setgid, sem escrita para "outros") e os tres scripts falham explicitamente quando o UID do operador/host-agent nao corresponde a `STORAGE_RUN_AS_USER` — contrato que o 777 mascarava e que o lifecycle ja exigia (`storage_enforce_namespace_ownership` faz `chown -R` como usuario comun);
+- Traefik ganha perfil TLS de producao por variaveis de ambiente: `TRAEFIK_ENABLE_TLS`, `TRAEFIK_TLS_MODE=file|acme` e `TRAEFIK_ACME_EMAIL`. Com TLS ativo, o renderer emite routers `websecure` com certificado (arquivo em `servidor/traefik/certs/traefik/{tls.crt,tls.key}` ou Let's Encrypt via HTTP-01), router `force-https` (prioridade 150: acima do catch-all, abaixo dos routers de scanner) e redirect permanente; porta 443 publicada; `acme.json` montado. Fail-closed: certificado ausente no modo file, email placeholder no modo acme ou `SERVER_PROTO=https` sem TLS abortam o render e preservam a ultima configuracao valida; `traefik.yml` declara `websecure` e o resolver `letsencrypt` inertes;
+- unit systemd do host-agent confinada: `ProtectSystem=full`, `ProtectHome=read-only`, `PrivateTmp=true`, `CapabilityBoundingSet=` vazio, `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6`, `RestrictRealtime`, `RestrictSUIDSGID`, `LockPersonality`, `ProtectClock/Hostname/KernelLogs`; `ReadWritePaths` resolvido pelo instalador para `SERVIDOR_DIR`/`AGENT_DIR`;
+- novas docs canonicas de HTTPS (`docs/01-https-setup.md` / `docs/pt-br/01-setup-https.md`) descrevem o fluxo por variaveis de ambiente; o procedimento manual antigo de editar Traefik/routers foi retirado;
+- novos contratos: `test_storage_volume_permissions_contract.py`, `test_traefik_tls_profile_contract.py` e `SystemdSandboxContractTest` em `test_host_agent_contract.py`.
+- instalacoes existentes: gere os certificados do modo escolhido antes de ligar `TRAEFIK_ENABLE_TLS`; reinstale o host-agent (`sudo bash servidor/host-agent/install.sh`) para receber a sandbox; se o UID do operador diferir de `STORAGE_RUN_AS_USER`, alinhe `HOST_AGENT_USER`/`STORAGE_RUN_AS_USER`.
+
 ## 2026-08-21 — `.env` global deixa de ser distribuido aos containers
 
 - `auth` e `rest` de cada projeto nao recebem mais `env_file`: passam a rodar somente com o bloco `environment:` declarado, que ja cobria tudo que os dois consomem (222 -> 43 variaveis no `auth`, 194 -> 13 no `rest`);

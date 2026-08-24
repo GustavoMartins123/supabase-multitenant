@@ -74,7 +74,7 @@ run_as_service_user() {
 }
 
 migrate_runtime_ownership() {
-  local runtime_dir
+  local runtime_dir storage_run_as storage_uid service_uid
   say "Ajustando arquivos de lifecycle para $SERVICE_USER:$SERVICE_GROUP ..."
   for runtime_dir in "$SERVIDOR_DIR/projects" "$SERVIDOR_DIR/backups" \
     "$SERVIDOR_DIR/volumes/storage"; do
@@ -85,7 +85,17 @@ migrate_runtime_ownership() {
   find "$SERVIDOR_DIR/projects" -mindepth 2 -maxdepth 2 -type f -name .env \
     -exec chmod 600 {} +
   mkdir -p "$SERVIDOR_DIR/volumes/storage/objects"
-  chmod 777 "$SERVIDOR_DIR/volumes/storage" "$SERVIDOR_DIR/volumes/storage/objects" 2>/dev/null || true
+  storage_run_as="$(sed -n 's/^STORAGE_RUN_AS_USER=//p' "$SERVIDOR_DIR/.env" | head -1 | tr -d '\"')"
+  storage_uid="${storage_run_as%%:*}"
+  case "$storage_uid" in
+    ''|*[!0-9]*) storage_uid=1000 ;;
+  esac
+  service_uid="$(id -u "$SERVICE_USER")"
+  [[ "$service_uid" == "$storage_uid" ]] \
+    || die "O usuario do host-agent ($SERVICE_USER, UID $service_uid) precisa ter o mesmo UID de STORAGE_RUN_AS_USER ($storage_uid em servidor/.env); o lifecycle faz chown dos namespaces como esse usuario sem root. Ajuste HOST_AGENT_USER ou STORAGE_RUN_AS_USER e reinstale."
+  chown "$storage_uid:$storage_uid" \
+    "$SERVIDOR_DIR/volumes/storage" "$SERVIDOR_DIR/volumes/storage/objects"
+  chmod 2775 "$SERVIDOR_DIR/volumes/storage" "$SERVIDOR_DIR/volumes/storage/objects"
   ok "Ownership do lifecycle alinhado ao usuario do host-agent."
 }
 

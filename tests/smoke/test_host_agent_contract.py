@@ -148,6 +148,61 @@ class SystemdInstallerContractTest(unittest.TestCase):
             self.assertIn(f"WorkingDirectory={escaped_workdir}", unit)
 
 
+class SystemdSandboxContractTest(unittest.TestCase):
+    """A unit do host-agent precisa rodar confinada (REVISAO_ARQUITETURAL #3)."""
+
+    REQUIRED_DIRECTIVES = (
+        "NoNewPrivileges=true",
+        "ProtectSystem=full",
+        "ProtectHome=read-only",
+        "PrivateTmp=true",
+        "CapabilityBoundingSet=",
+        "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6",
+        "RestrictRealtime=true",
+        "RestrictSUIDSGID=true",
+        "LockPersonality=true",
+        "ProtectClock=true",
+        "ProtectHostname=true",
+        "ProtectKernelLogs=true",
+        "ProtectKernelModules=true",
+        "ProtectKernelTunables=true",
+        "ProtectControlGroups=true",
+    )
+
+    def test_unit_declares_the_sandbox_directives(self) -> None:
+        template = (
+            AGENT_ROOT / "supabase-host-agent.service"
+        ).read_text(encoding="utf-8")
+        for directive in self.REQUIRED_DIRECTIVES:
+            with self.subTest(directive=directive):
+                self.assertIn(directive, template)
+
+    def test_read_write_paths_use_placeholders_resolved_by_the_installer(self) -> None:
+        template = (
+            AGENT_ROOT / "supabase-host-agent.service"
+        ).read_text(encoding="utf-8")
+        self.assertIn("ReadWritePaths=-__SERVIDOR_DIR__", template)
+        self.assertIn("ReadWritePaths=-__AGENT_DIR__", template)
+
+        installer = (AGENT_ROOT / "install.sh").read_text(encoding="utf-8")
+        for placeholder in ("__SERVIDOR_DIR__", "__AGENT_DIR__"):
+            with self.subTest(placeholder=placeholder):
+                self.assertIn(f'"s|{placeholder}|', installer)
+
+    def test_capability_bounding_set_is_empty_not_missing(self) -> None:
+        lines = (
+            (AGENT_ROOT / "supabase-host-agent.service")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        )
+        bounding = [
+            line.split("=", 1)[1]
+            for line in lines
+            if line.startswith("CapabilityBoundingSet=")
+        ]
+        self.assertEqual(bounding, [""], "CapabilityBoundingSet= deve zerar as capabilities.")
+
+
 class SchemaReadinessTest(unittest.IsolatedAsyncioTestCase):
     async def test_schema_probe_checks_all_agent_tables_and_closes_connection(
         self,

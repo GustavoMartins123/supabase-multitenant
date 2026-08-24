@@ -558,7 +558,16 @@ main() {
     print_success "Certificado copiado para servidor/certs/ca.pem"
 
     mkdir -p servidor/volumes/storage/objects
-    chmod 777 servidor/volumes/storage servidor/volumes/storage/objects 2>/dev/null || true
+    storage_run_as="$(sed -n 's/^STORAGE_RUN_AS_USER=//p' servidor/.env | head -1 | tr -d '\"')"
+    storage_uid="${storage_run_as%%:*}"
+    case "$storage_uid" in
+        ''|*[!0-9]*) storage_uid=1000 ;;
+    esac
+    if [ "$(id -u)" != "$storage_uid" ]; then
+        echo "Erro: o volume do Storage exige que o operador seja o UID de STORAGE_RUN_AS_USER ($storage_uid em servidor/.env)." >&2
+        exit 1
+    fi
+    chmod 2775 servidor/volumes/storage servidor/volumes/storage/objects
 
 
     print_success "Studio e Authelia configurados para $LOCAL_IP."

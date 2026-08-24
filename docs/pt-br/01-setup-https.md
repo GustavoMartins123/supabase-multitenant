@@ -1,247 +1,80 @@
-## Setup https
+# Setup HTTPS
 
-Por padrão, a plataforma é configurada para rodar em um ambiente de desenvolvimento local usando HTTP. Os passos a seguir habilitam o Traefik para operar em HTTPS, gerando certificados SSL automaticamente com Let's Encrypt.
+O Traefik possui um perfil TLS de produção, controlado por variáveis de ambiente. O renderizador da configuração dinâmica (`render_dynamic_config.py`) decide entre routers HTTP e routers `websecure` com redirecionamento automático HTTP→HTTPS, e falha fechado quando o protocolo declarado e o perfil TLS divergem ou quando os certificados estão ausentes. Edição manual de `traefik.yml` ou dos routers gerados não faz mais parte do procedimento.
 
-### ⚠️ Pré-requisitos
+## Variáveis do perfil (`servidor/.env`)
 
-Antes de prosseguir, certifique-se de que:
+| Variável | Padrão | Significado |
+| --- | --- | --- |
+| `TRAEFIK_ENABLE_TLS` | `false` | Com `true`, todos os routers de serviço migram para `websecure` com fonte de certificado, e a porta 80 passa a responder só com redirecionamento permanente (além dos routers de proteção de borda). |
+| `TRAEFIK_TLS_MODE` | `file` | `file` lê `tls.crt`/`tls.key` de `servidor/traefik/certs/traefik/`; `acme` usa Let's Encrypt pelo resolver `letsencrypt`. |
+| `TRAEFIK_ACME_EMAIL` | placeholder | Obrigatório (sem placeholder) quando `TRAEFIK_TLS_MODE=acme`. |
+| `TRAEFIK_HTTPS_PORT` | `443` | Porta do host publicada para `websecure`; também usada no destino do redirect. |
+| `SERVER_PROTO` | preenchido pelo setup | Esquema declarado da plataforma. Se for `https` enquanto `TRAEFIK_ENABLE_TLS` não é `true`, o renderer levanta erro e nenhuma configuração nova é gravada. |
 
-- **Domínio válido**: Você possui um domínio registrado apontando para o IP do seu servidor
-- **DNS configurado**: O domínio está propagado e acessível pela internet
-- **Portas abertas**: As portas 80 e 443 estão liberadas no firewall/cloud provider
-> **Importante**: O Let's Encrypt só funciona com domínios válidos e publicamente acessíveis. Para desenvolvimento local, continue usando HTTP ou configure certificados auto-assinados.
+A porta `443` é sempre publicada no Compose do Traefik; sem `TRAEFIK_ENABLE_TLS=true` nada escuta com TLS nela e as conexões são fechadas sem rota.
 
----
+## Comportamento fail-closed
 
-### Passo 1: Habilitar TLS no `traefik.yml`
+O container watcher re-renderiza as rotas continuamente. Com `TRAEFIK_ENABLE_TLS=true`:
 
-Para que o Traefik possa gerar e armazenar os certificados SSL do Let's Encrypt, precisamos primeiro ajustar as permissões do arquivo de armazenamento e depois editar sua configuração principal.
+- `TRAEFIK_TLS_MODE=file` exige que `servidor/traefik/certs/traefik/tls.crt` e `tls.key` existam no momento do render; caso contrário o render falha, o healthcheck do watcher cai e o Traefik continua servindo a última configuração válida;
+- `TRAEFIK_TLS_MODE=acme` exige um `TRAEFIK_ACME_EMAIL` real;
+- `SERVER_PROTO=https` sem `TRAEFIK_ENABLE_TLS=true` aborta o render com erro explícito, em vez de servir HTTP puro silenciosamente.
 
-**1.1. Ajustar Permissões do `acme.json` (Passo Crítico)**
+## Modo 1 — `file` (self-signed ou CA interna, instalação por IP/LAN)
 
-Execute o seguinte comando dentro da pasta `servidor/traefik/` para garantir que o Traefik tenha permissão para gerenciar os certificados de forma segura.
+1. Gere o par em `servidor/traefik/certs/traefik/`, incluindo o IP do servidor em SAN:
+
+    ```bash
+    mkdir -p servidor/traefik/certs/traefik
+    openssl req -x509 -newkey rsa:4096 -sha256 -days 825 -nodes \
+      -keyout servidor/traefik/certs/traefik/tls.key \
+      -out servidor/traefik/certs/traefik/tls.crt \
+      -subj "/CN=supabase-local" \
+      -addext "subjectAltName=IP:<SEU_IP>,DNS:seu.dominio.local"
+    chmod 600 servidor/traefik/certs/traefik/tls.key
+    ```
+
+2. No `servidor/.env`: `TRAEFIK_ENABLE_TLS=true`, `TRAEFIK_TLS_MODE=file`.
+3. Recrie o Traefik:
+
+    ```bash
+    docker compose -f servidor/traefik/docker-compose.yml up -d --force-recreate
+    ```
+
+4. Valide: `curl -k https://<SEU_IP>/<project_ref>/rest/v1/` deve responder via Nginx do projeto, e `curl http://<SEU_IP>/<project_ref>/rest/v1/` deve retornar redirecionamento permanente.
+
+## Modo 2 — `acme` (Let's Encrypt, domínio público)
+
+Pré-requisitos: domínio registrado apontando para o servidor, DNS propagado, portas 80 e 443 liberadas e `acme.json` gravável apenas pelo dono:
 
 ```bash
-# Define as permissões restritivas (apenas o proprietário pode ler/escrever)
-chmod 600 acme.json
+chmod 600 servidor/traefik/acme.json
 ```
 
-Agora, abra o arquivo `servidor/traefik/traefik.yml` e faça as seguintes alterações:
+No `servidor/.env`: `TRAEFIK_ENABLE_TLS=true`, `TRAEFIK_TLS_MODE=acme`, `TRAEFIK_ACME_EMAIL=você@example.com`, e recrie o Traefik como acima. Os certificados são obtidos pelo desafio HTTP-01 no entrypoint `web` e ficam em `/acme.json`.
 
-**1.2. Ativar Redirecionamento para HTTPS**
+## Apontar o Studio para HTTPS
 
-Esta configuração instrui o Traefik a redirecionar todo o tráfego da porta 80 (HTTP) para a porta 443 (HTTPS).
+Com TLS habilitado no data plane, atualize o `studio/.env` para que a interface administrativa use o mesmo esquema:
 
-* **Encontre** a seção `entryPoints` e **substitua-a** pelo bloco abaixo para ativar o redirecionamento e a porta `websecure`:
-
-    ```yaml
-    entryPoints:
-      web:
-        address: ":80"
-        http:
-          redirections:
-            entryPoint:
-              to: websecure
-              scheme: https
-      websecure:
-        address: ":443"
-    ```
-
-**1.3. Configurar o Provedor de Certificados (Let's Encrypt)**
-
-Isso informa ao Traefik como obter os certificados SSL.
-
-* **Adicione** o seguinte bloco ao final do arquivo. **Lembre-se de trocar `seuemail@email.com` pelo seu email.**
-
-    ```yaml
-    certificatesResolvers:
-      letsencrypt:
-        acme:
-          email: seuemail@email.com
-          storage: /acme.json
-          keyType: EC256
-          httpChallenge:
-            entryPoint: web
-    ```
-
-**1.4. Definir Padrões de Segurança TLS (Opcional, mas recomendado)**
-
-Este bloco garante que apenas cifras de criptografia modernas e seguras sejam utilizadas.
-
-* **Adicione** o seguinte bloco ao final do arquivo:
-
-    ```yaml
-    tls:
-      options:
-        default:
-          minVersion: "VersionTLS12"
-          cipherSuites:
-            - "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384"
-            - "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"
-            - "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305"
-            - "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305"
-            - "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256"
-            - "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"
-          curvePreferences:
-            - "secp521r1"
-            - "secp384r1"
-    ```
-
-> 💡 **Nota de compatibilidade**: Restringir a versão mínima para `VersionTLS12` e limitar as cifras garante excelente segurança e pontuação máxima em auditorias (como SSL Labs), mas pode impedir a conexão de clientes muito antigos ou dispositivos legados (como sistemas embarcados obsoletos). Se a sua regra de negócio exige suporte a esses dispositivos, você pode remover ou flexibilizar essa configuração.
-
----
-
-### Passo 2: Ajustar Headers de Segurança no `middlewares.yml`
-
-Para produção, é crucial enviar o header `Strict-Transport-Security` (HSTS), que força o navegador a usar HTTPS.
-
-* Abra o arquivo `servidor/traefik/middlewares.yml`.
-* **Encontre** o middleware `security-headers` e **substitua-o completamente** pela versão abaixo:
-
-    ```yaml
-    # Substitua o middleware 'security-headers' existente por este:
-    security-headers:
-      headers:
-        customRequestHeaders:
-          X-Forwarded-Proto: "https"
-        customResponseHeaders:
-          X-Frame-Options: "DENY"
-          X-Content-Type-Options: "nosniff"
-          X-XSS-Protection: "1; mode=block"
-          Strict-Transport-Security: "max-age=31536000; includeSubDomains; preload" 
-          Content-Security-Policy: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'"
-          Referrer-Policy: "strict-origin-when-cross-origin"
-    ```
-
-> ⚠️ **Atenção: Ajuste conforme suas regras de negócio!**
-> Os cabeçalhos (headers) de segurança padrão acima são rígidos e seguros, mas podem ser restritivos ("engessados") dependendo do seu projeto:
->
-> * **`Content-Security-Policy` (CSP)**:
->   * **O que faz:** Impede que o navegador carregue scripts, imagens, fontes ou faça requisições de/para domínios que não sejam o próprio (`'self'`).
->   * **Quando ajustar:** Se o seu aplicativo usa APIs externas (ex: Stripe, Google Maps), fontes do Google Fonts, ou se você usa o Supabase Storage para exibir imagens hospedadas em outros buckets/domínios, o CSP bloqueará o carregamento. Você precisará adicionar os domínios permitidos nas diretivas apropriadas (ex: `img-src 'self' data: https://*.supabase.co; connect-src 'self' https://api.seuservico.com`). Se estiver na fase inicial de desenvolvimento ou testes, você pode desativar temporariamente este cabeçalho ou usar `Content-Security-Policy-Report-Only` para auditar os bloqueios sem impedir o funcionamento da aplicação.
-> * **`Strict-Transport-Security` (HSTS)**:
->   * **O que faz:** Obriga o navegador a sempre usar HTTPS para o domínio atual e todos os seus subdomínios (`includeSubDomains; preload`) durante 1 ano (`max-age=31536000`).
->   * **Cuidado:** Uma vez ativo e enviado ao cabeçalho com `preload`, se você tiver subdomínios legados ou outros serviços que ainda precisem rodar sem HTTPS, eles se tornarão totalmente inacessíveis. Recomenda-se começar com um `max-age` menor e sem `preload` ou `includeSubDomains` durante a fase de testes e homologação (ex: `"max-age=63072000"`).
-> * **`X-Frame-Options`**:
->   * **O que faz:** Evita ataques de clickjacking impedindo que seu site seja renderizado dentro de um `<iframe>`.
->   * **Quando ajustar:** Se você planeja integrar o painel ou partes da sua aplicação dentro de outras plataformas suas via iframe, altere de `"DENY"` para `"SAMEORIGIN"`, ou use a diretiva `frame-ancestors` no CSP.
-
----
-
-### Passo 3: Atualizar os Roteadores em middlewares.yml
-
-* Abra o arquivo servidor/traefik/middlewares.yml.
-
-* Ajuste os entrypoints: Para cada roteador (malicious-paths, block-bad-useragents e http-catchall), adicione `- websecure` a lista de `entryPoints` e adicione a chave `tls: {}`.
-
-* Exemplo para o roteador malicious-paths:
-
-ANTES:
-```yml
-    malicious-paths:
-      rule: "..."
-      entryPoints:
-        - web
-      priority: 2000
-      middlewares:
-        - malicious-paths-chain
-      service: forbidden-service
-```
-DEPOIS:
-```yml
-    malicious-paths:
-      rule: "..."
-      entryPoints:
-        - web
-        - websecure
-      tls: {}
-      priority: 2000
-      middlewares:
-        - malicious-paths-chain
-      service: forbidden-service
-```
-* Essa etapa vale da mesma forma para os roteadores 'block-bad-useragents' e 'http-catchall'.
-
-**3.1. Roteador da API de Projetos (projects-api)**
-
-* Abra o arquivo servidor/traefik/render_dynamic_config.py.
-* Encontre o bloco que monta o roteador "projects-api".
-
-ANTES:
-```python
-        "      entryPoints:",
-        "        - web",
-        "      priority: 1000",
-```
-DEPOIS:
-```python
-        "      entryPoints:",
-        "        - web",
-        "        - websecure",
-        "      tls: {}",
-        "      priority: 1000",
-```
-
-## Passo 4: Configurar os Roteadores dos Projetos para HTTPS
-
-* Esta é a etapa final para expor suas aplicações Supabase de forma segura.
-
-* No mesmo arquivo servidor/traefik/render_dynamic_config.py, encontre o bloco que monta o roteador "project-{project_id}". Como esse roteador é gerado dinamicamente para todos os projetos a partir do conteúdo de projects/, essa edição já vale tanto para os projetos existentes quanto para os que forem criados depois.
-
-ANTES:
-```python
-                "      entryPoints:",
-                "        - web",
-                "      priority: 500",
-```
-DEPOIS:
-```python
-                "      entryPoints:",
-                "        - web",
-                "        - websecure",
-                "      tls: {}",
-                "      priority: 500",
-```
-
-## Passo 5: Aplicar as Configurações Finais
-
-Após salvar todas as alterações nos arquivos *.yml, reinicie os contêineres para que as novas regras sejam aplicadas.
-
-Execute os seguintes comandos a partir da pasta raiz do seu projeto.
-
-**5.1. Atualize o Ambiente do Servidor de Gerenciamento (Studio)**
-
-O Nginx do Studio precisa saber que o backend agora opera em HTTPS.
-
-* Abra o arquivo studio/.env.
-
-* Altere as seguintes variáveis para apontar para seu domínio e usar o protocolo https:
-
-ANTES:
-```bash
-SERVER_DOMAIN=http://<seu_ip_local>
-BACKEND_PROTO=http
-```
-DEPOIS:
-```
-SERVER_DOMAIN=https://seu.dominio.real
+```text
+SERVER_DOMAIN=https://<ip-ou-dominio-do-servidor>
 BACKEND_PROTO=https
 ```
 
-**5.2. Reinicie Todos os Serviços**
-
-Os comandos abaixo forçam a recriação dos contêineres, garantindo que eles usem os novos arquivos .yml e .env que você modificou.
-
-Reinicie o Gateway de Borda (Traefik), o watcher da configuração dinâmica e de permissão para escrita ao arquivo 'acme.json':
+E recrie o Studio:
 
 ```bash
-# Aplica as novas configurações de HTTPS e resolvedores de certificado.
-docker compose -f servidor/traefik/docker-compose.yml up -d --force-recreate
-```
-
-Reinicie a Interface de Gerenciamento (Studio):
-
-```bash
-# Aplica as novas variáveis de ambiente para o backend.
 docker compose -f studio/docker-compose.yml up -d --force-recreate
 ```
+
+## Hardening opcional de transporte
+
+- **HSTS**: adicione `Strict-Transport-Security` ao `customResponseHeaders` do middleware `security-headers` em `servidor/traefik/middlewares.yml`. Comece sem `preload` e com `max-age` curto durante a validação; com `preload`, voltar atrás vira impossível por um ano.
+- **Piso de TLS**: um bloco `tls.options.default` (versão mínima, cipher suites) pode ser adicionado ao diretório dinâmico; aplique somente após confirmar que nenhum cliente legado precisa dos padrões relaxados.
+
+## Precedência do redirect
+
+O router gerado `force-https` usa prioridade `150` no entrypoint `web`: acima do catch-all genérico (`100`) para que caminhos desconhecidos sejam redirecionados, abaixo dos routers de scanner/deny (`>= 1900`) para que tráfego hostil continue sendo classificado e banido em HTTP puro, em vez de receber redirect.
