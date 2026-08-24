@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
+source "$SCRIPT_DIR/lib/resource_profiles.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/backup_core.sh"
 
@@ -467,6 +468,7 @@ template_to_file "$SCRIPT_DIR/poolertemplate" "$OUT_DIR/pooler/pooler.exs"
 template_to_file "$SCRIPT_DIR/Dockerfile" "$OUT_DIR/Dockerfile"
 template_to_file "$SCRIPT_DIR/.dockerignore" "$OUT_DIR/.dockerignore"
 chmod 600 "$OUT_DIR/.env"
+apply_project_resource_limits "$PROJECT_ROOT/.env" "$OUT_DIR/.env"
 chmod 644 "$OUT_DIR/nginx/nginx_${NEW_PROJECT}.conf" "$OUT_DIR/.dockerignore"
 
 COMPOSE_STARTED=1

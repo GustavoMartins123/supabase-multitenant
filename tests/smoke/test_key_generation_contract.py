@@ -41,7 +41,23 @@ class KeyGenerationContractTest(unittest.TestCase):
         )
         compose = (GENERATE / "dockercomposetemplate").read_text(encoding="utf-8")
         references = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*)", compose))
-        self.assertEqual(sorted(references - root_env - project_env), [])
+        # Limites de recursos nao vivem em template: sao gravados no .env do
+        # projeto pelo helper lib/resource_profiles.sh (fail-closed ':?' no
+        # compose). Contrato dedicado em test_project_resource_limits_contract.py.
+        helper_managed = {
+            "PROJECT_MEM_LIMIT",
+            "PROJECT_CPUS",
+            "PROJECT_PIDS_LIMIT",
+        }
+        self.assertIn("PROJECT_RESOURCE_PROFILE", root_env)
+        self.assertFalse(
+            helper_managed & (root_env | project_env),
+            "limites resolvidos nao devem ter default em template raiz/projeto",
+        )
+        self.assertEqual(
+            sorted(references - root_env - project_env - helper_managed),
+            [],
+        )
 
     def test_every_template_placeholder_is_rendered(self):
         generator = "\n".join(

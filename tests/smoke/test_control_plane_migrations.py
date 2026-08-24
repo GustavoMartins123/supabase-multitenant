@@ -233,11 +233,15 @@ class StartupDoesNotMigrateTest(unittest.TestCase):
 
     def test_runtime_process_does_not_provision_database_identities(self) -> None:
         self.assertNotIn("ensure_key_authorizer_role", self.main)
+        self.assertNotIn("ensure_host_agent_rw_role", self.main)
         self.assertNotIn("KEY_AUTHORIZER_DB_PASSWORD", self.main)
+        self.assertNotIn("HOST_AGENT_DB_PASSWORD", self.main)
         roles = (APP / "control_plane_roles.py").read_text(encoding="utf-8")
         self.assertIn("ensure_key_authorizer_role", roles)
+        self.assertIn("ensure_host_agent_rw_role", roles)
         self.assertIn(
-            "from app.control_plane_roles import ensure_key_authorizer_role",
+            "from app.control_plane_roles import "
+            "ensure_host_agent_rw_role, ensure_key_authorizer_role",
             (APP / "schema_migrations.py").read_text(encoding="utf-8"),
         )
 

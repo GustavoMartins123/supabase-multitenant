@@ -1,3 +1,13 @@
+## 2026-08-24 — Limites de recursos por projeto e identidade dedicada do host-agent
+
+- containers nginx/auth/rest de cada projeto passam a subir com `mem_limit`/`memswap_limit`, `cpus` e `pids_limit` definidos via interpolacao fail-closed (`${PROJECT_MEM_LIMIT:?...}`): projeto sem limites no `.env` recusa o start em vez de rodar sem controle;
+- novo perfil `PROJECT_RESOURCE_PROFILE` (small|medium|large) no `.env.example`, resolvido para valores concretos no `.env` do projeto em create/duplicate/rename/rotate_key; instalacoes existentes usam o migrador idempotente `tools/migrate_project_resource_limits.py` (dry-run por padrao, `--apply` grava), seguido de recreate;
+- nova identidade de banco `host_agent_rw` provisionada pelo comando privilegiado de migrations (`ensure_host_agent_rw_role`): apenas lease/heartbeat/resultado em `host_agent_workers`/`host_agent_commands` e inventario em `project_container_state`; sem acesso a qualquer outra tabela do control plane nem a databases de tenant;
+- host-agent resolve o DSN como: `HOST_AGENT_DB_DSN` explicito > identidade dedicada (`HOST_AGENT_DB_PASSWORD`) > derivacao legada de `POSTGRES_*`; o fallback legado sera removido junto com a separacao de DSN da Projects API;
+- `control-plane-migrations` exige `HOST_AGENT_DB_PASSWORD` (compose com `:?`) e o install.sh do agent recusa placeholder — alinhe o `.env` antes de reinstalar;
+- pendencias da mesma frente que continuam abertas: role restrita para o DSN normal da Projects API (hoje ainda superuser), quotas de conexao/statement_timeout por tenant e quota de disco (hoje so observabilidade);
+- novos contratos: `test_project_resource_limits_contract.py` e `HostAgentRoleContractTest`.
+
 ## 2026-08-24 — Volume do Storage sem world-writable, perfil TLS de produção e sandbox do host-agent
 
 - `chmod 777` removido de `start.sh`, `setup.sh` e `servidor/host-agent/install.sh`: os diretorios `servidor/volumes/storage{,/objects}` passam a ser `2775` (setgid, sem escrita para "outros") e os tres scripts falham explicitamente quando o UID do operador/host-agent nao corresponde a `STORAGE_RUN_AS_USER` — contrato que o 777 mascarava e que o lifecycle ja exigia (`storage_enforce_namespace_ownership` faz `chown -R` como usuario comun);

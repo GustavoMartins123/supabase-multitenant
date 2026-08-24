@@ -214,6 +214,12 @@ It must not be confused with ordinary API-key rotation.
 
 ## Settings and service recreation
 
+### Resource limits
+
+Every rendered project Compose pins `mem_limit`/`memswap_limit`, `cpus`, and `pids_limit` for `nginx`, `auth`, and `rest` through fail-closed interpolation (`${PROJECT_MEM_LIMIT:?...}`), so a project without limits refuses to start instead of running unconstrained. Concrete values come from the project `.env` and are resolved from the root profile `PROJECT_RESOURCE_PROFILE` (`small|medium|large`) at create, duplicate, rename, and rotate-key time. Existing projects are migrated idempotently with `tools/migrate_project_resource_limits.py` (dry-run by default, `--apply` to write), followed by a recreate. Database-level quotas (connection limits per tenant role, statement timeouts) and disk quotas remain open items; disk usage is currently an observability concern only.
+
+Every rendered project Compose pins `mem_limit`/`memswap_limit`, `cpus`, and `pids_limit` for `nginx`, `auth`, and `rest` through fail-closed interpolation (`${PROJECT_MEM_LIMIT:?...}`), so a project without limits refuses to start instead of running unconstrained. Concrete values come from the project `.env` and are resolved from the root profile `PROJECT_RESOURCE_PROFILE` (`small|medium|large`) at create, duplicate, rename, and rotate-key time. Existing projects are migrated idempotently with `tools/migrate_project_resource_limits.py` (dry-run by default, `--apply` to write), followed by a recreate. Database-level quotas (connection limits per tenant role, statement timeouts) and disk quotas remain open items; disk usage is currently an observability concern only.
+
 Changing settings writes the `.env` atomically and reports the affected services.
 
 Examples:

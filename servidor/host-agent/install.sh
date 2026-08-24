@@ -120,6 +120,9 @@ main() {
   if grep -Eq '^HOST_AGENT_HMAC_SECRET=pass$' "$SERVIDOR_DIR/.env"; then
     die "HOST_AGENT_HMAC_SECRET ainda e placeholder em servidor/.env."
   fi
+  if ! grep -Eq '^HOST_AGENT_DB_PASSWORD=[A-Za-z0-9_-]{32,128}$' "$SERVIDOR_DIR/.env"; then
+    die "HOST_AGENT_DB_PASSWORD ausente ou placeholder em servidor/.env; gere com: openssl rand -base64 48 | tr '/+' '_-' | tr -d '=\n' e aplique as migrations antes de reinstalar o agent."
+  fi
 
   SERVICE_USER="$(resolve_service_user)"
   SERVICE_GROUP="$(id -gn "$SERVICE_USER")"

@@ -291,13 +291,18 @@ def _require_dsn() -> str:
 
 
 async def _command_apply(*, wait_timeout: float, skip_roles: bool) -> int:
-    from app.control_plane_roles import ensure_key_authorizer_role
+    from app.control_plane_roles import ensure_host_agent_rw_role, ensure_key_authorizer_role
 
     key_authorizer_password = (
         os.getenv("KEY_AUTHORIZER_DB_PASSWORD") or ""
     ).strip()
     if not skip_roles and not key_authorizer_password:
         raise SchemaMigrationError("KEY_AUTHORIZER_DB_PASSWORD e obrigatorio")
+    host_agent_password = (
+        os.getenv("HOST_AGENT_DB_PASSWORD") or ""
+    ).strip()
+    if not skip_roles and not host_agent_password:
+        raise SchemaMigrationError("HOST_AGENT_DB_PASSWORD e obrigatorio")
 
     catalog = discover_migrations()
     pool = await _connect_pool(_require_dsn(), wait_timeout=wait_timeout)
@@ -318,6 +323,10 @@ async def _command_apply(*, wait_timeout: float, skip_roles: bool) -> int:
                 pool, password=key_authorizer_password
             )
             print("[migrations] identidade key_authorizer provisionada")
+            await ensure_host_agent_rw_role(
+                pool, password=host_agent_password
+            )
+            print("[migrations] identidade host_agent_rw provisionada")
     finally:
         await pool.close()
     return 0

@@ -16,6 +16,9 @@ import asyncpg
 KEY_AUTHORIZER_ROLE = "key_authorizer"
 KEY_AUTHORIZER_PASSWORD_RE = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
 
+HOST_AGENT_ROLE = "host_agent_rw"
+HOST_AGENT_PASSWORD_RE = KEY_AUTHORIZER_PASSWORD_RE
+
 
 async def ensure_key_authorizer_role(
     pool: asyncpg.Pool, *, password: str
@@ -79,6 +82,71 @@ async def ensure_key_authorizer_role(
                 """
                 SELECT format(
                     'GRANT CONNECT ON DATABASE %I TO key_authorizer',
+                    current_database()
+                )
+                """
+            )
+            await conn.execute(grant_connect)
+
+
+async def ensure_host_agent_rw_role(
+    pool: asyncpg.Pool, *, password: str
+) -> None:
+    """Provision the least-privilege identity used by the host-agent.
+
+    O agent precisa apenas de lease/heartbeat/resultado nas tabelas
+    host_agent_* e do inventario de containers. Nenhuma outra tabela do
+    control plane, nenhum database de tenant.
+    """
+
+    if not HOST_AGENT_PASSWORD_RE.fullmatch(password):
+        raise RuntimeError(
+            "HOST_AGENT_DB_PASSWORD must contain 32-128 URL-safe characters"
+        )
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                """
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_roles WHERE rolname = 'host_agent_rw'
+                    ) THEN
+                        CREATE ROLE host_agent_rw WITH
+                            LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT
+                            NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 10;
+                    END IF;
+                END
+                $$;
+
+                ALTER ROLE host_agent_rw WITH
+                    LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT
+                    NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 10;
+                ALTER ROLE host_agent_rw SET search_path = public, pg_catalog;
+                ALTER ROLE host_agent_rw SET statement_timeout = '5s';
+                ALTER ROLE host_agent_rw SET lock_timeout = '2s';
+                ALTER ROLE host_agent_rw SET idle_in_transaction_session_timeout = '15s';
+
+                REVOKE ALL ON ALL TABLES IN SCHEMA public FROM host_agent_rw;
+                REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM host_agent_rw;
+                REVOKE CREATE ON SCHEMA public FROM host_agent_rw;
+                GRANT USAGE ON SCHEMA public TO host_agent_rw;
+
+                GRANT SELECT, INSERT, UPDATE ON host_agent_workers TO host_agent_rw;
+                GRANT SELECT, INSERT, UPDATE ON host_agent_commands TO host_agent_rw;
+                GRANT SELECT, INSERT, UPDATE, DELETE ON project_container_state
+                    TO host_agent_rw;
+                """
+            )
+            password_statement = await conn.fetchval(
+                "SELECT format('ALTER ROLE host_agent_rw PASSWORD %L', $1::text)",
+                password,
+            )
+            await conn.execute(password_statement)
+            grant_connect = await conn.fetchval(
+                """
+                SELECT format(
+                    'GRANT CONNECT ON DATABASE %I TO host_agent_rw',
                     current_database()
                 )
                 """

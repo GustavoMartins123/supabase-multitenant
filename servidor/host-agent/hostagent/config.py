@@ -44,6 +44,55 @@ def _int_env(env: dict[str, str], key: str, default: int) -> int:
     return int(raw) if raw else default
 
 
+def _env_lookup(env: dict[str, str], key: str) -> str:
+    return (os.environ.get(key) or env.get(key) or "").strip()
+
+
+def build_db_dsn_from_env(env: dict[str, str]) -> str:
+    """Resolve o DSN do agent: HOST_AGENT_DB_DSN > host_agent_rw > legado.
+
+    A identidade dedicada `host_agent_rw` e provisionada pelas migrations do
+    control plane. O fallback legado deriva o DSN de POSTGRES_USER enquanto
+    instalacoes antigas nao tiverem HOST_AGENT_DB_PASSWORD; o cutover estrito
+    acompanha a separacao de DSN da Projects API.
+    """
+
+    dsn = _env_lookup(env, "HOST_AGENT_DB_DSN")
+    if dsn:
+        return dsn
+
+    agent_user = _env_lookup(env, "HOST_AGENT_DB_USER") or "host_agent_rw"
+    agent_password = _env_lookup(env, "HOST_AGENT_DB_PASSWORD")
+    if agent_password:
+        db_name = (
+            _env_lookup(env, "HOST_AGENT_DB_NAME")
+            or env.get("POSTGRES_DB")
+            or "postgres"
+        )
+        return (
+            "postgresql://"
+            f"{urllib.parse.quote(agent_user, safe='')}"
+            f":{urllib.parse.quote(agent_password, safe='')}"
+            f"@{env['POSTGRES_HOST']}:{env['POSTGRES_PORT']}/{db_name}"
+        )
+
+    missing = [
+        key
+        for key in ("POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB")
+        if not env.get(key)
+    ]
+    if missing:
+        raise ConfigError(
+            "variaveis de banco ausentes no .env: " + ", ".join(missing)
+        )
+    return (
+        "postgresql://"
+        f"{urllib.parse.quote(env['POSTGRES_USER'], safe='')}"
+        f":{urllib.parse.quote(env['POSTGRES_PASSWORD'], safe='')}"
+        f"@{env['POSTGRES_HOST']}:{env['POSTGRES_PORT']}/{env['POSTGRES_DB']}"
+    )
+
+
 def load_config(root: str | Path) -> AgentConfig:
     root_path = Path(root).resolve()
     env_path = root_path / ".env"
@@ -68,23 +117,7 @@ def load_config(root: str | Path) -> AgentConfig:
     if not hmac_secret or hmac_secret == "pass":
         raise ConfigError("HOST_AGENT_HMAC_SECRET ausente ou placeholder")
 
-    dsn = (os.environ.get("HOST_AGENT_DB_DSN") or env.get("HOST_AGENT_DB_DSN") or "").strip()
-    if not dsn:
-        missing = [
-            key
-            for key in ("POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB")
-            if not env.get(key)
-        ]
-        if missing:
-            raise ConfigError(
-                "variaveis de banco ausentes no .env: " + ", ".join(missing)
-            )
-        dsn = (
-            "postgresql://"
-            f"{urllib.parse.quote(env['POSTGRES_USER'], safe='')}"
-            f":{urllib.parse.quote(env['POSTGRES_PASSWORD'], safe='')}"
-            f"@{env['POSTGRES_HOST']}:{env['POSTGRES_PORT']}/{env['POSTGRES_DB']}"
-        )
+    dsn = build_db_dsn_from_env(env)
 
     worker_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
 

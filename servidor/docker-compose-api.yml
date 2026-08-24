@@ -25,6 +25,7 @@ services:
       PYTHONDONTWRITEBYTECODE: 1
       DB_DSN: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
       KEY_AUTHORIZER_DB_PASSWORD: ${KEY_AUTHORIZER_DB_PASSWORD:?defina KEY_AUTHORIZER_DB_PASSWORD}
+      HOST_AGENT_DB_PASSWORD: ${HOST_AGENT_DB_PASSWORD:?defina HOST_AGENT_DB_PASSWORD}
     command: ["python", "-m", "app.schema_migrations", "apply"]
 
   key-authorizer:

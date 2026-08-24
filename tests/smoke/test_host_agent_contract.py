@@ -203,6 +203,68 @@ class SystemdSandboxContractTest(unittest.TestCase):
         self.assertEqual(bounding, [""], "CapabilityBoundingSet= deve zerar as capabilities.")
 
 
+class HostAgentRoleContractTest(unittest.TestCase):
+    """O agent usa a identidade dedicada host_agent_rw (REVISAO #1)."""
+
+    def test_role_provisioning_grants_only_agent_tables(self) -> None:
+        source = (
+            API_ROOT / "app" / "control_plane_roles.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("host_agent_rw", source)
+        self.assertIn(
+            "GRANT SELECT, INSERT, UPDATE ON host_agent_workers TO host_agent_rw",
+            source,
+        )
+        self.assertIn(
+            "GRANT SELECT, INSERT, UPDATE ON host_agent_commands TO host_agent_rw",
+            source,
+        )
+        self.assertIn("DELETE ON project_container_state", source)
+        self.assertIn("CONNECTION LIMIT 10", source)
+        # A role nao pode enxergar projects nem chaves opacas.
+        self.assertNotIn("ON projects TO host_agent_rw", source)
+        self.assertNotIn("project_api_keys TO host_agent_rw", source)
+
+    def test_migrations_require_and_provision_the_role(self) -> None:
+        source = (API_ROOT / "app" / "schema_migrations.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("HOST_AGENT_DB_PASSWORD", source)
+        self.assertIn("ensure_host_agent_rw_role", source)
+
+    def test_compose_passes_the_password_to_migrations(self) -> None:
+        compose = (
+            ROOT / "servidor" / "docker-compose-api.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "HOST_AGENT_DB_PASSWORD: ${HOST_AGENT_DB_PASSWORD:?defina HOST_AGENT_DB_PASSWORD}",
+            compose,
+        )
+        example = (ROOT / "servidor" / ".env.example").read_text(encoding="utf-8")
+        self.assertRegex(example, r"(?m)^HOST_AGENT_DB_PASSWORD=pass$")
+
+    def test_config_prefers_dedicated_identity_with_legacy_fallback(self) -> None:
+        from hostagent import config as agent_config
+
+        base = {
+            "POSTGRES_HOST": "db",
+            "POSTGRES_PORT": "5432",
+            "POSTGRES_USER": "supabase_admin",
+            "POSTGRES_PASSWORD": "legado",
+            "POSTGRES_DB": "postgres",
+            "HOST_AGENT_HMAC_SECRET": "segredo-forte",
+        }
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("HOST_AGENT_DB_DSN", None)
+            os.environ.pop("HOST_AGENT_DB_PASSWORD", None)
+            legacy = agent_config.build_db_dsn_from_env(dict(base))
+            dedicated = agent_config.build_db_dsn_from_env(
+                dict(base, HOST_AGENT_DB_PASSWORD="novo-segredo-32-caracteres-minimo!")
+            )
+        self.assertIn("supabase_admin:legado@", legacy)
+        self.assertIn("host_agent_rw:novo-segredo", dedicated)
+
+
 class SchemaReadinessTest(unittest.IsolatedAsyncioTestCase):
     async def test_schema_probe_checks_all_agent_tables_and_closes_connection(
         self,

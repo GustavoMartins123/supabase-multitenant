@@ -15,6 +15,10 @@ services:
       dockerfile: Dockerfile
     container_name: supabase-nginx-{{project_id}}
     restart: unless-stopped
+    mem_limit: ${PROJECT_MEM_LIMIT:?defina PROJECT_MEM_LIMIT no .env do projeto}
+    memswap_limit: ${PROJECT_MEM_LIMIT:?defina PROJECT_MEM_LIMIT no .env do projeto}
+    cpus: ${PROJECT_CPUS:?defina PROJECT_CPUS no .env do projeto}
+    pids_limit: ${PROJECT_PIDS_LIMIT:?defina PROJECT_PIDS_LIMIT no .env do projeto}
     logging: *vector-logging
     environment:
       FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT}
@@ -41,6 +45,10 @@ services:
     container_name: supabase-auth-{{project_id}}
     image: ${AUTH_IMAGE}
     restart: unless-stopped
+    mem_limit: ${PROJECT_MEM_LIMIT:?defina PROJECT_MEM_LIMIT no .env do projeto}
+    memswap_limit: ${PROJECT_MEM_LIMIT:?defina PROJECT_MEM_LIMIT no .env do projeto}
+    cpus: ${PROJECT_CPUS:?defina PROJECT_CPUS no .env do projeto}
+    pids_limit: ${PROJECT_PIDS_LIMIT:?defina PROJECT_PIDS_LIMIT no .env do projeto}
     logging: *vector-logging
     networks:
       - rede-supabase
@@ -139,6 +147,10 @@ services:
     container_name: supabase-rest-{{project_id}}
     image: ${POSTGREST_IMAGE}
     restart: unless-stopped
+    mem_limit: ${PROJECT_MEM_LIMIT:?defina PROJECT_MEM_LIMIT no .env do projeto}
+    memswap_limit: ${PROJECT_MEM_LIMIT:?defina PROJECT_MEM_LIMIT no .env do projeto}
+    cpus: ${PROJECT_CPUS:?defina PROJECT_CPUS no .env do projeto}
+    pids_limit: ${PROJECT_PIDS_LIMIT:?defina PROJECT_PIDS_LIMIT no .env do projeto}
     logging: *vector-logging
     networks:
       - rede-supabase

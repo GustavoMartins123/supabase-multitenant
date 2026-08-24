@@ -19,6 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
+source "$SCRIPT_DIR/lib/resource_profiles.sh"
 
 TRANSACTION_DIR="$PROJECT_ROOT/.generate_transaction_$$"
 CREATED_DIRS=()
@@ -473,6 +474,7 @@ template_to_file "$SCRIPT_DIR/poolertemplate" "$OUT_DIR/pooler/pooler.exs"
 template_to_file "$SCRIPT_DIR/Dockerfile" "$OUT_DIR/Dockerfile"
 template_to_file "$SCRIPT_DIR/.dockerignore" "$OUT_DIR/.dockerignore"
 chmod 600 "$OUT_DIR/.env"
+apply_project_resource_limits "$PROJECT_ROOT/.env" "$OUT_DIR/.env"
 chmod 644 "$OUT_DIR/nginx/nginx_${PROJECT_ID}.conf" "$OUT_DIR/.dockerignore"
 echo "HOST_AGENT_PROGRESS=create:files_rendered"
 

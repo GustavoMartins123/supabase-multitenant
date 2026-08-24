@@ -54,7 +54,16 @@ The API does not trust only the groups sent by the gateway. It queries persisted
 
 The `postgres` database stores control-plane state.
 
-The schema belongs to versioned migrations in `servidor/api-internal/app/migrations`. A privileged, ephemeral deployment step applies them and provisions the `key_authorizer` identity; Projects API boot only checks the version recorded in the ledger and refuses to serve when the database is behind the image. No DDL runs in the request-serving process. See [Control-plane migrations](control-plane-migrations.md).
+The schema belongs to versioned migrations in `servidor/api-internal/app/migrations`. A privileged, ephemeral deployment step applies them and provisions the least-privilege identities (`key_authorizer`, `host_agent_rw`); Projects API boot only checks the version recorded in the ledger and refuses to serve when the database is behind the image. No DDL runs in the request-serving process. See [Control-plane migrations](control-plane-migrations.md).
+
+### Database identities
+
+| Role | Consumer | Scope |
+| --- | --- | --- |
+| `key_authorizer` | key-authorizer service | column-scoped `SELECT` on `projects`, `project_api_key_slots`, `project_api_keys`; `UPDATE (last_used_at)` |
+| `host_agent_rw` | host-agent worker | `SELECT/INSERT/UPDATE` on `host_agent_workers` and `host_agent_commands`; `SELECT/INSERT/UPDATE/DELETE` on `project_container_state`. No access to any other control-plane table and no tenant database. |
+
+The host-agent resolves its DSN as: explicit `HOST_AGENT_DB_DSN` → dedicated identity (`HOST_AGENT_DB_PASSWORD`, user fixed as `host_agent_rw`) → legacy derivation from `POSTGRES_USER`/`POSTGRES_PASSWORD`. The legacy fallback exists only while the Projects API still shares the privileged DSN; it is removed together with that separation.
 
 ### Identity and access
 
