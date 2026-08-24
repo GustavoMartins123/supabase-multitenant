@@ -236,12 +236,25 @@ class StartupDoesNotMigrateTest(unittest.TestCase):
         self.assertNotIn("ensure_host_agent_rw_role", self.main)
         self.assertNotIn("KEY_AUTHORIZER_DB_PASSWORD", self.main)
         self.assertNotIn("HOST_AGENT_DB_PASSWORD", self.main)
+        self.assertNotIn("PLATFORM_APP_DB_PASSWORD", self.main)
+        self.assertNotIn("META_ADMIN_DB_PASSWORD", self.main)
         roles = (APP / "control_plane_roles.py").read_text(encoding="utf-8")
         self.assertIn("ensure_key_authorizer_role", roles)
         self.assertIn("ensure_host_agent_rw_role", roles)
+        for role in (
+            "ensure_key_authorizer_role",
+            "ensure_host_agent_rw_role",
+            "ensure_platform_app_role",
+            "ensure_platform_meta_admin_role",
+        ):
+            self.assertIn(role, roles)
         self.assertIn(
-            "from app.control_plane_roles import "
-            "ensure_host_agent_rw_role, ensure_key_authorizer_role",
+            "from app.control_plane_roles import (\n"
+            "        ensure_host_agent_rw_role,\n"
+            "        ensure_key_authorizer_role,\n"
+            "        ensure_platform_app_role,\n"
+            "        ensure_platform_meta_admin_role,\n"
+            "    )",
             (APP / "schema_migrations.py").read_text(encoding="utf-8"),
         )
 

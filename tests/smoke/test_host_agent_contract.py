@@ -243,7 +243,7 @@ class HostAgentRoleContractTest(unittest.TestCase):
         example = (ROOT / "servidor" / ".env.example").read_text(encoding="utf-8")
         self.assertRegex(example, r"(?m)^HOST_AGENT_DB_PASSWORD=pass$")
 
-    def test_config_prefers_dedicated_identity_with_legacy_fallback(self) -> None:
+    def test_config_is_fail_closed_without_dedicated_identity(self) -> None:
         from hostagent import config as agent_config
 
         base = {
@@ -257,12 +257,26 @@ class HostAgentRoleContractTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("HOST_AGENT_DB_DSN", None)
             os.environ.pop("HOST_AGENT_DB_PASSWORD", None)
-            legacy = agent_config.build_db_dsn_from_env(dict(base))
+            # Cutover estrito: credenciais globais nao sao mais aceitas.
+            with self.assertRaises(agent_config.ConfigError):
+                agent_config.build_db_dsn_from_env(dict(base))
             dedicated = agent_config.build_db_dsn_from_env(
                 dict(base, HOST_AGENT_DB_PASSWORD="novo-segredo-32-caracteres-minimo!")
             )
-        self.assertIn("supabase_admin:legado@", legacy)
         self.assertIn("host_agent_rw:novo-segredo", dedicated)
+
+    def test_config_rejects_placeholder_password(self) -> None:
+        from hostagent import config as agent_config
+
+        env = {
+            "POSTGRES_HOST": "db",
+            "POSTGRES_PORT": "5432",
+            "HOST_AGENT_DB_PASSWORD": "pass",
+        }
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("HOST_AGENT_DB_DSN", None)
+            with self.assertRaises(agent_config.ConfigError):
+                agent_config.build_db_dsn_from_env(env)
 
 
 class SchemaReadinessTest(unittest.IsolatedAsyncioTestCase):

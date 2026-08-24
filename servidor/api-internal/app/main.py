@@ -577,6 +577,11 @@ async def _scan_automatic_key_rotations() -> int:
 
 @app.on_event("startup")
 async def startup():
+    if not (os.getenv("META_ADMIN_DSN") or "").strip():
+        raise RuntimeError(
+            "META_ADMIN_DSN ausente; a Projects API nao expoe credenciais "
+            "administrativas globais para o Postgres-Meta"
+        )
     reader_password = (os.getenv("PLATFORM_READER_DB_PASSWORD") or "").strip()
     if not reader_password or reader_password == "pass":
         raise RuntimeError(
@@ -4476,7 +4481,10 @@ async def get_project_conn(project_ref: str):
 
 
 def get_project_meta_connection_string(project_ref: str) -> str:
-    dsn = urllib.parse.urlparse(DB_DSN)
+    meta_dsn = (os.getenv("META_ADMIN_DSN") or "").strip()
+    if not meta_dsn:
+        raise RuntimeError("META_ADMIN_DSN ausente no ambiente da Projects API")
+    dsn = urllib.parse.urlparse(meta_dsn)
     if dsn.scheme not in {"postgres", "postgresql"} or not dsn.hostname or not dsn.username:
         raise RuntimeError("DB_DSN inválido para construir a conexão administrativa do projeto")
 

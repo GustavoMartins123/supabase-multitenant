@@ -1,3 +1,12 @@
+## 2026-08-24 — Separação de DSN da Projects API (platform_app) e cutover estrito do host-agent
+
+- nova `DB_DSN` da Projects API: role dedicada `platform_app` (DML completo apenas nas tabelas do schema public do control plane; sem administracao de cluster, sem databases de tenant, CONNECTION LIMIT 100);
+- Postgres-Meta passa a usar `META_ADMIN_DSN` com a credencial dedicada `platform_meta_admin` (membro de `supabase_admin`, revogavel e auditavel): o superuser global deixa de existir no ambiente da API;
+- migrations provisionam as quatro identidades (`key_authorizer`, `host_agent_rw`, `platform_app`, `platform_meta_admin`) e exigem as senhas correspondentes; compose falha com `:?` se qualquer uma estiver ausente;
+- host-agent em cutover estrito: a derivacao legada por `POSTGRES_USER/POSTGRES_PASSWORD` foi removida — sem `HOST_AGENT_DB_PASSWORD` util, o agent recusa iniciar; setup gera todas as novas senhas;
+- instalacoes existentes: adicione `PLATFORM_APP_DB_PASSWORD` e `META_ADMIN_DB_PASSWORD` ao `.env`, rode o container `control-plane-migrations` para provisionar as roles e recrie `projects-api` e o host-agent;
+- novos contratos: `test_api_dsn_separation_contract.py`; docs EN/PT-BR atualizadas (tabela de identidades).
+
 ## 2026-08-24 — Perfil de recursos por projeto e telemetria com identidade dedicada
 
 - migration `0005_project_resource_profile.sql`: coluna `projects.resource_profile` (small|medium|large, default `medium`);

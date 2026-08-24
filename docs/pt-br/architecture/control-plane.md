@@ -80,13 +80,15 @@ privilegio, e nao apenas o `key_authorizer`:
 | `key_authorizer` | servico key-authorizer | `SELECT` por coluna em `projects`, `project_api_key_slots`, `project_api_keys`; `UPDATE (last_used_at)` |
 | `host_agent_rw` | worker do host-agent | `SELECT/INSERT/UPDATE` em `host_agent_workers` e `host_agent_commands`; `SELECT/INSERT/UPDATE/DELETE` em `project_container_state` |
 | `platform_reader` | telemetria da Projects API | por database de tenant: `CONNECT` + `SELECT` em `auth.users` e `auth.sessions`; exigida no startup da API — nao existe fallback para credencial global |
+| `platform_app` | pool do control plane na Projects API | DML completo nas tabelas do control plane (schema public); sem administracao de cluster nem databases de tenant. O `DB_DSN` da API e essa identidade |
+| `platform_meta_admin` | conexoes do Postgres-Meta (`META_ADMIN_DSN`) | membro de `supabase_admin`, credencial propria revogavel. O superuser global nao existe no ambiente da API |
 | `platform_reader` | telemetria da Projects API | por database de tenant: `CONNECT` + `SELECT` em `auth.users` e `auth.sessions` (helper `lib/tenant_reader_role.sh`) |
 
-O DSN do host-agent resolve como: `HOST_AGENT_DB_DSN` explicito → identidade
-dedicada (`HOST_AGENT_DB_PASSWORD`, usuario fixo `host_agent_rw`) → derivacao
-legada de `POSTGRES_*`. O DSN de telemetria e fail-closed: `PLATFORM_READER_DB_PASSWORD` ausente ou
-placeholder impede o startup da API. O fallback legado restante e apenas o
-do host-agent, que sai junto com a separacao do DSN da Projects API.
+Todas as identidades sao provisionadas pelo comando privilegiado de migrations
+e exigidas no startup: o agent recusa iniciar sem `HOST_AGENT_DB_PASSWORD`, e a
+API recusa sem `PLATFORM_APP_DB_PASSWORD`, `META_ADMIN_DSN` e
+`PLATFORM_READER_DB_PASSWORD`. Nenhum componente deriva mais credenciais do
+superuser global.
 
 ### Chaves de API opacas
 

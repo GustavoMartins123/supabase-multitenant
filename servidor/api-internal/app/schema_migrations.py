@@ -291,7 +291,12 @@ def _require_dsn() -> str:
 
 
 async def _command_apply(*, wait_timeout: float, skip_roles: bool) -> int:
-    from app.control_plane_roles import ensure_host_agent_rw_role, ensure_key_authorizer_role
+    from app.control_plane_roles import (
+        ensure_host_agent_rw_role,
+        ensure_key_authorizer_role,
+        ensure_platform_app_role,
+        ensure_platform_meta_admin_role,
+    )
 
     key_authorizer_password = (
         os.getenv("KEY_AUTHORIZER_DB_PASSWORD") or ""
@@ -303,6 +308,16 @@ async def _command_apply(*, wait_timeout: float, skip_roles: bool) -> int:
     ).strip()
     if not skip_roles and not host_agent_password:
         raise SchemaMigrationError("HOST_AGENT_DB_PASSWORD e obrigatorio")
+    platform_app_password = (
+        os.getenv("PLATFORM_APP_DB_PASSWORD") or ""
+    ).strip()
+    if not skip_roles and not platform_app_password:
+        raise SchemaMigrationError("PLATFORM_APP_DB_PASSWORD e obrigatorio")
+    meta_admin_password = (
+        os.getenv("META_ADMIN_DB_PASSWORD") or ""
+    ).strip()
+    if not skip_roles and not meta_admin_password:
+        raise SchemaMigrationError("META_ADMIN_DB_PASSWORD e obrigatorio")
 
     catalog = discover_migrations()
     pool = await _connect_pool(_require_dsn(), wait_timeout=wait_timeout)
@@ -327,6 +342,14 @@ async def _command_apply(*, wait_timeout: float, skip_roles: bool) -> int:
                 pool, password=host_agent_password
             )
             print("[migrations] identidade host_agent_rw provisionada")
+            await ensure_platform_app_role(
+                pool, password=platform_app_password
+            )
+            print("[migrations] identidade platform_app provisionada")
+            await ensure_platform_meta_admin_role(
+                pool, password=meta_admin_password
+            )
+            print("[migrations] identidade platform_meta_admin provisionada")
     finally:
         await pool.close()
     return 0
