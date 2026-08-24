@@ -221,9 +221,10 @@ class ProjectIdentitySourceContractTest(unittest.TestCase):
 
     def test_new_projects_use_one_uuid_for_project_and_tenant(self) -> None:
         self.assertGreaterEqual(
-            self.main.count("VALUES($1, $1, $2, $3)"),
+            self.main.count("VALUES($1, $1, $2, $3"),
             2,
         )
+        self.assertIn("owner_id, resource_profile)", self.main)
         self.assertGreaterEqual(
             self.main.count('"tenant_uuid": str(project_id)'),
             2,

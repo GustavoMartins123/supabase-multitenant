@@ -437,6 +437,8 @@ main() {
     safe_sed "s|POSTGRES_PASSWORD=pass|POSTGRES_PASSWORD=$POSTGRES_PASSWORD|g" servidor/.env
     safe_sed "s|META_GUEST_PASSWORD=pass|META_GUEST_PASSWORD=$META_GUEST_PASSWORD|g" servidor/.env
     safe_sed "s|KEY_AUTHORIZER_DB_PASSWORD=pass|KEY_AUTHORIZER_DB_PASSWORD=$KEY_AUTHORIZER_DB_PASSWORD|g" servidor/.env
+    PLATFORM_READER_DB_PASSWORD=$(generate_key_authorizer_password)
+    safe_sed "s|PLATFORM_READER_DB_PASSWORD=pass|PLATFORM_READER_DB_PASSWORD=$PLATFORM_READER_DB_PASSWORD|g" servidor/.env
     safe_sed "s|DB_ENC_KEY=pass|DB_ENC_KEY=$DB_ENC_KEY|g" servidor/.env
     safe_sed "s|VAULT_ENC_KEY=pass|VAULT_ENC_KEY=$VAULT_ENC_KEY|g" servidor/.env
     safe_sed "s|SECRET_KEY_BASE=pass|SECRET_KEY_BASE=$SECRET_KEY_BASE|g" servidor/.env

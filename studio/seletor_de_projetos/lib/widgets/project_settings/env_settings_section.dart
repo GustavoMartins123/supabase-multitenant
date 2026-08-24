@@ -24,7 +24,15 @@ class _SettingMeta {
   });
 }
 
-enum _FieldType { toggle, number, text }
+enum _FieldType { toggle, number, text, select }
+
+const _kSelectOptions = <String, Map<String, String>>{
+  'PROJECT_RESOURCE_PROFILE': {
+    'small': 'Pequeno (256 MB / 0,5 CPU / 128 PIDs)',
+    'medium': 'Médio (1 GB / 1,5 CPU / 384 PIDs)',
+    'large': 'Grande (4 GB / 3 CPUs / 768 PIDs)',
+  },
+};
 
 const _kIntegerRanges = {
   'JWT_EXPIRY': (min: 60, max: 3153600000),
@@ -60,6 +68,14 @@ const _kSettings = [
         'Impede novos cadastros no projeto, mesmo com provedores habilitados',
     type: _FieldType.toggle,
     category: 'Autenticação',
+  ),
+  _SettingMeta(
+    key: 'PROJECT_RESOURCE_PROFILE',
+    label: 'Perfil de Recursos',
+    description:
+        'Limites de CPU/memória/PIDs dos containers; aplicado ao recriar auth/rest/nginx',
+    type: _FieldType.select,
+    category: 'Recursos',
   ),
   _SettingMeta(
     key: 'ENABLE_EMAIL_SIGNUP',
@@ -903,6 +919,19 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
               inactiveTrackColor: SupabaseColors.bg300,
             ),
           ),
+        );
+      case _FieldType.select:
+        final options = _kSelectOptions[meta.key] ?? const {};
+        return DropdownButtonFormField<String>(
+          initialValue: options.containsKey(value) ? value : null,
+          isDense: true,
+          items: options.entries
+              .map((entry) => DropdownMenuItem(
+                    value: entry.key,
+                    child: Text(entry.value, overflow: TextOverflow.ellipsis),
+                  ))
+              .toList(),
+          onChanged: enabled ? (v) => _updateValue(meta.key, v ?? '') : null,
         );
       case _FieldType.number:
         final isFileSize = meta.key == 'FILE_SIZE_LIMIT';

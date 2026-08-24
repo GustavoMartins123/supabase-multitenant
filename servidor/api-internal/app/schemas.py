@@ -2,13 +2,17 @@ import uuid
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Literal, Optional
 
+ResourceProfile = Literal["small", "medium", "large"]
+
 class NewProject(BaseModel):
     name: str
+    resource_profile: ResourceProfile = "medium"
 
 class DuplicateProject(BaseModel):
     original_name: str
     new_name: str
     copy_data: bool = False
+    resource_profile: Optional[ResourceProfile] = None
 
 class UserSyncPayload(BaseModel):
     id: uuid.UUID

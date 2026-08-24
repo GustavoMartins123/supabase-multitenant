@@ -577,6 +577,13 @@ async def _scan_automatic_key_rotations() -> int:
 
 @app.on_event("startup")
 async def startup():
+    reader_password = (os.getenv("PLATFORM_READER_DB_PASSWORD") or "").strip()
+    if not reader_password or reader_password == "pass":
+        raise RuntimeError(
+            "PLATFORM_READER_DB_PASSWORD ausente ou placeholder no ambiente da "
+            "Projects API; gere a senha e provisione a role platform_reader "
+            "(scripts de lifecycle) antes de iniciar"
+        )
     pool = await initialize_pool(DB_DSN)
     schema = await verify_control_plane_schema(pool)
     print(
@@ -2274,12 +2281,13 @@ async def create_project(
             project_id = uuid.uuid4()
             await conn.execute(
                 """
-                INSERT INTO projects(id, tenant_uuid, name, owner_id)
-                VALUES($1, $1, $2, $3)
+                INSERT INTO projects(id, tenant_uuid, name, owner_id, resource_profile)
+                VALUES($1, $1, $2, $3, $4)
                 """,
                 project_id,
                 name,
                 auth_user["db_user_id"],
+                body.resource_profile,
             )
             await conn.execute(
                     """
@@ -3700,6 +3708,7 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
                 "recover_stale": recover_stale,
                 "stale_tenant_uuids": stale_tenant_uuids,
                 "gateway_token": gateway_token,
+                "resource_profile": body.resource_profile,
             },
             reuse_terminal=True,
             on_progress=_job_progress_mirror(job_id),
@@ -4447,11 +4456,21 @@ async def transfer_project(
 async def get_project_conn(project_ref: str):
     dsn = urllib.parse.urlparse(DB_DSN)
     db_name = f"_supabase_{project_ref}"
+    # Identidade de leitura dedicada por tenant (GRANT SELECT em auth.*),
+    # provisionada pelos scripts de lifecycle. Falha fechado: sem a senha
+    # configurada, a telemetria nao existe — nunca cai em credencial global.
+    reader_password = (os.getenv("PLATFORM_READER_DB_PASSWORD") or "").strip()
+    if not reader_password or reader_password == "pass":
+        raise HTTPException(
+            503,
+            "PLATFORM_READER_DB_PASSWORD ausente ou placeholder; "
+            "provisione a role platform_reader antes de usar a telemetria",
+        )
     return await asyncpg.connect(
         host=dsn.hostname,
         port=dsn.port,
-        user=dsn.username,
-        password=dsn.password,
+        user="platform_reader",
+        password=reader_password,
         database=db_name
     )
 
@@ -4871,11 +4890,17 @@ async def update_project_settings(
 
     updates = _normalize_settings_updates(body.settings)
 
+    resolved_limits: dict[str, str] = {}
+    if "PROJECT_RESOURCE_PROFILE" in updates:
+        from app.project_settings import resolve_resource_limits
+
+        resolved_limits = resolve_resource_limits(updates["PROJECT_RESOURCE_PROFILE"])
+
     env_path = _get_project_env_path(project_name)
     if not env_path.exists():
         raise HTTPException(404, f"Arquivo .env não encontrado para o projeto '{project_name}'")
 
-    _write_env_whitelisted(env_path, updates)
+    _write_env_whitelisted(env_path, {**updates, **resolved_limits})
 
     affected = _get_affected_services(list(updates.keys()))
     if affected:

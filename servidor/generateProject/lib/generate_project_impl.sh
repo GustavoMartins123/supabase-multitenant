@@ -20,6 +20,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
 source "$SCRIPT_DIR/lib/resource_profiles.sh"
+source "$SCRIPT_DIR/lib/tenant_reader_role.sh"
 
 TRANSACTION_DIR="$PROJECT_ROOT/.generate_transaction_$$"
 CREATED_DIRS=()
@@ -251,6 +252,7 @@ generate_db() {
     "REVOKE CONNECT, TEMPORARY ON DATABASE $db FROM PUBLIC; GRANT CONNECT, TEMPORARY ON DATABASE $db TO pgbouncer; GRANT CONNECT, TEMPORARY ON DATABASE $db TO authenticator; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $db TO supabase_storage_admin; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $db TO supabase_auth_admin;"
   docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
     "ALTER ROLE supabase_storage_admin IN DATABASE $db SET search_path = storage, public;"
+  provision_platform_reader "$db"
   vector_validate_database "$db" || die "Banco do projeto sem suporte a Storage Vectors"
 }
 
@@ -474,7 +476,7 @@ template_to_file "$SCRIPT_DIR/poolertemplate" "$OUT_DIR/pooler/pooler.exs"
 template_to_file "$SCRIPT_DIR/Dockerfile" "$OUT_DIR/Dockerfile"
 template_to_file "$SCRIPT_DIR/.dockerignore" "$OUT_DIR/.dockerignore"
 chmod 600 "$OUT_DIR/.env"
-apply_project_resource_limits "$PROJECT_ROOT/.env" "$OUT_DIR/.env"
+apply_project_resource_limits "$PROJECT_ROOT/.env" "$OUT_DIR/.env" "${PROJECT_RESOURCE_PROFILE_OVERRIDE:-}"
 chmod 644 "$OUT_DIR/nginx/nginx_${PROJECT_ID}.conf" "$OUT_DIR/.dockerignore"
 echo "HOST_AGENT_PROGRESS=create:files_rendered"
 

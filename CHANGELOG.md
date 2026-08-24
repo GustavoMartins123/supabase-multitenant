@@ -1,3 +1,14 @@
+## 2026-08-24 — Perfil de recursos por projeto e telemetria com identidade dedicada
+
+- migration `0005_project_resource_profile.sql`: coluna `projects.resource_profile` (small|medium|large, default `medium`);
+- criacao e duplicacao aceitam `resource_profile` no payload; o valor persiste no control plane, viaja na intencao HMAC ate o host-agent (`resource_profile` validado no protocolo) e chega aos scripts via `PROJECT_RESOURCE_PROFILE_OVERRIDE`;
+- edicao pela aba de configuracoes: nova chave `PROJECT_RESOURCE_PROFILE` (dropdown no Flutter), gravada junto com o trio resolvido `PROJECT_MEM_LIMIT/PROJECT_CPUS/PROJECT_PIDS_LIMIT`; chaves derivadas rejeitadas se enviadas diretamente; `auth/rest/nginx` marcados como serviços afetados;
+- Flutter: dropdown de perfil no dialog de novo projeto (retorno estruturado name+profile) e campo de selecao nas configuracoes de ambiente;
+- telemetria usa a role `platform_reader` (por tenant: CONNECT + SELECT em auth.users/auth.sessions), fail-closed: compose exige a senha com `:?`, o startup da API recusa placeholder e o endpoint responde 503 sem ela; scripts de create/duplicate/restore provisionam a role idempotentemente (`lib/tenant_reader_role.sh`);
+- docs canonicas EN + PT-BR atualizadas (identidades de banco em control-plane; limites de recursos em project-lifecycle);
+- novos contratos: `test_resource_profile_contract.py`.
+- instalacoes existentes: gere `PLATFORM_READER_DB_PASSWORD` no `.env`, aplique a migration 0005 e rode o migrador de limites antes do proximo recreate.
+
 ## 2026-08-24 — Limites de recursos por projeto e identidade dedicada do host-agent
 
 - containers nginx/auth/rest de cada projeto passam a subir com `mem_limit`/`memswap_limit`, `cpus` e `pids_limit` definidos via interpolacao fail-closed (`${PROJECT_MEM_LIMIT:?...}`): projeto sem limites no `.env` recusa o start em vez de rodar sem controle;

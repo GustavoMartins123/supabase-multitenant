@@ -124,6 +124,7 @@ RECREATE_SERVICE_NAMES = frozenset(
     {"auth", "rest", "storage", "nginx", "meta"}
 )
 COPY_MODES = frozenset({"with-data", "schema-only"})
+RESOURCE_PROFILES = frozenset({"small", "medium", "large"})
 UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
@@ -162,6 +163,11 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
         if unknown:
             errors.append("unknown_args:" + ",".join(sorted(unknown)))
 
+    def validate_resource_profile() -> None:
+        value = args.get("resource_profile")
+        if value is not None and value not in RESOURCE_PROFILES:
+            errors.append("invalid_resource_profile")
+
     if command in {
         "start_project",
         "stop_project",
@@ -189,7 +195,7 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
         ):
             errors.append("invalid_services")
     elif command == "create_project":
-        reject_unknown({"tenant_uuid", "recover_stale", "stale_tenant_uuids", "gateway_token"})
+        reject_unknown({"tenant_uuid", "recover_stale", "stale_tenant_uuids", "gateway_token", "resource_profile"})
         if not is_valid_uuid(args.get("tenant_uuid")):
             errors.append("invalid_tenant_uuid")
         if "gateway_token" in args and not is_valid_gateway_token(args.get("gateway_token")):
@@ -206,8 +212,9 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
             errors.append("invalid_stale_tenant_uuids")
         elif stale_tenant_uuids and recover_stale is not True:
             errors.append("stale_tenants_require_recovery")
+        validate_resource_profile()
     elif command == "duplicate_project":
-        reject_unknown({"original_name", "copy_mode", "tenant_uuid", "gateway_token"})
+        reject_unknown({"original_name", "copy_mode", "tenant_uuid", "gateway_token", "resource_profile"})
         require_project_field("original_name")
         if args.get("copy_mode") not in COPY_MODES:
             errors.append("invalid_copy_mode")
@@ -215,11 +222,13 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
             errors.append("invalid_tenant_uuid")
         if "gateway_token" in args and not is_valid_gateway_token(args.get("gateway_token")):
             errors.append("invalid_gateway_token")
+        validate_resource_profile()
     elif command == "rename_project":
-        reject_unknown({"new_name"})
+        reject_unknown({"new_name", "resource_profile"})
         require_project_field("new_name")
         if args.get("new_name") == project:
             errors.append("new_name_equals_project")
+        validate_resource_profile()
     elif command == "backup_project":
         reject_unknown({"backup_id", "tenant_uuid"})
         if not is_valid_uuid(args.get("backup_id")):

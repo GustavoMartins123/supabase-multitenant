@@ -62,6 +62,7 @@ The schema belongs to versioned migrations in `servidor/api-internal/app/migrati
 | --- | --- | --- |
 | `key_authorizer` | key-authorizer service | column-scoped `SELECT` on `projects`, `project_api_key_slots`, `project_api_keys`; `UPDATE (last_used_at)` |
 | `host_agent_rw` | host-agent worker | `SELECT/INSERT/UPDATE` on `host_agent_workers` and `host_agent_commands`; `SELECT/INSERT/UPDATE/DELETE` on `project_container_state`. No access to any other control-plane table and no tenant database. |
+| `platform_reader` | Projects API telemetry | per-tenant database: `CONNECT` plus `SELECT` on `auth.users` and `auth.sessions`, provisioned by the lifecycle scripts. Required at API startup; there is no global-credential fallback. |
 
 The host-agent resolves its DSN as: explicit `HOST_AGENT_DB_DSN` → dedicated identity (`HOST_AGENT_DB_PASSWORD`, user fixed as `host_agent_rw`) → legacy derivation from `POSTGRES_USER`/`POSTGRES_PASSWORD`. The legacy fallback exists only while the Projects API still shares the privileged DSN; it is removed together with that separation.
 

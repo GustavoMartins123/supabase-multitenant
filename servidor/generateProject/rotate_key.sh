@@ -259,7 +259,7 @@ template_to_file "$SCRIPT_DIR/Dockerfile" "$PROJECT_DIR/Dockerfile"
 template_to_file "$SCRIPT_DIR/dockercomposetemplate" "$PROJECT_DIR/docker-compose.yml"
 template_to_file "$SCRIPT_DIR/.dockerignore" "$PROJECT_DIR/.dockerignore"
 chmod 600 "$PROJECT_DIR/.env"
-apply_project_resource_limits "$PROJECT_ROOT/.env" "$PROJECT_DIR/.env"
+apply_project_resource_limits "$PROJECT_ROOT/.env" "$PROJECT_DIR/.env" "${PROJECT_RESOURCE_PROFILE_OVERRIDE:-}"
 chmod 644 "$PROJECT_DIR/nginx/nginx_${PROJECT_ID}.conf" "$PROJECT_DIR/.dockerignore"
 
 replace_env_value "ANON_KEY_PROJETO" "$NEW_ANON" "$PROJECT_DIR/.env"

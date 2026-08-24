@@ -225,6 +225,20 @@ Exemplos:
 
 A atualização de Storage envia `PATCH /tenants/<tenant_uuid>` e não reinicia o Storage ou imgproxy globais. A recriação do Nginx continua sendo um job idempotente quando sua configuração local muda.
 
+### Limites de recursos
+
+Todo Compose de projeto renderizado fixa `mem_limit`/`memswap_limit`, `cpus`
+e `pids_limit` para `nginx`, `auth` e `rest` via interpolacao fail-closed
+(`${PROJECT_MEM_LIMIT:?...}`): projeto sem limites no `.env` recusa o start.
+Os valores concretos vêm do perfil do projeto (`projects.resource_profile`,
+escolhido na criacao ou na aba de configuracoes como
+`PROJECT_RESOURCE_PROFILE`) resolvido contra o `.env` raiz pelo helper
+`lib/resource_profiles.sh`, chamado em create/duplicate/rename/rotate-key. A
+edicao pela Projects API grava o perfil junto com o trio resolvido e marca
+`auth/rest/nginx` como serviços afetados; instalacoes existentes usam
+`tools/migrate_project_resource_limits.py`. Quotas de database por tenant,
+statement_timeout default e quota de disco seguem pendentes.
+
 ## Pontos de restauração
 
 Um ponto de restauração captura **dados, não identidade**: o dump do database `_supabase_<project_ref>` (sem o schema `realtime`, que é capturado à parte como no duplicate) e o tar somente de `volumes/storage/objects/<tenant_uuid>/`. O `manifest.json` formato 2 inclui UUID, Storage tenant ID, layout, ref na época, versão do Postgres e as tabelas da publication do Realtime.

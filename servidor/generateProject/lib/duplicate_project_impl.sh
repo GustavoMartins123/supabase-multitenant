@@ -8,6 +8,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
 source "$SCRIPT_DIR/lib/resource_profiles.sh"
+source "$SCRIPT_DIR/lib/tenant_reader_role.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/backup_core.sh"
 
@@ -308,6 +309,7 @@ CREATED_DB=1
 
 docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
   "REVOKE CONNECT, TEMPORARY ON DATABASE $NEW_DB FROM PUBLIC; GRANT CONNECT, TEMPORARY ON DATABASE $NEW_DB TO pgbouncer; GRANT CONNECT, TEMPORARY ON DATABASE $NEW_DB TO authenticator; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $NEW_DB TO supabase_storage_admin; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $NEW_DB TO supabase_auth_admin;"
+  provision_platform_reader "$NEW_DB"
 
 if [[ "$COPY_MODE" == "with-data" ]]; then
   for source_service in nginx rest auth meta; do
@@ -468,7 +470,7 @@ template_to_file "$SCRIPT_DIR/poolertemplate" "$OUT_DIR/pooler/pooler.exs"
 template_to_file "$SCRIPT_DIR/Dockerfile" "$OUT_DIR/Dockerfile"
 template_to_file "$SCRIPT_DIR/.dockerignore" "$OUT_DIR/.dockerignore"
 chmod 600 "$OUT_DIR/.env"
-apply_project_resource_limits "$PROJECT_ROOT/.env" "$OUT_DIR/.env"
+apply_project_resource_limits "$PROJECT_ROOT/.env" "$OUT_DIR/.env" "${PROJECT_RESOURCE_PROFILE_OVERRIDE:-}"
 chmod 644 "$OUT_DIR/nginx/nginx_${NEW_PROJECT}.conf" "$OUT_DIR/.dockerignore"
 
 COMPOSE_STARTED=1

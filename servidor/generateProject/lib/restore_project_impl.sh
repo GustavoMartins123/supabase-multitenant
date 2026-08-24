@@ -19,6 +19,7 @@ BACKUPS_ROOT="$PROJECT_ROOT/backups"
 source "$SCRIPT_DIR/lib/backup_core.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
+source "$SCRIPT_DIR/lib/tenant_reader_role.sh"
 
 NAME_RE='^[a-z_][a-z0-9_]{2,39}$'
 UUID_RE='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
@@ -282,6 +283,7 @@ fi
 
 docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
   "GRANT CONNECT, TEMPORARY ON DATABASE $DB TO pgbouncer; GRANT CONNECT, TEMPORARY ON DATABASE $DB TO authenticator; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $DB TO supabase_storage_admin; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $DB TO supabase_auth_admin;"
+  provision_platform_reader "$DB"
 
 vector_validate_database "$DB" || die "Banco restaurado sem contrato pgvector valido"
 

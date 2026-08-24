@@ -129,11 +129,11 @@ class ProjectRepository {
     return projects;
   }
 
-  Future<Job> createProject(String name) async {
+  Future<Job> createProject(String name, {String resourceProfile = 'medium'}) async {
     final response = await _client.post(
       Uri.parse('/api/projects'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'name': name}),
+      body: jsonEncode({'name': name, 'resource_profile': resourceProfile}),
     );
     _ensureCommandSucceeded(response, allowedStatusCodes: const {202});
     return Job.fromResponse(response);
@@ -142,8 +142,9 @@ class ProjectRepository {
   Future<Job> duplicateProject(
     String originalName,
     String newName,
-    bool copyData,
-  ) async {
+    bool copyData, {
+    String? resourceProfile,
+  }) async {
     final response = await _client.post(
       Uri.parse('/api/projects/duplicate'),
       headers: {'Content-Type': 'application/json'},
@@ -151,6 +152,7 @@ class ProjectRepository {
         'original_name': originalName,
         'new_name': newName,
         'copy_data': copyData,
+        if (resourceProfile != null) 'resource_profile': resourceProfile,
       }),
     );
     _ensureCommandSucceeded(response, allowedStatusCodes: const {202});

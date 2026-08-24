@@ -34,7 +34,10 @@ SETTINGS_WHITELIST = {
     "VECTOR_BUCKETS_ENABLED",
     "VECTOR_MAX_BUCKETS",
     "VECTOR_MAX_INDEXES",
+    "PROJECT_RESOURCE_PROFILE",
 }
+
+DERIVED_LIMIT_KEYS = {"PROJECT_MEM_LIMIT", "PROJECT_CPUS", "PROJECT_PIDS_LIMIT"}
 
 BOOLEAN_SETTINGS = {
     "DISABLE_SIGNUP",
@@ -64,6 +67,15 @@ INTEGER_SETTING_RANGES = {
 
 SCHEMA_NAME_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
 
+RESOURCE_PROFILES = ("small", "medium", "large")
+RESOLVED_LIMIT_KEYS = ("PROJECT_MEM_LIMIT", "PROJECT_CPUS", "PROJECT_PIDS_LIMIT")
+
+PROFILE_RESOLVED_FROM_ROOT = {
+    "small": {"MEMORY": "PROJECT_RES_SMALL_MEMORY", "CPUS": "PROJECT_RES_SMALL_CPUS", "PIDS": "PROJECT_RES_SMALL_PIDS"},
+    "medium": {"MEMORY": "PROJECT_RES_MEDIUM_MEMORY", "CPUS": "PROJECT_RES_MEDIUM_CPUS", "PIDS": "PROJECT_RES_MEDIUM_PIDS"},
+    "large": {"MEMORY": "PROJECT_RES_LARGE_MEMORY", "CPUS": "PROJECT_RES_LARGE_CPUS", "PIDS": "PROJECT_RES_LARGE_PIDS"},
+}
+
 SETTING_TO_SERVICES: dict[str, list[str]] = {
     "DISABLE_SIGNUP":                          ["auth"],
     "ENABLE_EMAIL_SIGNUP":                     ["auth"],
@@ -84,9 +96,37 @@ SETTING_TO_SERVICES: dict[str, list[str]] = {
     "ENABLE_IMAGE_TRANSFORMATION":             ["storage"],
     "S3_PROTOCOL_ENABLED":                     ["storage"],
     "VECTOR_BUCKETS_ENABLED":                  ["storage"],
-    "VECTOR_MAX_BUCKETS":                      ["storage"],
-    "VECTOR_MAX_INDEXES":                      ["storage"],
+    "VECTOR_MAX_BUCKETS":                    ["storage"],
+    "VECTOR_MAX_INDEXES":                    ["storage"],
+    "PROJECT_RESOURCE_PROFILE":              ["auth", "rest", "nginx"],
 }
+
+DEFAULT_SERVER_ENV = pathlib.Path(
+    os.getenv("SERVER_ENV_PATH", "/docker/.env")
+)
+
+
+def resolve_resource_limits(
+    profile: str,
+    *,
+    server_env: pathlib.Path = DEFAULT_SERVER_ENV,
+) -> dict[str, str]:
+    """Resolve o trio de limites do .env raiz para o perfil informado."""
+
+    if profile not in RESOURCE_PROFILES:
+        raise HTTPException(400, "PROJECT_RESOURCE_PROFILE: use small, medium ou large")
+    try:
+        content = server_env.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(409, ".env do servidor indisponivel") from exc
+    values: dict[str, str] = {}
+    for suffix, key in PROFILE_RESOLVED_FROM_ROOT[profile].items():
+        match = re.search(rf"(?m)^{key}=(.*)$", content)
+        raw = match.group(1).strip().strip('"').strip("'") if match else ""
+        if not raw or raw == "pass":
+            raise HTTPException(409, f"{key} ausente no .env do servidor")
+        values[RESOLVED_LIMIT_KEYS[("MEMORY", "CPUS", "PIDS").index(suffix)]] = raw
+    return values
 
 def _read_env_whitelisted(env_path: pathlib.Path) -> dict[str, str]:
     all_values = {
@@ -120,6 +160,11 @@ def _normalize_setting_value(key: str, raw_value: str) -> str:
         raise HTTPException(400, f"{key}: valor não pode conter quebra de linha ou byte nulo")
     if not value:
         raise HTTPException(400, f"{key}: valor obrigatório")
+
+    if key == "PROJECT_RESOURCE_PROFILE":
+        if value not in RESOURCE_PROFILES:
+            raise HTTPException(400, f"{key}: use small, medium ou large")
+        return value
 
     if key in BOOLEAN_SETTINGS:
         normalized = value.lower()
@@ -159,6 +204,13 @@ def _normalize_settings_updates(settings: dict[str, str]) -> dict[str, str]:
             400,
             f"Variáveis não permitidas: {', '.join(sorted(invalid_keys))}",
         )
+    injected = set(settings.keys()) & DERIVED_LIMIT_KEYS
+    if injected:
+        raise HTTPException(
+            400,
+            "Limites resolvidos nao sao configuraveis diretamente: "
+            f"use PROJECT_RESOURCE_PROFILE ({', '.join(sorted(injected))})",
+        )
 
     if not settings:
         raise HTTPException(400, "Nenhuma configuração enviada")
@@ -183,7 +235,9 @@ def _write_env_whitelisted(env_path: pathlib.Path, updates: dict[str, str]) -> N
             continue
         if "=" in stripped:
             key = stripped.split("=", 1)[0].strip()
-            if key in updates and key in SETTINGS_WHITELIST:
+            if key in updates and (
+                key in SETTINGS_WHITELIST or key in DERIVED_LIMIT_KEYS
+            ):
                 value = updates[key]
                 new_lines.append(f"{key}={value}\n")
                 updated_keys.add(key)
@@ -192,7 +246,9 @@ def _write_env_whitelisted(env_path: pathlib.Path, updates: dict[str, str]) -> N
         new_lines.append(line)
 
     for key, value in updates.items():
-        if key not in updated_keys and key in SETTINGS_WHITELIST:
+        if key not in updated_keys and (
+            key in SETTINGS_WHITELIST or key in DERIVED_LIMIT_KEYS
+        ):
             new_lines.append(f"{key}={value}\n")
 
     temp_path: pathlib.Path | None = None

@@ -60,13 +60,15 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
         ),
       );
 
-  Future<void> _createAndWait(String name) async {
+  Future<void> _createAndWait(String name,
+      {String resourceProfile = 'medium'}) async {
     setState(() => _creating = true);
     _snack('Gerando… aguarde', SupabaseColors.info);
 
     try {
       final notifier = ref.read(projectListProvider.notifier);
-      final ok = await notifier.createProjectAndWait(name);
+      final ok = await notifier.createProjectAndWait(name,
+            resourceProfile: resourceProfile);
       if (!mounted) return;
       _snack(
         ok ? 'Projeto criado!' : 'Falhou ao criar',
@@ -303,13 +305,17 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
                       onPressed: _creating || hasProjectCreationInFlight
                           ? null
                           : () async {
-                              final name = await showDialog<String>(
+                              final result =
+                                  await showDialog<
+                                      ({String name, String resourceProfile})>(
                                 context: context,
                                 builder: (_) => const NewProjectDialog(),
                               );
                               if (!mounted) return;
-                              if (name != null && name.trim().isNotEmpty) {
-                                await _createAndWait(name.trim());
+                              if (result != null &&
+                                  result.name.trim().isNotEmpty) {
+                                await _createAndWait(result.name.trim(),
+                                    resourceProfile: result.resourceProfile);
                               }
                             },
                       icon: Icons.add,

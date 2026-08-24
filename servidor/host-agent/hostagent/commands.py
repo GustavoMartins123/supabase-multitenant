@@ -724,6 +724,9 @@ async def handle_create_project(ctx: CommandContext, project: str, args: dict[st
     gateway_token = args.get("gateway_token")
     if gateway_token:
         env["API_GATEWAY_TOKEN_PROJETO"] = str(gateway_token)
+    resource_profile = args.get("resource_profile")
+    if resource_profile:
+        env["PROJECT_RESOURCE_PROFILE_OVERRIDE"] = str(resource_profile)
     outcome, process = await _run_lifecycle_script(
         ctx,
         "generate_project.sh",
@@ -770,6 +773,9 @@ async def handle_duplicate_project(ctx: CommandContext, project: str, args: dict
     gateway_token = args.get("gateway_token")
     if gateway_token:
         env["API_GATEWAY_TOKEN_PROJETO"] = str(gateway_token)
+    resource_profile = args.get("resource_profile")
+    if resource_profile:
+        env["PROJECT_RESOURCE_PROFILE_OVERRIDE"] = str(resource_profile)
     outcome, _ = await _run_lifecycle_script(
         ctx,
         "duplicate_project.sh",
@@ -828,10 +834,15 @@ async def handle_rename_project(ctx: CommandContext, project: str, args: dict[st
     resolve_project_dir(ctx.config.projects_root, project)
     resolve_project_dir(ctx.config.projects_root, new_name)
     ctx.state.report(progress=5, step="migrate_infrastructure", message=f"Renomeando {project} -> {new_name}...")
+    env = os.environ.copy()
+    resource_profile = args.get("resource_profile")
+    if resource_profile:
+        env["PROJECT_RESOURCE_PROFILE_OVERRIDE"] = str(resource_profile)
     outcome, process = await _run_lifecycle_script(
         ctx,
         "rename_project.sh",
         [project, new_name],
+        env=env,
         error_code="rename_failed",
         markers=("ROLLBACK_COMPLETE",),
     )

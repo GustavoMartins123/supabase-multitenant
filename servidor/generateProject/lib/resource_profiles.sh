@@ -2,7 +2,9 @@
 # Resolve o perfil de recursos do .env raiz e grava os limites concretos no
 # .env do projeto (PROJECT_MEM_LIMIT, PROJECT_CPUS, PROJECT_PIDS_LIMIT).
 
-# Uso: apply_project_resource_limits <root_env> <project_env>
+# Uso: apply_project_resource_limits <root_env> <project_env> [profile_override]
+# O terceiro argumento (opcional) sobrepoe o perfil do .env raiz — usado
+# quando o projeto tem perfil proprio escolhido na criacao/edicao.
 
 resource_profiles_error() {
     echo "Erro: $*" >&2
@@ -14,13 +16,17 @@ resource_env_value() {
 }
 
 apply_project_resource_limits() {
-    local root_env="$1" project_env="$2"
+    local root_env="$1" project_env="$2" profile_override="${3:-}"
     [ -f "$root_env" ] || resource_profiles_error ".env raiz ausente: $root_env"
     [ -f "$project_env" ] || resource_profiles_error ".env do projeto ausente: $project_env"
 
     local profile upper mem cpus pids key
-    profile="$(resource_env_value PROJECT_RESOURCE_PROFILE "$root_env")"
-    profile="${profile:-medium}"
+    if [ -n "$profile_override" ]; then
+        profile="$profile_override"
+    else
+        profile="$(resource_env_value PROJECT_RESOURCE_PROFILE "$root_env")"
+        profile="${profile:-medium}"
+    fi
     case "$profile" in
         small|medium|large) ;;
         *) resource_profiles_error "PROJECT_RESOURCE_PROFILE invalido: $profile (use small, medium ou large)" ;;

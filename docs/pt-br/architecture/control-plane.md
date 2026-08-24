@@ -70,6 +70,24 @@ Tabelas principais:
 
 A tabela `projects` possui o UUID canônico (`id`), o vínculo persistido com o tenant externo (`tenant_uuid`), project ref, display name, versão das chaves e segredos criptografados. Em projetos novos, `tenant_uuid` recebe exatamente o valor de `id`; a coluna separada mantém compatibilidade auditável com projetos legados.
 
+### Identidades de banco
+
+O provisionamento privilegiado das migrations cria identidades de menor
+privilegio, e nao apenas o `key_authorizer`:
+
+| Role | Consumidor | Escopo |
+| --- | --- | --- |
+| `key_authorizer` | servico key-authorizer | `SELECT` por coluna em `projects`, `project_api_key_slots`, `project_api_keys`; `UPDATE (last_used_at)` |
+| `host_agent_rw` | worker do host-agent | `SELECT/INSERT/UPDATE` em `host_agent_workers` e `host_agent_commands`; `SELECT/INSERT/UPDATE/DELETE` em `project_container_state` |
+| `platform_reader` | telemetria da Projects API | por database de tenant: `CONNECT` + `SELECT` em `auth.users` e `auth.sessions`; exigida no startup da API — nao existe fallback para credencial global |
+| `platform_reader` | telemetria da Projects API | por database de tenant: `CONNECT` + `SELECT` em `auth.users` e `auth.sessions` (helper `lib/tenant_reader_role.sh`) |
+
+O DSN do host-agent resolve como: `HOST_AGENT_DB_DSN` explicito → identidade
+dedicada (`HOST_AGENT_DB_PASSWORD`, usuario fixo `host_agent_rw`) → derivacao
+legada de `POSTGRES_*`. O DSN de telemetria e fail-closed: `PLATFORM_READER_DB_PASSWORD` ausente ou
+placeholder impede o startup da API. O fallback legado restante e apenas o
+do host-agent, que sai junto com a separacao do DSN da Projects API.
+
 ### Chaves de API opacas
 
 O registro público não usa as colunas escalares de JWT como credenciais de cliente:

@@ -14,6 +14,7 @@ class NewProjectDialog extends StatefulWidget {
 
 class _NewProjectDialogState extends State<NewProjectDialog>
     with SingleTickerProviderStateMixin {
+  String _resourceProfile = 'medium';
   final _ctrl = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   final _rand = Random.secure();
@@ -162,7 +163,9 @@ class _NewProjectDialogState extends State<NewProjectDialog>
 
   void _submit() {
     if (_formKey.currentState!.validate()) {
-      Navigator.pop(context, ProjectNameValidator.normalize(_ctrl.text));
+      Navigator.pop(context,
+          (name: ProjectNameValidator.normalize(_ctrl.text),
+          resourceProfile: _resourceProfile));
     }
   }
 
@@ -253,6 +256,21 @@ class _NewProjectDialogState extends State<NewProjectDialog>
                         fontWeight: FontWeight.w500,
                         color: SupabaseColors.textSecondary,
                       ),
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      initialValue: _resourceProfile,
+                      decoration: const InputDecoration(
+                        labelText: 'Perfil de Recursos',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 'small', child: Text('Pequeno (256 MB / 0,5 CPU)')),
+                        DropdownMenuItem(value: 'medium', child: Text('Médio (1 GB / 1,5 CPU)')),
+                        DropdownMenuItem(value: 'large', child: Text('Grande (4 GB / 3 CPUs)')),
+                      ],
+                      onChanged: (v) =>
+                          setState(() => _resourceProfile = v ?? 'medium'),
                     ),
                     const SizedBox(height: 8),
                     Autocomplete<String>(

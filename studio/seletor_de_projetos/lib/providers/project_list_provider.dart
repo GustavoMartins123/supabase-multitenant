@@ -42,7 +42,7 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
     }
   }
 
-  Future<bool> createProjectAndWait(String name) async {
+  Future<bool> createProjectAndWait(String name, {String resourceProfile = 'medium'}) async {
     final rep = ref.read(projectRepositoryProvider);
     final current = state.value ?? [];
 
@@ -64,15 +64,16 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
     return _submitAndTrack(
       project: name,
       action: 'create',
-      submit: () => rep.createProject(name),
+      submit: () => rep.createProject(name, resourceProfile: resourceProfile),
     );
   }
 
   Future<bool> duplicateProjectAndWait(
     String originalName,
     String newName,
-    bool copyData,
-  ) async {
+    bool copyData, {
+    String resourceProfile = 'medium',
+  }) async {
     final rep = ref.read(projectRepositoryProvider);
     final current = state.value ?? [];
 
@@ -94,7 +95,7 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
     return _submitAndTrack(
       project: newName,
       action: 'duplicate',
-      submit: () => rep.duplicateProject(originalName, newName, copyData),
+      submit: () => rep.duplicateProject(originalName, newName, copyData, resourceProfile: resourceProfile),
     );
   }
 
