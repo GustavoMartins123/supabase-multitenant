@@ -48,7 +48,7 @@ class KeyGenerationContractTest(unittest.TestCase):
             "PROJECT_MEM_LIMIT",
             "PROJECT_CPUS",
             "PROJECT_PIDS_LIMIT",
-        } | {
+        } | {"PROJECT_REST_GHC_MAX_HEAP"} | {
             f"PROJECT_{service}_{suffix}"
             for service in ("NGINX", "AUTH", "REST")
             for suffix in ("MEM_LIMIT", "CPUS", "PIDS_LIMIT")

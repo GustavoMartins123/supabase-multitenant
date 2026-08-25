@@ -236,6 +236,103 @@ class ProfileSplitFunctionalTest(unittest.TestCase):
                 )
 
 
+class GhcHeapCapContract(unittest.TestCase):
+    """A fatia do rest so e teto de verdade com o heap do GHC limitado.
+
+    O RTS do GHC cresce ate a memoria disponivel e o PostgREST nao enxerga o
+    limite do container (PostgREST#1263). Sem `-M`, `mem_limit` vira um
+    convite: o processo ocupa o que tiver e morre por OOM do kernel, sem log.
+    """
+
+    def test_template_caps_the_haskell_heap_below_the_container_limit(self) -> None:
+        source = TEMPLATE.read_text(encoding="utf-8")
+        self.assertIn("GHCRTS: -c -M${PROJECT_REST_GHC_MAX_HEAP:?", source)
+
+    def test_cap_is_derived_and_below_the_rest_share(self) -> None:
+        bash = shutil.which("bash") or "bash"
+        with tempfile.TemporaryDirectory() as tmp:
+            root_env = pathlib.Path(tmp) / "root.env"
+            root_env.write_text(
+                "PROJECT_RES_MEDIUM_MEMORY=1g\nPROJECT_RES_MEDIUM_CPUS=1.50\n"
+                "PROJECT_RES_MEDIUM_PIDS=384\n",
+                encoding="utf-8",
+            )
+            project_env = pathlib.Path(tmp) / "p.env"
+            project_env.write_text("X=1\n", encoding="utf-8")
+            subprocess.run(
+                [
+                    bash,
+                    "-c",
+                    f'source "{HELPER}"; apply_project_resource_limits '
+                    f'"{root_env}" "{project_env}" medium',
+                ],
+                check=True,
+            )
+            values = dict(
+                line.split("=", 1)
+                for line in project_env.read_text(encoding="utf-8").splitlines()
+                if "=" in line
+            )
+            heap = int(values["PROJECT_REST_GHC_MAX_HEAP"].rstrip("m"))
+            share = int(values["PROJECT_REST_MEM_LIMIT"].rstrip("m"))
+            self.assertLess(heap, share, "heap tem de caber abaixo do mem_limit")
+            self.assertGreater(heap, share // 2, "teto baixo demais viraria crash")
+
+
+class MemoryFloorContract(unittest.TestCase):
+    """Perfil pequeno demais falha alto, em vez de furar o teto em silencio.
+
+    GoTrue tem pico de baseline ~56 MiB: uma fatia menor que isso e um OOM
+    latente, que so aparece sob carga real.
+    """
+
+    def test_profile_below_the_auth_floor_is_rejected(self) -> None:
+        bash = shutil.which("bash") or "bash"
+        with tempfile.TemporaryDirectory() as tmp:
+            root_env = pathlib.Path(tmp) / "root.env"
+            root_env.write_text(
+                "PROJECT_RES_SMALL_MEMORY=64m\nPROJECT_RES_SMALL_CPUS=0.50\n"
+                "PROJECT_RES_SMALL_PIDS=128\n",
+                encoding="utf-8",
+            )
+            project_env = pathlib.Path(tmp) / "p.env"
+            project_env.write_text("X=1\n", encoding="utf-8")
+            result = subprocess.run(
+                [
+                    bash,
+                    "-c",
+                    f'source "{HELPER}"; apply_project_resource_limits '
+                    f'"{root_env}" "{project_env}" small',
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("minimo seguro", result.stderr)
+            # Nada pode ter sido gravado.
+            self.assertEqual("X=1\n", project_env.read_text(encoding="utf-8"))
+
+    def test_floors_match_between_bash_and_api(self) -> None:
+        import re
+
+        helper = HELPER.read_text(encoding="utf-8")
+        settings = (
+            ROOT / "servidor/api-internal/app/project_settings.py"
+        ).read_text(encoding="utf-8")
+        bash_floors = re.search(
+            r"(?m)^RESOURCE_MEM_FLOORS_MIB=\(([^)]*)\)", helper
+        )
+        api_floors = re.search(
+            r"RESOURCE_MEM_FLOORS_MIB = \(([^)]*)\)", settings
+        )
+        self.assertIsNotNone(bash_floors)
+        self.assertIsNotNone(api_floors)
+        self.assertEqual(
+            tuple(int(v) for v in bash_floors.group(1).split()),
+            tuple(int(v) for v in api_floors.group(1).split(",") if v.strip()),
+        )
+
+
 class MigratorContractTest(unittest.TestCase):
     def test_migrator_exists_and_defaults_to_dry_run(self) -> None:
         """Sem --apply o migrador nao pode tocar em nenhum .env."""
@@ -273,6 +370,52 @@ class MigratorContractTest(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("[pendente]", result.stdout)
         self.assertEqual(before, project_env.read_text(encoding="utf-8"))
+
+    def test_migrator_tracks_every_key_the_helper_writes(self) -> None:
+        """Chave fora do MANAGED_RE some do diff: reporta "ja aplicado" sem estar.
+
+        Foi o que aconteceu ao introduzir PROJECT_REST_GHC_MAX_HEAP.
+        """
+        import re
+
+        bash = shutil.which("bash") or "bash"
+        with tempfile.TemporaryDirectory() as tmp:
+            root_env = pathlib.Path(tmp) / "root.env"
+            root_env.write_text(
+                "PROJECT_RES_MEDIUM_MEMORY=1g\nPROJECT_RES_MEDIUM_CPUS=1.50\n"
+                "PROJECT_RES_MEDIUM_PIDS=384\n",
+                encoding="utf-8",
+            )
+            project_env = pathlib.Path(tmp) / "p.env"
+            project_env.write_text("X=1\n", encoding="utf-8")
+            subprocess.run(
+                [
+                    bash,
+                    "-c",
+                    f'source "{HELPER}"; apply_project_resource_limits '
+                    f'"{root_env}" "{project_env}" medium',
+                ],
+                check=True,
+            )
+            written = {
+                line.split("=", 1)[0]
+                for line in project_env.read_text(encoding="utf-8").splitlines()
+                if line.startswith("PROJECT_")
+            }
+
+        pattern = re.search(
+            r"MANAGED_RE = re\.compile\((.*?)\)\n", MIGRATOR.read_text(), re.S
+        )
+        self.assertIsNotNone(pattern)
+        managed = re.compile(
+            "".join(re.findall(r'r"([^"]*)"', pattern.group(1)))
+        )
+        for key in sorted(written):
+            with self.subTest(key=key):
+                self.assertIsNotNone(
+                    managed.match(f"{key}=x"),
+                    f"{key} nao esta no MANAGED_RE do migrador",
+                )
 
     def test_migrator_delegates_to_the_canonical_helper(self) -> None:
         """Uma unica implementacao do rateio: bash, API e migrador."""

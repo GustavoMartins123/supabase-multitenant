@@ -43,11 +43,14 @@ RESOURCE_WEIGHTS = {
     "CPUS": (1, 2, 3),
     "PIDS": (2, 5, 5),
 }
+RESOURCE_MEM_FLOORS_MIB = (16, 64, 32)
+RESOURCE_GHC_HEAP_PERCENT = 80
 
 DERIVED_LIMIT_KEYS = {
     "PROJECT_MEM_LIMIT",
     "PROJECT_CPUS",
     "PROJECT_PIDS_LIMIT",
+    "PROJECT_REST_GHC_MAX_HEAP",
     *(
         f"PROJECT_{service}_{suffix}"
         for service in RESOURCE_SERVICES
@@ -201,9 +204,20 @@ def _split_across_services(totals: dict[str, str]) -> dict[str, str]:
 
     resolved: dict[str, str] = {}
     for index, service in enumerate(RESOURCE_SERVICES):
+        floor = RESOURCE_MEM_FLOORS_MIB[index]
+        if memory[index] < floor:
+            raise HTTPException(
+                409,
+                f"o perfil da apenas {memory[index]}m ao {service.lower()}; "
+                f"o minimo seguro e {floor}m",
+            )
         resolved[f"PROJECT_{service}_MEM_LIMIT"] = f"{memory[index]}m"
         resolved[f"PROJECT_{service}_CPUS"] = f"{cpus[index] // 100}.{cpus[index] % 100:02d}"
         resolved[f"PROJECT_{service}_PIDS_LIMIT"] = str(pids[index])
+    rest_share = memory[RESOURCE_SERVICES.index("REST")]
+    resolved["PROJECT_REST_GHC_MAX_HEAP"] = (
+        f"{rest_share * RESOURCE_GHC_HEAP_PERCENT // 100}m"
+    )
     return resolved
 
 def _read_env_whitelisted(env_path: pathlib.Path) -> dict[str, str]:

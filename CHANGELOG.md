@@ -1,3 +1,14 @@
+## 2026-08-25 — Limites de memoria calibrados por medicao: teto do heap do GHC, pisos por servico e pool do PostgREST
+
+Pesquisa de consumo real por servico (medicao local + fontes upstream) mudou tres defaults:
+
+- **teto do heap do GHC no `rest`:** o RTS do Haskell expande o heap ate a memoria disponivel, e o PostgREST nao enxerga o limite do container (PostgREST#1263) — a fatia do perfil era so uma sugestao, e o processo morreria por OOM do kernel sem log. O helper passa a derivar `PROJECT_REST_GHC_MAX_HEAP` (80% da fatia do rest) e o compose injeta `GHCRTS=-c -M<teto>`, a invocacao documentada pelo PostgREST. Verificado contra a imagem `postgrest/postgrest:v14.14`: `GHCRTS` e de fato parseado (opcao invalida faz o RTS abortar), entao a variavel nao passa despercebida;
+- **pisos de memoria por servico** (nginx 16m, auth 64m, rest 32m): o rateio agora **falha alto** se o total do perfil nao cobrir os pisos, em vez de esticar em silencio e furar o teto. O piso do auth vem do pico de baseline medido do GoTrue (~56 MiB) — o consumo dele nao e dirigido por carga, entao alocar abaixo disso e um OOM latente;
+- **`PGRST_DB_POOL` de 100 para 10** (default do upstream) no template de novos projetos: o `rest` fala com o Supavisor em modo *session*, entao cada conexao do pool vira um backend real no Postgres (~10 MB cada). Cem por projeto sao ~1 GB no banco compartilhado sob carga, e com `max_connections=1000` cerca de dez projetos saturariam o cluster. Projetos existentes mantem o valor atual; a chave continua editavel por projeto na aba de configuracoes;
+- ordem de necessidade real, ao contrario do que o rateio 1:3:4 sugere: **auth** tem piso rigido, **rest** e elastico (cresce com pool e com heap disponivel) e **nginx** e o menor (pico ~8 MiB, sem Lua no template do projeto);
+- fix no migrador: `MANAGED_RE` nao listava a chave nova, entao o diff nao a via e a ferramenta reportava "ja aplicado" sem ter aplicado. Contrato novo compara o regex com **tudo** que o helper escreve, para a proxima chave nao repetir o falso negativo;
+- novos contratos: teto do heap presente no template e abaixo da fatia do rest, perfil abaixo do piso rejeitado sem gravar nada, e pisos identicos entre bash e Projects API.
+
 ## 2026-08-25 — Perfil de recursos passa a ser o teto do projeto, nao de cada container
 
 - o mesmo `PROJECT_MEM_LIMIT`/`PROJECT_CPUS`/`PROJECT_PIDS_LIMIT` era aplicado a `nginx`, `auth` e `rest`: o perfil anunciado como "Médio 1 GB / 1,5 CPU / 384 PIDs" reservava, na pratica, **3 GB / 4,5 CPU / 1152 PIDs** por projeto. `docker stats` mostrava os tres containers com `LIMIT 1GiB`;

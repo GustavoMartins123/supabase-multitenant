@@ -30,6 +30,7 @@ VALID_PROFILES = {"small", "medium", "large"}
 MANAGED_RE = re.compile(
     r"(?m)^(?:export[ \t]+)?"
     r"(PROJECT_(?:RESOURCE_PROFILE|MEM_LIMIT|CPUS|PIDS_LIMIT"
+    r"|REST_GHC_MAX_HEAP"
     r"|(?:NGINX|AUTH|REST)_(?:MEM_LIMIT|CPUS|PIDS_LIMIT)))[ \t]*=(.*)$"
 )
 

@@ -15,6 +15,8 @@ RESOURCE_SERVICES=(NGINX AUTH REST)
 RESOURCE_MEM_WEIGHTS=(1 3 4)
 RESOURCE_CPU_WEIGHTS=(1 2 3)
 RESOURCE_PIDS_WEIGHTS=(2 5 5)
+RESOURCE_MEM_FLOORS_MIB=(16 64 32)
+RESOURCE_GHC_HEAP_PERCENT=80
 
 resource_profiles_error() {
     echo "Erro: $*" >&2
@@ -99,13 +101,19 @@ apply_project_resource_limits() {
 
     local -a mem_shares cpu_shares pids_shares
     mapfile -t mem_shares < <(resource_split "$(resource_mem_to_mib "$mem")" "${RESOURCE_MEM_WEIGHTS[@]}")
+    local floor_index
+    for floor_index in "${!RESOURCE_SERVICES[@]}"; do
+        [ "${mem_shares[floor_index]}" -ge "${RESOURCE_MEM_FLOORS_MIB[floor_index]}" ] \
+            || resource_profiles_error \
+                "perfil $profile da apenas ${mem_shares[floor_index]}m ao ${RESOURCE_SERVICES[floor_index],,}; o minimo seguro e ${RESOURCE_MEM_FLOORS_MIB[floor_index]}m. Aumente PROJECT_RES_${upper}_MEMORY."
+    done
     mapfile -t cpu_shares < <(resource_split "$(resource_cpus_to_centi "$cpus")" "${RESOURCE_CPU_WEIGHTS[@]}")
     mapfile -t pids_shares < <(resource_split "$pids" "${RESOURCE_PIDS_WEIGHTS[@]}")
 
     local temporary index service
     temporary="$(mktemp "${project_env}.limits.XXXXXX")"
     {
-        grep -vE '^PROJECT_(RESOURCE_PROFILE|MEM_LIMIT|CPUS|PIDS_LIMIT|(NGINX|AUTH|REST)_(MEM_LIMIT|CPUS|PIDS_LIMIT))=' \
+        grep -vE '^PROJECT_(RESOURCE_PROFILE|MEM_LIMIT|CPUS|PIDS_LIMIT|REST_GHC_MAX_HEAP|(NGINX|AUTH|REST)_(MEM_LIMIT|CPUS|PIDS_LIMIT))=' \
             "$project_env" || true
         printf 'PROJECT_RESOURCE_PROFILE=%s\n' "$profile"
         # Totais do projeto: referencia para a UI e para os limites derivados.
@@ -119,6 +127,8 @@ apply_project_resource_limits() {
                 "$((cpu_shares[index] / 100))" "$((cpu_shares[index] % 100))"
             printf 'PROJECT_%s_PIDS_LIMIT=%s\n' "$service" "${pids_shares[index]}"
         done
+        printf 'PROJECT_REST_GHC_MAX_HEAP=%sm\n' \
+            "$(( mem_shares[2] * RESOURCE_GHC_HEAP_PERCENT / 100 ))"
     } > "$temporary"
     # Preserva dono/permissões do arquivo original (600).
     cat "$temporary" > "$project_env"
