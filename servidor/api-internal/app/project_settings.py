@@ -251,6 +251,7 @@ def _write_env_whitelisted(env_path: pathlib.Path, updates: dict[str, str]) -> N
         ):
             new_lines.append(f"{key}={value}\n")
 
+    original = os.stat(env_path)
     temp_path: pathlib.Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -267,6 +268,12 @@ def _write_env_whitelisted(env_path: pathlib.Path, updates: dict[str, str]) -> N
             temp_file.flush()
             os.fsync(temp_file.fileno())
         shutil.copymode(env_path, temp_path)
+        temp_stat = os.stat(temp_path)
+        if (temp_stat.st_uid, temp_stat.st_gid) != (
+            original.st_uid,
+            original.st_gid,
+        ):
+            os.chown(temp_path, original.st_uid, original.st_gid)
         os.replace(temp_path, env_path)
     finally:
         if temp_path is not None and temp_path.exists():

@@ -1,3 +1,13 @@
+## 2026-08-25 — Fix: recreate de servicos quebrado por aspas no .env e por troca de dono
+
+- **leitor canonico recusava aspas:** `HOST_PROJECT_ROOT` e citado por convencao (`.env.example` traz `"pass"`, o `setup.sh` mantem as aspas) porque o `.env` do servidor tambem e lido por `source` do bash e o caminho pode ter espaco. `read_canonical_env_value` rejeitava **qualquer** valor citado, entao `sync_project_generated_files` estourava `RuntimeError: Entrada nao canonica no .env: HOST_PROJECT_ROOT` e `recreate_services` falhava em toda instalacao;
+- o leitor passa a remover uma unica camada de aspas (simples ou duplas). Continua recusando o que o bash reinterpretaria: `$`, crase e `\` dentro de aspas duplas, aspas desbalanceadas, `export`, valor nao normalizado e chave duplicada;
+- `upsert_env_value` grava sem aspas por design, entao agora **recusa** valor que precisaria delas (espaco, tab, aspas, `$`, crase, `\`) em vez de corromper o arquivo para o `source`;
+- **dono do arquivo trocava para root:** `_write_env_whitelisted` cria um temporario, copia o modo com `shutil.copymode` e faz `os.replace`. A Projects API roda como root sobre um bind mount, entao salvar qualquer configuracao transformava o `.env` do projeto (modo 600) em `root:root` — e o host-agent, que roda como usuario de servico, perdia o acesso. Todo recreate/rename/rotate seguinte falharia com PermissionError;
+- o writer passa a restaurar uid/gid do arquivo original antes da troca atomica;
+- instalacoes afetadas: recrie `projects-api`; um `.env` de projeto que ja tenha virado root precisa de `chown` de volta para o usuario de servico;
+- novo `test_envfile_quoting_contract.py`: casos aceitos e recusados do leitor, recusa do writer e obrigatoriedade do chown antes do replace.
+
 ## 2026-08-25 — Fix: perfil de recursos nunca chegava ao .env do projeto
 
 - `apply_project_resource_limits` gravava so os valores **derivados** do perfil (`PROJECT_MEM_LIMIT`, `PROJECT_CPUS`, `PROJECT_PIDS_LIMIT`) e nunca o `PROJECT_RESOURCE_PROFILE` que os gerou;
