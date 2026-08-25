@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+MAIN_SHELL_PID="$BASHPID"
+
 die() { echo "❌  $*" >&2; return 1; }
 
 read_canonical_env_value() {
@@ -117,6 +119,9 @@ delete_tenant_metadata() {
 rollback_transaction() {
   local status="${1:-$?}"
   local rollback_failed=0
+  if [[ "$BASHPID" != "$MAIN_SHELL_PID" ]]; then
+    exit "$status"
+  fi
   trap - ERR TERM INT HUP
   set +e
   echo "❌ Erro detectado! Revertendo alterações..."
@@ -252,7 +257,7 @@ generate_db() {
     "REVOKE CONNECT, TEMPORARY ON DATABASE $db FROM PUBLIC; GRANT CONNECT, TEMPORARY ON DATABASE $db TO pgbouncer; GRANT CONNECT, TEMPORARY ON DATABASE $db TO authenticator; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $db TO supabase_storage_admin; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $db TO supabase_auth_admin;"
   docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
     "ALTER ROLE supabase_storage_admin IN DATABASE $db SET search_path = storage, public;"
-  provision_platform_reader "$db"
+  provision_platform_reader_role
   vector_validate_database "$db" || die "Banco do projeto sem suporte a Storage Vectors"
 }
 
@@ -271,9 +276,11 @@ cleanup_stale_state() {
         return 1
       fi
     fi
-    (cd "$OUT_DIR" && docker compose -p "$PROJECT_ID" \
-      --env-file ../../.env --env-file .env down --remove-orphans) >/dev/null 2>&1 \
-      || { echo "HOST_AGENT_ROLLBACK_FAILED=stale_compose" >&2; return 1; }
+    if [[ -f "$OUT_DIR/.env" && -f "$OUT_DIR/docker-compose.yml" ]]; then
+      (cd "$OUT_DIR" && docker compose -p "$PROJECT_ID" \
+        --env-file ../../.env --env-file .env down --remove-orphans) >/dev/null 2>&1 \
+        || { echo "HOST_AGENT_ROLLBACK_FAILED=stale_compose" >&2; return 1; }
+    fi
   elif [[ -e "$OUT_DIR" ]]; then
     echo "HOST_AGENT_ROLLBACK_FAILED=stale_path" >&2
     return 1
@@ -493,6 +500,9 @@ vector_validate_storage_api "$PROJECT_UUID" "$SERVICE_TOKEN" \
 storage_assert_project_gateway "$PROJECT_UUID" "$PROJECT_ID" "$SERVICE_TOKEN" \
   || die "Nginx do projeto nao resolveu o tenant Storage correto"
 echo "HOST_AGENT_PROGRESS=create:storage_verified"
+
+grant_platform_reader_on_tenant "_supabase_$PROJECT_ID" \
+  || die "Falha ao conceder leitura de telemetria ao platform_reader"
 
 echo "✅  Projeto $PROJECT_ID configurado com Storage Vectors e SigV4"
 commit_transaction

@@ -29,8 +29,11 @@ ProtectControlGroups=true
 # viver sob /home, por isso o ReadWritePaths explicito).
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=-__SERVIDOR_DIR__
-ReadWritePaths=-__AGENT_DIR__
+ReadWritePaths=-"__SERVIDOR_DIR__"
+ReadWritePaths=-"__AGENT_DIR__"
+# `docker compose build` grava o estado do buildx em ~/.docker; sem isso o
+# build do nginx do projeto morre em "read-only file system".
+ReadWritePaths=-"__SERVICE_HOME__/.docker"
 PrivateTmp=true
 CapabilityBoundingSet=
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

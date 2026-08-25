@@ -78,10 +78,10 @@ privilegio, e nao apenas o `key_authorizer`:
 | Role | Consumidor | Escopo |
 | --- | --- | --- |
 | `key_authorizer` | servico key-authorizer | `SELECT` por coluna em `projects`, `project_api_key_slots`, `project_api_keys`; `UPDATE (last_used_at)` |
-| `host_agent_rw` | worker do host-agent | `SELECT/INSERT/UPDATE` em `host_agent_workers` e `host_agent_commands`; `SELECT/INSERT/UPDATE/DELETE` em `project_container_state` |
+| `host_agent_rw` | worker do host-agent | `SELECT/INSERT/UPDATE` em `host_agent_workers` e `host_agent_commands`; `SELECT/INSERT/UPDATE/DELETE` em `project_container_state`; `SELECT` somente leitura por coluna em `projects` (`id`, `name`, `owner_id`, `tenant_uuid`, `automatic_key_rotation_enabled`), `users` (`id`, `is_active`), `user_groups` (`user_id`, `group_name`) e `project_members` (`project_id`, `user_id`, `role`), para o agent reautorizar cada comando contra o banco em vez de confiar na Projects API. Nenhum segredo de projeto, nenhuma escrita fora das tabelas do agent, nenhum database de tenant |
 | `platform_reader` | telemetria da Projects API | por database de tenant: `CONNECT` + `SELECT` em `auth.users` e `auth.sessions`; exigida no startup da API — nao existe fallback para credencial global |
 | `platform_app` | pool do control plane na Projects API | DML completo nas tabelas do control plane (schema public); sem administracao de cluster nem databases de tenant. O `DB_DSN` da API e essa identidade |
-| `platform_meta_admin` | conexoes do Postgres-Meta (`META_ADMIN_DSN`) | membro de `supabase_admin`, credencial propria revogavel. O superuser global nao existe no ambiente da API |
+| `platform_meta_admin` | conexoes do Postgres-Meta e as etapas privilegiadas da exclusao de projeto (`META_ADMIN_DSN`) | membro de `supabase_admin`, credencial propria revogavel. Executa o que `platform_app` nao alcanca: metadata de `_realtime`/`_supavisor`, encerramento de backends de outros papeis, slots de replicacao e `DROP DATABASE`. O superuser global nao existe no ambiente da API |
 | `platform_reader` | telemetria da Projects API | por database de tenant: `CONNECT` + `SELECT` em `auth.users` e `auth.sessions` (helper `lib/tenant_reader_role.sh`) |
 
 Todas as identidades sao provisionadas pelo comando privilegiado de migrations

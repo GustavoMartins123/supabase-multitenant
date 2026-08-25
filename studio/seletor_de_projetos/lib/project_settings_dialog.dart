@@ -29,6 +29,13 @@ import 'widgets/project_settings/opaque_api_keys_section.dart';
 import 'models/project_member.dart';
 import 'models/all_users.dart';
 
+const _kTabs = <({String label, IconData icon})>[
+  (label: 'Geral', icon: Icons.info_outline),
+  (label: 'Chaves', icon: Icons.key_outlined),
+  (label: 'Ambiente', icon: Icons.tune),
+  (label: 'Acesso', icon: Icons.people_outline),
+];
+
 class ProjectSettingsDialog extends ConsumerStatefulWidget {
   const ProjectSettingsDialog({
     super.key,
@@ -53,9 +60,10 @@ class ProjectSettingsDialog extends ConsumerStatefulWidget {
 }
 
 class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late AnimationController _animController;
   late Animation<double> _fadeAnimation;
+  late TabController _tabController;
 
   late String _currentConfigToken;
   String? _currentDisplayName;
@@ -79,6 +87,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
       curve: Curves.easeOut,
     );
     _animController.forward();
+    _tabController = TabController(length: _kTabs.length, vsync: this);
 
     _automaticKeyRotationEnabled = widget.automaticKeyRotationEnabled;
     _automaticKeyRotationBlocked = widget.automaticKeyRotationBlocked;
@@ -93,6 +102,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
   @override
   void dispose() {
     _displayNameController.dispose();
+    _tabController.dispose();
     _animController.dispose();
     super.dispose();
   }
@@ -252,6 +262,8 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
       return _buildLoadingDialog();
     }
 
+    final isAdmin = myRole == 'admin' || Session().isSysAdmin;
+
     return Dialog(
       backgroundColor: Colors.transparent,
       child: FadeTransition(
@@ -270,43 +282,16 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
             mainAxisSize: MainAxisSize.min,
             children: [
               _buildHeader(),
+              _buildTabBar(),
               Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      StatusSection(projectRef: widget.ref),
-                      const SizedBox(height: 20),
-                      _buildUrlSection(projectUrl),
-                      const SizedBox(height: 20),
-                      _buildIdentitySection(myRole, projectBusy),
-                      const SizedBox(height: 20),
-                      OpaqueApiKeysSection(
-                        projectRef: widget.ref,
-                        canManage: myRole == 'admin' || Session().isSysAdmin,
-                        projectBusy: projectBusy,
-                      ),
-                      const SizedBox(height: 20),
-                      _buildAutomaticKeyRotationSection(
-                        myRole,
-                        projectBusy,
-                      ),
-                      const SizedBox(height: 20),
-                      if (myRole == 'admin' || Session().isSysAdmin) ...[
-                        UserTelemetrySection(projectRef: widget.ref),
-                        const SizedBox(height: 20),
-                        _buildConfigTokenSection(),
-                        const SizedBox(height: 20),
-                      ],
-                      EnvSettingsSection(
-                        projectRef: widget.ref,
-                        isAdmin: myRole == 'admin' || Session().isSysAdmin,
-                      ),
-                      const SizedBox(height: 20),
-                      MembersSection(projectRef: widget.ref),
-                    ],
-                  ),
+                child: TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _buildGeneralTab(projectUrl, myRole, projectBusy),
+                    _buildKeysTab(myRole, projectBusy, isAdmin),
+                    _buildEnvironmentTab(isAdmin),
+                    _buildAccessTab(isAdmin),
+                  ],
                 ),
               ),
               _buildFooter(myRole, projectBusy),
@@ -315,6 +300,97 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
         ),
       ),
     );
+  }
+
+  Widget _buildTabBar() {
+    return Container(
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: SupabaseColors.border)),
+      ),
+      child: TabBar(
+        controller: _tabController,
+        isScrollable: false,
+        labelColor: SupabaseColors.brand,
+        unselectedLabelColor: SupabaseColors.textMuted,
+        indicatorColor: SupabaseColors.brand,
+        indicatorSize: TabBarIndicatorSize.tab,
+        dividerColor: Colors.transparent,
+        labelStyle: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+        unselectedLabelStyle: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+        ),
+        tabs: [
+          for (final tab in _kTabs)
+            Tab(
+              height: 44,
+              icon: Icon(tab.icon, size: 16),
+              iconMargin: const EdgeInsets.only(bottom: 2),
+              text: tab.label,
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Cada aba rola sozinha: o TabBarView recebe altura limitada do Expanded.
+  Widget _buildTabBody(List<Widget> children) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: children,
+      ),
+    );
+  }
+
+  Widget _buildGeneralTab(
+    String projectUrl,
+    String? myRole,
+    bool projectBusy,
+  ) {
+    return _buildTabBody([
+      StatusSection(projectRef: widget.ref),
+      const SizedBox(height: 20),
+      _buildUrlSection(projectUrl),
+      const SizedBox(height: 20),
+      _buildIdentitySection(myRole, projectBusy),
+    ]);
+  }
+
+  Widget _buildKeysTab(String? myRole, bool projectBusy, bool isAdmin) {
+    return _buildTabBody([
+      OpaqueApiKeysSection(
+        projectRef: widget.ref,
+        canManage: isAdmin,
+        projectBusy: projectBusy,
+      ),
+      const SizedBox(height: 20),
+      _buildAutomaticKeyRotationSection(myRole, projectBusy),
+      if (isAdmin) ...[
+        const SizedBox(height: 20),
+        _buildConfigTokenSection(),
+      ],
+    ]);
+  }
+
+  Widget _buildEnvironmentTab(bool isAdmin) {
+    return _buildTabBody([
+      EnvSettingsSection(projectRef: widget.ref, isAdmin: isAdmin),
+    ]);
+  }
+
+  Widget _buildAccessTab(bool isAdmin) {
+    return _buildTabBody([
+      MembersSection(projectRef: widget.ref),
+      if (isAdmin) ...[
+        const SizedBox(height: 20),
+        UserTelemetrySection(projectRef: widget.ref),
+      ],
+    ]);
   }
 
   Widget _buildHeader() {

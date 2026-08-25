@@ -312,8 +312,7 @@ async def load_authorization_context(
 
         project_row = await conn.fetchrow(
             """
-            SELECT id, owner_id,
-                   to_jsonb(projects)->>'tenant_uuid' AS tenant_uuid,
+            SELECT id, owner_id, tenant_uuid,
                    automatic_key_rotation_enabled
             FROM projects WHERE name = $1
             """,

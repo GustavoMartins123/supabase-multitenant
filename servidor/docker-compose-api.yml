@@ -130,14 +130,35 @@ services:
   #     context: .
   #     dockerfile: ./api-internal/Dockerfile
   #   restart: unless-stopped
+  #   logging: *vector-logging
+  #   depends_on:
+  #     control-plane-migrations:
+  #       condition: service_completed_successfully
+  #   read_only: true
+  #   tmpfs:
+  #     - /tmp:rw,noexec,nosuid,size=32m
+  #   security_opt:
+  #     - no-new-privileges:true
+  #   cap_drop:
+  #     - ALL
   #   networks: [rede-supabase]
   #   environment:
   #     PYTHONUNBUFFERED: 1
   #     DB_DSN: postgres://supabase_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/postgres
-  #     PUSH_API_URL: ${PUSH_API_URL}
-  #     INTERNAL_HMAC_SECRET: ${INTERNAL_HMAC_SECRET}
-  #     PUSH_VERIFY_TLS: ${PUSH_VERIFY_TLS}
-  #     PUSH_CA_FILE: ${PUSH_CA_FILE}
+  #     PUSH_API_URL: ${PUSH_API_URL:?defina PUSH_API_URL}
+  #     INTERNAL_HMAC_SECRET: ${INTERNAL_HMAC_SECRET:?defina INTERNAL_HMAC_SECRET}
+  #     PUSH_VERIFY_TLS: ${PUSH_VERIFY_TLS:-true}
+  #     PUSH_CA_FILE: ${PUSH_CA_FILE:-/docker/push-certs/ca.pem}
+  #     PUSH_REQUEST_TIMEOUT: ${PUSH_REQUEST_TIMEOUT:-10}
+  #     PUSH_BATCH_SIZE: ${PUSH_BATCH_SIZE:-10}
+  #     PUSH_MAX_ATTEMPTS: ${PUSH_MAX_ATTEMPTS:-8}
+  #     PUSH_REQUEST_RETRIES: ${PUSH_REQUEST_RETRIES:-2}
+  #     PUSH_RETRY_BASE_SECONDS: ${PUSH_RETRY_BASE_SECONDS:-2}
+  #     PUSH_MAX_RETRY_SECONDS: ${PUSH_MAX_RETRY_SECONDS:-60}
+  #     PUSH_NOTIFICATION_LEASE_SECONDS: ${PUSH_NOTIFICATION_LEASE_SECONDS:-900}
+  #     PUSH_SCHEMA_RETRY_SECONDS: ${PUSH_SCHEMA_RETRY_SECONDS:-60}
+  #     PUSH_DB_CONNECT_TIMEOUT: ${PUSH_DB_CONNECT_TIMEOUT:-10}
+  #     PUSH_MAX_TENANT_CONNECTIONS: ${PUSH_MAX_TENANT_CONNECTIONS:-32}
   #   volumes:
   #     - ./certs:/docker/push-certs:ro
   #   command: ["python", "app/push_worker.py"]

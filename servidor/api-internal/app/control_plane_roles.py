@@ -94,9 +94,12 @@ async def ensure_host_agent_rw_role(
 ) -> None:
     """Provision the least-privilege identity used by the host-agent.
 
-    O agent precisa apenas de lease/heartbeat/resultado nas tabelas
-    host_agent_* e do inventario de containers. Nenhuma outra tabela do
-    control plane, nenhum database de tenant.
+    O agent precisa de lease/heartbeat/resultado nas tabelas host_agent_*,
+    do inventario de containers e — para reautorizar cada comando por conta
+    propria, sem confiar na Projects API — da leitura das colunas de
+    identidade e associacao usadas pela matriz de autorizacao. Nenhum
+    segredo de projeto, nenhuma escrita fora das tabelas do agent, nenhum
+    database de tenant.
     """
 
     if not HOST_AGENT_PASSWORD_RE.fullmatch(password):
@@ -136,6 +139,16 @@ async def ensure_host_agent_rw_role(
                 GRANT SELECT, INSERT, UPDATE ON host_agent_commands TO host_agent_rw;
                 GRANT SELECT, INSERT, UPDATE, DELETE ON project_container_state
                     TO host_agent_rw;
+
+                GRANT SELECT (
+                    id, name, owner_id, tenant_uuid,
+                    automatic_key_rotation_enabled
+                ) ON projects TO host_agent_rw;
+                GRANT SELECT (id, is_active) ON users TO host_agent_rw;
+                GRANT SELECT (user_id, group_name)
+                    ON user_groups TO host_agent_rw;
+                GRANT SELECT (project_id, user_id, role)
+                    ON project_members TO host_agent_rw;
                 """
             )
             password_statement = await conn.fetchval(
@@ -196,10 +209,20 @@ async def ensure_platform_app_role(
                     TO platform_app;
                 """
             )
-            await conn.execute(
+            password_statement = await conn.fetchval(
                 "SELECT format('ALTER ROLE platform_app PASSWORD %L', $1::text)",
                 password,
             )
+            await conn.execute(password_statement)
+            grant_connect = await conn.fetchval(
+                """
+                SELECT format(
+                    'GRANT CONNECT ON DATABASE %I TO platform_app',
+                    current_database()
+                )
+                """
+            )
+            await conn.execute(grant_connect)
 
 
 async def ensure_platform_meta_admin_role(
@@ -242,7 +265,17 @@ async def ensure_platform_meta_admin_role(
                 GRANT supabase_admin TO platform_meta_admin;
                 """
             )
-            await conn.execute(
+            password_statement = await conn.fetchval(
                 "SELECT format('ALTER ROLE platform_meta_admin PASSWORD %L', $1::text)",
                 password,
             )
+            await conn.execute(password_statement)
+            grant_connect = await conn.fetchval(
+                """
+                SELECT format(
+                    'GRANT CONNECT ON DATABASE %I TO platform_meta_admin',
+                    current_database()
+                )
+                """
+            )
+            await conn.execute(grant_connect)

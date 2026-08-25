@@ -922,16 +922,42 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
         );
       case _FieldType.select:
         final options = _kSelectOptions[meta.key] ?? const {};
-        return DropdownButtonFormField<String>(
-          initialValue: options.containsKey(value) ? value : null,
-          isDense: true,
-          items: options.entries
-              .map((entry) => DropdownMenuItem(
-                    value: entry.key,
-                    child: Text(entry.value, overflow: TextOverflow.ellipsis),
-                  ))
-              .toList(),
-          onChanged: enabled ? (v) => _updateValue(meta.key, v ?? '') : null,
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            SizedBox(
+              width: 220,
+              child: DropdownButtonFormField<String>(
+                initialValue: options.containsKey(value) ? value : null,
+                isDense: true,
+                isExpanded: true,
+                dropdownColor: SupabaseColors.bg300,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: SupabaseColors.textPrimary,
+                ),
+                icon: const Icon(
+                  Icons.expand_more,
+                  size: 18,
+                  color: SupabaseColors.textMuted,
+                ),
+                decoration: _fieldDecoration(error),
+                items: options.entries
+                    .map((entry) => DropdownMenuItem(
+                          value: entry.key,
+                          child: Text(
+                            entry.value,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ))
+                    .toList(),
+                onChanged:
+                    enabled ? (v) => _updateValue(meta.key, v ?? '') : null,
+              ),
+            ),
+            if (error != null) _buildFieldError(error),
+          ],
         );
       case _FieldType.number:
         final isFileSize = meta.key == 'FILE_SIZE_LIMIT';

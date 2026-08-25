@@ -1,0 +1,64 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  static-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar dependencias de teste
+        run: |
+          python -m pip install --upgrade pip
+          [ -f requirements-dev.txt ] && python -m pip install -r requirements-dev.txt || true
+      - name: Sintaxe Python
+        run: python -m compileall -q servidor/api-internal/app servidor/host-agent/hostagent tools
+      - name: Nomes indefinidos (NameError em runtime)
+        run: |
+          python -m pip install 'ruff==0.13.2'
+          python -m ruff check --select F821 --no-cache \
+            servidor/api-internal/app servidor/host-agent/hostagent tools tests
+      - name: Suite smoke (contratos)
+        run: python -m pytest tests/smoke -q
+      - name: Sintaxe Bash
+        run: |
+          fail=0
+          while IFS= read -r f; do bash -n "$f" || fail=1; done \
+            < <(git ls-files '*.sh')
+          exit $fail
+      - name: Sintaxe Lua
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq lua5.4 >/dev/null
+          fail=0
+          while IFS= read -r f; do luac -p -s "$f" || fail=1; done \
+            < <(git ls-files '*.lua')
+          exit $fail
+      - name: ShellCheck
+        run: |
+          shellcheck --version >/dev/null 2>&1 || { echo "shellcheck ausente"; exit 1; }
+          git ls-files '*.sh' | xargs -r shellcheck -x
+      - name: Validar arquivos Compose
+        run: |
+          for f in $(git ls-files 'servidor/**docker-compose*.yml' 'servidor/docker-compose*.yml'); do
+            docker compose -f "$f" config -q || exit 1
+          done
+
+  flutter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: flutter analyze
+        working-directory: studio/seletor_de_projetos
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings

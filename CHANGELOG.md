@@ -1,3 +1,118 @@
+## 2026-08-25 — Fix: perfil de recursos nunca chegava ao .env do projeto
+
+- `apply_project_resource_limits` gravava so os valores **derivados** do perfil (`PROJECT_MEM_LIMIT`, `PROJECT_CPUS`, `PROJECT_PIDS_LIMIT`) e nunca o `PROJECT_RESOURCE_PROFILE` que os gerou;
+- a API de settings le o perfil justamente desse arquivo (`SETTINGS_WHITELIST`), entao o seletor do Studio abria vazio com "Valor obrigatorio" em **todo** projeto — os limites nos containers estavam corretos, so a origem da escolha nao era persistida;
+- o helper passa a gravar o perfil junto dos limites, removendo a chave antiga antes de reescrever (idempotente). Vale para criacao, duplicacao, rename e rotate, que compartilham o helper;
+- `tools/migrate_project_resource_limits.py` tambem so escrevia o trio derivado e resolvia o perfil **sempre do .env raiz**, o que sobrescreveria um projeto `large` com o default global. Agora tem `profile_for()`, que prefere o perfil proprio do projeto e so cai no raiz quando ausente, e grava a chave do perfil;
+- projetos existentes: `python3 tools/migrate_project_resource_limits.py` mostra o plano, `--apply` grava (preserva dono e modo 600);
+- novos contratos: o perfil precisa ser persistido ao lado dos limites, e a migracao nao pode rebaixar o perfil proprio do projeto.
+
+## 2026-08-25 — Studio: abas no dialogo de configuracoes e fix do seletor de perfil
+
+- **layout quebrado:** no `Row` de cada configuracao, todos os campos tem largura limitada por `SizedBox` (28/120/180) menos o `select`. `DropdownButtonFormField` se dimensiona pelo item mais largo e consumia a linha inteira, deixando ~1 caractere para o `Expanded` do rotulo — "Perfil de Recursos" era renderizado uma letra por linha. O select agora fica em `SizedBox(width: 220)` com `isExpanded`, e ganhou a mesma `_fieldDecoration` e cores escuras dos demais campos;
+- **abas por assunto:** o dialogo empilhava nove secoes num scroll unico. Agora sao quatro abas — Geral (status, URL, identidade), Chaves (chaves opacas, rotacao automatica, config token), Ambiente (configuracoes do `.env`) e Acesso (membros, telemetria de usuarios);
+- cada aba rola sozinha e o rodape (Excluir/Transferir/Fechar) segue global. As secoes so montam quando a aba e aberta, entao as consultas de dados deixam de disparar todas de uma vez;
+- o gating por papel foi preservado: config token e telemetria continuam restritos a admin, apenas realocados para as abas correspondentes.
+
+## 2026-08-25 — install.sh avisa quando derruba um host-agent ativo
+
+- a instalacao nao sobe o agent de proposito (banco e API precisam vir antes, e o `start.sh` orquestra), mas ela **para** quem estava rodando para migrar o ownership e nao dizia nada;
+- o efeito pratico e uma reinstalacao aparentemente bem-sucedida seguida de `host_agent_offline` no proximo comando, sem pista da causa;
+- quando o servico estava ativo, o final da instalacao agora imprime que ele foi parado e o comando exato para retomar. Contrato garante o aviso sem reintroduzir start automatico.
+
+## 2026-08-24 — Fix: build do projeto bloqueado pelo sandbox e rollback rodando em dobro
+
+- **buildx sem escrita:** `docker compose build` grava o estado do builder em `~/.docker/buildx`, e `ProtectHome=read-only` bloqueava: o build do nginx do projeto morria com `failed to update builder last activity time: ... read-only file system`, a 72% da criacao — depois de banco, tenants Realtime/Supavisor e Storage ja criados. O unit ganha `ReadWritePaths=-"__SERVICE_HOME__/.docker"`, resolvido pelo `install.sh` via `getent passwd`;
+- **rollback duplo:** o script roda com `set -Eeuo pipefail`, e `-E` propaga o trap `ERR` para subshells. A falha dentro de `( docker compose up )` disparava `rollback_transaction` no subshell (que completava: `HOST_AGENT_ROLLBACK_COMPLETE=1`) e o `exit` so encerrava o subshell — o shell principal via o retorno nao-zero e rodava o rollback de novo, agora tentando dropar um banco ja removido (`database "_supabase_x" does not exist`) e terminando em `HOST_AGENT_ROLLBACK_FAILED=1`. Um projeto limpo com sucesso era reportado como residuo;
+- `rollback_transaction` agora compara `$BASHPID` com `MAIN_SHELL_PID` e sai imediatamente quando roda num subshell, deixando o rollback real para o shell principal — onde as variaveis `CREATED_*` de fato vivem (as alteradas no subshell nem voltariam);
+- `render_unit` passou a receber o home do servico como argumento em vez de consultar `getent` internamente: renderizador puro, testavel com usuario sintetico;
+- novos contratos: `ReadWritePaths` do `~/.docker`, e o guard de subshell obrigatoriamente antes de qualquer remocao no rollback.
+
+## 2026-08-24 — Fix: recuperacao travava em diretorio de projeto meio-criado
+
+- `cleanup_stale_state` sempre rodava `docker compose down --env-file .env`. Uma criacao que falha antes de renderizar os arquivos deixa o diretorio so com `nginx/` e `pooler/`: o compose sai com 1 por falta do env-file, a recuperacao devolve `HOST_AGENT_ROLLBACK_FAILED=stale_compose` e o nome do projeto fica impossivel de reutilizar;
+- o `compose down` passa a rodar so quando `.env` e `docker-compose.yml` existem — sem eles nao ha stack a derrubar, e a varredura por `label=com.docker.compose.project` logo abaixo ja cobre qualquer container que tenha subido;
+- contrato novo em `StaleRecoveryContract`.
+
+## 2026-08-24 — Fix: provisionamento do platform_reader quebrava a criacao de projeto
+
+- `psql_exec_stdin` usava so `$1` e **descartava os argumentos seguintes**: o `-v reader_pwd=...` nunca chegava ao psql e o `:'reader_pwd'` ia sem substituicao para o Postgres (`syntax error at or near ":"`), derrubando toda criacao com "falha ao provisionar a role platform_reader";
+- o helper agora repassa `"$@"`, e a senha migrou do argv para o stdin — argumentos de processo sao visiveis em `ps` para qualquer usuario local, e o helper ja canalizava o SQL por stdin;
+- segundo defeito no mesmo passo: `auth.sessions` nasce nas migrations do GoTrue, que so rodam quando o container do projeto sobe. Um banco recem-criado do `_supabase_template` tem `auth.users` mas nao `auth.sessions`, e o `GRANT` rodava antes do `docker compose up` — falharia sempre em projeto novo;
+- `provision_platform_reader` foi dividido: `provision_platform_reader_role` continua cedo (fail-fast na senha antes de trabalho caro) e `grant_platform_reader_on_tenant` roda depois dos containers, com `wait_for_auth_sessions` (poll com timeout, `PLATFORM_READER_WAIT_TIMEOUT`, default 60s). O grant segue restrito a `auth.users` e `auth.sessions` — sem `ALL TABLES IN SCHEMA auth` nem `ALTER DEFAULT PRIVILEGES`, que alcancariam `refresh_tokens`, `instances` e futuras tabelas do GoTrue;
+- `duplicate`/`restore` partem de bancos ja migrados e seguem usando `provision_platform_reader`, onde o wait retorna de imediato;
+- novos contratos: nenhum segredo no argv do psql, `psql_exec_stdin` obrigado a repassar argumentos, e o GRANT obrigado a rodar depois do `docker compose up`.
+
+## 2026-08-24 — Fix: host-agent offline reportava residuo fisico inexistente
+
+- quando nenhum worker esta ativo, o comando e cancelado ainda em `queued` — nenhum script roda no host. Mesmo assim a criacao caia no `except HostAgentError` generico e reportava "A limpeza fisica nao foi confirmada; uma nova tentativa fara a recuperacao", sugerindo residuo que nao existe;
+- `HostAgentOffline` (ja importado em `main.py`, ate agora sem uso) passa a ter tratamento proprio antes do `HostAgentError`: mensagem diz que nada foi provisionado e que basta iniciar o servico, com `current_step="host_agent_offline"`;
+- os demais fluxos (duplicate/delete/rotate/recreate) ja usavam mensagens neutras e ficaram como estao.
+
+## 2026-08-24 — Fix: sandbox do systemd deixava o repositorio somente-leitura
+
+- `ReadWritePaths=` recebe uma LISTA separada por espaco. O unit template usava `ReadWritePaths=-__SERVIDOR_DIR__` sem aspas: num deployment sob `~/Área de trabalho/...` o systemd parseou `-/home/gustavo/Área` duas vezes e descartou o resto, entao `ProtectHome=read-only` prevaleceu e o repositorio nunca ficou gravavel;
+- efeito: toda criacao de projeto falhava em `cleanup_stale_state (12%)` com `mkdir: nao foi possivel criar o diretorio ".../.generate_transaction_NNN": Sistema de arquivos somente para leitura`. Diagnostico: `systemctl show supabase-host-agent -p ReadWritePaths` mostrava o caminho truncado;
+- template passa a usar `ReadWritePaths=-"__SERVIDOR_DIR__"` / `-"__AGENT_DIR__"` (`escape_systemd_value` ja escapava `\`, `"` e `%`). `WorkingDirectory=` fica sem aspas de proposito: consome o resto da linha;
+- `install.sh` ganha `assert_sandbox_paths_parsed`, que le `systemctl show -p ReadWritePaths` apos o `daemon-reload` e aborta se algum caminho nao sobreviveu ao parsing — a truncagem so apareceria no primeiro `mkdir` de um job real;
+- novos contratos: todo placeholder de caminho do unit precisa estar entre aspas (exceto `WorkingDirectory=`), e o instalador precisa verificar o sandbox depois do reload;
+- instalacoes afetadas: reinstale com `sudo bash servidor/host-agent/install.sh`.
+
+## 2026-08-24 — Fix: criacao de projeto quebrava com NameError em `body`
+
+- `_provision_and_store_keys` montava os args do host-agent com `body.resource_profile`, mas `body` so existe no endpoint: toda criacao morria com `Worker error: name 'body' is not defined` e caia no rollback;
+- o worker passa a ler `projects.resource_profile` (coluna `NOT NULL` com `CHECK small|medium|large`), gravada pelo endpoint antes de enfileirar. Isso tambem cobre `_build_recovery_runner`, que reentra no worker so com job_id/projeto/dono e nao teria como repassar o perfil;
+- mesma classe de bug encontrada e corrigida no host-agent: `handle_ensure_opaque_gateway_token` usava `ensure_inside` sem importar de `.security`, quebrando o comando de token opaco em runtime;
+- duplicacao herdava o perfil errado: o `INSERT` da copia nao definia `resource_profile` (caia no default `medium`) e o worker nao enviava o valor ao agent — um projeto `large` virava `medium` em silencio. O `INSERT ... SELECT` agora copia o perfil do original na mesma transacao e o worker repassa o valor persistido;
+- CI ganha varredura `ruff --select F821` (nomes indefinidos): `compileall` valida sintaxe e nao pega `NameError`, que so aparece em runtime no meio do job. Contrato em `test_ci_workflow_contract.py` impede o passo de sumir;
+- `drop_supabase_replication_slots` migrou de `main.py` para `project_deletion.py`, junto das demais primitivas de exclusao fisica.
+
+## 2026-08-24 — Fix: exclusao de projeto rodava SQL privilegiado como platform_app
+
+- com a API migrada para `platform_app` (DML so nas tabelas do schema `public`), o fluxo de delete continuou usando o pool da aplicacao para operacoes que exigem administracao: `DELETE`/`SELECT` em `_realtime.*` e `_supavisor.*`, `pg_terminate_backend` em backends de outros papeis, `pg_drop_replication_slot` e `DROP DATABASE`;
+- efeito: a exclusao morreria em "Limpando metadata global" (55%) com `permission denied for schema _realtime`, apos os containers, o tenant de Storage e os tenants globais ja terem sido removidos — projeto meio apagado e database orfao;
+- novo `global_admin_connection()` em `project_deletion.py` abre a conexao dedicada de `META_ADMIN_DSN` (`platform_meta_admin`, membro de `supabase_admin`); os dois blocos privilegiados do delete — metadata global + drop, e a verificacao final — passam a usa-la, enquanto a limpeza do control plane continua no pool de `platform_app`;
+- novo contrato `PrivilegedStatementRoutingContract`: fatia `main.py` por bloco de conexao e proibe marcadores privilegiados dentro de qualquer `async with pool.acquire()`, alem de exigir que `drain_database_connections`/`drop_database_force` recebam a conexao administrativa;
+- instalacoes afetadas: recrie o container `projects-api`.
+
+## 2026-08-24 — Fix: host_agent_rw sem leitura das tabelas de autorizacao
+
+- o cutover para a identidade dedicada concedeu apenas as tabelas `host_agent_*` e `project_container_state`, mas o agent tambem le `projects`, `users`, `user_groups` e `project_members` para reautorizar cada comando por conta propria;
+- efeito na instalacao limpa: `start.sh` parava em "Schema do host-agent indisponivel" — `information_schema.columns` esconde `projects.tenant_uuid` de quem nao tem privilegio, entao o probe de schema dava falso negativo mesmo com as migrations aplicadas; passando dele, todo comando falharia com permission denied;
+- `ensure_host_agent_rw_role` passa a conceder `SELECT` por coluna exatamente nas colunas consultadas: `projects` (`id`, `name`, `owner_id`, `tenant_uuid`, `automatic_key_rotation_enabled`), `users` (`id`, `is_active`), `user_groups` (`user_id`, `group_name`), `project_members` (`project_id`, `user_id`, `role`) — nenhum segredo de projeto (`anon_key`, `service_role`, `config_token`, hashes de chave) e alcancavel, e a escrita continua restrita as tabelas do agent;
+- `load_authorization_context` deixa de usar `to_jsonb(projects)->>'tenant_uuid'`: referencia de linha inteira exige `SELECT` na tabela toda e anularia o escopo por coluna;
+- contrato ampliado em `test_host_agent_contract.py`: as colunas concedidas sao comparadas exatamente com as que o agent consulta, e privilegios de escrita fora das tabelas do agent sao proibidos;
+- instalacoes afetadas: recrie o container `control-plane-migrations` para aplicar os grants.
+
+## 2026-08-24 — Fix: GRANT CONNECT explicito para platform_app/platform_meta_admin
+
+- o database do control plane tem CONNECT revogado do PUBLIC (hardening); as duas roles novas nao recebiam o grant e a API morria com InsufficientPrivilegeError no startup;
+- ambas agora recebem `GRANT CONNECT ON DATABASE ...` no mesmo padrao fetchval+execute do key_authorizer; contrato estendido exige o grant explicito para as quatro identidades.
+
+## 2026-08-24 — Fix: senha de platform_app/platform_meta_admin nunca era aplicada
+
+- `ensure_platform_app_role` e `ensure_platform_meta_admin_role` chamavam `conn.execute("SELECT format('ALTER ROLE ... PASSWORD %L', ...)")`: o SELECT so retorna a string, o ALTER nunca roda — as roles nasciam sem senha e a API morria com InvalidPasswordError no startup;
+- corrigido para o padrao correto (`fetchval` + `execute(password_statement)`), o mesmo de key_authorizer/host_agent_rw;
+- novo contrato em `test_api_dsn_separation_contract.py`: toda alteracao de senha de role precisa passar por fetchval+execute, e nenhum execute direto do SELECT de formato e permitido;
+- instalacoes afetadas: recrie o container `control-plane-migrations` para aplicar as senhas antes de subir a API.
+
+## 2026-08-24 — Fix: `import os` ausente em main.py quebrava o startup da API
+
+- o fail-fast de META_ADMIN_DSN/PLATFORM_READER_DB_PASSWORD usava `os.getenv` sem `import os` no topo de `main.py` — py_compile nao pega NameError e o container morria no boot;
+- novo contrato AST (`test_main_stdlib_imports_contract.py`): qualquer modulo stdlib usado como nome global em main.py precisa estar importado; cobre essa classe de regressao offline, sem depender das dependencias do app.
+
+## 2026-08-24 — Fix: setup.sh agora gera HOST_AGENT_DB_PASSWORD
+
+- o cutover estrito das identidades esqueceu de gerar a senha do host-agent no setup: instalacao limpa falhava no `install.sh` com "HOST_AGENT_DB_PASSWORD ausente ou placeholder";
+- `setup.sh` gera as cinco senhas de identidade (KEY_AUTHORIZER, PLATFORM_READER, PLATFORM_APP, META_ADMIN, HOST_AGENT) pelo mesmo gerador;
+- novo contrato `test_setup_secret_generation_contract.py`: deriva as chaves diretamente do `.env.example` — qualquer identidade de banco nova passa a exigir, obrigatoriamente, geracao no setup.
+
+## 2026-08-24 — CI permanente e suíte E2E opt-in da plataforma
+
+- novo workflow `.github/workflows/ci.yml` em toda PR/main: suite smoke de contratos, sintaxe Python/Bash/Lua, ShellCheck, validacao dos arquivos Compose e `flutter analyze`;
+- nova suite opt-in `tests/smoke/test_platform_e2e_integration.py` (`RUN_PLATFORM_E2E=1` em instalacao descartavel): criacao real com perfil de recursos aplicado ao `.env`, gateway fail-closed sem credencial (401) e comportamento com key-authorizer fora do ar (5xx) com recuperacao verificada;
+- contrato `test_ci_workflow_contract.py` impede o CI de sumir ou de ligar a flag de E2E no runner;
+
 ## 2026-08-24 — Separação de DSN da Projects API (platform_app) e cutover estrito do host-agent
 
 - nova `DB_DSN` da Projects API: role dedicada `platform_app` (DML completo apenas nas tabelas do schema public do control plane; sem administracao de cluster, sem databases de tenant, CONNECTION LIMIT 100);

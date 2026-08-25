@@ -30,6 +30,7 @@ from .host_agent_protocol import (
 )
 from .security import (
     PathConfinementError,
+    ensure_inside,
     resolve_backup_dir,
     resolve_backup_project_dir,
     resolve_project_dir,

@@ -220,10 +220,13 @@ class ProjectIdentitySourceContractTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
     def test_new_projects_use_one_uuid_for_project_and_tenant(self) -> None:
-        self.assertGreaterEqual(
-            self.main.count("VALUES($1, $1, $2, $3"),
-            2,
-        )
+        # O invariante e id == tenant_uuid vindos do mesmo parametro; a
+        # duplicacao usa INSERT ... SELECT para herdar o resource_profile
+        # do original na mesma transacao.
+        same_uuid_inserts = self.main.count(
+            "VALUES($1, $1, $2, $3"
+        ) + self.main.count("SELECT $1, $1, $2, $3")
+        self.assertGreaterEqual(same_uuid_inserts, 2)
         self.assertIn("owner_id, resource_profile)", self.main)
         self.assertGreaterEqual(
             self.main.count('"tenant_uuid": str(project_id)'),

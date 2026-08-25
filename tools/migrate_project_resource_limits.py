@@ -28,8 +28,11 @@ TARGET_KEYS = {
     "CPUS": "PROJECT_CPUS",
     "PIDS": "PROJECT_PIDS_LIMIT",
 }
+PROFILE_KEY = "PROJECT_RESOURCE_PROFILE"
+VALID_PROFILES = {"small", "medium", "large"}
 ASSIGNMENT_RE = re.compile(
-    r"(?m)^(?:export[ \t]+)?(PROJECT_(?:MEM_LIMIT|CPUS|PIDS_LIMIT))[ \t]*=(.*)$"
+    r"(?m)^(?:export[ \t]+)?"
+    r"(PROJECT_(?:RESOURCE_PROFILE|MEM_LIMIT|CPUS|PIDS_LIMIT))[ \t]*=(.*)$"
 )
 
 
@@ -46,13 +49,26 @@ def value_for(content: str, key: str) -> str:
     return matches[0].strip().strip('"').strip("'")
 
 
-def resolve_limits(root_env: Path) -> dict[str, str]:
-    content = root_env.read_text(encoding="utf-8")
-    profile = value_for(content, "PROJECT_RESOURCE_PROFILE") or "medium"
-    if profile not in {"small", "medium", "large"}:
+def profile_for(project_env: Path, root_env: Path) -> str:
+    """Perfil proprio do projeto; so cai no padrao do .env raiz se ausente.
+
+    Sobrescrever um projeto `large` com o default global seria um rebaixamento
+    silencioso de capacidade.
+    """
+    own = value_for(project_env.read_text(encoding="utf-8"), PROFILE_KEY)
+    profile = own or value_for(root_env.read_text(encoding="utf-8"), PROFILE_KEY)
+    profile = profile or "medium"
+    if profile not in VALID_PROFILES:
+        origin = project_env if own else root_env
         raise MigrationError(
-            f"PROJECT_RESOURCE_PROFILE invalido: {profile} (use small, medium ou large)"
+            f"{PROFILE_KEY} invalido em {origin}: {profile} "
+            "(use small, medium ou large)"
         )
+    return profile
+
+
+def resolve_limits(root_env: Path, profile: str) -> dict[str, str]:
+    content = root_env.read_text(encoding="utf-8")
     upper = profile.upper()
     limits: dict[str, str] = {}
     for suffix in PROFILE_KEYS:
@@ -63,6 +79,9 @@ def resolve_limits(root_env: Path) -> dict[str, str]:
                 "atualize o arquivo a partir do .env.example"
             )
         limits[TARGET_KEYS[suffix]] = raw
+    # A API de settings le o perfil do .env do projeto: sem esta chave o
+    # seletor do Studio abre vazio, mesmo com os limites corretos aplicados.
+    limits[PROFILE_KEY] = profile
     return limits
 
 
@@ -114,18 +133,15 @@ def main() -> int:
         print(f"diretorio de projetos ausente: {args.projects_dir}", file=sys.stderr)
         return 1
 
-    try:
-        limits = resolve_limits(args.server_env)
-    except MigrationError as error:
-        print(f"Erro: {error}", file=sys.stderr)
-        return 1
-
     changed = 0
     for project_dir in sorted(args.projects_dir.iterdir()):
         project_env = project_dir / ".env"
         if not project_dir.is_dir() or not project_env.is_file():
             continue
         try:
+            limits = resolve_limits(
+                args.server_env, profile_for(project_env, args.server_env)
+            )
             added, updated = upsert(project_env, limits)
         except MigrationError as error:
             print(f"Erro em {project_dir.name}: {error}", file=sys.stderr)

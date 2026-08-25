@@ -99,7 +99,8 @@ class SystemdInstallerContractTest(unittest.TestCase):
         self.assertIn("escape_systemd_value", source)
         self.assertIn("escape_sed_replacement", source)
         self.assertIn(
-            'render_unit "$SERVIDOR_DIR" "$AGENT_DIR" "$SERVICE_USER" "$UNIT_PATH"',
+            'render_unit "$SERVIDOR_DIR" "$AGENT_DIR" "$SERVICE_USER"'
+            ' "$SERVICE_HOME" "$UNIT_PATH"',
             source,
         )
         self.assertIn("HOST_AGENT_USER", source)
@@ -110,6 +111,11 @@ class SystemdInstallerContractTest(unittest.TestCase):
         self.assertNotIn("HOST_AGENT_INSTALL_SCHEMA_WAIT_TIMEOUT", source)
         self.assertNotIn("--wait-for-schema", source)
         self.assertNotIn('systemctl restart "$UNIT_NAME"', source)
+        # Nao subir o agent e deliberado (banco/API primeiro), mas um
+        # reinstall derruba quem estava rodando: sem aviso, o proximo
+        # comando cai em host_agent_offline sem explicacao.
+        self.assertIn("WAS_ACTIVE=1", source)
+        self.assertIn("sudo systemctl start $UNIT_NAME", source)
         self.assertNotIn("run_hostagent", source)
 
         with tempfile.TemporaryDirectory(prefix="host agent % & ") as temp_dir:
@@ -122,12 +128,13 @@ class SystemdInstallerContractTest(unittest.TestCase):
                 [
                     bash,
                     "-c",
-                    'source "$1"; render_unit "$2" "$3" "$4" "$5"',
+                    'source "$1"; render_unit "$2" "$3" "$4" "$5" "$6"',
                     "bash",
                     str(installer),
                     str(servidor_dir),
                     str(agent_dir),
                     "hostagent_test",
+                    "/home/hostagent_test",
                     str(rendered),
                 ],
                 check=True,
@@ -146,6 +153,9 @@ class SystemdInstallerContractTest(unittest.TestCase):
             self.assertIn("User=hostagent_test", unit)
             self.assertIn(f'--root "{escaped_servidor}"', unit)
             self.assertIn(f"WorkingDirectory={escaped_workdir}", unit)
+            self.assertIn(
+                'ReadWritePaths=-"/home/hostagent_test/.docker"', unit
+            )
 
 
 class SystemdSandboxContractTest(unittest.TestCase):
@@ -181,13 +191,69 @@ class SystemdSandboxContractTest(unittest.TestCase):
         template = (
             AGENT_ROOT / "supabase-host-agent.service"
         ).read_text(encoding="utf-8")
-        self.assertIn("ReadWritePaths=-__SERVIDOR_DIR__", template)
-        self.assertIn("ReadWritePaths=-__AGENT_DIR__", template)
+        self.assertIn('ReadWritePaths=-"__SERVIDOR_DIR__"', template)
+        self.assertIn('ReadWritePaths=-"__AGENT_DIR__"', template)
 
         installer = (AGENT_ROOT / "install.sh").read_text(encoding="utf-8")
         for placeholder in ("__SERVIDOR_DIR__", "__AGENT_DIR__"):
             with self.subTest(placeholder=placeholder):
                 self.assertIn(f'"s|{placeholder}|', installer)
+
+    def test_every_path_placeholder_is_quoted_in_the_unit(self) -> None:
+        """Todo placeholder de caminho precisa sobreviver a um espaco.
+
+        `WorkingDirectory=` consome o resto da linha e dispensa aspas; as
+        demais diretivas fazem split por espaco e truncam sem avisar.
+        """
+        template = (
+            AGENT_ROOT / "supabase-host-agent.service"
+        ).read_text(encoding="utf-8")
+        unquoted: list[str] = []
+        for line in template.splitlines():
+            if line.startswith("#") or "__" not in line:
+                continue
+            if line.split("=", 1)[0] == "WorkingDirectory":
+                continue
+            for placeholder in (
+                "__SERVIDOR_DIR__",
+                "__AGENT_DIR__",
+                "__SERVICE_HOME__",
+            ):
+                start = line.find(placeholder)
+                while start != -1:
+                    # Dentro de aspas <=> numero impar de aspas antes.
+                    if line.count('"', 0, start) % 2 == 0:
+                        unquoted.append(line)
+                        break
+                    start = line.find(placeholder, start + 1)
+        self.assertEqual([], unquoted, "placeholder de caminho fora de aspas")
+
+    def test_sandbox_allows_buildx_state_under_the_service_home(self) -> None:
+        """`docker compose build` grava o estado do buildx em ~/.docker.
+
+        Com `ProtectHome=read-only` e sem esse ReadWritePaths, o build do
+        nginx do projeto morre em "read-only file system" — e a falha so
+        aparece a 72% da criacao, depois de banco e tenants ja criados.
+        """
+        template = (
+            AGENT_ROOT / "supabase-host-agent.service"
+        ).read_text(encoding="utf-8")
+        self.assertIn('ReadWritePaths=-"__SERVICE_HOME__/.docker"', template)
+
+        installer = (AGENT_ROOT / "install.sh").read_text(encoding="utf-8")
+        self.assertIn("__SERVICE_HOME__", installer)
+        self.assertIn('getent passwd "$SERVICE_USER"', installer)
+
+    def test_installer_verifies_the_sandbox_after_daemon_reload(self) -> None:
+        """A truncagem so apareceria no primeiro mkdir de um job real."""
+        installer = (AGENT_ROOT / "install.sh").read_text(encoding="utf-8")
+        self.assertIn("assert_sandbox_paths_parsed", installer)
+        self.assertIn(
+            'systemctl show "$UNIT_NAME" -p ReadWritePaths --value', installer
+        )
+        reload_at = installer.index("systemctl daemon-reload")
+        check_at = installer.index("  assert_sandbox_paths_parsed\n")
+        self.assertLess(reload_at, check_at)
 
     def test_capability_bounding_set_is_empty_not_missing(self) -> None:
         lines = (
@@ -221,9 +287,62 @@ class HostAgentRoleContractTest(unittest.TestCase):
         )
         self.assertIn("DELETE ON project_container_state", source)
         self.assertIn("CONNECTION LIMIT 10", source)
-        # A role nao pode enxergar projects nem chaves opacas.
-        self.assertNotIn("ON projects TO host_agent_rw", source)
+        agent_grants = re.findall(
+            r"GRANT ([^;]*?) ON (?:\s*)([a-z_]+) TO host_agent_rw", source
+        )
+        for privileges, table in agent_grants:
+            if table in {
+                "host_agent_workers",
+                "host_agent_commands",
+                "project_container_state",
+            }:
+                continue
+            self.assertNotIn("INSERT", privileges, table)
+            self.assertNotIn("UPDATE", privileges, table)
+            self.assertNotIn("DELETE", privileges, table)
         self.assertNotIn("project_api_keys TO host_agent_rw", source)
+        self.assertNotIn("project_api_key_slots TO host_agent_rw", source)
+
+    def test_role_reads_only_the_authorization_columns(self) -> None:
+        """A reautorizacao no agent exige leitura escopada por coluna."""
+        source = (
+            API_ROOT / "app" / "control_plane_roles.py"
+        ).read_text(encoding="utf-8")
+        marker = "async def ensure_host_agent_rw_role"
+        block = source[source.index(marker) :]
+        block = block[: block.index("async def ensure_platform_app_role")]
+
+        expected = {
+            "projects": {
+                "id",
+                "name",
+                "owner_id",
+                "tenant_uuid",
+                "automatic_key_rotation_enabled",
+            },
+            "users": {"id", "is_active"},
+            "user_groups": {"user_id", "group_name"},
+            "project_members": {"project_id", "user_id", "role"},
+        }
+        granted = {
+            table: {column.strip() for column in columns.split(",")}
+            for columns, table in re.findall(
+                r"GRANT SELECT \(([^)]*)\)\s*ON ([a-z_]+) TO host_agent_rw",
+                block,
+            )
+        }
+        self.assertEqual(expected, granted)
+
+        agent_db = (
+            ROOT / "servidor" / "host-agent" / "hostagent" / "db.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn(
+            "to_jsonb(projects)",
+            agent_db,
+            "referencia de linha inteira exige SELECT na tabela toda",
+        )
+        for secret in ("anon_key", "service_role", "config_token"):
+            self.assertNotIn(secret, granted["projects"])
 
     def test_migrations_require_and_provision_the_role(self) -> None:
         source = (API_ROOT / "app" / "schema_migrations.py").read_text(

@@ -151,6 +151,41 @@ FOR SELECT
 USING (auth.uid() = user_id);
 ```
 
+**2.4. Adicionar o estado durável de entrega exigido pelo worker resiliente**
+
+Execute este bloco uma vez em cada database de projeto existente. O worker não
+executa DDL em runtime: ele recusa um schema incompleto e continua tentando
+até que esta migration seja aplicada.
+
+```sql
+ALTER TABLE public.notifications
+  ADD COLUMN IF NOT EXISTS available_at timestamp with time zone NOT NULL DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS attempts integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS locked_at timestamp with time zone NULL,
+  ADD COLUMN IF NOT EXISTS last_error text NULL;
+
+CREATE TABLE IF NOT EXISTS public.notification_deliveries (
+  notification_id uuid NOT NULL REFERENCES public.notifications (id) ON DELETE CASCADE,
+  token text NOT NULL,
+  platform text NULL,
+  status text NOT NULL DEFAULT 'pendente',
+  attempts integer NOT NULL DEFAULT 0,
+  available_at timestamp with time zone NOT NULL DEFAULT now(),
+  locked_at timestamp with time zone NULL,
+  last_error text NULL,
+  delivered_at timestamp with time zone NULL,
+  CONSTRAINT notification_deliveries_pkey PRIMARY KEY (notification_id, token)
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_push_available
+  ON public.notifications (status, available_at, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_notification_deliveries_push_available
+  ON public.notification_deliveries (notification_id, status, available_at);
+
+ALTER TABLE public.notification_deliveries ENABLE ROW LEVEL SECURITY;
+```
+
 ### Passo 3: Ativar o Worker no Docker Compose
 
 Por padrão, para economizar recursos caso o módulo de notificações não seja utilizado, o serviço do `push-worker` vem comentado no arquivo de orquestração da API.
@@ -175,6 +210,16 @@ Abra o `docker-compose-api.yml` e remova os `#` da frente do serviço `push-work
       INTERNAL_HMAC_SECRET: ${INTERNAL_HMAC_SECRET}
       PUSH_VERIFY_TLS: ${PUSH_VERIFY_TLS}
       PUSH_CA_FILE: ${PUSH_CA_FILE}
+      PUSH_REQUEST_TIMEOUT: ${PUSH_REQUEST_TIMEOUT:-10}
+      PUSH_BATCH_SIZE: ${PUSH_BATCH_SIZE:-10}
+      PUSH_MAX_ATTEMPTS: ${PUSH_MAX_ATTEMPTS:-8}
+      PUSH_REQUEST_RETRIES: ${PUSH_REQUEST_RETRIES:-2}
+      PUSH_RETRY_BASE_SECONDS: ${PUSH_RETRY_BASE_SECONDS:-2}
+      PUSH_MAX_RETRY_SECONDS: ${PUSH_MAX_RETRY_SECONDS:-60}
+      PUSH_NOTIFICATION_LEASE_SECONDS: ${PUSH_NOTIFICATION_LEASE_SECONDS:-900}
+      PUSH_SCHEMA_RETRY_SECONDS: ${PUSH_SCHEMA_RETRY_SECONDS:-60}
+      PUSH_DB_CONNECT_TIMEOUT: ${PUSH_DB_CONNECT_TIMEOUT:-10}
+      PUSH_MAX_TENANT_CONNECTIONS: ${PUSH_MAX_TENANT_CONNECTIONS:-32}
     volumes:
       - ./certs:/docker/push-certs:ro
     command: ["python", "app/push_worker.py"]
@@ -199,7 +244,10 @@ INSERT INTO public.notifications (user_id, body)
 VALUES ('uuid-do-usuario-aqui', 'Sua nova notificação chegou!');
 ```
 
-O status mudará automaticamente de pendente para enviado, sem_token ou erro.
+O status mudará automaticamente de `pendente` para `enviado`,
+`enviado_parcial`, `sem_token` ou `erro`. Falhas transitórias voltam para
+`pendente` com backoff exponencial; uma
+entrega só vai para erro depois do limite configurado de tentativas.
 
 ### Passo 5: Troubleshooting e Logs
 

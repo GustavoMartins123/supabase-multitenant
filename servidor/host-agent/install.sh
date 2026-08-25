@@ -23,9 +23,11 @@ escape_sed_replacement() {
 }
 
 render_unit() {
-  local servidor_dir="$1" agent_dir="$2" service_user="$3" destination="$4"
+  local servidor_dir="$1" agent_dir="$2" service_user="$3" service_home="$4"
+  local destination="$5"
   local servidor_value agent_value service_user_replacement
   local servidor_replacement agent_replacement
+  local service_home_value service_home_replacement
 
   [[ "$servidor_dir" != *$'\n'* && "$servidor_dir" != *$'\r'* ]] \
     || die "Caminho do servidor contem quebra de linha."
@@ -34,17 +36,33 @@ render_unit() {
   [[ "$service_user" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] \
     || die "Usuario do host-agent invalido: $service_user"
 
+  [[ "$service_home" == /* ]] \
+    || die "Home invalido para $service_user: $service_home"
+
   servidor_value="$(escape_systemd_value "$servidor_dir")"
   agent_value="$(escape_systemd_value "$agent_dir")"
+  service_home_value="$(escape_systemd_value "$service_home")"
   servidor_replacement="$(escape_sed_replacement "$servidor_value")"
   agent_replacement="$(escape_sed_replacement "$agent_value")"
   service_user_replacement="$(escape_sed_replacement "$service_user")"
+  service_home_replacement="$(escape_sed_replacement "$service_home_value")"
 
   sed \
     -e "s|__SERVIDOR_DIR__|$servidor_replacement|g" \
     -e "s|__AGENT_DIR__|$agent_replacement|g" \
     -e "s|__HOST_AGENT_USER__|$service_user_replacement|g" \
+    -e "s|__SERVICE_HOME__|$service_home_replacement|g" \
     "$AGENT_DIR/supabase-host-agent.service" > "$destination"
+}
+
+assert_sandbox_paths_parsed() {
+  local parsed
+  parsed="$(systemctl show "$UNIT_NAME" -p ReadWritePaths --value)"
+  for required in "$SERVIDOR_DIR" "$AGENT_DIR" "$SERVICE_HOME/.docker"; do
+    [[ "$parsed" == *"$required"* ]] \
+      || die "systemd truncou ReadWritePaths: '$required' nao ficou gravavel (lido: $parsed)."
+  done
+  ok "Sandbox do systemd concede escrita no repositorio."
 }
 
 AGENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -53,6 +71,8 @@ UNIT_NAME="supabase-host-agent.service"
 UNIT_PATH="/etc/systemd/system/$UNIT_NAME"
 SERVICE_USER=""
 SERVICE_GROUP=""
+SERVICE_HOME=""
+WAS_ACTIVE=0
 
 resolve_service_user() {
   local candidate="${HOST_AGENT_USER:-}"
@@ -141,16 +161,25 @@ main() {
   if systemctl is-active --quiet "$UNIT_NAME"; then
     say "Parando a unit antiga antes de migrar o ownership ..."
     systemctl stop "$UNIT_NAME"
+    WAS_ACTIVE=1
   fi
   migrate_runtime_ownership
 
   say "Instalando unit systemd em $UNIT_PATH ..."
-  render_unit "$SERVIDOR_DIR" "$AGENT_DIR" "$SERVICE_USER" "$UNIT_PATH"
+  SERVICE_HOME="$(getent passwd "$SERVICE_USER" | cut -d: -f6)"
+  [[ -n "$SERVICE_HOME" ]] \
+    || die "Nao foi possivel resolver o home de $SERVICE_USER."
+  render_unit "$SERVIDOR_DIR" "$AGENT_DIR" "$SERVICE_USER" "$SERVICE_HOME" "$UNIT_PATH"
   chmod 644 "$UNIT_PATH"
 
   systemctl daemon-reload
+  assert_sandbox_paths_parsed
   systemctl enable "$UNIT_NAME"
   ok "Servico $UNIT_NAME instalado e habilitado."
+  if [[ "$WAS_ACTIVE" -eq 1 ]]; then
+    say "O host-agent estava ATIVO e foi parado por esta reinstalacao."
+    say "Com banco e API no ar, retome com: sudo systemctl start $UNIT_NAME"
+  fi
   say "O start.sh iniciara banco/API e depois ativara o host-agent."
   say "Em reinicializacoes, o ExecStartPre aguardara o schema antes de iniciar o worker."
   say "Logs: journalctl -u $UNIT_NAME -f"

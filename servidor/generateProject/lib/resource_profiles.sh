@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Resolve o perfil de recursos do .env raiz e grava os limites concretos no
-# .env do projeto (PROJECT_MEM_LIMIT, PROJECT_CPUS, PROJECT_PIDS_LIMIT).
+# Resolve o perfil de recursos e grava, no .env do projeto, tanto o perfil
+# escolhido (PROJECT_RESOURCE_PROFILE) quanto os limites concretos que ele
+# gera (PROJECT_MEM_LIMIT, PROJECT_CPUS, PROJECT_PIDS_LIMIT). A API de
+# settings le o perfil desse arquivo: sem a chave, o seletor do Studio abre
+# vazio e acusa "Valor obrigatorio".
 
 # Uso: apply_project_resource_limits <root_env> <project_env> [profile_override]
 # O terceiro argumento (opcional) sobrepoe o perfil do .env raiz — usado
@@ -46,7 +49,9 @@ apply_project_resource_limits() {
     local name value temporary
     temporary="$(mktemp "${project_env}.limits.XXXXXX")"
     {
-        grep -vE '^PROJECT_(MEM_LIMIT|CPUS|PIDS_LIMIT)=' "$project_env" || true
+        grep -vE '^PROJECT_(RESOURCE_PROFILE|MEM_LIMIT|CPUS|PIDS_LIMIT)=' \
+            "$project_env" || true
+        printf 'PROJECT_RESOURCE_PROFILE=%s\n' "$profile"
         printf 'PROJECT_MEM_LIMIT=%s\n' "$mem"
         printf 'PROJECT_CPUS=%s\n' "$cpus"
         printf 'PROJECT_PIDS_LIMIT=%s\n' "$pids"

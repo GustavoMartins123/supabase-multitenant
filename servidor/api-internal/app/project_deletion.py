@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import hashlib
 import hmac
 import json
@@ -23,6 +24,27 @@ import httpx
 from dotenv import dotenv_values
 
 from app.runtime_config import REALTIME_INTERNAL_URL, SUPAVISOR_INTERNAL_URL
+
+
+@contextlib.asynccontextmanager
+async def global_admin_connection():
+    """Conexao administrativa global, aberta com `platform_meta_admin`.
+
+    O pool da API usa `platform_app`, cujo alcance termina nas tabelas do
+    control plane no schema `public`. As etapas que apagam metadata de
+    Realtime/Supavisor, encerram backends de outros papeis, removem slots
+    de replicacao ou dropam o database do tenant exigem a identidade
+    dedicada de administracao publicada em `META_ADMIN_DSN`.
+    """
+
+    meta_dsn = (os.getenv("META_ADMIN_DSN") or "").strip()
+    if not meta_dsn:
+        raise RuntimeError("META_ADMIN_DSN ausente no ambiente da Projects API")
+    conn = await asyncpg.connect(meta_dsn)
+    try:
+        yield conn
+    finally:
+        await conn.close()
 
 
 class ProjectDeletionError(RuntimeError):
@@ -207,6 +229,64 @@ async def drain_database_connections(
                 f"conexões continuaram sendo abertas no banco {db_name}"
             )
         await asyncio.sleep(0.5)
+
+
+async def drop_supabase_replication_slots(
+    conn: asyncpg.Connection, project_name: str
+) -> list[str]:
+    """
+    Remove os replication slots do Supabase Realtime de um projeto, na ordem EXATA:
+        1. Termina o backend do slot *messages*
+        2. Dropa o slot *messages*
+        3. Termina o backend do slot *replication*
+        4. Dropa o slot *replication*
+
+    Parameters
+    ----------
+    conn : asyncpg.Connection
+        Conexão administrativa já aberta (`platform_meta_admin`).
+    project_name : str
+        Slug do projeto, p.ex. "sistema_novo".
+
+    Returns
+    -------
+    List[str]
+        Lista de erros/avisos (vazia se tudo correu bem).
+    """
+    errors: list[str] = []
+
+    msg_slot  = f"supabase_realtime_messages_replication_slot_{project_name}"[:63]
+    repl_slot = f"supabase_realtime_replication_slot_{project_name}"[:63]
+
+    async def terminate_if_active(slot: str) -> None:
+        try:
+            pid = await conn.fetchval(
+                "SELECT active_pid FROM pg_replication_slots WHERE slot_name = $1",
+                slot,
+            )
+            if pid:
+                await conn.execute("SELECT pg_terminate_backend($1)", pid)
+                await asyncio.sleep(1)
+        except Exception as exc:
+            if "does not exist" not in str(exc):
+                print(f"[delete_project] terminate slot {slot}: {exc}")
+                errors.append(f"Não foi possível encerrar o slot {slot}.")
+
+    async def drop_slot(slot: str) -> None:
+        try:
+            await conn.execute("SELECT pg_drop_replication_slot($1)", slot)
+        except Exception as exc:
+            if "does not exist" not in str(exc):
+                print(f"[delete_project] drop slot {slot}: {exc}")
+                errors.append(f"Não foi possível remover o slot {slot}.")
+
+    await terminate_if_active(msg_slot)
+    await drop_slot(msg_slot)
+
+    await terminate_if_active(repl_slot)
+    await drop_slot(repl_slot)
+
+    return errors
 
 
 async def drop_database_force(conn: asyncpg.Connection, db_name: str) -> None:

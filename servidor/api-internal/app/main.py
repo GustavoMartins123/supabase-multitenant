@@ -1,3 +1,4 @@
+import os
 import secrets
 import uuid
 import pathlib
@@ -98,6 +99,8 @@ from app.project_deletion import (
     delete_supavisor_tenant,
     drain_database_connections,
     drop_database_force,
+    drop_supabase_replication_slots,
+    global_admin_connection,
     load_project_environment,
     terminate_supavisor_pools,
 )
@@ -2366,12 +2369,15 @@ async def duplicate_project(
             project_id = uuid.uuid4()
             await conn.execute(
                 """
-                INSERT INTO projects(id, tenant_uuid, name, owner_id)
-                VALUES($1, $1, $2, $3)
+                INSERT INTO projects(id, tenant_uuid, name, owner_id,
+                                     resource_profile)
+                SELECT $1, $1, $2, $3, resource_profile
+                FROM projects WHERE id = $4
                 """,
                 project_id,
                 new_name,
                 auth_user["db_user_id"],
+                project_row["id"],
             )
 
             await conn.execute("""
@@ -2442,6 +2448,11 @@ async def _duplicate_and_store_keys(
         if project_uuid != resolved_project_uuid:
             raise ProjectIdentityError("projects.id do job mudou durante duplicacao")
 
+        resource_profile = await pool.fetchval(
+            "SELECT resource_profile FROM projects WHERE id = $1",
+            project_uuid,
+        )
+
         gateway_token = secrets.token_hex(32)
         async with pool.acquire() as conn:
             async with conn.transaction():
@@ -2464,6 +2475,7 @@ async def _duplicate_and_store_keys(
                 "copy_mode": copy_mode,
                 "tenant_uuid": str(tenant_uuid),
                 "gateway_token": gateway_token,
+                "resource_profile": resource_profile,
             },
             reuse_terminal=True,
             on_progress=_job_progress_mirror(job_id),
@@ -2716,7 +2728,9 @@ async def _delete_project_impl(
     await asyncio.sleep(1)
 
     await report(55, "clean_global_metadata", "Limpando metadata global...")
-    async with pool.acquire() as conn:
+    # Schemas _realtime/_supavisor, encerramento de backends alheios, slots de
+    # replicacao e DROP DATABASE estao fora do alcance de platform_app.
+    async with global_admin_connection() as conn:
         deleted_ext = await conn.execute(
             'DELETE FROM _realtime.extensions WHERE tenant_external_id = $1',
             tenant_external_id,
@@ -2788,7 +2802,7 @@ async def _delete_project_impl(
             await conn.execute("DELETE FROM projects WHERE id = $1", project_id)
 
     await report(96, "verify_cleanup", "Verificando limpeza final...")
-    async with pool.acquire() as conn:
+    async with global_admin_connection() as conn:
         db_exists = await conn.fetchval(
             "SELECT 1 FROM pg_database WHERE datname = $1",
             db_name,
@@ -2864,63 +2878,6 @@ async def _delete_project_background(job_id: str, project_name: str) -> None:
             error_code="delete_failed",
         )
         print(f"[delete_project] {project_name}: background task failed: {exc}")
-
-async def drop_supabase_replication_slots(
-    conn: asyncpg.Connection, project_name: str
-) -> List[str]:
-    """
-    Remove os replication slots do Supabase Realtime de um projeto, na ordem EXATA:
-        1. Termina o backend do slot *messages*
-        2. Dropa o slot *messages*
-        3. Termina o backend do slot *replication*
-        4. Dropa o slot *replication*
-
-    Parameters
-    ----------
-    conn : asyncpg.Connection
-        Conexão já aberta (superuser) com o Postgres.
-    project_name : str
-        Slug do projeto, p.ex. "sistema_novo".
-
-    Returns
-    -------
-    List[str]
-        Lista de erros/avisos (vazia se tudo correu bem).
-    """
-    errors: List[str] = []
-
-    msg_slot  = f"supabase_realtime_messages_replication_slot_{project_name}"[:63]
-    repl_slot = f"supabase_realtime_replication_slot_{project_name}"[:63]
-
-    async def terminate_if_active(slot: str) -> None:
-        try:
-            pid = await conn.fetchval(
-                "SELECT active_pid FROM pg_replication_slots WHERE slot_name = $1",
-                slot,
-            )
-            if pid:
-                await conn.execute("SELECT pg_terminate_backend($1)", pid)
-                await asyncio.sleep(1)
-        except Exception as exc:
-            if "does not exist" not in str(exc):
-                print(f"[delete_project] terminate slot {slot}: {exc}")
-                errors.append(f"Não foi possível encerrar o slot {slot}.")
-
-    async def drop_slot(slot: str) -> None:
-        try:
-            await conn.execute("SELECT pg_drop_replication_slot($1)", slot)
-        except Exception as exc:
-            if "does not exist" not in str(exc):
-                print(f"[delete_project] drop slot {slot}: {exc}")
-                errors.append(f"Não foi possível remover o slot {slot}.")
-
-    await terminate_if_active(msg_slot)
-    await drop_slot(msg_slot)
-
-    await terminate_if_active(repl_slot)
-    await drop_slot(repl_slot)
-
-    return errors
 
 @app.delete("/api/projects/{project_name}")
 async def delete_project(
@@ -3690,6 +3647,10 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
             project_name=project_name,
             created_by=user,
         )
+        resource_profile = await pool.fetchval(
+            "SELECT resource_profile FROM projects WHERE id = $1",
+            project_uuid,
+        )
 
         gateway_token = secrets.token_hex(32)
         async with pool.acquire() as conn:
@@ -3713,7 +3674,7 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
                 "recover_stale": recover_stale,
                 "stale_tenant_uuids": stale_tenant_uuids,
                 "gateway_token": gateway_token,
-                "resource_profile": body.resource_profile,
+                "resource_profile": resource_profile,
             },
             reuse_terminal=True,
             on_progress=_job_progress_mirror(job_id),
@@ -3838,6 +3799,18 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
             error_code="tenant_identity_error",
         )
         print(f"[project_identity] create job {job_id}: {exc}")
+        await rollback_project_from_db(pool, project_name, project_uuid)
+    except HostAgentOffline as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=(
+                "Nenhum host-agent ativo para criar o projeto. Nada foi "
+                "provisionado no host; inicie o servico e tente de novo."
+            ),
+            current_step="host_agent_offline",
+            error_code=exc.error_code,
+        )
         await rollback_project_from_db(pool, project_name, project_uuid)
     except HostAgentError as exc:
         await _set_job_status(

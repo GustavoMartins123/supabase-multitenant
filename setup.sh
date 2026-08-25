@@ -443,6 +443,8 @@ main() {
     safe_sed "s|PLATFORM_APP_DB_PASSWORD=pass|PLATFORM_APP_DB_PASSWORD=$PLATFORM_APP_DB_PASSWORD|g" servidor/.env
     META_ADMIN_DB_PASSWORD=$(generate_key_authorizer_password)
     safe_sed "s|META_ADMIN_DB_PASSWORD=pass|META_ADMIN_DB_PASSWORD=$META_ADMIN_DB_PASSWORD|g" servidor/.env
+    HOST_AGENT_DB_PASSWORD=$(generate_key_authorizer_password)
+    safe_sed "s|HOST_AGENT_DB_PASSWORD=pass|HOST_AGENT_DB_PASSWORD=$HOST_AGENT_DB_PASSWORD|g" servidor/.env
     safe_sed "s|DB_ENC_KEY=pass|DB_ENC_KEY=$DB_ENC_KEY|g" servidor/.env
     safe_sed "s|VAULT_ENC_KEY=pass|VAULT_ENC_KEY=$VAULT_ENC_KEY|g" servidor/.env
     safe_sed "s|SECRET_KEY_BASE=pass|SECRET_KEY_BASE=$SECRET_KEY_BASE|g" servidor/.env

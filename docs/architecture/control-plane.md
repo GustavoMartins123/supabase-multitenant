@@ -61,10 +61,10 @@ The schema belongs to versioned migrations in `servidor/api-internal/app/migrati
 | Role | Consumer | Scope |
 | --- | --- | --- |
 | `key_authorizer` | key-authorizer service | column-scoped `SELECT` on `projects`, `project_api_key_slots`, `project_api_keys`; `UPDATE (last_used_at)` |
-| `host_agent_rw` | host-agent worker | `SELECT/INSERT/UPDATE` on `host_agent_workers` and `host_agent_commands`; `SELECT/INSERT/UPDATE/DELETE` on `project_container_state`. No access to any other control-plane table and no tenant database. |
+| `host_agent_rw` | host-agent worker | `SELECT/INSERT/UPDATE` on `host_agent_workers` and `host_agent_commands`; `SELECT/INSERT/UPDATE/DELETE` on `project_container_state`; column-scoped read-only `SELECT` on `projects` (`id`, `name`, `owner_id`, `tenant_uuid`, `automatic_key_rotation_enabled`), `users` (`id`, `is_active`), `user_groups` (`user_id`, `group_name`) and `project_members` (`project_id`, `user_id`, `role`) so the agent re-authorizes every command against the database instead of trusting the Projects API. No project secret, no write outside the agent tables, no tenant database. |
 | `platform_reader` | Projects API telemetry | per-tenant database: `CONNECT` plus `SELECT` on `auth.users` and `auth.sessions`, provisioned by the lifecycle scripts. Required at API startup; there is no global-credential fallback. |
 | `platform_app` | Projects API control-plane pool | full DML on control-plane tables in schema `public`; no cluster administration, no tenant databases. The API's `DB_DSN` is this identity. |
-| `platform_meta_admin` | Postgres-Meta connections (`META_ADMIN_DSN`) | member of `supabase_admin`, dedicated revocable credential. The global superuser never exists in the API environment. |
+| `platform_meta_admin` | Postgres-Meta connections and the privileged steps of project deletion (`META_ADMIN_DSN`) | member of `supabase_admin`, dedicated revocable credential. Carries the work `platform_app` cannot reach: `_realtime`/`_supavisor` metadata, terminating other roles' backends, replication slots and `DROP DATABASE`. The global superuser never exists in the API environment. |
 
 All identities are provisioned by the privileged migration command and required at startup: the agent refuses to run without `HOST_AGENT_DB_PASSWORD`, and the API refuses without `PLATFORM_APP_DB_PASSWORD`, `META_ADMIN_DSN` and `PLATFORM_READER_DB_PASSWORD`. No component derives credentials from the global superuser anymore.
 
