@@ -1,3 +1,13 @@
+## 2026-08-25 — Perfil de recursos passa a ser o teto do projeto, nao de cada container
+
+- o mesmo `PROJECT_MEM_LIMIT`/`PROJECT_CPUS`/`PROJECT_PIDS_LIMIT` era aplicado a `nginx`, `auth` e `rest`: o perfil anunciado como "Médio 1 GB / 1,5 CPU / 384 PIDs" reservava, na pratica, **3 GB / 4,5 CPU / 1152 PIDs** por projeto. `docker stats` mostrava os tres containers com `LIMIT 1GiB`;
+- `PROJECT_RES_<PERFIL>_{MEMORY,CPUS,PIDS}` no `.env` raiz passa a ser o teto do PROJETO, rateado por pesos fixos — memoria 1:3:4, cpus 1:2:3, pids 2:5:5 para nginx:auth:rest. `nginx` e proxy fino; `auth` (GoTrue) e `rest` (PostgREST) sustentam a carga. A sobra da divisao inteira vai para o `rest`, entao a soma fecha exatamente com o teto;
+- o template do Compose passa a interpolar a fatia de cada servico (`PROJECT_NGINX_MEM_LIMIT`, `PROJECT_AUTH_CPUS`, ...), mantendo o fail-closed `:?`; os totais continuam no `.env` do projeto como referencia;
+- `tools/migrate_project_resource_limits.py` foi reescrito para **delegar ao helper canonico** em vez de reimplementar o rateio (evita uma terceira copia dos pesos, alem do bash e da Projects API). O modo de simulacao roda o helper sobre uma copia do `.env` e mostra o diff, entao o plano exibido e exatamente o que seria gravado; `--apply` preserva dono e modo;
+- Studio: os rotulos passam a dizer "no total" e a descricao explica o rateio entre os tres servicos;
+- novos contratos: pesos do bash e da API comparados chave a chave, fatias conferidas contra a tabela documentada, soma obrigatoriamente igual ao teto, template proibido de usar o total como limite de um servico, e o migrador proibido de reimplementar os pesos;
+- **instalacoes existentes:** `python3 tools/migrate_project_resource_limits.py` mostra o plano, `--apply` grava; depois recrie os projetos para o Compose consumir as fatias. Sem a migracao o compose falha fechado (`:?`), como projetado.
+
 ## 2026-08-25 — Fix: recreate de servicos quebrado por aspas no .env e por troca de dono
 
 - **leitor canonico recusava aspas:** `HOST_PROJECT_ROOT` e citado por convencao (`.env.example` traz `"pass"`, o `setup.sh` mantem as aspas) porque o `.env` do servidor tambem e lido por `source` do bash e o caminho pode ter espaco. `read_canonical_env_value` rejeitava **qualquer** valor citado, entao `sync_project_generated_files` estourava `RuntimeError: Entrada nao canonica no .env: HOST_PROJECT_ROOT` e `recreate_services` falhava em toda instalacao;

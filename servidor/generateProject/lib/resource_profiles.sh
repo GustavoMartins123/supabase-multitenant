@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
-# Resolve o perfil de recursos e grava, no .env do projeto, tanto o perfil
-# escolhido (PROJECT_RESOURCE_PROFILE) quanto os limites concretos que ele
-# gera (PROJECT_MEM_LIMIT, PROJECT_CPUS, PROJECT_PIDS_LIMIT). A API de
-# settings le o perfil desse arquivo: sem a chave, o seletor do Studio abre
-# vazio e acusa "Valor obrigatorio".
+#
+# O rateio usa pesos fixos por dimensao e a sobra vai para o `rest`, de modo
+# que a soma dos tres servicos seja exatamente o total do perfil.
+#
+#   memoria  nginx 1 : auth 3 : rest 4   (de 8)
+#   cpus     nginx 1 : auth 2 : rest 3   (de 6)
+#   pids     nginx 2 : auth 5 : rest 5   (de 12)
+#
+# nginx e um proxy fino; auth (GoTrue) e rest (PostgREST) sustentam a carga.
+# Os pesos sao espelhados em servidor/api-internal/app/project_settings.py —
+# um contrato de teste garante que as duas tabelas nao divirjam.
 
-# Uso: apply_project_resource_limits <root_env> <project_env> [profile_override]
-# O terceiro argumento (opcional) sobrepoe o perfil do .env raiz — usado
-# quando o projeto tem perfil proprio escolhido na criacao/edicao.
+RESOURCE_SERVICES=(NGINX AUTH REST)
+RESOURCE_MEM_WEIGHTS=(1 3 4)
+RESOURCE_CPU_WEIGHTS=(1 2 3)
+RESOURCE_PIDS_WEIGHTS=(2 5 5)
 
 resource_profiles_error() {
     echo "Erro: $*" >&2
@@ -16,6 +23,49 @@ resource_profiles_error() {
 
 resource_env_value() {
     sed -n "s/^$1=//p" "$2" | head -1 | tr -d '"'"'"''
+}
+
+resource_mem_to_mib() {
+    local raw="${1,,}" number unit
+    number="${raw%[mg]}"
+    unit="${raw#"$number"}"
+    [[ "$number" =~ ^[0-9]+$ && -n "$number" ]] \
+        || resource_profiles_error "memoria invalida: $1 (use 256m ou 1g)"
+    case "$unit" in
+        m) printf '%s' "$number" ;;
+        g) printf '%s' "$((number * 1024))" ;;
+        *) resource_profiles_error "memoria invalida: $1 (use sufixo m ou g)" ;;
+    esac
+}
+
+resource_cpus_to_centi() {
+    local raw="$1" int frac
+    [[ "$raw" =~ ^([0-9]+)(\.([0-9]{1,2}))?$ ]] \
+        || resource_profiles_error "cpus invalido: $raw (use 0.50, 1.50, 3.00)"
+    int="${BASH_REMATCH[1]}"
+    frac="${BASH_REMATCH[3]:-0}"
+    while [ "${#frac}" -lt 2 ]; do frac="${frac}0"; done
+    printf '%s' "$((10#$int * 100 + 10#$frac))"
+}
+
+resource_split() {
+    local total="$1"; shift
+    local -a weights=("$@")
+    local sum=0 weight index used=0 share
+    for weight in "${weights[@]}"; do sum=$((sum + weight)); done
+    local -a shares=()
+    for index in "${!weights[@]}"; do
+        if [ "$index" -eq $((${#weights[@]} - 1)) ]; then
+            share=$((total - used))
+        else
+            share=$((total * weights[index] / sum))
+            used=$((used + share))
+        fi
+        [ "$share" -ge 1 ] \
+            || resource_profiles_error "perfil pequeno demais para ratear: total=$total"
+        shares+=("$share")
+    done
+    printf '%s\n' "${shares[@]}"
 }
 
 apply_project_resource_limits() {
@@ -45,16 +95,30 @@ apply_project_resource_limits() {
         key="${pair%%:*}"
         [ -n "${pair#*:}" ] || resource_profiles_error "$key ausente no .env raiz; atualize a partir do .env.example"
     done
+    [[ "$pids" =~ ^[0-9]+$ ]] || resource_profiles_error "PROJECT_RES_${upper}_PIDS invalido: $pids"
 
-    local name value temporary
+    local -a mem_shares cpu_shares pids_shares
+    mapfile -t mem_shares < <(resource_split "$(resource_mem_to_mib "$mem")" "${RESOURCE_MEM_WEIGHTS[@]}")
+    mapfile -t cpu_shares < <(resource_split "$(resource_cpus_to_centi "$cpus")" "${RESOURCE_CPU_WEIGHTS[@]}")
+    mapfile -t pids_shares < <(resource_split "$pids" "${RESOURCE_PIDS_WEIGHTS[@]}")
+
+    local temporary index service
     temporary="$(mktemp "${project_env}.limits.XXXXXX")"
     {
-        grep -vE '^PROJECT_(RESOURCE_PROFILE|MEM_LIMIT|CPUS|PIDS_LIMIT)=' \
+        grep -vE '^PROJECT_(RESOURCE_PROFILE|MEM_LIMIT|CPUS|PIDS_LIMIT|(NGINX|AUTH|REST)_(MEM_LIMIT|CPUS|PIDS_LIMIT))=' \
             "$project_env" || true
         printf 'PROJECT_RESOURCE_PROFILE=%s\n' "$profile"
+        # Totais do projeto: referencia para a UI e para os limites derivados.
         printf 'PROJECT_MEM_LIMIT=%s\n' "$mem"
         printf 'PROJECT_CPUS=%s\n' "$cpus"
         printf 'PROJECT_PIDS_LIMIT=%s\n' "$pids"
+        for index in "${!RESOURCE_SERVICES[@]}"; do
+            service="${RESOURCE_SERVICES[index]}"
+            printf 'PROJECT_%s_MEM_LIMIT=%sm\n' "$service" "${mem_shares[index]}"
+            printf 'PROJECT_%s_CPUS=%d.%02d\n' "$service" \
+                "$((cpu_shares[index] / 100))" "$((cpu_shares[index] % 100))"
+            printf 'PROJECT_%s_PIDS_LIMIT=%s\n' "$service" "${pids_shares[index]}"
+        done
     } > "$temporary"
     # Preserva dono/permissões do arquivo original (600).
     cat "$temporary" > "$project_env"

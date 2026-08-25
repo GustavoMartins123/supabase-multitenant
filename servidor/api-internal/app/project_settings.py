@@ -37,7 +37,23 @@ SETTINGS_WHITELIST = {
     "PROJECT_RESOURCE_PROFILE",
 }
 
-DERIVED_LIMIT_KEYS = {"PROJECT_MEM_LIMIT", "PROJECT_CPUS", "PROJECT_PIDS_LIMIT"}
+RESOURCE_SERVICES = ("NGINX", "AUTH", "REST")
+RESOURCE_WEIGHTS = {
+    "MEMORY": (1, 3, 4),
+    "CPUS": (1, 2, 3),
+    "PIDS": (2, 5, 5),
+}
+
+DERIVED_LIMIT_KEYS = {
+    "PROJECT_MEM_LIMIT",
+    "PROJECT_CPUS",
+    "PROJECT_PIDS_LIMIT",
+    *(
+        f"PROJECT_{service}_{suffix}"
+        for service in RESOURCE_SERVICES
+        for suffix in ("MEM_LIMIT", "CPUS", "PIDS_LIMIT")
+    ),
+}
 
 BOOLEAN_SETTINGS = {
     "DISABLE_SIGNUP",
@@ -119,14 +135,76 @@ def resolve_resource_limits(
         content = server_env.read_text(encoding="utf-8")
     except OSError as exc:
         raise HTTPException(409, ".env do servidor indisponivel") from exc
-    values: dict[str, str] = {}
+    totals: dict[str, str] = {}
     for suffix, key in PROFILE_RESOLVED_FROM_ROOT[profile].items():
         match = re.search(rf"(?m)^{key}=(.*)$", content)
         raw = match.group(1).strip().strip('"').strip("'") if match else ""
         if not raw or raw == "pass":
             raise HTTPException(409, f"{key} ausente no .env do servidor")
-        values[RESOLVED_LIMIT_KEYS[("MEMORY", "CPUS", "PIDS").index(suffix)]] = raw
+        totals[suffix] = raw
+
+    values = {
+        RESOLVED_LIMIT_KEYS[index]: totals[suffix]
+        for index, suffix in enumerate(("MEMORY", "CPUS", "PIDS"))
+    }
+    values.update(_split_across_services(totals))
     return values
+
+
+def _mem_to_mib(raw: str) -> int:
+    match = re.fullmatch(r"(\d+)([mMgG])", raw.strip())
+    if not match:
+        raise HTTPException(409, f"memoria invalida no .env do servidor: {raw}")
+    size = int(match.group(1))
+    return size * 1024 if match.group(2) in "gG" else size
+
+
+def _cpus_to_centi(raw: str) -> int:
+    match = re.fullmatch(r"(\d+)(?:\.(\d{1,2}))?", raw.strip())
+    if not match:
+        raise HTTPException(409, f"cpus invalido no .env do servidor: {raw}")
+    return int(match.group(1)) * 100 + int((match.group(2) or "0").ljust(2, "0"))
+
+
+def _split(total: int, weights: tuple[int, ...]) -> list[int]:
+    """Rateia por peso; o ultimo servico absorve a sobra da divisao inteira.
+
+    Assim a soma dos servicos fecha exatamente com o teto do perfil.
+    """
+    denominator = sum(weights)
+    shares: list[int] = []
+    used = 0
+    for index, weight in enumerate(weights):
+        if index == len(weights) - 1:
+            share = total - used
+        else:
+            share = total * weight // denominator
+            used += share
+        if share < 1:
+            raise HTTPException(
+                409, f"perfil pequeno demais para ratear entre os servicos: {total}"
+            )
+        shares.append(share)
+    return shares
+
+
+def _split_across_services(totals: dict[str, str]) -> dict[str, str]:
+    memory = _split(_mem_to_mib(totals["MEMORY"]), RESOURCE_WEIGHTS["MEMORY"])
+    cpus = _split(_cpus_to_centi(totals["CPUS"]), RESOURCE_WEIGHTS["CPUS"])
+    try:
+        pids_total = int(totals["PIDS"])
+    except ValueError as exc:
+        raise HTTPException(
+            409, f"pids invalido no .env do servidor: {totals['PIDS']}"
+        ) from exc
+    pids = _split(pids_total, RESOURCE_WEIGHTS["PIDS"])
+
+    resolved: dict[str, str] = {}
+    for index, service in enumerate(RESOURCE_SERVICES):
+        resolved[f"PROJECT_{service}_MEM_LIMIT"] = f"{memory[index]}m"
+        resolved[f"PROJECT_{service}_CPUS"] = f"{cpus[index] // 100}.{cpus[index] % 100:02d}"
+        resolved[f"PROJECT_{service}_PIDS_LIMIT"] = str(pids[index])
+    return resolved
 
 def _read_env_whitelisted(env_path: pathlib.Path) -> dict[str, str]:
     all_values = {

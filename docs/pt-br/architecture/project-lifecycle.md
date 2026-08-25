@@ -227,17 +227,29 @@ A atualização de Storage envia `PATCH /tenants/<tenant_uuid>` e não reinicia 
 
 ### Limites de recursos
 
-Todo Compose de projeto renderizado fixa `mem_limit`/`memswap_limit`, `cpus`
-e `pids_limit` para `nginx`, `auth` e `rest` via interpolacao fail-closed
-(`${PROJECT_MEM_LIMIT:?...}`): projeto sem limites no `.env` recusa o start.
-Os valores concretos vêm do perfil do projeto (`projects.resource_profile`,
-escolhido na criacao ou na aba de configuracoes como
-`PROJECT_RESOURCE_PROFILE`) resolvido contra o `.env` raiz pelo helper
-`lib/resource_profiles.sh`, chamado em create/duplicate/rename/rotate-key. A
-edicao pela Projects API grava o perfil junto com o trio resolvido e marca
-`auth/rest/nginx` como serviços afetados; instalacoes existentes usam
-`tools/migrate_project_resource_limits.py`. Quotas de database por tenant,
-statement_timeout default e quota de disco seguem pendentes.
+O perfil é o teto do **projeto inteiro**, não de cada container.
+`PROJECT_RESOURCE_PROFILE` (`small|medium|large`) nomeia um total no `.env`
+raiz, e o helper `lib/resource_profiles.sh` rateia esse total entre os três
+containers do tenant por pesos fixos — memória 1:3:4, cpus 1:2:3, pids 2:5:5
+para nginx:auth:rest — com a sobra da divisão inteira indo para o `rest`, de
+modo que a soma feche exatamente com o teto. `nginx` é um proxy fino; `auth`
+(GoTrue) e `rest` (PostgREST) sustentam a carga.
+
+| Perfil | Total do projeto | nginx | auth | rest |
+| --- | --- | --- | --- | --- |
+| `small` | 256m / 0.50 / 128 | 32m / 0.08 / 21 | 96m / 0.16 / 53 | 128m / 0.26 / 54 |
+| `medium` | 1g / 1.50 / 384 | 128m / 0.25 / 64 | 384m / 0.50 / 160 | 512m / 0.75 / 160 |
+| `large` | 4g / 3.00 / 768 | 512m / 0.50 / 128 | 1536m / 1.00 / 320 | 2048m / 1.50 / 320 |
+
+Todo Compose de projeto renderizado fixa a fatia de cada serviço via
+interpolacao fail-closed (`${PROJECT_NGINX_MEM_LIMIT:?...}`,
+`${PROJECT_AUTH_CPUS:?...}`, ...): projeto sem limites no `.env` recusa o
+start. As fatias sao gravadas no `.env` do projeto em
+create/duplicate/rename/rotate-key. A edicao pela Projects API grava o perfil
+junto com as fatias e marca `auth/rest/nginx` como serviços afetados;
+instalacoes existentes usam `tools/migrate_project_resource_limits.py`, que
+delega ao mesmo helper. Quotas de database por tenant, statement_timeout
+default e quota de disco seguem pendentes.
 
 ## Pontos de restauração
 

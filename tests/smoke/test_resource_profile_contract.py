@@ -93,10 +93,9 @@ class BackendResourceProfileContract(unittest.TestCase):
             ROOT / "servidor/generateProject/lib/resource_profiles.sh"
         ).read_text()
         self.assertIn("PROJECT_RESOURCE_PROFILE=%s", helper)
-        # A chave antiga precisa ser removida antes de reescrita.
-        self.assertIn(
-            "^PROJECT_(RESOURCE_PROFILE|MEM_LIMIT|CPUS|PIDS_LIMIT)=", helper
-        )
+        # As chaves gerenciadas sao removidas antes de reescrever (idempotencia).
+        self.assertIn("^PROJECT_(RESOURCE_PROFILE|MEM_LIMIT|CPUS|PIDS_LIMIT", helper)
+        self.assertIn("(NGINX|AUTH|REST)_(MEM_LIMIT|CPUS|PIDS_LIMIT)", helper)
         settings = (APP / "project_settings.py").read_text()
         self.assertIn('"PROJECT_RESOURCE_PROFILE"', settings)
 
@@ -108,7 +107,39 @@ class BackendResourceProfileContract(unittest.TestCase):
         # O perfil proprio do projeto vem antes do .env raiz.
         body = tool.split("def profile_for(", 1)[1].split("\ndef ", 1)[0]
         self.assertLess(body.index("project_env"), body.index("root_env"))
-        self.assertIn("limits[PROFILE_KEY] = profile", tool)
+
+    def test_split_weights_match_between_bash_and_api(self) -> None:
+        """Bash e Projects API rateiam o perfil; os pesos nao podem divergir."""
+        import re
+
+        helper = (
+            ROOT / "servidor/generateProject/lib/resource_profiles.sh"
+        ).read_text()
+        settings = (APP / "project_settings.py").read_text()
+
+        def bash_weights(name: str) -> tuple[int, ...]:
+            match = re.search(rf"(?m)^{name}=\(([^)]*)\)", helper)
+            self.assertIsNotNone(match, name)
+            return tuple(int(value) for value in match.group(1).split())
+
+        def python_weights(name: str) -> tuple[int, ...]:
+            match = re.search(rf'"{name}": \(([^)]*)\)', settings)
+            self.assertIsNotNone(match, name)
+            return tuple(
+                int(value) for value in match.group(1).split(",") if value.strip()
+            )
+
+        for bash_name, python_name in (
+            ("RESOURCE_MEM_WEIGHTS", "MEMORY"),
+            ("RESOURCE_CPU_WEIGHTS", "CPUS"),
+            ("RESOURCE_PIDS_WEIGHTS", "PIDS"),
+        ):
+            with self.subTest(dimension=python_name):
+                self.assertEqual(
+                    bash_weights(bash_name), python_weights(python_name)
+                )
+        self.assertIn("RESOURCE_SERVICES=(NGINX AUTH REST)", helper)
+        self.assertIn('RESOURCE_SERVICES = ("NGINX", "AUTH", "REST")', settings)
 
     def test_tenant_reader_role_helper_is_wired(self) -> None:
         helper = (

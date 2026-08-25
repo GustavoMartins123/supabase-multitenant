@@ -10,6 +10,7 @@ from __future__ import annotations
 import pathlib
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -28,12 +29,31 @@ HOOKED_SCRIPTS = (
 
 
 class TemplateResourceLimitsTest(unittest.TestCase):
-    LIMIT_LINES = (
-        'mem_limit: ${PROJECT_MEM_LIMIT:?defina PROJECT_MEM_LIMIT no .env do projeto}',
-        'memswap_limit: ${PROJECT_MEM_LIMIT:?defina PROJECT_MEM_LIMIT no .env do projeto}',
-        'cpus: ${PROJECT_CPUS:?defina PROJECT_CPUS no .env do projeto}',
-        'pids_limit: ${PROJECT_PIDS_LIMIT:?defina PROJECT_PIDS_LIMIT no .env do projeto}',
-    )
+    """Cada servico recebe a SUA fatia do perfil, nao o total do projeto.
+
+    Aplicar o mesmo PROJECT_MEM_LIMIT aos tres containers fazia um perfil
+    anunciado como 1 GB reservar 3 GB.
+    """
+
+    @staticmethod
+    def limit_lines(service: str) -> tuple[str, ...]:
+        upper = service.upper()
+        return (
+            f'mem_limit: ${{PROJECT_{upper}_MEM_LIMIT:?defina '
+            f'PROJECT_{upper}_MEM_LIMIT no .env do projeto}}',
+            f'memswap_limit: ${{PROJECT_{upper}_MEM_LIMIT:?defina '
+            f'PROJECT_{upper}_MEM_LIMIT no .env do projeto}}',
+            f'cpus: ${{PROJECT_{upper}_CPUS:?defina '
+            f'PROJECT_{upper}_CPUS no .env do projeto}}',
+            f'pids_limit: ${{PROJECT_{upper}_PIDS_LIMIT:?defina '
+            f'PROJECT_{upper}_PIDS_LIMIT no .env do projeto}}',
+        )
+
+    def test_no_service_uses_the_project_total_as_its_own_limit(self) -> None:
+        source = TEMPLATE.read_text(encoding="utf-8")
+        for key in ("PROJECT_MEM_LIMIT", "PROJECT_CPUS", "PROJECT_PIDS_LIMIT"):
+            with self.subTest(key=key):
+                self.assertNotIn("${" + key, source)
 
     def test_every_project_service_declares_the_limits(self) -> None:
         import re
@@ -50,15 +70,16 @@ class TemplateResourceLimitsTest(unittest.TestCase):
                 None,
             )
             self.assertIsNotNone(block, f"servico {service} ausente no template")
-            for line in self.LIMIT_LINES:
+            for line in self.limit_lines(service):
                 with self.subTest(service=service, line=line):
                     self.assertIn(line, block)
 
     def test_limits_are_fail_closed_interpolations(self) -> None:
         source = TEMPLATE.read_text(encoding="utf-8")
-        self.assertNotIn("PROJECT_MEM_LIMIT:-", source)
-        self.assertNotIn("PROJECT_CPUS:-", source)
-        self.assertNotIn("PROJECT_PIDS_LIMIT:-", source)
+        for service in ("NGINX", "AUTH", "REST"):
+            for suffix in ("MEM_LIMIT", "CPUS", "PIDS_LIMIT"):
+                with self.subTest(service=service, suffix=suffix):
+                    self.assertNotIn(f"PROJECT_{service}_{suffix}:-", source)
 
 
 class LifecycleHookTest(unittest.TestCase):
@@ -129,12 +150,139 @@ class ProfileHelperFunctionalTest(unittest.TestCase):
             self.assertIn("PROJECT_RESOURCE_PROFILE invalido", result.stderr)
 
 
+class ProfileSplitFunctionalTest(unittest.TestCase):
+    """A soma das fatias tem de fechar exatamente com o teto do perfil."""
+
+    ROOT_ENV = (
+        "PROJECT_RES_SMALL_MEMORY=256m\nPROJECT_RES_SMALL_CPUS=0.50\n"
+        "PROJECT_RES_SMALL_PIDS=128\n"
+        "PROJECT_RES_MEDIUM_MEMORY=1g\nPROJECT_RES_MEDIUM_CPUS=1.50\n"
+        "PROJECT_RES_MEDIUM_PIDS=384\n"
+        "PROJECT_RES_LARGE_MEMORY=4g\nPROJECT_RES_LARGE_CPUS=3.00\n"
+        "PROJECT_RES_LARGE_PIDS=768\n"
+    )
+    EXPECTED = {
+        "medium": {
+            "NGINX": ("128m", "0.25", "64"),
+            "AUTH": ("384m", "0.50", "160"),
+            "REST": ("512m", "0.75", "160"),
+        },
+        "large": {
+            "NGINX": ("512m", "0.50", "128"),
+            "AUTH": ("1536m", "1.00", "320"),
+            "REST": ("2048m", "1.50", "320"),
+        },
+    }
+
+    def _apply(self, profile: str) -> dict[str, str]:
+        bash = shutil.which("bash") or "bash"
+        with tempfile.TemporaryDirectory() as tmp:
+            root_env = pathlib.Path(tmp) / "root.env"
+            root_env.write_text(self.ROOT_ENV, encoding="utf-8")
+            project_env = pathlib.Path(tmp) / "project.env"
+            project_env.write_text("PROJECT_ID=demo\n", encoding="utf-8")
+            subprocess.run(
+                [
+                    bash,
+                    "-c",
+                    f'source "{HELPER}"; apply_project_resource_limits '
+                    f'"{root_env}" "{project_env}" "{profile}"',
+                ],
+                check=True,
+            )
+            return dict(
+                line.split("=", 1)
+                for line in project_env.read_text(encoding="utf-8").splitlines()
+                if "=" in line
+            )
+
+    def test_shares_match_the_documented_table(self) -> None:
+        for profile, services in self.EXPECTED.items():
+            values = self._apply(profile)
+            for service, (memory, cpus, pids) in services.items():
+                with self.subTest(profile=profile, service=service):
+                    self.assertEqual(memory, values[f"PROJECT_{service}_MEM_LIMIT"])
+                    self.assertEqual(cpus, values[f"PROJECT_{service}_CPUS"])
+                    self.assertEqual(pids, values[f"PROJECT_{service}_PIDS_LIMIT"])
+
+    def test_shares_sum_exactly_to_the_project_total(self) -> None:
+        for profile in ("small", "medium", "large"):
+            values = self._apply(profile)
+            with self.subTest(profile=profile):
+                total_memory = values["PROJECT_MEM_LIMIT"]
+                expected_mib = int(total_memory[:-1]) * (
+                    1024 if total_memory[-1].lower() == "g" else 1
+                )
+                self.assertEqual(
+                    expected_mib,
+                    sum(
+                        int(values[f"PROJECT_{service}_MEM_LIMIT"][:-1])
+                        for service in ("NGINX", "AUTH", "REST")
+                    ),
+                )
+                self.assertEqual(
+                    round(float(values["PROJECT_CPUS"]) * 100),
+                    sum(
+                        round(float(values[f"PROJECT_{service}_CPUS"]) * 100)
+                        for service in ("NGINX", "AUTH", "REST")
+                    ),
+                )
+                self.assertEqual(
+                    int(values["PROJECT_PIDS_LIMIT"]),
+                    sum(
+                        int(values[f"PROJECT_{service}_PIDS_LIMIT"])
+                        for service in ("NGINX", "AUTH", "REST")
+                    ),
+                )
+
+
 class MigratorContractTest(unittest.TestCase):
     def test_migrator_exists_and_defaults_to_dry_run(self) -> None:
+        """Sem --apply o migrador nao pode tocar em nenhum .env."""
         source = MIGRATOR.read_text(encoding="utf-8")
         self.assertIn("--apply", source)
-        self.assertIn("--dry-run", source)
-        self.assertIn("action=\"store_true\"", source)
+        self.assertIn('action="store_true"', source)
+
+        bash_env = tempfile.mkdtemp()
+        root_env = pathlib.Path(bash_env) / ".env"
+        root_env.write_text(
+            "PROJECT_RESOURCE_PROFILE=medium\n"
+            "PROJECT_RES_MEDIUM_MEMORY=1g\n"
+            "PROJECT_RES_MEDIUM_CPUS=1.50\n"
+            "PROJECT_RES_MEDIUM_PIDS=384\n",
+            encoding="utf-8",
+        )
+        projects = pathlib.Path(bash_env) / "projects" / "demo"
+        projects.mkdir(parents=True)
+        project_env = projects / ".env"
+        project_env.write_text("PROJECT_ID=demo\n", encoding="utf-8")
+        before = project_env.read_text(encoding="utf-8")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(MIGRATOR),
+                "--server-env",
+                str(root_env),
+                "--projects-dir",
+                str(projects.parent),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("[pendente]", result.stdout)
+        self.assertEqual(before, project_env.read_text(encoding="utf-8"))
+
+    def test_migrator_delegates_to_the_canonical_helper(self) -> None:
+        """Uma unica implementacao do rateio: bash, API e migrador."""
+        source = MIGRATOR.read_text(encoding="utf-8")
+        self.assertIn("apply_project_resource_limits", source)
+        self.assertIn("resource_profiles.sh", source)
+        # Nao pode reimplementar os pesos.
+        for weights in ("1, 3, 4", "(1, 2, 3)", "(2, 5, 5)"):
+            with self.subTest(weights=weights):
+                self.assertNotIn(weights, source)
 
     def test_env_example_documents_profiles(self) -> None:
         import re

@@ -1,38 +1,36 @@
 #!/usr/bin/env python3
-"""Aplica o perfil de recursos aos .env de projetos existentes.
+"""Reaplica o perfil de recursos aos .env de projetos existentes.
 
-Os containers nginx/auth/rest de cada projeto passaram a consumir
-PROJECT_MEM_LIMIT, PROJECT_CPUS e PROJECT_PIDS_LIMIT via interpolacao com ':?'
-no dockercomposetemplate. Projetos criados depois dessa mudanca recebem as
-chaves do lifecycle; os anteriores precisam deste migrador antes do proximo
-recreate. Idempotente: pode rodar quantas vezes quiser.
-
-Por padrao apenas mostra o plano (--dry-run). Use --apply para gravar.
-O script nao imprime nenhum segredo.
+O perfil e o teto do PROJETO, rateado entre nginx/auth/rest. Em vez de
+reimplementar o rateio (uma terceira copia dos pesos, alem do bash e da
+Projects API), este utilitario chama o proprio helper canonico usado pelo
+lifecycle — `apply_project_resource_limits`. O modo de simulacao roda o
+helper sobre uma COPIA do .env e mostra o diff, entao o plano exibido e
+exatamente o que seria gravado.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SERVER_ENV = ROOT / "servidor" / ".env"
 DEFAULT_PROJECTS_DIR = ROOT / "servidor" / "projects"
+HELPER = ROOT / "servidor" / "generateProject" / "lib" / "resource_profiles.sh"
 
-PROFILE_KEYS = ("MEMORY", "CPUS", "PIDS")
-TARGET_KEYS = {
-    "MEMORY": "PROJECT_MEM_LIMIT",
-    "CPUS": "PROJECT_CPUS",
-    "PIDS": "PROJECT_PIDS_LIMIT",
-}
 PROFILE_KEY = "PROJECT_RESOURCE_PROFILE"
 VALID_PROFILES = {"small", "medium", "large"}
-ASSIGNMENT_RE = re.compile(
+MANAGED_RE = re.compile(
     r"(?m)^(?:export[ \t]+)?"
-    r"(PROJECT_(?:RESOURCE_PROFILE|MEM_LIMIT|CPUS|PIDS_LIMIT))[ \t]*=(.*)$"
+    r"(PROJECT_(?:RESOURCE_PROFILE|MEM_LIMIT|CPUS|PIDS_LIMIT"
+    r"|(?:NGINX|AUTH|REST)_(?:MEM_LIMIT|CPUS|PIDS_LIMIT)))[ \t]*=(.*)$"
 )
 
 
@@ -67,52 +65,46 @@ def profile_for(project_env: Path, root_env: Path) -> str:
     return profile
 
 
-def resolve_limits(root_env: Path, profile: str) -> dict[str, str]:
-    content = root_env.read_text(encoding="utf-8")
-    upper = profile.upper()
-    limits: dict[str, str] = {}
-    for suffix in PROFILE_KEYS:
-        raw = value_for(content, f"PROJECT_RES_{upper}_{suffix}")
-        if not raw or raw == "pass":
-            raise MigrationError(
-                f"PROJECT_RES_{upper}_{suffix} ausente ou placeholder no {root_env}; "
-                "atualize o arquivo a partir do .env.example"
-            )
-        limits[TARGET_KEYS[suffix]] = raw
-    # A API de settings le o perfil do .env do projeto: sem esta chave o
-    # seletor do Studio abre vazio, mesmo com os limites corretos aplicados.
-    limits[PROFILE_KEY] = profile
-    return limits
-
-
-def upsert(project_env: Path, limits: dict[str, str]) -> tuple[list[str], list[str]]:
-    """Retorna (adicionadas, atualizadas) sem gravar nada."""
-    content = project_env.read_text(encoding="utf-8")
-    existing = {
+def managed_values(content: str) -> dict[str, str]:
+    return {
         match.group(1): match.group(2).strip()
-        for match in ASSIGNMENT_RE.finditer(content)
+        for match in MANAGED_RE.finditer(content)
     }
-    added: list[str] = []
-    updated: list[str] = []
-    for key, new_value in limits.items():
-        current = existing.get(key)
-        if current is None:
-            added.append(key)
-        elif current != new_value:
-            updated.append(key)
-    return added, updated
 
 
-def write_limits(project_env: Path, limits: dict[str, str]) -> None:
-    lines = [
-        line
-        for line in project_env.read_text(encoding="utf-8").splitlines()
-        if not ASSIGNMENT_RE.match(line)
-    ]
-    lines.extend(f"{key}={value}" for key, value in limits.items())
-    # Reescreve no mesmo inode para preservar dono e permissoes (600).
-    with project_env.open("w", encoding="utf-8", newline="\n") as handle:
-        handle.write("\n".join(lines) + "\n")
+def apply_helper(root_env: Path, project_env: Path, profile: str) -> None:
+    """Delega ao helper de lifecycle: uma unica implementacao do rateio."""
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'source "$1"; apply_project_resource_limits "$2" "$3" "$4"',
+            "bash",
+            str(HELPER),
+            str(root_env),
+            str(project_env),
+            profile,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise MigrationError(
+            (result.stderr or result.stdout).strip() or "helper falhou"
+        )
+
+
+def plan_for(root_env: Path, project_env: Path, profile: str) -> dict[str, str]:
+    """Roda o helper numa copia e devolve as chaves que mudariam."""
+    before = managed_values(project_env.read_text(encoding="utf-8"))
+    with tempfile.TemporaryDirectory() as temp:
+        copy = Path(temp) / ".env"
+        shutil.copy2(project_env, copy)
+        apply_helper(root_env, copy, profile)
+        after = managed_values(copy.read_text(encoding="utf-8"))
+    return {
+        key: value for key, value in after.items() if before.get(key) != value
+    }
 
 
 def main() -> int:
@@ -132,6 +124,9 @@ def main() -> int:
     if not args.projects_dir.is_dir():
         print(f"diretorio de projetos ausente: {args.projects_dir}", file=sys.stderr)
         return 1
+    if not HELPER.is_file():
+        print(f"helper ausente: {HELPER}", file=sys.stderr)
+        return 1
 
     changed = 0
     for project_dir in sorted(args.projects_dir.iterdir()):
@@ -139,22 +134,26 @@ def main() -> int:
         if not project_dir.is_dir() or not project_env.is_file():
             continue
         try:
-            limits = resolve_limits(
-                args.server_env, profile_for(project_env, args.server_env)
-            )
-            added, updated = upsert(project_env, limits)
+            profile = profile_for(project_env, args.server_env)
+            pending = plan_for(args.server_env, project_env, profile)
         except MigrationError as error:
             print(f"Erro em {project_dir.name}: {error}", file=sys.stderr)
             return 1
-        if not (added or updated):
-            print(f"[ok] {project_dir.name}: limites ja aplicados")
+        if not pending:
+            print(f"[ok] {project_dir.name}: perfil {profile} ja aplicado")
             continue
-        plan = ", ".join(added + [f"{key} (valor divergente)" for key in updated])
+        plan = ", ".join(f"{key}={value}" for key, value in sorted(pending.items()))
         if args.apply:
-            write_limits(project_env, limits)
-            print(f"[migrado] {project_dir.name}: {plan}")
+            original = os.stat(project_env)
+            try:
+                apply_helper(args.server_env, project_env, profile)
+            except MigrationError as error:
+                print(f"Erro em {project_dir.name}: {error}", file=sys.stderr)
+                return 1
+            os.chmod(project_env, original.st_mode & 0o777)
+            print(f"[migrado] {project_dir.name} ({profile}): {plan}")
         else:
-            print(f"[pendente] {project_dir.name}: {plan}")
+            print(f"[pendente] {project_dir.name} ({profile}): {plan}")
         changed += 1
 
     if not args.apply and changed:

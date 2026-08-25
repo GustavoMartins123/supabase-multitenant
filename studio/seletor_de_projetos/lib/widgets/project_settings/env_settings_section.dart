@@ -28,9 +28,9 @@ enum _FieldType { toggle, number, text, select }
 
 const _kSelectOptions = <String, Map<String, String>>{
   'PROJECT_RESOURCE_PROFILE': {
-    'small': 'Pequeno (256 MB / 0,5 CPU / 128 PIDs)',
-    'medium': 'Médio (1 GB / 1,5 CPU / 384 PIDs)',
-    'large': 'Grande (4 GB / 3 CPUs / 768 PIDs)',
+    'small': 'Pequeno — 256 MB / 0,5 CPU / 128 PIDs no total',
+    'medium': 'Médio — 1 GB / 1,5 CPU / 384 PIDs no total',
+    'large': 'Grande — 4 GB / 3 CPUs / 768 PIDs no total',
   },
 };
 
@@ -73,7 +73,8 @@ const _kSettings = [
     key: 'PROJECT_RESOURCE_PROFILE',
     label: 'Perfil de Recursos',
     description:
-        'Limites de CPU/memória/PIDs dos containers; aplicado ao recriar auth/rest/nginx',
+        'Teto de CPU/memória/PIDs do projeto, rateado entre nginx, auth e rest; '
+        'aplicado ao recriar os serviços',
     type: _FieldType.select,
     category: 'Recursos',
   ),

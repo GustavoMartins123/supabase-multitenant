@@ -216,9 +216,15 @@ It must not be confused with ordinary API-key rotation.
 
 ### Resource limits
 
-Every rendered project Compose pins `mem_limit`/`memswap_limit`, `cpus`, and `pids_limit` for `nginx`, `auth`, and `rest` through fail-closed interpolation (`${PROJECT_MEM_LIMIT:?...}`), so a project without limits refuses to start instead of running unconstrained. Concrete values come from the project `.env` and are resolved from the root profile `PROJECT_RESOURCE_PROFILE` (`small|medium|large`) at create, duplicate, rename, and rotate-key time. Existing projects are migrated idempotently with `tools/migrate_project_resource_limits.py` (dry-run by default, `--apply` to write), followed by a recreate. Database-level quotas (connection limits per tenant role, statement timeouts) and disk quotas remain open items; disk usage is currently an observability concern only.
+The profile is the ceiling for the **whole project**, not per container. `PROJECT_RESOURCE_PROFILE` (`small|medium|large`) names a total in the root `.env`, and `lib/resource_profiles.sh` splits it across the three tenant containers by fixed weights — memory 1:3:4, cpus 1:2:3, pids 2:5:5 for nginx:auth:rest, with the integer-division remainder going to `rest` so the shares sum exactly to the total. `nginx` is a thin proxy; `auth` (GoTrue) and `rest` (PostgREST) carry the load.
 
-Every rendered project Compose pins `mem_limit`/`memswap_limit`, `cpus`, and `pids_limit` for `nginx`, `auth`, and `rest` through fail-closed interpolation (`${PROJECT_MEM_LIMIT:?...}`), so a project without limits refuses to start instead of running unconstrained. Concrete values come from the project `.env` and are resolved from the root profile `PROJECT_RESOURCE_PROFILE` (`small|medium|large`) at create, duplicate, rename, and rotate-key time. Existing projects are migrated idempotently with `tools/migrate_project_resource_limits.py` (dry-run by default, `--apply` to write), followed by a recreate. Database-level quotas (connection limits per tenant role, statement timeouts) and disk quotas remain open items; disk usage is currently an observability concern only.
+| Profile | Project total | nginx | auth | rest |
+| --- | --- | --- | --- | --- |
+| `small` | 256m / 0.50 / 128 | 32m / 0.08 / 21 | 96m / 0.16 / 53 | 128m / 0.26 / 54 |
+| `medium` | 1g / 1.50 / 384 | 128m / 0.25 / 64 | 384m / 0.50 / 160 | 512m / 0.75 / 160 |
+| `large` | 4g / 3.00 / 768 | 512m / 0.50 / 128 | 1536m / 1.00 / 320 | 2048m / 1.50 / 320 |
+
+Every rendered project Compose pins each service's own share through fail-closed interpolation (`${PROJECT_NGINX_MEM_LIMIT:?...}`, `${PROJECT_AUTH_CPUS:?...}`, …), so a project without limits refuses to start instead of running unconstrained. The shares are written to the project `.env` at create, duplicate, rename, and rotate-key time. Existing projects are migrated idempotently with `tools/migrate_project_resource_limits.py` (dry-run by default, `--apply` to write), which delegates to the same helper, followed by a recreate. Database-level quotas (connection limits per tenant role, statement timeouts) and disk quotas remain open items; disk usage is currently an observability concern only.
 
 Changing settings writes the `.env` atomically and reports the affected services.
 
