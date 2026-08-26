@@ -504,5 +504,11 @@ echo "HOST_AGENT_PROGRESS=create:storage_verified"
 grant_platform_reader_on_tenant "_supabase_$PROJECT_ID" \
   || die "Falha ao conceder leitura de telemetria ao platform_reader"
 
+if [[ -f "$SCRIPT_DIR/lib/platform_capacity.sh" ]]; then
+  source "$SCRIPT_DIR/lib/platform_capacity.sh"
+  platform_apply_shared_limits "$PROJECT_ROOT/.env" \
+    || echo "Aviso: limites da camada compartilhada nao foram reaplicados." >&2
+fi
+
 echo "✅  Projeto $PROJECT_ID configurado com Storage Vectors e SigV4"
 commit_transaction

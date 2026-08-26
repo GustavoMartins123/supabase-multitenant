@@ -91,6 +91,7 @@ from app.project_telemetry import (
     fetch_project_user_telemetry,
     resolve_telemetry_period,
 )
+from app.platform_capacity import assert_capacity_available
 from app.project_deletion import (
     ProjectDeletionError,
     build_global_delete_token,
@@ -2286,6 +2287,9 @@ async def create_project(
             )
             if existing:
                 raise HTTPException(status_code=409, detail="Project already exists")
+            assert_capacity_available(
+                await conn.fetchval("SELECT count(*) FROM projects")
+            )
             project_id = uuid.uuid4()
             await conn.execute(
                 """
@@ -2365,6 +2369,10 @@ async def duplicate_project(
             )
             if exists:
                 raise HTTPException(409, "Nome de projeto já existe")
+
+            assert_capacity_available(
+                await conn.fetchval("SELECT count(*) FROM projects")
+            )
 
             project_id = uuid.uuid4()
             await conn.execute(

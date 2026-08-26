@@ -37,7 +37,7 @@ require_host_agent_installation() {
 start_studio() {
     echo "Iniciando Studio, Authelia e OpenResty..."
     cd "$ROOT_DIR/studio"
-    docker compose up --build -d
+    docker compose -f docker-compose.yml -f docker-compose.capacity.yml up --build -d
     echo "Studio iniciado."
 }
 
@@ -86,9 +86,29 @@ fi
 chmod 2775 "$ROOT_DIR/servidor/volumes/storage" "$ROOT_DIR/servidor/volumes/storage/objects"
 cd "$ROOT_DIR/servidor"
 API_OVERRIDE="docker-compose.${SERVER_TOPOLOGY}.yml"
-API_COMPOSE=(docker compose -f docker-compose-api.yml -f "$API_OVERRIDE" --env-file .env)
+API_COMPOSE=(docker compose -f docker-compose-api.yml -f "$API_OVERRIDE" \
+    -f "$ROOT_DIR/servidor/docker-compose-api.capacity.yml" --env-file .env)
 
-docker compose -f docker-compose.yml --env-file .env up --build -d
+echo "Derivando capacidade da plataforma para este host..."
+source "$ROOT_DIR/servidor/generateProject/lib/platform_capacity.sh"
+platform_render_postgres_conf "$ROOT_DIR/servidor/.env" \
+    "$ROOT_DIR/servidor/volumes/db/platform-capacity.conf" \
+    || die "nao foi possivel derivar a capacidade; rode 'bash servidor/generateProject/lib/platform_capacity.sh --report servidor/.env' para ver o erro."
+CAPACITY_SERVIDOR="$ROOT_DIR/servidor/docker-compose.capacity.yml"
+CAPACITY_API="$ROOT_DIR/servidor/docker-compose-api.capacity.yml"
+CAPACITY_STUDIO="$ROOT_DIR/studio/docker-compose.capacity.yml"
+platform_render_compose_override "$ROOT_DIR/servidor/.env" servidor "$CAPACITY_SERVIDOR" \
+    || die "falha ao gerar os limites do compose principal."
+platform_render_compose_override "$ROOT_DIR/servidor/.env" api "$CAPACITY_API" \
+    || die "falha ao gerar os limites do compose da API."
+platform_render_compose_override "$ROOT_DIR/servidor/.env" studio "$CAPACITY_STUDIO" \
+    || die "falha ao gerar os limites do compose do Studio."
+platform_render_env "$ROOT_DIR/servidor/.env" "$ROOT_DIR/servidor/platform-capacity.env" \
+    || die "falha ao publicar a capacidade derivada para a Projects API."
+platform_compute_capacity "$ROOT_DIR/servidor/.env" >/dev/null
+echo "  teto desta maquina: $PLATFORM_CAP_PROJECTS projetos (restricao: $PLATFORM_CAP_BINDING)"
+
+docker compose -f docker-compose.yml -f "$CAPACITY_SERVIDOR" --env-file .env up --build -d
 
 echo "Aguardando o banco de dados ficar pronto..."
 counter=0

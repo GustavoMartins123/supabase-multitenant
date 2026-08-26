@@ -14,7 +14,9 @@
 RESOURCE_SERVICES=(NGINX AUTH REST)
 RESOURCE_MEM_WEIGHTS=(1 3 4)
 RESOURCE_CPU_WEIGHTS=(1 2 3)
-RESOURCE_PIDS_WEIGHTS=(2 5 5)
+
+RESOURCE_CPU_FLOORS_CENTI=(5 40 15)
+RESOURCE_PIDS_FLOOR=(128 256 512)
 RESOURCE_MEM_FLOORS_MIB=(16 64 32)
 RESOURCE_GHC_HEAP_PERCENT=80
 
@@ -70,6 +72,26 @@ resource_split() {
     printf '%s\n' "${shares[@]}"
 }
 
+resource_split_cpu() {
+    local total="$1" floor_total=0 weight_total=0 index used=0 extra
+    for index in "${!RESOURCE_SERVICES[@]}"; do
+        floor_total=$((floor_total + RESOURCE_CPU_FLOORS_CENTI[index]))
+        weight_total=$((weight_total + RESOURCE_CPU_WEIGHTS[index]))
+    done
+    [ "$total" -ge "$floor_total" ] \
+        || resource_profiles_error "perfil de CPU precisa de pelo menos $floor_total centi-CPU"
+    local remaining=$((total - floor_total))
+    for index in "${!RESOURCE_SERVICES[@]}"; do
+        if [ "$index" -eq $((${#RESOURCE_SERVICES[@]} - 1)) ]; then
+            extra=$((remaining - used))
+        else
+            extra=$((remaining * RESOURCE_CPU_WEIGHTS[index] / weight_total))
+            used=$((used + extra))
+        fi
+        printf '%s\n' "$((RESOURCE_CPU_FLOORS_CENTI[index] + extra))"
+    done
+}
+
 apply_project_resource_limits() {
     local root_env="$1" project_env="$2" profile_override="${3:-}"
     [ -f "$root_env" ] || resource_profiles_error ".env raiz ausente: $root_env"
@@ -107,8 +129,16 @@ apply_project_resource_limits() {
             || resource_profiles_error \
                 "perfil $profile da apenas ${mem_shares[floor_index]}m ao ${RESOURCE_SERVICES[floor_index],,}; o minimo seguro e ${RESOURCE_MEM_FLOORS_MIB[floor_index]}m. Aumente PROJECT_RES_${upper}_MEMORY."
     done
-    mapfile -t cpu_shares < <(resource_split "$(resource_cpus_to_centi "$cpus")" "${RESOURCE_CPU_WEIGHTS[@]}")
-    mapfile -t pids_shares < <(resource_split "$pids" "${RESOURCE_PIDS_WEIGHTS[@]}")
+    mapfile -t cpu_shares < <(resource_split_cpu "$(resource_cpus_to_centi "$cpus")")
+    local index_pids
+    pids_shares=()
+    for index_pids in "${!RESOURCE_SERVICES[@]}"; do
+        if [ "$pids" -gt "${RESOURCE_PIDS_FLOOR[index_pids]}" ]; then
+            pids_shares+=("$pids")
+        else
+            pids_shares+=("${RESOURCE_PIDS_FLOOR[index_pids]}")
+        fi
+    done
 
     local temporary index service
     temporary="$(mktemp "${project_env}.limits.XXXXXX")"

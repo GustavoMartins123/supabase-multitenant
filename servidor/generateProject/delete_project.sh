@@ -19,3 +19,9 @@ if [ -d "$PROJECT_DIR" ]; then
 else
   echo "⚠️ Diretório $PROJECT_DIR não encontrado."
 fi
+
+if [ -f "$SCRIPT_DIR/lib/platform_capacity.sh" ]; then
+  source "$SCRIPT_DIR/lib/platform_capacity.sh"
+  platform_apply_shared_limits "$PROJECT_ROOT/.env" \
+    || echo "Aviso: limites da camada compartilhada nao foram reaplicados." >&2
+fi

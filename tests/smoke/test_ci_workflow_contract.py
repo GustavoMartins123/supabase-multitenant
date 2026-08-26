@@ -45,6 +45,13 @@ class CiWorkflowContract(unittest.TestCase):
         # CI nao pode ligar a flag: E2E roda so em instalacao descartavel.
         self.assertNotIn("RUN_PLATFORM_E2E=1", WORKFLOW.read_text(encoding="utf-8"))
 
+    def test_load_suite_stays_opt_in(self) -> None:
+        probe = (
+            ROOT / "tests" / "smoke" / "test_platform_load_probe_contract.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('env_flag("RUN_PLATFORM_LOAD")', probe)
+        self.assertNotIn("RUN_PLATFORM_LOAD=1", WORKFLOW.read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -39,14 +39,14 @@ class TemplateResourceLimitsTest(unittest.TestCase):
     def limit_lines(service: str) -> tuple[str, ...]:
         upper = service.upper()
         return (
-            f'mem_limit: ${{PROJECT_{upper}_MEM_LIMIT:?defina '
-            f'PROJECT_{upper}_MEM_LIMIT no .env do projeto}}',
-            f'memswap_limit: ${{PROJECT_{upper}_MEM_LIMIT:?defina '
-            f'PROJECT_{upper}_MEM_LIMIT no .env do projeto}}',
-            f'cpus: ${{PROJECT_{upper}_CPUS:?defina '
-            f'PROJECT_{upper}_CPUS no .env do projeto}}',
-            f'pids_limit: ${{PROJECT_{upper}_PIDS_LIMIT:?defina '
-            f'PROJECT_{upper}_PIDS_LIMIT no .env do projeto}}',
+            f"mem_limit: ${{PROJECT_{upper}_MEM_LIMIT:?defina "
+            f"PROJECT_{upper}_MEM_LIMIT no .env do projeto}}",
+            f"memswap_limit: ${{PROJECT_{upper}_MEM_LIMIT:?defina "
+            f"PROJECT_{upper}_MEM_LIMIT no .env do projeto}}",
+            f"cpus: ${{PROJECT_{upper}_CPUS:?defina "
+            f"PROJECT_{upper}_CPUS no .env do projeto}}",
+            f"pids_limit: ${{PROJECT_{upper}_PIDS_LIMIT:?defina "
+            f"PROJECT_{upper}_PIDS_LIMIT no .env do projeto}}",
         )
 
     def test_no_service_uses_the_project_total_as_its_own_limit(self) -> None:
@@ -102,7 +102,7 @@ class ProfileHelperFunctionalTest(unittest.TestCase):
             root_env.write_text(
                 "PROJECT_RESOURCE_PROFILE=small\n"
                 "PROJECT_RES_SMALL_MEMORY=256m\n"
-                "PROJECT_RES_SMALL_CPUS=0.50\n"
+                "PROJECT_RES_SMALL_CPUS=0.75\n"
                 "PROJECT_RES_SMALL_PIDS=128\n",
                 encoding="utf-8",
             )
@@ -123,7 +123,7 @@ class ProfileHelperFunctionalTest(unittest.TestCase):
             self.assertIn("JWT_SECRET_PROJETO=segredo\n", content)
             self.assertEqual(content.count("PROJECT_MEM_LIMIT="), 1)
             self.assertIn("PROJECT_MEM_LIMIT=256m\n", content)
-            self.assertIn("PROJECT_CPUS=0.50\n", content)
+            self.assertIn("PROJECT_CPUS=0.75\n", content)
             self.assertIn("PROJECT_PIDS_LIMIT=128\n", content)
             self.assertEqual(project_env.stat().st_mode & 0o777, 0o600)
 
@@ -131,9 +131,7 @@ class ProfileHelperFunctionalTest(unittest.TestCase):
         bash = shutil.which("bash") or "bash"
         with tempfile.TemporaryDirectory() as tmp:
             root_env = pathlib.Path(tmp) / ".env"
-            root_env.write_text(
-                "PROJECT_RESOURCE_PROFILE=huge\n", encoding="utf-8"
-            )
+            root_env.write_text("PROJECT_RESOURCE_PROFILE=huge\n", encoding="utf-8")
             project_env = pathlib.Path(tmp) / "project.env"
             project_env.write_text("A=1\n", encoding="utf-8")
             result = subprocess.run(
@@ -154,7 +152,7 @@ class ProfileSplitFunctionalTest(unittest.TestCase):
     """A soma das fatias tem de fechar exatamente com o teto do perfil."""
 
     ROOT_ENV = (
-        "PROJECT_RES_SMALL_MEMORY=256m\nPROJECT_RES_SMALL_CPUS=0.50\n"
+        "PROJECT_RES_SMALL_MEMORY=256m\nPROJECT_RES_SMALL_CPUS=0.75\n"
         "PROJECT_RES_SMALL_PIDS=128\n"
         "PROJECT_RES_MEDIUM_MEMORY=1g\nPROJECT_RES_MEDIUM_CPUS=1.50\n"
         "PROJECT_RES_MEDIUM_PIDS=384\n"
@@ -162,15 +160,20 @@ class ProfileSplitFunctionalTest(unittest.TestCase):
         "PROJECT_RES_LARGE_PIDS=768\n"
     )
     EXPECTED = {
+        "small": {
+            "NGINX": ("32m", "0.07"),
+            "AUTH": ("96m", "0.45"),
+            "REST": ("128m", "0.23"),
+        },
         "medium": {
-            "NGINX": ("128m", "0.25", "64"),
-            "AUTH": ("384m", "0.50", "160"),
-            "REST": ("512m", "0.75", "160"),
+            "NGINX": ("128m", "0.20"),
+            "AUTH": ("384m", "0.70"),
+            "REST": ("512m", "0.60"),
         },
         "large": {
-            "NGINX": ("512m", "0.50", "128"),
-            "AUTH": ("1536m", "1.00", "320"),
-            "REST": ("2048m", "1.50", "320"),
+            "NGINX": ("512m", "0.45"),
+            "AUTH": ("1536m", "1.20"),
+            "REST": ("2048m", "1.35"),
         },
     }
 
@@ -199,11 +202,21 @@ class ProfileSplitFunctionalTest(unittest.TestCase):
     def test_shares_match_the_documented_table(self) -> None:
         for profile, services in self.EXPECTED.items():
             values = self._apply(profile)
-            for service, (memory, cpus, pids) in services.items():
+            for service, (memory, cpus) in services.items():
                 with self.subTest(profile=profile, service=service):
                     self.assertEqual(memory, values[f"PROJECT_{service}_MEM_LIMIT"])
                     self.assertEqual(cpus, values[f"PROJECT_{service}_CPUS"])
-                    self.assertEqual(pids, values[f"PROJECT_{service}_PIDS_LIMIT"])
+
+    def test_pids_are_floors_not_a_split_of_the_total(self) -> None:
+        values = self._apply("small")
+        floors = {"NGINX": 128, "AUTH": 256, "REST": 512}
+        for service, floor in floors.items():
+            with self.subTest(service=service):
+                self.assertGreaterEqual(
+                    int(values[f"PROJECT_{service}_PIDS_LIMIT"]), floor
+                )
+        total = sum(int(values[f"PROJECT_{s}_PIDS_LIMIT"]) for s in floors)
+        self.assertGreater(total, int(values["PROJECT_PIDS_LIMIT"]))
 
     def test_shares_sum_exactly_to_the_project_total(self) -> None:
         for profile in ("small", "medium", "large"):
@@ -224,13 +237,6 @@ class ProfileSplitFunctionalTest(unittest.TestCase):
                     round(float(values["PROJECT_CPUS"]) * 100),
                     sum(
                         round(float(values[f"PROJECT_{service}_CPUS"]) * 100)
-                        for service in ("NGINX", "AUTH", "REST")
-                    ),
-                )
-                self.assertEqual(
-                    int(values["PROJECT_PIDS_LIMIT"]),
-                    sum(
-                        int(values[f"PROJECT_{service}_PIDS_LIMIT"])
                         for service in ("NGINX", "AUTH", "REST")
                     ),
                 )
@@ -291,7 +297,7 @@ class MemoryFloorContract(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root_env = pathlib.Path(tmp) / "root.env"
             root_env.write_text(
-                "PROJECT_RES_SMALL_MEMORY=64m\nPROJECT_RES_SMALL_CPUS=0.50\n"
+                "PROJECT_RES_SMALL_MEMORY=64m\nPROJECT_RES_SMALL_CPUS=0.75\n"
                 "PROJECT_RES_SMALL_PIDS=128\n",
                 encoding="utf-8",
             )
@@ -316,15 +322,11 @@ class MemoryFloorContract(unittest.TestCase):
         import re
 
         helper = HELPER.read_text(encoding="utf-8")
-        settings = (
-            ROOT / "servidor/api-internal/app/project_settings.py"
-        ).read_text(encoding="utf-8")
-        bash_floors = re.search(
-            r"(?m)^RESOURCE_MEM_FLOORS_MIB=\(([^)]*)\)", helper
+        settings = (ROOT / "servidor/api-internal/app/project_settings.py").read_text(
+            encoding="utf-8"
         )
-        api_floors = re.search(
-            r"RESOURCE_MEM_FLOORS_MIB = \(([^)]*)\)", settings
-        )
+        bash_floors = re.search(r"(?m)^RESOURCE_MEM_FLOORS_MIB=\(([^)]*)\)", helper)
+        api_floors = re.search(r"RESOURCE_MEM_FLOORS_MIB = \(([^)]*)\)", settings)
         self.assertIsNotNone(bash_floors)
         self.assertIsNotNone(api_floors)
         self.assertEqual(
@@ -407,9 +409,7 @@ class MigratorContractTest(unittest.TestCase):
             r"MANAGED_RE = re\.compile\((.*?)\)\n", MIGRATOR.read_text(), re.S
         )
         self.assertIsNotNone(pattern)
-        managed = re.compile(
-            "".join(re.findall(r'r"([^"]*)"', pattern.group(1)))
-        )
+        managed = re.compile("".join(re.findall(r'r"([^"]*)"', pattern.group(1))))
         for key in sorted(written):
             with self.subTest(key=key):
                 self.assertIsNotNone(
@@ -436,9 +436,7 @@ class MigratorContractTest(unittest.TestCase):
             for key in ("MEMORY", "CPUS", "PIDS"):
                 with self.subTest(profile=suffix, key=key):
                     self.assertIsNotNone(
-                        re.search(
-                            rf"^PROJECT_RES_{suffix}_{key}=\S+$", example, re.M
-                        )
+                        re.search(rf"^PROJECT_RES_{suffix}_{key}=\S+$", example, re.M)
                     )
 
 

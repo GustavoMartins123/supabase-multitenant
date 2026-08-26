@@ -50,6 +50,7 @@ services:
       #################################
       # Use named volume to persist pgsodium decryption key between restarts
       - db-config:/etc/postgresql-custom
+      - ./volumes/db/platform-capacity.conf:/etc/postgresql-custom/conf.d/10-platform-capacity.conf:Z
     healthcheck:
       test:
         [
@@ -75,8 +76,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXP: ${JWT_EXPIRY}
-    mem_limit: ${POSTGRES_MEM_LIMIT}
-    memswap_limit: ${POSTGRES_MEMSWAP_LIMIT}
     shm_size: ${POSTGRES_SHM_SIZE}
     command:
       - postgres
@@ -85,17 +84,7 @@ services:
       - -c
       - log_min_messages=fatal
       - -c
-      - max_connections=1000
-      - -c
       - superuser_reserved_connections=5
-      - -c
-      - shared_buffers=4GB
-      - -c
-      - effective_cache_size=8GB
-      - -c
-      - maintenance_work_mem=1GB
-      - -c
-      - work_mem=16MB
       - -c
       - wal_buffers=128MB
       - -c
@@ -110,10 +99,6 @@ services:
       - synchronous_commit=on
       - -c
       - checkpoint_timeout=15min
-      - -c
-      - max_wal_size=8GB
-      - -c
-      - min_wal_size=2GB
       - -c
       - wal_level=logical
       - -c
@@ -130,14 +115,6 @@ services:
       - cpu_index_tuple_cost=0.005
       - -c
       - cpu_operator_cost=0.0025
-      - -c
-      - max_worker_processes=8
-      - -c
-      - max_parallel_workers=4
-      - -c
-      - max_parallel_workers_per_gather=2
-      - -c
-      - max_parallel_maintenance_workers=2
       - -c
       - statement_timeout=300000
       - -c
@@ -157,8 +134,6 @@ services:
       - -c
       - 'log_line_prefix=%t [%p]: user=%u,db=%d,app=%a,client=%h'
       - -c
-      - autovacuum_max_workers=4
-      - -c
       - autovacuum_naptime=10s
       - -c
       - autovacuum_vacuum_scale_factor=0.1
@@ -170,10 +145,6 @@ services:
       - archive_timeout=3600
       - -c
       - wal_keep_size=1GB
-      - -c
-      - max_replication_slots=32
-      - -c
-      - max_wal_senders=40
       - -c
       - tcp_keepalives_idle=60
       - -c

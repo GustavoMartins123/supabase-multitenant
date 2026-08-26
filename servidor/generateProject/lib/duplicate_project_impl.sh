@@ -491,4 +491,11 @@ vector_sync_project_wrappers "$NEW_PROJECT" || die "Falha ao recriar wrappers ve
 trap - ERR TERM INT HUP
 cleanup_tmp
 trap - EXIT
+
+if [[ -f "$SCRIPT_DIR/lib/platform_capacity.sh" ]]; then
+  source "$SCRIPT_DIR/lib/platform_capacity.sh"
+  platform_apply_shared_limits "$PROJECT_ROOT/.env" \
+    || echo "Aviso: limites da camada compartilhada nao foram reaplicados." >&2
+fi
+
 echo "✅ Projeto $NEW_PROJECT duplicado com credenciais SigV4 e wrappers isolados"

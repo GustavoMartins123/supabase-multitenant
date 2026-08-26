@@ -28,9 +28,9 @@ PROJECTS_DIR = ROOT / "servidor" / "projects"
 
 def _project_env(project: str) -> dict[str, str]:
     values: dict[str, str] = {}
-    for line in (PROJECTS_DIR / project / ".env").read_text(
-        encoding="utf-8"
-    ).splitlines():
+    for line in (
+        (PROJECTS_DIR / project / ".env").read_text(encoding="utf-8").splitlines()
+    ):
         if line and not line.startswith("#") and "=" in line:
             key, value = line.split("=", 1)
             values[key] = value
@@ -74,7 +74,7 @@ class PlatformLifecycleE2E(unittest.TestCase):
 
     def test_01_create_applies_resource_profile_to_project_env(self) -> None:
         expected = {
-            "small": ("256m", "0.50", "128"),
+            "small": ("256m", "0.75", "128"),
             "medium": ("1g", "1.50", "384"),
         }
         for index, (profile, (mem, cpus, pids)) in enumerate(expected.items()):

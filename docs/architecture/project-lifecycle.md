@@ -216,13 +216,13 @@ It must not be confused with ordinary API-key rotation.
 
 ### Resource limits
 
-The profile is the ceiling for the **whole project**, not per container. `PROJECT_RESOURCE_PROFILE` (`small|medium|large`) names a total in the root `.env`, and `lib/resource_profiles.sh` splits it across the three tenant containers by fixed weights — memory 1:3:4, cpus 1:2:3, pids 2:5:5 for nginx:auth:rest, with the integer-division remainder going to `rest` so the shares sum exactly to the total. `nginx` is a thin proxy; `auth` (GoTrue) and `rest` (PostgREST) carry the load.
+The profile is the ceiling for the **whole project**, not per container. `PROJECT_RESOURCE_PROFILE` (`small|medium|large`) names a total in the root `.env`. Memory is split 1:3:4 for nginx:auth:rest. CPU first reserves calibrated floors of 0.05/0.40/0.15 CPU and splits the remainder 1:2:3. PIDs use independent safety floors of 128/256/512 rather than sharing the project reference value. `nginx` is a thin proxy; `auth` (GoTrue) and `rest` (PostgREST) carry the load.
 
 | Profile | Project total | nginx | auth | rest |
 | --- | --- | --- | --- | --- |
-| `small` | 256m / 0.50 / 128 | 32m / 0.08 / 21 | 96m / 0.16 / 53 | 128m / 0.26 / 54 |
-| `medium` | 1g / 1.50 / 384 | 128m / 0.25 / 64 | 384m / 0.50 / 160 | 512m / 0.75 / 160 |
-| `large` | 4g / 3.00 / 768 | 512m / 0.50 / 128 | 1536m / 1.00 / 320 | 2048m / 1.50 / 320 |
+| `small` | 256m / 0.75 / 128 | 32m / 0.07 / 128 | 96m / 0.45 / 256 | 128m / 0.23 / 512 |
+| `medium` | 1g / 1.50 / 384 | 128m / 0.20 / 384 | 384m / 0.70 / 384 | 512m / 0.60 / 512 |
+| `large` | 4g / 3.00 / 768 | 512m / 0.45 / 768 | 1536m / 1.20 / 768 | 2048m / 1.35 / 768 |
 
 Every rendered project Compose pins each service's own share through fail-closed interpolation (`${PROJECT_NGINX_MEM_LIMIT:?...}`, `${PROJECT_AUTH_CPUS:?...}`, …), so a project without limits refuses to start instead of running unconstrained. The shares are written to the project `.env` at create, duplicate, rename, and rotate-key time. Existing projects are migrated idempotently with `tools/migrate_project_resource_limits.py` (dry-run by default, `--apply` to write), which delegates to the same helper, followed by a recreate. Database-level quotas (connection limits per tenant role, statement timeouts) and disk quotas remain open items; disk usage is currently an observability concern only.
 

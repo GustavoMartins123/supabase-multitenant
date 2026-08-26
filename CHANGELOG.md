@@ -1,3 +1,177 @@
+## 2026-08-26 — Validacao sob carga: `tools/platform_load_probe.py`
+
+Os contratos seguiam verdes enquanto servicos saturavam em producao, porque validavam aritmetica e nao comportamento. A ferramenta exercita de pe Nginx, Auth e REST do projeto, Postgres e os 14 servicos compartilhados, e reprova quando a folga nao aguenta.
+
+- perfis monotonicamente crescentes: `small` usa 1 worker por rota, 2 SQL e respostas REST de 100 linhas; `medium`, 2/4/1.000; `large`, 4/8/5.000. Cada rota tem workers independentes, entao uma rota lenta nao reduz a pressao sobre as demais;
+- `--prepare-fixture` cria uma tabela `UNLOGGED` exclusiva, somente leitura pela API, recarrega o schema do PostgREST e remove a tabela no `finally`. O label `com.docker.compose.project.working_dir` impede atingir o repositorio real por engano;
+- mede `memory.current`, `memory.peak`, `pids`, `cpu.stat`, `io.stat`, OOM, reinicios, troca de container, req/s, MiB/s, query/s, status e p95. Amostras de CPU fisicamente impossiveis sao descartadas e tornam a rodada reprovada, sem contaminar a recomendacao;
+- `--repetitions` agrega o maior pico e recomendacao e o menor throughput. O JSON inclui `capacity_profiles`, pronto para calibrar `small`, `medium` e `large`, e preserva as rodadas brutas para auditoria;
+- matriz definitiva no `supabase-multitenant-3`, 3 x 20 s por perfil: zero erros HTTP/SQL, zero OOM, zero reinicios, zero containers substituidos e zero amostras de CPU descartadas. Com 30% de headroom, projeto/compartilhados pediram 160/3904 MiB e 0,60/6,95 CPU (`small`), 208/3888 MiB e 0,60/9,05 CPU (`medium`), 240/4032 MiB e 0,75/13,25 CPU (`large`);
+- a calibracao elevou `small` de 0,50 para 0,75 CPU e introduziu pisos por container de 0,05/0,40/0,15 para Nginx/Auth/REST. Os fallbacks de RAM compartilhada passaram a usar os picos carregados, cada compartilhado ganhou piso de CPU medido, e o Postgres ganhou pisos por perfil de 2,15/4,75/9,40 CPU;
+- o codigo de saida e `1` para saturacao, erro de carga, OOM, reinicio ou amostra invalida, e `2` para configuracao, ambiente incorreto ou Docker indisponivel. A suite Docker continua opt-in com `RUN_PLATFORM_LOAD=1`.
+
+## 2026-08-26 — Fix: nginx do Studio sofrendo OOM, e medicao que se realimentava do proprio erro
+
+Terceiro servico derrubado pelos limites derivados. `worker process exited on signal 9` nos logs: SIGKILL do OOM killer, cinco vezes, matando requisicoes do Studio no meio — a criacao do usuario admin falhava com `NS_ERROR_NET_RESET`.
+
+- **`worker_processes auto` tambem escala com nucleos.** A lista de servicos que crescem com a maquina so tinha VMs Erlang; o nginx do Studio sobe **20 workers** numa maquina de 20 nucleos, cada um com sua VM Lua, alem de ~28 MiB de `lua_shared_dict` pre-alocados. Entrou na lista, e o baseline subiu de 49 para 128 MiB (PIDs de 22 para 40);
+- **medicao ceifada pelo proprio limite passa a ser recusada.** O nginx marcava `memory.peak = 128 MiB` com `limite = 128 MiB`: ali o numero nao e a necessidade do servico, e o teto que a cortou. Tratar aquilo como medicao realimentaria o erro — o proximo limite sairia do teto que ja estava matando o servico. Agora, pico dentro de 5% do limite do container e descartado e o calculador cai na referencia. Vale para memoria e para PIDs;
+- restaurado no deployment: nginx de 128 para 768 MiB, Studio respondendo HTTPS 200, zero SIGKILL desde entao, e varredura confirmou que nenhum outro container tem `oom_kill` registrado;
+- novos contratos: as duas funcoes de medicao precisam comparar o pico com o limite do container, e a lista de escalados por nucleo precisa conter o nginx. Ambos verificados por mutacao.
+
+## 2026-08-26 — Fix critico: limites derivados mataram servicos em producao
+
+Os limites aplicados na sessao anterior derrubaram a plataforma. `postgres-meta` reiniciou **619 vezes** com o pico de memoria batendo exatamente no teto de 96 MiB; `realtime` reiniciou **339 vezes**, nao por memoria (pico 139 MiB contra 512 de teto) mas por **PIDs**: pico 64 contra limite 64. E o `rest` do projeto reiniciou **102 vezes**, com pico de 46 PIDs contra teto de 54.
+
+Varredura mostrou que **todo container** tinha pico historico acima do proprio limite — `authelia` a 300%, `edge-functions` a 309% de memoria e 150% de PIDs. Nao foi um numero errado: foram dois erros de modelo.
+
+**Erro 1 — leitura instantanea em vez de pico.** O calculador lia `anon` e `pids.current`, que sao fotografias: o servico pode estar entre dois picos na hora da leitura. A leitura dizia 22 PIDs para o realtime, quando a BEAM abre uma thread por scheduler e chega a 65 com 20 nucleos. Passa a ler `memory.peak` e `pids.peak` — marcas d'agua — com fallback para o instantaneo em cgroup v1.
+
+**Erro 2 — folga de orcamento usada como margem de seguranca.** Sao conceitos distintos que eu tratei como um so:
+
+| | significado |
+| --- | --- |
+| `PLATFORM_RESERVE_PERCENT` | quanto do host **nao se aloca** — orcamento |
+| `PLATFORM_LIMIT_HEADROOM_PERCENT` | quanto um limite fica **acima do pico** — seguranca |
+
+Usar 20% para ambos deu limites a 1,2x do observado. Um limite a 1,2x do pico nao e limite, e gatilho. O fator de seguranca passa a 100% (2x o pico), com pisos absolutos de 128 MiB e 128 PIDs.
+
+**PIDs deixam de ser rateio.** Memoria e CPU sao escassas no host e precisam de orcamento; PIDs nao — `kernel.pid_max` fica nos milhoes. `pids_limit` existe para conter fork bomb, entao precisa ficar ordens de grandeza acima da operacao normal. O rateio 2:5:5 dos 128 PIDs do perfil `small` dava 54 ao rest, que opera em 46. Agora sao pisos por servico (nginx 128, auth 256, rest 512), espelhados entre `resource_profiles.sh` e `project_settings.py`;
+- baselines de PIDs recolhidos por `pids.peak`: realtime 22 -> 65, analytics 84 -> 92, edge-functions 12 -> 48;
+- plataforma restaurada: 19 containers de pe, nenhum reiniciando, todos abaixo de 40% do limite;
+- novos contratos: medicao tem de ler pico e nao instante, fator de seguranca tem de ser >= 100% e distinto da folga de orcamento, PIDs tem de ser piso e nao rateio, e os pisos nao podem divergir entre bash e API. Todos verificados por mutacao, reintroduzindo cada erro.
+
+## 2026-08-26 — Fix: duplicar projeto contornava o teto de capacidade
+
+A verificacao de teto foi para o endpoint de criacao e nao para o de duplicacao, que tambem insere em `projects`. Na pratica o limite era contornavel: com o host no teto, duplicar continuava funcionando e criava o projeto N+1.
+
+- `assert_capacity_available` passa a rodar tambem na duplicacao, dentro da mesma transacao e antes do `INSERT`, como na criacao;
+- `duplicate_project_impl.sh` passa a reaplicar os limites da camada compartilhada no fim, como o de criacao — um projeto a mais e um projeto a mais, venha de onde vier;
+- **o contrato que faltava era o generico.** O anterior listava endpoints a mao, e listar a mao esquece um. O novo encontra TODO `INSERT INTO projects` em `main.py` e exige uma verificacao de teto imediatamente antes de cada um, de modo que um caminho novo nao passe despercebido. Verificado por mutacao: remover a verificacao da duplicacao derruba o contrato;
+- conferido que `restore`, `rename` e `backup` nao alteram a contagem — rename faz `UPDATE`, os demais nao tocam a tabela. Os tres caminhos que mexem no numero de projetos (create, duplicate, delete) estao cobertos.
+
+## 2026-08-26 — Elasticidade fechada: limites acompanham os projetos e o teto e imposto
+
+Ultima peca do modelo de capacidade. A infra passa a crescer e encolher com o numero de projetos, e criar alem do teto e recusado com instrucao do que fazer.
+
+- **`platform_apply_shared_limits`** aplica os limites derivados aos containers compartilhados **em execucao**, via `docker update` — memoria, CPU e PIDs, sem reiniciar processo. Verificado nos 14 servicos: todos ajustados, nenhum caiu, margem mais apertada em 32%;
+- chamado no fim da **criacao** e da **exclusao** de projeto. O lado do delete importa tanto quanto o do create: sem ele os limites so cresceriam e nunca voltariam;
+- falha ao aplicar **nao derruba o lifecycle**: o projeto ja existe, e o override do Compose reaplica no proximo start. Abortar a criacao por causa de um ajuste de limite seria trocar um problema pequeno por um grande;
+- **teto imposto na criacao.** Novo `app/platform_capacity.py` le a capacidade publicada em `platform-capacity.env` (gerado no host, montado somente-leitura na API) e recusa o projeto N+1 com HTTP 409 dizendo o teto, a restricao que o liga, o perfil e o que fazer. A verificacao roda **dentro da transacao**, antes do INSERT: fora dela, duas criacoes simultaneas no teto viriam da mesma contagem e ambas passariam;
+- **ausencia do arquivo nao bloqueia.** Instalacao que ainda nao rodou o `start.sh` novo continua criando projetos: o teto protege contra esgotar a maquina, e falhar por nao saber o limite seria pior que o problema que ele evita. Valor malformado, vazio ou zero tambem nao bloqueia;
+- **testes de capacidade deixaram de ser instaveis.** O calculador le `anon` dos containers vivos, entao os testes dependiam do que estava rodando na maquina — verde aqui, vermelho noutra, ou ate na mesma em horas diferentes. Agora desligam a medicao e exercitam o caminho da referencia, que e determinista; o caminho da medicao tem contratos proprios;
+- pelo mesmo motivo, o contrato de piso de host parou de cravar "8 GiB falha": os baselines das VMs Erlang escalam com os nucleos, entao 8 GiB com 4 nucleos cabe e com 16 nao. Testa-se o comportamento — host inequivocamente pequeno recusa, e o teto cresce monotonicamente com a maquina;
+- novos contratos em `test_platform_capacity_enforcement_contract.py`: recusa no teto, mensagem acionavel, ausencia e valores invalidos nao bloqueiam, verificacao dentro da transacao e antes do INSERT, arquivo publicado e montado, e reaplicacao presente nos dois lados do ciclo.
+
+## 2026-08-26 — Limites de container derivados do host, e fim da fonte concorrente
+
+Fecha a cobertura: nenhum servico compartilhado sobe mais sem `mem_limit`, `cpus` e `pids_limit`, e todos saem da mesma conta.
+
+- tres overrides de Compose gerados por `lib/platform_capacity.sh` — um por arquivo (`servidor`, `api`, `studio`) — com os limites derivados. Override em vez de editar cada servico: os limites sao artefato do host, e manter 42 interpolacoes espalhadas convidaria a divergencia. Sem o override, `docker compose -f base -f override` falha: fail-closed, nada sobe sem limite;
+- **`POSTGRES_MEM_LIMIT` eliminado.** Era fonte concorrente: 24 GiB no `.env` contra 11,5 GiB derivados para o Postgres. Duas fontes para o mesmo limite divergem, e nao havia nada que as reconciliasse. A variavel saiu do `.env.example` e do compose;
+- **`db` ganha `pids_limit`** (786 neste host): o Postgres forja um processo por conexao mais os workers de background, e sem teto de PIDs o banco recusaria conexoes que `max_connections` permite — falha confusa de diagnosticar;
+- o mapeamento servico -> nome no Compose e explicito, porque os nomes divergem (`edge-functions` e `functions`, `studio-nginx` e `nginx`, `postgres-meta` e `postgres-meta-global`); errar isso geraria override para servico inexistente, que o Compose tentaria criar sem imagem;
+- `start.sh` gera os tres overrides antes de qualquer `up` e os inclui nas tres invocacoes, inclusive na do Studio;
+- overrides entram no `.gitignore`: sao artefato do host, como o `.env`;
+- verificado com `docker compose config` real: os nove servicos do compose principal recebem os limites, e o `db` fica com 11631m em vez dos 24 GiB antigos;
+- novos contratos: todo servico renderizado precisa dos quatro limites, o override so pode citar servicos que existem no base, `POSTGRES_MEM_LIMIT` nao pode voltar, e o `start.sh` tem de usar os tres arquivos.
+
+## 2026-08-26 — Config do Postgres sai da linha de comando e vira derivada do host
+
+Pre-requisito de qualquer elasticidade: no Postgres, parametro na linha de comando tem precedencia **maxima** — nem `ALTER SYSTEM` o sobrepoe. Enquanto os 14 parametros de capacidade vivessem no `command:` do compose, ajustar qualquer um exigiria recriar o container do banco, ou seja, indisponibilidade para todos os tenants.
+
+- os 14 parametros derivados (`max_connections`, `shared_buffers`, `work_mem`, `maintenance_work_mem`, `effective_cache_size`, WAL, workers, slots) sairam do `command:` e passam a ser gerados em `volumes/db/platform-capacity.conf`, incluido pelo `conf.d` que a imagem ja expunha. Os outros 35 parametros continuam onde estavam: sao politica de tuning e nao escalam com o numero de projetos;
+- o arquivo gerado **separa explicitamente** o que exige restart do que aceita reload — a distincao decide se um ajuste custa indisponibilidade;
+- `start.sh` gera a config antes de subir o banco e imprime o teto derivado para o host;
+- **`temp_file_limit` deixou de ser `-1`.** Passa a 476 MiB por conexao: sem teto, uma unica query de um tenant enchia o disco e derrubava todos os outros;
+- verificado no deployment: os nove parametros conferidos agora vem de `configuration file`, e `ALTER SYSTEM SET work_mem` + `pg_reload_conf()` alterou o valor de 4 para 6 MiB e voltou **com uptime de 29 segundos** — nenhum restart. A reconfiguracao a quente esta destravada;
+- plataforma sobreviveu a recriacao do banco: 15 containers saudaveis, `rest` recarregou o schema cache, realtime reconectou (0 erros, 0 avisos apos estabilizar), 69 conexoes contra o novo teto de 603;
+- config gerada entra no `.gitignore`: e artefato do host, como o `.env`;
+- novos contratos: nenhum parametro derivado pode voltar para o `command:`, o arquivo tem de ser montado no `conf.d`, o gerador tem de emitir todos os 14 mais `temp_file_limit`, a separacao restart/reload tem de estar no arquivo, e a geracao tem de vir antes do `docker compose up` do banco.
+
+**Pendente:** `POSTGRES_MEM_LIMIT` no `.env` continua em 24 GiB enquanto o calculador deriva 11,5 GiB para o Postgres. Alinhar isso e a proxima etapa, junto com aplicar os limites elasticos aos containers compartilhados.
+
+## 2026-08-25 — Baseline medido no host de destino, nao na maquina de referencia
+
+Os baselines da camada compartilhada eram medicoes de UMA maquina (20 nucleos, 31 GiB) cravadas no codigo. Numa maquina de 4 nucleos isso superdimensiona tudo; numa de 64, subdimensiona.
+
+- **o calculador passa a medir o proprio host**, lendo `anon` do cgroup de cada container (`/sys/fs/cgroup/.../memory.stat`), com fallback para os tres layouts comuns de cgroup;
+- **a medicao so pode AUMENTAR o baseline, nunca reduzi-lo.** Medir um servico ocioso devolve um minimo que nao se sustenta — foi assim que o supavisor apareceu com 64 MiB quando o valor sob atividade e 218 MiB, e o limite derivado daquele numero mataria o servico no primeiro pico. A referencia vira piso conhecido-seguro; o host so empurra para cima;
+- **a referencia escala pelos nucleos** nos servicos que alocam por scheduler (realtime e supavisor, VMs Erlang): 2 nucleos dao 52 MiB, 20 dao 209 MiB, 64 dao 668 MiB. Servicos que nao alocam por scheduler ficam constantes;
+- primeira instalacao, sem nada de pe para medir, cai inteiramente na referencia escalada — verificado tambem com `PLATFORM_SERVICE_CONTAINER` vazio, simulando host sem Docker;
+- o relatorio ganha coluna **ORIGEM** por servico, dizendo se o numero veio de medicao neste host ou da referencia;
+- novos contratos: medicao nao pode reduzir baseline, referencia tem de escalar por nucleos nos servicos BEAM e ficar constante nos demais, a medicao tem de ler `anon` e nunca `docker stats`, e todo servico da tabela precisa de container mapeado — sem mapeamento ele cairia na referencia para sempre sem ninguem perceber.
+
+## 2026-08-25 — Veredito da medicao: os baselines estavam errados nos dois sentidos
+
+Tentativa de medir o incremento por tenant registrando 28 tenants em Supavisor e Realtime, com database e conexao em cada. O incremento nao saiu — mas a sondagem revelou um erro de metodo pior.
+
+- **`docker stats` inclui page cache.** No Postgres eram **84%** do numero: 743 MiB reportados para 136 MiB de `anon`. Todos os baselines do calculador vinham dai;
+- **servicos medidos ociosos ha horas estavam num minimo que nao se sustenta.** Recolhidos por `anon` do cgroup apos atividade real, a diferenca chega a **3,4x**:
+
+| servico | no codigo | medido (anon) | |
+| --- | --- | --- | --- |
+| supavisor | 64 MiB | **218 MiB** | 3,4x |
+| postgres-meta | 19 MiB | **73 MiB** | 3,8x |
+| realtime | 69 MiB | **209 MiB** | 3,0x |
+| analytics | 174 MiB | **316 MiB** | 1,8x |
+| projects-api | 50 MiB | 26 MiB | inflado por cache |
+| imgproxy | 17 MiB | 10 MiB | inflado por cache |
+
+- **os limites derivados dos baselines antigos matariam a plataforma:** realtime receberia 96m para usar 209m, supavisor 80m para usar 218m. Aplicar aqueles numeros teria causado OOM nos dois no primeiro pico;
+- baselines substituidos pelos valores de `anon`, com o metodo de coleta documentado no proprio arquivo. A camada compartilhada subiu de ~956 MiB para **1563 MiB** — a plataforma nao engordou, a medicao ficou honesta;
+- **host minimo subiu de 8 para 12 GiB.** Contrato ajustado: 12 GiB comporta um projeto `small`, 8 GiB falha fechado;
+- **o incremento por projeto continua estimativa, e agora com o porque registrado:** a memoria nao voltou ao remover os tenants nem ao reiniciar os servicos (logo nao e custo reversivel por tenant); o storage cresceu sem ter um unico tenant registrado; e apenas 1 slot de replicacao foi criado — sem cliente WebSocket o Realtime nao replica, entao aquilo media custo de REGISTRO, nao de carga. Medir de verdade exige trafego real, nao tenants ociosos;
+- novos contratos: o metodo `anon` precisa estar documentado, realtime e supavisor nao podem voltar a ser subdimensionados, e o incremento tem de seguir marcado como estimativa ate ser medido.
+
+## 2026-08-25 — Cobertura completa: CPU, disco, PIDs e workers entram no modelo
+
+O calculador cobria memoria e conexoes. Agora deriva **todo** recurso, e duas dimensoes novas mudaram o teto.
+
+- **CPU vira restricao real.** Antes so memoria e `work_mem` limitavam. Com 11 projetos de perfil `medium` (1,5 CPU cada) contra 16 CPUs alocaveis, o sobrecompromisso chegava a **343%** — toda query 3,4x mais lenta sob carga simultanea. `cpus` e cota e nao reserva, entao algum sobrecompromisso e saudavel; ilimitado nao e. Nova entrada `PLATFORM_CPU_OVERSUBSCRIBE_MAX` (default 300), e neste host o teto caiu de 11 para **9 projetos**, agora ligado por CPU;
+- **`temp_file_limit` estava em `-1`.** Sem teto, uma unica query de um tenant enche o disco e derruba todos os outros — negacao de servico entre tenants pelo caminho mais simples possivel. Passa a ser derivado do disco disponivel dividido pelas conexoes concorrentes;
+- **disco entra com a mesma folga de 20%**, e dele saem `max_wal_size`, `min_wal_size`, `max_slot_wal_keep_size`, o `temp_file_limit` acima e a cota por projeto. Detectado por `df` no ponto de montagem do repositorio, ou declarado em `PLATFORM_HOST_DISK`;
+- **workers do Postgres derivados:** `autovacuum_max_workers` escala com o numero de bancos de tenant (piso 4, teto 8) — poucos workers para muitos bancos e degradacao silenciosa, sem erro nenhum; `max_parallel_workers` sai da CPU alocavel; `max_worker_processes` cobre paralelismo mais replicacao logica mais folga;
+- **CPU e PIDs por servico compartilhado:** CPU repartida por pesos (supavisor e realtime pesam mais; vector e authelia, menos), com piso de 25 centi-CPU para picos curtos. PIDs derivados do baseline observado **dobrado** antes da folga — fork bomb precisa de ordem de grandeza para se distinguir de operacao normal;
+- oito entradas no total; todo o resto e derivado. Contratos novos cobrem as tres dimensoes, incluindo que compartilhados + Postgres cabem na CPU alocavel e que WAL mais cota de projeto cabem no disco.
+
+## 2026-08-25 — Veredito: modelo de capacidade calibrado por medicao no cluster
+
+Tres medicoes derrubaram a conta ingenua de `work_mem x conexoes x nos`:
+
+- **`hash_mem_multiplier = 2`** (medido em `pg_settings`): nos baseados em hash — `Hash Join`, `HashAggregate` — recebem o dobro de `work_mem`. A conta ignorava isso inteiramente;
+- **`max_parallel_workers_per_gather = 2`**: cada no e alocado tambem em cada worker paralelo, entao o custo real e `work_mem x nos x (1 + workers)`. O calculador agora reduz esse valor para 1 acima de 8 projetos — num host multi-tenant, um tenant nao pode consumir o pote global de workers E multiplicar a memoria da propria query;
+- **nos de `work_mem` por query, medidos com `EXPLAIN ANALYZE`** em consultas no formato que o PostgREST gera: listagem com ordenacao **1 no**, filtro + ordenacao **1**, embed com recurso aninhado **2** (Sort + Hash), agregacao **1**, e o pior caso realista com join + filtro + group + order **4**. A estimativa de 2 se confirma para a carga tipica;
+- juntos, os tres fatores dao **8 alocacoes por conexao**, nao 2.
+
+Com o pior caso corrigido, o teto caiu de 11 para **2 projetos** — resultado inutilizavel, e a investigacao do porque produziu o quarto achado:
+
+- **o consumo real por no fica entre 24 kB e 721 kB**, muito abaixo de qualquer `work_mem` plausivel, porque `LIMIT` transforma ordenacao em top-N heapsort. E na medicao anterior um pool de 40 do Supavisor mantinha **1 conexao ativa**. Dimensionar por `max_connections` assume que toda conexao roda a query mais pesada simultaneamente — cenario que nao ocorre;
+- nova entrada `PLATFORM_ACTIVE_CONNECTION_PERCENT` (default 25). Nao e um fator escondido no codigo: e decisao de risco declarada, e `100` reproduz o pior caso estrito;
+- **medicao que dispensa o valor antigo:** um `ORDER BY` sem `LIMIT` sobre 200 mil linhas foi para disco tanto com `work_mem = 4 MiB` quanto com `16 MiB` (9 MB de spill nos dois). O 16 MiB fixo nao protegia nada que o 4 MiB derivado nao proteja.
+
+Neste host (31 GiB), a sensibilidade ao fator de concorrencia mostra que 25% e o joelho da curva: abaixo disso ganha-se `work_mem` mas nao projetos; acima, perdem-se projetos.
+
+| concorrencia | projetos | work_mem | restricao ligada |
+| --- | --- | --- | --- |
+| 10% | 11 | 12 MiB | memoria |
+| 25% | 11 | 4 MiB | memoria |
+| 50% | 6 | 4 MiB | work_mem |
+| 100% | 2 | 4 MiB | work_mem |
+
+## 2026-08-25 — Capacidade da plataforma derivada do host, com folga de 20%
+
+Premissa: uma unica maquina hospeda tudo. Novo `lib/platform_capacity.sh` mede o host, desconta a folga e reparte o que sobra — o teto de projetos passa a ser **consequencia da conta**, nao um numero escolhido a mao.
+
+- **cinco entradas, o resto derivado:** `PLATFORM_RESERVE_PERCENT`, `PLATFORM_HOST_MEMORY` (`auto` le `/proc/meminfo`), `PLATFORM_HOST_CPUS`, `PLATFORM_POSTGRES_SHARE_PERCENT` e `PLATFORM_WORK_MEM_NODES`. Delas saem `max_connections`, `shared_buffers`, `work_mem`, `maintenance_work_mem`, slots, wal senders, o `mem_limit` de cada servico compartilhado e o teto de projetos;
+- **`work_mem` deixa de ser entrada e vira saida.** Ele e alocado por no de ordenacao, por conexao: mante-lo fixo em 16 MiB enquanto as conexoes crescem e exatamente o que faz um cluster multi-tenant estourar sem aviso. Agora ele CAI conforme o teto de conexoes sobe, e quando bate no piso de 4 MiB e o teto de projetos que desce;
+- **as conexoes do control plane tambem escalam.** Eram 195 fixas (`platform_app` sozinho reservava 100). Como o orcamento de `work_mem` precisa cobrir toda conexao declarada — usada ou nao — isso tornava hosts pequenos impossiveis: nem um projeto `small` cabia em 8 GiB. Cada role passa a ter minimo + incremento por projeto (`platform_app` 20+4N, `key_authorizer` 10+2N, ...), e o mesmo host de 8 GiB passa a comportar 2 projetos;
+- **falha fechado em capacidade zero:** derivar `work_mem` abaixo do piso para aplicar no Postgres seria pior que recusar. A mensagem diz o que fazer — perfil menor, menos folga ou maquina maior;
+- **relatorio auditavel:** `bash servidor/generateProject/lib/platform_capacity.sh --report servidor/.env` imprime a conta inteira, incluindo qual restricao esta ligando o teto;
+- limites da camada compartilhada derivados de baseline medido (`docker stats`, plataforma ociosa) + incremento por projeto, com a folga aplicada e arredondamento em blocos de 16 MiB;
+- **nao medido, e marcado como tal:** o incremento por projeto de realtime, supavisor e storage — exige N projetos com trafego real. E o numero de nos de `work_mem` por query, hoje estimado em 2;
+- neste host (31 GiB, 20 CPUs) a conta da **11 projetos** no perfil `medium`, ligada por memoria, com `work_mem` em 4 MiB e `max_connections` em 651.
+
 ## 2026-08-25 — Limites de memoria calibrados por medicao: teto do heap do GHC, pisos por servico e pool do PostgREST
 
 Pesquisa de consumo real por servico (medicao local + fontes upstream) mudou tres defaults:

@@ -41,8 +41,10 @@ RESOURCE_SERVICES = ("NGINX", "AUTH", "REST")
 RESOURCE_WEIGHTS = {
     "MEMORY": (1, 3, 4),
     "CPUS": (1, 2, 3),
-    "PIDS": (2, 5, 5),
 }
+
+RESOURCE_CPU_FLOORS_CENTI = (5, 40, 15)
+RESOURCE_PIDS_FLOOR = (128, 256, 512)
 RESOURCE_MEM_FLOORS_MIB = (16, 64, 32)
 RESOURCE_GHC_HEAP_PERCENT = 80
 
@@ -90,39 +92,49 @@ RESOURCE_PROFILES = ("small", "medium", "large")
 RESOLVED_LIMIT_KEYS = ("PROJECT_MEM_LIMIT", "PROJECT_CPUS", "PROJECT_PIDS_LIMIT")
 
 PROFILE_RESOLVED_FROM_ROOT = {
-    "small": {"MEMORY": "PROJECT_RES_SMALL_MEMORY", "CPUS": "PROJECT_RES_SMALL_CPUS", "PIDS": "PROJECT_RES_SMALL_PIDS"},
-    "medium": {"MEMORY": "PROJECT_RES_MEDIUM_MEMORY", "CPUS": "PROJECT_RES_MEDIUM_CPUS", "PIDS": "PROJECT_RES_MEDIUM_PIDS"},
-    "large": {"MEMORY": "PROJECT_RES_LARGE_MEMORY", "CPUS": "PROJECT_RES_LARGE_CPUS", "PIDS": "PROJECT_RES_LARGE_PIDS"},
+    "small": {
+        "MEMORY": "PROJECT_RES_SMALL_MEMORY",
+        "CPUS": "PROJECT_RES_SMALL_CPUS",
+        "PIDS": "PROJECT_RES_SMALL_PIDS",
+    },
+    "medium": {
+        "MEMORY": "PROJECT_RES_MEDIUM_MEMORY",
+        "CPUS": "PROJECT_RES_MEDIUM_CPUS",
+        "PIDS": "PROJECT_RES_MEDIUM_PIDS",
+    },
+    "large": {
+        "MEMORY": "PROJECT_RES_LARGE_MEMORY",
+        "CPUS": "PROJECT_RES_LARGE_CPUS",
+        "PIDS": "PROJECT_RES_LARGE_PIDS",
+    },
 }
 
 SETTING_TO_SERVICES: dict[str, list[str]] = {
-    "DISABLE_SIGNUP":                          ["auth"],
-    "ENABLE_EMAIL_SIGNUP":                     ["auth"],
-    "ENABLE_EMAIL_AUTOCONFIRM":                ["auth"],
-    "ENABLE_ANONYMOUS_USERS":                  ["auth"],
-    "ENABLE_PHONE_SIGNUP":                     ["auth"],
-    "ENABLE_PHONE_AUTOCONFIRM":                ["auth"],
-    "JWT_EXPIRY":                              ["auth", "rest"],
-    "GOTRUE_MAILER_OTP_EXP":                   ["auth"],
-    "GOTRUE_PASSWORD_MIN_LENGTH":              ["auth"],
-    "GOTRUE_EXTERNAL_IMPLICIT_FLOW_ENABLED":   ["auth"],
-    "PGRST_DB_SCHEMAS":                        ["rest"],
-    "PGRST_DB_MAX_ROWS":                       ["rest"],
-    "PGRST_DB_POOL":                           ["rest"],
-    "PGRST_DB_POOL_TIMEOUT":                   ["rest"],
-    "PGRST_DB_POOL_ACQUISITION_TIMEOUT":       ["rest"],
-    "FILE_SIZE_LIMIT":                         ["storage", "nginx"],
-    "ENABLE_IMAGE_TRANSFORMATION":             ["storage"],
-    "S3_PROTOCOL_ENABLED":                     ["storage"],
-    "VECTOR_BUCKETS_ENABLED":                  ["storage"],
-    "VECTOR_MAX_BUCKETS":                    ["storage"],
-    "VECTOR_MAX_INDEXES":                    ["storage"],
-    "PROJECT_RESOURCE_PROFILE":              ["auth", "rest", "nginx"],
+    "DISABLE_SIGNUP": ["auth"],
+    "ENABLE_EMAIL_SIGNUP": ["auth"],
+    "ENABLE_EMAIL_AUTOCONFIRM": ["auth"],
+    "ENABLE_ANONYMOUS_USERS": ["auth"],
+    "ENABLE_PHONE_SIGNUP": ["auth"],
+    "ENABLE_PHONE_AUTOCONFIRM": ["auth"],
+    "JWT_EXPIRY": ["auth", "rest"],
+    "GOTRUE_MAILER_OTP_EXP": ["auth"],
+    "GOTRUE_PASSWORD_MIN_LENGTH": ["auth"],
+    "GOTRUE_EXTERNAL_IMPLICIT_FLOW_ENABLED": ["auth"],
+    "PGRST_DB_SCHEMAS": ["rest"],
+    "PGRST_DB_MAX_ROWS": ["rest"],
+    "PGRST_DB_POOL": ["rest"],
+    "PGRST_DB_POOL_TIMEOUT": ["rest"],
+    "PGRST_DB_POOL_ACQUISITION_TIMEOUT": ["rest"],
+    "FILE_SIZE_LIMIT": ["storage", "nginx"],
+    "ENABLE_IMAGE_TRANSFORMATION": ["storage"],
+    "S3_PROTOCOL_ENABLED": ["storage"],
+    "VECTOR_BUCKETS_ENABLED": ["storage"],
+    "VECTOR_MAX_BUCKETS": ["storage"],
+    "VECTOR_MAX_INDEXES": ["storage"],
+    "PROJECT_RESOURCE_PROFILE": ["auth", "rest", "nginx"],
 }
 
-DEFAULT_SERVER_ENV = pathlib.Path(
-    os.getenv("SERVER_ENV_PATH", "/docker/.env")
-)
+DEFAULT_SERVER_ENV = pathlib.Path(os.getenv("SERVER_ENV_PATH", "/docker/.env"))
 
 
 def resolve_resource_limits(
@@ -191,16 +203,42 @@ def _split(total: int, weights: tuple[int, ...]) -> list[int]:
     return shares
 
 
+def _split_with_floors(
+    total: int, weights: tuple[int, ...], floors: tuple[int, ...]
+) -> list[int]:
+    floor_total = sum(floors)
+    if total < floor_total:
+        raise HTTPException(
+            409,
+            f"perfil de CPU precisa de pelo menos {floor_total} centi-CPU",
+        )
+    remaining = total - floor_total
+    extras: list[int] = []
+    used = 0
+    for index, weight in enumerate(weights):
+        if index == len(weights) - 1:
+            extra = remaining - used
+        else:
+            extra = remaining * weight // sum(weights)
+            used += extra
+        extras.append(extra)
+    return [floor + extras[index] for index, floor in enumerate(floors)]
+
+
 def _split_across_services(totals: dict[str, str]) -> dict[str, str]:
     memory = _split(_mem_to_mib(totals["MEMORY"]), RESOURCE_WEIGHTS["MEMORY"])
-    cpus = _split(_cpus_to_centi(totals["CPUS"]), RESOURCE_WEIGHTS["CPUS"])
+    cpus = _split_with_floors(
+        _cpus_to_centi(totals["CPUS"]),
+        RESOURCE_WEIGHTS["CPUS"],
+        RESOURCE_CPU_FLOORS_CENTI,
+    )
     try:
         pids_total = int(totals["PIDS"])
     except ValueError as exc:
         raise HTTPException(
             409, f"pids invalido no .env do servidor: {totals['PIDS']}"
         ) from exc
-    pids = _split(pids_total, RESOURCE_WEIGHTS["PIDS"])
+    pids = [max(pids_total, floor) for floor in RESOURCE_PIDS_FLOOR]
 
     resolved: dict[str, str] = {}
     for index, service in enumerate(RESOURCE_SERVICES):
@@ -212,13 +250,16 @@ def _split_across_services(totals: dict[str, str]) -> dict[str, str]:
                 f"o minimo seguro e {floor}m",
             )
         resolved[f"PROJECT_{service}_MEM_LIMIT"] = f"{memory[index]}m"
-        resolved[f"PROJECT_{service}_CPUS"] = f"{cpus[index] // 100}.{cpus[index] % 100:02d}"
+        resolved[f"PROJECT_{service}_CPUS"] = (
+            f"{cpus[index] // 100}.{cpus[index] % 100:02d}"
+        )
         resolved[f"PROJECT_{service}_PIDS_LIMIT"] = str(pids[index])
     rest_share = memory[RESOURCE_SERVICES.index("REST")]
     resolved["PROJECT_REST_GHC_MAX_HEAP"] = (
         f"{rest_share * RESOURCE_GHC_HEAP_PERCENT // 100}m"
     )
     return resolved
+
 
 def _read_env_whitelisted(env_path: pathlib.Path) -> dict[str, str]:
     all_values = {
@@ -238,7 +279,9 @@ def get_project_file_size_limit(
     try:
         values = dotenv_values(projects_root / project_name / ".env")
     except (OSError, ValueError) as exc:
-        raise HTTPException(409, "Configuração de Storage do projeto indisponível") from exc
+        raise HTTPException(
+            409, "Configuração de Storage do projeto indisponível"
+        ) from exc
 
     value = str(values.get("FILE_SIZE_LIMIT") or "").strip()
     if re.fullmatch(r"\d+", value) and int(value) > 0:
@@ -249,7 +292,9 @@ def get_project_file_size_limit(
 def _normalize_setting_value(key: str, raw_value: str) -> str:
     value = str(raw_value).strip()
     if "\n" in value or "\r" in value or "\x00" in value:
-        raise HTTPException(400, f"{key}: valor não pode conter quebra de linha ou byte nulo")
+        raise HTTPException(
+            400, f"{key}: valor não pode conter quebra de linha ou byte nulo"
+        )
     if not value:
         raise HTTPException(400, f"{key}: valor obrigatório")
 
@@ -308,8 +353,7 @@ def _normalize_settings_updates(settings: dict[str, str]) -> dict[str, str]:
         raise HTTPException(400, "Nenhuma configuração enviada")
 
     return {
-        key: _normalize_setting_value(key, value)
-        for key, value in settings.items()
+        key: _normalize_setting_value(key, value) for key, value in settings.items()
     }
 
 
@@ -378,4 +422,3 @@ def _get_affected_services(changed_keys: list[str]) -> list[str]:
         for svc in SETTING_TO_SERVICES.get(key, []):
             services.add(svc)
     return sorted(services)
-
