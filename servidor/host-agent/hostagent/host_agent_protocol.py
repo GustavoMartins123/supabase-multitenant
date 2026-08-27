@@ -124,7 +124,7 @@ RECREATE_SERVICE_NAMES = frozenset(
     {"auth", "rest", "storage", "nginx", "meta"}
 )
 COPY_MODES = frozenset({"with-data", "schema-only"})
-RESOURCE_PROFILES = frozenset({"small", "medium", "large"})
+RESOURCE_PROFILES = frozenset({"small", "medium", "large", "custom"})
 UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )

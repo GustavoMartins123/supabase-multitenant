@@ -67,6 +67,8 @@ from app.project_settings import (
     _read_env_whitelisted,
     _write_env_whitelisted,
     get_project_file_size_limit,
+    resolve_resource_limits,
+    split_resource_directives,
 )
 from app.project_env_secrets import (
     PROJECTS_ROOT,
@@ -4871,17 +4873,32 @@ async def update_project_settings(
 
     updates = _normalize_settings_updates(body.settings)
 
-    resolved_limits: dict[str, str] = {}
-    if "PROJECT_RESOURCE_PROFILE" in updates:
-        from app.project_settings import resolve_resource_limits
-
-        resolved_limits = resolve_resource_limits(updates["PROJECT_RESOURCE_PROFILE"])
-
     env_path = _get_project_env_path(project_name)
     if not env_path.exists():
         raise HTTPException(404, f"Arquivo .env não encontrado para o projeto '{project_name}'")
 
+    had_profile_directive = "PROJECT_RESOURCE_PROFILE" in updates
+    updates, resolved_limits = split_resource_directives(
+        updates, current_env=_read_env_whitelisted(env_path)
+    )
+    if had_profile_directive:
+        resolved_limits = {
+            **resolve_resource_limits(updates["PROJECT_RESOURCE_PROFILE"]),
+            **resolved_limits,
+        }
+
     _write_env_whitelisted(env_path, {**updates, **resolved_limits})
+
+    final_profile = (
+        resolved_limits.get("PROJECT_RESOURCE_PROFILE")
+        or project_row.get("resource_profile")
+    )
+    if final_profile and final_profile != project_row.get("resource_profile"):
+        await pool.execute(
+            "UPDATE projects SET resource_profile = $1 WHERE name = $2",
+            final_profile,
+            project_name,
+        )
 
     affected = _get_affected_services(list(updates.keys()))
     if affected:

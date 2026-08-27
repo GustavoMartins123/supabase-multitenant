@@ -13,6 +13,8 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/) e [Versionamento
 - `tools/platform_bottleneck_probe.py` para carga simultânea de todos os serviços, host, cgroups e SLO de p95.
 - Fixtures descartáveis com lock, recuperação e limpeza automática.
 - Limites de CPU, RAM e PIDs para Traefik, GeoIP, watcher e deny-service.
+- Perfil personalizado: slot global `PROJECT_RES_CUSTOM_*` no `.env`, selecionável na criação; migration 0006 libera o valor `custom`.
+- Capacidade editável por projeto no Studio: campos de Memória (m/g), CPUs e PIDs na seção Recursos gravam totais que a API deriva em nginx/auth/rest com os mesmos pesos/pisos dos perfis (`split_resource_directives`), marcando `resource_profile=custom` no banco e mantendo os valores próprios no `.env` do projeto através de duplicar/renomear/rotação.
 
 #### Alterado
 
@@ -28,6 +30,7 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/) e [Versionamento
 
 #### Corrigido
 
+- Derivação de capacidade não bloqueia mais hosts modestos na CPU: os pisos calibrados (~17 núcleos somados antes de qualquer projeto) viram apenas sinal informativo (`aptidao dos tetos` + sobrecompromisso implicado no `--report`), sem abortar o `start.sh` nem reduzir o teto de projetos — tetos de CPU são contenção, não reserva.
 - Rota Realtime do Nginx monta a URI após `auth_request`.
 - Capacidade de CPU desconta a soma efetiva dos pisos compartilhados.
 

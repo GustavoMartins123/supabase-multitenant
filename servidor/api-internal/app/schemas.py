@@ -2,7 +2,7 @@ import uuid
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Literal, Optional
 
-ResourceProfile = Literal["small", "medium", "large"]
+ResourceProfile = Literal["small", "medium", "large", "custom"]
 
 class NewProject(BaseModel):
     name: str

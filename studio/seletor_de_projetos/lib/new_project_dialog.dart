@@ -268,10 +268,23 @@ class _NewProjectDialogState extends State<NewProjectDialog>
                         DropdownMenuItem(value: 'small', child: Text('Pequeno (256 MB / 0,5 CPU)')),
                         DropdownMenuItem(value: 'medium', child: Text('Médio (1 GB / 1,5 CPU)')),
                         DropdownMenuItem(value: 'large', child: Text('Grande (4 GB / 3 CPUs)')),
+                        DropdownMenuItem(
+                            value: 'custom',
+                            child: Text('Personalizado (definido no .env do servidor)')),
                       ],
                       onChanged: (v) =>
                           setState(() => _resourceProfile = v ?? 'medium'),
                     ),
+                    if (_resourceProfile == 'custom')
+                      const Padding(
+                        padding: EdgeInsets.only(top: 6),
+                        child: Text(
+                          'Usa o slot PROJECT_RES_CUSTOM_* do .env do servidor. '
+                          'Após criar, ajuste RAM/CPU/PIDs livremente nas '
+                          'configurações do projeto.',
+                          style: TextStyle(fontSize: 11, color: Colors.white70),
+                        ),
+                      ),
                     const SizedBox(height: 8),
                     Autocomplete<String>(
                       optionsBuilder: (textEditingValue) {

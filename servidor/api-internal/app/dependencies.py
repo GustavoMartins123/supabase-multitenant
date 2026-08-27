@@ -152,7 +152,7 @@ async def get_project_row(conn: asyncpg.Connection, project_name: str) -> asyncp
                automatic_key_rotation_enabled,
                automatic_key_rotation_blocked_at,
                automatic_key_rotation_last_error,
-               opaque_gateway_ready_at
+               opaque_gateway_ready_at, resource_profile
         FROM projects WHERE name = $1
         """,
         project_name,

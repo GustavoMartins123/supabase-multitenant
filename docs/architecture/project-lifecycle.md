@@ -216,13 +216,20 @@ It must not be confused with ordinary API-key rotation.
 
 ### Resource limits
 
-The profile is the ceiling for the **whole project**, not per container. `PROJECT_RESOURCE_PROFILE` (`small|medium|large`) names a total in the root `.env`. Memory is split 1:2:5 for nginx:auth:rest. CPU first reserves sustained-load floors of 0.40/1.20/0.25 CPU and splits the remainder 1:4:1. PIDs use independent safety floors of 128/256/512 rather than sharing the project reference value. Load tests with real password logins showed that Auth dominates tenant CPU while PostgREST needs the largest memory share.
+The profile is the ceiling for the **whole project**, not per container. `PROJECT_RESOURCE_PROFILE` (`small|medium|large|custom`) names a total in the root `.env`. Memory is split 1:2:5 for nginx:auth:rest. CPU first reserves sustained-load floors of 0.40/1.20/0.25 CPU and splits the remainder 1:4:1. PIDs use independent safety floors of 128/256/512 rather than sharing the project reference value. Load tests with real password logins showed that Auth dominates tenant CPU while PostgREST needs the largest memory share.
 
 | Profile | Project total | nginx | auth | rest |
 | --- | --- | --- | --- | --- |
 | `small` | 256m / 1.85 / 128 | 32m / 0.40 / 128 | 64m / 1.20 / 256 | 160m / 0.25 / 512 |
 | `medium` | 1g / 2.00 / 384 | 128m / 0.42 / 384 | 256m / 1.30 / 384 | 640m / 0.28 / 512 |
 | `large` | 4g / 3.00 / 768 | 512m / 0.59 / 768 | 1024m / 1.96 / 768 | 2560m / 0.45 / 768 |
+
+Two ways to go beyond the presets, both without any global ceiling:
+
+- **Root slot** — define `PROJECT_RES_CUSTOM_MEMORY/CPUS/PIDS` in the server `.env` and select profile `custom` at creation time.
+- **Per-project capacity** — in the Studio project settings (Recursos section), edit Memória (`256m`/`2g`), CPUs (`1.50`) and PIDs directly and save; the API derives the same weighted split locally, persists the values as `PROJECT_RES_CUSTOM_*` in that project's `.env`, flags the row as `custom` in `projects.resource_profile`, and reports nginx/auth/rest as pending recreate. Partial edits inherit the missing totals from the current file. Duplicate/rename copy these per-project values through `apply_project_resource_limits ... <source-env>` (precedence: local `.env` > source `.env` > root slot), so clones keep the original sizing instead of silently re-falling to a preset.
+
+Minimums are enforced at derivation time (`112m` total memory floor across services, `1.85` CPU floors), returning HTTP 409 with the offending share rather than producing a stack that would OOM-loop.
 
 Every rendered project Compose pins each service's own share through fail-closed interpolation (`${PROJECT_NGINX_MEM_LIMIT:?...}`, `${PROJECT_AUTH_CPUS:?...}`, …), so a project without limits refuses to start instead of running unconstrained. The shares are written to the project `.env` at create, duplicate, rename, and rotate-key time. Existing projects are migrated idempotently with `tools/migrate_project_resource_limits.py` (dry-run by default, `--apply` to write), which delegates to the same helper, followed by a recreate. Database-level quotas (connection limits per tenant role, statement timeouts) and disk quotas remain open items; disk usage is currently an observability concern only.
 

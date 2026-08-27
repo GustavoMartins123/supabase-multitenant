@@ -576,29 +576,59 @@ class CpuContract(unittest.TestCase):
         values = compute(BASE_ENV.replace("PLATFORM_CPU_OVERSUBSCRIBE_MAX=300\n", ""))
         self.assertEqual(int(values["PLATFORM_CAP_CPU_OVERSUBSCRIBE_MAX"]), 100)
 
-    def test_oversubscription_is_bounded_by_the_declared_maximum(self) -> None:
+    def test_oversubscription_is_at_least_neutral(self) -> None:
         values = compute(BASE_ENV)
-        self.assertLessEqual(
-            int(values["PLATFORM_CAP_CPU_OVERSUBSCRIBE"]),
-            int(values["PLATFORM_CAP_CPU_OVERSUBSCRIBE_MAX"]),
+        self.assertGreaterEqual(
+            int(values["PLATFORM_CAP_CPU_OVERSUBSCRIBE"]), 100
         )
 
-    def test_tighter_tolerance_lowers_the_ceiling(self) -> None:
+    def test_cpu_never_lowers_the_ceiling_or_fails_the_host(self) -> None:
+        """Tetos de CPU sao contencao, nao reserva: host pequeno inicia.
+
+        Um projeto medium exige ~17 núcleos somando pisos calibrados — qualquer
+        laptop consumer falhava antes. Agora a derivacao sempre entrega o teto
+        de memoria/work_mem e apenas reporta o sobrecompromisso implicado.
+        """
+        scarce_env = (
+            "PLATFORM_RESERVE_PERCENT=25\n"
+            "PLATFORM_HOST_MEMORY=32g\n"
+            "PLATFORM_HOST_CPUS=20\n"
+            "PLATFORM_POSTGRES_SHARE_PERCENT=50\n"
+            "PLATFORM_WORK_MEM_NODES=2\n"
+            "PLATFORM_HOST_DISK=500g\n"
+            "PROJECT_RESOURCE_PROFILE=medium\n"
+            "PROJECT_RES_MEDIUM_MEMORY=1g\n"
+            "PROJECT_RES_MEDIUM_CPUS=2.00\n"
+            "PROJECT_RES_MEDIUM_PIDS=384\n"
+        )
+        scarce = compute(scarce_env)
+        self.assertGreaterEqual(int(scarce["PLATFORM_CAP_PROJECTS"]), 1)
+        self.assertNotEqual("cpu", scarce["PLATFORM_CAP_BINDING"])
+        # A escassez aparece como sinal, nao como bloqueio.
+        self.assertIn("sobrecomprometido", scarce["PLATFORM_CAP_CPU_FIT"])
+        self.assertGreater(int(scarce["PLATFORM_CAP_CPU_OVERSUBSCRIBE"]), 100)
+
+        # Declarar um maximo generoso inverte apenas o SINAL de aptidao;
+        # o numero de projetos suportados nunca depende da tolerancia.
+        relaxed = compute(
+            scarce_env + "PLATFORM_CPU_OVERSUBSCRIBE_MAX=200000\n"
+        )
+        self.assertEqual(
+            scarce["PLATFORM_CAP_PROJECTS"], relaxed["PLATFORM_CAP_PROJECTS"]
+        )
+        self.assertEqual("dentro do orcamento", relaxed["PLATFORM_CAP_CPU_FIT"])
+
+    def test_declared_maximum_is_kept_as_a_report_reference(self) -> None:
         generous = compute(
-            BASE_ENV.replace(
-                "PLATFORM_CPU_OVERSUBSCRIBE_MAX=300",
-                "PLATFORM_CPU_OVERSUBSCRIBE_MAX=800",
-            )
+            BASE_ENV.replace("PLATFORM_CPU_OVERSUBSCRIBE_MAX=300", "800")
         )
         strict = compute(
-            BASE_ENV.replace(
-                "PLATFORM_CPU_OVERSUBSCRIBE_MAX=300",
-                "PLATFORM_CPU_OVERSUBSCRIBE_MAX=100",
-            )
+            BASE_ENV.replace("PLATFORM_CPU_OVERSUBSCRIBE_MAX=300", "100")
         )
-        self.assertLess(
-            int(strict["PLATFORM_CAP_PROJECTS"]),
-            int(generous["PLATFORM_CAP_PROJECTS"]),
+        # O maximo declarado nao altera mais o numero de projetos suportados;
+        # ele e so a referencia contra a qual a aptidao (FIT) e comparada.
+        self.assertEqual(
+            generous["PLATFORM_CAP_PROJECTS"], strict["PLATFORM_CAP_PROJECTS"]
         )
 
     def test_cpu_is_fully_apportioned(self) -> None:
@@ -628,6 +658,12 @@ class CpuContract(unittest.TestCase):
         )
 
     def test_calibrated_small_cpu_floor_starts_at_twenty_seven_cores(self) -> None:
+        """Pisos calibrados viram SINAL, nunca bloqueio: hosts pequenos sobem.
+
+        Antes: <27 nucleos abortava o start.sh inteiro. Agora a derivacao
+        entrega o teto de memoria/work_mem e marca a aptidao de CPU como
+        sobrecomprometida (informativo), deixando a decisao ao operador.
+        """
         env = (
             "PLATFORM_RESERVE_PERCENT=25\n"
             "PLATFORM_HOST_MEMORY=64g\n"
@@ -639,19 +675,18 @@ class CpuContract(unittest.TestCase):
             "PROJECT_RES_SMALL_CPUS=1.85\n"
             "PROJECT_RES_SMALL_PIDS=128\n"
         )
-        for cores in (20, 26):
+        for cores in (4, 20):
             with self.subTest(cores=cores):
-                with self.assertRaises(AssertionError):
-                    compute(
-                        env.replace(
-                            "PLATFORM_HOST_CPUS=20",
-                            f"PLATFORM_HOST_CPUS={cores}",
-                        )
+                accepted = compute(
+                    env.replace(
+                        "PLATFORM_HOST_CPUS=20",
+                        f"PLATFORM_HOST_CPUS={cores}",
                     )
-        accepted = compute(
-            env.replace("PLATFORM_HOST_CPUS=20", "PLATFORM_HOST_CPUS=27")
-        )
-        self.assertEqual(1, int(accepted["PLATFORM_CAP_PROJECTS"]))
+                )
+                self.assertGreaterEqual(int(accepted["PLATFORM_CAP_PROJECTS"]), 1)
+                self.assertIn(
+                    "sobrecomprometido", accepted["PLATFORM_CAP_CPU_FIT"]
+                )
 
     def test_calibrated_shared_cpu_floors_are_applied(self) -> None:
         source = HELPER.read_text(encoding="utf-8")

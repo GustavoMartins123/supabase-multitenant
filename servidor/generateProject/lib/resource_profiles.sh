@@ -81,7 +81,7 @@ resource_split_cpu() {
 }
 
 apply_project_resource_limits() {
-    local root_env="$1" project_env="$2" profile_override="${3:-}"
+    local root_env="$1" project_env="$2" profile_override="${3:-}" source_env="${4:-}"
     [ -f "$root_env" ] || resource_profiles_error ".env raiz ausente: $root_env"
     [ -f "$project_env" ] || resource_profiles_error ".env do projeto ausente: $project_env"
 
@@ -89,23 +89,51 @@ apply_project_resource_limits() {
     if [ -n "$profile_override" ]; then
         profile="$profile_override"
     else
-        profile="$(resource_env_value PROJECT_RESOURCE_PROFILE "$root_env")"
+        # Perfil proprio do projeto > .env de origem (renomear/duplicar) >
+        # padrao global.
+        profile="$(resource_env_value PROJECT_RESOURCE_PROFILE "$project_env")"
+        if [ -z "$profile" ] && [ -n "$source_env" ] && [ -f "$source_env" ]; then
+            profile="$(resource_env_value PROJECT_RESOURCE_PROFILE "$source_env")"
+        fi
+        profile="${profile:-$(resource_env_value PROJECT_RESOURCE_PROFILE "$root_env")}"
         profile="${profile:-medium}"
     fi
     case "$profile" in
-        small|medium|large) ;;
-        *) resource_profiles_error "PROJECT_RESOURCE_PROFILE invalido: $profile (use small, medium ou large)" ;;
+        small|medium|large|custom) ;;
+        *) resource_profiles_error "PROJECT_RESOURCE_PROFILE invalido: $profile (use small, medium, large ou custom)" ;;
     esac
-    upper="$(printf '%s' "$profile" | tr '[:lower:]' '[:upper:]')"
+    upper="${profile^^}"
 
     mem="$(resource_env_value "PROJECT_RES_${upper}_MEMORY" "$root_env")"
     cpus="$(resource_env_value "PROJECT_RES_${upper}_CPUS" "$root_env")"
     pids="$(resource_env_value "PROJECT_RES_${upper}_PIDS" "$root_env")"
+    if [ "$upper" = "CUSTOM" ]; then
+        # Precedencia: .env do proprio projeto > ambiente de origem
+        # (duplicar/renomear) > slot global PROJECT_RES_CUSTOM_*.
+        local lmem lcpus lpids smem scpus spids
+        lmem="$(resource_env_value PROJECT_RES_CUSTOM_MEMORY "$project_env")"
+        lcpus="$(resource_env_value PROJECT_RES_CUSTOM_CPUS "$project_env")"
+        lpids="$(resource_env_value PROJECT_RES_CUSTOM_PIDS "$project_env")"
+        if [ -n "$source_env" ] && [ -f "$source_env" ]; then
+            smem="$(resource_env_value PROJECT_RES_CUSTOM_MEMORY "$source_env")"
+            scpus="$(resource_env_value PROJECT_RES_CUSTOM_CPUS "$source_env")"
+            spids="$(resource_env_value PROJECT_RES_CUSTOM_PIDS "$source_env")"
+        fi
+        mem="${lmem:-${smem:-${mem:-}}}"
+        cpus="${lcpus:-${scpus:-${cpus:-}}}"
+        pids="${lpids:-${spids:-${pids:-}}}"
+    fi
     for pair in "PROJECT_RES_${upper}_MEMORY:$mem" \
         "PROJECT_RES_${upper}_CPUS:$cpus" \
         "PROJECT_RES_${upper}_PIDS:$pids"; do
         key="${pair%%:*}"
-        [ -n "${pair#*:}" ] || resource_profiles_error "$key ausente no .env raiz; atualize a partir do .env.example"
+        if [ -z "${pair#*:}" ]; then
+            if [ "$upper" = "CUSTOM" ]; then
+                resource_profiles_error \
+                    "$key ausente: edite a capacidade pelo Studio ou defina PROJECT_RES_CUSTOM_MEMORY/CPUS/PIDS no .env do projeto"
+            fi
+            resource_profiles_error "$key ausente no .env raiz; atualize a partir do .env.example"
+        fi
     done
     [[ "$pids" =~ ^[0-9]+$ ]] || resource_profiles_error "PROJECT_RES_${upper}_PIDS invalido: $pids"
 
@@ -131,13 +159,20 @@ apply_project_resource_limits() {
     local temporary index service
     temporary="$(mktemp "${project_env}.limits.XXXXXX")"
     {
-        grep -vE '^PROJECT_(RESOURCE_PROFILE|MEM_LIMIT|CPUS|PIDS_LIMIT|REST_GHC_MAX_HEAP|(NGINX|AUTH|REST)_(MEM_LIMIT|CPUS|PIDS_LIMIT))=' \
+        grep -vE '^PROJECT_(RESOURCE_PROFILE|MEM_LIMIT|CPUS|PIDS_LIMIT|REST_GHC_MAX_HEAP|RES_CUSTOM_(MEMORY|CPUS|PIDS)|(NGINX|AUTH|REST)_(MEM_LIMIT|CPUS|PIDS_LIMIT))=' \
             "$project_env" || true
         printf 'PROJECT_RESOURCE_PROFILE=%s\n' "$profile"
         # Totais do projeto: referencia para a UI e para os limites derivados.
         printf 'PROJECT_MEM_LIMIT=%s\n' "$mem"
         printf 'PROJECT_CPUS=%s\n' "$cpus"
         printf 'PROJECT_PIDS_LIMIT=%s\n' "$pids"
+        if [ "$upper" = "CUSTOM" ]; then
+            # Valores proprios persistidos tornam o perfil autossuficiente
+            # em rotacoes e regeneracoes seguintes deste projeto.
+            printf 'PROJECT_RES_CUSTOM_MEMORY=%s\n' "$mem"
+            printf 'PROJECT_RES_CUSTOM_CPUS=%s\n' "$cpus"
+            printf 'PROJECT_RES_CUSTOM_PIDS=%s\n' "$pids"
+        fi
         for index in "${!RESOURCE_SERVICES[@]}"; do
             service="${RESOURCE_SERVICES[index]}"
             printf 'PROJECT_%s_MEM_LIMIT=%sm\n' "$service" "${mem_shares[index]}"

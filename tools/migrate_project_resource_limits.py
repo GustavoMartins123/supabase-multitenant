@@ -26,11 +26,12 @@ DEFAULT_PROJECTS_DIR = ROOT / "servidor" / "projects"
 HELPER = ROOT / "servidor" / "generateProject" / "lib" / "resource_profiles.sh"
 
 PROFILE_KEY = "PROJECT_RESOURCE_PROFILE"
-VALID_PROFILES = {"small", "medium", "large"}
+VALID_PROFILES = {"small", "medium", "large", "custom"}
 MANAGED_RE = re.compile(
     r"(?m)^(?:export[ \t]+)?"
     r"(PROJECT_(?:RESOURCE_PROFILE|MEM_LIMIT|CPUS|PIDS_LIMIT"
     r"|REST_GHC_MAX_HEAP"
+    r"|RES_CUSTOM_(?:MEMORY|CPUS|PIDS)"
     r"|(?:NGINX|AUTH|REST)_(?:MEM_LIMIT|CPUS|PIDS_LIMIT)))[ \t]*=(.*)$"
 )
 

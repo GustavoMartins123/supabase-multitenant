@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import pathlib
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 
 
@@ -16,9 +20,18 @@ class BackendResourceProfileContract(unittest.TestCase):
         self.assertIn("ADD COLUMN resource_profile TEXT NOT NULL DEFAULT 'medium'", sql)
         self.assertIn("resource_profile IN ('small', 'medium', 'large')", sql)
 
-    def test_schemas_accept_only_the_three_profiles(self) -> None:
+    def test_custom_profile_is_allowed_by_migration_0006(self) -> None:
+        sql = (APP / "migrations" / "0006_resource_profile_custom.sql").read_text()
+        self.assertIn("DROP CONSTRAINT projects_resource_profile_check", sql)
+        self.assertIn(
+            "CHECK (resource_profile IN ('small', 'medium', 'large', 'custom'))", sql
+        )
+
+    def test_schemas_accept_only_known_profiles(self) -> None:
         source = (APP / "schemas.py").read_text()
-        self.assertIn('ResourceProfile = Literal["small", "medium", "large"]', source)
+        self.assertIn(
+            'ResourceProfile = Literal["small", "medium", "large", "custom"]', source
+        )
         self.assertIn('resource_profile: ResourceProfile = "medium"', source)
 
     def test_settings_whitelist_and_derived_guard(self) -> None:
@@ -27,8 +40,17 @@ class BackendResourceProfileContract(unittest.TestCase):
         self.assertIn("DERIVED_LIMIT_KEYS", source)
         self.assertLess(
             source.index("def _normalize_settings_updates"),
-            source.index("injected = set(settings.keys()) & DERIVED_LIMIT_KEYS"),
-        )
+            source.index("derived_rejected ="),
+        ).
+        normalizer_end = source.index("def _normalize_setting_value")
+        body = source[normalizer_end:]
+        for key in (
+            "PROJECT_MEM_LIMIT",
+            "PROJECT_CPUS",
+            "PROJECT_PIDS_LIMIT",
+        ):
+            with self.subTest(key=key):
+                self.assertIn(f'"{key}"', body[:4000])
 
     def test_main_persists_and_passes_profile_to_agent(self) -> None:
         main = (APP / "main.py").read_text()
@@ -93,6 +115,7 @@ class BackendResourceProfileContract(unittest.TestCase):
         self.assertIn("PROJECT_RESOURCE_PROFILE=%s", helper)
         # As chaves gerenciadas sao removidas antes de reescrever (idempotencia).
         self.assertIn("^PROJECT_(RESOURCE_PROFILE|MEM_LIMIT|CPUS|PIDS_LIMIT", helper)
+        self.assertIn("RES_CUSTOM_(MEMORY|CPUS|PIDS)", helper)
         self.assertIn("(NGINX|AUTH|REST)_(MEM_LIMIT|CPUS|PIDS_LIMIT)", helper)
         settings = (APP / "project_settings.py").read_text()
         self.assertIn('"PROJECT_RESOURCE_PROFILE"', settings)
@@ -351,6 +374,206 @@ class FlutterContract(unittest.TestCase):
         self.assertIn("'PROJECT_RESOURCE_PROFILE'", section)
         self.assertIn("case _FieldType.select:", section)
         self.assertIn("_kSelectOptions", section)
+
+
+class CustomCapacityContract(unittest.TestCase):
+    """Capacidade personalizada: validacao, derivacao e precedencia no bash."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        import importlib
+
+        app_path = str(ROOT / "servidor" / "api-internal")
+        if app_path not in sys.path:
+            sys.path.insert(0, app_path)
+        cls.ps = importlib.import_module("app.project_settings")
+
+    def _bash_apply(self, root_env: dict[str, str], project_env: dict[str, str],
+                    *extra: str) -> tuple[dict[str, str], int]:
+        helper = ROOT / "servidor" / "generateProject" / "lib" / "resource_profiles.sh"
+
+        def dump(path: pathlib.Path, mapping: dict[str, str]) -> None:
+            path.write_text(
+                "".join(f"{k}={v}\n" for k, v in mapping.items()), encoding="utf-8"
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            root, proj = tmp_path / "root.env", tmp_path / "proj.env"
+            dump(root, root_env)
+            dump(proj, project_env)
+            cmd = [
+                shutil.which("bash") or "bash", "-c",
+                f'source "{helper}"; apply_project_resource_limits '
+                f'{root} {proj} {" ".join(extra)} >/dev/null && cat "{proj}"',
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+        parsed = dict(
+            line.split("=", 1)
+            for line in result.stdout.splitlines()
+            if "=" in line and not line.startswith("#")
+        )
+        return parsed, result.returncode
+
+    def test_direct_totals_are_derived_and_persisted(self) -> None:
+        updates, resolved = self.ps.split_resource_directives(
+            {
+                "PROJECT_MEM_LIMIT": "2g",
+                "PROJECT_CPUS": "3",
+                "PROJECT_PIDS_LIMIT": "500",
+            }
+        )
+        self.assertEqual("custom", updates["PROJECT_RESOURCE_PROFILE"])
+        self.assertEqual("custom", resolved["PROJECT_RESOURCE_PROFILE"])
+        self.assertEqual("2g", resolved["PROJECT_RES_CUSTOM_MEMORY"])
+        self.assertEqual("3.00", resolved["PROJECT_RES_CUSTOM_CPUS"])
+        self.assertEqual("500", resolved["PROJECT_RES_CUSTOM_PIDS"])
+        mem_mib = sum(
+            int(v[:-1])
+            for k, v in resolved.items()
+            if k.endswith("_MEM_LIMIT") and k.startswith("PROJECT_")
+            and k != "PROJECT_MEM_LIMIT"
+        )
+        self.assertEqual(2048, mem_mib)
+        cpu_centi = sum(
+            round(float(v) * 100)
+            for k, v in resolved.items()
+            if k.startswith("PROJECT_")
+            and k.endswith("_CPUS")
+            and k != "PROJECT_CPUS"
+            and "RES_CUSTOM" not in k
+        )
+        self.assertEqual(300, cpu_centi)
+
+    def test_partial_edit_inherits_current_totals(self) -> None:
+        current = {
+            "PROJECT_MEM_LIMIT": "768m",
+            "PROJECT_CPUS": "2.50",
+            "PROJECT_PIDS_LIMIT": "300",
+        }
+        updates, resolved = self.ps.split_resource_directives(
+            {"PROJECT_CPUS": "4"}, current_env=current
+        )
+        self.assertEqual("custom", updates["PROJECT_RESOURCE_PROFILE"])
+        self.assertEqual("768m", resolved["PROJECT_RES_CUSTOM_MEMORY"])
+        self.assertEqual("4.00", resolved["PROJECT_RES_CUSTOM_CPUS"])
+
+    def test_missing_total_fails_loudly(self) -> None:
+        with self.assertRaises(Exception):
+            self.ps.split_resource_directives({"PROJECT_CPUS": "2.00"})
+        with self.assertRaises(self.ps.HTTPException) as ctx:
+            self.ps.split_resource_directives({"PROJECT_CPUS": "2.00"})
+        self.assertEqual(400, ctx.exception.status_code)
+
+    def test_profile_and_totals_conflict(self) -> None:
+        with self.assertRaises(self.ps.HTTPException) as ctx:
+            self.ps._normalize_settings_updates(
+                {
+                    "PROJECT_RESOURCE_PROFILE": "large",
+                    "PROJECT_CPUS": "2.00",
+                }
+            )
+        self.assertEqual(400, ctx.exception.status_code)
+
+    def test_service_derived_keys_stay_unwritable(self) -> None:
+        with self.assertRaises(self.ps.HTTPException) as ctx:
+            self.ps._normalize_settings_updates({"PROJECT_NGINX_MEM_LIMIT": "128m"})
+        self.assertEqual(400, ctx.exception.status_code)
+
+    def test_floor_violations_refuse_custom_values(self) -> None:
+        for totals, expected in (
+            ({"MEMORY": "160m", "CPUS": "2.00", "PIDS": "256"}, "minimo seguro"),
+            (
+                {"MEMORY": "2g", "CPUS": "0.50", "PIDS": "256"},
+                "centi-CPU",
+            ),
+        ):
+            with self.subTest(memory=totals["MEMORY"], cpus=totals["CPUS"]):
+                with self.assertRaises(self.ps.HTTPException) as ctx:
+                    self.ps.resolve_custom_project_limits(dict(totals))
+                self.assertEqual(409, ctx.exception.status_code)
+                self.assertIn(expected, ctx.exception.detail)
+
+    def test_bash_prefers_local_customs_then_source_then_root_slot(self) -> None:
+        rootslot = {
+            "PROJECT_RES_SMALL_MEMORY": "256m",
+            "PROJECT_RES_SMALL_CPUS": "1.85",
+            "PROJECT_RES_SMALL_PIDS": "128",
+            "PROJECT_RES_CUSTOM_MEMORY": "1g",
+            "PROJECT_RES_CUSTOM_CPUS": "2.00",
+            "PROJECT_RES_CUSTOM_PIDS": "384",
+        }
+
+        values, code = self._bash_apply(
+            rootslot,
+            {"PROJECT_RESOURCE_PROFILE": "custom"},
+            "",
+        )
+        self.assertEqual(0, code, values)
+        self.assertEqual("1g", values.get("PROJECT_RES_CUSTOM_MEMORY"))
+
+        # Valor proprio do projeto vence o slot global.
+        values, code = self._bash_apply(
+            rootslot,
+            {
+                "PROJECT_RESOURCE_PROFILE": "custom",
+                "PROJECT_RES_CUSTOM_MEMORY": "640m",
+                "PROJECT_RES_CUSTOM_CPUS": "2.75",
+                "PROJECT_RES_CUSTOM_PIDS": "420",
+            },
+            "",
+        )
+        self.assertEqual(0, code, values)
+        self.assertEqual("640m", values.get("PROJECT_RES_CUSTOM_MEMORY"))
+        self.assertEqual("2.75", values.get("PROJECT_RES_CUSTOM_CPUS"))
+        self.assertEqual("PROJECT_CPUS=2.75", f"PROJECT_CPUS={values['PROJECT_CPUS']}")
+
+        # Origem supply os valores quando o novo .env ainda nao tem nenhum.
+        with tempfile.TemporaryDirectory() as tmp:
+            src = pathlib.Path(tmp) / "src.env"
+            dst = pathlib.Path(tmp) / "dst.env"
+            root = pathlib.Path(tmp) / "root.env"
+            src.write_text(
+                "PROJECT_RESOURCE_PROFILE=custom\n"
+                "PROJECT_RES_CUSTOM_MEMORY=9g\n"
+                "PROJECT_RES_CUSTOM_CPUS=5.10\n"
+                "PROJECT_RES_CUSTOM_PIDS=999\n",
+                encoding="utf-8",
+            )
+            dst.write_text("", encoding="utf-8")
+            root.write_text(
+                "".join(f"{k}={v}\n" for k, v in rootslot.items()),
+                encoding="utf-8",
+            )
+            helper = (
+                ROOT / "servidor" / "generateProject" / "lib" / "resource_profiles.sh"
+            )
+            result = subprocess.run(
+                [
+                    shutil.which("bash") or "bash", "-c",
+                    f'source "{helper}"; apply_project_resource_limits '
+                    f'{root} {dst} "" {src} && cat "{dst}"',
+                ],
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("PROJECT_MEM_LIMIT=9g", result.stdout)
+        self.assertIn("PROJECT_RES_CUSTOM_CPUS=5.10", result.stdout)
+
+    def test_named_profiles_still_work_on_both_layers(self) -> None:
+        values, code = self._bash_apply(
+            {
+                "PROJECT_RES_MEDIUM_MEMORY": "1g",
+                "PROJECT_RES_MEDIUM_CPUS": "2.00",
+                "PROJECT_RES_MEDIUM_PIDS": "384",
+            },
+            {},
+            "medium",
+        )
+        self.assertEqual(0, code, values)
+        self.assertEqual("medium", values.get("PROJECT_RESOURCE_PROFILE"))
+        self.assertNotIn("PROJECT_RES_CUSTOM_MEMORY", values)
 
 
 if __name__ == "__main__":

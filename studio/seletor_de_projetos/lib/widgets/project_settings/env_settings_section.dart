@@ -31,6 +31,7 @@ const _kSelectOptions = <String, Map<String, String>>{
     'small': 'Pequeno — 256 MB / 0,5 CPU / 128 PIDs no total',
     'medium': 'Médio — 1 GB / 1,5 CPU / 384 PIDs no total',
     'large': 'Grande — 4 GB / 3 CPUs / 768 PIDs no total',
+    'custom': 'Personalizado — capacidade própria abaixo',
   },
 };
 
@@ -76,6 +77,33 @@ const _kSettings = [
         'Teto de CPU/memória/PIDs do projeto, rateado entre nginx, auth e rest; '
         'aplicado ao recriar os serviços',
     type: _FieldType.select,
+    category: 'Recursos',
+  ),
+  _SettingMeta(
+    key: 'PROJECT_MEM_LIMIT',
+    label: 'Capacidade: Memória Total',
+    description:
+        'Ex.: 512m ou 2g. Salvar converte o projeto para o perfil '
+        'Personalizado e deriva o rateio entre os serviços',
+    type: _FieldType.text,
+    category: 'Recursos',
+  ),
+  _SettingMeta(
+    key: 'PROJECT_CPUS',
+    label: 'Capacidade: CPUs Totais',
+    description:
+        'Ex.: 1.50 ou 3.00. Mínimo efetivo de 1.85 (pisos nginx/auth/rest); '
+        'o resto é rateado pelos mesmos pesos dos perfis',
+    type: _FieldType.text,
+    category: 'Recursos',
+  ),
+  _SettingMeta(
+    key: 'PROJECT_PIDS_LIMIT',
+    label: 'Capacidade: PIDs por Serviço',
+    description:
+        'Teto de processos/threads aplicado a cada serviço do projeto '
+        '(mínimos garantidos por serviço)',
+    type: _FieldType.text,
     category: 'Recursos',
   ),
   _SettingMeta(
@@ -304,6 +332,7 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
           .where((part) => part.isNotEmpty)
           .join(',');
     }
+    if (key == 'PROJECT_MEM_LIMIT') return value.trim().toLowerCase();
     return value.trim();
   }
 
@@ -350,6 +379,26 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
           return 'Schema inválido: $schema.';
         }
       }
+    }
+
+    if (key == 'PROJECT_MEM_LIMIT') {
+      if (!RegExp(r'^\d+[mg]$').hasMatch(trimmed.toLowerCase())) {
+        return 'Use o formato 256m ou 1g.';
+      }
+      return null;
+    }
+    if (key == 'PROJECT_CPUS') {
+      if (!RegExp(r'^\d+(\.\d{1,2})?$').hasMatch(trimmed)) {
+        return 'Use o formato 1.50 (máx. 2 casas).';
+      }
+      return null;
+    }
+    if (key == 'PROJECT_PIDS_LIMIT') {
+      final parsed = int.tryParse(trimmed);
+      if (parsed == null || parsed < 1) {
+        return 'Use um número inteiro maior que zero.';
+      }
+      return null;
     }
 
     return null;
@@ -1008,6 +1057,14 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
           ],
         );
       case _FieldType.text:
+        final formatters = <TextInputFormatter>[
+          if (meta.key == 'PROJECT_MEM_LIMIT')
+            FilteringTextInputFormatter.allow(RegExp(r'[0-9mMgG]'))
+          else if (meta.key == 'PROJECT_CPUS')
+            FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
+          else
+            FilteringTextInputFormatter.allow(RegExp(r'[a-z0-9_,]')),
+        ];
         return Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
@@ -1018,9 +1075,7 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
                 controller: TextEditingController(text: value)
                   ..selection = TextSelection.collapsed(offset: value.length),
                 enabled: enabled,
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'[a-z0-9_,]')),
-                ],
+                inputFormatters: formatters,
                 onChanged: (v) => _updateValue(meta.key, v),
                 style: const TextStyle(
                   fontSize: 12,

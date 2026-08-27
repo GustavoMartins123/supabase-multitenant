@@ -22,7 +22,6 @@ SETTINGS_WHITELIST = {
     "JWT_EXPIRY",
     "GOTRUE_MAILER_OTP_EXP",
     "GOTRUE_PASSWORD_MIN_LENGTH",
-    "GOTRUE_EXTERNAL_IMPLICIT_FLOW_ENABLED",
     "PGRST_DB_SCHEMAS",
     "PGRST_DB_MAX_ROWS",
     "PGRST_DB_POOL",
@@ -35,6 +34,18 @@ SETTINGS_WHITELIST = {
     "VECTOR_MAX_BUCKETS",
     "VECTOR_MAX_INDEXES",
     "PROJECT_RESOURCE_PROFILE",
+}
+
+CUSTOM_TOTAL_INPUTS = (
+    "PROJECT_MEM_LIMIT",
+    "PROJECT_CPUS",
+    "PROJECT_PIDS_LIMIT",
+)
+
+CUSTOM_PROFILE_DISPLAY_KEYS = {
+    "PROJECT_RES_CUSTOM_MEMORY",
+    "PROJECT_RES_CUSTOM_CPUS",
+    "PROJECT_RES_CUSTOM_PIDS",
 }
 
 RESOURCE_SERVICES = ("NGINX", "AUTH", "REST")
@@ -53,6 +64,7 @@ DERIVED_LIMIT_KEYS = {
     "PROJECT_CPUS",
     "PROJECT_PIDS_LIMIT",
     "PROJECT_REST_GHC_MAX_HEAP",
+    *CUSTOM_PROFILE_DISPLAY_KEYS,
     *(
         f"PROJECT_{service}_{suffix}"
         for service in RESOURCE_SERVICES
@@ -88,7 +100,7 @@ INTEGER_SETTING_RANGES = {
 
 SCHEMA_NAME_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
 
-RESOURCE_PROFILES = ("small", "medium", "large")
+RESOURCE_PROFILES = ("small", "medium", "large", "custom")
 RESOLVED_LIMIT_KEYS = ("PROJECT_MEM_LIMIT", "PROJECT_CPUS", "PROJECT_PIDS_LIMIT")
 
 PROFILE_RESOLVED_FROM_ROOT = {
@@ -106,6 +118,11 @@ PROFILE_RESOLVED_FROM_ROOT = {
         "MEMORY": "PROJECT_RES_LARGE_MEMORY",
         "CPUS": "PROJECT_RES_LARGE_CPUS",
         "PIDS": "PROJECT_RES_LARGE_PIDS",
+    },
+    "custom": {
+        "MEMORY": "PROJECT_RES_CUSTOM_MEMORY",
+        "CPUS": "PROJECT_RES_CUSTOM_CPUS",
+        "PIDS": "PROJECT_RES_CUSTOM_PIDS",
     },
 }
 
@@ -142,10 +159,12 @@ def resolve_resource_limits(
     *,
     server_env: pathlib.Path = DEFAULT_SERVER_ENV,
 ) -> dict[str, str]:
-    """Resolve o trio de limites do .env raiz para o perfil informado."""
+    """Resolve o trio do .env raiz para o perfil informado."""
 
     if profile not in RESOURCE_PROFILES:
-        raise HTTPException(400, "PROJECT_RESOURCE_PROFILE: use small, medium ou large")
+        raise HTTPException(
+            400, "PROJECT_RESOURCE_PROFILE: use small, medium, large ou custom"
+        )
     try:
         content = server_env.read_text(encoding="utf-8")
     except OSError as exc:
@@ -164,6 +183,91 @@ def resolve_resource_limits(
     }
     values.update(_split_across_services(totals))
     return values
+
+
+def resolve_custom_project_limits(totals: dict[str, str]) -> dict[str, str]:
+    """Deriva a capacidade personalizada a partir dos totais enviados.
+
+    `totals` usa as chaves MEMORY/CPUS/PIDS. Retorna o perfil `custom`
+    persistido junto dos valores proprios e do rateio por servico.
+    """
+
+    missing = [key for key in ("MEMORY", "CPUS", "PIDS") if not totals.get(key)]
+    if missing:
+        raise HTTPException(
+            400,
+            "capacidade personalizada incompleta: informe "
+            + ", ".join(
+                {
+                    "MEMORY": "PROJECT_MEM_LIMIT",
+                    "CPUS": "PROJECT_CPUS",
+                    "PIDS": "PROJECT_PIDS_LIMIT",
+                }[item]
+                for item in missing
+            ),
+        )
+    mem = totals["MEMORY"].strip().lower()
+    cpus = totals["CPUS"].strip()
+    pids = totals["PIDS"].strip()
+    canonical_totals = {
+        "MEMORY": mem,
+        "CPUS": f"{_cpus_to_centi(cpus) // 100}.{_cpus_to_centi(cpus) % 100:02d}",
+        "PIDS": str(int(pids)),
+    }
+    resolved: dict[str, str] = {"PROJECT_RESOURCE_PROFILE": "custom"}
+    resolved.update(
+        {
+            "PROJECT_MEM_LIMIT": canonical_totals["MEMORY"],
+            "PROJECT_CPUS": canonical_totals["CPUS"],
+            "PROJECT_PIDS_LIMIT": canonical_totals["PIDS"],
+            "PROJECT_RES_CUSTOM_MEMORY": canonical_totals["MEMORY"],
+            "PROJECT_RES_CUSTOM_CPUS": canonical_totals["CPUS"],
+            "PROJECT_RES_CUSTOM_PIDS": canonical_totals["PIDS"],
+        }
+    )
+    resolved.update(_split_across_services(canonical_totals))
+    return resolved
+
+
+def split_resource_directives(
+    settings: dict[str, str],
+    *,
+    current_env: dict[str, str] | None = None,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Divida updates de settings em (diretos, limites derivados a gravar).
+
+    Perfil nomeado resolve do .env raiz; capacidade personalizada completa
+    totais ausentes com `current_env` e deriva o rateio por servico local.
+    """
+
+    direct_totals = {
+        key
+        for key in ("PROJECT_MEM_LIMIT", "PROJECT_CPUS", "PROJECT_PIDS_LIMIT")
+        if key in settings
+    }
+    updates = dict(settings)
+    if not direct_totals:
+        return updates, {}
+
+    totals: dict[str, str] = {}
+    env_now = current_env or {}
+    for input_key, suffix in (
+        ("PROJECT_MEM_LIMIT", "MEMORY"),
+        ("PROJECT_CPUS", "CPUS"),
+        ("PROJECT_PIDS_LIMIT", "PIDS"),
+    ):
+        value = updates.get(input_key) or str(env_now.get(input_key) or "").strip()
+        if not value or value == "pass":
+            raise HTTPException(
+                400,
+                "Capacidade personalizada precisa de Memoria, CPUs e PIDs "
+                f"completos ({input_key} ausente no projeto)",
+            )
+        totals[suffix] = value
+
+    resolved = resolve_custom_project_limits(totals)
+    updates["PROJECT_RESOURCE_PROFILE"] = "custom"
+    return updates, resolved
 
 
 def _mem_to_mib(raw: str) -> int:
@@ -267,7 +371,8 @@ def _read_env_whitelisted(env_path: pathlib.Path) -> dict[str, str]:
         for key, value in dotenv_values(env_path).items()
         if value is not None
     }
-    return {k: value for k, value in all_values.items() if k in SETTINGS_WHITELIST}
+    readable = SETTINGS_WHITELIST | CUSTOM_PROFILE_DISPLAY_KEYS | set(CUSTOM_TOTAL_INPUTS)
+    return {k: value for k, value in all_values.items() if k in readable}
 
 
 def get_project_file_size_limit(
@@ -300,7 +405,24 @@ def _normalize_setting_value(key: str, raw_value: str) -> str:
 
     if key == "PROJECT_RESOURCE_PROFILE":
         if value not in RESOURCE_PROFILES:
-            raise HTTPException(400, f"{key}: use small, medium ou large")
+            raise HTTPException(
+                400, f"{key}: use small, medium, large ou custom"
+            )
+        return value
+
+    if key == "PROJECT_MEM_LIMIT":
+        if not re.fullmatch(r"\d+[mMgG]", value):
+            raise HTTPException(400, f"{key}: use o formato 256m ou 1g")
+        return value.lower()
+
+    if key == "PROJECT_CPUS":
+        if not re.fullmatch(r"\d+(?:\.\d{1,2})?", value):
+            raise HTTPException(400, f"{key}: use o formato 1.50")
+        return value
+
+    if key == "PROJECT_PIDS_LIMIT":
+        if not re.fullmatch(r"\d+", value) or int(value) < 1:
+            raise HTTPException(400, f"{key}: use um número inteiro maior que zero")
         return value
 
     if key in BOOLEAN_SETTINGS:
@@ -335,18 +457,30 @@ def _normalize_setting_value(key: str, raw_value: str) -> str:
 
 
 def _normalize_settings_updates(settings: dict[str, str]) -> dict[str, str]:
-    invalid_keys = set(settings.keys()) - SETTINGS_WHITELIST
+    acceptable = SETTINGS_WHITELIST | set(CUSTOM_TOTAL_INPUTS)
+    invalid_keys = set(settings.keys()) - acceptable
     if invalid_keys:
         raise HTTPException(
             400,
             f"Variáveis não permitidas: {', '.join(sorted(invalid_keys))}",
         )
-    injected = set(settings.keys()) & DERIVED_LIMIT_KEYS
-    if injected:
+
+    direct_totals = set(settings.keys()) & set(CUSTOM_TOTAL_INPUTS)
+    if direct_totals and "PROJECT_RESOURCE_PROFILE" in settings:
+        raise HTTPException(
+            400,
+            "Informe perfil pronto OU capacidade personalizada na mesma "
+            "requisicao, nunca ambos",
+        )
+
+    derived_rejected = (
+        set(settings.keys()) & DERIVED_LIMIT_KEYS
+    ) - direct_totals
+    if derived_rejected:
         raise HTTPException(
             400,
             "Limites resolvidos nao sao configuraveis diretamente: "
-            f"use PROJECT_RESOURCE_PROFILE ({', '.join(sorted(injected))})",
+            f"use PROJECT_RESOURCE_PROFILE ({', '.join(sorted(derived_rejected))})",
         )
 
     if not settings:

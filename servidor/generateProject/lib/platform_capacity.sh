@@ -600,10 +600,11 @@ platform_compute_capacity() {
     profile_cpus="$(platform_env_value "PROJECT_RES_${upper}_CPUS" "$root_env")"
     profile_cpu_centi=$(( ${profile_cpus%%.*} * 100 + 10#$(printf '%s' "${profile_cpus#*.}" | cut -c1-2) ))
     PLATFORM_CAP_PROJECT_CPU_CENTI="$profile_cpu_centi"
+
     project_cpu_centi=$(( allocatable_centi - shared_cpu_centi - postgres_cpu_centi ))
     [ "$project_cpu_centi" -lt 0 ] && project_cpu_centi=0
-    PLATFORM_CAP_CPU_OVERSUBSCRIBE=$(( PLATFORM_CAP_PROJECTS * profile_cpu_centi * 100 \
-        / (project_cpu_centi > 0 ? project_cpu_centi : 1) ))
+    PLATFORM_CAP_PROJECT_CPU_BUDGET_CENTI="$project_cpu_centi"
+
     local cpu_max_oversubscribe
     cpu_max_oversubscribe="$(platform_env_value PLATFORM_CPU_OVERSUBSCRIBE_MAX "$root_env")"
     cpu_max_oversubscribe="${cpu_max_oversubscribe:-100}"
@@ -611,17 +612,16 @@ platform_compute_capacity() {
         || { platform_capacity_error "PLATFORM_CPU_OVERSUBSCRIBE_MAX precisa ser >= 100"; return 1; }
     PLATFORM_CAP_CPU_OVERSUBSCRIBE_MAX="$cpu_max_oversubscribe"
 
-    PLATFORM_CAP_BY_CPU=$(( project_cpu_centi * cpu_max_oversubscribe / 100 / profile_cpu_centi ))
-    if [ "$PLATFORM_CAP_BY_CPU" -lt "$PLATFORM_CAP_PROJECTS" ]; then
-        PLATFORM_CAP_PROJECTS="$PLATFORM_CAP_BY_CPU"
-        PLATFORM_CAP_BINDING="cpu"
-        PLATFORM_CAP_CPU_OVERSUBSCRIBE="$cpu_max_oversubscribe"
+    local implied_over=$(( PLATFORM_CAP_PROJECTS * profile_cpu_centi * 100 \
+        / (project_cpu_centi > 0 ? project_cpu_centi : 1) ))
+    [ "$implied_over" -lt 100 ] && implied_over=100
+    PLATFORM_CAP_CPU_OVERSUBSCRIBE="$implied_over"
+    if [ "$implied_over" -le "$cpu_max_oversubscribe" ]; then
+        PLATFORM_CAP_CPU_FIT="dentro do orcamento"
+    else
+        PLATFORM_CAP_CPU_FIT="sobrecomprometido (informativo)"
     fi
-    [ "$PLATFORM_CAP_PROJECTS" -gt 0 ] || {
-        platform_capacity_error \
-            "host sem CPU suficiente para um projeto $profile e os servicos compartilhados"
-        return 1
-    }
+    PLATFORM_CAP_BY_CPU=$(( project_cpu_centi * cpu_max_oversubscribe / 100 / profile_cpu_centi ))
 
     PLATFORM_CAP_DISK_MIB="$(platform_detect_disk_mib "$disk_declared" "$disk_path")"
     [ -n "$PLATFORM_CAP_DISK_MIB" ] && [ "$PLATFORM_CAP_DISK_MIB" -gt 0 ] \
@@ -824,7 +824,7 @@ platform_capacity_report() {
     printf '  Teto de projetos, por restricao\n'
     printf '    por memoria de projeto       %18s\n' "$PLATFORM_CAP_BY_MEMORY"
     printf '    por piso de work_mem         %18s\n' "$PLATFORM_CAP_BY_CONNECTIONS"
-    printf '    por CPU (sobrecompromisso)   %18s\n' "$PLATFORM_CAP_BY_CPU"
+    printf '    teorico por cpu (so medida)  %18s\n' "$PLATFORM_CAP_BY_CPU"
     printf '    ---------------------------------------------------\n'
     printf '    TETO (%s)  %*s\n\n' "$PLATFORM_CAP_BINDING" \
         "$(( 30 - ${#PLATFORM_CAP_BINDING} ))" "$PLATFORM_CAP_PROJECTS"
@@ -852,9 +852,10 @@ platform_capacity_report() {
     printf '    alvo compartilhado (20%%)     %18s\n' "$PLATFORM_CAP_SHARED_CPU_BUDGET_CENTI"
     printf '    compartilhado apos pisos     %18s\n' "$PLATFORM_CAP_SHARED_CPU_CENTI"
     printf '    Postgres                     %18s\n' "$PLATFORM_CAP_POSTGRES_CPU_CENTI"
-    printf '    teto de projetos por CPU     %18s\n' "$PLATFORM_CAP_BY_CPU"
-    printf '    sobrecompromisso (max %3d%%)  %17s%%\n\n' \
-        "$PLATFORM_CAP_CPU_OVERSUBSCRIBE_MAX" "$PLATFORM_CAP_CPU_OVERSUBSCRIBE"
+    printf '    orcamento dos projetos       %18s\n' "$PLATFORM_CAP_PROJECT_CPU_BUDGET_CENTI"
+    printf '    aptidao dos tetos            %18s\n' "$PLATFORM_CAP_CPU_FIT"
+    printf '    sobrecompromisso implicado   %17s%%\n' "$PLATFORM_CAP_CPU_OVERSUBSCRIBE"
+    printf '    limite declarado (max)       %17s%%\n\n' "$PLATFORM_CAP_CPU_OVERSUBSCRIBE_MAX"
 
     printf '  Limites da camada compartilhada\n'
     printf '    %-20s %8s %8s %8s  %s\n' SERVICO MEMORIA CPU PIDS ORIGEM
