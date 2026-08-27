@@ -1,21 +1,9 @@
 #!/usr/bin/env bash
-#
-# O rateio usa pesos fixos por dimensao e a sobra vai para o `rest`, de modo
-# que a soma dos tres servicos seja exatamente o total do perfil.
-#
-#   memoria  nginx 1 : auth 3 : rest 4   (de 8)
-#   cpus     nginx 1 : auth 2 : rest 3   (de 6)
-#   pids     nginx 2 : auth 5 : rest 5   (de 12)
-#
-# nginx e um proxy fino; auth (GoTrue) e rest (PostgREST) sustentam a carga.
-# Os pesos sao espelhados em servidor/api-internal/app/project_settings.py —
-# um contrato de teste garante que as duas tabelas nao divirjam.
-
 RESOURCE_SERVICES=(NGINX AUTH REST)
-RESOURCE_MEM_WEIGHTS=(1 3 4)
-RESOURCE_CPU_WEIGHTS=(1 2 3)
+RESOURCE_MEM_WEIGHTS=(1 2 5)
+RESOURCE_CPU_WEIGHTS=(1 4 1)
 
-RESOURCE_CPU_FLOORS_CENTI=(5 40 15)
+RESOURCE_CPU_FLOORS_CENTI=(40 120 25)
 RESOURCE_PIDS_FLOOR=(128 256 512)
 RESOURCE_MEM_FLOORS_MIB=(16 64 32)
 RESOURCE_GHC_HEAP_PERCENT=80

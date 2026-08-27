@@ -74,8 +74,8 @@ class PlatformLifecycleE2E(unittest.TestCase):
 
     def test_01_create_applies_resource_profile_to_project_env(self) -> None:
         expected = {
-            "small": ("256m", "0.75", "128"),
-            "medium": ("1g", "1.50", "384"),
+            "small": ("256m", "1.85", "128"),
+            "medium": ("1g", "2.00", "384"),
         }
         for index, (profile, (mem, cpus, pids)) in enumerate(expected.items()):
             with self.subTest(profile=profile):

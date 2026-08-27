@@ -229,17 +229,17 @@ A atualização de Storage envia `PATCH /tenants/<tenant_uuid>` e não reinicia 
 
 O perfil é o teto do **projeto inteiro**, não de cada container.
 `PROJECT_RESOURCE_PROFILE` (`small|medium|large`) nomeia um total no `.env`
-raiz. A memória é rateada em 1:3:4 para nginx:auth:rest. CPU primeiro reserva
-pisos calibrados de 0,05/0,40/0,15 CPU e rateia a sobra em 1:2:3. PIDs usam
+raiz. A memória é rateada em 1:2:5 para nginx:auth:rest. CPU primeiro reserva
+pisos de carga sustentada de 0,40/1,20/0,25 CPU e rateia a sobra em 1:4:1. PIDs usam
 pisos de segurança independentes de 128/256/512, em vez de dividir a referência
-total do projeto. `nginx` é um proxy fino; `auth`
-(GoTrue) e `rest` (PostgREST) sustentam a carga.
+total do projeto. Testes com login real por senha mostraram que `auth`, e nao
+`rest`, domina a CPU do tenant; PostgREST recebe a maior fatia de memoria.
 
 | Perfil | Total do projeto | nginx | auth | rest |
 | --- | --- | --- | --- | --- |
-| `small` | 256m / 0.75 / 128 | 32m / 0.07 / 128 | 96m / 0.45 / 256 | 128m / 0.23 / 512 |
-| `medium` | 1g / 1.50 / 384 | 128m / 0.20 / 384 | 384m / 0.70 / 384 | 512m / 0.60 / 512 |
-| `large` | 4g / 3.00 / 768 | 512m / 0.45 / 768 | 1536m / 1.20 / 768 | 2048m / 1.35 / 768 |
+| `small` | 256m / 1.85 / 128 | 32m / 0.40 / 128 | 64m / 1.20 / 256 | 160m / 0.25 / 512 |
+| `medium` | 1g / 2.00 / 384 | 128m / 0.42 / 384 | 256m / 1.30 / 384 | 640m / 0.28 / 512 |
+| `large` | 4g / 3.00 / 768 | 512m / 0.59 / 768 | 1024m / 1.96 / 768 | 2560m / 0.45 / 768 |
 
 Todo Compose de projeto renderizado fixa a fatia de cada serviço via
 interpolacao fail-closed (`${PROJECT_NGINX_MEM_LIMIT:?...}`,

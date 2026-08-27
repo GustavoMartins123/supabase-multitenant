@@ -102,7 +102,7 @@ class ProfileHelperFunctionalTest(unittest.TestCase):
             root_env.write_text(
                 "PROJECT_RESOURCE_PROFILE=small\n"
                 "PROJECT_RES_SMALL_MEMORY=256m\n"
-                "PROJECT_RES_SMALL_CPUS=0.75\n"
+                "PROJECT_RES_SMALL_CPUS=1.85\n"
                 "PROJECT_RES_SMALL_PIDS=128\n",
                 encoding="utf-8",
             )
@@ -123,7 +123,7 @@ class ProfileHelperFunctionalTest(unittest.TestCase):
             self.assertIn("JWT_SECRET_PROJETO=segredo\n", content)
             self.assertEqual(content.count("PROJECT_MEM_LIMIT="), 1)
             self.assertIn("PROJECT_MEM_LIMIT=256m\n", content)
-            self.assertIn("PROJECT_CPUS=0.75\n", content)
+            self.assertIn("PROJECT_CPUS=1.85\n", content)
             self.assertIn("PROJECT_PIDS_LIMIT=128\n", content)
             self.assertEqual(project_env.stat().st_mode & 0o777, 0o600)
 
@@ -152,28 +152,28 @@ class ProfileSplitFunctionalTest(unittest.TestCase):
     """A soma das fatias tem de fechar exatamente com o teto do perfil."""
 
     ROOT_ENV = (
-        "PROJECT_RES_SMALL_MEMORY=256m\nPROJECT_RES_SMALL_CPUS=0.75\n"
+        "PROJECT_RES_SMALL_MEMORY=256m\nPROJECT_RES_SMALL_CPUS=1.85\n"
         "PROJECT_RES_SMALL_PIDS=128\n"
-        "PROJECT_RES_MEDIUM_MEMORY=1g\nPROJECT_RES_MEDIUM_CPUS=1.50\n"
+        "PROJECT_RES_MEDIUM_MEMORY=1g\nPROJECT_RES_MEDIUM_CPUS=2.00\n"
         "PROJECT_RES_MEDIUM_PIDS=384\n"
         "PROJECT_RES_LARGE_MEMORY=4g\nPROJECT_RES_LARGE_CPUS=3.00\n"
         "PROJECT_RES_LARGE_PIDS=768\n"
     )
     EXPECTED = {
         "small": {
-            "NGINX": ("32m", "0.07"),
-            "AUTH": ("96m", "0.45"),
-            "REST": ("128m", "0.23"),
+            "NGINX": ("32m", "0.40"),
+            "AUTH": ("64m", "1.20"),
+            "REST": ("160m", "0.25"),
         },
         "medium": {
-            "NGINX": ("128m", "0.20"),
-            "AUTH": ("384m", "0.70"),
-            "REST": ("512m", "0.60"),
+            "NGINX": ("128m", "0.42"),
+            "AUTH": ("256m", "1.30"),
+            "REST": ("640m", "0.28"),
         },
         "large": {
-            "NGINX": ("512m", "0.45"),
-            "AUTH": ("1536m", "1.20"),
-            "REST": ("2048m", "1.35"),
+            "NGINX": ("512m", "0.59"),
+            "AUTH": ("1024m", "1.96"),
+            "REST": ("2560m", "0.45"),
         },
     }
 
@@ -259,7 +259,7 @@ class GhcHeapCapContract(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root_env = pathlib.Path(tmp) / "root.env"
             root_env.write_text(
-                "PROJECT_RES_MEDIUM_MEMORY=1g\nPROJECT_RES_MEDIUM_CPUS=1.50\n"
+                "PROJECT_RES_MEDIUM_MEMORY=1g\nPROJECT_RES_MEDIUM_CPUS=2.00\n"
                 "PROJECT_RES_MEDIUM_PIDS=384\n",
                 encoding="utf-8",
             )
@@ -297,7 +297,7 @@ class MemoryFloorContract(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root_env = pathlib.Path(tmp) / "root.env"
             root_env.write_text(
-                "PROJECT_RES_SMALL_MEMORY=64m\nPROJECT_RES_SMALL_CPUS=0.75\n"
+                "PROJECT_RES_SMALL_MEMORY=64m\nPROJECT_RES_SMALL_CPUS=1.85\n"
                 "PROJECT_RES_SMALL_PIDS=128\n",
                 encoding="utf-8",
             )
@@ -347,7 +347,7 @@ class MigratorContractTest(unittest.TestCase):
         root_env.write_text(
             "PROJECT_RESOURCE_PROFILE=medium\n"
             "PROJECT_RES_MEDIUM_MEMORY=1g\n"
-            "PROJECT_RES_MEDIUM_CPUS=1.50\n"
+            "PROJECT_RES_MEDIUM_CPUS=2.00\n"
             "PROJECT_RES_MEDIUM_PIDS=384\n",
             encoding="utf-8",
         )
@@ -384,7 +384,7 @@ class MigratorContractTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root_env = pathlib.Path(tmp) / "root.env"
             root_env.write_text(
-                "PROJECT_RES_MEDIUM_MEMORY=1g\nPROJECT_RES_MEDIUM_CPUS=1.50\n"
+                "PROJECT_RES_MEDIUM_MEMORY=1g\nPROJECT_RES_MEDIUM_CPUS=2.00\n"
                 "PROJECT_RES_MEDIUM_PIDS=384\n",
                 encoding="utf-8",
             )
@@ -423,7 +423,7 @@ class MigratorContractTest(unittest.TestCase):
         self.assertIn("apply_project_resource_limits", source)
         self.assertIn("resource_profiles.sh", source)
         # Nao pode reimplementar os pesos.
-        for weights in ("1, 3, 4", "(1, 2, 3)", "(2, 5, 5)"):
+        for weights in ("1, 2, 5", "(1, 4, 1)", "(2, 5, 5)"):
             with self.subTest(weights=weights):
                 self.assertNotIn(weights, source)
 

@@ -97,12 +97,15 @@ platform_render_postgres_conf "$ROOT_DIR/servidor/.env" \
 CAPACITY_SERVIDOR="$ROOT_DIR/servidor/docker-compose.capacity.yml"
 CAPACITY_API="$ROOT_DIR/servidor/docker-compose-api.capacity.yml"
 CAPACITY_STUDIO="$ROOT_DIR/studio/docker-compose.capacity.yml"
+CAPACITY_TRAEFIK="$ROOT_DIR/servidor/traefik/docker-compose.capacity.yml"
 platform_render_compose_override "$ROOT_DIR/servidor/.env" servidor "$CAPACITY_SERVIDOR" \
     || die "falha ao gerar os limites do compose principal."
 platform_render_compose_override "$ROOT_DIR/servidor/.env" api "$CAPACITY_API" \
     || die "falha ao gerar os limites do compose da API."
 platform_render_compose_override "$ROOT_DIR/servidor/.env" studio "$CAPACITY_STUDIO" \
     || die "falha ao gerar os limites do compose do Studio."
+platform_render_compose_override "$ROOT_DIR/servidor/.env" traefik "$CAPACITY_TRAEFIK" \
+    || die "falha ao gerar os limites do compose do Traefik."
 platform_render_env "$ROOT_DIR/servidor/.env" "$ROOT_DIR/servidor/platform-capacity.env" \
     || die "falha ao publicar a capacidade derivada para a Projects API."
 platform_compute_capacity "$ROOT_DIR/servidor/.env" >/dev/null
@@ -176,7 +179,7 @@ done
 
 echo
 echo "Iniciando Traefik com File Provider..."
-docker compose -f traefik/docker-compose.yml --env-file .env up -d
+docker compose -f traefik/docker-compose.yml -f "$CAPACITY_TRAEFIK" --env-file .env up -d
 
 echo "Iniciando projetos Supabase..."
 shopt -s nullglob

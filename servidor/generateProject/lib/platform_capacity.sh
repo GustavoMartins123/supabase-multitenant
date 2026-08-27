@@ -27,6 +27,10 @@ PLATFORM_SERVICE_CONTAINER=(
     "key-authorizer:key-authorizer"
     "storage-data-plane:shared-storage-data-plane"
     "imgproxy:supabase-imgproxy-global"
+    "traefik:traefik-traefik-1"
+    "geoip:traefik-geoip-api-1"
+    "traefik-config:supabase-traefik-config-watcher"
+    "deny-service:traefik-deny-service"
 )
 
 PLATFORM_SERVICE_COMPOSE=(
@@ -44,6 +48,10 @@ PLATFORM_SERVICE_COMPOSE=(
     "studio:studio:studio"
     "studio-nginx:studio:nginx"
     "authelia:studio:authelia"
+    "traefik:traefik:traefik"
+    "geoip:traefik:geoip-api"
+    "traefik-config:traefik:traefik-config-watcher"
+    "deny-service:traefik:deny-service"
 )
 
 PLATFORM_CPU_SCALED_SERVICES=(realtime supavisor studio-nginx)
@@ -63,6 +71,10 @@ PLATFORM_SHARED_BASELINE_MIB=(
     "key-authorizer:63"
     "storage-data-plane:21"
     "imgproxy:96"
+    "traefik:60"
+    "geoip:18"
+    "traefik-config:35"
+    "deny-service:13"
 )
 
 PLATFORM_SHARED_PER_PROJECT_MIB=(
@@ -86,29 +98,37 @@ PLATFORM_SHARED_CPU_WEIGHT=(
     "vector:1"
     "edge-functions:2"
     "storage-data-plane:1"
+    "traefik:1"
+    "geoip:2"
+    "traefik-config:2"
+    "deny-service:1"
 )
 
 PLATFORM_SHARED_CPU_FLOOR_CENTI=(
     "analytics:45"
-    "supavisor:80"
-    "realtime:30"
-    "studio:35"
-    "storage:40"
-    "postgres-meta:35"
-    "studio-nginx:35"
+    "supavisor:95"
+    "realtime:40"
+    "studio:70"
+    "storage:75"
+    "postgres-meta:60"
+    "studio-nginx:45"
     "vector:15"
-    "projects-api:35"
+    "projects-api:40"
     "authelia:20"
     "edge-functions:35"
-    "key-authorizer:35"
+    "key-authorizer:70"
     "storage-data-plane:10"
-    "imgproxy:30"
+    "imgproxy:65"
+    "traefik:10"
+    "geoip:25"
+    "traefik-config:70"
+    "deny-service:5"
 )
 
 PLATFORM_POSTGRES_CPU_FLOOR_CENTI=(
-    "small:215"
-    "medium:475"
-    "large:940"
+    "small:545"
+    "medium:890"
+    "large:1035"
 )
 
 PLATFORM_SHARED_PIDS_BASELINE=(
@@ -126,6 +146,10 @@ PLATFORM_SHARED_PIDS_BASELINE=(
     "imgproxy:14"
     "projects-api:12"
     "key-authorizer:12"
+    "traefik:24"
+    "geoip:8"
+    "traefik-config:7"
+    "deny-service:21"
 )
 
 platform_container_cgroup() {
@@ -278,6 +302,16 @@ platform_service_cpu_centi() {
     printf '%s' "$share"
 }
 
+platform_shared_cpu_total_centi() {
+    local budget="$1" entry service value total=0
+    for entry in "${PLATFORM_SHARED_CPU_FLOOR_CENTI[@]}"; do
+        service="${entry%%:*}"
+        value="$(platform_service_cpu_centi "$service" "$budget")" || return 1
+        total=$(( total + value ))
+    done
+    printf '%s' "$total"
+}
+
 platform_postgres_cpu_floor_centi() {
     local profile="$1" entry
     for entry in "${PLATFORM_POSTGRES_CPU_FLOOR_CENTI[@]}"; do
@@ -409,7 +443,7 @@ platform_compute_capacity() {
 
     local reserve host_declared cpus_declared postgres_share work_mem_nodes profile
     reserve="$(platform_env_value PLATFORM_RESERVE_PERCENT "$root_env")"
-    reserve="${reserve:-20}"
+    reserve="${reserve:-25}"
     host_declared="$(platform_env_value PLATFORM_HOST_MEMORY "$root_env")"
     host_declared="${host_declared:-auto}"
     cpus_declared="$(platform_env_value PLATFORM_HOST_CPUS "$root_env")"
@@ -546,15 +580,19 @@ platform_compute_capacity() {
         PLATFORM_CAP_BINDING="memoria"
     fi
 
-    local allocatable_centi shared_cpu_centi postgres_cpu_centi project_cpu_centi
+    local allocatable_centi shared_cpu_budget_centi shared_cpu_centi
+    local postgres_cpu_centi project_cpu_centi
     allocatable_centi=$(( PLATFORM_CAP_HOST_CPUS * 100 * (100 - reserve) / 100 ))
     PLATFORM_CAP_ALLOCATABLE_CPUS=$(( allocatable_centi / 100 ))
-    shared_cpu_centi=$(( allocatable_centi * 20 / 100 ))
+    shared_cpu_budget_centi=$(( allocatable_centi * 20 / 100 ))
+    shared_cpu_centi="$(platform_shared_cpu_total_centi "$shared_cpu_budget_centi")" \
+        || return 1
     postgres_cpu_centi=$(( allocatable_centi * postgres_share / 100 ))
     PLATFORM_CAP_POSTGRES_CPU_FLOOR_CENTI="$(platform_postgres_cpu_floor_centi "$profile")" \
         || return 1
     [ "$postgres_cpu_centi" -lt "$PLATFORM_CAP_POSTGRES_CPU_FLOOR_CENTI" ] \
         && postgres_cpu_centi="$PLATFORM_CAP_POSTGRES_CPU_FLOOR_CENTI"
+    PLATFORM_CAP_SHARED_CPU_BUDGET_CENTI="$shared_cpu_budget_centi"
     PLATFORM_CAP_SHARED_CPU_CENTI="$shared_cpu_centi"
     PLATFORM_CAP_POSTGRES_CPU_CENTI="$postgres_cpu_centi"
 
@@ -568,7 +606,7 @@ platform_compute_capacity() {
         / (project_cpu_centi > 0 ? project_cpu_centi : 1) ))
     local cpu_max_oversubscribe
     cpu_max_oversubscribe="$(platform_env_value PLATFORM_CPU_OVERSUBSCRIBE_MAX "$root_env")"
-    cpu_max_oversubscribe="${cpu_max_oversubscribe:-300}"
+    cpu_max_oversubscribe="${cpu_max_oversubscribe:-100}"
     [[ "$cpu_max_oversubscribe" =~ ^[0-9]+$ ]] && [ "$cpu_max_oversubscribe" -ge 100 ] \
         || { platform_capacity_error "PLATFORM_CPU_OVERSUBSCRIBE_MAX precisa ser >= 100"; return 1; }
     PLATFORM_CAP_CPU_OVERSUBSCRIBE_MAX="$cpu_max_oversubscribe"
@@ -694,7 +732,7 @@ platform_render_compose_override() {
             [ "$file" = "$target" ] || continue
             memory="$(platform_service_limit_mib "$service" "$PLATFORM_CAP_PROJECTS" \
                 "$PLATFORM_CAP_RESERVE_PERCENT" "$PLATFORM_CAP_HOST_CPUS")" || return 1
-            cpus="$(platform_service_cpu_centi "$service" "$PLATFORM_CAP_SHARED_CPU_CENTI")" || return 1
+            cpus="$(platform_service_cpu_centi "$service" "$PLATFORM_CAP_SHARED_CPU_BUDGET_CENTI")" || return 1
             pids="$(platform_service_pids "$service" "$PLATFORM_CAP_RESERVE_PERCENT")" || return 1
             printf '  %s:\n' "$compose_name"
             printf '    mem_limit: %sm\n' "$memory"
@@ -707,7 +745,7 @@ platform_render_compose_override() {
 
     if [ "$any" -eq 0 ]; then
         rm -f "$temporary"
-        platform_capacity_error "alvo de compose desconhecido: $target (use servidor, api ou studio)"
+        platform_capacity_error "alvo de compose desconhecido: $target (use servidor, api, studio ou traefik)"
         return 1
     fi
     chmod 644 "$temporary"
@@ -748,7 +786,7 @@ platform_apply_shared_limits() {
 
         memory="$(platform_service_limit_mib "$service" "$PLATFORM_CAP_PROJECTS" \
             "$PLATFORM_CAP_RESERVE_PERCENT" "$PLATFORM_CAP_HOST_CPUS")" || return 1
-        cpus="$(platform_service_cpu_centi "$service" "$PLATFORM_CAP_SHARED_CPU_CENTI")" || return 1
+        cpus="$(platform_service_cpu_centi "$service" "$PLATFORM_CAP_SHARED_CPU_BUDGET_CENTI")" || return 1
         pids="$(platform_service_pids "$service" "$PLATFORM_CAP_RESERVE_PERCENT")" || return 1
 
         if docker update \
@@ -830,7 +868,8 @@ platform_capacity_report() {
 
     printf '  CPU (centi-CPU; 100 = 1 nucleo)\n'
     printf '    alocavel                     %18s\n' "$(( PLATFORM_CAP_ALLOCATABLE_CPUS * 100 ))"
-    printf '    camada compartilhada (20%%)   %18s\n' "$PLATFORM_CAP_SHARED_CPU_CENTI"
+    printf '    alvo compartilhado (20%%)     %18s\n' "$PLATFORM_CAP_SHARED_CPU_BUDGET_CENTI"
+    printf '    compartilhado apos pisos     %18s\n' "$PLATFORM_CAP_SHARED_CPU_CENTI"
     printf '    Postgres                     %18s\n' "$PLATFORM_CAP_POSTGRES_CPU_CENTI"
     printf '    teto de projetos por CPU     %18s\n' "$PLATFORM_CAP_BY_CPU"
     printf '    sobrecompromisso (max %3d%%)  %17s%%\n\n' \
@@ -843,7 +882,7 @@ platform_capacity_report() {
         service="${entry%%:*}"
         printf '    %-20s %7sm %8s %8s  %s\n' "$service" \
             "$(platform_service_limit_mib "$service" "$PLATFORM_CAP_PROJECTS" "$PLATFORM_CAP_RESERVE_PERCENT" "$PLATFORM_CAP_HOST_CPUS")" \
-            "$(platform_service_cpu_centi "$service" "$PLATFORM_CAP_SHARED_CPU_CENTI")" \
+            "$(platform_service_cpu_centi "$service" "$PLATFORM_CAP_SHARED_CPU_BUDGET_CENTI")" \
             "$(platform_service_pids "$service" "$PLATFORM_CAP_RESERVE_PERCENT")" \
             "$(platform_service_baseline_source "$service" "$PLATFORM_CAP_HOST_CPUS")"
     done
@@ -872,9 +911,9 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
             ;;
         --render-compose)
             platform_render_compose_override \
-                "${2:?uso: --render-compose <root_env> <servidor|api|studio> <saida>}" \
-                "${3:?uso: --render-compose <root_env> <servidor|api|studio> <saida>}" \
-                "${4:?uso: --render-compose <root_env> <servidor|api|studio> <saida>}"
+                "${2:?uso: --render-compose <root_env> <servidor|api|studio|traefik> <saida>}" \
+                "${3:?uso: --render-compose <root_env> <servidor|api|studio|traefik> <saida>}" \
+                "${4:?uso: --render-compose <root_env> <servidor|api|studio|traefik> <saida>}"
             ;;
         --render-postgres)
             platform_render_postgres_conf \

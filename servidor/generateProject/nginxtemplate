@@ -385,10 +385,7 @@ http {
                 return 204;
             }
 
-
-            rewrite ^/realtime/v1/websocket$ /socket/websocket?$opaque_realtime_upstream_args break;
-
-            proxy_pass http://$realtime_upstream;
+            proxy_pass http://$realtime_upstream/socket/websocket?$opaque_realtime_upstream_args;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection $connection_upgrade;

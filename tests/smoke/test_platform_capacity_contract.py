@@ -11,18 +11,19 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 HELPER = ROOT / "servidor" / "generateProject" / "lib" / "platform_capacity.sh"
 ENV_EXAMPLE = ROOT / "servidor" / ".env.example"
+START = ROOT / "start.sh"
 
 BASE_ENV = (
     "PLATFORM_RESERVE_PERCENT=20\n"
     "PLATFORM_HOST_MEMORY=32g\n"
-    "PLATFORM_HOST_CPUS=16\n"
+    "PLATFORM_HOST_CPUS=32\n"
     "PLATFORM_POSTGRES_SHARE_PERCENT=50\n"
     "PLATFORM_WORK_MEM_NODES=2\n"
     "PLATFORM_HOST_DISK=500g\n"
     "PLATFORM_CPU_OVERSUBSCRIBE_MAX=300\n"
     "PROJECT_RESOURCE_PROFILE=medium\n"
     "PROJECT_RES_MEDIUM_MEMORY=1g\n"
-    "PROJECT_RES_MEDIUM_CPUS=1.50\n"
+    "PROJECT_RES_MEDIUM_CPUS=2.00\n"
     "PROJECT_RES_MEDIUM_PIDS=384\n"
 )
 
@@ -68,7 +69,7 @@ class ReserveContract(unittest.TestCase):
             env = BASE_ENV.replace(
                 "PLATFORM_RESERVE_PERCENT=20",
                 f"PLATFORM_RESERVE_PERCENT={reserve}",
-            )
+            ).replace("PLATFORM_HOST_CPUS=32", "PLATFORM_HOST_CPUS=64")
             values = compute(env)
             with self.subTest(reserve=reserve):
                 total = (
@@ -202,12 +203,12 @@ class DerivationContract(unittest.TestCase):
         return (
             "PLATFORM_RESERVE_PERCENT=20\n"
             f"PLATFORM_HOST_MEMORY={memory}\n"
-            "PLATFORM_HOST_CPUS=8\n"
+            "PLATFORM_HOST_CPUS=32\n"
             "PLATFORM_HOST_DISK=500g\n"
             "PLATFORM_CPU_OVERSUBSCRIBE_MAX=300\n"
             "PROJECT_RESOURCE_PROFILE=small\n"
             "PROJECT_RES_SMALL_MEMORY=256m\n"
-            "PROJECT_RES_SMALL_CPUS=0.75\n"
+            "PROJECT_RES_SMALL_CPUS=1.85\n"
             "PROJECT_RES_SMALL_PIDS=128\n"
         )
 
@@ -357,6 +358,7 @@ class ComposeLimitsContract(unittest.TestCase):
         "servidor": ROOT / "servidor" / "docker-compose.yml",
         "api": ROOT / "servidor" / "docker-compose-api.yml",
         "studio": ROOT / "studio" / "docker-compose.yml",
+        "traefik": ROOT / "servidor" / "traefik" / "docker-compose.yml",
     }
 
     def _render(self, target: str) -> dict:
@@ -405,6 +407,7 @@ class ComposeLimitsContract(unittest.TestCase):
         for name in (
             "docker-compose.capacity.yml",
             "docker-compose-api.capacity.yml",
+            "traefik/docker-compose.capacity.yml",
         ):
             with self.subTest(name=name):
                 self.assertIn(name, start)
@@ -569,6 +572,10 @@ class BaselineMethodContract(unittest.TestCase):
 
 
 class CpuContract(unittest.TestCase):
+    def test_default_does_not_oversubscribe_cpu(self) -> None:
+        values = compute(BASE_ENV.replace("PLATFORM_CPU_OVERSUBSCRIBE_MAX=300\n", ""))
+        self.assertEqual(int(values["PLATFORM_CAP_CPU_OVERSUBSCRIBE_MAX"]), 100)
+
     def test_oversubscription_is_bounded_by_the_declared_maximum(self) -> None:
         values = compute(BASE_ENV)
         self.assertLessEqual(
@@ -603,6 +610,49 @@ class CpuContract(unittest.TestCase):
             allocatable,
         )
 
+    def test_shared_cpu_uses_the_sum_after_per_service_floors(self) -> None:
+        values = compute(BASE_ENV)
+        source = HELPER.read_text(encoding="utf-8")
+        block = source.split("PLATFORM_SHARED_CPU_FLOOR_CENTI=(", 1)[1].split(
+            ")", 1
+        )[0]
+        floor_total = sum(
+            int(value) for value in re.findall(r'"[a-z-]+:(\d+)"', block)
+        )
+        self.assertGreaterEqual(
+            int(values["PLATFORM_CAP_SHARED_CPU_CENTI"]), floor_total
+        )
+        self.assertGreaterEqual(
+            int(values["PLATFORM_CAP_SHARED_CPU_CENTI"]),
+            int(values["PLATFORM_CAP_SHARED_CPU_BUDGET_CENTI"]),
+        )
+
+    def test_calibrated_small_cpu_floor_starts_at_twenty_seven_cores(self) -> None:
+        env = (
+            "PLATFORM_RESERVE_PERCENT=25\n"
+            "PLATFORM_HOST_MEMORY=64g\n"
+            "PLATFORM_HOST_CPUS=20\n"
+            "PLATFORM_HOST_DISK=500g\n"
+            "PLATFORM_CPU_OVERSUBSCRIBE_MAX=100\n"
+            "PROJECT_RESOURCE_PROFILE=small\n"
+            "PROJECT_RES_SMALL_MEMORY=256m\n"
+            "PROJECT_RES_SMALL_CPUS=1.85\n"
+            "PROJECT_RES_SMALL_PIDS=128\n"
+        )
+        for cores in (20, 26):
+            with self.subTest(cores=cores):
+                with self.assertRaises(AssertionError):
+                    compute(
+                        env.replace(
+                            "PLATFORM_HOST_CPUS=20",
+                            f"PLATFORM_HOST_CPUS={cores}",
+                        )
+                    )
+        accepted = compute(
+            env.replace("PLATFORM_HOST_CPUS=20", "PLATFORM_HOST_CPUS=27")
+        )
+        self.assertEqual(1, int(accepted["PLATFORM_CAP_PROJECTS"]))
+
     def test_calibrated_shared_cpu_floors_are_applied(self) -> None:
         source = HELPER.read_text(encoding="utf-8")
         block = source.split("PLATFORM_SHARED_CPU_FLOOR_CENTI=(", 1)[1].split(")", 1)[0]
@@ -613,6 +663,20 @@ class CpuContract(unittest.TestCase):
         baseline = source.split("PLATFORM_SHARED_BASELINE_MIB=(", 1)[1].split(")", 1)[0]
         services = set(re.findall(r'"([a-z-]+):\d+"', baseline))
         self.assertEqual(services, set(floors))
+        calibrated = {
+            "geoip": 25,
+            "imgproxy": 65,
+            "key-authorizer": 70,
+            "postgres-meta": 60,
+            "realtime": 40,
+            "storage": 75,
+            "studio": 70,
+            "studio-nginx": 45,
+            "supavisor": 95,
+        }
+        for service, minimum in calibrated.items():
+            with self.subTest(calibrated=service):
+                self.assertGreaterEqual(floors[service], minimum)
         for service, floor in floors.items():
             with self.subTest(service=service):
                 value = int(run_helper(f"platform_service_cpu_centi {service} 320"))
@@ -620,8 +684,8 @@ class CpuContract(unittest.TestCase):
 
     def test_postgres_cpu_floor_follows_the_project_profile(self) -> None:
         profiles = {
-            "small": ("256m", "0.75", "128"),
-            "medium": ("1g", "1.50", "384"),
+            "small": ("256m", "1.85", "128"),
+            "medium": ("1g", "2.00", "384"),
             "large": ("4g", "3.00", "768"),
         }
         floors = []
@@ -643,7 +707,7 @@ class CpuContract(unittest.TestCase):
             self.assertGreaterEqual(
                 int(values["PLATFORM_CAP_POSTGRES_CPU_CENTI"]), floor
             )
-        self.assertEqual(floors, sorted(floors))
+        self.assertEqual(floors, [545, 890, 1035])
 
 
 class DiskContract(unittest.TestCase):
@@ -683,7 +747,7 @@ class WorkerContract(unittest.TestCase):
         large = compute(
             BASE_ENV.replace(
                 "PLATFORM_HOST_MEMORY=32g", "PLATFORM_HOST_MEMORY=128g"
-            ).replace("PLATFORM_HOST_CPUS=16", "PLATFORM_HOST_CPUS=64")
+            ).replace("PLATFORM_HOST_CPUS=32", "PLATFORM_HOST_CPUS=64")
         )
         self.assertGreater(
             int(large["PLATFORM_CAP_PROJECTS"]), int(small["PLATFORM_CAP_PROJECTS"])
@@ -711,6 +775,34 @@ class WorkerContract(unittest.TestCase):
 
 
 class SharedTierContract(unittest.TestCase):
+    def test_edge_infrastructure_is_budgeted_and_limited(self) -> None:
+        source = HELPER.read_text(encoding="utf-8")
+        start = START.read_text(encoding="utf-8")
+        infrastructure = {
+            "traefik",
+            "geoip",
+            "traefik-config",
+            "deny-service",
+        }
+        for array in (
+            "PLATFORM_SERVICE_CONTAINER",
+            "PLATFORM_SERVICE_COMPOSE",
+            "PLATFORM_SHARED_BASELINE_MIB",
+            "PLATFORM_SHARED_CPU_WEIGHT",
+            "PLATFORM_SHARED_CPU_FLOOR_CENTI",
+            "PLATFORM_SHARED_PIDS_BASELINE",
+        ):
+            block = source.split(f"{array}=(", 1)[1].split(")", 1)[0]
+            with self.subTest(array=array):
+                self.assertTrue(
+                    all(f'"{service}:' in block for service in infrastructure)
+                )
+        self.assertIn(
+            'platform_render_compose_override "$ROOT_DIR/servidor/.env" traefik',
+            start,
+        )
+        self.assertIn('-f "$CAPACITY_TRAEFIK"', start)
+
     def test_service_limits_carry_the_reserve(self) -> None:
         bash = shutil.which("bash") or "bash"
         source = HELPER.read_text(encoding="utf-8")

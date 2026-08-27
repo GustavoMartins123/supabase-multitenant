@@ -151,10 +151,14 @@ class BackendResourceProfileContract(unittest.TestCase):
         api_cpu_floor = re.search(r"RESOURCE_CPU_FLOORS_CENTI = \(([^)]*)\)", settings)
         self.assertIsNotNone(bash_cpu_floor)
         self.assertIsNotNone(api_cpu_floor)
-        self.assertEqual(
-            tuple(int(v) for v in bash_cpu_floor.group(1).split()),
-            tuple(int(v) for v in api_cpu_floor.group(1).split(",") if v.strip()),
+        bash_cpu_floors = tuple(int(v) for v in bash_cpu_floor.group(1).split())
+        api_cpu_floors = tuple(
+            int(v) for v in api_cpu_floor.group(1).split(",") if v.strip()
         )
+        self.assertEqual(bash_cpu_floors, api_cpu_floors)
+        self.assertGreaterEqual(bash_cpu_floors[0], 40)
+        self.assertGreaterEqual(bash_cpu_floors[1], 120)
+        self.assertGreaterEqual(bash_cpu_floors[2], 25)
 
     def test_tenant_reader_role_helper_is_wired(self) -> None:
         helper = (

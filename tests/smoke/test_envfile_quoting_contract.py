@@ -1,6 +1,6 @@
 """O .env do servidor e lido pelo bash E pelo host-agent.
 
-Caminhos com espaco (`HOST_PROJECT_ROOT="/home/x/Area de trabalho/..."`)
+Caminhos com espaco (`HOST_PROJECT_ROOT="/srv/Project Root/..."`)
 precisam de aspas para o `source` do bash. O leitor canonico do agent
 rejeitava qualquer valor citado, entao `recreate_services` quebrava com
 "Entrada nao canonica no .env: HOST_PROJECT_ROOT" em toda instalacao.
@@ -34,9 +34,9 @@ class CanonicalEnvQuotingContract(unittest.TestCase):
 
     def test_quoted_paths_with_spaces_are_accepted(self) -> None:
         self.assertEqual(
-            "/home/gustavo/Área de trabalho/supabase-git/x",
+            "/srv/Supabase Projects/x",
             self._read(
-                'HOST_PROJECT_ROOT="/home/gustavo/Área de trabalho/supabase-git/x"',
+                'HOST_PROJECT_ROOT="/srv/Supabase Projects/x"',
                 "HOST_PROJECT_ROOT",
             ),
         )
