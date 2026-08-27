@@ -106,10 +106,8 @@ platform_render_compose_override "$ROOT_DIR/servidor/.env" studio "$CAPACITY_STU
     || die "falha ao gerar os limites do compose do Studio."
 platform_render_compose_override "$ROOT_DIR/servidor/.env" traefik "$CAPACITY_TRAEFIK" \
     || die "falha ao gerar os limites do compose do Traefik."
-platform_render_env "$ROOT_DIR/servidor/.env" "$ROOT_DIR/servidor/platform-capacity.env" \
-    || die "falha ao publicar a capacidade derivada para a Projects API."
 platform_compute_capacity "$ROOT_DIR/servidor/.env" >/dev/null
-echo "  teto desta maquina: $PLATFORM_CAP_PROJECTS projetos (restricao: $PLATFORM_CAP_BINDING)"
+echo "  referencia desta maquina: $PLATFORM_CAP_PROJECTS projetos no perfil $PLATFORM_CAP_PROFILE (apenas informativo; perfis sao tetos por projeto, nao reservas)"
 
 docker compose -f docker-compose.yml -f "$CAPACITY_SERVIDOR" --env-file .env up --build -d
 

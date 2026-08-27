@@ -752,25 +752,6 @@ platform_render_compose_override() {
     mv "$temporary" "$output"
 }
 
-platform_render_env() {
-    local root_env="$1" output="$2"
-    platform_compute_capacity "$root_env" || return 1
-    local temporary
-    temporary="$(mktemp "${output}.XXXXXX")" || return 1
-    {
-        printf '# Gerado por lib/platform_capacity.sh — NAO EDITE A MAO.\n'
-        printf '# Capacidade derivada deste host. Regenere com --render-env.\n'
-        printf 'PLATFORM_PROJECT_CAPACITY=%s\n' "$PLATFORM_CAP_PROJECTS"
-        printf 'PLATFORM_CAPACITY_BINDING=%s\n' "$PLATFORM_CAP_BINDING"
-        printf 'PLATFORM_HOST_MEMORY_MIB=%s\n' "$PLATFORM_CAP_HOST_MIB"
-        printf 'PLATFORM_HOST_CPU_COUNT=%s\n' "$PLATFORM_CAP_HOST_CPUS"
-        printf 'PLATFORM_RESERVE_PERCENT=%s\n' "$PLATFORM_CAP_RESERVE_PERCENT"
-        printf 'PLATFORM_PROJECT_PROFILE=%s\n' "$PLATFORM_CAP_PROFILE"
-    } > "$temporary" || { rm -f "$temporary"; return 1; }
-    chmod 644 "$temporary"
-    mv "$temporary" "$output"
-}
-
 platform_apply_shared_limits() {
     local root_env="$1"
     platform_compute_capacity "$root_env" || return 1
@@ -899,11 +880,6 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     case "${1:-}" in
         --report)
             platform_capacity_report "${2:?uso: platform_capacity.sh --report <root_env>}"
-            ;;
-        --render-env)
-            platform_render_env \
-                "${2:?uso: platform_capacity.sh --render-env <root_env> <saida>}" \
-                "${3:?uso: platform_capacity.sh --render-env <root_env> <saida>}"
             ;;
         --apply-shared)
             platform_apply_shared_limits \

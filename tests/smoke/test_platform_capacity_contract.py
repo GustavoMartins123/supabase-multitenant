@@ -871,5 +871,18 @@ class SharedTierContract(unittest.TestCase):
                 self.assertNotRegex(example, rf"(?m)^{derived}=")
 
 
+class SharedLimitsReapplicationContract(unittest.TestCase):
+    def test_shared_limits_are_reapplied_on_create_and_delete(self) -> None:
+        for script in (
+            ROOT / "servidor/generateProject/lib/generate_project_impl.sh",
+            ROOT / "servidor/generateProject/lib/duplicate_project_impl.sh",
+            ROOT / "servidor/generateProject/delete_project.sh",
+        ):
+            with self.subTest(script=script.name):
+                self.assertIn(
+                    "platform_apply_shared_limits", script.read_text(encoding="utf-8")
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

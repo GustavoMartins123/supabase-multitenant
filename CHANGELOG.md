@@ -21,6 +21,11 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/) e [Versionamento
 - Reserva padrão do host em 25% e sobrecompromisso padrão de CPU em 100%.
 - Pisos de Postgres e serviços compartilhados recalibrados.
 
+#### Removido
+
+- Teto de projetos na criação e duplicação: os perfis passam a ser apenas tetos individuais (cgroups), sem limite global de quantos projetos podem ser criados.
+- `app/platform_capacity.py`, a verificação `assert_capacity_available` nos endpoints de projeto e a publicação/montagem de `platform-capacity.env` na Projects API (incluindo o subcomando `--render-env`).
+
 #### Corrigido
 
 - Rota Realtime do Nginx monta a URI após `auth_request`.

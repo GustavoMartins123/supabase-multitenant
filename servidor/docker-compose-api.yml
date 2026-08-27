@@ -109,7 +109,6 @@ services:
       - ./projects:/docker/projects:rw        # bind-mount relativo  :contentReference[oaicite:0]{index=0}
       - ./certs:/docker/push-certs:ro
       - ./.env:/docker/.env:ro
-      - ./platform-capacity.env:/docker/platform-capacity.env:ro
   postgres-meta-global:
     container_name: postgres-meta-global
     image: ${PG_META_IMAGE}

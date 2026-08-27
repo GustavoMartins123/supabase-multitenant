@@ -33,4 +33,3 @@ servidor/docker-compose.capacity.yml
 servidor/docker-compose-api.capacity.yml
 studio/docker-compose.capacity.yml
 servidor/traefik/docker-compose.capacity.yml
-servidor/platform-capacity.env
