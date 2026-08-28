@@ -40,9 +40,11 @@ class ApiDsnSeparationContract(unittest.TestCase):
         self.assertNotIn("POSTGRES_PASSWORD", api_block)
 
     def test_meta_uses_dedicated_admin_identity(self) -> None:
-        main = (APP / "main.py").read_text()
-        self.assertIn('meta_dsn = (os.getenv("META_ADMIN_DSN") or "").strip()', main)
-        self.assertIn("META_ADMIN_DSN ausente", main)
+        connections = (APP / "meta_connections.py").read_text()
+        self.assertIn(
+            'meta_dsn = (os.getenv("META_ADMIN_DSN") or "").strip()', connections
+        )
+        self.assertIn("META_ADMIN_DSN ausente", connections)
         compose = COMPOSE.read_text()
         self.assertIn(
             "META_ADMIN_DSN: postgres://platform_meta_admin:${META_ADMIN_DB_PASSWORD:?defina META_ADMIN_DB_PASSWORD}@",

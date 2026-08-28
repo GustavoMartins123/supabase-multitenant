@@ -134,7 +134,12 @@ from app.routers.collaboration import router as collaboration_router
 from app.routers.internal import router as internal_router
 from app.routers.lifecycle import router as lifecycle_router
 from app.routers.health import router as health_router
+from app.meta_connections import (
+    get_project_meta_connection_string,
+    get_project_reader_connection_string,
+)
 from app.routers.opaque_keys import router as opaque_keys_router
+from app.routers.platform_auth import router as platform_auth_router
 configure_jobs(get_pool)
 
 
@@ -281,6 +286,7 @@ app.include_router(collaboration_router)
 app.include_router(internal_router)
 app.include_router(lifecycle_router)
 app.include_router(opaque_keys_router)
+app.include_router(platform_auth_router)
 
 # ``create`` nao e repetivel, mas e retomavel: o runner se religa ao mesmo
 # host_agent_command duravel com ``reuse_terminal=True`` e nunca dispara um
@@ -4468,25 +4474,6 @@ async def get_project_conn(project_ref: str):
     )
 
 
-def get_project_meta_connection_string(project_ref: str) -> str:
-    meta_dsn = (os.getenv("META_ADMIN_DSN") or "").strip()
-    if not meta_dsn:
-        raise RuntimeError("META_ADMIN_DSN ausente no ambiente da Projects API")
-    dsn = urllib.parse.urlparse(meta_dsn)
-    if dsn.scheme not in {"postgres", "postgresql"} or not dsn.hostname or not dsn.username:
-        raise RuntimeError("DB_DSN inválido para construir a conexão administrativa do projeto")
-
-    db_name = f"_supabase_{project_ref}"
-    return urllib.parse.urlunparse(
-        dsn._replace(
-            path=f"/{urllib.parse.quote(db_name, safe='')}",
-            params="",
-            query="",
-            fragment="",
-        )
-    )
-
-
 @app.get("/api/projects/{project_name}/telemetry/users")
 async def get_project_user_telemetry(
     project_name: str,
@@ -4607,7 +4594,11 @@ async def proxy_project_meta(
             )
 
     try:
-        project_connection_string = get_project_meta_connection_string(ref)
+        meta_key = (request.query_params.get("key") or "").strip().lower()
+        if meta_key.startswith("users"):
+            project_connection_string = get_project_reader_connection_string(ref)
+        else:
+            project_connection_string = get_project_meta_connection_string(ref)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 
