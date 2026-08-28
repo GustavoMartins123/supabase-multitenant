@@ -235,7 +235,12 @@ http {
             proxy_set_header apikey $opaque_upstream_apikey;
             proxy_set_header Authorization $opaque_upstream_authorization;
             proxy_set_header X-Api-Key-Id $opaque_key_id;
-            
+            proxy_set_header X-Opaque-Key-Role "";
+            proxy_set_header X-Opaque-Key-Present "";
+            proxy_set_header X-Opaque-Key-Id "";
+            proxy_set_header X-Opaque-Key-Preserve-Authorization "";
+            proxy_set_header X-Project-Gateway-Token "";
+
             add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, PATCH, DELETE' always;
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, X-Client-Info, X-Supabase-Auth, x-supabase-api-version' always;
@@ -498,6 +503,11 @@ http {
             proxy_set_header apikey $opaque_upstream_apikey;
             proxy_set_header Authorization $opaque_upstream_authorization;
             proxy_set_header X-Api-Key-Id $opaque_key_id;
+            proxy_set_header X-Opaque-Key-Role "";
+            proxy_set_header X-Opaque-Key-Present "";
+            proxy_set_header X-Opaque-Key-Id "";
+            proxy_set_header X-Opaque-Key-Preserve-Authorization "";
+            proxy_set_header X-Project-Gateway-Token "";
 
             add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, PATCH, DELETE' always;

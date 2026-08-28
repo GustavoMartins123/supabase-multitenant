@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+umask 077
 
 die() { echo "❌  $*" >&2; return 1; }
 say() { echo "ℹ️  $*"; }
@@ -274,8 +275,12 @@ SQL
 
 if [[ -n "$REALTIME_TABLES" ]]; then
   IFS=',' read -ra tables <<< "$REALTIME_TABLES"
+  local_table_re='^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$'
   for table_name in "${tables[@]}"; do
+    table_name="$(printf '%s' "$table_name" | tr -d '[:space:]')"
     [[ -n "$table_name" ]] || continue
+    [[ "$table_name" =~ $local_table_re ]] \
+      || die "Tabela realtime invalida no manifest: '$table_name'"
     docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$DB" -c \
       "ALTER PUBLICATION supabase_realtime ADD TABLE $table_name;"
   done

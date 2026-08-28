@@ -10,11 +10,11 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/) e [Versionamento
 
 #### Adicionado
 
+- Capacidade personalizada por projeto: Memória, CPUs e PIDs editáveis no Studio.
+- Perfil `custom` definido no `.env` do servidor, selecionável na criação.
 - `tools/platform_bottleneck_probe.py` para carga simultânea de todos os serviços, host, cgroups e SLO de p95.
 - Fixtures descartáveis com lock, recuperação e limpeza automática.
 - Limites de CPU, RAM e PIDs para Traefik, GeoIP, watcher e deny-service.
-- Perfil personalizado: slot global `PROJECT_RES_CUSTOM_*` no `.env`, selecionável na criação; migration 0006 libera o valor `custom`.
-- Capacidade editável por projeto no Studio: campos de Memória (m/g), CPUs e PIDs na seção Recursos gravam totais que a API deriva em nginx/auth/rest com os mesmos pesos/pisos dos perfis (`split_resource_directives`), marcando `resource_profile=custom` no banco e mantendo os valores próprios no `.env` do projeto através de duplicar/renomear/rotação.
 
 #### Alterado
 
@@ -25,12 +25,29 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/) e [Versionamento
 
 #### Removido
 
-- Teto de projetos na criação e duplicação: os perfis passam a ser apenas tetos individuais (cgroups), sem limite global de quantos projetos podem ser criados.
-- `app/platform_capacity.py`, a verificação `assert_capacity_available` nos endpoints de projeto e a publicação/montagem de `platform-capacity.env` na Projects API (incluindo o subcomando `--render-env`).
+- Limite global de projetos na criação e duplicação.
+- Arquivo de capacidade derivada consumido pela Projects API.
 
 #### Corrigido
 
-- Derivação de capacidade não bloqueia mais hosts modestos na CPU: os pisos calibrados (~17 núcleos somados antes de qualquer projeto) viram apenas sinal informativo (`aptidao dos tetos` + sobrecompromisso implicado no `--report`), sem abortar o `start.sh` nem reduzir o teto de projetos — tetos de CPU são contenção, não reserva.
+- Funções Edge deixam de receber credenciais do banco do cluster.
+- Setup preserva `.env` e segredos existentes em re-execução.
+- Restore valida as tabelas do Realtime declaradas no backup.
+- Backups e arquivos de ciclo de vida criados com permissão restrita.
+- Slots de replicação sem colisão em projetos com nomes longos.
+- Apenas assets estáticos do Studio ficam públicos.
+- Signup do Studio com rate-limit e checagens antes do hash de senha.
+- Cadeia anti-abuso do Traefik passa a cobrir HTTPS.
+- Exclusão de projeto continua a limpeza após falha e mantém o registro para nova tentativa.
+- Headers de identidade do cliente deixam de atravessar os proxies internos do Studio.
+- `extract_token.sh` valida o nome do projeto.
+- Listagem de usuários em modo admin restrita a administradores da plataforma.
+- Hosts pequenos iniciam em modo degradado com aviso, sem abortar o `start.sh`.
+- Valores inválidos de `PLATFORM_*` caem no padrão em vez de travar a inicialização.
+- Memória e disco do host aceitam valores decimais (ex.: `7.7g`).
+- Studio não é mais reconstruído a cada `start.sh`.
+- Capacidade de CPU vira apenas referência informativa.
+- Documentação de chaves opacas alinhada às rotas e migrations reais.
 - Rota Realtime do Nginx monta a URI após `auth_request`.
 - Capacidade de CPU desconta a soma efetiva dos pisos compartilhados.
 

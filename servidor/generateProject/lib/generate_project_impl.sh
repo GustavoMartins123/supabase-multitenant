@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+umask 077
 
 MAIN_SHELL_PID="$BASHPID"
 
@@ -22,6 +23,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
 source "$SCRIPT_DIR/lib/resource_profiles.sh"
+source "$SCRIPT_DIR/lib/realtime_slots.sh"
 source "$SCRIPT_DIR/lib/tenant_reader_role.sh"
 
 TRANSACTION_DIR="$PROJECT_ROOT/.generate_transaction_$$"
@@ -58,12 +60,9 @@ database_exists() {
 
 drop_project_replication_slots() {
   local project="$1" raw_slot slot
-  local slots=(
-    "supabase_realtime_messages_replication_slot_$project"
-    "supabase_realtime_replication_slot_$project"
-  )
-  for raw_slot in "${slots[@]}"; do
-    slot="${raw_slot:0:63}"
+  local slots=()
+  mapfile -t slots < <(realtime_slot_candidates_unique "$project")
+  for slot in "${slots[@]}"; do
     docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
       "SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots WHERE slot_name = '$slot' AND active_pid IS NOT NULL;" \
       >/dev/null || return 1
@@ -375,7 +374,7 @@ realtime_tenant() {
     --arg uuid "$PROJECT_UUID" --arg secret "$JWT_SECRET_PROJETO" \
     --arg db "_supabase_$PROJECT_ID" --arg host "$POSTGRES_HOST" \
     --arg port "$POSTGRES_PORT" --arg password "$POSTGRES_PASSWORD" \
-    --arg slot "supabase_realtime_replication_slot_$PROJECT_ID" \
+    --arg slot "$(realtime_primary_slot "$PROJECT_ID")" \
     --argjson max_users "$MAX_CONCURRENT_USERS" \
     '{tenant:{name:$uuid,external_id:$uuid,jwt_secret:$secret,max_concurrent_users:$max_users,extensions:[{type:"postgres_cdc_rls",settings:{db_name:$db,db_host:$host,db_user:"supabase_admin",db_password:$password,db_port:$port,region:"us-west-1",poll_interval_ms:100,poll_max_record_bytes:1048576,ssl_enforced:false,slot_name:$slot}}]}}')
   response=$(docker exec realtime-dev.supabase-realtime curl -sS -w '\n%{http_code}' \

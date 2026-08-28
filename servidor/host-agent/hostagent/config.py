@@ -9,6 +9,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import db
 from .envfile import read_env_file
 
 
@@ -32,6 +33,7 @@ class AgentConfig:
     max_parallel_commands: int
     shutdown_grace: int
     schema_wait_timeout: float
+    db_command_timeout: float
 
 
 def _float_env(env: dict[str, str], key: str, default: float) -> float:
@@ -124,4 +126,7 @@ def load_config(root: str | Path) -> AgentConfig:
         max_parallel_commands=_int_env(env, "HOST_AGENT_MAX_PARALLEL_COMMANDS", 3),
         shutdown_grace=_int_env(env, "HOST_AGENT_SHUTDOWN_GRACE", 300),
         schema_wait_timeout=_float_env(env, "HOST_AGENT_SCHEMA_WAIT_TIMEOUT", 180.0),
+        db_command_timeout=_float_env(
+            env, "HOST_AGENT_DB_COMMAND_TIMEOUT", db.DEFAULT_COMMAND_TIMEOUT
+        ),
     )

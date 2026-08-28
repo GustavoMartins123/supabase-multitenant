@@ -2701,7 +2701,7 @@ async def _delete_project_impl(
             or containers_record["error_code"]
             or "falha ao remover containers"
         ]
-        raise ProjectDeletionError("; ".join(str(item) for item in container_errors))
+        errors.append("containers: " + "; ".join(str(item) for item in container_errors))
 
     await report(25, "remove_storage_tenant", "Removendo tenant e objetos do Storage...")
     storage_record = await agent_step(
@@ -2716,56 +2716,62 @@ async def _delete_project_impl(
             or storage_record["error_code"]
             or "falha ao remover tenant Storage"
         )
-        raise ProjectDeletionError(detail)
+        errors.append(f"storage: {detail}")
 
     await report(35, "remove_tenants", "Removendo tenants globais...")
-    supavisor_token = build_global_delete_token(tenant_external_id)
-    await terminate_supavisor_pools(project_name, supavisor_token)
-    await delete_realtime_tenant(
-        tenant_external_id,
-        build_realtime_delete_token(project_env),
-    )
-    await delete_supavisor_tenant(project_name, supavisor_token)
-
-    await asyncio.sleep(1)
+    try:
+        supavisor_token = build_global_delete_token(tenant_external_id)
+        await terminate_supavisor_pools(project_name, supavisor_token)
+        await delete_realtime_tenant(
+            tenant_external_id,
+            build_realtime_delete_token(project_env),
+        )
+        await delete_supavisor_tenant(project_name, supavisor_token)
+        await asyncio.sleep(1)
+    except Exception as exc:
+        errors.append(f"tenants globais: {exc}")
 
     await report(55, "clean_global_metadata", "Limpando metadata global...")
-    # Schemas _realtime/_supavisor, encerramento de backends alheios, slots de
-    # replicacao e DROP DATABASE estao fora do alcance de platform_app.
-    async with global_admin_connection() as conn:
-        deleted_ext = await conn.execute(
-            'DELETE FROM _realtime.extensions WHERE tenant_external_id = $1',
-            tenant_external_id,
-        )
-        deleted_tenant = await conn.execute(
-            'DELETE FROM _realtime.tenants WHERE external_id = $1',
-            tenant_external_id,
-        )
-        deleted_supavisor_users = await conn.execute(
-            'DELETE FROM _supavisor.users WHERE tenant_external_id = $1',
-            project_name,
-        )
-        deleted_supavisor_tenant = await conn.execute(
-            'DELETE FROM _supavisor.tenants WHERE external_id = $1',
-            project_name,
-        )
+    try:
+        async with global_admin_connection() as conn:
+            deleted_ext = await conn.execute(
+                'DELETE FROM _realtime.extensions WHERE tenant_external_id = $1',
+                tenant_external_id,
+            )
+            deleted_tenant = await conn.execute(
+                'DELETE FROM _realtime.tenants WHERE external_id = $1',
+                tenant_external_id,
+            )
+            deleted_supavisor_users = await conn.execute(
+                'DELETE FROM _supavisor.users WHERE tenant_external_id = $1',
+                project_name,
+            )
+            deleted_supavisor_tenant = await conn.execute(
+                'DELETE FROM _supavisor.tenants WHERE external_id = $1',
+                project_name,
+            )
 
-        print(
-            "Delete cleanup: "
-            f"realtime_extensions={deleted_ext}, "
-            f"realtime_tenants={deleted_tenant}, "
-            f"supavisor_users={deleted_supavisor_users}, "
-            f"supavisor_tenants={deleted_supavisor_tenant}"
-        )
+            print(
+                "Delete cleanup: "
+                f"realtime_extensions={deleted_ext}, "
+                f"realtime_tenants={deleted_tenant}, "
+                f"supavisor_users={deleted_supavisor_users}, "
+                f"supavisor_tenants={deleted_supavisor_tenant}"
+            )
+    except Exception as exc:
+        errors.append(f"metadata global: {exc}")
 
-        await report(70, "drop_database", "Removendo slots e database...")
-        await drain_database_connections(conn, db_name)
+    await report(70, "drop_database", "Removendo slots e database...")
+    try:
+        async with global_admin_connection() as conn:
+            await drain_database_connections(conn, db_name)
 
-        slot_errors = await drop_supabase_replication_slots(conn, project_name)
-        if slot_errors:
-            raise ProjectDeletionError("; ".join(slot_errors))
-
-        await drop_database_force(conn, db_name)
+            slot_errors = await drop_supabase_replication_slots(conn, project_name)
+            errors.extend(f"slots: {item}" for item in slot_errors)
+            if not slot_errors:
+                await drop_database_force(conn, db_name)
+    except Exception as exc:
+        errors.append(f"database: {exc}")
 
     await report(82, "remove_files", "Removendo arquivos do projeto...")
     files_record = await agent_step(
@@ -2780,7 +2786,14 @@ async def _delete_project_impl(
             or files_record["error_code"]
             or "erro desconhecido"
         )
-        raise ProjectDeletionError(f"Erro ao excluir diretórios: {detail}")
+        errors.append(f"arquivos: {detail}")
+
+    if errors:
+        raise ProjectDeletionError(
+            "Exclusao parcial de "
+            f"{project_name}; etapas com falha: {'; '.join(errors)}. "
+            "O registro permaneceu no control plane para nova tentativa."
+        )
 
     await report(
         90,

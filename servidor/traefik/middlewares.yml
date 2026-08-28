@@ -4,6 +4,7 @@ http:
       rule: "PathPrefix(`/admin`) || PathPrefix(`/wp-admin`) || PathPrefix(`/phpmyadmin`) || PathPrefix(`/cgi-bin`) || PathPrefix(`/.env`) || PathPrefix(`/.git`) || PathPrefix(`/xmlrpc`) || PathPrefix(`/server-status`) || PathPrefix(`/phpinfo.php`) || PathPrefix(`/actuator`) || PathPrefix(`/global-protect`) || PathPrefix(`/ssl-vpn`) || PathPrefix(`/+CSCOE+`) || PathPrefix(`/login.htm`) || PathPrefix(`/login.html`) || PathPrefix(`/login.jsp`) || PathPrefix(`/remote/login`) || PathPrefix(`/manage/account`) || PathPrefix(`/webpages/login`) || PathPrefix(`/doc/index.html`) || PathPrefix(`/owa/auth`) || PathPrefix(`/getcfg.php`) || PathPrefix(`/aws.sh`) || PathPrefix(`/vb.env`) || PathPrefix(`/env.py`)"
       entryPoints:
         - web
+        - websecure
       priority: 2000
       middlewares:
         - malicious-paths-chain
@@ -12,6 +13,7 @@ http:
       rule: "HeaderRegexp(`User-Agent`, `.*[Bb]ot.*|.*[Ss]canner.*|.*[Cc]rawler.*|.*[Ss]pider.*|.*[Cc]url.*|.*[Ww]get.*|.*ruby.*|.*perl.*|.*masscan.*|.*nmap.*|^-?$`)"
       entryPoints:
         - web
+        - websecure
       priority: 1900
       middlewares:
         - suspicious-paths-chain
@@ -20,6 +22,7 @@ http:
       rule: "HostRegexp(`{host:.+}`)"
       entryPoints:
         - web
+        - websecure
       priority: 100
       middlewares:
         - security-chain-enhanced
@@ -28,6 +31,7 @@ http:
       rule: "PathRegexp(`(?i)^/(?:[^/]+/)*(?:\\.env[^/]*|\\.git|\\.svn|\\.hg|\\.bzr|\\.htaccess|\\.htpasswd)(?:/|$|[.?~_-].*)`)"
       entryPoints:
         - web
+        - websecure
       priority: 5000
       middlewares:
         - hide-deny-headers

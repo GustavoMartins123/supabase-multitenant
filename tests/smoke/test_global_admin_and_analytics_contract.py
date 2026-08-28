@@ -88,8 +88,14 @@ class SupabaseAnalyticsContractTest(unittest.TestCase):
         nginx = (ROOT / "studio" / "nginx" / "nginx.conf").read_text(
             encoding="utf-8"
         )
-        self.assertIn("LOGFLARE_PUBLIC_ACCESS_TOKEN=$(generate_logflare_api_key)", setup)
-        self.assertIn("LOGFLARE_PRIVATE_ACCESS_TOKEN=$(generate_logflare_api_key)", setup)
+        self.assertIn(
+            "LOGFLARE_PUBLIC_ACCESS_TOKEN=$(env_secret servidor/.analytics.env LOGFLARE_PUBLIC_ACCESS_TOKEN generate_logflare_api_key)",
+            setup,
+        )
+        self.assertIn(
+            "LOGFLARE_PRIVATE_ACCESS_TOKEN=$(env_secret servidor/.analytics.env LOGFLARE_PRIVATE_ACCESS_TOKEN generate_logflare_api_key)",
+            setup,
+        )
         self.assertIn(".analytics.env", self.server_compose)
 
         studio_service = self.studio_compose[self.studio_compose.index("  studio:\n") :]

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+umask 077
 
 die() { echo "❌  $*" >&2; return 1; }
 say() { echo "ℹ️  $*"; }
@@ -28,6 +29,7 @@ PROJECTS_ROOT="$PROJECT_ROOT/projects"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
 source "$SCRIPT_DIR/lib/resource_profiles.sh"
+source "$SCRIPT_DIR/lib/realtime_slots.sh"
 
 OLD_DIR="$PROJECTS_ROOT/$OLD_NAME"
 NEW_DIR="$PROJECTS_ROOT/$NEW_NAME"
@@ -86,8 +88,8 @@ accepted_code() {
 }
 
 build_realtime_payload() {
-  local project_name="$1" slot_name="supabase_realtime_replication_slot_$1"
-  slot_name="${slot_name:0:63}"
+  local project_name="$1" slot_name
+  slot_name="$(realtime_primary_slot "$project_name")"
   jq -cn \
     --arg uuid "$PROJECT_UUID" --arg secret "$JWT_SECRET_PROJETO" \
     --arg db "_supabase_$project_name" --arg host "$POSTGRES_HOST" \
@@ -297,8 +299,8 @@ REALTIME_OLD_PAYLOAD=$(build_realtime_payload "$OLD_NAME")
 REALTIME_NEW_PAYLOAD=$(build_realtime_payload "$NEW_NAME")
 SUPAVISOR_OLD_PAYLOAD=$(build_supavisor_payload "$OLD_NAME")
 SUPAVISOR_NEW_PAYLOAD=$(build_supavisor_payload "$NEW_NAME")
-OLD_SLOT="supabase_realtime_replication_slot_${OLD_NAME}"; OLD_SLOT="${OLD_SLOT:0:63}"
-NEW_SLOT="supabase_realtime_replication_slot_${NEW_NAME}"; NEW_SLOT="${NEW_SLOT:0:63}"
+OLD_SLOT="$(realtime_primary_slot "$OLD_NAME")"
+NEW_SLOT="$(realtime_primary_slot "$NEW_NAME")"
 
 say "Parando stack antiga..."
 MUTATION_STARTED=1

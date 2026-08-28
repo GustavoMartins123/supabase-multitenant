@@ -124,7 +124,7 @@ def render(
     entry_points = ["websecure"] if enable_tls else ["web"]
 
     guard = {
-        "mode": settings.get("TRAEFIK_GUARD_PROJECT_MODE", "observe"),
+        "mode": settings.get("TRAEFIK_GUARD_PROJECT_MODE", "enforce"),
         "maxTrackedClients": settings.get("TRAEFIK_GUARD_MAX_TRACKED_CLIENTS", "10000"),
         "cleanupInterval": settings.get("TRAEFIK_GUARD_CLEANUP_INTERVAL", "5m"),
         "authThreshold": settings.get("TRAEFIK_GUARD_AUTH_THRESHOLD", "12"),

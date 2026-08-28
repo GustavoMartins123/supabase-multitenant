@@ -75,19 +75,12 @@ async function loadTenant(ref: string): Promise<TenantConfig | null> {
   const anon = parsed['ANON_KEY_PROJETO'] ?? ''
   const service = parsed['SERVICE_ROLE_KEY_PROJETO'] ?? ''
   const jwtSecret = parsed['JWT_SECRET_PROJETO'] ?? ''
-  const dbName = parsed['POSTGRES_DATABASE'] ?? `_supabase_${ref}`
   if (!anon || !service || !jwtSecret) return null
-
-  const dbUser = globalEnv['POSTGRES_USER'] ?? 'supabase_admin'
-  const dbHost = globalEnv['POSTGRES_HOST'] ?? ''
-  const dbPort = globalEnv['POSTGRES_PORT'] ?? '5432'
-  const dbPass = globalEnv['POSTGRES_PASSWORD'] ?? ''
 
   const env: Record<string, string> = {
     SUPABASE_URL: `http://supabase-nginx-${ref}:8080`,
     SUPABASE_ANON_KEY: anon,
     SUPABASE_SERVICE_ROLE_KEY: service,
-    SUPABASE_DB_URL: `postgresql://${dbUser}:${dbPass}@${dbHost}:${dbPort}/${dbName}`,
     JWT_SECRET: jwtSecret,
     PROJECT_REF: ref,
   }

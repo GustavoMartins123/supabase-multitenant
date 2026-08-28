@@ -11,7 +11,12 @@ if not slug or slug == "" then
 end
 
 local include_members = ngx.var.arg_include_members == "true"
-local mode = ngx.var.arg_mode or "owner"  -- "admin" ou "owner"
+local mode = ngx.var.arg_mode or "owner"
+local admin_groups = require("security.admin_groups")
+if mode == "admin" and not admin_groups.is_admin(ngx.var.authelia_groups or "") then
+    ngx.log(ngx.WARN, "[AVAILABLE] mode=admin solicitado por nao-admin para ", slug)
+    mode = "owner"
+end
 ngx.log(ngx.INFO, "[AVAILABLE][CONTENT] Request for project: ", slug, " include_members: ", tostring(include_members), " mode: ", mode)
 
 local remote_groups = ngx.req.get_headers()["Remote-Groups"]

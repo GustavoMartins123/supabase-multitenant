@@ -16,6 +16,10 @@ from typing import Any
 import asyncpg
 
 
+DEFAULT_COMMAND_TIMEOUT = 30.0
+INACTIVE_CONNECTION_LIFETIME = 60.0
+
+
 class HostAgentSchemaTimeout(RuntimeError):
     """O control plane ainda nao publicou o schema exigido pelo agent."""
 
@@ -84,8 +88,25 @@ async def wait_for_host_agent_schema(
         await asyncio.sleep(min(poll_interval, remaining))
 
 
-async def create_pool(dsn: str) -> asyncpg.Pool:
-    return await asyncpg.create_pool(dsn, min_size=1, max_size=5)
+async def create_pool(
+    dsn: str,
+    command_timeout: float = DEFAULT_COMMAND_TIMEOUT,
+) -> asyncpg.Pool:
+    """Pool com prazo em toda query e reciclagem agressiva de conexao ociosa.
+
+    Sem ``command_timeout`` uma query fica pendurada indefinidamente num
+    socket TCP morto (pooler reiniciado sob o agent) e os loops do agent
+    param de progredir em silencio. ``max_inactive_connection_lifetime``
+    fecha (via ``terminate()``, sem I/O) conexoes ociosas, de modo que o
+    pool nao carrega sockets obsoletos apos o pooler voltar.
+    """
+    return await asyncpg.create_pool(
+        dsn,
+        min_size=1,
+        max_size=5,
+        command_timeout=command_timeout,
+        max_inactive_connection_lifetime=INACTIVE_CONNECTION_LIFETIME,
+    )
 
 
 async def register_worker(pool: asyncpg.Pool, worker_id: str, hostname: str, pid: int, version: str) -> None:

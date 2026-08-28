@@ -46,7 +46,7 @@ the Internet.
 ## Schema update
 
 The Projects API applies the
-`20260812_opaque_api_key_optional_expiration.sql` migration when it detects
+`0003_opaque_api_key_optional_expiration.sql` migration when it detects
 the previous schema. It makes `rotation_interval_days` and
 `project_api_keys.expires_at` nullable, replaces the constraints, and adapts
 the expiration index. It does not run an `UPDATE` on keys: all existing rows
@@ -56,7 +56,7 @@ After deployment, confirm that the migration finished before allowing policy
 PATCH requests. A migration failure prevents canonical Projects API startup;
 do not change constraints manually to bypass the error.
 
-The deployment also applies `20260812_step_up_grants.sql`, which creates only
+The deployment also applies `0002_step_up_grants.sql`, which creates only
 the reauthentication-grant consumption ledger. It records actor, hashed
 session, action, target, and timestamps; it never stores a password, bearer
 token, or API-key plaintext. A failure of this migration prevents Projects API
@@ -229,7 +229,7 @@ expires** never authorizes reuse of the compromised version.
 ### Scheduled cutover
 
 Scheduling is done through the internal API
-`POST /internal/projects/{project}/api-key-slots/{slot_id}/rotation`; Studio
+`POST /api/projects/{project}/api-key-slots/{slot_id}/rotation`; Studio
 exposes only immediate cutover at this stage.
 
 1. send `activate_at` in ISO 8601 with a timezone;

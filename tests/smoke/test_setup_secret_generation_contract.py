@@ -42,7 +42,12 @@ class SetupSecretGenerationContract(unittest.TestCase):
     def test_setup_generates_every_identity_password(self) -> None:
         for key in self._identity_keys():
             with self.subTest(key=key):
-                self.assertIn(f"{key}=$(generate_key_authorizer_password)", self.setup)
+                self.assertIsNotNone(
+                    re.search(
+                        rf"{key}=\$\(env_secret \S+ {key} generate_key_authorizer_password\)",
+                        self.setup,
+                    )
+                )
                 self.assertIn(f'safe_sed "s|{key}=pass|{key}=${key}|g"', self.setup)
 
     def test_generated_values_match_the_format_validators(self) -> None:

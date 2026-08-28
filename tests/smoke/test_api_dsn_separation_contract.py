@@ -63,8 +63,14 @@ class ApiDsnSeparationContract(unittest.TestCase):
 
     def test_setup_generates_both_passwords(self) -> None:
         setup = (ROOT / "setup.sh").read_text()
-        self.assertIn("PLATFORM_APP_DB_PASSWORD=$(generate_key_authorizer_password)", setup)
-        self.assertIn("META_ADMIN_DB_PASSWORD=$(generate_key_authorizer_password)", setup)
+        self.assertIn(
+            "PLATFORM_APP_DB_PASSWORD=$(env_secret servidor/.env PLATFORM_APP_DB_PASSWORD generate_key_authorizer_password)",
+            setup,
+        )
+        self.assertIn(
+            "META_ADMIN_DB_PASSWORD=$(env_secret servidor/.env META_ADMIN_DB_PASSWORD generate_key_authorizer_password)",
+            setup,
+        )
 
 
 if __name__ == "__main__":

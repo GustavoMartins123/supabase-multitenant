@@ -124,11 +124,14 @@ class EdgeFunctionWorkersGetOnlyTheirTenantEnvTest(unittest.TestCase):
             "SUPABASE_URL",
             "SUPABASE_ANON_KEY",
             "SUPABASE_SERVICE_ROLE_KEY",
-            "SUPABASE_DB_URL",
             "JWT_SECRET",
             "PROJECT_REF",
         ):
             self.assertIn(f"{name}:", self.main)
+
+    def test_worker_env_never_carries_a_cluster_dsn(self) -> None:
+        self.assertNotIn("SUPABASE_DB_URL", self.main)
+        self.assertNotIn("POSTGRES_PASSWORD", self.main)
 
 
 if __name__ == "__main__":

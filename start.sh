@@ -37,7 +37,7 @@ require_host_agent_installation() {
 start_studio() {
     echo "Iniciando Studio, Authelia e OpenResty..."
     cd "$ROOT_DIR/studio"
-    docker compose -f docker-compose.yml -f docker-compose.capacity.yml up --build -d
+    docker compose -f docker-compose.yml -f docker-compose.capacity.yml up -d
     echo "Studio iniciado."
 }
 
@@ -107,6 +107,9 @@ platform_render_compose_override "$ROOT_DIR/servidor/.env" studio "$CAPACITY_STU
 platform_render_compose_override "$ROOT_DIR/servidor/.env" traefik "$CAPACITY_TRAEFIK" \
     || die "falha ao gerar os limites do compose do Traefik."
 platform_compute_capacity "$ROOT_DIR/servidor/.env" >/dev/null
+if [ -n "${PLATFORM_CAP_DEGRADED:-}" ]; then
+    echo "  AVISO: capacidade degradada - ${PLATFORM_CAP_DEGRADED}"
+fi
 echo "  referencia desta maquina: $PLATFORM_CAP_PROJECTS projetos no perfil $PLATFORM_CAP_PROFILE (apenas informativo; perfis sao tetos por projeto, nao reservas)"
 
 docker compose -f docker-compose.yml -f "$CAPACITY_SERVIDOR" --env-file .env up --build -d

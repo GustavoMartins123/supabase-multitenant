@@ -41,7 +41,7 @@ class BackendResourceProfileContract(unittest.TestCase):
         self.assertLess(
             source.index("def _normalize_settings_updates"),
             source.index("derived_rejected ="),
-        ).
+        )
         normalizer_end = source.index("def _normalize_setting_value")
         body = source[normalizer_end:]
         for key in (

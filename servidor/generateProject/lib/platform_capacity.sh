@@ -254,19 +254,17 @@ platform_service_baseline_source() {
 }
 
 platform_detect_disk_mib() {
-    local declared="${1:-auto}" path="${2:-.}"
+    local declared="${1:-auto}" path="${2:-.}" mib
     if [ "$declared" != "auto" ] && [ -n "$declared" ]; then
-        local lower="${declared,,}" number unit
-        number="${lower%[mgt]}"
-        unit="${lower#"$number"}"
-        [[ "$number" =~ ^[0-9]+$ ]] \
-            || { platform_capacity_error "PLATFORM_HOST_DISK invalido: $declared"; return 1; }
-        case "$unit" in
-            m) printf '%s' "$number" ;;
-            g) printf '%s' "$((number * 1024))" ;;
-            t) printf '%s' "$((number * 1024 * 1024))" ;;
+        case "${declared,,}" in
+            *m) mib="$(platform_size_to_mib "$declared" 1)" ;;
+            *g) mib="$(platform_size_to_mib "$declared" 1024)" ;;
+            *t) mib="$(platform_size_to_mib "$declared" 1048576)" ;;
             *) platform_capacity_error "PLATFORM_HOST_DISK precisa de sufixo m, g ou t"; return 1 ;;
         esac
+        [ -n "$mib" ] \
+            || { platform_capacity_error "PLATFORM_HOST_DISK invalido: $declared"; return 1; }
+        printf '%s' "$mib"
         return 0
     fi
     df -Pm "$path" 2>/dev/null | awk 'NR==2 {printf "%d", $4}'
@@ -367,19 +365,41 @@ platform_env_value() {
     sed -n "s/^$1=//p" "$2" 2>/dev/null | head -1 | tr -d '"'"'"''
 }
 
+platform_env_int() {
+    local raw="$1" default="$2" minimum="$3" maximum="$4"
+    raw="${raw//$'\r'/}"
+    raw="${raw//[[:space:]]/}"
+    if [[ "$raw" =~ ^[0-9]+$ ]] && [ "$raw" -ge "$minimum" ] && [ "$raw" -le "$maximum" ]; then
+        printf '%s' "$raw"
+    else
+        printf '%s' "$default"
+    fi
+}
+
+platform_size_to_mib() {
+    local declared="$1" multiplier="$2" lower number unit whole frac
+    lower="${declared,,}"
+    number="${lower%[mg]}"
+    unit="${lower#"$number"}"
+    [[ "$number" =~ ^([0-9]+)(\.([0-9]{1,2}))?$ ]] || return 1
+    whole="${BASH_REMATCH[1]}"
+    frac="${BASH_REMATCH[3]:-0}"
+    while [ "${#frac}" -lt 2 ]; do frac="${frac}0"; done
+    printf '%s' "$(( whole * multiplier + frac * multiplier / 100 ))"
+}
+
 platform_detect_memory_mib() {
     local declared="${1:-auto}"
     if [ "$declared" != "auto" ] && [ -n "$declared" ]; then
-        local lower="${declared,,}" number unit
-        number="${lower%[mg]}"
-        unit="${lower#"$number"}"
-        [[ "$number" =~ ^[0-9]+$ ]] \
-            || { platform_capacity_error "PLATFORM_HOST_MEMORY invalido: $declared"; return 1; }
-        case "$unit" in
-            m) printf '%s' "$number" ;;
-            g) printf '%s' "$((number * 1024))" ;;
+        local mib
+        case "${declared,,}" in
+            *m) mib="$(platform_size_to_mib "$declared" 1)" ;;
+            *g) mib="$(platform_size_to_mib "$declared" 1024)" ;;
             *) platform_capacity_error "PLATFORM_HOST_MEMORY precisa de sufixo m ou g"; return 1 ;;
         esac
+        [ -n "$mib" ] \
+            || { platform_capacity_error "PLATFORM_HOST_MEMORY invalido: $declared"; return 1; }
+        printf '%s' "$mib"
         return 0
     fi
     [ -r /proc/meminfo ] \
@@ -454,9 +474,7 @@ platform_compute_capacity() {
     work_mem_nodes="${work_mem_nodes:-2}"
     local active_percent
     active_percent="$(platform_env_value PLATFORM_ACTIVE_CONNECTION_PERCENT "$root_env")"
-    active_percent="${active_percent:-25}"
-    [[ "$active_percent" =~ ^[0-9]+$ ]] && [ "$active_percent" -ge 5 ] && [ "$active_percent" -le 100 ] \
-        || { platform_capacity_error "PLATFORM_ACTIVE_CONNECTION_PERCENT fora de 5..100: $active_percent"; return 1; }
+    active_percent="$(platform_env_int "$active_percent" 25 5 100)"
     PLATFORM_CAP_ACTIVE_PERCENT="$active_percent"
     local disk_declared disk_path
     disk_declared="$(platform_env_value PLATFORM_HOST_DISK "$root_env")"
@@ -466,11 +484,17 @@ platform_compute_capacity() {
     profile="${profile:-$(platform_env_value PROJECT_RESOURCE_PROFILE "$root_env")}"
     profile="${profile:-medium}"
 
-    [[ "$reserve" =~ ^[0-9]+$ ]] && [ "$reserve" -ge 10 ] && [ "$reserve" -le 60 ] \
-        || { platform_capacity_error "PLATFORM_RESERVE_PERCENT fora de 10..60: $reserve"; return 1; }
+    reserve="$(platform_env_int "$reserve" 25 10 60)"
 
     PLATFORM_CAP_RESERVE_PERCENT="$reserve"
-    PLATFORM_CAP_HOST_MIB="$(platform_detect_memory_mib "$host_declared")" || return 1
+    local degraded=""
+    PLATFORM_CAP_HOST_MIB="$(platform_detect_memory_mib "$host_declared" 2>/dev/null)" || true
+    case "$PLATFORM_CAP_HOST_MIB" in
+        ''|*[!0-9]*|0)
+            PLATFORM_CAP_HOST_MIB=4096
+            degraded="memoria do host nao detectada (assumido 4096 MiB)"
+            ;;
+    esac
     PLATFORM_CAP_HOST_CPUS="$(platform_detect_cpus "$cpus_declared")"
     PLATFORM_CAP_RESERVED_MIB=$(( PLATFORM_CAP_HOST_MIB * reserve / 100 ))
     PLATFORM_CAP_ALLOCATABLE_MIB=$(( PLATFORM_CAP_HOST_MIB - PLATFORM_CAP_RESERVED_MIB ))
@@ -505,13 +529,21 @@ platform_compute_capacity() {
     local projects=0 iteration budget_for_rest postgres_budget shared_total
     local capacity_by_memory previous=-1 shared_buffers_mib maintenance_mib
     local max_connections work_mem_mib available_for_sorts active_connections
+    degraded="${degraded:-}"
     for iteration in 1 2 3 4 5 6 7 8; do
         shared_total=$(( shared_base + shared_increment * projects ))
         budget_for_rest=$(( PLATFORM_CAP_ALLOCATABLE_MIB - shared_total ))
-        [ "$budget_for_rest" -gt 0 ] || {
-            platform_capacity_error "camada compartilhada nao cabe no host com folga de ${reserve}%"
-            return 1
-        }
+        if [ "$budget_for_rest" -le 0 ]; then
+            degraded="camada compartilhada nao cabe no alocavel (limites compartilhados proporcionalmente menores)"
+            shared_total=$(( PLATFORM_CAP_ALLOCATABLE_MIB * 60 / 100 ))
+            budget_for_rest=$(( PLATFORM_CAP_ALLOCATABLE_MIB - shared_total ))
+            postgres_budget=$(( budget_for_rest * postgres_share / 100 ))
+            capacity_by_memory=$(( (budget_for_rest - postgres_budget) / profile_mib ))
+            [ "$capacity_by_memory" -lt 0 ] && capacity_by_memory=0
+            projects="$capacity_by_memory"
+            [ "$projects" -lt 1 ] && projects=1
+            break
+        fi
         postgres_budget=$(( budget_for_rest * postgres_share / 100 ))
         capacity_by_memory=$(( (budget_for_rest - postgres_budget) / profile_mib ))
         [ "$capacity_by_memory" -lt 0 ] && capacity_by_memory=0
@@ -519,6 +551,10 @@ platform_compute_capacity() {
         [ "$projects" -eq "$previous" ] && break
         previous="$projects"
     done
+    [ "$postgres_budget" -gt 0 ] || {
+        degraded="${degraded:+$degraded; }orcamento do Postgres zerado (assumido 20% do alocavel)"
+        postgres_budget=$(( PLATFORM_CAP_ALLOCATABLE_MIB * 20 / 100 ))
+    }
 
     PLATFORM_CAP_POSTGRES_MIB="$postgres_budget"
     PLATFORM_CAP_SHARED_TOTAL_MIB="$shared_total"
@@ -530,10 +566,15 @@ platform_compute_capacity() {
     [ "$maintenance_mib" -lt 64 ] && maintenance_mib=64
 
     available_for_sorts=$(( postgres_budget - shared_buffers_mib - maintenance_mib * autovacuum ))
-    [ "$available_for_sorts" -gt 0 ] || {
-        platform_capacity_error "orcamento do Postgres nao cobre shared_buffers + manutencao"
-        return 1
-    }
+    if [ "$available_for_sorts" -le 0 ]; then
+        degraded="${degraded:+$degraded; }orcamento do Postgres comprimido (shared_buffers/manutencao minimos)"
+        shared_buffers_mib=$(( postgres_budget / 4 ))
+        [ "$shared_buffers_mib" -lt 32 ] && shared_buffers_mib=32
+        maintenance_mib=$(( postgres_budget / 16 ))
+        [ "$maintenance_mib" -lt 16 ] && maintenance_mib=16
+        available_for_sorts=$(( postgres_budget - shared_buffers_mib - maintenance_mib * autovacuum ))
+        [ "$available_for_sorts" -gt 0 ] || available_for_sorts=32
+    fi
 
     local parallel_per_gather=2
     [ "$projects" -gt 8 ] && parallel_per_gather=1
@@ -555,10 +596,18 @@ platform_compute_capacity() {
         projects=$(( projects - 1 ))
     done
     if [ "$projects" -eq 0 ]; then
-        platform_capacity_error \
-            "host de $(platform_format_mib "$PLATFORM_CAP_HOST_MIB") nao comporta nenhum projeto do perfil $profile com folga de ${reserve}%. Use um perfil menor, reduza PLATFORM_RESERVE_PERCENT ou aumente a maquina."
-        return 1
+        degraded="${degraded:+$degraded; }piso de work_mem nao alcancavel (iniciando com 1 projeto e work_mem minimo)"
+        projects=1
+        max_connections=$(( $(platform_control_connections "$projects") \
+            + PLATFORM_PG_SYSTEM_CONNECTIONS \
+            + projects * PLATFORM_PG_POOL_PER_PROJECT ))
+        active_connections=$(( max_connections * active_percent / 100 ))
+        [ "$active_connections" -lt 1 ] && active_connections=1
+        work_mem_mib=$(( available_for_sorts \
+            / (active_connections * allocations_per_connection) ))
+        [ "$work_mem_mib" -ge 1 ] || work_mem_mib=1
     fi
+    PLATFORM_CAP_DEGRADED="$degraded"
 
     PLATFORM_CAP_SHARED_BUFFERS_MIB="$shared_buffers_mib"
     PLATFORM_CAP_MAINTENANCE_MIB="$maintenance_mib"
@@ -607,9 +656,7 @@ platform_compute_capacity() {
 
     local cpu_max_oversubscribe
     cpu_max_oversubscribe="$(platform_env_value PLATFORM_CPU_OVERSUBSCRIBE_MAX "$root_env")"
-    cpu_max_oversubscribe="${cpu_max_oversubscribe:-100}"
-    [[ "$cpu_max_oversubscribe" =~ ^[0-9]+$ ]] && [ "$cpu_max_oversubscribe" -ge 100 ] \
-        || { platform_capacity_error "PLATFORM_CPU_OVERSUBSCRIBE_MAX precisa ser >= 100"; return 1; }
+    cpu_max_oversubscribe="$(platform_env_int "$cpu_max_oversubscribe" 100 100 1000000)"
     PLATFORM_CAP_CPU_OVERSUBSCRIBE_MAX="$cpu_max_oversubscribe"
 
     local implied_over=$(( PLATFORM_CAP_PROJECTS * profile_cpu_centi * 100 \
@@ -623,9 +670,13 @@ platform_compute_capacity() {
     fi
     PLATFORM_CAP_BY_CPU=$(( project_cpu_centi * cpu_max_oversubscribe / 100 / profile_cpu_centi ))
 
-    PLATFORM_CAP_DISK_MIB="$(platform_detect_disk_mib "$disk_declared" "$disk_path")"
-    [ -n "$PLATFORM_CAP_DISK_MIB" ] && [ "$PLATFORM_CAP_DISK_MIB" -gt 0 ] \
-        || { platform_capacity_error "nao foi possivel medir o disco; declare PLATFORM_HOST_DISK"; return 1; }
+    PLATFORM_CAP_DISK_MIB="$(platform_detect_disk_mib "$disk_declared" "$disk_path" 2>/dev/null)" || true
+    case "$PLATFORM_CAP_DISK_MIB" in
+        ''|*[!0-9]*|0)
+            PLATFORM_CAP_DISK_MIB=20480
+            degraded="${degraded:+$degraded; }disco nao detectado (assumido 20480 MiB)"
+            ;;
+    esac
     PLATFORM_CAP_DISK_RESERVED_MIB=$(( PLATFORM_CAP_DISK_MIB * reserve / 100 ))
     PLATFORM_CAP_DISK_ALLOCATABLE_MIB=$(( PLATFORM_CAP_DISK_MIB - PLATFORM_CAP_DISK_RESERVED_MIB ))
 
@@ -790,6 +841,10 @@ platform_capacity_report() {
 
     printf '\n  CAPACIDADE DA PLATAFORMA\n'
     printf '  %s\n\n' "$(printf '=%.0s' {1..66})"
+    if [ -n "${PLATFORM_CAP_DEGRADED:-}" ]; then
+        printf '  AVISO: modo degradado - %s\n' "$PLATFORM_CAP_DEGRADED"
+        printf '  A inicializacao continua; ajuste perfil/reserva ou aumente a maquina.\n\n'
+    fi
 
     printf '  Host\n'
     printf '    memoria total                %18s\n' "$(platform_format_mib "$PLATFORM_CAP_HOST_MIB")"

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+umask 077
 
 backup_progress() {
   printf 'HOST_AGENT_PROGRESS=backup:%s\n' "$1"

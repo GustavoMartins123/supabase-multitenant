@@ -80,15 +80,26 @@ class ReserveContract(unittest.TestCase):
                 )
                 self.assertLessEqual(total, int(values["PLATFORM_CAP_ALLOCATABLE_MIB"]))
 
-    def test_absurd_reserve_is_rejected(self) -> None:
+    def test_invalid_reserve_falls_back_to_default(self) -> None:
         for reserve in ("0", "5", "80", "abc"):
             env = BASE_ENV.replace(
                 "PLATFORM_RESERVE_PERCENT=20",
                 f"PLATFORM_RESERVE_PERCENT={reserve}",
             )
             with self.subTest(reserve=reserve):
-                with self.assertRaises(AssertionError):
-                    compute(env)
+                values = compute(env)
+                self.assertEqual(25, int(values["PLATFORM_CAP_RESERVE_PERCENT"]))
+
+    def test_reserve_tolerates_carriage_returns_and_spaces(self) -> None:
+        env = BASE_ENV.replace(
+            "PLATFORM_RESERVE_PERCENT=20", "PLATFORM_RESERVE_PERCENT=10\r"
+        )
+        values = compute(env)
+        self.assertEqual(10, int(values["PLATFORM_CAP_RESERVE_PERCENT"]))
+        env = BASE_ENV.replace(
+            "PLATFORM_RESERVE_PERCENT=20", "PLATFORM_RESERVE_PERCENT= 30 "
+        )
+        self.assertEqual(30, int(compute(env)["PLATFORM_CAP_RESERVE_PERCENT"]))
 
 
 class DerivationContract(unittest.TestCase):
@@ -148,11 +159,11 @@ class DerivationContract(unittest.TestCase):
             active, total * int(values["PLATFORM_CAP_ACTIVE_PERCENT"]) // 100
         )
 
-        for bad in ("0", "3", "150"):
+        for bad in ("0", "3", "150", "abc", "25\r"):
             env = BASE_ENV + f"PLATFORM_ACTIVE_CONNECTION_PERCENT={bad}\n"
             with self.subTest(percent=bad):
-                with self.assertRaises(AssertionError):
-                    compute(env)
+                values = compute(env)
+                self.assertEqual(25, int(values["PLATFORM_CAP_ACTIVE_PERCENT"]))
 
         strict = compute(BASE_ENV + "PLATFORM_ACTIVE_CONNECTION_PERCENT=100\n")
         self.assertLess(
@@ -216,9 +227,10 @@ class DerivationContract(unittest.TestCase):
         values = compute(self._small_host_env("12g"))
         self.assertGreaterEqual(int(values["PLATFORM_CAP_PROJECTS"]), 1)
 
-    def test_host_below_the_minimum_fails_closed(self) -> None:
-        with self.assertRaises(AssertionError):
-            compute(self._small_host_env("4g"))
+    def test_host_below_the_minimum_starts_degraded(self) -> None:
+        values = compute(self._small_host_env("4g"))
+        self.assertGreaterEqual(int(values["PLATFORM_CAP_PROJECTS"]), 1)
+        self.assertTrue(values.get("PLATFORM_CAP_DEGRADED"))
 
     def test_ceiling_grows_with_the_host(self) -> None:
         sizes = ["12g", "16g", "32g", "64g"]
@@ -229,7 +241,7 @@ class DerivationContract(unittest.TestCase):
         self.assertEqual(ceilings, sorted(ceilings))
         self.assertLess(ceilings[0], ceilings[-1])
 
-    def test_zero_capacity_fails_closed(self) -> None:
+    def test_zero_capacity_starts_degraded(self) -> None:
         env = (
             "PLATFORM_RESERVE_PERCENT=20\n"
             "PLATFORM_HOST_MEMORY=3g\n"
@@ -239,8 +251,11 @@ class DerivationContract(unittest.TestCase):
             "PROJECT_RES_LARGE_CPUS=3.00\n"
             "PROJECT_RES_LARGE_PIDS=768\n"
         )
-        with self.assertRaises(AssertionError):
-            compute(env)
+        values = compute(env)
+        self.assertGreaterEqual(int(values["PLATFORM_CAP_PROJECTS"]), 1)
+        self.assertTrue(values.get("PLATFORM_CAP_DEGRADED"))
+        self.assertGreater(int(values["PLATFORM_CAP_POSTGRES_MIB"]), 0)
+        self.assertGreater(int(values["PLATFORM_CAP_WORK_MEM_MIB"]), 0)
 
     def test_replication_slots_cover_every_project_with_slack(self) -> None:
         values = compute(BASE_ENV)

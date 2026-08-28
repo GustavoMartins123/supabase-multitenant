@@ -45,6 +45,19 @@ read_env_value() {
     grep -m1 "^${key}=" "$file" | cut -d= -f2-
 }
 
+env_secret() {
+    local file="$1"
+    local key="$2"
+    shift 2
+    local current
+    current=$(read_env_value "$file" "$key" 2>/dev/null || true)
+    if [ -n "$current" ] && [ "$current" != "pass" ]; then
+        printf '%s' "$current"
+    else
+        "$@"
+    fi
+}
+
 init_transaction() {
     mkdir -p "$TRANSACTION_DIR"
     print_status "Sistema de transação inicializado em $TRANSACTION_DIR"
@@ -357,12 +370,12 @@ main() {
     SUPABASE_NETWORK_SUBNET=$(read_env_value servidor/.env.example SUPABASE_NETWORK_SUBNET)
     print_status "Gerando chaves de criptografia e tokens..."
 
-    PROJECT_SECRETS_MASTER_KEY=$(generate_fernet_key)
-    STUDIO_SERVICE_KEY_ENCRYPTION_KEY=$(generate_fernet_key)
-    PG_META_CRYPTO_KEY=$(generate_hmac_secret)
-    SHARED_NGINX_HMAC_SECRET=$(generate_hmac_secret)
-    SHARED_INTERNAL_HMAC_SECRET=$(generate_hmac_secret)
-    HOST_AGENT_HMAC_SECRET=$(generate_hmac_secret)
+    PROJECT_SECRETS_MASTER_KEY=$(env_secret servidor/.env PROJECT_SECRETS_MASTER_KEY generate_fernet_key)
+    STUDIO_SERVICE_KEY_ENCRYPTION_KEY=$(env_secret servidor/.env STUDIO_SERVICE_KEY_ENCRYPTION_KEY generate_fernet_key)
+    PG_META_CRYPTO_KEY=$(env_secret servidor/.env PG_META_CRYPTO_KEY generate_hmac_secret)
+    SHARED_NGINX_HMAC_SECRET=$(env_secret servidor/.env NGINX_HMAC_SECRET generate_hmac_secret)
+    SHARED_INTERNAL_HMAC_SECRET=$(env_secret servidor/.env INTERNAL_HMAC_SECRET generate_hmac_secret)
+    HOST_AGENT_HMAC_SECRET=$(env_secret servidor/.env HOST_AGENT_HMAC_SECRET generate_hmac_secret)
 
     case "$topology_profile" in
         single-node)
@@ -410,40 +423,40 @@ main() {
         exit 1
     fi
 
-    DB_ENC_KEY=$(generate_db_enc_key)
-    VAULT_ENC_KEY=$(generate_vault_enc_key)
-    SECRET_KEY_BASE=$(generate_secret_key_base)
-    LOGFLARE_PUBLIC_ACCESS_TOKEN=$(generate_logflare_api_key)
-    LOGFLARE_PRIVATE_ACCESS_TOKEN=$(generate_logflare_api_key)
-    LOGFLARE_DB_ENCRYPTION_KEY=$(generate_logflare_encryption_key)
+    DB_ENC_KEY=$(env_secret servidor/.env DB_ENC_KEY generate_db_enc_key)
+    VAULT_ENC_KEY=$(env_secret servidor/.env VAULT_ENC_KEY generate_vault_enc_key)
+    SECRET_KEY_BASE=$(env_secret servidor/.env SECRET_KEY_BASE generate_secret_key_base)
+    LOGFLARE_PUBLIC_ACCESS_TOKEN=$(env_secret servidor/.analytics.env LOGFLARE_PUBLIC_ACCESS_TOKEN generate_logflare_api_key)
+    LOGFLARE_PRIVATE_ACCESS_TOKEN=$(env_secret servidor/.analytics.env LOGFLARE_PRIVATE_ACCESS_TOKEN generate_logflare_api_key)
+    LOGFLARE_DB_ENCRYPTION_KEY=$(env_secret servidor/.analytics.env LOGFLARE_DB_ENCRYPTION_KEY generate_logflare_encryption_key)
     if [[ "$LOGFLARE_PUBLIC_ACCESS_TOKEN" == "$LOGFLARE_PRIVATE_ACCESS_TOKEN" ]]; then
         print_error "Tokens publico e privado do Logflare nao podem ser iguais"
         return 1
     fi
-    PROJECT_DELETE_PASSWORD=$(generate_jwt_secret)
-    DASHBOARD_USER=$(generate_user_realtime)
-    DASHBOARD_PASSWORD=$(generate_realtime_dashboard_pass)
-    JWT_SECRET=$(generate_jwt_secret)
-    POSTGRES_PASSWORD=$(generate_postgres_password)
-    META_GUEST_PASSWORD=$(generate_postgres_password)
-    KEY_AUTHORIZER_DB_PASSWORD=$(generate_key_authorizer_password)
-    STORAGE_ADMIN_API_KEY=$(generate_storage_admin_key)
-    STORAGE_AUTH_ENCRYPTION_KEY=$(generate_storage_encryption_key)
+    PROJECT_DELETE_PASSWORD=$(env_secret servidor/.env PROJECT_DELETE_PASSWORD generate_jwt_secret)
+    DASHBOARD_USER=$(env_secret servidor/.env DASHBOARD_USER generate_user_realtime)
+    DASHBOARD_PASSWORD=$(env_secret servidor/.env DASHBOARD_PASSWORD generate_realtime_dashboard_pass)
+    JWT_SECRET=$(env_secret servidor/.env JWT_SECRET generate_jwt_secret)
+    POSTGRES_PASSWORD=$(env_secret servidor/.env POSTGRES_PASSWORD generate_postgres_password)
+    META_GUEST_PASSWORD=$(env_secret servidor/.env META_GUEST_PASSWORD generate_postgres_password)
+    KEY_AUTHORIZER_DB_PASSWORD=$(env_secret servidor/.env KEY_AUTHORIZER_DB_PASSWORD generate_key_authorizer_password)
+    STORAGE_ADMIN_API_KEY=$(env_secret servidor/.storage.env SERVER_ADMIN_API_KEYS generate_storage_admin_key)
+    STORAGE_AUTH_ENCRYPTION_KEY=$(env_secret servidor/.storage.env AUTH_ENCRYPTION_KEY generate_storage_encryption_key)
 
-    cp servidor/.env.example servidor/.env
-    cp servidor/.analytics.env.example servidor/.analytics.env
-    cp servidor/.storage.env.example servidor/.storage.env
+    if [ ! -f servidor/.env ]; then cp servidor/.env.example servidor/.env; fi
+    if [ ! -f servidor/.analytics.env ]; then cp servidor/.analytics.env.example servidor/.analytics.env; fi
+    if [ ! -f servidor/.storage.env ]; then cp servidor/.storage.env.example servidor/.storage.env; fi
 
     safe_sed "s|POSTGRES_PASSWORD=pass|POSTGRES_PASSWORD=$POSTGRES_PASSWORD|g" servidor/.env
     safe_sed "s|META_GUEST_PASSWORD=pass|META_GUEST_PASSWORD=$META_GUEST_PASSWORD|g" servidor/.env
     safe_sed "s|KEY_AUTHORIZER_DB_PASSWORD=pass|KEY_AUTHORIZER_DB_PASSWORD=$KEY_AUTHORIZER_DB_PASSWORD|g" servidor/.env
-    PLATFORM_READER_DB_PASSWORD=$(generate_key_authorizer_password)
+    PLATFORM_READER_DB_PASSWORD=$(env_secret servidor/.env PLATFORM_READER_DB_PASSWORD generate_key_authorizer_password)
     safe_sed "s|PLATFORM_READER_DB_PASSWORD=pass|PLATFORM_READER_DB_PASSWORD=$PLATFORM_READER_DB_PASSWORD|g" servidor/.env
-    PLATFORM_APP_DB_PASSWORD=$(generate_key_authorizer_password)
+    PLATFORM_APP_DB_PASSWORD=$(env_secret servidor/.env PLATFORM_APP_DB_PASSWORD generate_key_authorizer_password)
     safe_sed "s|PLATFORM_APP_DB_PASSWORD=pass|PLATFORM_APP_DB_PASSWORD=$PLATFORM_APP_DB_PASSWORD|g" servidor/.env
-    META_ADMIN_DB_PASSWORD=$(generate_key_authorizer_password)
+    META_ADMIN_DB_PASSWORD=$(env_secret servidor/.env META_ADMIN_DB_PASSWORD generate_key_authorizer_password)
     safe_sed "s|META_ADMIN_DB_PASSWORD=pass|META_ADMIN_DB_PASSWORD=$META_ADMIN_DB_PASSWORD|g" servidor/.env
-    HOST_AGENT_DB_PASSWORD=$(generate_key_authorizer_password)
+    HOST_AGENT_DB_PASSWORD=$(env_secret servidor/.env HOST_AGENT_DB_PASSWORD generate_key_authorizer_password)
     safe_sed "s|HOST_AGENT_DB_PASSWORD=pass|HOST_AGENT_DB_PASSWORD=$HOST_AGENT_DB_PASSWORD|g" servidor/.env
     safe_sed "s|DB_ENC_KEY=pass|DB_ENC_KEY=$DB_ENC_KEY|g" servidor/.env
     safe_sed "s|VAULT_ENC_KEY=pass|VAULT_ENC_KEY=$VAULT_ENC_KEY|g" servidor/.env
@@ -490,10 +503,10 @@ main() {
         exit 1
     fi
     
-    POSTGRES_NGINX_PASSWORD=$(generate_postgres_password)
+    POSTGRES_NGINX_PASSWORD=$(env_secret studio/.env POSTGRES_NGINX_PASSWORD generate_postgres_password)
 
-    cp studio/.env.example studio/.env
-    cp studio/.analytics.env.example studio/.analytics.env
+    if [ ! -f studio/.env ]; then cp studio/.env.example studio/.env; fi
+    if [ ! -f studio/.analytics.env ]; then cp studio/.analytics.env.example studio/.analytics.env; fi
     safe_sed "s|^STUDIO_SERVICE_KEY_ENCRYPTION_KEY=.*|STUDIO_SERVICE_KEY_ENCRYPTION_KEY=$STUDIO_SERVICE_KEY_ENCRYPTION_KEY|g" studio/.env
     safe_sed "s|^NGINX_HMAC_SECRET=.*|NGINX_HMAC_SECRET=$SHARED_NGINX_HMAC_SECRET|g" studio/.env
     safe_sed "s|^INTERNAL_HMAC_SECRET=.*|INTERNAL_HMAC_SECRET=$SHARED_INTERNAL_HMAC_SECRET|g" studio/.env

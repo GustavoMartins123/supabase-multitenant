@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+umask 077
 
 die() { echo "❌  $*" >&2; return 1; }
 
@@ -8,6 +9,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
 source "$SCRIPT_DIR/lib/resource_profiles.sh"
+source "$SCRIPT_DIR/lib/realtime_slots.sh"
 source "$SCRIPT_DIR/lib/tenant_reader_role.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/backup_core.sh"
@@ -103,10 +105,8 @@ cleanup_tmp() { rm -rf "$TMP_DIR"; }
 rollback() {
   local status="${1:-$?}"
   local rollback_failed=0 remaining tenant_status raw_slot slot
-  local -a replication_slots=(
-    "supabase_realtime_messages_replication_slot_$NEW_PROJECT"
-    "supabase_realtime_replication_slot_$NEW_PROJECT"
-  )
+  local -a replication_slots=()
+  mapfile -t replication_slots < <(realtime_slot_candidates_unique "$NEW_PROJECT")
   trap - ERR TERM INT HUP
   set +e
   echo "❌ Duplicacao falhou; limpando recursos do clone..." >&2
@@ -153,8 +153,7 @@ rollback() {
     docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
       "ALTER DATABASE \"$NEW_DB\" ALLOW_CONNECTIONS false;" \
       >/dev/null || rollback_failed=1
-    for raw_slot in "${replication_slots[@]}"; do
-      slot="${raw_slot:0:63}"
+    for slot in "${replication_slots[@]}"; do
       docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
         "SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots WHERE slot_name = '$slot' AND active_pid IS NOT NULL;" \
         >/dev/null || rollback_failed=1
@@ -421,7 +420,7 @@ fi
 realtime_payload=$(jq -cn \
   --arg uuid "$PROJECT_UUID" --arg secret "$JWT_SECRET_PROJETO" \
   --arg db "$NEW_DB" --arg host "$POSTGRES_HOST" --arg port "$POSTGRES_PORT" \
-  --arg password "$POSTGRES_PASSWORD" --arg slot "supabase_realtime_replication_slot_$NEW_PROJECT" \
+    --arg password "$POSTGRES_PASSWORD" --arg slot "$(realtime_primary_slot "$NEW_PROJECT")" \
   --argjson max_users "$MAX_CONCURRENT_USERS" \
   '{tenant:{name:$uuid,external_id:$uuid,jwt_secret:$secret,max_concurrent_users:$max_users,extensions:[{type:"postgres_cdc_rls",settings:{db_name:$db,db_host:$host,db_user:"supabase_admin",db_password:$password,db_port:$port,region:"us-west-1",poll_interval_ms:100,poll_max_record_bytes:1048576,ssl_enforced:false,slot_name:$slot}}]}}')
 CREATED_REALTIME=1

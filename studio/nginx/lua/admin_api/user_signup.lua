@@ -85,17 +85,6 @@ local function generate_argon2_hash(plain_password)
     return hash
 end
 
--- O hash e caro; faz fora do lock. Validacoes contra o snapshot atual do YAML
--- sao repetidas dentro do lock antes de qualquer escrita.
-local password_hash = generate_argon2_hash(password)
-user_data.password = nil
-password = nil
-if not password_hash then
-    ngx.status = ngx.HTTP_INTERNAL_SERVER_ERROR
-    ngx.say('{"error": "Failed to generate password hash"}')
-    return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
-end
-
 local function is_bootstrap_placeholder(existing_username)
     return existing_username == "__bootstrap_placeholder__"
 end
@@ -150,6 +139,37 @@ local function error_result(status, message)
         status = status,
         payload = { error = message }
     }
+end
+
+local pre_yaml = user_store.load()
+if pre_yaml and pre_yaml.users then
+    local pre_users = pre_yaml.users
+    if is_bootstrap_admin and users_have_admin(pre_users) then
+        return error_result(ngx.HTTP_FORBIDDEN, "Initial admin already exists")
+    end
+    local pre_username_lower = username:lower()
+    for existing_user, user_info in pairs(pre_users) do
+        if not is_bootstrap_placeholder(existing_user)
+            and existing_user:lower() == pre_username_lower
+        then
+            return error_result(ngx.HTTP_CONFLICT, "Username already exists")
+        end
+        if not is_bootstrap_placeholder(existing_user)
+            and user_info.email
+            and user_info.email:lower() == normalized_email
+        then
+            return error_result(ngx.HTTP_CONFLICT, "Email already exists")
+        end
+    end
+end
+
+local password_hash = generate_argon2_hash(password)
+user_data.password = nil
+password = nil
+if not password_hash then
+    ngx.status = ngx.HTTP_INTERNAL_SERVER_ERROR
+    ngx.say('{"error": "Failed to generate password hash"}')
+    return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
 end
 
 local result, mutation_err = user_store.with_lock(function()

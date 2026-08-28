@@ -46,6 +46,8 @@ from .security import PathConfinementError
 
 AGENT_VERSION = "1.0.0"
 LEASE_REAP_GRACE_SECONDS = 60
+DB_SHUTDOWN_TIMEOUT = 10.0
+LISTEN_CONNECT_TIMEOUT = 10.0
 
 logger = logging.getLogger("hostagent")
 
@@ -64,7 +66,9 @@ class HostAgent:
         assert set(COMMAND_HANDLERS) == HOST_AGENT_COMMANDS, (
             "registro de handlers divergente do protocolo"
         )
-        self.pool = await db.create_pool(self.config.dsn)
+        self.pool = await db.create_pool(
+            self.config.dsn, command_timeout=self.config.db_command_timeout
+        )
         await db.register_worker(
             self.pool,
             self.config.worker_id,
@@ -94,18 +98,51 @@ class HostAgent:
                 task.cancel()
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
-        if self._listen_conn is not None:
-            await self._listen_conn.close()
-        await db.mark_worker_stopped(self.pool, self.config.worker_id)
-        await self.pool.close()
+        await self._close_listener()
+        await self._close_pool()
         logger.info("host-agent finalizado")
+
+    async def _close_listener(self) -> None:
+        conn = self._listen_conn
+        self._listen_conn = None
+        if conn is None:
+            return
+        try:
+            await asyncio.wait_for(conn.close(), timeout=DB_SHUTDOWN_TIMEOUT)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("LISTEN nao fechou (%s); terminando conexao", exc)
+            conn.terminate()
+
+    async def _close_pool(self) -> None:
+        """Encerra o pool sem consumir o TimeoutStopSec do systemd.
+
+        Com o Postgres inacessivel, ``mark_worker_stopped`` e ``pool.close()``
+        bloqueiam em sockets mortos ate o systemd mandar SIGKILL; o prazo aqui
+        garante que o stop termina, deixando o lease expirar pelo reaper.
+        """
+        if self.pool is None:
+            return
+        try:
+            await asyncio.wait_for(
+                db.mark_worker_stopped(self.pool, self.config.worker_id),
+                timeout=DB_SHUTDOWN_TIMEOUT,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("nao foi possivel marcar o worker como parado: %s", exc)
+        try:
+            await asyncio.wait_for(self.pool.close(), timeout=DB_SHUTDOWN_TIMEOUT)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("pool nao fechou (%s); terminando conexoes", exc)
+            self.pool.terminate()
 
     def request_stop(self) -> None:
         self._stopping.set()
 
     async def _start_listener(self) -> None:
         try:
-            self._listen_conn = await asyncpg.connect(self.config.dsn)
+            self._listen_conn = await asyncpg.connect(
+                self.config.dsn, timeout=LISTEN_CONNECT_TIMEOUT
+            )
             await self._listen_conn.add_listener(
                 NOTIFY_CHANNEL, lambda *_args: self._wakeup.set()
             )
