@@ -211,6 +211,8 @@ RESERVED=(default select from where insert update delete table create drop join 
 for word in "${RESERVED[@]}"; do [[ "$NEW_NAME" != "$word" ]] || die "'$NEW_NAME' e palavra reservada"; done
 RESERVED_ROUTES=(admin phpmyadmin xmlrpc actuator)
 for word in "${RESERVED_ROUTES[@]}"; do [[ "$NEW_NAME" != "$word" ]] || die "'$NEW_NAME' e rota reservada"; done
+RESERVED_API=(internal)
+for word in "${RESERVED_API[@]}"; do [[ "$NEW_NAME" != "$word" ]] || die "'$NEW_NAME' e namespace reservado da API"; done
 for command in docker jq openssl python3 sed; do command -v "$command" >/dev/null || die "Comando obrigatorio ausente: $command"; done
 [[ -f "$PROJECT_ROOT/.env" ]] || die "Arquivo $PROJECT_ROOT/.env ausente"
 [[ -d "$OLD_DIR" ]] || die "Diretorio $OLD_DIR nao encontrado"

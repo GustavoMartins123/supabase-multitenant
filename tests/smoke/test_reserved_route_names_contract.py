@@ -54,8 +54,10 @@ class ReservedRouteNamesContractTest(unittest.TestCase):
         canonical_text = (
             ROOT / "servidor/api-internal/app/host_agent_protocol.py"
         ).read_text(encoding="utf-8")
-        combined = _extract_py_set(canonical_text, "RESERVED_WORDS") | _extract_py_set(
-            canonical_text, "RESERVED_ROUTE_NAMES"
+        combined = (
+            _extract_py_set(canonical_text, "RESERVED_WORDS")
+            | _extract_py_set(canonical_text, "RESERVED_ROUTE_NAMES")
+            | _extract_py_set(canonical_text, "RESERVED_API_NAMES")
         )
 
         api_validation = (
@@ -71,8 +73,10 @@ class ReservedRouteNamesContractTest(unittest.TestCase):
             "servidor/generateProject/lib/rename_project_impl.sh",
         ):
             text = (ROOT / relative).read_text(encoding="utf-8")
-            got = _extract_bash_array(text, "RESERVED") | _extract_bash_array(
-                text, "RESERVED_ROUTES"
+            got = (
+                _extract_bash_array(text, "RESERVED")
+                | _extract_bash_array(text, "RESERVED_ROUTES")
+                | _extract_bash_array(text, "RESERVED_API")
             )
             self.assertEqual(got, combined, relative)
 

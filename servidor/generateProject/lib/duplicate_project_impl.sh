@@ -49,6 +49,11 @@ for word in "${RESERVED_ROUTES[@]}"; do
   [[ "$NEW_PROJECT" != "$word" ]] || die "'$NEW_PROJECT' e rota reservada"
 done
 
+RESERVED_API=(internal)
+for word in "${RESERVED_API[@]}"; do
+  [[ "$NEW_PROJECT" != "$word" ]] || die "'$NEW_PROJECT' e namespace reservado da API"
+done
+
 set -a
 source "$PROJECT_ROOT/.env"
 set +a

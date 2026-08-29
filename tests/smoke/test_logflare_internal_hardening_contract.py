@@ -101,7 +101,11 @@ class LogflareInternalHardeningContractTest(unittest.TestCase):
         end = internal.index('@router.post("/api/projects/internal/users/sync")')
         block = internal[start:end]
 
-        self.assertIn('internal_service", None) != "studio-nginx"', block)
+        self.assertIn("_require_studio_nginx(request)", block)
+        self.assertIn(
+            'getattr(request.state, "internal_service", None) != "studio-nginx"',
+            internal,
+        )
         self.assertIn("_analytics_allowed_methods", block)
         self.assertIn('"x-api-key": LOGFLARE_PRIVATE_ACCESS_TOKEN', block)
         self.assertNotIn('request.headers.get("x-api-key")', block)

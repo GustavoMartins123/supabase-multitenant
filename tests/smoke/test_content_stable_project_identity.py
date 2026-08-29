@@ -21,10 +21,13 @@ class ContentStableProjectIdentityTests(unittest.TestCase):
         route = source[start:end]
 
         self.assertIn("_require_studio_nginx(request)", route)
+        # A identidade tem de vir do middleware HMAC (request.state), nunca do
+        # header cru enviado pelo caller.
         self.assertIn(
-            'request.headers.get("X-Internal-Service") != "studio-nginx"',
+            'getattr(request.state, "internal_service", None) != "studio-nginx"',
             source,
         )
+        self.assertNotIn('request.headers.get("X-Internal-Service")', source)
         self.assertIn('"SELECT id, name FROM projects WHERE name = $1"', route)
         self.assertIn("FROM project_name_history", route)
         self.assertIn('"project_id": str(project["id"])', route)

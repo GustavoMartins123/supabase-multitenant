@@ -13,7 +13,12 @@ local function append_query(target)
     return target
 end
 
-local function target_for_request(uri)
+local function is_internal_namespace(uri)
+    return uri == "/api/projects/internal"
+        or uri:find("^/api/projects/internal/") ~= nil
+end
+
+local function resolve_target(uri)
     if uri == "/api/projects" or uri:find("^/api/projects/") then
         return append_query(uri)
     end
@@ -72,6 +77,18 @@ local function target_for_request(uri)
     return nil
 end
 
+local function target_for_request(uri)
+    if is_internal_namespace(uri) then
+        return nil
+    end
+
+    local target = resolve_target(uri)
+    if target and is_internal_namespace((target:gsub("%?.*$", ""))) then
+        return nil
+    end
+    return target
+end
+
 local function clear_untrusted_internal_headers()
     for _, name in ipairs({
         "X-Internal-Version",
@@ -86,6 +103,8 @@ end
 
 function M.maybe_sign()
     local uri = ngx.var.uri or ""
+    clear_untrusted_internal_headers()
+
     local target = target_for_request(uri)
     if not target then
         return true
@@ -94,7 +113,6 @@ function M.maybe_sign()
         return nil, "STUDIO_GATEWAY_HMAC_SECRET is not configured"
     end
 
-    clear_untrusted_internal_headers()
     return internal_hmac.apply_current_request(SECRET, SERVICE, target)
 end
 

@@ -216,6 +216,11 @@ for word in "${RESERVED_ROUTES[@]}"; do
   [[ "$PROJECT_ID" != "$word" ]] || die "'$PROJECT_ID' é rota reservada."
 done
 
+RESERVED_API=(internal)
+for word in "${RESERVED_API[@]}"; do
+  [[ "$PROJECT_ID" != "$word" ]] || die "'$PROJECT_ID' é namespace reservado da API."
+done
+
 OUT_DIR="$PROJECT_ROOT/projects/$PROJECT_ID"
 
 docker_must_exist() {

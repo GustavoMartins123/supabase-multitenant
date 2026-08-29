@@ -45,6 +45,8 @@ def validate_project_id(raw: str) -> str:
         raise HTTPException(400, "Nome invalido: palavra reservada SQL.")
     if name in ProjectNameValidator.RESERVED_ROUTE_NAMES:
         raise HTTPException(400, "Nome invalido: rota reservada do Traefik.")
+    if name in ProjectNameValidator.RESERVED_API_NAMES:
+        raise HTTPException(400, "Nome invalido: namespace reservado da API.")
     return name
 
 

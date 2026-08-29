@@ -28,7 +28,8 @@ router = APIRouter(tags=["internal"])
 
 
 def _require_studio_nginx(request: Request) -> None:
-    if request.headers.get("X-Internal-Service") != "studio-nginx":
+    """Exige a identidade verificada pelo middleware HMAC, nunca o header cru."""
+    if getattr(request.state, "internal_service", None) != "studio-nginx":
         raise HTTPException(403, "Internal service access required")
 
 
@@ -55,8 +56,7 @@ async def proxy_global_analytics(
     analytics_path: str,
     request: Request,
 ):
-    if getattr(request.state, "internal_service", None) != "studio-nginx":
-        raise HTTPException(403, "Internal service access required")
+    _require_studio_nginx(request)
 
     allowed_methods = _analytics_allowed_methods(analytics_path)
     if allowed_methods is None:
@@ -125,8 +125,11 @@ async def proxy_global_analytics(
 @router.post("/api/projects/internal/users/sync")
 async def sync_user_identity(
     body: UserSyncPayload,
+    request: Request,
     pool=Depends(get_pool),
 ):
+    _require_studio_nginx(request)
+
     async with pool.acquire() as conn:
         async with conn.transaction():
             synced = await sync_user_record(

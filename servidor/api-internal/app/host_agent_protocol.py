@@ -108,6 +108,7 @@ class ProjectNameValidator:
         }
     )
     RESERVED_ROUTE_NAMES = frozenset({"admin", "phpmyadmin", "xmlrpc", "actuator"})
+    RESERVED_API_NAMES = frozenset({"internal"})
 
     @classmethod
     def is_valid(cls, raw: Any) -> bool:
@@ -117,6 +118,7 @@ class ProjectNameValidator:
             bool(cls.NAME_RE.fullmatch(raw))
             and raw not in cls.RESERVED_WORDS
             and raw not in cls.RESERVED_ROUTE_NAMES
+            and raw not in cls.RESERVED_API_NAMES
         )
 
 

@@ -65,6 +65,12 @@ def _reader_connection_params(
     )
 
 
+def _require_studio_nginx(request: Request) -> None:
+    """Exige a identidade verificada pelo middleware HMAC, nunca o header cru."""
+    if getattr(request.state, "internal_service", None) != "studio-nginx":
+        raise HTTPException(403, "Internal service access required")
+
+
 @router.get("/api/projects/internal/auth-users/{project_name}")
 async def list_project_auth_users(
     project_name: str,
@@ -74,6 +80,7 @@ async def list_project_auth_users(
     pool=Depends(get_pool),
 ) -> Response:
     project_name = validate_project_id(project_name)
+    _require_studio_nginx(request)
     auth_user = await resolve_authenticated_user(request, pool)
     async with pool.acquire() as conn:
         project_row = await get_project_row(conn, project_name)
@@ -166,6 +173,7 @@ async def proxy_project_auth_admin(
     request: Request,
 ) -> Response:
     project_name = validate_project_id(project_name)
+    _require_studio_nginx(request)
     if not gotrue_path.startswith(ALLOWED_GOTRUE_ROOTS):
         raise HTTPException(400, "operacao auth-admin nao suportada")
 

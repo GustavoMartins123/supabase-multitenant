@@ -65,6 +65,7 @@ class ProjectNameValidator {
     'phpmyadmin',
     'xmlrpc',
     'actuator',
+    'internal',
   };
 
   static String normalize(String input) {
