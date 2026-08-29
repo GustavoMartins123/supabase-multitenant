@@ -1,10 +1,7 @@
-"""Contratos das correcoes da auditoria de seguranca.
+"""Contratos das correcoes de seguranca.
 
-Cada teste amarra uma correcao especifica para que uma regressao futura falhe
-aqui em vez de reabrir a vulnerabilidade em silencio. Onde e possivel executar
-a logica de verdade (assinatura de tokens, normalizacao de caminho, resolucao
-de alvo do signer), o teste executa; onde a logica so existe dentro do nginx ou
-do OpenResty, o teste amarra o contrato no arquivo de configuracao.
+Executa a logica onde da (tokens, normalizacao de caminho); onde ela so existe
+dentro do nginx/OpenResty, amarra o contrato no arquivo de configuracao.
 """
 
 from __future__ import annotations
@@ -423,14 +420,8 @@ class SharedNonceStoreTest(unittest.TestCase):
 
 class StaticSecretsTest(unittest.TestCase):
     def test_studio_container_never_holds_the_real_logflare_token(self):
-        """O placeholder no compose e deliberado, nao um segredo estatico.
-
-        O hook Node do Studio remove authorization/x-api-key e assina com
-        STUDIO_ANALYTICS_HMAC_SECRET; o gateway valida e injeta o token privado
-        real do lado servidor. Dar o token de verdade ao container do Studio
-        seria uma regressao, nao uma correcao -- por isso o valor literal e o
-        ausencia de .analytics.env no servico sao amarrados aqui.
-        """
+        """O placeholder e deliberado: o hook Node assina com
+        STUDIO_ANALYTICS_HMAC_SECRET e o gateway injeta o token real."""
         compose = read(ROOT / "studio" / "docker-compose.yml")
         studio_service = compose[compose.index("\n  studio:\n") :]
         self.assertIn(
