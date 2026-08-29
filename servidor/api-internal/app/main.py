@@ -3449,6 +3449,21 @@ async def remove_member_by_ref(
         )
         old_role = old_member_row["role"] if old_member_row else None
 
+        if target_uuid is not None and target_uuid == project_row["owner_id"]:
+            raise HTTPException(
+                409,
+                "O dono do projeto nao pode ser removido; transfira a posse antes",
+            )
+
+        if old_role == "admin" and target_uuid != auth_user["db_user_id"]:
+            is_owner = project_row["owner_id"] == auth_user["db_user_id"]
+            if not is_owner and not auth_user["is_global_admin"]:
+                raise HTTPException(
+                    403,
+                    "Apenas o dono do projeto ou um administrador global pode "
+                    "remover outro admin",
+                )
+
         await conn.execute(
             """
             DELETE FROM project_members

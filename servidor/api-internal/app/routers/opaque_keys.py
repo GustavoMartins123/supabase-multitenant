@@ -874,6 +874,7 @@ async def activate_api_key_slot(
     project_name: str,
     slot_id: uuid.UUID,
     request: Request,
+    x_step_up_token: str | None = Header(None, alias="X-Step-Up-Token"),
     pool: asyncpg.Pool = Depends(get_pool),
 ):
     project_name = validate_project_id(project_name)
@@ -888,6 +889,34 @@ async def activate_api_key_slot(
                     auth_user=auth_user,
                     message="Project admin permission changed during API key activation",
                 )
+                slot_kind = await conn.fetchval(
+                    """
+                    SELECT kind
+                    FROM project_api_key_slots
+                    WHERE id = $1 AND project_id = $2
+                    FOR UPDATE
+                    """,
+                    slot_id,
+                    project["id"],
+                )
+                if slot_kind is None:
+                    raise OpaqueKeyLifecycleError(
+                        "active API key slot not found"
+                    )
+                if slot_kind == "secret":
+                    await consume_step_up_grant(
+                        conn,
+                        token=x_step_up_token,
+                        secret=NGINX_HMAC_SECRET,
+                        max_clock_skew_seconds=(
+                            USER_TOKEN_MAX_CLOCK_SKEW_SECONDS
+                        ),
+                        auth_user=auth_user,
+                        action="activate_secret_key",
+                        project_id=project["id"],
+                        project_ref=project_name,
+                        resource_id=str(slot_id),
+                    )
                 key_id, version = await activate_pending_key(
                     conn, project_id=project["id"], slot_id=slot_id
                 )

@@ -12,6 +12,7 @@ local ACTIONS = {
     reveal_secret_key = true,
     create_secret_key = true,
     rotate_secret_key = true,
+    activate_secret_key = true,
 }
 
 local function respond(status, message)
