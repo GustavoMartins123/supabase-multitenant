@@ -26,6 +26,13 @@ class AuthAdminProxyContract(unittest.TestCase):
         )
         self.assertIn("GOTRUE_INTERNAL_PORT = 9999", self.source)
 
+    def test_internal_url_strips_the_public_auth_prefix(self) -> None:
+        self.assertIn('GOTRUE_PUBLIC_PREFIX = "auth/v1/"', self.source)
+        self.assertIn(
+            "if internal_path.startswith(GOTRUE_PUBLIC_PREFIX):",
+            self.source,
+        )
+
     def test_proxy_uses_the_project_service_key(self) -> None:
         self.assertIn("SERVICE_ROLE_KEY_PROJETO", self.source)
         self.assertIn('headers["Authorization"] = f"Bearer {service_key}"', self.source)
@@ -63,6 +70,9 @@ class StudioAuthLuaContract(unittest.TestCase):
         self.assertIn("internal_hmac.apply_current_request", self.lua)
         self.assertIn("STUDIO_GATEWAY_HMAC_SECRET", self.lua)
         self.assertIn('"/api/projects/internal/auth-admin/"', self.lua)
+
+    def test_rewritten_uri_keeps_the_leading_slash(self) -> None:
+        self.assertIn('ngx.req.set_uri("/" .. gotrue_path, false)', self.lua)
 
     def test_signature_covers_path_and_query(self) -> None:
         self.assertIn("ngx.var.is_args", self.lua)

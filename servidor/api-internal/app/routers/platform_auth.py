@@ -21,6 +21,8 @@ from app.validation import validate_project_id
 router = APIRouter()
 
 GOTRUE_INTERNAL_PORT = 9999
+# O Nginx do projeto remove este prefixo antes do GoTrue; aqui a chamada e direta.
+GOTRUE_PUBLIC_PREFIX = "auth/v1/"
 ALLOWED_GOTRUE_ROOTS = (
     "auth/v1/admin/",
     "auth/v1/invite",
@@ -140,9 +142,12 @@ async def list_project_auth_users(
 
 
 def _gotrue_internal_url(project_name: str, gotrue_path: str) -> str:
+    internal_path = gotrue_path.lstrip("/")
+    if internal_path.startswith(GOTRUE_PUBLIC_PREFIX):
+        internal_path = internal_path[len(GOTRUE_PUBLIC_PREFIX):]
     return (
         f"http://supabase-auth-{project_name}:"
-        f"{GOTRUE_INTERNAL_PORT}/{gotrue_path.lstrip('/')}"
+        f"{GOTRUE_INTERNAL_PORT}/{internal_path}"
     )
 
 

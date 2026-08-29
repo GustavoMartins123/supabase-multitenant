@@ -48,7 +48,7 @@ if not gotrue_path then
     return ngx.exit(ngx.HTTP_NOT_IMPLEMENTED)
 end
 
-ngx.req.set_uri(gotrue_path, false)
+ngx.req.set_uri("/" .. gotrue_path, false)
 
 local server_domain = (os.getenv("SERVER_DOMAIN") or ""):gsub("/+$", "")
 local hmac_secret = os.getenv("STUDIO_GATEWAY_HMAC_SECRET")

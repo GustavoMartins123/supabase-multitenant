@@ -230,9 +230,10 @@ async def ensure_platform_meta_admin_role(
 ) -> None:
     """Provision the dedicated identity used exclusively by Postgres-Meta.
 
-    Membro de supabase_admin: direitos equivalentes dentro dos databases de
-    tenant, mas credencial propria, revogavel e auditavel — o superuser em si
-    nunca chega ao ambiente da Projects API.
+    Membro de supabase_admin: credencial propria, revogavel e auditavel — o
+    superuser em si nunca chega ao ambiente da Projects API. SUPERUSER e
+    atributo e nao trafega por membership, entao leitura e DDL em auth e
+    storage dependem das memberships e do BYPASSRLS abaixo.
     """
 
     if not HOST_AGENT_PASSWORD_RE.fullmatch(password):
@@ -251,18 +252,48 @@ async def ensure_platform_meta_admin_role(
                     ) THEN
                         CREATE ROLE platform_meta_admin WITH
                             LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT
-                            NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 20;
+                            NOREPLICATION BYPASSRLS CONNECTION LIMIT 20;
                     END IF;
                 END
                 $$;
 
                 ALTER ROLE platform_meta_admin WITH
                     LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT
-                    NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 20;
+                    NOREPLICATION BYPASSRLS CONNECTION LIMIT 20;
                 ALTER ROLE platform_meta_admin SET statement_timeout = '30s';
                 ALTER ROLE platform_meta_admin SET lock_timeout = '10s';
 
                 GRANT supabase_admin TO platform_meta_admin;
+
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM pg_roles WHERE rolname = 'dashboard_user'
+                    ) THEN
+                        GRANT dashboard_user TO platform_meta_admin;
+                    END IF;
+                END
+                $$;
+
+                GRANT pg_read_all_data TO platform_meta_admin;
+
+                DO $$
+                DECLARE
+                    service_admin text;
+                BEGIN
+                    FOREACH service_admin IN ARRAY ARRAY[
+                        'supabase_auth_admin', 'supabase_storage_admin'
+                    ] LOOP
+                        IF EXISTS (
+                            SELECT 1 FROM pg_roles WHERE rolname = service_admin
+                        ) THEN
+                            EXECUTE format(
+                                'GRANT %I TO platform_meta_admin', service_admin
+                            );
+                        END IF;
+                    END LOOP;
+                END
+                $$;
                 """
             )
             password_statement = await conn.fetchval(

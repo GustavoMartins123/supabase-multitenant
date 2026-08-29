@@ -26,6 +26,16 @@ class ApiDsnSeparationContract(unittest.TestCase):
         )
         self.assertIn("CONNECTION LIMIT 100", roles)
         self.assertIn("GRANT supabase_admin TO platform_meta_admin;", roles)
+        # SUPERUSER nao e herdado por membership: leitura e DDL de
+        # auth/storage vem destas memberships.
+        self.assertIn("GRANT dashboard_user TO platform_meta_admin;", roles)
+        self.assertIn("GRANT pg_read_all_data TO platform_meta_admin;", roles)
+        self.assertIn("'supabase_auth_admin', 'supabase_storage_admin'", roles)
+        self.assertIn("'GRANT %I TO platform_meta_admin', service_admin", roles)
+        self.assertIn(
+            "NOREPLICATION BYPASSRLS CONNECTION LIMIT 20;",
+            roles,
+        )
         self.assertIn("CONNECTION LIMIT 20", roles)
 
     def test_api_pool_runs_as_platform_app(self) -> None:
