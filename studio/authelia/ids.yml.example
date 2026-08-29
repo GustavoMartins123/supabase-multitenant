@@ -1,3 +1,4 @@
 # yaml-language-server: $schema=https://www.authelia.com/schemas/v4.40/json-schema/export.identifiers.json
+# Opaque identifiers exportados do storage do Authelia. O arquivo real (ids.yml)
 
 identifiers: []

@@ -1,8 +1,8 @@
 server:
   address: tcp://0.0.0.0:9091/auth
   tls:
-    certificate: /config/ssl/ca.pem
-    key:         /config/ssl/ca.key
+    certificate: /config/ssl/server.pem
+    key:         /config/ssl/server.key
 
 log:
   level: info

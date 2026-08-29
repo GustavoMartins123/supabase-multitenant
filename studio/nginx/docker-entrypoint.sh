@@ -57,8 +57,18 @@ if [ ! -s "$EXTRA_CA_CERT_FILE" ]; then
     exit 1
 fi
 
-if ! openssl x509 -in /config/ssl/ca.pem -noout -checkhost nginx >/dev/null 2>&1; then
-    echo "[entrypoint] ERRO: o certificado do Studio não contém o SAN DNS:nginx; regenere-o com tools/configure_studio_runtime.py --force" >&2
+if [ ! -s /config/ssl/server.pem ] || [ ! -s /config/ssl/server.key ]; then
+    echo "[entrypoint] ERRO: certificado de servidor ausente em /config/ssl/server.pem; rode tools/configure_studio_runtime.py --force" >&2
+    exit 1
+fi
+
+if [ -e /config/ssl/ca.key ]; then
+    echo "[entrypoint] ERRO: /config/ssl/ca.key ainda presente; rode tools/configure_studio_runtime.py --force para move-la para studio/secrets/authelia/" >&2
+    exit 1
+fi
+
+if ! openssl x509 -in /config/ssl/server.pem -noout -checkhost nginx >/dev/null 2>&1; then
+    echo "[entrypoint] ERRO: o certificado do Studio nao contem o SAN DNS:nginx; regenere-o com tools/configure_studio_runtime.py --force" >&2
     exit 1
 fi
 

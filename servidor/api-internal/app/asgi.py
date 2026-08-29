@@ -22,6 +22,7 @@ from app.main import (
     get_project_row,
     resolve_authenticated_user,
 )
+from app.routers.jobs_api import router as jobs_router
 from app.validation import validate_project_id
 
 PROJECTS_ROOT = pathlib.Path("/docker/projects").resolve()
@@ -88,6 +89,8 @@ async def get_project_s3_vector_keys(
         },
     )
 
+
+app.include_router(jobs_router)
 
 # Registrado por ultimo para ser a camada mais externa: valida a identidade
 # criptografica do caller antes das rotas e dependencias da aplicacao.
