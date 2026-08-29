@@ -33,6 +33,21 @@ def _require_studio_nginx(request: Request) -> None:
         raise HTTPException(403, "Internal service access required")
 
 
+_END_USER_CONTEXT_HEADERS = ("X-User-Token", "X-User-Groups", "Remote-Groups")
+
+
+def _reject_end_user_context(request: Request) -> None:
+    """Fecha a rota a qualquer requisicao originada em um usuario final.
+
+    A identidade HMAC sozinha nao distingue "o gateway chamando por si" de "o
+    gateway assinando o pedido de um usuario": esta checagem faz essa distincao
+    mesmo que o roteamento volte a expor o namespace /internal/.
+    """
+    for header in _END_USER_CONTEXT_HEADERS:
+        if request.headers.get(header):
+            raise HTTPException(403, "Internal service access required")
+
+
 def _analytics_allowed_methods(analytics_path: str) -> set[str] | None:
     safe_segment = r"[A-Za-z0-9_.-]{1,128}"
     if re.fullmatch(rf"api/endpoints/query/{safe_segment}", analytics_path):
@@ -129,6 +144,7 @@ async def sync_user_identity(
     pool=Depends(get_pool),
 ):
     _require_studio_nginx(request)
+    _reject_end_user_context(request)
 
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -153,6 +169,7 @@ async def get_content_project_identity(
     """Resolve o slug mutável para o UUID estável usado apenas por content."""
     project_name = validate_project_id(project_name)
     _require_studio_nginx(request)
+    _reject_end_user_context(request)
 
     async with pool.acquire() as conn:
         project = await conn.fetchrow(
@@ -267,6 +284,7 @@ async def enc_key(
 ):
     ref = validate_project_id(ref)
     _require_studio_nginx(request)
+    _reject_end_user_context(request)
 
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -302,6 +320,7 @@ async def project_key_version(
 ):
     ref = validate_project_id(ref)
     _require_studio_nginx(request)
+    _reject_end_user_context(request)
     version = await pool.fetchval(
         "SELECT project_key_version FROM projects WHERE name = $1",
         ref,

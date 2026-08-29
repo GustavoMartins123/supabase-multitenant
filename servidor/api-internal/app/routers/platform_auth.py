@@ -40,6 +40,12 @@ STRIPPED_REQUEST_HEADERS = frozenset(
         "x-internal-timestamp",
         "x-internal-nonce",
         "x-internal-signature",
+        "x-user-token",
+        "x-user-groups",
+        "x-user-username",
+        "x-user-display-name",
+        "remote-groups",
+        "remote-email",
     }
 )
 
@@ -148,13 +154,27 @@ async def list_project_auth_users(
     )
 
 
+def _normalized_gotrue_path(gotrue_path: str) -> str:
+    """Rejeita travessia antes da whitelist; httpx resolve ../ e sairia dela."""
+    candidate = gotrue_path.lstrip("/")
+    if "\\" in candidate:
+        raise HTTPException(400, "operacao auth-admin nao suportada")
+    for segment in candidate.split("/"):
+        if segment in {".", ".."}:
+            raise HTTPException(400, "operacao auth-admin nao suportada")
+    if not candidate.startswith(ALLOWED_GOTRUE_ROOTS):
+        raise HTTPException(400, "operacao auth-admin nao suportada")
+    return candidate
+
+
 def _gotrue_internal_url(project_name: str, gotrue_path: str) -> str:
     internal_path = gotrue_path.lstrip("/")
     if internal_path.startswith(GOTRUE_PUBLIC_PREFIX):
         internal_path = internal_path[len(GOTRUE_PUBLIC_PREFIX):]
+    # quote() impede que "?" ou "#" vindos de %3F/%23 no path virem query/fragment.
     return (
         f"http://supabase-auth-{project_name}:"
-        f"{GOTRUE_INTERNAL_PORT}/{internal_path}"
+        f"{GOTRUE_INTERNAL_PORT}/{urllib.parse.quote(internal_path, safe='/')}"
     )
 
 
@@ -171,11 +191,20 @@ async def proxy_project_auth_admin(
     project_name: str,
     gotrue_path: str,
     request: Request,
+    pool=Depends(get_pool),
 ) -> Response:
     project_name = validate_project_id(project_name)
     _require_studio_nginx(request)
-    if not gotrue_path.startswith(ALLOWED_GOTRUE_ROOTS):
-        raise HTTPException(400, "operacao auth-admin nao suportada")
+    gotrue_path = _normalized_gotrue_path(gotrue_path)
+
+    auth_user = await resolve_authenticated_user(request, pool)
+    async with pool.acquire() as conn:
+        project_row = await get_project_row(conn, project_name)
+        await ensure_project_admin_access(
+            conn,
+            project_id=project_row["id"],
+            auth_user=auth_user,
+        )
 
     service_key = _project_service_key(project_name)
     if not service_key:
