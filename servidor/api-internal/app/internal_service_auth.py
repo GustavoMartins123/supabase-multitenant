@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
 
+from app.database import get_pool
 from app.internal_hmac import (
     INTERNAL_HMAC_VERSION,
     request_target_from_scope,
@@ -32,14 +33,74 @@ _SIGNATURE_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _nonce_lock = asyncio.Lock()
 _nonce_expirations: OrderedDict[str, float] = OrderedDict()
 _MAX_TRACKED_NONCES = 20_000
+_PURGE_INTERVAL_SECONDS = 60.0
+_last_purge_at = 0.0
 
 
 def _json_error(status_code: int, detail: str) -> JSONResponse:
     return JSONResponse(status_code=status_code, content={"detail": detail})
 
 
+async def _claim_nonce_in_database(service: str, nonce: str, *, ttl: int) -> bool:
+    """Reivindica o nonce no Postgres do control plane.
+
+    A PRIMARY KEY (service, nonce) torna a reivindicacao atomica entre todos os
+    workers e replicas -- o cache em memoria sozinho so era seguro porque hoje
+    roda um unico worker uvicorn. Postgres ja e dependencia dura da API (toda
+    requisicao autenticada consulta users), entao isso nao adiciona infra nova.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        claimed = await conn.fetchval(
+            """
+            INSERT INTO internal_hmac_nonces(service, nonce, expires_at)
+            VALUES($1, $2, now() + ($3 || ' seconds')::interval)
+            ON CONFLICT (service, nonce) DO UPDATE
+                SET expires_at = EXCLUDED.expires_at
+                WHERE internal_hmac_nonces.expires_at <= now()
+            RETURNING nonce
+            """,
+            service,
+            nonce.lower(),
+            str(int(ttl)),
+        )
+    return claimed is not None
+
+
+async def _purge_expired_nonces() -> None:
+    """Limpeza oportunista; falhar aqui nunca pode derrubar a requisicao."""
+    global _last_purge_at
+    now = time.monotonic()
+    if now - _last_purge_at < _PURGE_INTERVAL_SECONDS:
+        return
+    _last_purge_at = now
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM internal_hmac_nonces WHERE expires_at <= now()"
+            )
+    except Exception:  # noqa: BLE001 - limpeza e best-effort
+        pass
+
+
 async def _claim_nonce(service: str, nonce: str, *, now: float) -> bool:
-    """Registra nonce por toda a janela na qual o timestamp seria aceito."""
+    """Registra nonce por toda a janela na qual o timestamp seria aceito.
+
+    O cache em processo continua como primeiro filtro barato: ele rejeita o
+    replay imediato sem ida ao banco. A decisao de aceitar, porem, e sempre do
+    Postgres, que e compartilhado.
+    """
+    ttl = INTERNAL_HMAC_MAX_SKEW_SECONDS * 2 + 5
+    if not await _claim_nonce_in_memory(service, nonce, now=now):
+        return False
+    if not await _claim_nonce_in_database(service, nonce, ttl=ttl):
+        return False
+    await _purge_expired_nonces()
+    return True
+
+
+async def _claim_nonce_in_memory(service: str, nonce: str, *, now: float) -> bool:
     ttl = INTERNAL_HMAC_MAX_SKEW_SECONDS * 2 + 5
     cache_key = f"{service}:{nonce.lower()}"
     async with _nonce_lock:
@@ -105,7 +166,11 @@ async def authenticate_internal_request(request: Request) -> JSONResponse | None
     ):
         return _json_error(403, "Forbidden: Invalid internal HMAC signature")
 
-    if not await _claim_nonce(service, nonce, now=float(now)):
+    try:
+        claimed = await _claim_nonce(service, nonce, now=float(now))
+    except Exception:  # noqa: BLE001
+        return _json_error(503, "Internal replay protection is unavailable")
+    if not claimed:
         return _json_error(401, "Unauthorized: Replayed internal HMAC signature")
 
     request.state.internal_service = service
