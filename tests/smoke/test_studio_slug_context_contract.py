@@ -154,7 +154,7 @@ class StudioSlugContextContractTest(unittest.TestCase):
         self.assertIn(full_sha, studio_dockerfile)
         self.assertIn("git -C /src apply --check", studio_dockerfile)
         self.assertIn("context: ./studio-slug", compose)
-        self.assertIn("STUDIO_SLUG_IMAGE", compose)
+        self.assertIn("ghcr.io/gustavomartins123/multitenant-studio:", compose)
         self.assertIn("studio_compat/project_context_response.lua", nginx)
         self.assertIn("X-Studio-Project-Ref", studio_patch)
         self.assertIn(
