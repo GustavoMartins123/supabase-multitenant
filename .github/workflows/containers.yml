@@ -1,0 +1,142 @@
+name: Containers and Compose
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/containers.yml"
+      - "servidor/**"
+      - "studio/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/containers.yml"
+      - "servidor/**"
+      - "studio/**"
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: containers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compose:
+    name: Compose and nginx -t
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Prepare ephemeral configuration
+        shell: bash
+        run: |
+          cp servidor/.env.example servidor/.env
+          cp servidor/.analytics.env.example servidor/.analytics.env
+          cp studio/.env.example studio/.env
+          cp studio/.analytics.env.example studio/.analytics.env
+
+      - name: Validate Compose models
+        shell: bash
+        run: |
+          docker compose --env-file servidor/.env -f servidor/docker-compose.yml -f servidor/docker-compose.single-node.yml config --quiet
+          docker compose --env-file servidor/.env -f servidor/docker-compose.yml -f servidor/docker-compose.split-node.yml config --quiet
+          docker compose --env-file servidor/.env -f servidor/docker-compose-api.yml -f servidor/docker-compose.single-node.yml config --quiet
+          docker compose --env-file studio/.env -f studio/docker-compose.yml config --quiet
+          docker compose --env-file servidor/.env -f servidor/traefik/docker-compose.yml config --quiet
+
+      - name: Build gateway for nginx validation
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: studio
+          file: studio/Dockerfile
+          load: true
+          push: false
+          tags: supabase-multitenant-studio-ci:local
+
+      - name: Validate OpenResty configuration
+        shell: bash
+        run: |
+          mkdir -p .ci-certs
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -subj "/CN=Studio CI CA" \
+            -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
+            -addext "keyUsage=critical,keyCertSign,cRLSign" \
+            -keyout .ci-certs/ca.key -out .ci-certs/ca.pem
+          openssl req -new -newkey rsa:2048 -nodes \
+            -subj "/CN=nginx" \
+            -keyout .ci-certs/server.key -out .ci-certs/server.csr
+          {
+            echo 'basicConstraints=critical,CA:FALSE'
+            echo 'keyUsage=critical,digitalSignature,keyEncipherment'
+            echo 'extendedKeyUsage=serverAuth'
+            echo 'subjectAltName=DNS:nginx'
+          } > .ci-certs/server.ext
+          openssl x509 -req -in .ci-certs/server.csr \
+            -CA .ci-certs/ca.pem -CAkey .ci-certs/ca.key -CAcreateserial \
+            -days 1 -sha256 -extfile .ci-certs/server.ext \
+            -out .ci-certs/server.pem
+          cat /etc/ssl/certs/ca-certificates.crt .ci-certs/ca.pem > .ci-certs/studio-ca-bundle.pem
+          docker run --rm \
+            --entrypoint /usr/local/openresty/bin/openresty \
+            --add-host studio:127.0.0.1 \
+            -e SERVER_DOMAIN=https://nginx \
+            -e BACKEND_PROTO=https \
+            -e SERVICE_KEY_VERIFY_TLS=true \
+            -e NGINX_SHARED_TOKEN=ci-shared-token \
+            -e NGINX_HMAC_SECRET=ci-hmac-secret \
+            -e STUDIO_SERVICE_KEY_ENCRYPTION_KEY=MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA= \
+            -v "$PWD/.ci-certs/ca.pem:/config/ssl/ca.pem:ro" \
+            -v "$PWD/.ci-certs/server.pem:/config/ssl/server.pem:ro" \
+            -v "$PWD/.ci-certs/server.key:/config/ssl/server.key:ro" \
+            -v "$PWD/.ci-certs/studio-ca-bundle.pem:/var/run/studio-ca-bundle.pem:ro" \
+            supabase-multitenant-studio-ci:local -t
+
+  images:
+    name: Build ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: projects-api
+            context: servidor
+            file: servidor/api-internal/Dockerfile
+          - name: postgres
+            context: servidor/volumes/db
+            file: servidor/volumes/db/Dockerfile
+          - name: realtime
+            context: servidor
+            file: servidor/volumes/realtime/Dockerfile
+          - name: analytics
+            context: servidor
+            file: servidor/volumes/analytics/Dockerfile
+          - name: geoip
+            context: servidor/traefik/geoip
+            file: servidor/traefik/geoip/Dockerfile
+          - name: studio-postgres
+            context: studio/postgres
+            file: studio/postgres/Dockerfile
+          - name: patched-studio
+            context: studio/studio-slug
+            file: studio/studio-slug/Dockerfile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

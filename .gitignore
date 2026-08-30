@@ -8,6 +8,16 @@ servidor/docker/volumes/db/data/*
 studio/.env
 studio/.analytics.env
 studio/authelia/profile-pictures/
+studio/authelia/users_database.yml
+studio/authelia/ids.yml
+studio/authelia/notifications.txt
+studio/authelia/db.sqlite3
+studio/authelia/db.sqlite3-shm
+studio/authelia/db.sqlite3-wal
+studio/authelia/db.sqlite3-journal
+studio/authelia/configuration.runtime.yml
+studio/authelia/ssl/
+studio/secrets/
 servidor/.env
 servidor/.analytics.env
 servidor/.storage.env

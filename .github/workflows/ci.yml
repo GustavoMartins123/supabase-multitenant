@@ -18,6 +18,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           [ -f requirements-dev.txt ] && python -m pip install -r requirements-dev.txt || true
+          python -m pip install -r servidor/api-internal/requirements.txt
       - name: Sintaxe Python
         run: python -m compileall -q servidor/api-internal/app servidor/host-agent/hostagent tools
       - name: Nomes indefinidos (NameError em runtime)

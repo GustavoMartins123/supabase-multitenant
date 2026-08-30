@@ -1,0 +1,44 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: pub
+    directory: /studio/seletor_de_projetos
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: pip
+    directories:
+      - /
+      - /servidor/api-internal
+      - /servidor/host-agent
+      - /servidor/key-authorizer
+      - /servidor/traefik/geoip
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: docker
+    directories:
+      - /servidor/api-internal
+      - /servidor/generateProject
+      - /servidor/key-authorizer
+      - /servidor/traefik/geoip
+      - /servidor/volumes/analytics
+      - /servidor/volumes/db
+      - /servidor/volumes/realtime
+      - /studio
+      - /studio/postgres
+      - /studio/studio-slug
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      base-images:
+        patterns:
+          - "*"
