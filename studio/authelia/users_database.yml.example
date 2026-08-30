@@ -3,7 +3,7 @@
 # runtime: o Authelia roda com watch/write e grava hashes Argon2 reais aqui
 #
 # Para criar um usuario real:
-#   docker run --rm -it "$AUTHELIA_IMAGE" authelia crypto hash generate argon2
+#   docker run --rm -it authelia/authelia:4.39.20 authelia crypto hash generate argon2
 # e substitua o bloco abaixo pelo seu usuario.
 users:
   __bootstrap_placeholder__:

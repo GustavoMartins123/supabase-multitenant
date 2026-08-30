@@ -7,7 +7,7 @@ x-vector-logging: &vector-logging
 
 services:
   traefik-config-watcher:
-    image: ${TRAEFIK_CONFIG_IMAGE}
+    image: python:3.12-alpine
     container_name: supabase-traefik-config-watcher
     restart: unless-stopped
     logging: *vector-logging
@@ -50,7 +50,7 @@ services:
       retries: 5
 
   traefik:
-    image: ${TRAEFIK_IMAGE}
+    image: traefik:v3.7.6
     working_dir: /
     ports:
       - "${TRAEFIK_HTTP_PORT}:80"
@@ -83,7 +83,7 @@ services:
     logging: *vector-logging
 
   deny-service:
-    image: ${TRAEFIK_DENY_IMAGE}
+    image: nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim
     container_name: traefik-deny-service
     networks:
       - rede-supabase

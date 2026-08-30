@@ -52,7 +52,7 @@ class SupabaseAnalyticsContractTest(unittest.TestCase):
     def test_analytics_uses_pinned_source_build_and_private_network(self) -> None:
         self.assertIn("dockerfile: volumes/analytics/Dockerfile", self.server_compose)
         self.assertIn("ARG LOGFLARE_VER=v1.47.1", self.analytics_dockerfile)
-        self.assertIn("image: ${VECTOR_IMAGE}", self.server_compose)
+        self.assertIn("image: timberio/vector:0.53.0-alpine", self.server_compose)
         analytics_block = self.server_compose.split("  analytics:", 1)[1].split(
             "\n  vector:", 1
         )[0]

@@ -25,6 +25,8 @@ updates:
 
   - package-ecosystem: docker
     directories:
+      - /servidor
+      - /servidor/traefik
       - /servidor/api-internal
       - /servidor/generateProject
       - /servidor/key-authorizer

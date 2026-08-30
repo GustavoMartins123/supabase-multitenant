@@ -203,7 +203,7 @@ services:
 
   supavisor:
     container_name: supabase-pooler
-    image: ${POOLER_IMAGE}
+    image: supabase/supavisor:2.9.7
     restart: unless-stopped
     logging: *vector-logging
     networks:
@@ -256,7 +256,7 @@ services:
         && /app/bin/server
   functions:
     container_name: supabase-edge-functions
-    image: ${FUNCTIONS_IMAGE}
+    image: supabase/edge-runtime:v1.74.2
     restart: unless-stopped
     logging: *vector-logging
     networks:
@@ -444,7 +444,7 @@ services:
       POSTGRES_BACKEND_SCHEMA: _analytics
 
   vector:
-    image: ${VECTOR_IMAGE}
+    image: timberio/vector:0.53.0-alpine
     container_name: supabase-vector-global
     restart: unless-stopped
     volumes:

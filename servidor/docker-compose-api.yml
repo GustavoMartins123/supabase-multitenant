@@ -111,7 +111,7 @@ services:
       - ./.env:/docker/.env:ro
   postgres-meta-global:
     container_name: postgres-meta-global
-    image: ${PG_META_IMAGE}
+    image: supabase/postgres-meta:v0.96.1
     restart: unless-stopped
     logging: *vector-logging
     networks: [rede-supabase]
