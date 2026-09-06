@@ -293,7 +293,15 @@ def check_network(report: Report, values: dict[str, str], origin: str) -> None:
                 f"{origin}: SUPABASE_NETWORK_IP_RANGE invalido: {ip_range_raw!r}"
             )
         else:
-            if not ip_range.subnet_of(subnet):
+            if isinstance(subnet, ipaddress.IPv4Network):
+                contained = isinstance(
+                    ip_range, ipaddress.IPv4Network
+                ) and ip_range.subnet_of(subnet)
+            else:
+                contained = isinstance(
+                    ip_range, ipaddress.IPv6Network
+                ) and ip_range.subnet_of(subnet)
+            if not contained:
                 report.error(
                     f"{origin}: ip-range {ip_range} fora da subnet {subnet}"
                 )

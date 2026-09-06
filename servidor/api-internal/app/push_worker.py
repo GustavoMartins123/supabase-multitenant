@@ -68,6 +68,7 @@ if not API_URL:
     raise RuntimeError("Missing PUSH_API_URL environment variable")
 if not INTERNAL_HMAC_SECRET:
     raise RuntimeError("Missing INTERNAL_HMAC_SECRET environment variable")
+assert BASE_DSN and API_URL and INTERNAL_HMAC_SECRET
 
 PUSH_API_SCHEME = urlparse(API_URL).scheme.lower()
 if PUSH_API_SCHEME not in ("http", "https"):
@@ -154,6 +155,7 @@ async def send_to_api(
         "idempotency_key": delivery_key,
     }
     request_body = json.dumps(payload).encode("utf-8")
+    assert API_URL
     headers = {
         "Content-Type": "application/json",
         **build_internal_hmac_headers("POST", API_URL, request_body),
@@ -500,6 +502,7 @@ async def process_notification(
 
 async def poll_tenant(db_name: str, connection_slots: asyncio.Semaphore) -> None:
     project_name = db_name.removeprefix("_supabase_")
+    assert BASE_DSN
     tenant_dsn = get_tenant_dsn(BASE_DSN, db_name)
 
     async with connection_slots:

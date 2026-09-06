@@ -160,9 +160,11 @@ class HostAgent:
 
     async def _lease_reaper_loop(self) -> None:
         """Marca como failed comandos cujo lease expirou (agent morto)."""
+        pool = self.pool
+        assert pool is not None
         while True:
             try:
-                await self.pool.execute(
+                await pool.execute(
                     """
                     UPDATE host_agent_commands
                     SET status = 'failed',

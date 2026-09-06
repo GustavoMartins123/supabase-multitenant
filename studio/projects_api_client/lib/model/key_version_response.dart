@@ -16,7 +16,7 @@ class KeyVersionResponse {
     required this.projectKeyVersion,
   });
 
-  Object? projectKeyVersion;
+  int projectKeyVersion;
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is KeyVersionResponse &&
@@ -25,18 +25,14 @@ class KeyVersionResponse {
   @override
   int get hashCode =>
     // ignore: unnecessary_parenthesis
-    (projectKeyVersion == null ? 0 : projectKeyVersion!.hashCode);
+    (projectKeyVersion.hashCode);
 
   @override
   String toString() => 'KeyVersionResponse[projectKeyVersion=$projectKeyVersion]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
-    if (this.projectKeyVersion != null) {
       json[r'project_key_version'] = this.projectKeyVersion;
-    } else {
-      json[r'project_key_version'] = null;
-    }
     return json;
   }
 
@@ -59,7 +55,7 @@ class KeyVersionResponse {
       }());
 
       return KeyVersionResponse(
-        projectKeyVersion: mapValueOfType<Object>(json, r'project_key_version'),
+        projectKeyVersion: mapValueOfType<int>(json, r'project_key_version')!,
       );
     }
     return null;

@@ -76,8 +76,6 @@ class KeyVersionResponse(BaseModel):
 
     project_key_version: int
 
-    project_key_version: Any
-
 
 def _require_studio_nginx(request: Request) -> None:
     """Exige a identidade verificada pelo middleware HMAC, nunca o header cru."""
@@ -150,7 +148,9 @@ async def proxy_global_analytics(
     raw_query = request.scope.get("query_string", b"")
     if len(raw_query) > 16 * 1024:
         raise HTTPException(414, "Analytics query is too large")
-    query_items = list(request.query_params.multi_items())
+    query_items: list[tuple[str, str | int | float | bool | None]] = [
+        (key, value) for key, value in request.query_params.multi_items()
+    ]
     if len(query_items) > 64:
         raise HTTPException(400, "Too many Analytics query parameters")
 

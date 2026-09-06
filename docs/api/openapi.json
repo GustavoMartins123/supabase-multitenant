@@ -2012,7 +2012,8 @@
         "additionalProperties": true,
         "properties": {
           "project_key_version": {
-            "title": "Project Key Version"
+            "title": "Project Key Version",
+            "type": "integer"
           }
         },
         "required": [

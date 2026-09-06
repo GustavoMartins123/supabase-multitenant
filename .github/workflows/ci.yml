@@ -28,6 +28,20 @@ jobs:
             servidor/api-internal/app servidor/host-agent/hostagent tools tests
       - name: Contrato das variaveis de ambiente
         run: python tools/check-env-contract.py
+      - name: Secret scanning
+        run: |
+          curl -sSL -o /tmp/gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.28.0/gitleaks_8.28.0_linux_x64.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp
+          /tmp/gitleaks detect --source . --no-git -v --config .gitleaks.toml
+      - name: Dependency audit (pip)
+        run: |
+          python -m pip install pip-audit
+          for req in servidor/api-internal/requirements.txt requirements-dev.txt servidor/host-agent/requirements.txt servidor/key-authorizer/requirements.txt servidor/traefik/geoip/requirements.txt; do
+            python -m pip_audit -r "$req" || exit 1
+          done
+      - name: Type checking (mypy, progressivo)
+        run: |
+          python -m mypy servidor/api-internal/app servidor/host-agent/hostagent tools/openapi_to_30.py tools/check-env-contract.py tools/export_openapi.py tools/patch_dart_client.py
       - name: Suite smoke (contratos)
         run: python -m pytest tests/smoke -q
       - name: Sintaxe Bash
@@ -48,10 +62,35 @@ jobs:
           shellcheck --version >/dev/null 2>&1 || { echo "shellcheck ausente"; exit 1; }
           git ls-files '*.sh' | xargs -r shellcheck -x
       - name: Validar arquivos Compose
+        run: python tools/check-env-contract.py --compose
+
+  migrations-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s --health-timeout=5s --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar dependencias de teste
         run: |
-          for f in $(git ls-files 'servidor/**docker-compose*.yml' 'servidor/docker-compose*.yml'); do
-            docker compose -f "$f" config -q || exit 1
-          done
+          python -m pip install --upgrade pip
+          python -m pip install -r servidor/api-internal/requirements.txt
+      - name: Cadeia de migrations em Postgres real
+        env:
+          RUN_MIGRATIONS_INTEGRATION: "1"
+          MIGRATIONS_ADMIN_DSN: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+        run: python -m pytest tests/integration/test_control_plane_migrations_postgres.py -q
 
   flutter:
     runs-on: ubuntu-latest
@@ -65,3 +104,6 @@ jobs:
       - name: flutter analyze
         working-directory: studio/seletor_de_projetos
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      - name: flutter test
+        working-directory: studio/seletor_de_projetos
+        run: flutter test

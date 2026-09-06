@@ -16,7 +16,7 @@ void main() {
   // final instance = KeyVersionResponse();
 
   group('test KeyVersionResponse', () {
-    // Object projectKeyVersion
+    // int projectKeyVersion
     test('to test the property `projectKeyVersion`', () async {
       // TODO
     });

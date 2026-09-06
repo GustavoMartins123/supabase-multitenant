@@ -40,14 +40,14 @@ jobs:
           cp studio/.env.example studio/.env
           cp studio/.analytics.env.example studio/.analytics.env
 
+      - name: Setup Python for env contract
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Validate Compose models
         shell: bash
-        run: |
-          docker compose --env-file servidor/.env -f servidor/docker-compose.yml -f servidor/docker-compose.single-node.yml config --quiet
-          docker compose --env-file servidor/.env -f servidor/docker-compose.yml -f servidor/docker-compose.split-node.yml config --quiet
-          docker compose --env-file servidor/.env -f servidor/docker-compose-api.yml -f servidor/docker-compose.single-node.yml config --quiet
-          docker compose --env-file studio/.env -f studio/docker-compose.yml config --quiet
-          docker compose --env-file servidor/.env -f servidor/traefik/docker-compose.yml config --quiet
+        run: python tools/check-env-contract.py --compose
 
       - name: Build gateway for nginx validation
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0

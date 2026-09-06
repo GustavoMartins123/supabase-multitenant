@@ -17,8 +17,26 @@ class CiWorkflowContract(unittest.TestCase):
         self.assertIn("bash -n", source)
         self.assertIn("luac -p", source)
         self.assertIn("shellcheck", source)
-        self.assertIn("docker compose", source)
+        self.assertIn("python tools/check-env-contract.py --compose", source)
         self.assertIn("flutter analyze", source)
+        self.assertIn("flutter test", source)
+
+    def test_workflow_scans_secrets_dependencies_and_types(self) -> None:
+        source = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("gitleaks", source)
+        self.assertIn(".gitleaks.toml", source)
+        self.assertIn("pip_audit", source)
+        self.assertIn("python -m mypy", source)
+
+    def test_workflow_runs_migrations_against_real_postgres(self) -> None:
+        source = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("migrations-live", source)
+        self.assertIn("postgres:15", source)
+        self.assertIn("RUN_MIGRATIONS_INTEGRATION", source)
+        self.assertIn(
+            "tests/integration/test_control_plane_migrations_postgres.py",
+            source,
+        )
 
     def test_workflow_catches_undefined_names(self) -> None:
         """compileall nao pega NameError: o sweep F821 e obrigatorio.

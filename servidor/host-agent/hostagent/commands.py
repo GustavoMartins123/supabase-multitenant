@@ -907,6 +907,7 @@ async def handle_backup_project(ctx: CommandContext, project: str, args: dict[st
     )
     if failure is not None:
         return failure
+    assert project_uuid is not None
     backup_id = str(args["backup_id"]).lower()
     backup_dir = resolve_backup_dir(ctx.config.backups_root, project_uuid, backup_id)
     if backup_dir.exists():
@@ -940,6 +941,7 @@ async def handle_restore_project(ctx: CommandContext, project: str, args: dict[s
     )
     if failure is not None:
         return failure
+    assert project_uuid is not None
     backup_id = str(args["backup_id"]).lower()
     safety_backup_id = str(args["safety_backup_id"]).lower()
     backup_dir = resolve_backup_dir(
@@ -974,7 +976,7 @@ async def handle_restore_project(ctx: CommandContext, project: str, args: dict[s
     )
     safety_completed = "SAFETY_BACKUP_COMPLETE" in process.markers_seen
     rolled_back = "ROLLBACK_COMPLETE" in process.markers_seen
-    result = {
+    result: dict[str, Any] = {
         "rolled_back": rolled_back,
         "safety_backup_completed": safety_completed,
     }
@@ -994,6 +996,7 @@ async def handle_delete_restore_point(ctx: CommandContext, project: str, args: d
     )
     if failure is not None:
         return failure
+    assert project_uuid is not None
     backup_id = str(args["backup_id"]).lower()
     backup_dir = resolve_backup_dir(ctx.config.backups_root, project_uuid, backup_id)
     removed = await _remove_backup_tree(backup_dir)

@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import pathlib
 import sys
+from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEFAULT_IN = ROOT / "docs" / "api" / "openapi.json"
@@ -46,8 +47,10 @@ def _convert(node: object) -> object:
 def main() -> int:
     src = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_IN
     dst = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 else None
-    spec = json.loads(src.read_text(encoding="utf-8"))
-    spec = _convert(spec)
+    spec: dict[str, Any] = json.loads(src.read_text(encoding="utf-8"))
+    converted = _convert(spec)
+    assert isinstance(converted, dict)
+    spec = converted
     spec["openapi"] = "3.0.3"
     spec.pop("jsonSchemaDialect", None)
     rendered = json.dumps(spec, indent=2, sort_keys=True) + "\n"

@@ -1,0 +1,33 @@
+title = "supabase-multitenant gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "supabase-multitenant-publishable-key"
+description = "Opaque publishable API key: sb_publishable_<43 base64url>_<8 checksum> (see app/opaque_keys.py TOKEN_RE)"
+regex = '''sb_publishable_[A-Za-z0-9_-]{43}_[A-Za-z0-9_-]{8}'''
+tags = ["key", "supabase-multitenant", "publishable"]
+
+[[rules]]
+id = "supabase-multitenant-secret-key"
+description = "Opaque secret API key: sb_secret_<43 base64url>_<8 checksum> (see app/opaque_keys.py TOKEN_RE). Highest severity: plaintext secret keys."
+regex = '''sb_secret_[A-Za-z0-9_-]{43}_[A-Za-z0-9_-]{8}'''
+tags = ["key", "supabase-multitenant", "secret"]
+
+[[allowlists]]
+description = "placeholder tokens in documentation examples (not real keys)"
+paths = [
+  '''docs/12-opaque-api-key-operations\.md''',
+  '''docs/pt-br/12-chaves-api-opacas\.md''',
+]
+regexes = ['''SB_PUBLISHABLE''']
+
+[[allowlists]]
+description = "vendored test data inside local virtualenvs (never committed)"
+paths = ['''\.venv/''', '''site-packages/''']
+
+[[allowlists]]
+description = "synthetic unsigned JWT fixture for sanitize_output tests"
+paths = ['''tests/smoke/test_host_agent_contract\.py''']
+fingerprint = "tests/smoke/test_host_agent_contract.py:jwt:658"

@@ -83,6 +83,28 @@ The procedure is always to move forward:
 
 Restoring a backup of the `postgres` database remains the only way to move the schema back in time, and it moves the data back with it.
 
+## Why forward-only (no Alembic)
+
+Alembic was evaluated and rejected for this control plane:
+
+- a single database (`postgres`) with a linear `NNNN` sequence does not need
+  branches, merges, or multi-head resolution;
+- the migrations are Postgres-specific DDL (roles, `CHECK` constraints,
+  backfills with `NULL` semantics) written as plain SQL; Alembic
+  autogenerate adds nothing and would still require hand-written scripts;
+- the runtime uses `asyncpg`, while Alembic expects a SQLAlchemy engine, so
+  adopting it means a second driver just for migrations;
+- a `downgrade` path would be untested theater: production rollbacks move
+  data back via backup restore (above), never via inverse DDL, and the boot
+  contract treats "database ahead of image" as roll-forward, not revert.
+
+The equivalent guarantees live here instead: contiguous numbering and
+non-empty files (`discover_migrations`), SHA-256 drift refusal, advisory
+lock with `lock_timeout`, per-version transactions with ledger insert, and
+the live chain test
+(`tests/integration/test_control_plane_migrations_postgres.py`, executed by
+the `migrations-live` CI job against ephemeral PostgreSQL 15).
+
 ## Installations predating migrations
 
 The first `apply` run on an existing installation applies the three current versions to the schema already created by boot. The creations are no-ops and only missing convergence remains, all in `0001`:

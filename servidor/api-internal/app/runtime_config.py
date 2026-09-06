@@ -149,6 +149,12 @@ for key_name, key_value in {
     if not key_value:
         raise RuntimeError(f"Missing {key_name} environment variable")
 
+assert STUDIO_GATEWAY_HMAC_SECRET
+assert PROJECTS_API_HMAC_SECRET
+assert PROJECT_SECRETS_MASTER_KEY
+assert PG_META_CRYPTO_KEY
+assert STUDIO_SERVICE_KEY_ENCRYPTION_KEY
+
 if hmac.compare_digest(STUDIO_GATEWAY_HMAC_SECRET, PROJECTS_API_HMAC_SECRET):
     raise RuntimeError(
         "STUDIO_GATEWAY_HMAC_SECRET and PROJECTS_API_HMAC_SECRET must be distinct"
