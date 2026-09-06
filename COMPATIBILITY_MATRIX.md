@@ -63,23 +63,34 @@ tested against. One row per moving part; the platform row is the canonical
 A patched file is a rebase liability: bumping the upstream version above can
 silently drop or conflict with these. Any bump must re-apply and re-test them.
 
-| File | Upstream project | Purpose |
-| --- | --- | --- |
-| `studio/studio-slug/studio-project-context.patch` | Supabase Studio | per-tab project context |
-| `servidor/volumes/realtime/replication_connection.ex` | Realtime | multi-tenant replication slots |
-| `servidor/volumes/realtime/metrics_controller.ex` | Realtime | per-tenant metrics exposure |
-| `servidor/volumes/realtime/router.ex` | Realtime | tenant routing |
-| `servidor/volumes/realtime/tenant_controller_test.exs` | Realtime | test retargeted to the patched behavior |
-| `servidor/volumes/analytics/dialect_translation.ex` | Logflare | SQL dialect translation |
-| `servidor/volumes/analytics/sql.ex` | Logflare | query building |
-| `servidor/volumes/analytics/translation_smoke.exs` | Logflare | smoke over the translation patch |
+| File | Upstream project | Overwrites | Guard at build |
+| --- | --- | --- | --- |
+| `studio/studio-slug/studio-project-context.patch` | Supabase Studio | applied as a diff | `git apply --check` (`studio-slug/Dockerfile:34`) |
+| `servidor/volumes/analytics/dialect_translation.ex` | Logflare | `lib/logflare/sql/dialect_translation.ex` | behavioral smoke (`analytics/Dockerfile:46`) |
+| `servidor/volumes/analytics/sql.ex` | Logflare | `lib/logflare/sql.ex` | behavioral smoke (`analytics/Dockerfile:46`) |
+| `servidor/volumes/analytics/translation_smoke.exs` | — (own script) | nothing; copied to `/tmp` | it *is* the smoke |
+| `servidor/volumes/realtime/replication_connection.ex` | Realtime | `lib/realtime/tenants/replication_connection.ex` | `mix compile` only |
+| `servidor/volumes/realtime/metrics_controller.ex` | Realtime | `lib/realtime_web/controllers/metrics_controller.ex` | `mix compile` only |
+| `servidor/volumes/realtime/router.ex` | Realtime | `lib/realtime_web/router.ex` | `mix compile` only |
+| `servidor/volumes/realtime/tenant_controller_test.exs` | Realtime | `test/realtime_web/controllers/tenant_controller_test.exs` | **none — `mix test` never runs** |
 
-The Studio patch is applied with `git apply --check` before `git apply`
-(`studio/studio-slug/Dockerfile:34-35`), so an upstream commit that invalidates
-it fails the build instead of producing a silently unpatched image. The Elixir
-files are `COPY`-overwrites and have **no such guard** — they overwrite
-whatever upstream ships, so a bump can silently revert upstream fixes or drop
-new call sites. Treat them as the highest-risk part of any bump.
+The three guard levels are not equivalent, and the difference decides how risky
+a bump of each component is.
+
+`git apply --check` and the Logflare smoke (`RUN mix run --no-start
+/tmp/analytics_translation_smoke.exs`) both **fail the build** when upstream
+moves under the patch. Studio and Logflare are therefore safe to bump in the
+sense that a broken bump cannot produce a silently wrong image.
+
+The three Realtime `.ex` files are full-file overwrites guarded only by
+`mix compile`. That catches a renamed or re-signatured upstream function, but
+**not** the failure that actually matters: upstream fixing a bug inside one of
+these files, and the overwrite silently reverting the fix. A Realtime bump must
+be reviewed by diffing upstream's version of each overwritten path between the
+old and new ref — the build will not do it for you.
+
+`tenant_controller_test.exs` is copied into `test/` but nothing ever runs
+`mix test` in the image build, so it currently guards nothing.
 
 ## Update procedure
 
