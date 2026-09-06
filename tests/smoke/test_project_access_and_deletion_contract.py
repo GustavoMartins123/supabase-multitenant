@@ -7,6 +7,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 MAIN_PATH = ROOT / "servidor" / "api-internal" / "app" / "main.py"
+BACKGROUNDS_PATH = ROOT / "servidor" / "api-internal" / "app" / "project_backgrounds.py"
+PROJECTS_ROUTER_PATH = (
+    ROOT / "servidor" / "api-internal" / "app" / "routers" / "projects.py"
+)
+INSIGHTS_ROUTER_PATH = (
+    ROOT / "servidor" / "api-internal" / "app" / "routers" / "project_insights.py"
+)
 DEPENDENCIES_PATH = ROOT / "servidor" / "api-internal" / "app" / "dependencies.py"
 DELETION_PATH = ROOT / "servidor" / "api-internal" / "app" / "project_deletion.py"
 HOST_PROTOCOL_PATH = (
@@ -20,16 +27,26 @@ class ProjectAccessAndDeletionContractTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.source = MAIN_PATH.read_text(encoding="utf-8")
         cls.tree = ast.parse(cls.source)
+        cls.backgrounds_source = BACKGROUNDS_PATH.read_text(encoding="utf-8")
+        cls.backgrounds_tree = ast.parse(cls.backgrounds_source)
+        cls.projects_source = PROJECTS_ROUTER_PATH.read_text(encoding="utf-8")
+        cls.projects_tree = ast.parse(cls.projects_source)
+        cls.insights_source = INSIGHTS_ROUTER_PATH.read_text(encoding="utf-8")
         cls.dependencies_source = DEPENDENCIES_PATH.read_text(encoding="utf-8")
         cls.dependencies_tree = ast.parse(cls.dependencies_source)
         cls.deletion_source = DELETION_PATH.read_text(encoding="utf-8")
         cls.host_protocol_source = HOST_PROTOCOL_PATH.read_text(encoding="utf-8")
         cls.nginx_source = NGINX_PATH.read_text(encoding="utf-8")
 
-    def function(self, name: str) -> ast.AsyncFunctionDef:
-        for node in ast.walk(self.tree):
-            if isinstance(node, ast.AsyncFunctionDef) and node.name == name:
-                return node
+    def function(self, name: str) -> tuple[str, ast.AsyncFunctionDef]:
+        for source, tree in (
+            (self.source, self.tree),
+            (self.backgrounds_source, self.backgrounds_tree),
+            (self.projects_source, self.projects_tree),
+        ):
+            for node in ast.walk(tree):
+                if isinstance(node, ast.AsyncFunctionDef) and node.name == name:
+                    return source, node
         self.fail(f"async function {name} not found")
 
     def test_member_access_accepts_endpoint_specific_error_message(self) -> None:
@@ -43,8 +60,8 @@ class ProjectAccessAndDeletionContractTest(unittest.TestCase):
         self.assertIn("message", keyword_only_args)
 
     def test_deletion_terminates_supavisor_pools_before_dropping_database(self) -> None:
-        function = self.function("_delete_project_impl")
-        function_source = ast.get_source_segment(self.source, function) or ""
+        source, function = self.function("_delete_project_impl")
+        function_source = ast.get_source_segment(source, function) or ""
         terminate_at = function_source.index("terminate_supavisor_pools(")
         delete_tenant_at = function_source.index("delete_supavisor_tenant(")
         delete_storage_at = function_source.index('"delete_project_storage"')
@@ -72,14 +89,14 @@ class ProjectAccessAndDeletionContractTest(unittest.TestCase):
         self.assertIn('"delete_project_storage"', self.host_protocol_source)
 
     def test_final_verification_includes_supavisor_metadata(self) -> None:
-        function = self.function("_delete_project_impl")
-        function_source = ast.get_source_segment(self.source, function) or ""
+        source, function = self.function("_delete_project_impl")
+        function_source = ast.get_source_segment(source, function) or ""
         self.assertIn("_supavisor.tenants", function_source)
         self.assertIn("_supavisor.users", function_source)
 
     def test_whole_project_deletion_remains_global_admin_only(self) -> None:
-        function = self.function("delete_project")
-        function_source = ast.get_source_segment(self.source, function) or ""
+        source, function = self.function("delete_project")
+        function_source = ast.get_source_segment(source, function) or ""
         self.assertIn('if not auth_user["is_global_admin"]', function_source)
         self.assertIn('alias="X-Step-Up-Token"', function_source)
         self.assertIn("consume_step_up_grant", function_source)
@@ -89,7 +106,7 @@ class ProjectAccessAndDeletionContractTest(unittest.TestCase):
         self.assertNotIn("ensure_project_owner_access", function_source)
 
     def test_admin_projects_info_uses_one_canonical_path(self) -> None:
-        self.assertIn('@app.post("/api/admin/projects-info")', self.source)
+        self.assertIn('@router.post("/api/admin/projects-info")', self.insights_source)
         self.assertIn(
             "proxy_pass $server_domain/api/admin/projects-info$is_args$args;",
             self.nginx_source,

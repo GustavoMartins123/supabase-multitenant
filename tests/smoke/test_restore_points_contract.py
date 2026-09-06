@@ -59,15 +59,18 @@ class RestorePointApiSurfaceTest(unittest.TestCase):
 
     def test_endpoints_apply_role_matrix_and_serialize_limit(self) -> None:
         self.assertIn("RESTORE_POINT_LIMIT = 15", self.main_source)
-        self.assertIn("_count_active_restore_points", self.main_source)
+        self.assertIn("_count_active_restore_points", self.router_source)
         self.assertIn("ensure_project_admin_access", self.main_source)
         self.assertIn("ensure_project_owner_access", self.main_source)
+        backgrounds = (API_ROOT / "app" / "project_backgrounds.py").read_text(
+            encoding="utf-8"
+        )
         for runner in (
             "_create_restore_point_background",
             "_restore_project_background",
             "_delete_restore_point_background",
         ):
-            self.assertIn(runner, self.main_source)
+            self.assertIn(runner, backgrounds)
 
     def test_schema_declares_restore_points_table(self) -> None:
         schema_source = (
@@ -86,10 +89,10 @@ class RestorePointApiSurfaceTest(unittest.TestCase):
         )[1].split("async def shutdown()", 1)[0])
 
     def test_api_exposes_restore_point_creator_name(self) -> None:
-        self.assertIn('"created_by_name": row["created_by_name"]', self.main_source)
+        self.assertIn('"created_by_name": row["created_by_name"]', self.router_source)
         self.assertIn(
             "COALESCE(u.display_name, u.authelia_username, 'Sistema') AS created_by_name",
-            self.main_source,
+            self.router_source,
         )
         self.assertGreaterEqual(
             self.router_source.count("job_id, created_by, project_ref_at_creation"),
@@ -97,11 +100,17 @@ class RestorePointApiSurfaceTest(unittest.TestCase):
         )
 
     def test_delete_flow_passes_persisted_tenant_uuid_for_backup_cleanup(self) -> None:
-        self.assertIn('{"tenant_uuid": str(tenant_uuid)}', self.main_source)
+        backgrounds = (API_ROOT / "app" / "project_backgrounds.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('{"tenant_uuid": str(tenant_uuid)}', backgrounds)
 
     def test_restore_commands_carry_persisted_tenant_identity(self) -> None:
+        backgrounds = (API_ROOT / "app" / "project_backgrounds.py").read_text(
+            encoding="utf-8"
+        )
         self.assertGreaterEqual(
-            self.main_source.count('"tenant_uuid": str(tenant_uuid)'),
+            backgrounds.count('"tenant_uuid": str(tenant_uuid)'),
             4,
         )
 

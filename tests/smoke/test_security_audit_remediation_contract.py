@@ -236,14 +236,14 @@ class JobAuthorizationTest(unittest.TestCase):
 
 class MemberRemovalGuardTest(unittest.TestCase):
     def test_owner_membership_cannot_be_removed(self):
-        source = read(APP / "main.py")
+        source = read(APP / "routers" / "project_members.py")
         start = source.index("async def remove_member_by_ref(")
         body = source[start : start + 3000]
         self.assertIn('project_row["owner_id"]', body)
         self.assertIn("transfira a posse antes", body)
 
     def test_peer_admin_cannot_remove_another_admin(self):
-        source = read(APP / "main.py")
+        source = read(APP / "routers" / "project_members.py")
         start = source.index("async def remove_member_by_ref(")
         body = source[start : start + 3000]
         self.assertIn('old_role == "admin"', body)

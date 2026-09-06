@@ -10,6 +10,7 @@ from __future__ import annotations
 import pathlib
 import shutil
 import subprocess
+import sys
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -41,6 +42,7 @@ def lua_runtime_with_cjson() -> str | None:
 
 
 class PlatformRoutesCoverTheExplorerTest(unittest.TestCase):
+    @unittest.skipIf(sys.platform == "win32", "requires a working Lua 5.1 runtime (Linux-only)")
     def test_public_url_and_sign_multi_are_mapped(self) -> None:
         runtime = lua_runtime()
         if runtime is None:
@@ -100,6 +102,7 @@ class BrowserLoadsObjectsFromTheStudioOriginTest(unittest.TestCase):
         )
         self.assertIn('"^/storage/v1/([^/]+)/object/",', resolver)
 
+    @unittest.skipIf(sys.platform == "win32", "requires a working Lua 5.1 runtime (Linux-only)")
     def test_ref_in_path_never_swallows_the_resumable_upload_route(self) -> None:
         runtime = lua_runtime()
         if runtime is None:

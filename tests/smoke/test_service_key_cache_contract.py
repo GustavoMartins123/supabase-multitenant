@@ -9,8 +9,8 @@ LUA = ROOT / "studio" / "nginx" / "lua"
 
 class ServiceKeyCacheContractTest(unittest.TestCase):
     def test_rotation_versions_key_before_invalidating_cache(self):
-        main = (APP / "main.py").read_text(encoding="utf-8")
-        rotation = main[main.index("async def _rotate_project_key_background"):]
+        backgrounds = (APP / "project_backgrounds.py").read_text(encoding="utf-8")
+        rotation = backgrounds[backgrounds.index("async def _rotate_project_key_background"):]
         store = rotation.index("await store_project_secrets")
         bump = rotation.index("SET project_key_version = project_key_version + 1")
         invalidate = rotation.index("await invalidate_service_key_cache")

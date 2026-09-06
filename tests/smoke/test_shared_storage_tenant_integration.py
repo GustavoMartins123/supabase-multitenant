@@ -15,6 +15,7 @@ import os
 import pathlib
 import shlex
 import subprocess
+import sys
 import tarfile
 import time
 import unittest
@@ -120,6 +121,7 @@ def _sigv4_headers(
     env_flag("RUN_SHARED_STORAGE_SMOKE"),
     "set RUN_SHARED_STORAGE_SMOKE=1 on a disposable dedicated installation",
 )
+@unittest.skipIf(sys.platform == "win32", "requires POSIX bash (Linux-only)")
 class SharedStorageTenantIntegrationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

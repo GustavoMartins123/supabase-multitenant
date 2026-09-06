@@ -10,6 +10,7 @@ from __future__ import annotations
 import pathlib
 import shutil
 import subprocess
+import sys
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -60,6 +61,7 @@ class ResumableUploadTargetsTheStudioGatewayTest(unittest.TestCase):
 
 
 class ResumableLocationRewriteTest(unittest.TestCase):
+    @unittest.skipIf(sys.platform == "win32", "requires a working Lua 5.1 runtime (Linux-only)")
     def test_location_is_reanchored_on_the_studio_origin(self) -> None:
         runtime = shutil.which("lua5.1") or shutil.which("lua") or shutil.which("resty")
         if runtime is None:

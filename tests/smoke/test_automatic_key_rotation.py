@@ -95,16 +95,19 @@ class AutomaticRotationContractTest(unittest.TestCase):
         self.assertIn("WHEN $2 THEN NULL", self.keys)
 
     def test_manual_and_automatic_rotation_share_the_canonical_runner(self) -> None:
+        backgrounds = (API_ROOT / "app" / "project_backgrounds.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn(
             "async def _rotate_project_key_background(",
-            self.main,
+            backgrounds,
         )
         self.assertIn(
             'args={"trigger": trigger}',
-            self.main,
+            backgrounds,
         )
-        self.assertIn('if trigger not in {"manual", "automatic"}:', self.main)
-        self.assertIn('action="project_keys_rotated"', self.main)
+        self.assertIn('if trigger not in {"manual", "automatic"}:', backgrounds)
+        self.assertIn('action="project_keys_rotated"', backgrounds)
 
 
 if __name__ == "__main__":

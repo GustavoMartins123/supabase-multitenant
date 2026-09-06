@@ -237,9 +237,12 @@ class ProjectIdentitySourceContractTest(unittest.TestCase):
         )
 
     def test_background_workers_never_generate_the_tenant_uuid(self) -> None:
-        duplicate = self.main.split("async def _duplicate_and_store_keys", 1)[1]
+        backgrounds = (API_ROOT / "app" / "project_backgrounds.py").read_text(
+            encoding="utf-8"
+        )
+        duplicate = backgrounds.split("async def _duplicate_and_store_keys", 1)[1]
         duplicate = duplicate.split("def _base64url_no_padding", 1)[0]
-        create = self.main.split("async def _provision_and_store_keys", 1)[1]
+        create = backgrounds.split("async def _provision_and_store_keys", 1)[1]
         create = create.split("async def get_project_containers", 1)[0]
         self.assertNotIn("uuid.uuid4()", duplicate)
         self.assertNotIn("uuid.uuid4()", create)

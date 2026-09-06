@@ -13,6 +13,7 @@ DUPLICATE_IMPL = (
 )
 COMMANDS = ROOT / "servidor" / "host-agent" / "hostagent" / "commands.py"
 API_MAIN = ROOT / "servidor" / "api-internal" / "app" / "main.py"
+API_BACKGROUNDS = ROOT / "servidor" / "api-internal" / "app" / "project_backgrounds.py"
 
 
 class CreateRollbackContractTest(unittest.TestCase):
@@ -69,7 +70,7 @@ class CreateRollbackContractTest(unittest.TestCase):
         self.assertIn("reuse_terminal=True", source)
 
     def test_create_worker_imports_the_cryptographic_token_generator(self) -> None:
-        source = API_MAIN.read_text(encoding="utf-8")
+        source = API_BACKGROUNDS.read_text(encoding="utf-8")
         create_worker = source[source.index("async def _provision_and_store_keys"):]
 
         self.assertIn("import secrets", source)

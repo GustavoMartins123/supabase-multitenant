@@ -6,6 +6,7 @@ import os
 import pathlib
 import shutil
 import subprocess
+import sys
 import unittest
 
 
@@ -66,6 +67,7 @@ class ConstantTimeHmacTest(unittest.TestCase):
         fernet = read(LUA / "resty" / "fernet.lua")
         self.assertNotIn("mac_a ~= mac_b", fernet)
 
+    @unittest.skipIf(sys.platform == "win32", "requires a working Lua 5.1 runtime (Linux-only)")
     def test_constant_time_compare_runtime_contract(self) -> None:
         run_lua(
             f'''
@@ -95,6 +97,7 @@ class AdminGroupHardeningTest(unittest.TestCase):
         self.assertIn("env ADMIN_GROUPS;", read(NGINX))
         self.assertIn("ADMIN_GROUPS=admin", read(STUDIO_ENV))
 
+    @unittest.skipIf(sys.platform == "win32", "requires a working Lua 5.1 runtime (Linux-only)")
     def test_admin_group_parser_runtime_contract(self) -> None:
         env = dict(os.environ)
         env["ADMIN_GROUPS"] = "admin,superadmins"
@@ -152,6 +155,7 @@ class InternalServiceKeyHardeningTest(unittest.TestCase):
         self.assertIn('increment_metric("stale_fetch")', client)
         self.assertIn("service_key_version.invalidate", invalidation)
 
+    @unittest.skipIf(sys.platform == "win32", "requires a working Lua 5.1 runtime (Linux-only)")
     def test_service_key_version_runtime_contract(self) -> None:
         run_lua(
             f'''

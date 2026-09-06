@@ -14,6 +14,10 @@ from app.jobs import (
     enqueue_project_action as _enqueue_project_action,
 )
 from app.main import (
+    ALLOWED_RECREATE_SERVICES,
+    get_project_containers,
+)
+from app.project_backgrounds import (
     _clear_project_pending_settings,
     _get_project_env_path,
     _get_project_file_size_limit,
@@ -25,7 +29,6 @@ from app.main import (
     _start_project_containers_background,
     _stop_project_containers_background,
     _write_project_pending_settings,
-    get_project_containers,
 )
 from app.project_settings import (
     _get_affected_services,
@@ -276,9 +279,6 @@ async def update_project_settings(
         "storage_limit_token": _get_project_storage_limit_token(project_name),
         "message": f"Configurações salvas. Serviços afetados: {', '.join(affected)}. Recrie-os para aplicar.",
     }
-
-
-ALLOWED_RECREATE_SERVICES = {"auth", "rest", "storage", "nginx", "meta"}
 
 
 @router.post("/api/projects/{project_name}/recreate-services")

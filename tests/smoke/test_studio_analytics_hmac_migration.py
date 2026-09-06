@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -34,7 +35,8 @@ class StudioAnalyticsHmacMigrationTest(unittest.TestCase):
         self.assertRegex(value, r"^[0-9a-f]{64}$")
         self.assertNotEqual(value, "aa" * 32)
         self.assertNotEqual(value, "bb" * 32)
-        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        if sys.platform != "win32":
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         self.assertTrue(path.with_name(".env.pre-studio-analytics-hmac").exists())
         self.assertFalse(migration.migrate(path))
 

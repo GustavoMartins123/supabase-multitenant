@@ -3,6 +3,7 @@ from __future__ import annotations
 import pathlib
 import shutil
 import subprocess
+import sys
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -94,6 +95,7 @@ class StoragePlatformRouterTests(unittest.TestCase):
         self.assertNotIn('^/vector-buckets/([^/]+)$', router)
         self.assertNotIn('^/vector-buckets/([^/]+)/indexes$', router)
 
+    @unittest.skipIf(sys.platform == "win32", "requires a working Lua 5.1 runtime (Linux-only)")
     def test_vector_bucket_patterns_resolve_at_runtime_when_lua_is_available(self) -> None:
         runtime = shutil.which("lua5.1") or shutil.which("lua") or shutil.which("resty")
         if runtime is None:

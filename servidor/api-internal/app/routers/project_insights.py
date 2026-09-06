@@ -9,7 +9,8 @@ from fastapi.responses import Response
 from app.control_plane_service import audit_studio_action
 from app.database import get_pool
 from app.dependencies import audit_project_member_change, ensure_project_admin_access, ensure_project_member_access, get_project_role, get_project_row, require_synced_user_record, resolve_authenticated_user, upsert_project_member
-from app.main import AI_TOOL_MAX_ROWS, AI_TOOL_TIMEOUT_MS, _extract_project_admin_apikey, _get_project_file_size_limit, _get_project_storage_limit_token, get_project_conn
+from app.main import AI_TOOL_MAX_ROWS, AI_TOOL_TIMEOUT_MS, _extract_project_admin_apikey, get_project_conn
+from app.project_backgrounds import _get_project_file_size_limit, _get_project_storage_limit_token
 from app.meta_connections import get_project_meta_connection_string, get_project_reader_connection_string
 from app.pg_meta_crypto import encrypt_postgres_meta_uri
 from app.project_secret_service import decrypt_project_secret

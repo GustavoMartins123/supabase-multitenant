@@ -61,6 +61,7 @@ class ProtocolCopiesAreIdenticalTest(unittest.TestCase):
         )
 
 
+@unittest.skipIf(sys.platform == "win32", "requires POSIX bash (Linux-only)")
 class SystemdInstallerContractTest(unittest.TestCase):
     def test_unit_quotes_paths_that_may_contain_spaces(self) -> None:
         template = (

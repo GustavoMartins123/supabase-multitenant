@@ -19,13 +19,15 @@ sys.path.insert(0, str(TOOLS))
 SPEC = importlib.util.spec_from_file_location("platform_bottleneck_probe", PROBE)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
-SPEC.loader.exec_module(MODULE)
+if sys.platform != "win32":
+    SPEC.loader.exec_module(MODULE)
 
 
 def env_flag(name: str) -> bool:
     return (os.getenv(name) or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+@unittest.skipIf(sys.platform == "win32", "requires Linux (fcntl) and POSIX bash")
 class PlatformBottleneckProbeContract(unittest.TestCase):
     def test_probe_exists_parses_and_has_no_source_comments(self) -> None:
         source = PROBE.read_text(encoding="utf-8")
@@ -349,6 +351,7 @@ class PlatformBottleneckProbeContract(unittest.TestCase):
     env_flag("RUN_PLATFORM_BOTTLENECK"),
     "carga funcional exige RUN_PLATFORM_BOTTLENECK=1",
 )
+@unittest.skipIf(sys.platform == "win32", "requires Linux (fcntl) and POSIX bash")
 class PlatformBottleneckProbeExecution(unittest.TestCase):
     def test_disposable_platform_survives_functional_load(self) -> None:
         root = os.getenv("PLATFORM_BOTTLENECK_ROOT")

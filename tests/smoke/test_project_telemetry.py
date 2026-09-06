@@ -92,12 +92,14 @@ class ProjectTelemetryTest(unittest.TestCase):
         self.assertEqual(result["users"][0]["user_id"], "user-1")
 
     def test_route_contract_requires_project_admin_or_owner(self) -> None:
-        main_source = (APP_ROOT / "app" / "main.py").read_text(encoding="utf-8")
-        route_start = main_source.index(
-            '@app.get("/api/projects/{project_name}/telemetry/users")'
+        insights_source = (APP_ROOT / "app" / "routers" / "project_insights.py").read_text(
+            encoding="utf-8"
         )
-        route_end = main_source.index("\n@app.api_route(", route_start)
-        route_source = main_source[route_start:route_end]
+        route_start = insights_source.index(
+            '@router.get("/api/projects/{project_name}/telemetry/users")'
+        )
+        route_end = insights_source.index("\n@router.api_route(", route_start)
+        route_source = insights_source[route_start:route_end]
         self.assertIn('project_role != "admin"', route_source)
         self.assertIn("is_owner", route_source)
         self.assertIn('auth_user["is_global_admin"]', route_source)
@@ -105,12 +107,14 @@ class ProjectTelemetryTest(unittest.TestCase):
 
 
     def test_telemetry_route_resolves_period_before_use(self) -> None:
-        main_source = (APP_ROOT / "app" / "main.py").read_text(encoding="utf-8")
-        route_start = main_source.index(
-            '@app.get("/api/projects/{project_name}/telemetry/users")'
+        insights_source = (APP_ROOT / "app" / "routers" / "project_insights.py").read_text(
+            encoding="utf-8"
         )
-        route_end = main_source.index("\n@app.api_route(", route_start)
-        route_source = main_source[route_start:route_end]
+        route_start = insights_source.index(
+            '@router.get("/api/projects/{project_name}/telemetry/users")'
+        )
+        route_end = insights_source.index("\n@router.api_route(", route_start)
+        route_source = insights_source[route_start:route_end]
 
         resolve_index = route_source.index(
             "telemetry_period = resolve_telemetry_period("
@@ -122,15 +126,17 @@ class ProjectTelemetryTest(unittest.TestCase):
         self.assertIn("except TelemetryValidationError as exc", route_source)
 
     def test_config_token_route_has_no_telemetry_period_logic(self) -> None:
-        main_source = (APP_ROOT / "app" / "main.py").read_text(encoding="utf-8")
-        route_start = main_source.index(
-            '@app.get("/api/projects/{project_name}/config-token")'
+        rename_source = (APP_ROOT / "app" / "routers" / "project_rename.py").read_text(
+            encoding="utf-8"
         )
-        route_end = main_source.index(
-            '\n@app.get("/api/projects/{project_name}/queue-status")',
+        route_start = rename_source.index(
+            '@router.get("/api/projects/{project_name}/config-token")'
+        )
+        route_end = rename_source.index(
+            '\n@router.get("/api/projects/{project_name}/queue-status")',
             route_start,
         )
-        route_source = main_source[route_start:route_end]
+        route_source = rename_source[route_start:route_end]
 
         self.assertNotIn("resolve_telemetry_period", route_source)
         self.assertNotIn("telemetry_period", route_source)

@@ -1,0 +1,1900 @@
+import pathlib
+import secrets
+import time
+import hmac
+import hashlib
+import uuid
+import asyncpg
+import asyncio
+import json
+from typing import Any
+from app.project_secret_service import store_project_secrets
+from app.jobs import serialize_job, set_job_status as _set_job_status
+from app.runtime_config import AUTOMATIC_KEY_ROTATION_LEAD_DAYS, NGINX_HMAC_SECRET
+from app.project_settings import get_project_file_size_limit
+from app.host_agent import HostAgentError, HostAgentOffline, command_result, run_command as run_host_agent_command, run_command_for_job as run_host_agent_command_for_job
+from app.validation import parse_uuid_value
+from app.opaque_key_service import bootstrap_project_opaque_keys
+from app.control_plane_service import audit_studio_action, create_studio_notification
+from app.project_env_secrets import PROJECTS_ROOT, read_project_secret_keys as _read_project_secret_keys
+from app.service_key_cache import invalidate_service_key_cache
+from app.snippets_migration import rename_project_snippets
+from app.key_rotation import KeyRotationMetadataError, project_key_schedule
+from app.automatic_key_rotation import block_automatic_key_rotation
+from app.project_deletion import ProjectDeletionError, build_global_delete_token, build_realtime_delete_token, delete_realtime_tenant, delete_supavisor_tenant, drain_database_connections, drop_database_force, drop_supabase_replication_slots, global_admin_connection, load_project_environment, terminate_supavisor_pools
+from app.project_identity import ProjectIdentityError, get_job_project_identity as _get_job_project_identity, parse_tenant_uuid
+from app.database import get_pool
+
+
+async def _serialize_queued_job(
+    pool,
+    job_id: str,
+    queue_position: int,
+    message: str,
+    *,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Retorna o contrato completo e canonico de um job recem-enfileirado."""
+    row = await pool.fetchrow(
+        "SELECT * FROM jobs WHERE job_id = $1",
+        uuid.UUID(str(job_id)),
+    )
+    if row is None:
+        raise RuntimeError(f"job enfileirado nao encontrado: {job_id}")
+    result = serialize_job(row)
+    result["queue_position"] = queue_position
+    result["message"] = message
+    if extra:
+        result.update(extra)
+    return result
+
+
+async def rollback_project_from_db(
+    pool,
+    project_name: str,
+    project_uuid: uuid.UUID | None = None,
+) -> bool:
+    try:
+        async with pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                DELETE FROM projects
+                WHERE name = $1 AND ($2::uuid IS NULL OR id = $2)
+                """,
+                project_name,
+                project_uuid,
+            )
+        removed = result.endswith("1")
+        if removed:
+            print(f"Rollback: Projeto '{project_name}' removido do banco")
+        else:
+            print(
+                f"Rollback: registro de '{project_name}' já não existia "
+                "ou pertence a outra tentativa"
+            )
+        return removed
+    except Exception as e:
+        print(f"Erro no rollback do banco: {e}")
+        return False
+
+
+async def _get_job_project_uuid(pool, job_id: str) -> uuid.UUID | None:
+    return await pool.fetchval(
+        "SELECT project_uuid FROM jobs WHERE job_id = $1", uuid.UUID(str(job_id))
+    )
+
+
+async def _failed_create_recovery_context(
+    pool,
+    *,
+    job_id: str,
+    project_name: str,
+    created_by: uuid.UUID,
+) -> tuple[bool, list[str]]:
+    """Localiza resíduos atribuíveis a criações falhas recentes do usuário.
+
+    O opt-in de limpeza nunca é inferido apenas pela existência de um banco
+    físico. Ele exige histórico durável de um job ``create`` falho para o
+    mesmo nome e autor, reduzindo o risco de apagar um banco legítimo que
+    tenha perdido apenas o registro do control plane.
+    """
+    rows = await pool.fetch(
+        """
+        SELECT hc.args->>'tenant_uuid' AS tenant_uuid
+        FROM jobs j
+        JOIN host_agent_commands hc ON hc.job_id = j.job_id
+        WHERE j.job_id <> $1
+          AND j.project = $2
+          AND j.created_by = $3
+          AND j.action = 'create'
+          AND j.status = 'failed'
+          AND j.finished_at >= now() - interval '7 days'
+          AND hc.command = 'create_project'
+          AND hc.status IN ('done', 'failed', 'cancelled')
+        ORDER BY hc.created_at DESC
+        LIMIT 20
+        """,
+        uuid.UUID(str(job_id)),
+        project_name,
+        created_by,
+    )
+    tenant_uuids: list[str] = []
+    for row in rows:
+        candidate = str(row["tenant_uuid"] or "").lower()
+        if parse_uuid_value(candidate) is not None and candidate not in tenant_uuids:
+            tenant_uuids.append(candidate)
+    return bool(rows), tenant_uuids
+
+
+def _job_progress_mirror(job_id: str):
+    """Espelha progresso do comando do host-agent no job correspondente."""
+
+    async def on_progress(command_row) -> None:
+        try:
+            progress = command_row["progress"]
+            await _set_job_status(
+                job_id,
+                "running",
+                message=command_row["message"],
+                progress=max(1, min(95, progress)) if progress else None,
+                current_step=command_row["current_step"],
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[host_agent] falha ao espelhar progresso do job {job_id}: {exc}")
+
+    return on_progress
+
+
+async def _fail_job_from_command(
+    job_id: str,
+    command_row,
+    *,
+    default_error: str,
+    message_prefix: str,
+) -> None:
+    """Propaga a falha de um comando do host-agent para o job."""
+    detail = command_row["message"] or command_row["error_code"] or "erro desconhecido"
+    await _set_job_status(
+        job_id,
+        "failed",
+        message=f"{message_prefix}: {detail}",
+        stdout_tail=command_row["stdout_tail"],
+        stderr_tail=command_row["stderr_tail"],
+        error_code=command_row["error_code"] or default_error,
+    )
+
+
+async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.UUID):
+    pool = await get_pool()
+    project_uuid = await _get_job_project_uuid(pool, job_id)
+    await _set_job_status(
+        job_id,
+        "running",
+        message="Provisionando infraestrutura do projeto...",
+        progress=5,
+        current_step="provision_infrastructure",
+        total_steps=3,
+    )
+
+    try:
+        resolved_project_uuid, tenant_uuid = await _get_job_project_identity(
+            pool, job_id
+        )
+        if project_uuid != resolved_project_uuid:
+            raise ProjectIdentityError("projects.id do job mudou durante criacao")
+        recover_stale, stale_tenant_uuids = await _failed_create_recovery_context(
+            pool,
+            job_id=job_id,
+            project_name=project_name,
+            created_by=user,
+        )
+        resource_profile = await pool.fetchval(
+            "SELECT resource_profile FROM projects WHERE id = $1",
+            project_uuid,
+        )
+
+        gateway_token = secrets.token_hex(32)
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await bootstrap_project_opaque_keys(
+                    conn,
+                    project_id=project_uuid,
+                    created_by=user,
+                    gateway_token=gateway_token,
+                )
+
+        record = await run_host_agent_command_for_job(
+            pool,
+            job_id=job_id,
+            command="create_project",
+            project=project_name,
+            project_uuid=project_uuid,
+            requested_by=user,
+            args={
+                "tenant_uuid": str(tenant_uuid),
+                "recover_stale": recover_stale,
+                "stale_tenant_uuids": stale_tenant_uuids,
+                "gateway_token": gateway_token,
+                "resource_profile": resource_profile,
+            },
+            reuse_terminal=True,
+            on_progress=_job_progress_mirror(job_id),
+        )
+        if record["status"] != "done":
+            result = command_result(record)
+            rollback_completed = result.get("rollback_completed") is True
+            stale_state = result.get("stale_state_detected") is True
+            await _fail_job_from_command(
+                job_id,
+                record,
+                default_error="provision_failed",
+                message_prefix="Falha ao provisionar infraestrutura",
+            )
+            await rollback_project_from_db(pool, project_name, project_uuid)
+            if not rollback_completed or stale_state:
+                detail = (
+                    record["message"]
+                    or record["error_code"]
+                    or "falha física não confirmada"
+                )
+                await _set_job_status(
+                    job_id,
+                    "failed",
+                    message=(
+                        f"Falha ao provisionar infraestrutura: {detail}. "
+                        "A limpeza física não pôde ser confirmada; os resíduos "
+                        "foram registrados e serão recuperados numa nova tentativa."
+                    ),
+                    current_step="rollback_unconfirmed",
+                    error_code=record["error_code"] or "rollback_unconfirmed",
+                )
+            return
+
+        await _set_job_status(
+            job_id,
+            "running",
+            message="Lendo chaves do projeto...",
+            progress=70,
+            current_step="extract_keys",
+        )
+        keys = _read_project_secret_keys(project_name)
+        env_tenant_uuid = parse_tenant_uuid(keys["tenant_uuid"])
+        if env_tenant_uuid != tenant_uuid:
+            await _set_job_status(
+                job_id,
+                "failed",
+                message="PROJECT_UUID gerado diverge da identidade persistida",
+                error_code="tenant_uuid_mismatch",
+            )
+            await rollback_project_from_db(pool, project_name, project_uuid)
+            return
+        if not all(
+            keys[name]
+            for name in (
+                "anon_key", "service_role", "config_token", "gateway_token"
+            )
+        ):
+            await _set_job_status(
+                job_id,
+                "failed",
+                message="Chaves obrigatórias ausentes",
+                error_code="missing_keys",
+            )
+            print("Missing tokens")
+            await rollback_project_from_db(pool, project_name, project_uuid)
+            return
+        schedule = project_key_schedule(
+            keys["anon_key"],
+            keys["service_role"],
+            lead_days=AUTOMATIC_KEY_ROTATION_LEAD_DAYS,
+        )
+
+        await _set_job_status(
+            job_id,
+            "running",
+            message="Persistindo chaves criptografadas...",
+            progress=90,
+            current_step="store_keys",
+        )
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                project_id = await conn.fetchval(
+                    """
+                    SELECT id FROM projects
+                    WHERE name = $1 AND owner_id = $2 AND id = $3
+                    FOR UPDATE
+                    """,
+                    project_name,
+                    user,
+                    project_uuid,
+                )
+                if project_id is None:
+                    raise RuntimeError(
+                        "Projeto não encontrado ao persistir chaves"
+                    )
+                await store_project_secrets(
+                    conn,
+                    project_id=project_id,
+                    anon_key=keys["anon_key"],
+                    service_role=keys["service_role"],
+                    config_token=keys["config_token"],
+                )
+                await conn.execute(
+                    "UPDATE projects SET key_expires_at = $2 WHERE id = $1",
+                    project_id,
+                    schedule.expires_at,
+                )
+
+        await _set_job_status(
+            job_id,
+            "done",
+            message="Projeto criado com sucesso.",
+            current_step="completed",
+        )
+
+    except ProjectIdentityError as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message="A identidade persistida do tenant esta inconsistente.",
+            error_code="tenant_identity_error",
+        )
+        print(f"[project_identity] create job {job_id}: {exc}")
+        await rollback_project_from_db(pool, project_name, project_uuid)
+    except HostAgentOffline as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=(
+                "Nenhum host-agent ativo para criar o projeto. Nada foi "
+                "provisionado no host; inicie o servico e tente de novo."
+            ),
+            current_step="host_agent_offline",
+            error_code=exc.error_code,
+        )
+        await rollback_project_from_db(pool, project_name, project_uuid)
+    except HostAgentError as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=(
+                "O host-agent não conseguiu criar o projeto. A limpeza física "
+                "não foi confirmada; uma nova tentativa fará a recuperação."
+            ),
+            current_step="rollback_unconfirmed",
+            error_code=exc.error_code,
+        )
+        await rollback_project_from_db(pool, project_name, project_uuid)
+    except Exception as e:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=(
+                "Falha interna inesperada ao criar o projeto. Possíveis resíduos "
+                "foram registrados para recuperação na próxima tentativa."
+            ),
+            current_step="rollback_unconfirmed",
+            error_code="unexpected_create_error",
+        )
+        print(f"Worker error: {e}")
+        await rollback_project_from_db(pool, project_name, project_uuid)
+
+
+async def _duplicate_and_store_keys(
+    job_id: str,
+    original_name: str,
+    new_name: str,
+    owner_id: uuid.UUID,
+    copy_data: bool,
+):
+    pool = await get_pool()
+    project_uuid = await _get_job_project_uuid(pool, job_id)
+    await _set_job_status(
+        job_id,
+        "running",
+        message="Duplicando infraestrutura e banco...",
+        progress=5,
+        current_step="duplicate_infrastructure",
+        total_steps=3,
+    )
+
+    try:
+        copy_mode = "with-data" if copy_data else "schema-only"
+        resolved_project_uuid, tenant_uuid = await _get_job_project_identity(
+            pool, job_id
+        )
+        if project_uuid != resolved_project_uuid:
+            raise ProjectIdentityError("projects.id do job mudou durante duplicacao")
+
+        resource_profile = await pool.fetchval(
+            "SELECT resource_profile FROM projects WHERE id = $1",
+            project_uuid,
+        )
+
+        gateway_token = secrets.token_hex(32)
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await bootstrap_project_opaque_keys(
+                    conn,
+                    project_id=project_uuid,
+                    created_by=owner_id,
+                    gateway_token=gateway_token,
+                )
+
+        record = await run_host_agent_command_for_job(
+            pool,
+            job_id=job_id,
+            command="duplicate_project",
+            project=new_name,
+            project_uuid=project_uuid,
+            requested_by=owner_id,
+            args={
+                "original_name": original_name,
+                "copy_mode": copy_mode,
+                "tenant_uuid": str(tenant_uuid),
+                "gateway_token": gateway_token,
+                "resource_profile": resource_profile,
+            },
+            reuse_terminal=True,
+            on_progress=_job_progress_mirror(job_id),
+        )
+        if record["status"] != "done":
+            await _fail_job_from_command(
+                job_id,
+                record,
+                default_error="duplicate_failed",
+                message_prefix="Falha ao duplicar infraestrutura",
+            )
+            await rollback_project_from_db(pool, new_name, project_uuid)
+            return
+
+        await _set_job_status(
+            job_id,
+            "running",
+            message="Lendo chaves do projeto duplicado...",
+            progress=70,
+            current_step="extract_keys",
+        )
+        keys = _read_project_secret_keys(new_name)
+        env_tenant_uuid = parse_tenant_uuid(keys["tenant_uuid"])
+        if env_tenant_uuid != tenant_uuid:
+            await _set_job_status(
+                job_id,
+                "failed",
+                message="PROJECT_UUID gerado diverge da identidade persistida",
+                error_code="tenant_uuid_mismatch",
+            )
+            await rollback_project_from_db(pool, new_name, project_uuid)
+            return
+        if not all(
+            keys[name]
+            for name in (
+                "anon_key", "service_role", "config_token", "gateway_token"
+            )
+        ):
+            await _set_job_status(
+                job_id,
+                "failed",
+                message="Chaves obrigatórias ausentes no projeto duplicado",
+                error_code="missing_keys",
+            )
+            print("Missing tokens")
+            await rollback_project_from_db(pool, new_name, project_uuid)
+            return
+        schedule = project_key_schedule(
+            keys["anon_key"],
+            keys["service_role"],
+            lead_days=AUTOMATIC_KEY_ROTATION_LEAD_DAYS,
+        )
+
+        await _set_job_status(
+            job_id,
+            "running",
+            message="Persistindo chaves criptografadas...",
+            progress=90,
+            current_step="store_keys",
+        )
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                project_id = await conn.fetchval(
+                    """
+                    SELECT id FROM projects
+                    WHERE name = $1 AND owner_id = $2 AND id = $3
+                    FOR UPDATE
+                    """,
+                    new_name,
+                    owner_id,
+                    project_uuid,
+                )
+                if project_id is None:
+                    raise RuntimeError(
+                        "Projeto duplicado não encontrado ao persistir chaves"
+                    )
+                await store_project_secrets(
+                    conn,
+                    project_id=project_id,
+                    anon_key=keys["anon_key"],
+                    service_role=keys["service_role"],
+                    config_token=keys["config_token"],
+                )
+                await conn.execute(
+                    "UPDATE projects SET key_expires_at = $2 WHERE id = $1",
+                    project_id,
+                    schedule.expires_at,
+                )
+
+        await _set_job_status(
+            job_id,
+            "done",
+            message="Projeto duplicado com sucesso.",
+            current_step="completed",
+        )
+
+    except ProjectIdentityError as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message="A identidade persistida do tenant esta inconsistente.",
+            error_code="tenant_identity_error",
+        )
+        print(f"[project_identity] duplicate job {job_id}: {exc}")
+        await rollback_project_from_db(pool, new_name, project_uuid)
+    except HostAgentError as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message="O host-agent não conseguiu duplicar o projeto.",
+            error_code=exc.error_code,
+        )
+        await rollback_project_from_db(pool, new_name, project_uuid)
+    except Exception as e:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message="Falha interna inesperada ao duplicar o projeto.",
+            error_code="unexpected_duplicate_error",
+        )
+        print(f"Worker error: {e}")
+        await rollback_project_from_db(pool, new_name, project_uuid)
+
+
+async def _delete_project_impl(
+    project_name: str,
+    pool,
+    *,
+    current_job_id: str | None = None,
+) -> dict:
+    errors: list[str] = []
+    db_name = f"_supabase_{project_name}"
+
+    job_requested_by: uuid.UUID | None = None
+    job_project_uuid: uuid.UUID | None = None
+    job_tenant_uuid: uuid.UUID | None = None
+    if current_job_id:
+        job_row = await pool.fetchrow(
+            "SELECT created_by, project_uuid, payload FROM jobs WHERE job_id = $1",
+            uuid.UUID(str(current_job_id)),
+        )
+        if job_row:
+            job_requested_by = job_row["created_by"]
+            job_project_uuid = job_row["project_uuid"]
+            payload = job_row["payload"] or {}
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            job_tenant_uuid = parse_tenant_uuid(payload.get("tenant_uuid"))
+
+    async def report(progress: int, step: str, message: str) -> None:
+        if current_job_id:
+            await _set_job_status(
+                current_job_id,
+                "running",
+                message=message,
+                progress=progress,
+                current_step=step,
+                total_steps=9,
+            )
+
+    async def agent_step(
+        command: str,
+        project_uuid: uuid.UUID | None,
+        args: dict[str, Any] | None = None,
+    ):
+        if current_job_id:
+            return await run_host_agent_command_for_job(
+                pool,
+                job_id=current_job_id,
+                command=command,
+                project=project_name,
+                project_uuid=project_uuid,
+                requested_by=job_requested_by,
+                args=args,
+                reuse_terminal=True,
+            )
+        return await run_host_agent_command(
+            pool,
+            command=command,
+            project=project_name,
+            project_uuid=project_uuid,
+            requested_by=job_requested_by,
+            args=args,
+        )
+
+    await report(5, "load_project_state", "Carregando estado do projeto...")
+    project_env = load_project_environment(PROJECTS_ROOT, project_name)
+    identity_row = await pool.fetchrow(
+        "SELECT id, tenant_uuid FROM projects WHERE name = $1",
+        project_name,
+    )
+    persisted_tenant_uuid = (
+        parse_tenant_uuid(identity_row["tenant_uuid"]) if identity_row else None
+    )
+    env_tenant_uuid = parse_tenant_uuid(project_env.get("PROJECT_UUID"))
+    if persisted_tenant_uuid is None:
+        raise ProjectIdentityError(
+            f"Projeto {project_name} precisa de tenant UUID persistido antes do delete"
+        )
+    if env_tenant_uuid is None:
+        raise ProjectIdentityError(
+            f"Projeto {project_name} não possui PROJECT_UUID válido no ambiente"
+        )
+    if job_tenant_uuid is None:
+        raise ProjectIdentityError(
+            f"Job de exclusão de {project_name} não possui tenant UUID válido"
+        )
+    if len({persisted_tenant_uuid, env_tenant_uuid, job_tenant_uuid}) != 1:
+        raise ProjectIdentityError(
+            f"Projeto {project_name} possui tenant UUID divergente no delete"
+        )
+    tenant_uuid = persisted_tenant_uuid
+    tenant_external_id = str(tenant_uuid)
+    print(f"Deletando projeto com tenant UUID: {tenant_uuid}")
+
+    await report(15, "remove_containers", "Removendo containers do projeto...")
+    containers_record = await agent_step("delete_project_containers", job_project_uuid)
+    if containers_record["status"] != "done":
+        container_errors = command_result(containers_record).get("errors") or [
+            containers_record["message"]
+            or containers_record["error_code"]
+            or "falha ao remover containers"
+        ]
+        errors.append("containers: " + "; ".join(str(item) for item in container_errors))
+
+    await report(25, "remove_storage_tenant", "Removendo tenant e objetos do Storage...")
+    storage_record = await agent_step(
+        "delete_project_storage",
+        job_project_uuid,
+        {"tenant_uuid": str(tenant_uuid)},
+    )
+    if storage_record["status"] != "done":
+        detail = (
+            (storage_record["stderr_tail"] or "").strip()
+            or (storage_record["message"] or "").strip()
+            or storage_record["error_code"]
+            or "falha ao remover tenant Storage"
+        )
+        errors.append(f"storage: {detail}")
+
+    await report(35, "remove_tenants", "Removendo tenants globais...")
+    try:
+        supavisor_token = build_global_delete_token(tenant_external_id)
+        await terminate_supavisor_pools(project_name, supavisor_token)
+        await delete_realtime_tenant(
+            tenant_external_id,
+            build_realtime_delete_token(project_env),
+        )
+        await delete_supavisor_tenant(project_name, supavisor_token)
+        await asyncio.sleep(1)
+    except Exception as exc:
+        errors.append(f"tenants globais: {exc}")
+
+    await report(55, "clean_global_metadata", "Limpando metadata global...")
+    try:
+        async with global_admin_connection() as conn:
+            deleted_ext = await conn.execute(
+                'DELETE FROM _realtime.extensions WHERE tenant_external_id = $1',
+                tenant_external_id,
+            )
+            deleted_tenant = await conn.execute(
+                'DELETE FROM _realtime.tenants WHERE external_id = $1',
+                tenant_external_id,
+            )
+            deleted_supavisor_users = await conn.execute(
+                'DELETE FROM _supavisor.users WHERE tenant_external_id = $1',
+                project_name,
+            )
+            deleted_supavisor_tenant = await conn.execute(
+                'DELETE FROM _supavisor.tenants WHERE external_id = $1',
+                project_name,
+            )
+
+            print(
+                "Delete cleanup: "
+                f"realtime_extensions={deleted_ext}, "
+                f"realtime_tenants={deleted_tenant}, "
+                f"supavisor_users={deleted_supavisor_users}, "
+                f"supavisor_tenants={deleted_supavisor_tenant}"
+            )
+    except Exception as exc:
+        errors.append(f"metadata global: {exc}")
+
+    await report(70, "drop_database", "Removendo slots e database...")
+    try:
+        async with global_admin_connection() as conn:
+            await drain_database_connections(conn, db_name)
+
+            slot_errors = await drop_supabase_replication_slots(conn, project_name)
+            errors.extend(f"slots: {item}" for item in slot_errors)
+            if not slot_errors:
+                await drop_database_force(conn, db_name)
+    except Exception as exc:
+        errors.append(f"database: {exc}")
+
+    await report(82, "remove_files", "Removendo arquivos do projeto...")
+    files_record = await agent_step(
+        "delete_project_files",
+        None,
+        {"tenant_uuid": str(tenant_uuid)},
+    )
+    if files_record["status"] != "done":
+        detail = (
+            (files_record["stderr_tail"] or "").strip()
+            or (files_record["message"] or "").strip()
+            or files_record["error_code"]
+            or "erro desconhecido"
+        )
+        errors.append(f"arquivos: {detail}")
+
+    if errors:
+        raise ProjectDeletionError(
+            "Exclusao parcial de "
+            f"{project_name}; etapas com falha: {'; '.join(errors)}. "
+            "O registro permaneceu no control plane para nova tentativa."
+        )
+
+    await report(
+        90,
+        "remove_control_plane",
+        "Removendo registros do control plane...",
+    )
+    async with pool.acquire() as conn:
+        project_id = await conn.fetchval(
+            "SELECT id FROM projects WHERE name = $1",
+            project_name,
+        )
+        if project_id is None:
+            raise ProjectDeletionError(
+                f"Projeto {project_name} não encontrado para limpeza final"
+            )
+        async with conn.transaction():
+            await conn.execute(
+                "DELETE FROM project_members WHERE project_id = $1",
+                project_id,
+            )
+            await conn.execute("DELETE FROM projects WHERE id = $1", project_id)
+
+    await report(96, "verify_cleanup", "Verificando limpeza final...")
+    async with global_admin_connection() as conn:
+        db_exists = await conn.fetchval(
+            "SELECT 1 FROM pg_database WHERE datname = $1",
+            db_name,
+        )
+        if db_exists:
+            errors.append(f"Banco {db_name} ainda existe")
+        supavisor_tenant_exists = await conn.fetchval(
+            "SELECT 1 FROM _supavisor.tenants WHERE external_id = $1",
+            project_name,
+        )
+        supavisor_user_exists = await conn.fetchval(
+            "SELECT 1 FROM _supavisor.users WHERE tenant_external_id = $1",
+            project_name,
+        )
+        if supavisor_tenant_exists or supavisor_user_exists:
+            errors.append(
+                f"Metadata do tenant {project_name} ainda existe no Supavisor"
+            )
+
+    if errors:
+        raise ProjectDeletionError("; ".join(errors))
+
+    return {
+        "project": project_name,
+        "status": "success",
+        "message": "Projeto excluído com sucesso.",
+        "errors": [],
+        "success": True,
+    }
+
+
+async def _delete_project_background(job_id: str, project_name: str) -> None:
+    await _set_job_status(
+        job_id,
+        "running",
+        message="Excluindo projeto...",
+        progress=1,
+        current_step="starting",
+        total_steps=8,
+    )
+
+    try:
+        pool = await get_pool()
+        result = await _delete_project_impl(
+            project_name,
+            pool,
+            current_job_id=job_id,
+        )
+
+        message = result["message"]
+        if result["errors"]:
+            message = message + "\n" + "\n".join(result["errors"])
+
+        await _set_job_status(
+            job_id,
+            "done",
+            message=message,
+            current_step="completed",
+        )
+    except HostAgentError as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message="O host-agent não conseguiu excluir o projeto.",
+            error_code=exc.error_code,
+        )
+        print(f"[delete_project] {project_name}: host-agent: {exc}")
+    except Exception as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message="Falha interna inesperada ao excluir o projeto.",
+            error_code="delete_failed",
+        )
+        print(f"[delete_project] {project_name}: background task failed: {exc}")
+
+
+async def _rotate_project_key_background(
+    job_id: str,
+    project_name: str,
+    actor_user_id: uuid.UUID | None,
+    *,
+    trigger: str,
+) -> None:
+    if trigger not in {"manual", "automatic"}:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message="Origem da rotacao de chaves invalida.",
+            error_code="invalid_rotation_trigger",
+        )
+        return
+
+    async def fail_rotation(
+        *,
+        message: str,
+        error_code: str,
+        detail: str = "",
+        current_step: str | None = None,
+    ) -> None:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=message,
+            current_step=current_step,
+            error_code=error_code,
+            stderr_tail=detail or None,
+        )
+        if trigger == "automatic":
+            await block_automatic_key_rotation(
+                project_name,
+                error_code=error_code,
+                detail=detail or message,
+                job_id=job_id,
+            )
+
+    await _set_job_status(
+        job_id,
+        "running",
+        message="Rotacionando chaves...",
+        progress=10,
+        current_step="rotate_keys",
+        total_steps=4,
+    )
+    try:
+        pool = await get_pool()
+        gateway_ready = await pool.fetchval(
+            "SELECT opaque_gateway_ready_at FROM projects WHERE name = $1",
+            project_name,
+        )
+        if gateway_ready is None:
+            await fail_rotation(
+                message="Opaque gateway migration is not complete.",
+                error_code="opaque_gateway_not_ready",
+            )
+            return
+        record = await run_host_agent_command_for_job(
+            pool,
+            job_id=job_id,
+            command="rotate_keys",
+            project=project_name,
+            project_uuid=await _get_job_project_uuid(pool, job_id),
+            requested_by=actor_user_id,
+            args={"trigger": trigger},
+            reuse_terminal=True,
+            on_progress=_job_progress_mirror(job_id),
+        )
+        if record["status"] != "done":
+            await _fail_job_from_command(
+                job_id,
+                record,
+                default_error="rotate_script_failed",
+                message_prefix="Rotate failed",
+            )
+            if trigger == "automatic":
+                await block_automatic_key_rotation(
+                    project_name,
+                    error_code=record["error_code"] or "rotate_script_failed",
+                    detail=record["message"] or "Falha no script de rotacao.",
+                    job_id=job_id,
+                )
+            return
+
+        # O script persiste as chaves novas no .env do projeto; nada de
+        # segredo transita por stdout (que agora e sanitizado pelo agent).
+        keys = _read_project_secret_keys(project_name)
+        anon = keys["anon_key"]
+        service = keys["service_role"]
+        if not anon or not service:
+            await fail_rotation(
+                message="Keys not found in project .env after rotate",
+                error_code="missing_keys",
+            )
+            return
+        try:
+            schedule = project_key_schedule(
+                anon,
+                service,
+                lead_days=AUTOMATIC_KEY_ROTATION_LEAD_DAYS,
+            )
+        except KeyRotationMetadataError as exc:
+            await fail_rotation(
+                message="As chaves geradas nao possuem expiracao coerente.",
+                error_code="invalid_key_metadata",
+                detail=str(exc),
+            )
+            return
+
+        await _set_job_status(
+            job_id,
+            "running",
+            message="Persistindo novas chaves...",
+            progress=85,
+            current_step="store_keys",
+        )
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                project_row = await conn.fetchrow(
+                    "SELECT id FROM projects WHERE name = $1 FOR UPDATE",
+                    project_name,
+                )
+                if project_row is None:
+                    raise RuntimeError("Projeto não encontrado ao rotacionar chaves")
+                await store_project_secrets(
+                    conn,
+                    project_id=project_row["id"],
+                    anon_key=anon,
+                    service_role=service,
+                )
+                key_version = await conn.fetchval(
+                    """
+                    UPDATE projects
+                    SET project_key_version = project_key_version + 1,
+                        key_expires_at = $2,
+                        last_key_rotation_at = now(),
+                        automatic_key_rotation_blocked_at = NULL,
+                        automatic_key_rotation_last_error = NULL
+                    WHERE id = $1
+                    RETURNING project_key_version
+                    """,
+                    project_row["id"],
+                    schedule.expires_at,
+                )
+                await audit_studio_action(
+                    conn,
+                    project_id=project_row["id"],
+                    actor_user_id=actor_user_id,
+                    action="project_keys_rotated",
+                    target_type="project_keys",
+                    target_id=job_id,
+                    new_value={
+                        "trigger": trigger,
+                        "project_key_version": key_version,
+                        "expires_at": schedule.expires_at.isoformat(),
+                    },
+                )
+
+        await _set_job_status(
+            job_id,
+            "running",
+            message="Invalidando cache da service key...",
+            progress=95,
+            current_step="invalidate_service_key_cache",
+        )
+        try:
+            await invalidate_service_key_cache(project_name, key_version)
+        except Exception as cache_exc:
+            await fail_rotation(
+                message="Chaves rotacionadas, mas a invalidacao obrigatoria do cache falhou.",
+                current_step="invalidate_service_key_cache",
+                error_code="service_key_cache_invalidation_failed",
+                detail=str(cache_exc),
+            )
+            return
+
+        await _set_job_status(
+            job_id,
+            "done",
+            message="Chaves rotacionadas com sucesso.",
+            current_step="completed",
+        )
+    except HostAgentError as exc:
+        await fail_rotation(
+            message="O host-agent não conseguiu rotacionar as chaves.",
+            error_code=exc.error_code,
+            detail=str(exc),
+        )
+        print(f"[rotate-key] {project_name}: host-agent: {exc}")
+    except Exception as exc:
+        await fail_rotation(
+            message="Falha interna inesperada durante a rotação de chaves.",
+            error_code="rotate_failed",
+            detail=str(exc),
+        )
+        print(f"[rotate-key] {project_name}: {exc}")
+
+
+async def _update_rename_history(
+    conn: asyncpg.Connection,
+    history_id: int,
+    status: str,
+    *,
+    error: str | None = None,
+) -> None:
+    await conn.execute(
+        """
+        UPDATE project_name_history
+        SET status = $1,
+            error = $2,
+            updated_at = now(),
+            completed_at = CASE
+                WHEN $1 IN ('succeeded', 'failed', 'rolled_back') THEN now()
+                ELSE NULL
+            END
+        WHERE id = $3
+        """,
+        status,
+        error,
+        history_id,
+    )
+
+
+async def _rename_project_background(
+    job_id: str,
+    project_id: uuid.UUID,
+    history_id: int,
+    old_name: str,
+    new_name: str,
+    actor_user_id: uuid.UUID,
+) -> None:
+    """Delegar o rename ao host-agent e finalizar o control plane.
+
+    Em caso de shutdown da API o comando segue executando no host-agent;
+    o recovery do startup religa neste job e finaliza o rename (ou o
+    rollback) com o resultado persistido pelo agent.
+    """
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            await _update_rename_history(conn, history_id, "running")
+        await _set_job_status(
+            job_id,
+            "running",
+            message=f"Renomeando {old_name} -> {new_name}...",
+            progress=5,
+            current_step="migrate_infrastructure",
+            total_steps=9,
+        )
+
+        record = await run_host_agent_command_for_job(
+            pool,
+            job_id=job_id,
+            command="rename_project",
+            project=old_name,
+            project_uuid=project_id,
+            requested_by=actor_user_id,
+            args={"new_name": new_name},
+            reuse_terminal=True,
+            on_progress=_job_progress_mirror(job_id),
+        )
+
+        if record["status"] != "done":
+            output = (record["stdout_tail"] or record["message"] or "").strip()
+            rolled_back = (
+                bool(command_result(record).get("rolled_back"))
+                or "ROLLBACK_COMPLETE" in output
+            )
+            history_status = "rolled_back" if rolled_back else "failed"
+            audit_action = (
+                "project_rename_rolled_back"
+                if rolled_back
+                else "project_rename_failed"
+            )
+            async with pool.acquire() as conn:
+                await _update_rename_history(
+                    conn,
+                    history_id,
+                    history_status,
+                    error=output[-4000:],
+                )
+                await audit_studio_action(
+                    conn,
+                    project_id=project_id,
+                    actor_user_id=actor_user_id,
+                    action=audit_action,
+                    target_type="project",
+                    target_id=old_name,
+                    old_value={"name": old_name, "path": f"/{old_name}"},
+                    new_value={
+                        "name": new_name,
+                        "path": f"/{new_name}",
+                        "new_name": new_name,
+                        "returncode": record["exit_code"],
+                        "error_code": record["error_code"],
+                        "error_excerpt": output[-2000:],
+                    },
+                )
+            await _set_job_status(
+                job_id,
+                "failed",
+                message=(
+                    "Falha no rename. Projeto pode estar em estado parcial."
+                    f"\n\n{output[-2000:]}"
+                ),
+                current_step=(
+                    "rollback_completed" if rolled_back else "rollback_unconfirmed"
+                ),
+                error_code=(
+                    "rename_rolled_back" if rolled_back else "rename_failed"
+                ),
+                stdout_tail=record["stdout_tail"],
+                stderr_tail=record["stderr_tail"],
+            )
+            return
+
+        # Migra as pastas de snippets SQL do usuario no Studio para o novo slug.
+        # Best-effort: o rename ja commitou; se falhar, os snippets ficam orfaos
+        # ate um retry manual, mas o projeto renomeado continua valido.
+        snippet_note = ""
+        try:
+            await rename_project_snippets(old_name, new_name)
+        except Exception as exc:  # noqa: BLE001
+            snippet_note = (
+                "\n\n⚠️ Snippets do Studio não migraram automaticamente "
+                "por uma falha interna."
+            )
+            print(f"[rename_project] snippets {old_name} -> {new_name}: {exc}")
+
+        await _set_job_status(
+            job_id,
+            "running",
+            message="Finalizando histórico e notificações do rename...",
+            progress=92,
+            current_step="finalize_control_plane",
+        )
+        async with pool.acquire() as conn:
+            await _update_rename_history(conn, history_id, "succeeded")
+            await conn.execute(
+                "UPDATE jobs SET project = $1 WHERE job_id = $2",
+                new_name,
+                job_id,
+            )
+            await audit_studio_action(
+                conn,
+                project_id=project_id,
+                actor_user_id=actor_user_id,
+                action="project_rename_succeeded",
+                target_type="project",
+                target_id=old_name,
+                old_value={"name": old_name, "path": f"/{old_name}"},
+                new_value={"name": new_name, "path": f"/{new_name}"},
+            )
+            notification_targets = await conn.fetch(
+                """
+                SELECT user_id FROM project_members
+                WHERE project_id = $1 AND user_id <> $2
+                """,
+                project_id,
+                actor_user_id,
+            )
+            for target in notification_targets:
+                await create_studio_notification(
+                    conn,
+                    project_id=project_id,
+                    target_user_id=target["user_id"],
+                    actor_user_id=actor_user_id,
+                    kind="project_renamed",
+                    target_type="project",
+                    target_id=str(project_id),
+                    payload={
+                        "old_name": old_name,
+                        "new_name": new_name,
+                        "old_path": f"/{old_name}",
+                        "new_path": f"/{new_name}",
+                    },
+                )
+
+        await _set_job_status(
+            job_id,
+            "done",
+            message=f"Projeto renomeado: {old_name} -> {new_name}{snippet_note}",
+            current_step="completed",
+        )
+    except Exception as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message="Falha interna inesperada ao renomear o projeto.",
+            error_code="unexpected_rename_error",
+        )
+        try:
+            async with pool.acquire() as conn:
+                await _update_rename_history(
+                    conn,
+                    history_id,
+                    "failed",
+                    error="Falha interna inesperada ao renomear o projeto.",
+                )
+                await audit_studio_action(
+                    conn,
+                    project_id=project_id,
+                    actor_user_id=actor_user_id,
+                    action="project_rename_failed",
+                    target_type="project",
+                    target_id=old_name,
+                    old_value={"name": old_name, "path": f"/{old_name}"},
+                    new_value={
+                        "name": new_name,
+                        "path": f"/{new_name}",
+                        "error_code": "unexpected_rename_error",
+                    },
+                )
+        except Exception:
+            pass
+        print(f"[rename_project] {old_name} -> {new_name}: {exc}")
+
+
+async def _create_restore_point_background(
+    job_id: str,
+    project_name: str,
+    actor_user_id: uuid.UUID,
+    point_id: uuid.UUID,
+) -> None:
+    pool = await get_pool()
+    try:
+        project_uuid, tenant_uuid = await _get_job_project_identity(pool, job_id)
+        await _set_job_status(
+            job_id,
+            "running",
+            message="Criando ponto de restauração...",
+            progress=5,
+            current_step="capture_backup",
+            total_steps=2,
+        )
+        record = await run_host_agent_command_for_job(
+            pool,
+            job_id=job_id,
+            command="backup_project",
+            project=project_name,
+            project_uuid=project_uuid,
+            requested_by=actor_user_id,
+            args={
+                "backup_id": str(point_id),
+                "tenant_uuid": str(tenant_uuid),
+            },
+            reuse_terminal=True,
+            on_progress=_job_progress_mirror(job_id),
+        )
+        if record["status"] != "done":
+            detail = record["message"] or record["error_code"] or "erro desconhecido"
+            await pool.execute(
+                """
+                UPDATE project_restore_points
+                SET status = 'failed', error = $2, updated_at = now()
+                WHERE id = $1
+                """,
+                point_id,
+                str(detail)[:2000],
+            )
+            await _fail_job_from_command(
+                job_id,
+                record,
+                default_error="backup_failed",
+                message_prefix="Falha ao criar ponto de restauração",
+            )
+            return
+
+        size_bytes = command_result(record).get("size_bytes")
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE project_restore_points
+                SET status = 'ready', size_bytes = $2, error = NULL,
+                    completed_at = now(), updated_at = now()
+                WHERE id = $1
+                RETURNING project_id, title
+                """,
+                point_id,
+                size_bytes,
+            )
+            if row:
+                await audit_studio_action(
+                    conn,
+                    project_id=row["project_id"],
+                    actor_user_id=actor_user_id,
+                    action="restore_point_created",
+                    target_type="restore_point",
+                    target_id=str(point_id),
+                    new_value={"title": row["title"], "size_bytes": size_bytes},
+                )
+        await _set_job_status(
+            job_id,
+            "done",
+            message="Ponto de restauração criado.",
+            current_step="completed",
+        )
+    except Exception as exc:
+        try:
+            await pool.execute(
+                """
+                UPDATE project_restore_points
+                SET status = 'failed', error = $2, updated_at = now()
+                WHERE id = $1 AND status = 'creating'
+                """,
+                point_id,
+                "Falha interna inesperada ao criar o ponto de restauração.",
+            )
+        except Exception:
+            pass
+        await _set_job_status(
+            job_id,
+            "failed",
+            message="Falha interna inesperada ao criar o ponto de restauração.",
+            error_code="unexpected_backup_error",
+        )
+        print(f"[restore_point] backup {project_name}: {exc}")
+
+
+async def _restore_project_background(
+    job_id: str,
+    project_name: str,
+    actor_user_id: uuid.UUID,
+    point_id: uuid.UUID,
+    safety_point_id: uuid.UUID,
+) -> None:
+    pool = await get_pool()
+    try:
+        project_uuid, tenant_uuid = await _get_job_project_identity(pool, job_id)
+        await _set_job_status(
+            job_id,
+            "running",
+            message="Restaurando projeto para o ponto selecionado...",
+            progress=5,
+            current_step="restore_project",
+            total_steps=3,
+        )
+        record = await run_host_agent_command_for_job(
+            pool,
+            job_id=job_id,
+            command="restore_project",
+            project=project_name,
+            project_uuid=project_uuid,
+            requested_by=actor_user_id,
+            args={
+                "backup_id": str(point_id),
+                "safety_backup_id": str(safety_point_id),
+                "tenant_uuid": str(tenant_uuid),
+            },
+            reuse_terminal=True,
+            on_progress=_job_progress_mirror(job_id),
+        )
+        result = command_result(record)
+        safety_completed = bool(result.get("safety_backup_completed"))
+        async with pool.acquire() as conn:
+            if safety_completed:
+                await conn.execute(
+                    """
+                    UPDATE project_restore_points
+                    SET status = 'ready', size_bytes = $2, error = NULL,
+                        completed_at = now(), updated_at = now()
+                    WHERE id = $1
+                    """,
+                    safety_point_id,
+                    result.get("safety_backup_size_bytes"),
+                )
+            else:
+                await conn.execute(
+                    "DELETE FROM project_restore_points WHERE id = $1",
+                    safety_point_id,
+                )
+
+        if record["status"] != "done":
+            output = (record["stdout_tail"] or record["message"] or "").strip()
+            rolled_back = (
+                bool(result.get("rolled_back")) or "ROLLBACK_COMPLETE" in output
+            )
+            detail = record["message"] or record["error_code"] or "erro desconhecido"
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    UPDATE project_restore_points
+                    SET status = 'ready', error = $2, updated_at = now()
+                    WHERE id = $1
+                    RETURNING project_id, title
+                    """,
+                    point_id,
+                    str(detail)[:2000],
+                )
+                if row:
+                    await audit_studio_action(
+                        conn,
+                        project_id=row["project_id"],
+                        actor_user_id=actor_user_id,
+                        action="restore_point_restore_failed",
+                        target_type="restore_point",
+                        target_id=str(point_id),
+                        new_value={
+                            "title": row["title"],
+                            "rolled_back": rolled_back,
+                            "error_code": record["error_code"],
+                        },
+                    )
+            await _set_job_status(
+                job_id,
+                "failed",
+                message=(
+                    "Falha na restauração."
+                    + (
+                        " O estado anterior foi restaurado (rollback)."
+                        if rolled_back
+                        else " O projeto pode estar em estado parcial."
+                    )
+                    + f"\n\n{output[-2000:]}"
+                ),
+                current_step=(
+                    "rollback_completed" if rolled_back else "rollback_unconfirmed"
+                ),
+                error_code=(
+                    "restore_rolled_back" if rolled_back else "restore_failed"
+                ),
+                stdout_tail=record["stdout_tail"],
+                stderr_tail=record["stderr_tail"],
+            )
+            return
+
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE project_restore_points
+                SET status = 'ready', last_restored_at = now(),
+                    restore_count = restore_count + 1, error = NULL,
+                    updated_at = now()
+                WHERE id = $1
+                RETURNING project_id, title
+                """,
+                point_id,
+            )
+            if row:
+                await audit_studio_action(
+                    conn,
+                    project_id=row["project_id"],
+                    actor_user_id=actor_user_id,
+                    action="restore_point_restored",
+                    target_type="restore_point",
+                    target_id=str(point_id),
+                    new_value={
+                        "title": row["title"],
+                        "safety_point_id": str(safety_point_id)
+                        if safety_completed
+                        else None,
+                    },
+                )
+        safety_note = (
+            " Um ponto automático com o estado anterior foi criado."
+            if safety_completed
+            else ""
+        )
+        await _set_job_status(
+            job_id,
+            "done",
+            message=f"Projeto restaurado para o ponto selecionado.{safety_note}",
+            current_step="completed",
+        )
+    except Exception as exc:
+        try:
+            await pool.execute(
+                """
+                UPDATE project_restore_points
+                SET status = 'ready', error = $2, updated_at = now()
+                WHERE id = $1 AND status = 'restoring'
+                """,
+                point_id,
+                "Falha interna inesperada durante a restauração.",
+            )
+            await pool.execute(
+                """
+                UPDATE project_restore_points
+                SET status = 'failed', error = $2, updated_at = now()
+                WHERE id = $1 AND status = 'creating'
+                """,
+                safety_point_id,
+                "Falha interna inesperada durante a restauração.",
+            )
+        except Exception:
+            pass
+        await _set_job_status(
+            job_id,
+            "failed",
+            message="Falha interna inesperada durante a restauração.",
+            error_code="unexpected_restore_error",
+        )
+        print(f"[restore_point] restore {project_name}: {exc}")
+
+
+async def _delete_restore_point_background(
+    job_id: str,
+    project_name: str,
+    actor_user_id: uuid.UUID,
+    point_id: uuid.UUID,
+) -> None:
+    pool = await get_pool()
+    try:
+        project_uuid, tenant_uuid = await _get_job_project_identity(pool, job_id)
+        await _set_job_status(
+            job_id,
+            "running",
+            message="Excluindo ponto de restauração...",
+            progress=10,
+            current_step="delete_restore_point",
+            total_steps=1,
+        )
+        record = await run_host_agent_command_for_job(
+            pool,
+            job_id=job_id,
+            command="delete_restore_point",
+            project=project_name,
+            project_uuid=project_uuid,
+            requested_by=actor_user_id,
+            args={
+                "backup_id": str(point_id),
+                "tenant_uuid": str(tenant_uuid),
+            },
+            reuse_terminal=True,
+            on_progress=_job_progress_mirror(job_id),
+        )
+        if record["status"] != "done":
+            detail = record["message"] or record["error_code"] or "erro desconhecido"
+            await pool.execute(
+                """
+                UPDATE project_restore_points
+                SET status = 'failed', error = $2, updated_at = now()
+                WHERE id = $1
+                """,
+                point_id,
+                str(detail)[:2000],
+            )
+            await _fail_job_from_command(
+                job_id,
+                record,
+                default_error="delete_backup_failed",
+                message_prefix="Falha ao excluir ponto de restauração",
+            )
+            return
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                DELETE FROM project_restore_points
+                WHERE id = $1
+                RETURNING project_id, title, is_automatic
+                """,
+                point_id,
+            )
+            if row:
+                await audit_studio_action(
+                    conn,
+                    project_id=row["project_id"],
+                    actor_user_id=actor_user_id,
+                    action="restore_point_deleted",
+                    target_type="restore_point",
+                    target_id=str(point_id),
+                    old_value={
+                        "title": row["title"],
+                        "is_automatic": row["is_automatic"],
+                    },
+                )
+        await _set_job_status(
+            job_id,
+            "done",
+            message="Ponto de restauração excluído.",
+            current_step="completed",
+        )
+    except Exception as exc:
+        try:
+            await pool.execute(
+                """
+                UPDATE project_restore_points
+                SET status = 'failed', error = $2, updated_at = now()
+                WHERE id = $1 AND status = 'deleting'
+                """,
+                point_id,
+                "Falha interna inesperada ao excluir o ponto de restauração.",
+            )
+        except Exception:
+            pass
+        await _set_job_status(
+            job_id,
+            "failed",
+            message="Falha interna inesperada ao excluir o ponto de restauração.",
+            error_code="unexpected_delete_backup_error",
+        )
+        print(f"[restore_point] delete {project_name}: {exc}")
+
+
+async def _container_lifecycle_background(
+    job_id: str,
+    project_name: str,
+    actor_user_id: uuid.UUID | None,
+    *,
+    command: str,
+    initial_message: str,
+    success_prefix: str,
+    error_code: str,
+) -> None:
+    """Delegar start/stop/restart ao host-agent espelhando o progresso."""
+    await _set_job_status(
+        job_id,
+        "running",
+        message=initial_message,
+        progress=1,
+        current_step="dispatch_host_agent",
+    )
+    try:
+        pool = await get_pool()
+        record = await run_host_agent_command_for_job(
+            pool,
+            job_id=job_id,
+            command=command,
+            project=project_name,
+            project_uuid=await _get_job_project_uuid(pool, job_id),
+            requested_by=actor_user_id,
+            on_progress=_job_progress_mirror(job_id),
+        )
+        if record["status"] != "done":
+            await _fail_job_from_command(
+                job_id,
+                record,
+                default_error=error_code,
+                message_prefix=initial_message.rstrip("."),
+            )
+            print(f"[{command}] {project_name}: {record['error_code']}")
+            return
+
+        touched = command_result(record).get("containers", [])
+        await _set_job_status(
+            job_id,
+            "done",
+            message=f"{success_prefix}: {', '.join(touched)}" if touched else success_prefix,
+            current_step="completed",
+        )
+    except HostAgentError as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message="O host-agent não conseguiu concluir a operação do projeto.",
+            error_code=exc.error_code,
+        )
+        print(f"[{command}] {project_name}: host-agent: {exc}")
+    except Exception as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=f"{initial_message.rstrip('.')}: falha interna inesperada.",
+            error_code=error_code,
+        )
+        print(f"[{command}] {project_name}: background task failed: {exc}")
+
+
+async def _stop_project_containers_background(
+    job_id: str,
+    project_name: str,
+    actor_user_id: uuid.UUID | None = None,
+) -> None:
+    await _container_lifecycle_background(
+        job_id,
+        project_name,
+        actor_user_id,
+        command="stop_project",
+        initial_message="Parando servicos do projeto...",
+        success_prefix="Projeto parado com sucesso.",
+        error_code="stop_failed",
+    )
+
+
+async def _start_project_containers_background(
+    job_id: str,
+    project_name: str,
+    actor_user_id: uuid.UUID | None,
+) -> None:
+    await _container_lifecycle_background(
+        job_id,
+        project_name,
+        actor_user_id,
+        command="start_project",
+        initial_message="Iniciando containers...",
+        success_prefix="Iniciado",
+        error_code="start_failed",
+    )
+
+
+async def _restart_project_containers_background(
+    job_id: str,
+    project_name: str,
+    actor_user_id: uuid.UUID | None,
+) -> None:
+    await _container_lifecycle_background(
+        job_id,
+        project_name,
+        actor_user_id,
+        command="restart_project",
+        initial_message="Reiniciando containers...",
+        success_prefix="Reiniciado",
+        error_code="restart_failed",
+    )
+
+
+async def _recreate_project_services_background(
+    job_id: str,
+    project_name: str,
+    services: list[str],
+) -> None:
+    await _set_job_status(
+        job_id,
+        "running",
+        message=f"Recriando servicos: {', '.join(services)}",
+        progress=10,
+        current_step="recreate_services",
+        total_steps=2,
+    )
+    try:
+        pool = await get_pool()
+        job_row = await pool.fetchrow(
+            "SELECT created_by, project_uuid FROM jobs WHERE job_id = $1",
+            uuid.UUID(str(job_id)),
+        )
+        record = await run_host_agent_command_for_job(
+            pool,
+            job_id=job_id,
+            command="recreate_services",
+            project=project_name,
+            project_uuid=job_row["project_uuid"] if job_row else None,
+            requested_by=job_row["created_by"] if job_row else None,
+            args={"services": services},
+            on_progress=_job_progress_mirror(job_id),
+        )
+        if record["status"] != "done":
+            await _fail_job_from_command(
+                job_id,
+                record,
+                default_error="recreate_failed",
+                message_prefix="Falha ao recriar servicos",
+            )
+            print(
+                f"[recreate_project_services] {project_name}: "
+                f"{record['error_code']}"
+            )
+            return
+
+        _clear_project_pending_settings(project_name)
+        await _set_job_status(
+            job_id,
+            "running",
+            message="Limpando configurações pendentes...",
+            progress=90,
+            current_step="clear_pending_settings",
+        )
+        await _set_job_status(
+            job_id,
+            "done",
+            message=f"Servicos recriados: {', '.join(services)}",
+            current_step="completed",
+        )
+    except HostAgentError as exc:
+        await _set_job_status(
+            job_id,
+            "failed",
+            message="O host-agent não conseguiu recriar os serviços.",
+            error_code=exc.error_code,
+        )
+        print(f"[recreate_project_services] {project_name}: host-agent: {exc}")
+    except Exception as exc:
+        message = "Falha interna inesperada ao recriar os serviços."
+        await _set_job_status(
+            job_id,
+            "failed",
+            message=message,
+            error_code="recreate_failed",
+        )
+        print(
+            f"[recreate_project_services] {project_name}: "
+            f"background task failed: {exc}"
+        )
+
+
+def _get_project_env_path(project_name: str) -> pathlib.Path:
+    return PROJECTS_ROOT / project_name / ".env"
+
+
+def _get_project_dir(project_name: str) -> pathlib.Path:
+    return PROJECTS_ROOT / project_name
+
+
+def _get_project_pending_settings_path(project_name: str) -> pathlib.Path:
+    return _get_project_dir(project_name) / ".settings_pending.json"
+
+
+def _read_project_pending_settings(project_name: str) -> dict[str, Any]:
+    pending_path = _get_project_pending_settings_path(project_name)
+    if not pending_path.exists():
+        return {}
+    try:
+        data = json.loads(pending_path.read_text())
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_project_pending_settings(
+    project_name: str,
+    affected_services: list[str],
+) -> None:
+    pending_path = _get_project_pending_settings_path(project_name)
+    payload = {
+        "affected_services": affected_services,
+        "storage_limit_token": _get_project_storage_limit_token(project_name),
+        "updated_at": int(time.time()),
+    }
+    pending_path.write_text(json.dumps(payload))
+
+
+def _clear_project_pending_settings(project_name: str) -> None:
+    pending_path = _get_project_pending_settings_path(project_name)
+    try:
+        pending_path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _get_project_file_size_limit(project_name: str) -> str:
+    return get_project_file_size_limit(
+        project_name,
+        projects_root=PROJECTS_ROOT,
+    )
+
+
+def _get_project_storage_limit_token(project_name: str) -> str:
+    limit = _get_project_file_size_limit(project_name)
+    ts = str(int(time.time()))
+    payload = f"{project_name}.{limit}.{ts}"
+    sig = hmac.new(
+        NGINX_HMAC_SECRET.encode(),
+        payload.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{payload}.{sig}"

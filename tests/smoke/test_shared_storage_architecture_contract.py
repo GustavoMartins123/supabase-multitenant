@@ -221,7 +221,7 @@ class SharedStorageLifecycleContractTest(unittest.TestCase):
             self.storage.index("storage_remove_tenant_namespace", self.storage.index("storage_delete_tenant()")),
         )
         self.assertIn("storage_delete_tenant", self.delete)
-        api = read(SERVER / "api-internal" / "app" / "main.py")
+        api = read(SERVER / "api-internal" / "app" / "project_backgrounds.py")
         self.assertLess(api.index('"delete_project_storage"'), api.index("drop_database_force", api.index("async def _delete_project_impl")))
 
     def test_backup_and_restore_are_bound_to_manifest_tenant(self) -> None:

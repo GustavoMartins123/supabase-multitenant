@@ -3,12 +3,14 @@ from __future__ import annotations
 import pathlib
 import shutil
 import subprocess
+import sys
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class UserAvatarThumbnailTests(unittest.TestCase):
+    @unittest.skipIf(sys.platform == "win32", "requires a working Lua 5.1 runtime (Linux-only)")
     def test_avatar_uuid_normalization_uses_lua_patterns_correctly(self) -> None:
         runtime = shutil.which("lua5.1") or shutil.which("lua")
         if not runtime:
@@ -76,6 +78,7 @@ assert(processor.normalize_uuid("11111111-2222-3333-4444-555555555555/../x") == 
         self.assertEqual(handler.count('uri:match("^/api/users/'), 1)
         self.assertIn('if not requested_user_id then', handler)
 
+    @unittest.skipIf(sys.platform == "win32", "requires a working Lua 5.1 runtime (Linux-only)")
     def test_avatar_content_entrypoint_invokes_the_handler(self) -> None:
         content = ROOT / "studio/nginx/lua/admin_api/user_avatar_content.lua"
         runtime = shutil.which("lua5.1") or shutil.which("lua")
@@ -98,6 +101,7 @@ assert(calls == 1)
             capture_output=True,
         )
 
+    @unittest.skipIf(sys.platform == "win32", "requires a working Lua 5.1 runtime (Linux-only)")
     def test_avatar_get_flushes_the_binary_body_without_early_exit(self) -> None:
         handler_path = (
             ROOT / "studio/nginx/lua/admin_api/user_avatar_handler.lua"

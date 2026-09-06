@@ -52,8 +52,8 @@ class InternalHmacMigrationTest(unittest.TestCase):
                 "",
             )
             module.migrate(server, studio)
-            self.assertEqual(existing, module._value(server.read_text(), "STUDIO_GATEWAY_HMAC_SECRET"))
-            self.assertEqual(existing, module._value(studio.read_text(), "STUDIO_GATEWAY_HMAC_SECRET"))
+            self.assertEqual(existing, module._value(server.read_text(encoding="utf-8"), "STUDIO_GATEWAY_HMAC_SECRET"))
+            self.assertEqual(existing, module._value(studio.read_text(encoding="utf-8"), "STUDIO_GATEWAY_HMAC_SECRET"))
 
     def test_fails_on_divergent_explicit_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

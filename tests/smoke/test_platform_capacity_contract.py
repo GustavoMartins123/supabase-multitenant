@@ -4,8 +4,13 @@ import pathlib
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
+
+
+if sys.platform == "win32":
+    raise unittest.SkipTest("requires POSIX bash (Linux-only)")
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -318,14 +323,14 @@ class PostgresConfigSourceContract(unittest.TestCase):
     )
 
     def test_derived_parameters_left_the_command_line(self) -> None:
-        compose = (ROOT / "servidor" / "docker-compose.yml").read_text()
+        compose = (ROOT / "servidor" / "docker-compose.yml").read_text(encoding="utf-8")
         block = compose.split("  db:", 1)[1].split("\n  realtime:", 1)[0]
         for parameter in self.DERIVED:
             with self.subTest(parameter=parameter):
                 self.assertNotRegex(block, rf"(?m)^\s+- {parameter}=")
 
     def test_generated_config_is_mounted_into_conf_d(self) -> None:
-        compose = (ROOT / "servidor" / "docker-compose.yml").read_text()
+        compose = (ROOT / "servidor" / "docker-compose.yml").read_text(encoding="utf-8")
         self.assertIn("platform-capacity.conf:/etc/postgresql-custom/conf.d/", compose)
 
     def test_renderer_emits_every_derived_parameter(self) -> None:
@@ -356,7 +361,7 @@ class PostgresConfigSourceContract(unittest.TestCase):
         self.assertLess(reload_at, rendered.index("work_mem = "))
 
     def test_start_generates_before_the_database_starts(self) -> None:
-        start = (ROOT / "start.sh").read_text()
+        start = (ROOT / "start.sh").read_text(encoding="utf-8")
         self.assertIn("platform_render_postgres_conf", start)
         self.assertLess(
             start.index("platform_render_postgres_conf"),
@@ -364,7 +369,7 @@ class PostgresConfigSourceContract(unittest.TestCase):
         )
 
     def test_generated_config_is_not_tracked(self) -> None:
-        ignored = (ROOT / ".gitignore").read_text()
+        ignored = (ROOT / ".gitignore").read_text(encoding="utf-8")
         self.assertIn("platform-capacity.conf", ignored)
 
 

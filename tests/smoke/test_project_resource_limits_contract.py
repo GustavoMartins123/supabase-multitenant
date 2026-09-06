@@ -94,6 +94,7 @@ class LifecycleHookTest(unittest.TestCase):
                 )
 
 
+@unittest.skipIf(sys.platform == "win32", "requires POSIX bash (Linux-only)")
 class ProfileHelperFunctionalTest(unittest.TestCase):
     def test_helper_is_idempotent_and_preserves_content(self) -> None:
         bash = shutil.which("bash") or "bash"
@@ -148,6 +149,7 @@ class ProfileHelperFunctionalTest(unittest.TestCase):
             self.assertIn("PROJECT_RESOURCE_PROFILE invalido", result.stderr)
 
 
+@unittest.skipIf(sys.platform == "win32", "requires POSIX bash (Linux-only)")
 class ProfileSplitFunctionalTest(unittest.TestCase):
     """A soma das fatias tem de fechar exatamente com o teto do perfil."""
 
@@ -242,6 +244,7 @@ class ProfileSplitFunctionalTest(unittest.TestCase):
                 )
 
 
+@unittest.skipIf(sys.platform == "win32", "requires POSIX bash (Linux-only)")
 class GhcHeapCapContract(unittest.TestCase):
     """A fatia do rest so e teto de verdade com o heap do GHC limitado.
 
@@ -285,6 +288,7 @@ class GhcHeapCapContract(unittest.TestCase):
             self.assertGreater(heap, share // 2, "teto baixo demais viraria crash")
 
 
+@unittest.skipIf(sys.platform == "win32", "requires POSIX bash (Linux-only)")
 class MemoryFloorContract(unittest.TestCase):
     """Perfil pequeno demais falha alto, em vez de furar o teto em silencio.
 
@@ -335,6 +339,7 @@ class MemoryFloorContract(unittest.TestCase):
         )
 
 
+@unittest.skipIf(sys.platform == "win32", "requires POSIX bash (Linux-only)")
 class MigratorContractTest(unittest.TestCase):
     def test_migrator_exists_and_defaults_to_dry_run(self) -> None:
         """Sem --apply o migrador nao pode tocar em nenhum .env."""
@@ -406,7 +411,7 @@ class MigratorContractTest(unittest.TestCase):
             }
 
         pattern = re.search(
-            r"MANAGED_RE = re\.compile\((.*?)\)\n", MIGRATOR.read_text(), re.S
+            r"MANAGED_RE = re\.compile\((.*?)\)\n", MIGRATOR.read_text(encoding="utf-8"), re.S
         )
         self.assertIsNotNone(pattern)
         managed = re.compile("".join(re.findall(r'r"([^"]*)"', pattern.group(1))))
