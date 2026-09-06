@@ -39,6 +39,8 @@ The current architectural state assumes **a host-agent instead of API-side Docke
 
 ## Operations and troubleshooting
 
+- [Upgrades and rollback](operations/upgrades.md)
+- [Compatibility matrix](../COMPATIBILITY_MATRIX.md)
 - [Common errors](05-common-errors.md)
 - [Transitional shared Storage migration](architecture/shared-storage-migration.md)
 - The current view of jobs, recovery, rename, backup, restore, and deletion is in [Project lifecycle](architecture/project-lifecycle.md).
@@ -63,6 +65,8 @@ The current architectural state assumes **a host-agent instead of API-side Docke
 | safe Postgres-Meta fallback | `10-postgres-meta-hardening.md` |
 | envelope encryption and rotation | `11-project-secret-and-connection-rotation.md` |
 | opaque public keys, slots, optional expiration, migration, and incidents | `12-opaque-api-key-operations.md` |
+| release numbering, rollout, health gate, and rollback | `operations/upgrades.md` |
+| upstream pins and patched surface per release | `../COMPATIBILITY_MATRIX.md` |
 | vulnerability disclosure for this project | `../SECURITY.md` |
 
 ## Rule for new changes

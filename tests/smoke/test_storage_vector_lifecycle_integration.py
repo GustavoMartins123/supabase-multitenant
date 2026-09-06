@@ -82,7 +82,7 @@ class StorageVectorLifecycleIntegrationTests(unittest.TestCase):
         )
 
         self.assertIn(
-            '@app.get("/api/projects/{project_name}/storage/s3-keys")', asgi
+            '@app.get("/api/projects/{project_name}/storage/s3-keys"', asgi
         )
         self.assertIn("ensure_project_admin_access", asgi)
         self.assertIn('content={"accessKey": access_key, "secretKey": secret_key}', asgi)

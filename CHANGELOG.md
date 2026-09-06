@@ -6,6 +6,25 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/) e [Versionamento
 
 ## [Não lançado]
 
+### 2026-09-06
+
+#### Adicionado
+
+- `VERSION` na raiz como fonte única da versão da plataforma.
+- `tools/check-version-parity.py` propagando e travando a versão nos seis pontos derivados, com `--fix`.
+- `COMPATIBILITY_MATRIX.md` com os pins upstream, de infra e de toolchain de cada release.
+- `docs/operations/upgrades.md` e espelho pt-BR: rollout canário→percentual→todos, portão de saúde e rollback por camada.
+- Regras do gitleaks para as chaves legadas `anon` e `service_role` em JWT, por prefixo de payload e por atribuição.
+- Contratos `test_version_contract.py` e cobertura JWT em `test_gitleaks_config.py`.
+
+#### Alterado
+
+- Versão do app Flutter alinhada de `1.0.0+1` para `0.13.0-alpha+1`.
+
+#### Corrigido
+
+- Contrato do endpoint de chaves S3 aceita o decorator com `tags` e `response_model`.
+
 ### 2026-08-27
 
 #### Adicionado

@@ -39,6 +39,8 @@ O estado arquitetural atual assume **host-agent no lugar de acesso Docker pela A
 
 ## Operação e troubleshooting
 
+- [Upgrades e rollback](operations/upgrades.md)
+- [Matriz de compatibilidade](../../COMPATIBILITY_MATRIX.md)
 - [Principais erros](05-principais-erros.md)
 - [Migração transitória para Storage compartilhado](architecture/shared-storage-migration.md)
 - A visão atual de jobs, recovery, rename, backup, restore e deleção fica em [Lifecycle dos projetos](architecture/project-lifecycle.md).
@@ -63,6 +65,8 @@ O estado arquitetural atual assume **host-agent no lugar de acesso Docker pela A
 | fallback seguro do Postgres-Meta | `10-hardening-postgres-meta.md` |
 | envelope encryption e rotação | `11-rotacao-cripto-conexoes.md` |
 | chaves públicas opacas, slots, expiração opcional, migração e incidentes | `12-chaves-api-opacas.md` |
+| numeração de release, rollout, portão de saúde e rollback | `operations/upgrades.md` |
+| pins upstream e superfície patchada por release | `../../COMPATIBILITY_MATRIX.md` |
 | disclosure de vulnerabilidades deste projeto | `../../SECURITY.md` |
 
 ## Regra para novas mudanças
