@@ -15,6 +15,25 @@ description = "Opaque secret API key: sb_secret_<43 base64url>_<8 checksum> (see
 regex = '''sb_secret_[A-Za-z0-9_-]{43}_[A-Za-z0-9_-]{8}'''
 tags = ["key", "supabase-multitenant", "secret"]
 
+[[rules]]
+id = "supabase-multitenant-anon-key-jwt"
+description = "Legacy anon key: HS256 JWT minted by generate_jwt() with payload {\"role\":\"anon\",...}. Internal to the architecture, but a leak lets anyone reach PostgREST/Realtime/Storage of the tenant with RLS-only protection."
+regex = '''eyJ[A-Za-z0-9_-]{10,}\.eyJyb2xlIjoiYW5vbiIs[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{20,}'''
+tags = ["key", "jwt", "supabase-multitenant", "anon"]
+
+[[rules]]
+id = "supabase-multitenant-service-role-key-jwt"
+description = "Legacy service_role key: HS256 JWT minted by generate_jwt() with payload {\"role\":\"service_role\",...}. Highest severity: bypasses RLS on the whole tenant."
+regex = '''eyJ[A-Za-z0-9_-]{10,}\.eyJyb2xlIjoic2VydmljZV9yb2xl[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{20,}'''
+tags = ["key", "jwt", "supabase-multitenant", "service_role"]
+
+[[rules]]
+id = "supabase-multitenant-role-key-assignment"
+description = "JWT assigned to an anon/service_role variable or column (ANON_KEY_PROJETO, SERVICE_ROLE_KEY_PROJETO, FUNCTIONS_SUPABASE_*, anon_key, service_role). Catches claim orders the payload-prefix rules miss, e.g. keys minted outside generate_jwt()."
+regex = '''(?i)\b[a-z0-9_]*(?:anon_key|anon_token|service_role_key|service_role|service_key|service_token)[a-z0-9_]*['"]?\s*[:=>]{1,2}\s*['"]?(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,})'''
+secretGroup = 1
+tags = ["key", "jwt", "supabase-multitenant", "anon", "service_role"]
+
 [[allowlists]]
 description = "placeholder tokens in documentation examples (not real keys)"
 paths = [
