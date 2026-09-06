@@ -9,7 +9,7 @@ from typing import Literal
 import asyncpg
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.control_plane_service import audit_studio_action
 from app.database import get_pool
@@ -60,8 +60,7 @@ NO_STORE_HEADERS = {
 
 
 class OpaqueKeyRequest(BaseModel):
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
 
 def _raise_host_command_failure(

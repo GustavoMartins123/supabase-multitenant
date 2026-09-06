@@ -199,7 +199,7 @@ class OpaqueKeyContractTest(unittest.TestCase):
         self.assertIn('/{project_name}/api-key-slots/{slot_id}/activation"', self.router)
         self.assertIn('/{project_name}/api-key-reveals/{key_id}/claim"', self.router)
         self.assertIn('"Cache-Control": "no-store, max-age=0"', self.router)
-        self.assertIn('extra = "forbid"', self.router)
+        self.assertIn('extra="forbid"', self.router)
         self.assertIn("host-agent omitted error_code", self.router)
         self.assertNotIn('command["message"]\n                or', self.router)
         self.assertNotIn("/legacy-api-key", self.router.lower())

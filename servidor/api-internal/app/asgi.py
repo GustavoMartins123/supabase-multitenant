@@ -58,7 +58,7 @@ def _read_project_s3_vector_keys(project_name: str) -> tuple[str, str]:
     return access_key, secret_key
 
 
-@app.get("/api/projects/{project_name}/storage/s3-keys")
+@app.get("/api/projects/{project_name}/storage/s3-keys", tags=["project-insights"])
 async def get_project_s3_vector_keys(
     project_name: str,
     request: Request,

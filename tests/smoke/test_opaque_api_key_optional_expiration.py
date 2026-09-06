@@ -9,7 +9,7 @@ import unittest
 import warnings
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from fastapi.responses import JSONResponse
 
 
@@ -86,6 +86,7 @@ def _load_router_models():
             "functions",
         },
         "BaseModel": BaseModel,
+        "ConfigDict": ConfigDict,
         "DEFAULT_ROTATION_INTERVAL_DAYS": 90,
         "Field": Field,
         "Literal": Literal,

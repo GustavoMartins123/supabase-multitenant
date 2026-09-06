@@ -1,0 +1,134 @@
+//
+// AUTO-GENERATED FILE, DO NOT MODIFY!
+//
+// @dart=2.18
+
+// ignore_for_file: unused_element, unused_import
+// ignore_for_file: always_put_required_named_parameters_first
+// ignore_for_file: constant_identifier_names
+// ignore_for_file: lines_longer_than_80_chars
+
+part of openapi.api;
+
+class ProjectTagAssign {
+  /// Returns a new [ProjectTagAssign] instance.
+  ProjectTagAssign({
+    this.color,
+    this.name,
+    this.tagId,
+  });
+
+  String? color;
+
+  String? name;
+
+  String? tagId;
+
+  @override
+  bool operator ==(Object other) => identical(this, other) || other is ProjectTagAssign &&
+    other.color == color &&
+    other.name == name &&
+    other.tagId == tagId;
+
+  @override
+  int get hashCode =>
+    // ignore: unnecessary_parenthesis
+    (color == null ? 0 : color!.hashCode) +
+    (name == null ? 0 : name!.hashCode) +
+    (tagId == null ? 0 : tagId!.hashCode);
+
+  @override
+  String toString() => 'ProjectTagAssign[color=$color, name=$name, tagId=$tagId]';
+
+  Map<String, dynamic> toJson() {
+    final json = <String, dynamic>{};
+    if (this.color != null) {
+      json[r'color'] = this.color;
+    } else {
+      json[r'color'] = null;
+    }
+    if (this.name != null) {
+      json[r'name'] = this.name;
+    } else {
+      json[r'name'] = null;
+    }
+    if (this.tagId != null) {
+      json[r'tag_id'] = this.tagId;
+    } else {
+      json[r'tag_id'] = null;
+    }
+    return json;
+  }
+
+  /// Returns a new [ProjectTagAssign] instance and imports its values from
+  /// [value] if it's a [Map], null otherwise.
+  // ignore: prefer_constructors_over_static_methods
+  static ProjectTagAssign? fromJson(dynamic value) {
+    if (value is Map) {
+      final json = value.cast<String, dynamic>();
+
+      // Ensure that the map contains the required keys.
+      // Note 1: the values aren't checked for validity beyond being non-null.
+      // Note 2: this code is stripped in release mode!
+      assert(() {
+        requiredKeys.forEach((key) {
+          assert(json.containsKey(key), 'Required key "ProjectTagAssign[$key]" is missing from JSON.');
+          assert(json[key] != null, 'Required key "ProjectTagAssign[$key]" has a null value in JSON.');
+        });
+        return true;
+      }());
+
+      return ProjectTagAssign(
+        color: mapValueOfType<String>(json, r'color'),
+        name: mapValueOfType<String>(json, r'name'),
+        tagId: mapValueOfType<String>(json, r'tag_id'),
+      );
+    }
+    return null;
+  }
+
+  static List<ProjectTagAssign> listFromJson(dynamic json, {bool growable = false,}) {
+    final result = <ProjectTagAssign>[];
+    if (json is List && json.isNotEmpty) {
+      for (final row in json) {
+        final value = ProjectTagAssign.fromJson(row);
+        if (value != null) {
+          result.add(value);
+        }
+      }
+    }
+    return result.toList(growable: growable);
+  }
+
+  static Map<String, ProjectTagAssign> mapFromJson(dynamic json) {
+    final map = <String, ProjectTagAssign>{};
+    if (json is Map && json.isNotEmpty) {
+      json = json.cast<String, dynamic>(); // ignore: parameter_assignments
+      for (final entry in json.entries) {
+        final value = ProjectTagAssign.fromJson(entry.value);
+        if (value != null) {
+          map[entry.key] = value;
+        }
+      }
+    }
+    return map;
+  }
+
+  // maps a json object with a list of ProjectTagAssign-objects as value to a dart map
+  static Map<String, List<ProjectTagAssign>> mapListFromJson(dynamic json, {bool growable = false,}) {
+    final map = <String, List<ProjectTagAssign>>{};
+    if (json is Map && json.isNotEmpty) {
+      // ignore: parameter_assignments
+      json = json.cast<String, dynamic>();
+      for (final entry in json.entries) {
+        map[entry.key] = ProjectTagAssign.listFromJson(entry.value, growable: growable,);
+      }
+    }
+    return map;
+  }
+
+  /// The list of required keys that must be present in a JSON.
+  static const requiredKeys = <String>{
+  };
+}
+

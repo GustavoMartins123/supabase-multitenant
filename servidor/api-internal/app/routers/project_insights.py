@@ -273,11 +273,43 @@ async def get_project_user_telemetry(
 
 @router.api_route(
     "/api/projects/{ref}/meta",
-    methods=["GET", "POST", "PATCH", "DELETE"],
+    methods=["GET"],
+    operation_id="proxy_project_meta_get",
+)
+@router.api_route(
+    "/api/projects/{ref}/meta",
+    methods=["POST"],
+    operation_id="proxy_project_meta_post",
+)
+@router.api_route(
+    "/api/projects/{ref}/meta",
+    methods=["PATCH"],
+    operation_id="proxy_project_meta_patch",
+)
+@router.api_route(
+    "/api/projects/{ref}/meta",
+    methods=["DELETE"],
+    operation_id="proxy_project_meta_delete",
 )
 @router.api_route(
     "/api/projects/{ref}/meta/{meta_path:path}",
-    methods=["GET", "POST", "PATCH", "DELETE"],
+    methods=["GET"],
+    operation_id="proxy_project_meta_path_get",
+)
+@router.api_route(
+    "/api/projects/{ref}/meta/{meta_path:path}",
+    methods=["POST"],
+    operation_id="proxy_project_meta_path_post",
+)
+@router.api_route(
+    "/api/projects/{ref}/meta/{meta_path:path}",
+    methods=["PATCH"],
+    operation_id="proxy_project_meta_path_patch",
+)
+@router.api_route(
+    "/api/projects/{ref}/meta/{meta_path:path}",
+    methods=["DELETE"],
+    operation_id="proxy_project_meta_path_delete",
 )
 async def proxy_project_meta(
     ref: str,

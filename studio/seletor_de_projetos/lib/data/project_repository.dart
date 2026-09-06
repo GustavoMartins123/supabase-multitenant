@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:projects_api_client/api.dart' as generated;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/job.dart';
 import '../models/project_collaboration.dart';
@@ -130,10 +131,24 @@ class ProjectRepository {
   }
 
   Future<Job> createProject(String name, {String resourceProfile = 'medium'}) async {
+    final body = generated.NewProject(
+      name: name,
+      resourceProfile: switch (resourceProfile) {
+        'small' => generated.NewProjectResourceProfileEnum.small,
+        'medium' => generated.NewProjectResourceProfileEnum.medium,
+        'large' => generated.NewProjectResourceProfileEnum.large,
+        'custom' => generated.NewProjectResourceProfileEnum.custom,
+        _ => throw ArgumentError.value(
+            resourceProfile,
+            'resourceProfile',
+            'Use small, medium, large ou custom',
+          ),
+      },
+    );
     final response = await _client.post(
       Uri.parse('/api/projects'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'name': name, 'resource_profile': resourceProfile}),
+      body: jsonEncode(body.toJson()),
     );
     _ensureCommandSucceeded(response, allowedStatusCodes: const {202});
     return Job.fromResponse(response);
@@ -145,15 +160,27 @@ class ProjectRepository {
     bool copyData, {
     String? resourceProfile,
   }) async {
+    final body = generated.DuplicateProject(
+      originalName: originalName,
+      newName: newName,
+      copyData: copyData,
+      resourceProfile: switch (resourceProfile) {
+        null => null,
+        'small' => generated.DuplicateProjectResourceProfileEnum.small,
+        'medium' => generated.DuplicateProjectResourceProfileEnum.medium,
+        'large' => generated.DuplicateProjectResourceProfileEnum.large,
+        'custom' => generated.DuplicateProjectResourceProfileEnum.custom,
+        _ => throw ArgumentError.value(
+            resourceProfile,
+            'resourceProfile',
+            'Use small, medium, large ou custom',
+          ),
+      },
+    );
     final response = await _client.post(
       Uri.parse('/api/projects/duplicate'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'original_name': originalName,
-        'new_name': newName,
-        'copy_data': copyData,
-        if (resourceProfile != null) 'resource_profile': resourceProfile,
-      }),
+      body: jsonEncode(body.toJson()),
     );
     _ensureCommandSucceeded(response, allowedStatusCodes: const {202});
     return Job.fromResponse(response);
@@ -196,10 +223,18 @@ class ProjectRepository {
   }
 
   Future<void> addMember(String ref, String userId, String role) async {
+    final body = generated.AddMember(
+      userId: userId,
+      role: switch (role) {
+        'admin' => generated.AddMemberRoleEnum.admin,
+        'member' => generated.AddMemberRoleEnum.member,
+        _ => throw ArgumentError.value(role, 'role', 'Use admin ou member'),
+      },
+    );
     final resp = await _client.post(
       Uri.parse('/api/projects/$ref/members'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'user_id': userId, 'role': role}),
+      body: jsonEncode(body.toJson()),
     );
     _ensureCommandSucceeded(resp);
   }

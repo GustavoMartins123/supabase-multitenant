@@ -139,6 +139,7 @@ from app.meta_connections import (
 )
 from app.routers.opaque_keys import router as opaque_keys_router
 from app.routers.platform_auth import router as platform_auth_router
+from app.version import API_VERSION
 from app.project_backgrounds import (
     _create_restore_point_background,
     _delete_project_background,
@@ -156,7 +157,16 @@ from app.project_backgrounds import (
 configure_jobs(get_pool)
 
 
-app = FastAPI()
+app = FastAPI(
+    title="Supabase Multitenant Projects API",
+    version=API_VERSION,
+    description="Control plane for isolated Supabase projects on shared infrastructure.",
+    license_info={"name": "Apache-2.0", "identifier": "Apache-2.0"},
+    generate_unique_id_function=lambda route: (
+        f"{re.sub(r'\W', '_', f'{route.name}{route.path_format}')}"
+        f"_{'_'.join(sorted(method.lower() for method in route.methods or ()))}"
+    ),
+)
 app.include_router(health_router)
 app.include_router(collaboration_router)
 app.include_router(internal_router)

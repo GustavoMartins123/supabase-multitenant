@@ -18,7 +18,7 @@ from app.project_deletion import load_project_environment
 from app.project_env_secrets import PROJECTS_ROOT
 from app.validation import validate_project_id
 
-router = APIRouter()
+router = APIRouter(tags=["platform-auth"])
 
 GOTRUE_INTERNAL_PORT = 9999
 # O Nginx do projeto remove este prefixo antes do GoTrue; aqui a chamada e direta.
@@ -185,7 +185,28 @@ def _project_service_key(project_name: str) -> str:
 
 @router.api_route(
     "/api/projects/internal/auth-admin/{project_name}/{gotrue_path:path}",
-    methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    methods=["GET"],
+    operation_id="proxy_project_auth_admin_get",
+)
+@router.api_route(
+    "/api/projects/internal/auth-admin/{project_name}/{gotrue_path:path}",
+    methods=["POST"],
+    operation_id="proxy_project_auth_admin_post",
+)
+@router.api_route(
+    "/api/projects/internal/auth-admin/{project_name}/{gotrue_path:path}",
+    methods=["PUT"],
+    operation_id="proxy_project_auth_admin_put",
+)
+@router.api_route(
+    "/api/projects/internal/auth-admin/{project_name}/{gotrue_path:path}",
+    methods=["PATCH"],
+    operation_id="proxy_project_auth_admin_patch",
+)
+@router.api_route(
+    "/api/projects/internal/auth-admin/{project_name}/{gotrue_path:path}",
+    methods=["DELETE"],
+    operation_id="proxy_project_auth_admin_delete",
 )
 async def proxy_project_auth_admin(
     project_name: str,

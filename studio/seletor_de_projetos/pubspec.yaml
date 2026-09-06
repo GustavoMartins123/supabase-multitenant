@@ -41,6 +41,8 @@ dependencies:
   collection: ^1.18.0
   shared_preferences: ^2.5.3
   flutter_riverpod: ^3.3.1
+  projects_api_client:
+    path: ../projects_api_client
 dev_dependencies:
   flutter_launcher_icons: ^0.14.4
   flutter_test:

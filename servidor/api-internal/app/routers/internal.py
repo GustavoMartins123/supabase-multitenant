@@ -65,7 +65,23 @@ def _analytics_allowed_methods(analytics_path: str) -> set[str] | None:
 
 @router.api_route(
     "/api/internal/analytics/{analytics_path:path}",
-    methods=["GET", "POST", "PUT", "DELETE"],
+    methods=["GET"],
+    operation_id="proxy_global_analytics_get",
+)
+@router.api_route(
+    "/api/internal/analytics/{analytics_path:path}",
+    methods=["POST"],
+    operation_id="proxy_global_analytics_post",
+)
+@router.api_route(
+    "/api/internal/analytics/{analytics_path:path}",
+    methods=["PUT"],
+    operation_id="proxy_global_analytics_put",
+)
+@router.api_route(
+    "/api/internal/analytics/{analytics_path:path}",
+    methods=["DELETE"],
+    operation_id="proxy_global_analytics_delete",
 )
 async def proxy_global_analytics(
     analytics_path: str,
