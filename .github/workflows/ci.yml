@@ -26,6 +26,8 @@ jobs:
           python -m pip install 'ruff==0.13.2'
           python -m ruff check --select F821 --no-cache \
             servidor/api-internal/app servidor/host-agent/hostagent tools tests
+      - name: Contrato das variaveis de ambiente
+        run: python tools/check-env-contract.py
       - name: Suite smoke (contratos)
         run: python -m pytest tests/smoke -q
       - name: Sintaxe Bash

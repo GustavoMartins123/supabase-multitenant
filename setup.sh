@@ -295,6 +295,110 @@ confirm_network_topology() {
     done
 }
 
+validate_env_contract() {
+    print_status "Validando contrato das variáveis de ambiente..."
+    local fail=0
+    local env_file line key value
+    for env_file in servidor/.env servidor/.analytics.env servidor/.storage.env studio/.env studio/.analytics.env; do
+        if [[ ! -f "$env_file" ]]; then
+            print_error "Arquivo ausente após setup: $env_file"
+            fail=1
+            continue
+        fi
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            [[ -z "$line" || "$line" == \#* ]] && continue
+            [[ "$line" != *=* ]] && { print_error "Linha sem '=' em $env_file: $line"; fail=1; continue; }
+            key="${line%%=*}"
+            value="${line#*=}"
+            if [[ "$key" == *" "* ]]; then
+                print_error "Chave com espaço em $env_file: $key"
+                fail=1
+            fi
+            if [[ "$value" == "pass" && "$key" != "TRAEFIK_ACME_EMAIL" ]]; then
+                print_error "Placeholder sobrevivente: $key em $env_file"
+                fail=1
+            fi
+            if [[ "$value" =~ \<[^\<\>\ ]+\> ]]; then
+                print_error "Placeholder não substituído: $key em $env_file"
+                fail=1
+            fi
+            trimmed_value="${value# }"
+            trimmed_value="${trimmed_value% }"
+            if [[ "$value" != "$trimmed_value" ]]; then
+                print_error "Espaço nas bordas: $key em $env_file"
+                fail=1
+            fi
+        done < "$env_file"
+    done
+    local required_key required_file
+    for required_key in PROJECT_SECRETS_MASTER_KEY PG_META_CRYPTO_KEY STUDIO_SERVICE_KEY_ENCRYPTION_KEY NGINX_HMAC_SECRET HOST_AGENT_HMAC_SECRET; do
+        value=$(read_env_value servidor/.env "$required_key" 2>/dev/null || true)
+        if [[ -z "$value" || "$value" == "pass" ]]; then
+            print_error "Chave obrigatória vazia ou placeholder: $required_key em servidor/.env"
+            fail=1
+        fi
+    done
+    for required_file in servidor/.analytics.env studio/.analytics.env; do
+        value=$(read_env_value "$required_file" LOGFLARE_PRIVATE_ACCESS_TOKEN 2>/dev/null || true)
+        if [[ -z "$value" || "$value" == "pass" ]]; then
+            print_error "LOGFLARE_PRIVATE_ACCESS_TOKEN vazio ou placeholder em $required_file"
+            fail=1
+        fi
+    done
+    for required_file in servidor/.env studio/.env; do
+        for required_key in STUDIO_GATEWAY_HMAC_SECRET PROJECTS_API_HMAC_SECRET; do
+            value=$(read_env_value "$required_file" "$required_key" 2>/dev/null || true)
+            if [[ -z "$value" || "$value" == "pass" ]]; then
+                print_error "$required_key vazio ou placeholder em $required_file"
+                fail=1
+            fi
+        done
+    done
+    if ! python3 - servidor/.env <<'PYEOF'
+import ipaddress
+import sys
+
+values = {}
+with open(sys.argv[1], encoding="utf-8") as handle:
+    for raw in handle:
+        if "=" in raw and not raw.startswith("#"):
+            key, _, value = raw.partition("=")
+            values[key.strip()] = value.strip()
+try:
+    subnet = ipaddress.ip_network(values["SUPABASE_NETWORK_SUBNET"], strict=False)
+    gateway = ipaddress.ip_address(values["SUPABASE_NETWORK_GATEWAY"])
+    ip_range = ipaddress.ip_network(values["SUPABASE_NETWORK_IP_RANGE"], strict=False)
+except (KeyError, ValueError) as exc:
+    print(f"rede invalida em servidor/.env: {exc}")
+    sys.exit(1)
+if gateway not in subnet:
+    print(f"gateway {gateway} fora da subnet {subnet}")
+    sys.exit(1)
+if not ip_range.subnet_of(subnet):
+    print(f"ip-range {ip_range} fora da subnet {subnet}")
+    sys.exit(1)
+for item in values.get("PROJECTS_API_ALLOWED_IP_RANGES", "").split(","):
+    item = item.strip()
+    if not item:
+        continue
+    try:
+        ipaddress.ip_address(item.split("/")[0])
+        if "/" in item:
+            ipaddress.ip_network(item, strict=False)
+    except ValueError:
+        print(f"PROJECTS_API_ALLOWED_IP_RANGES invalido: {item!r}")
+        sys.exit(1)
+PYEOF
+    then
+        print_error "Validação de rede falhou em servidor/.env"
+        fail=1
+    fi
+    if [[ "$fail" -ne 0 ]]; then
+        return 1
+    fi
+    print_success "Contrato de ambiente válido."
+}
+
 print_setup_usage() {
     cat <<'EOF'
 Uso:
@@ -601,7 +705,9 @@ main() {
     bash servidor/verify_key_config.sh
     print_success "Api python configurada para permitir esse ip $LOCAL_IP a consultar ela."
     print_success "Script update_geoip.sh configurado com o caminho: $SCRIPT_DIR"
-    
+
+    validate_env_contract
+
     commit_transaction
 }
 main "$@"
