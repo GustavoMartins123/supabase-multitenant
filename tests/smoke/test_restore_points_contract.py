@@ -212,8 +212,12 @@ class RestorePointGatewayAndUiTest(unittest.TestCase):
         dialog = (SELECTOR_LIB / "dialogs" / "restore_points_dialog.dart").read_text(
             encoding="utf-8"
         )
+        card_widget = (SELECTOR_LIB / "dialogs" / "restore_point_card.dart").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("createdByName: json['created_by_name']", model)
-        self.assertIn("Criado por ${point.creatorName}", dialog)
+        self.assertIn("Criado por ${point.creatorName}", card_widget)
+        self.assertIn("restore_point_card.dart", dialog)
         card = (SELECTOR_LIB / "widgets" / "project_card.dart").read_text(
             encoding="utf-8"
         )

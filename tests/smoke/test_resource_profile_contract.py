@@ -372,13 +372,16 @@ class FlutterContract(unittest.TestCase):
         self.assertIn("(name: ProjectNameValidator.normalize(_ctrl.text),", dialog)
 
     def test_env_section_renders_select_for_profile(self) -> None:
-        section = (
-            ROOT / "studio/seletor_de_projetos/lib/widgets/"
-            "project_settings/env_settings_section.dart"
-        ).read_text(encoding="utf-8")
-        self.assertIn("'PROJECT_RESOURCE_PROFILE'", section)
-        self.assertIn("case _FieldType.select:", section)
-        self.assertIn("_kSelectOptions", section)
+        widgets = ROOT / "studio/seletor_de_projetos/lib/widgets/project_settings"
+        section = (widgets / "env_settings_section.dart").read_text(encoding="utf-8")
+        metadata = (widgets / "env_settings_metadata.dart").read_text(encoding="utf-8")
+        field = (widgets / "env_setting_field.dart").read_text(encoding="utf-8")
+        self.assertIn("'PROJECT_RESOURCE_PROFILE'", metadata)
+        self.assertIn("kEnvSelectOptions", metadata)
+        self.assertIn("EnvFieldType.select", field)
+        self.assertIn("DropdownButtonFormField<String>", field)
+        self.assertIn("env_setting_field.dart", section)
+        self.assertIn("env_settings_metadata.dart", section)
 
 
 @unittest.skipIf(sys.platform == "win32", "requires POSIX bash (Linux-only)")

@@ -34,15 +34,21 @@ class ContentStableProjectIdentityTests(unittest.TestCase):
         self.assertIn('headers={"Cache-Control": "no-store"}', route)
 
     def test_content_proxy_uses_stable_identity_only_for_content(self) -> None:
-        source = (
-            ROOT / "studio/nginx/lua/studio_compat/content_user_proxy.lua"
-        ).read_text(encoding="utf-8")
+        lua = ROOT / "studio/nginx/lua/studio_compat"
+        client = (lua / "content_studio_client.lua").read_text(encoding="utf-8")
+        namespace = (lua / "content_namespace.lua").read_text(encoding="utf-8")
+        virt = (lua / "content_virtualization.lua").read_text(encoding="utf-8")
 
-        self.assertIn('content_project_identity.resolve(selected_ref)', source)
-        self.assertIn('return identity.project_id', source)
-        self.assertIn('content_namespace_migration.ensure(user_id, identity)', source)
-        self.assertIn('id_namespace = namespace_state.root_folder.id', source)
-        self.assertIn('local legacy_id = virtual_snippet_id(snippet.name, virtual_folder)', source)
+        self.assertIn('content_project_identity.resolve(selected_ref)', client)
+        self.assertIn('return identity.project_id', client)
+        self.assertIn(
+            'content_namespace_migration.ensure(user_id, identity)', namespace
+        )
+        self.assertIn('id_namespace = namespace_state.root_folder.id', virt)
+        self.assertIn(
+            'local legacy_id = virtual_snippet_id(snippet.name, virtual_folder)',
+            virt,
+        )
 
     def test_read_routes_do_not_create_namespace_directories(self) -> None:
         source = (

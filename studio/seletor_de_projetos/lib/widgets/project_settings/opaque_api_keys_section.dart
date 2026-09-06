@@ -13,6 +13,9 @@ import '../danger_button.dart';
 import '../secondary_button.dart';
 import '../section_widget.dart';
 import '../step_up_authentication_dialog.dart';
+import 'claimed_opaque_api_key_dialog.dart';
+import 'create_opaque_slot_dialog.dart';
+import 'expiration_policy_dialog.dart';
 
 class OpaqueApiKeysSection extends ConsumerStatefulWidget {
   const OpaqueApiKeysSection({
@@ -193,7 +196,7 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
       final copiedBeforeClose = await showDialog<bool>(
             context: context,
             barrierDismissible: false,
-            builder: (context) => _ClaimedOpaqueApiKeyDialog(
+            builder: (context) => ClaimedOpaqueApiKeyDialog(
               secret: secret,
               reveal: reveal,
               initiallyCopied: copied,
@@ -278,9 +281,9 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
   }
 
   Future<void> _editExpirationPolicy(OpaqueApiKeySlot slot) async {
-    final selection = await showDialog<_ExpirationPolicySelection>(
+    final selection = await showDialog<ExpirationPolicySelection>(
       context: context,
-      builder: (context) => _ExpirationPolicyDialog(
+      builder: (context) => ExpirationPolicyDialog(
         initialDays: slot.rotationIntervalDays,
       ),
     );
@@ -322,9 +325,9 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
   }
 
   Future<void> _createSlot() async {
-    final draft = await showDialog<_CreateOpaqueSlotDraft>(
+    final draft = await showDialog<CreateOpaqueSlotDraft>(
       context: context,
-      builder: (context) => const _CreateOpaqueSlotDialog(),
+      builder: (context) => const CreateOpaqueSlotDialog(),
     );
     if (draft == null || !mounted) return;
     try {
@@ -651,7 +654,7 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           const SizedBox(height: 4),
           Text(
             '${slot.allowedServices.join(', ')} · Expiração: '
-            '${_expirationLabel(slot.rotationIntervalDays)}',
+            '${expirationLabel(slot.rotationIntervalDays)}',
             style:
                 const TextStyle(color: SupabaseColors.textMuted, fontSize: 11),
           ),
@@ -719,7 +722,7 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
               children: [
                 SecondaryButton(
                   label: 'Expiração: '
-                      '${_expirationLabel(slot.rotationIntervalDays)}',
+                      '${expirationLabel(slot.rotationIntervalDays)}',
                   icon: Icons.timer_outlined,
                   onPressed: _managementDisabled(state)
                       ? null
@@ -772,407 +775,4 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
     border: Border.all(color: SupabaseColors.border),
     borderRadius: BorderRadius.circular(6),
   );
-}
-
-class _ClaimedOpaqueApiKeyDialog extends StatefulWidget {
-  const _ClaimedOpaqueApiKeyDialog({
-    required this.secret,
-    required this.reveal,
-    required this.initiallyCopied,
-    required this.initialClipboardError,
-  });
-
-  final String secret;
-  final OpaqueApiKeyReveal reveal;
-  final bool initiallyCopied;
-  final String? initialClipboardError;
-
-  @override
-  State<_ClaimedOpaqueApiKeyDialog> createState() =>
-      _ClaimedOpaqueApiKeyDialogState();
-}
-
-class _ClaimedOpaqueApiKeyDialogState
-    extends State<_ClaimedOpaqueApiKeyDialog> {
-  late bool _copied = widget.initiallyCopied;
-  late String? _clipboardError = widget.initialClipboardError;
-
-  Future<void> _copy() async {
-    try {
-      await Clipboard.setData(ClipboardData(text: widget.secret));
-      if (!mounted) return;
-      setState(() {
-        _copied = true;
-        _clipboardError = null;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() => _clipboardError = opaqueApiKeyErrorMessage(error));
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      key: const ValueKey('claimed-opaque-api-key-dialog'),
-      backgroundColor: SupabaseColors.bg200,
-      title: const Text('API key do projeto'),
-      content: SizedBox(
-        width: 560,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Trate o valor como segredo: qualquer pessoa com ele fala com o '
-              'projeto até a chave ser rotacionada.',
-              style: TextStyle(color: SupabaseColors.warning),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '${widget.reveal.slotName} · ${widget.reveal.kind}',
-              style: const TextStyle(
-                color: SupabaseColors.textMuted,
-                fontSize: 11,
-              ),
-            ),
-            const SizedBox(height: 12),
-            SelectableText(
-              widget.secret,
-              key: const ValueKey('claimed-opaque-api-key-plaintext'),
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-            ),
-            if (_copied) ...[
-              const SizedBox(height: 8),
-              const Text(
-                'Copiada para a área de transferência.',
-                style: TextStyle(color: SupabaseColors.success, fontSize: 11),
-              ),
-            ],
-            if (_clipboardError != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Não foi possível copiar automaticamente: $_clipboardError',
-                style: const TextStyle(
-                  color: SupabaseColors.error,
-                  fontSize: 11,
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: _copy,
-          child: Text(_copied ? 'Copiar novamente' : 'Copiar'),
-        ),
-        TextButton(
-          onPressed: () => Navigator.pop(context, _copied),
-          child: const Text('Fechar'),
-        ),
-      ],
-    );
-  }
-}
-
-final class _CreateOpaqueSlotDraft {
-  const _CreateOpaqueSlotDraft({
-    required this.name,
-    required this.kind,
-    required this.allowedServices,
-    required this.automaticRotationEnabled,
-    required this.rotationIntervalDays,
-  });
-
-  final String name;
-  final String kind;
-  final List<String> allowedServices;
-  final bool automaticRotationEnabled;
-  final int? rotationIntervalDays;
-}
-
-class _CreateOpaqueSlotDialog extends StatefulWidget {
-  const _CreateOpaqueSlotDialog();
-
-  @override
-  State<_CreateOpaqueSlotDialog> createState() =>
-      _CreateOpaqueSlotDialogState();
-}
-
-class _CreateOpaqueSlotDialogState extends State<_CreateOpaqueSlotDialog> {
-  static const _services = [
-    'auth',
-    'rest',
-    'graphql',
-    'realtime',
-    'storage',
-    'functions',
-  ];
-  final _name = TextEditingController();
-  final _selectedServices = <String>{..._services};
-  String _kind = 'publishable';
-  bool _automatic = true;
-  int? _interval = 90;
-  String? _error;
-
-  @override
-  void dispose() {
-    _name.dispose();
-    super.dispose();
-  }
-
-  Future<void> _chooseExpirationPolicy() async {
-    final selection = await showDialog<_ExpirationPolicySelection>(
-      context: context,
-      builder: (context) => _ExpirationPolicyDialog(initialDays: _interval),
-    );
-    if (selection == null || !mounted) return;
-    setState(() {
-      _interval = selection.days;
-      if (_interval == null) _automatic = false;
-    });
-  }
-
-  void _submit() {
-    final name = _name.text;
-    if (!RegExp(r'^[a-z][a-z0-9_-]{2,39}$').hasMatch(name)) {
-      setState(() => _error = 'Use 3-40 caracteres: a-z, 0-9, _ ou -.');
-      return;
-    }
-    if (_selectedServices.isEmpty) {
-      setState(() => _error = 'Selecione ao menos um servico.');
-      return;
-    }
-    Navigator.pop(
-      context,
-      _CreateOpaqueSlotDraft(
-        name: name,
-        kind: _kind,
-        allowedServices: _selectedServices.toList()..sort(),
-        automaticRotationEnabled: _automatic,
-        rotationIntervalDays: _interval,
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: SupabaseColors.bg200,
-      title: const Text('Novo slot de API key'),
-      content: SizedBox(
-        width: 520,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: _name,
-                decoration:
-                    const InputDecoration(labelText: 'Nome do consumidor'),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: _kind,
-                decoration: const InputDecoration(labelText: 'Tipo'),
-                items: const [
-                  DropdownMenuItem(
-                      value: 'publishable', child: Text('Publishable')),
-                  DropdownMenuItem(value: 'secret', child: Text('Secret')),
-                ],
-                onChanged: (value) => setState(() => _kind = value!),
-              ),
-              const SizedBox(height: 12),
-              const Text('Servicos permitidos',
-                  style: _OpaqueApiKeysSectionState._captionStyle),
-              Wrap(
-                spacing: 6,
-                children: _services
-                    .map(
-                      (service) => FilterChip(
-                        label: Text(service),
-                        selected: _selectedServices.contains(service),
-                        onSelected: (selected) => setState(() {
-                          if (selected) {
-                            _selectedServices.add(service);
-                          } else {
-                            _selectedServices.remove(service);
-                          }
-                        }),
-                      ),
-                    )
-                    .toList(),
-              ),
-              SwitchListTile.adaptive(
-                contentPadding: EdgeInsets.zero,
-                value: _automatic,
-                onChanged: _interval == null
-                    ? null
-                    : (value) => setState(() => _automatic = value),
-                title: const Text('Rotacao automatica'),
-                subtitle: _interval == null
-                    ? const Text(
-                        'Indisponível para chaves sem expiração temporal.',
-                      )
-                    : null,
-              ),
-              SecondaryButton(
-                label: 'Expiração da chave: ${_expirationLabel(_interval)}',
-                icon: Icons.timer_outlined,
-                onPressed: _chooseExpirationPolicy,
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 10),
-                Text(_error!,
-                    style: const TextStyle(color: SupabaseColors.error)),
-              ],
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancelar'),
-        ),
-        TextButton(
-          onPressed: _submit,
-          child: const Text('Criar e revelar'),
-        ),
-      ],
-    );
-  }
-}
-
-class _ExpirationPolicySelection {
-  const _ExpirationPolicySelection(this.days);
-
-  final int? days;
-}
-
-String _expirationLabel(int? days) =>
-    days == null ? 'Não expira' : '$days dias';
-
-class _ExpirationPolicyDialog extends StatefulWidget {
-  const _ExpirationPolicyDialog({required this.initialDays});
-
-  final int? initialDays;
-
-  @override
-  State<_ExpirationPolicyDialog> createState() =>
-      _ExpirationPolicyDialogState();
-}
-
-class _ExpirationPolicyDialogState extends State<_ExpirationPolicyDialog> {
-  static const _presetDays = {90, 180, 365};
-  late String _choice;
-  late final TextEditingController _customDays;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    final initialDays = widget.initialDays;
-    if (initialDays == null) {
-      _choice = 'never';
-    } else if (_presetDays.contains(initialDays)) {
-      _choice = initialDays.toString();
-    } else {
-      _choice = 'custom';
-    }
-    _customDays = TextEditingController(
-      text: initialDays == null || _presetDays.contains(initialDays)
-          ? ''
-          : initialDays.toString(),
-    );
-  }
-
-  @override
-  void dispose() {
-    _customDays.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    int? days;
-    if (_choice != 'never') {
-      days = _choice == 'custom'
-          ? int.tryParse(_customDays.text)
-          : int.parse(_choice);
-      if (days == null || days < 1 || days > 3650) {
-        setState(() => _error = 'Informe um intervalo entre 1 e 3650 dias.');
-        return;
-      }
-    }
-    Navigator.pop(context, _ExpirationPolicySelection(days));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: SupabaseColors.bg200,
-      title: const Text('Expiração da chave'),
-      content: SizedBox(
-        width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'O lifetime da credencial não altera a janela curta de '
-              'revelação única nem o lifetime de JWTs e sessões.',
-              style: TextStyle(
-                color: SupabaseColors.textMuted,
-                fontSize: 11,
-              ),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              initialValue: _choice,
-              decoration: const InputDecoration(labelText: 'Política'),
-              items: const [
-                DropdownMenuItem(value: 'never', child: Text('Não expira')),
-                DropdownMenuItem(value: '90', child: Text('90 dias')),
-                DropdownMenuItem(value: '180', child: Text('180 dias')),
-                DropdownMenuItem(value: '365', child: Text('365 dias')),
-                DropdownMenuItem(value: 'custom', child: Text('Personalizado')),
-              ],
-              onChanged: (value) => setState(() {
-                _choice = value!;
-                _error = null;
-              }),
-            ),
-            if (_choice == 'custom') ...[
-              const SizedBox(height: 12),
-              TextField(
-                controller: _customDays,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(
-                  labelText: 'Intervalo em dias',
-                  hintText: '1 a 3650',
-                ),
-              ),
-            ],
-            if (_error != null) ...[
-              const SizedBox(height: 10),
-              Text(
-                _error!,
-                style: const TextStyle(color: SupabaseColors.error),
-              ),
-            ],
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancelar'),
-        ),
-        TextButton(onPressed: _submit, child: const Text('Aplicar')),
-      ],
-    );
-  }
 }

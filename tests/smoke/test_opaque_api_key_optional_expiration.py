@@ -41,6 +41,11 @@ STUDIO_WIDGET = (
     / "studio/seletor_de_projetos/lib/widgets/project_settings"
     / "opaque_api_keys_section.dart"
 )
+STUDIO_EXPIRATION_DIALOG = (
+    ROOT
+    / "studio/seletor_de_projetos/lib/widgets/project_settings"
+    / "expiration_policy_dialog.dart"
+)
 
 
 def _load_pure_service_function(name: str):
@@ -130,6 +135,9 @@ class OptionalOpaqueKeyExpirationContractTest(unittest.TestCase):
         cls.migration = MIGRATION.read_text(encoding="utf-8")
         cls.studio_model = STUDIO_MODEL.read_text(encoding="utf-8")
         cls.studio_widget = STUDIO_WIDGET.read_text(encoding="utf-8")
+        cls.studio_expiration_dialog = STUDIO_EXPIRATION_DIALOG.read_text(
+            encoding="utf-8"
+        )
 
     def test_creation_policy_calculates_timestamp_or_never(self) -> None:
         expiration_from_policy = _load_pure_service_function(
@@ -281,7 +289,7 @@ class OptionalOpaqueKeyExpirationContractTest(unittest.TestCase):
         self.assertIn("DateTime? expiresAt", self.studio_model)
         self.assertIn("int? rotationIntervalDays", self.studio_model)
         self.assertIn("Não expira", self.studio_widget)
-        self.assertIn("Personalizado", self.studio_widget)
+        self.assertIn("Personalizado", self.studio_expiration_dialog)
 
         issued_response = _load_issued_response()
         response = issued_response(
