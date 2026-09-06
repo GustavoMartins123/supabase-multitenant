@@ -19,7 +19,7 @@ void main() {
   group('tests for PlatformAuthApi', () {
     // List Project Auth Users
     //
-    //Future<Object> listProjectAuthUsersApiProjectsInternalAuthUsersProjectNameGet(String projectName, { int page, int perPage }) async
+    //Future<AuthUsersResponse> listProjectAuthUsersApiProjectsInternalAuthUsersProjectNameGet(String projectName, { int page, int perPage }) async
     test('test listProjectAuthUsersApiProjectsInternalAuthUsersProjectNameGet', () async {
       // TODO
     });

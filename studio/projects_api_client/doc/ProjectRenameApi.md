@@ -17,7 +17,7 @@ Method | HTTP request | Description
 
 
 # **getProjectConfigTokenApiProjectsProjectNameConfigTokenGet**
-> Object getProjectConfigTokenApiProjectsProjectNameConfigTokenGet(projectName)
+> ProjectConfigTokenResponse getProjectConfigTokenApiProjectsProjectNameConfigTokenGet(projectName)
 
 Get Project Config Token
 
@@ -46,7 +46,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**ProjectConfigTokenResponse**](ProjectConfigTokenResponse.md)
 
 ### Authorization
 
@@ -60,7 +60,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getProjectQueueStatusApiProjectsProjectNameQueueStatusGet**
-> Object getProjectQueueStatusApiProjectsProjectNameQueueStatusGet(projectName)
+> ProjectQueueStatusResponse getProjectQueueStatusApiProjectsProjectNameQueueStatusGet(projectName)
 
 Get Project Queue Status
 
@@ -89,7 +89,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**ProjectQueueStatusResponse**](ProjectQueueStatusResponse.md)
 
 ### Authorization
 
@@ -103,7 +103,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getProjectRenameHistoryApiProjectsProjectNameRenameHistoryGet**
-> Object getProjectRenameHistoryApiProjectsProjectNameRenameHistoryGet(projectName, limit)
+> ProjectRenameHistoryResponse getProjectRenameHistoryApiProjectsProjectNameRenameHistoryGet(projectName, limit)
 
 Get Project Rename History
 
@@ -134,7 +134,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**ProjectRenameHistoryResponse**](ProjectRenameHistoryResponse.md)
 
 ### Authorization
 
@@ -148,7 +148,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **renameProjectApiProjectsProjectNameRenamePost**
-> Object renameProjectApiProjectsProjectNameRenamePost(projectName, projectRenameRequest)
+> RenameProjectResponse renameProjectApiProjectsProjectNameRenamePost(projectName, projectRenameRequest)
 
 Rename Project
 
@@ -179,7 +179,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**RenameProjectResponse**](RenameProjectResponse.md)
 
 ### Authorization
 
@@ -193,7 +193,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **updateProjectDisplayNameApiProjectsProjectNameDisplayNamePatch**
-> Object updateProjectDisplayNameApiProjectsProjectNameDisplayNamePatch(projectName, projectDisplayNameUpdate)
+> UpdateDisplayNameResponse updateProjectDisplayNameApiProjectsProjectNameDisplayNamePatch(projectName, projectDisplayNameUpdate)
 
 Update Project Display Name
 
@@ -224,7 +224,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**UpdateDisplayNameResponse**](UpdateDisplayNameResponse.md)
 
 ### Authorization
 

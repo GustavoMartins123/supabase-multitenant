@@ -182,66 +182,216 @@ class ApiClient {
           return valueString == 'true' || valueString == '1';
         case 'DateTime':
           return value is DateTime ? value : DateTime.tryParse(value);
-        case 'ActivateAt':
-          return ActivateAt.fromJson(value);
         case 'AddMember':
           return AddMember.fromJson(value);
-        case 'AllowedServices':
-          return AllowedServices.fromJson(value);
+        case 'AddMemberResponse':
+          return AddMemberResponse.fromJson(value);
+        case 'AllUsersMemberItem':
+          return AllUsersMemberItem.fromJson(value);
+        case 'AllUsersResponse':
+          return AllUsersResponse.fromJson(value);
+        case 'AssignProjectTagResponse':
+          return AssignProjectTagResponse.fromJson(value);
+        case 'AuthUserItem':
+          return AuthUserItem.fromJson(value);
+        case 'AuthUsersResponse':
+          return AuthUsersResponse.fromJson(value);
+        case 'AutomaticKeyRotationResponse':
+          return AutomaticKeyRotationResponse.fromJson(value);
         case 'AutomaticKeyRotationUpdate':
           return AutomaticKeyRotationUpdate.fromJson(value);
-        case 'AutomaticRotationEnabled':
-          return AutomaticRotationEnabled.fromJson(value);
+        case 'CollaborationHintItem':
+          return CollaborationHintItem.fromJson(value);
+        case 'CollaborationMemberItem':
+          return CollaborationMemberItem.fromJson(value);
+        case 'CollaborationNoteItem':
+          return CollaborationNoteItem.fromJson(value);
+        case 'CollaborationNotificationItem':
+          return CollaborationNotificationItem.fromJson(value);
+        case 'CollaborationTagItem':
+          return CollaborationTagItem.fromJson(value);
+        case 'CollaborationThreadItem':
+          return CollaborationThreadItem.fromJson(value);
         case 'ConfirmApiKeyInstallation':
           return ConfirmApiKeyInstallation.fromJson(value);
+        case 'ContainerInfoItem':
+          return ContainerInfoItem.fromJson(value);
+        case 'ContainerLogsResponse':
+          return ContainerLogsResponse.fromJson(value);
+        case 'ContentIdentityResponse':
+          return ContentIdentityResponse.fromJson(value);
         case 'CreateApiKeySlot':
           return CreateApiKeySlot.fromJson(value);
+        case 'CreateProjectHintResponse':
+          return CreateProjectHintResponse.fromJson(value);
+        case 'CreateProjectNoteResponse':
+          return CreateProjectNoteResponse.fromJson(value);
+        case 'CreateRestorePointResponse':
+          return CreateRestorePointResponse.fromJson(value);
+        case 'CreateThreadMessageResponse':
+          return CreateThreadMessageResponse.fromJson(value);
+        case 'DeleteProjectNoteResponse':
+          return DeleteProjectNoteResponse.fromJson(value);
+        case 'DeleteRestorePointResponse':
+          return DeleteRestorePointResponse.fromJson(value);
         case 'DuplicateProject':
           return DuplicateProject.fromJson(value);
+        case 'EncKeyResponse':
+          return EncKeyResponse.fromJson(value);
+        case 'GetProjectCollaborationResponse':
+          return GetProjectCollaborationResponse.fromJson(value);
+        case 'GetProjectSettingsResponse':
+          return GetProjectSettingsResponse.fromJson(value);
         case 'HTTPValidationError':
           return HTTPValidationError.fromJson(value);
+        case 'IssuedKeyResponse':
+          return IssuedKeyResponse.fromJson(value);
+        case 'JobListResponse':
+          return JobListResponse.fromJson(value);
+        case 'JobResponse':
+          return JobResponse.fromJson(value);
+        case 'JobRetryResponse':
+          return JobRetryResponse.fromJson(value);
+        case 'KeyVersionResponse':
+          return KeyVersionResponse.fromJson(value);
+        case 'ListRestorePointsResponse':
+          return ListRestorePointsResponse.fromJson(value);
+        case 'LocationInner':
+          return LocationInner.fromJson(value);
+        case 'MemberItem':
+          return MemberItem.fromJson(value);
+        case 'MigrationAbortResponse':
+          return MigrationAbortResponse.fromJson(value);
+        case 'MigrationCutoverResponse':
+          return MigrationCutoverResponse.fromJson(value);
+        case 'MigrationPrepareResponse':
+          return MigrationPrepareResponse.fromJson(value);
+        case 'MigrationStatusResponse':
+          return MigrationStatusResponse.fromJson(value);
         case 'ModelSource':
           return ModelSource.fromJson(value);
         case 'NewProject':
           return NewProject.fromJson(value);
+        case 'ProjectAIFunctionItem':
+          return ProjectAIFunctionItem.fromJson(value);
+        case 'ProjectConfigTokenResponse':
+          return ProjectConfigTokenResponse.fromJson(value);
         case 'ProjectDisplayNameUpdate':
           return ProjectDisplayNameUpdate.fromJson(value);
         case 'ProjectHintCreate':
           return ProjectHintCreate.fromJson(value);
         case 'ProjectHintStatusUpdate':
           return ProjectHintStatusUpdate.fromJson(value);
+        case 'ProjectInfoItem':
+          return ProjectInfoItem.fromJson(value);
+        case 'ProjectListItem':
+          return ProjectListItem.fromJson(value);
         case 'ProjectNoteCreate':
           return ProjectNoteCreate.fromJson(value);
         case 'ProjectNotificationRead':
           return ProjectNotificationRead.fromJson(value);
+        case 'ProjectQueueInFlightJob':
+          return ProjectQueueInFlightJob.fromJson(value);
+        case 'ProjectQueueStatusResponse':
+          return ProjectQueueStatusResponse.fromJson(value);
+        case 'ProjectRenameHistoryResponse':
+          return ProjectRenameHistoryResponse.fromJson(value);
         case 'ProjectRenameRequest':
           return ProjectRenameRequest.fromJson(value);
+        case 'ProjectS3VectorKeysResponse':
+          return ProjectS3VectorKeysResponse.fromJson(value);
+        case 'ProjectStatusResponse':
+          return ProjectStatusResponse.fromJson(value);
         case 'ProjectTagAssign':
           return ProjectTagAssign.fromJson(value);
         case 'ProjectThreadMessageCreate':
           return ProjectThreadMessageCreate.fromJson(value);
+        case 'ProjectUserTelemetryResponse':
+          return ProjectUserTelemetryResponse.fromJson(value);
+        case 'ProjectsInfoResponse':
+          return ProjectsInfoResponse.fromJson(value);
+        case 'QueuedJobResponse':
+          return QueuedJobResponse.fromJson(value);
+        case 'RecreateProjectServicesResponse':
+          return RecreateProjectServicesResponse.fromJson(value);
         case 'RecreateServices':
           return RecreateServices.fromJson(value);
+        case 'RemoveMemberResponse':
+          return RemoveMemberResponse.fromJson(value);
+        case 'RenameHistoryEntry':
+          return RenameHistoryEntry.fromJson(value);
+        case 'RenameHistoryEvent':
+          return RenameHistoryEvent.fromJson(value);
+        case 'RenameProjectResponse':
+          return RenameProjectResponse.fromJson(value);
+        case 'RestartProjectResponse':
+          return RestartProjectResponse.fromJson(value);
         case 'RestorePointCreate':
           return RestorePointCreate.fromJson(value);
+        case 'RestorePointItem':
+          return RestorePointItem.fromJson(value);
+        case 'RestorePointsPermissions':
+          return RestorePointsPermissions.fromJson(value);
+        case 'RestoreRestorePointResponse':
+          return RestoreRestorePointResponse.fromJson(value);
+        case 'RevealClaimResponse':
+          return RevealClaimResponse.fromJson(value);
+        case 'RevealItem':
+          return RevealItem.fromJson(value);
+        case 'RevealListResponse':
+          return RevealListResponse.fromJson(value);
         case 'RotateApiKeySlot':
           return RotateApiKeySlot.fromJson(value);
-        case 'RotationIntervalDays':
-          return RotationIntervalDays.fromJson(value);
-        case 'RotationIntervalDays1':
-          return RotationIntervalDays1.fromJson(value);
+        case 'RotateProjectKeyResponse':
+          return RotateProjectKeyResponse.fromJson(value);
+        case 'SlotActivationResponse':
+          return SlotActivationResponse.fromJson(value);
+        case 'SlotCancelResponse':
+          return SlotCancelResponse.fromJson(value);
+        case 'SlotConfirmResponse':
+          return SlotConfirmResponse.fromJson(value);
+        case 'SlotItem':
+          return SlotItem.fromJson(value);
+        case 'SlotKeyItem':
+          return SlotKeyItem.fromJson(value);
+        case 'SlotListResponse':
+          return SlotListResponse.fromJson(value);
+        case 'SlotPolicyUpdateResponse':
+          return SlotPolicyUpdateResponse.fromJson(value);
+        case 'SlotRevokeResponse':
+          return SlotRevokeResponse.fromJson(value);
+        case 'StartProjectResponse':
+          return StartProjectResponse.fromJson(value);
+        case 'StopProjectResponse':
+          return StopProjectResponse.fromJson(value);
+        case 'StudioContextResponse':
+          return StudioContextResponse.fromJson(value);
+        case 'TelemetryUserItem':
+          return TelemetryUserItem.fromJson(value);
         case 'TransferBody':
           return TransferBody.fromJson(value);
+        case 'TransferResponse':
+          return TransferResponse.fromJson(value);
+        case 'UnassignProjectTagResponse':
+          return UnassignProjectTagResponse.fromJson(value);
         case 'UpdateApiKeySlotPolicy':
           return UpdateApiKeySlotPolicy.fromJson(value);
+        case 'UpdateDisplayNameResponse':
+          return UpdateDisplayNameResponse.fromJson(value);
+        case 'UpdateNotificationReadResponse':
+          return UpdateNotificationReadResponse.fromJson(value);
+        case 'UpdateProjectHintResponse':
+          return UpdateProjectHintResponse.fromJson(value);
+        case 'UpdateProjectSettingsResponse':
+          return UpdateProjectSettingsResponse.fromJson(value);
         case 'UpdateSettings':
           return UpdateSettings.fromJson(value);
         case 'UserSyncPayload':
           return UserSyncPayload.fromJson(value);
+        case 'UserSyncResponse':
+          return UserSyncResponse.fromJson(value);
         case 'ValidationError':
           return ValidationError.fromJson(value);
-        case 'ValidationErrorLocInner':
-          return ValidationErrorLocInner.fromJson(value);
         default:
           dynamic match;
           if (value is List && (match = _regList.firstMatch(targetType)?.group(1)) != null) {

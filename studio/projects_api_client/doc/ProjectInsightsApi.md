@@ -27,7 +27,7 @@ Method | HTTP request | Description
 
 
 # **executeProjectFunctionApiProjectsRefExecuteFunctionPost**
-> Object executeProjectFunctionApiProjectsRefExecuteFunctionPost(ref, requestBody)
+> List<Map<String, Object>> executeProjectFunctionApiProjectsRefExecuteFunctionPost(ref, requestBody)
 
 Execute Project Function
 
@@ -56,7 +56,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**List<Map<String, Object>>**](Map.md)
 
 ### Authorization
 
@@ -70,7 +70,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getProjectAiFunctionsApiProjectsRefFunctionsGet**
-> Object getProjectAiFunctionsApiProjectsRefFunctionsGet(ref)
+> List<ProjectAIFunctionItem> getProjectAiFunctionsApiProjectsRefFunctionsGet(ref)
 
 Get Project Ai Functions
 
@@ -97,7 +97,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**List<ProjectAIFunctionItem>**](ProjectAIFunctionItem.md)
 
 ### Authorization
 
@@ -111,7 +111,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getProjectS3VectorKeysApiProjectsProjectNameStorageS3KeysGet**
-> Object getProjectS3VectorKeysApiProjectsProjectNameStorageS3KeysGet(projectName)
+> ProjectS3VectorKeysResponse getProjectS3VectorKeysApiProjectsProjectNameStorageS3KeysGet(projectName)
 
 Get Project S3 Vector Keys
 
@@ -140,7 +140,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**ProjectS3VectorKeysResponse**](ProjectS3VectorKeysResponse.md)
 
 ### Authorization
 
@@ -154,7 +154,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getProjectUserTelemetryApiProjectsProjectNameTelemetryUsersGet**
-> Object getProjectUserTelemetryApiProjectsProjectNameTelemetryUsersGet(projectName, period, start, end)
+> ProjectUserTelemetryResponse getProjectUserTelemetryApiProjectsProjectNameTelemetryUsersGet(projectName, period, start, end)
 
 Get Project User Telemetry
 
@@ -187,7 +187,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**ProjectUserTelemetryResponse**](ProjectUserTelemetryResponse.md)
 
 ### Authorization
 
@@ -201,7 +201,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getProjectsForUserApiAdminProjectsInfoPost**
-> Object getProjectsForUserApiAdminProjectsInfoPost(requestBody)
+> ProjectsInfoResponse getProjectsForUserApiAdminProjectsInfoPost(requestBody)
 
 Get Projects For User
 
@@ -228,7 +228,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**ProjectsInfoResponse**](ProjectsInfoResponse.md)
 
 ### Authorization
 
@@ -242,7 +242,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **listAllUsersForAdminApiAdminProjectsNameAllUsersGet**
-> Object listAllUsersForAdminApiAdminProjectsNameAllUsersGet(name)
+> AllUsersResponse listAllUsersForAdminApiAdminProjectsNameAllUsersGet(name)
 
 List All Users For Admin
 
@@ -271,7 +271,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**AllUsersResponse**](AllUsersResponse.md)
 
 ### Authorization
 
@@ -629,7 +629,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **transferProjectApiProjectsProjectNameTransferPost**
-> Object transferProjectApiProjectsProjectNameTransferPost(projectName, transferBody)
+> TransferResponse transferProjectApiProjectsProjectNameTransferPost(projectName, transferBody)
 
 Transfer Project
 
@@ -658,7 +658,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**TransferResponse**](TransferResponse.md)
 
 ### Authorization
 

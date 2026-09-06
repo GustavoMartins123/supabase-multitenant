@@ -19,21 +19,21 @@ void main() {
   group('tests for ProjectMembersApi', () {
     // Add Member
     //
-    //Future<Object> addMemberApiProjectsProjectNameMembersPost(String projectName, AddMember addMember) async
+    //Future<AddMemberResponse> addMemberApiProjectsProjectNameMembersPost(String projectName, AddMember addMember) async
     test('test addMemberApiProjectsProjectNameMembersPost', () async {
       // TODO
     });
 
     // List Members By Ref
     //
-    //Future<Object> listMembersByRefApiProjectsNameMembersGet(String name) async
+    //Future<List<MemberItem>> listMembersByRefApiProjectsNameMembersGet(String name) async
     test('test listMembersByRefApiProjectsNameMembersGet', () async {
       // TODO
     });
 
     // Remove Member By Ref
     //
-    //Future<Map<String, Object>> removeMemberByRefApiProjectsNameMembersMemberIdDelete(String name, String memberId) async
+    //Future<RemoveMemberResponse> removeMemberByRefApiProjectsNameMembersMemberIdDelete(String name, String memberId) async
     test('test removeMemberByRefApiProjectsNameMembersMemberIdDelete', () async {
       // TODO
     });

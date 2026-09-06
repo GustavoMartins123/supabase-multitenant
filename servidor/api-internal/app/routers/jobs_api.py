@@ -13,6 +13,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, ConfigDict
 
 from app.database import get_pool
 from app.dependencies import (
@@ -31,7 +32,66 @@ from app.validation import parse_uuid_value
 router = APIRouter(tags=["jobs"])
 
 
-@router.get("/api/jobs")
+class JobResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    job_id: str
+    project: str
+    project_uuid: str | None = None
+    tenant_uuid: str | None = None
+    created_by: str | None = None
+    action: str
+    status: str
+    message: str | None = None
+    progress: int | None = None
+    current_step: str | None = None
+    total_steps: int | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    error_code: str | None = None
+    is_idempotent: bool = False
+    retryable: bool = False
+    retry_of: str | None = None
+    attempt: int = 1
+    created_at: str | None = None
+    updated_at: str | None = None
+    stdout_tail: str | None = None
+    stderr_tail: str | None = None
+
+
+class JobListResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    items: list[JobResponse] = []
+    limit: int = 0
+    offset: int = 0
+    count: int = 0
+
+
+class JobRetryResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    job_id: str
+    project: str
+    project_uuid: str | None = None
+    tenant_uuid: str | None = None
+    created_by: str | None = None
+    action: str
+    status: str
+    message: str | None = None
+    progress: int | None = None
+    current_step: str | None = None
+    total_steps: int | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    error_code: str | None = None
+    is_idempotent: bool = False
+    retryable: bool = False
+    retry_of: str | None = None
+    attempt: int = 1
+    created_at: str | None = None
+    updated_at: str | None = None
+    queue_position: int = 0
+
+
+@router.get("/api/jobs", response_model=JobListResponse)
 async def list_job_history(
     request: Request,
     project_uuid: uuid.UUID | None = Query(default=None),
@@ -102,7 +162,9 @@ async def list_job_history(
     }
 
 
-@router.post("/api/jobs/{job_id}/retry", status_code=202)
+@router.post(
+    "/api/jobs/{job_id}/retry", status_code=202, response_model=JobRetryResponse
+)
 async def retry_project_job(
     job_id: str,
     request: Request,
@@ -173,7 +235,7 @@ async def retry_project_job(
     return result
 
 
-@router.get("/api/projects/status/{job_id}")
+@router.get("/api/projects/status/{job_id}", response_model=JobResponse)
 async def project_status(
     job_id: str,
     request: Request,

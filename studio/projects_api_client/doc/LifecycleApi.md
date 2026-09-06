@@ -14,7 +14,7 @@ Method | HTTP request | Description
 
 
 # **getContainerLogsApiProjectsProjectNameLogsServiceGet**
-> Object getContainerLogsApiProjectsProjectNameLogsServiceGet(projectName, service, lines)
+> ContainerLogsResponse getContainerLogsApiProjectsProjectNameLogsServiceGet(projectName, service, lines)
 
 Get Container Logs
 
@@ -45,7 +45,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**ContainerLogsResponse**](ContainerLogsResponse.md)
 
 ### Authorization
 
@@ -59,7 +59,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getProjectDockerStatusApiProjectsProjectNameStatusGet**
-> Object getProjectDockerStatusApiProjectsProjectNameStatusGet(projectName)
+> ProjectStatusResponse getProjectDockerStatusApiProjectsProjectNameStatusGet(projectName)
 
 Get Project Docker Status
 
@@ -86,7 +86,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**ProjectStatusResponse**](ProjectStatusResponse.md)
 
 ### Authorization
 

@@ -18,7 +18,7 @@ Method | HTTP request | Description
 
 
 # **listProjectAuthUsersApiProjectsInternalAuthUsersProjectNameGet**
-> Object listProjectAuthUsersApiProjectsInternalAuthUsersProjectNameGet(projectName, page, perPage)
+> AuthUsersResponse listProjectAuthUsersApiProjectsInternalAuthUsersProjectNameGet(projectName, page, perPage)
 
 List Project Auth Users
 
@@ -49,7 +49,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**AuthUsersResponse**](AuthUsersResponse.md)
 
 ### Authorization
 

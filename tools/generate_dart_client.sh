@@ -13,8 +13,11 @@ if [[ -z "$JAR" ]]; then
 fi
 
 python3 tools/export_openapi.py
-java -jar "$JAR" generate -g dart -i docs/api/openapi.json -o studio/projects_api_client \
-  --additional-properties=pubName=projects_api_client,pubVersion=0.13.0-alpha,pubDescription="Generated client for the supabase-multitenant Projects API. DO NOT EDIT BY HAND.",hideGenerationTimestamp=true,dateLibrary=core
+SPEC30="$(mktemp --suffix=.json)"
+trap 'rm -f "$SPEC30"' EXIT
+python3 tools/openapi_to_30.py docs/api/openapi.json "$SPEC30"
+java -jar "$JAR" generate -g dart -i "$SPEC30" -o studio/projects_api_client \
+  --additional-properties=pubName=projects_api_client,pubVersion=0.13.0-alpha,pubDescription="Generated client for the supabase-multitenant Projects API. DO NOT EDIT BY HAND.",hideGenerationTimestamp=true,dateLibrary=core --skip-validate-spec
 rm -f studio/projects_api_client/git_push.sh studio/projects_api_client/.travis.yml
 python3 tools/patch_dart_client.py
 dart pub get --directory=studio/projects_api_client

@@ -16,17 +16,17 @@ void main() {
   // final instance = UpdateApiKeySlotPolicy();
 
   group('test UpdateApiKeySlotPolicy', () {
-    // AllowedServices allowedServices
+    // List<String> allowedServices (default value: const [])
     test('to test the property `allowedServices`', () async {
       // TODO
     });
 
-    // AutomaticRotationEnabled automaticRotationEnabled
+    // bool automaticRotationEnabled
     test('to test the property `automaticRotationEnabled`', () async {
       // TODO
     });
 
-    // RotationIntervalDays1 rotationIntervalDays
+    // int rotationIntervalDays
     test('to test the property `rotationIntervalDays`', () async {
       // TODO
     });

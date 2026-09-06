@@ -54,7 +54,7 @@ class LifecycleOpsApi {
   /// Parameters:
   ///
   /// * [String] projectName (required):
-  Future<Object?> getProjectSettingsApiProjectsProjectNameSettingsGet(String projectName,) async {
+  Future<GetProjectSettingsResponse?> getProjectSettingsApiProjectsProjectNameSettingsGet(String projectName,) async {
     final response = await getProjectSettingsApiProjectsProjectNameSettingsGetWithHttpInfo(projectName,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -63,7 +63,7 @@ class LifecycleOpsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'GetProjectSettingsResponse',) as GetProjectSettingsResponse;
     
     }
     return null;
@@ -115,7 +115,7 @@ class LifecycleOpsApi {
   /// * [String] projectName (required):
   ///
   /// * [RecreateServices] recreateServices (required):
-  Future<Object?> recreateProjectServicesApiProjectsProjectNameRecreateServicesPost(String projectName, RecreateServices recreateServices,) async {
+  Future<RecreateProjectServicesResponse?> recreateProjectServicesApiProjectsProjectNameRecreateServicesPost(String projectName, RecreateServices recreateServices,) async {
     final response = await recreateProjectServicesApiProjectsProjectNameRecreateServicesPostWithHttpInfo(projectName, recreateServices,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -124,7 +124,7 @@ class LifecycleOpsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'RecreateProjectServicesResponse',) as RecreateProjectServicesResponse;
     
     }
     return null;
@@ -172,7 +172,7 @@ class LifecycleOpsApi {
   /// Parameters:
   ///
   /// * [String] projectName (required):
-  Future<Object?> restartProjectApiProjectsProjectNameRestartPost(String projectName,) async {
+  Future<RestartProjectResponse?> restartProjectApiProjectsProjectNameRestartPost(String projectName,) async {
     final response = await restartProjectApiProjectsProjectNameRestartPostWithHttpInfo(projectName,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -181,7 +181,7 @@ class LifecycleOpsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'RestartProjectResponse',) as RestartProjectResponse;
     
     }
     return null;
@@ -229,7 +229,7 @@ class LifecycleOpsApi {
   /// Parameters:
   ///
   /// * [String] projectName (required):
-  Future<Object?> startProjectApiProjectsProjectNameStartPost(String projectName,) async {
+  Future<StartProjectResponse?> startProjectApiProjectsProjectNameStartPost(String projectName,) async {
     final response = await startProjectApiProjectsProjectNameStartPostWithHttpInfo(projectName,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -238,7 +238,7 @@ class LifecycleOpsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'StartProjectResponse',) as StartProjectResponse;
     
     }
     return null;
@@ -282,7 +282,7 @@ class LifecycleOpsApi {
   /// Parameters:
   ///
   /// * [String] projectName (required):
-  Future<Object?> stopProjectApiProjectsProjectNameStopPost(String projectName,) async {
+  Future<StopProjectResponse?> stopProjectApiProjectsProjectNameStopPost(String projectName,) async {
     final response = await stopProjectApiProjectsProjectNameStopPostWithHttpInfo(projectName,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -291,7 +291,7 @@ class LifecycleOpsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'StopProjectResponse',) as StopProjectResponse;
     
     }
     return null;
@@ -339,7 +339,7 @@ class LifecycleOpsApi {
   /// * [String] projectName (required):
   ///
   /// * [UpdateSettings] updateSettings (required):
-  Future<Object?> updateProjectSettingsApiProjectsProjectNameSettingsPut(String projectName, UpdateSettings updateSettings,) async {
+  Future<UpdateProjectSettingsResponse?> updateProjectSettingsApiProjectsProjectNameSettingsPut(String projectName, UpdateSettings updateSettings,) async {
     final response = await updateProjectSettingsApiProjectsProjectNameSettingsPutWithHttpInfo(projectName, updateSettings,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -348,7 +348,7 @@ class LifecycleOpsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'UpdateProjectSettingsResponse',) as UpdateProjectSettingsResponse;
     
     }
     return null;

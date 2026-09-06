@@ -17,30 +17,20 @@ class CreateApiKeySlot {
     this.automaticRotationEnabled,
     required this.kind,
     required this.name,
-    this.rotationIntervalDays,
+    this.rotationIntervalDays = 90,
   });
 
   List<String> allowedServices;
 
-  ///
-  /// Please note: This property should have been non-nullable! Since the specification file
-  /// does not include a default value (using the "default:" property), however, the generated
-  /// source code must fall back to having a nullable type.
-  /// Consider adding a "default:" property in the specification file to hide this note.
-  ///
-  AutomaticRotationEnabled? automaticRotationEnabled;
+  bool? automaticRotationEnabled;
 
   CreateApiKeySlotKindEnum kind;
 
   String name;
 
-  ///
-  /// Please note: This property should have been non-nullable! Since the specification file
-  /// does not include a default value (using the "default:" property), however, the generated
-  /// source code must fall back to having a nullable type.
-  /// Consider adding a "default:" property in the specification file to hide this note.
-  ///
-  RotationIntervalDays? rotationIntervalDays;
+  /// Minimum value: 1
+  /// Maximum value: 3650
+  int? rotationIntervalDays;
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is CreateApiKeySlot &&
@@ -102,10 +92,10 @@ class CreateApiKeySlot {
         allowedServices: json[r'allowed_services'] is Iterable
             ? (json[r'allowed_services'] as Iterable).cast<String>().toList(growable: false)
             : const [],
-        automaticRotationEnabled: AutomaticRotationEnabled.fromJson(json[r'automatic_rotation_enabled']),
+        automaticRotationEnabled: mapValueOfType<bool>(json, r'automatic_rotation_enabled'),
         kind: CreateApiKeySlotKindEnum.fromJson(json[r'kind'])!,
         name: mapValueOfType<String>(json, r'name')!,
-        rotationIntervalDays: RotationIntervalDays.fromJson(json[r'rotation_interval_days']),
+        rotationIntervalDays: mapValueOfType<int>(json, r'rotation_interval_days') ?? 90,
       );
     }
     return null;

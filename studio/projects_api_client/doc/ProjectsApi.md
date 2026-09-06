@@ -16,7 +16,7 @@ Method | HTTP request | Description
 
 
 # **createProjectApiProjectsPost**
-> Object createProjectApiProjectsPost(newProject)
+> QueuedJobResponse createProjectApiProjectsPost(newProject)
 
 Create Project
 
@@ -43,7 +43,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**QueuedJobResponse**](QueuedJobResponse.md)
 
 ### Authorization
 
@@ -57,7 +57,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **deleteProjectApiProjectsProjectNameDelete**
-> Object deleteProjectApiProjectsProjectNameDelete(projectName, xStepUpToken)
+> QueuedJobResponse deleteProjectApiProjectsProjectNameDelete(projectName, xStepUpToken)
 
 Delete Project
 
@@ -86,7 +86,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**QueuedJobResponse**](QueuedJobResponse.md)
 
 ### Authorization
 
@@ -100,7 +100,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **duplicateProjectApiProjectsDuplicatePost**
-> Object duplicateProjectApiProjectsDuplicatePost(duplicateProject)
+> QueuedJobResponse duplicateProjectApiProjectsDuplicatePost(duplicateProject)
 
 Duplicate Project
 
@@ -129,7 +129,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**QueuedJobResponse**](QueuedJobResponse.md)
 
 ### Authorization
 
@@ -143,7 +143,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **listProjectsApiProjectsGet**
-> Object listProjectsApiProjectsGet()
+> List<ProjectListItem> listProjectsApiProjectsGet()
 
 List Projects
 
@@ -166,7 +166,7 @@ This endpoint does not need any parameter.
 
 ### Return type
 
-[**Object**](Object.md)
+[**List<ProjectListItem>**](ProjectListItem.md)
 
 ### Authorization
 

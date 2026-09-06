@@ -21,14 +21,14 @@ void main() {
     //
     // Rotaciona anon/service_role via script. Enfileirado por projeto.
     //
-    //Future<Object> rotateProjectKeyApiProjectsProjectNameRotateKeyPost(String projectName) async
+    //Future<RotateProjectKeyResponse> rotateProjectKeyApiProjectsProjectNameRotateKeyPost(String projectName) async
     test('test rotateProjectKeyApiProjectsProjectNameRotateKeyPost', () async {
       // TODO
     });
 
     // Update Automatic Key Rotation
     //
-    //Future<Object> updateAutomaticKeyRotationApiProjectsProjectNameAutomaticKeyRotationPut(String projectName, AutomaticKeyRotationUpdate automaticKeyRotationUpdate) async
+    //Future<AutomaticKeyRotationResponse> updateAutomaticKeyRotationApiProjectsProjectNameAutomaticKeyRotationPut(String projectName, AutomaticKeyRotationUpdate automaticKeyRotationUpdate) async
     test('test updateAutomaticKeyRotationApiProjectsProjectNameAutomaticKeyRotationPut', () async {
       // TODO
     });

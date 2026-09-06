@@ -14,7 +14,7 @@ Method | HTTP request | Description
 
 
 # **rotateProjectKeyApiProjectsProjectNameRotateKeyPost**
-> Object rotateProjectKeyApiProjectsProjectNameRotateKeyPost(projectName)
+> RotateProjectKeyResponse rotateProjectKeyApiProjectsProjectNameRotateKeyPost(projectName)
 
 Rotate Project Key
 
@@ -43,7 +43,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**RotateProjectKeyResponse**](RotateProjectKeyResponse.md)
 
 ### Authorization
 
@@ -57,7 +57,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **updateAutomaticKeyRotationApiProjectsProjectNameAutomaticKeyRotationPut**
-> Object updateAutomaticKeyRotationApiProjectsProjectNameAutomaticKeyRotationPut(projectName, automaticKeyRotationUpdate)
+> AutomaticKeyRotationResponse updateAutomaticKeyRotationApiProjectsProjectNameAutomaticKeyRotationPut(projectName, automaticKeyRotationUpdate)
 
 Update Automatic Key Rotation
 
@@ -86,7 +86,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**AutomaticKeyRotationResponse**](AutomaticKeyRotationResponse.md)
 
 ### Authorization
 

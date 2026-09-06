@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict
 
 from app.automatic_key_rotation import block_automatic_key_rotation
 from app.automatic_opaque_key_rotation import scan_automatic_opaque_key_rotations
@@ -47,7 +49,45 @@ from app.validation import validate_project_id
 router = APIRouter(tags=["project-keys"])
 
 
-@router.put("/api/projects/{project_name}/automatic-key-rotation")
+class AutomaticKeyRotationResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    automatic_key_rotation_enabled: bool
+    automatic_key_rotation_blocked: bool
+    automatic_key_rotation_last_error: str | None
+    automatic_key_rotation_lead_days: int
+
+
+class RotateProjectKeyResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    job_id: str
+    project: str
+    project_uuid: str | None
+    tenant_uuid: str | None
+    created_by: str | None
+    action: str
+    status: str
+    message: str | None
+    progress: int | None
+    current_step: str | None
+    total_steps: int | None
+    started_at: str | None
+    finished_at: str | None
+    error_code: str | None
+    is_idempotent: bool
+    retryable: bool
+    retry_of: str | None
+    attempt: int
+    created_at: str | None
+    updated_at: str | None
+    queue_position: int
+
+
+@router.put(
+    "/api/projects/{project_name}/automatic-key-rotation",
+    response_model=AutomaticKeyRotationResponse,
+)
 async def update_automatic_key_rotation(
     project_name: str,
     body: AutomaticKeyRotationUpdate,
@@ -127,7 +167,11 @@ async def update_automatic_key_rotation(
     }
 
 
-@router.post("/api/projects/{project_name}/rotate-key", status_code=202)
+@router.post(
+    "/api/projects/{project_name}/rotate-key",
+    status_code=202,
+    response_model=RotateProjectKeyResponse,
+)
 async def rotate_project_key(
     project_name: str,
     request: Request,

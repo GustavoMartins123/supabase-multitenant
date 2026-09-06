@@ -54,7 +54,7 @@ class OpaqueApiKeysApi {
   /// Parameters:
   ///
   /// * [String] projectName (required):
-  Future<Object?> abortOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationDelete(String projectName,) async {
+  Future<MigrationAbortResponse?> abortOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationDelete(String projectName,) async {
     final response = await abortOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationDeleteWithHttpInfo(projectName,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -63,7 +63,7 @@ class OpaqueApiKeysApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'MigrationAbortResponse',) as MigrationAbortResponse;
     
     }
     return null;
@@ -120,7 +120,7 @@ class OpaqueApiKeysApi {
   /// * [String] slotId (required):
   ///
   /// * [String] xStepUpToken:
-  Future<Object?> activateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdActivationPost(String projectName, String slotId, { String? xStepUpToken, }) async {
+  Future<SlotActivationResponse?> activateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdActivationPost(String projectName, String slotId, { String? xStepUpToken, }) async {
     final response = await activateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdActivationPostWithHttpInfo(projectName, slotId,  xStepUpToken: xStepUpToken, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -129,7 +129,7 @@ class OpaqueApiKeysApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'SlotActivationResponse',) as SlotActivationResponse;
     
     }
     return null;
@@ -178,7 +178,7 @@ class OpaqueApiKeysApi {
   /// * [String] projectName (required):
   ///
   /// * [String] slotId (required):
-  Future<Object?> cancelApiKeySlotRotationApiProjectsProjectNameApiKeySlotsSlotIdRotationDelete(String projectName, String slotId,) async {
+  Future<SlotCancelResponse?> cancelApiKeySlotRotationApiProjectsProjectNameApiKeySlotsSlotIdRotationDelete(String projectName, String slotId,) async {
     final response = await cancelApiKeySlotRotationApiProjectsProjectNameApiKeySlotsSlotIdRotationDeleteWithHttpInfo(projectName, slotId,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -187,7 +187,7 @@ class OpaqueApiKeysApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'SlotCancelResponse',) as SlotCancelResponse;
     
     }
     return null;
@@ -244,7 +244,7 @@ class OpaqueApiKeysApi {
   /// * [String] keyId (required):
   ///
   /// * [String] xStepUpToken:
-  Future<Object?> claimApiKeyApiProjectsProjectNameApiKeyRevealsKeyIdClaimPost(String projectName, String keyId, { String? xStepUpToken, }) async {
+  Future<RevealClaimResponse?> claimApiKeyApiProjectsProjectNameApiKeyRevealsKeyIdClaimPost(String projectName, String keyId, { String? xStepUpToken, }) async {
     final response = await claimApiKeyApiProjectsProjectNameApiKeyRevealsKeyIdClaimPostWithHttpInfo(projectName, keyId,  xStepUpToken: xStepUpToken, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -253,7 +253,7 @@ class OpaqueApiKeysApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'RevealClaimResponse',) as RevealClaimResponse;
     
     }
     return null;
@@ -306,7 +306,7 @@ class OpaqueApiKeysApi {
   /// * [String] slotId (required):
   ///
   /// * [ConfirmApiKeyInstallation] confirmApiKeyInstallation (required):
-  Future<Object?> confirmApiKeySlotInstallationApiProjectsProjectNameApiKeySlotsSlotIdRotationConfirmationPost(String projectName, String slotId, ConfirmApiKeyInstallation confirmApiKeyInstallation,) async {
+  Future<SlotConfirmResponse?> confirmApiKeySlotInstallationApiProjectsProjectNameApiKeySlotsSlotIdRotationConfirmationPost(String projectName, String slotId, ConfirmApiKeyInstallation confirmApiKeyInstallation,) async {
     final response = await confirmApiKeySlotInstallationApiProjectsProjectNameApiKeySlotsSlotIdRotationConfirmationPostWithHttpInfo(projectName, slotId, confirmApiKeyInstallation,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -315,7 +315,7 @@ class OpaqueApiKeysApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'SlotConfirmResponse',) as SlotConfirmResponse;
     
     }
     return null;
@@ -371,7 +371,7 @@ class OpaqueApiKeysApi {
   /// * [CreateApiKeySlot] createApiKeySlot (required):
   ///
   /// * [String] xStepUpToken:
-  Future<Object?> createApiKeySlotApiProjectsProjectNameApiKeySlotsPost(String projectName, CreateApiKeySlot createApiKeySlot, { String? xStepUpToken, }) async {
+  Future<IssuedKeyResponse?> createApiKeySlotApiProjectsProjectNameApiKeySlotsPost(String projectName, CreateApiKeySlot createApiKeySlot, { String? xStepUpToken, }) async {
     final response = await createApiKeySlotApiProjectsProjectNameApiKeySlotsPostWithHttpInfo(projectName, createApiKeySlot,  xStepUpToken: xStepUpToken, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -380,7 +380,7 @@ class OpaqueApiKeysApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'IssuedKeyResponse',) as IssuedKeyResponse;
     
     }
     return null;
@@ -428,7 +428,7 @@ class OpaqueApiKeysApi {
   /// Parameters:
   ///
   /// * [String] projectName (required):
-  Future<Object?> cutoverOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationCutoverPost(String projectName,) async {
+  Future<MigrationCutoverResponse?> cutoverOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationCutoverPost(String projectName,) async {
     final response = await cutoverOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationCutoverPostWithHttpInfo(projectName,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -437,7 +437,7 @@ class OpaqueApiKeysApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'MigrationCutoverResponse',) as MigrationCutoverResponse;
     
     }
     return null;
@@ -481,7 +481,7 @@ class OpaqueApiKeysApi {
   /// Parameters:
   ///
   /// * [String] projectName (required):
-  Future<Object?> getApiKeyRevealsApiProjectsProjectNameApiKeyRevealsGet(String projectName,) async {
+  Future<RevealListResponse?> getApiKeyRevealsApiProjectsProjectNameApiKeyRevealsGet(String projectName,) async {
     final response = await getApiKeyRevealsApiProjectsProjectNameApiKeyRevealsGetWithHttpInfo(projectName,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -490,7 +490,7 @@ class OpaqueApiKeysApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'RevealListResponse',) as RevealListResponse;
     
     }
     return null;
@@ -534,7 +534,7 @@ class OpaqueApiKeysApi {
   /// Parameters:
   ///
   /// * [String] projectName (required):
-  Future<Object?> getApiKeySlotsApiProjectsProjectNameApiKeySlotsGet(String projectName,) async {
+  Future<SlotListResponse?> getApiKeySlotsApiProjectsProjectNameApiKeySlotsGet(String projectName,) async {
     final response = await getApiKeySlotsApiProjectsProjectNameApiKeySlotsGetWithHttpInfo(projectName,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -543,7 +543,7 @@ class OpaqueApiKeysApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'SlotListResponse',) as SlotListResponse;
     
     }
     return null;
@@ -587,7 +587,7 @@ class OpaqueApiKeysApi {
   /// Parameters:
   ///
   /// * [String] projectName (required):
-  Future<Object?> getOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationGet(String projectName,) async {
+  Future<MigrationStatusResponse?> getOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationGet(String projectName,) async {
     final response = await getOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationGetWithHttpInfo(projectName,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -596,7 +596,7 @@ class OpaqueApiKeysApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'MigrationStatusResponse',) as MigrationStatusResponse;
     
     }
     return null;
@@ -644,7 +644,7 @@ class OpaqueApiKeysApi {
   /// Parameters:
   ///
   /// * [String] projectName (required):
-  Future<Object?> prepareOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationPreparePost(String projectName,) async {
+  Future<MigrationPrepareResponse?> prepareOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationPreparePost(String projectName,) async {
     final response = await prepareOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationPreparePostWithHttpInfo(projectName,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -653,7 +653,7 @@ class OpaqueApiKeysApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'MigrationPrepareResponse',) as MigrationPrepareResponse;
     
     }
     return null;
@@ -702,7 +702,7 @@ class OpaqueApiKeysApi {
   /// * [String] projectName (required):
   ///
   /// * [String] slotId (required):
-  Future<Object?> revokeApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdDelete(String projectName, String slotId,) async {
+  Future<SlotRevokeResponse?> revokeApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdDelete(String projectName, String slotId,) async {
     final response = await revokeApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdDeleteWithHttpInfo(projectName, slotId,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -711,7 +711,7 @@ class OpaqueApiKeysApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'SlotRevokeResponse',) as SlotRevokeResponse;
     
     }
     return null;
@@ -772,7 +772,7 @@ class OpaqueApiKeysApi {
   /// * [RotateApiKeySlot] rotateApiKeySlot (required):
   ///
   /// * [String] xStepUpToken:
-  Future<Object?> rotateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdRotationPost(String projectName, String slotId, RotateApiKeySlot rotateApiKeySlot, { String? xStepUpToken, }) async {
+  Future<IssuedKeyResponse?> rotateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdRotationPost(String projectName, String slotId, RotateApiKeySlot rotateApiKeySlot, { String? xStepUpToken, }) async {
     final response = await rotateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdRotationPostWithHttpInfo(projectName, slotId, rotateApiKeySlot,  xStepUpToken: xStepUpToken, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -781,7 +781,7 @@ class OpaqueApiKeysApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'IssuedKeyResponse',) as IssuedKeyResponse;
     
     }
     return null;
@@ -834,7 +834,7 @@ class OpaqueApiKeysApi {
   /// * [String] slotId (required):
   ///
   /// * [UpdateApiKeySlotPolicy] updateApiKeySlotPolicy (required):
-  Future<Object?> updateApiKeySlotPolicyApiProjectsProjectNameApiKeySlotsSlotIdPatch(String projectName, String slotId, UpdateApiKeySlotPolicy updateApiKeySlotPolicy,) async {
+  Future<SlotPolicyUpdateResponse?> updateApiKeySlotPolicyApiProjectsProjectNameApiKeySlotsSlotIdPatch(String projectName, String slotId, UpdateApiKeySlotPolicy updateApiKeySlotPolicy,) async {
     final response = await updateApiKeySlotPolicyApiProjectsProjectNameApiKeySlotsSlotIdPatchWithHttpInfo(projectName, slotId, updateApiKeySlotPolicy,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -843,7 +843,7 @@ class OpaqueApiKeysApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'SlotPolicyUpdateResponse',) as SlotPolicyUpdateResponse;
     
     }
     return null;

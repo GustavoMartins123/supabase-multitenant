@@ -54,7 +54,7 @@ class InternalApi {
   /// Parameters:
   ///
   /// * [String] ref (required):
-  Future<Object?> encKeyApiProjectsInternalEncKeyRefGet(String ref,) async {
+  Future<EncKeyResponse?> encKeyApiProjectsInternalEncKeyRefGet(String ref,) async {
     final response = await encKeyApiProjectsInternalEncKeyRefGetWithHttpInfo(ref,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -63,7 +63,7 @@ class InternalApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'EncKeyResponse',) as EncKeyResponse;
     
     }
     return null;
@@ -111,7 +111,7 @@ class InternalApi {
   /// Parameters:
   ///
   /// * [String] projectName (required):
-  Future<Object?> getContentProjectIdentityApiProjectsInternalContentIdentityProjectNameGet(String projectName,) async {
+  Future<ContentIdentityResponse?> getContentProjectIdentityApiProjectsInternalContentIdentityProjectNameGet(String projectName,) async {
     final response = await getContentProjectIdentityApiProjectsInternalContentIdentityProjectNameGetWithHttpInfo(projectName,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -120,7 +120,7 @@ class InternalApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'ContentIdentityResponse',) as ContentIdentityResponse;
     
     }
     return null;
@@ -168,7 +168,7 @@ class InternalApi {
   /// Parameters:
   ///
   /// * [String] ref (required):
-  Future<Object?> getStudioProjectContextApiProjectsInternalStudioContextRefGet(String ref,) async {
+  Future<StudioContextResponse?> getStudioProjectContextApiProjectsInternalStudioContextRefGet(String ref,) async {
     final response = await getStudioProjectContextApiProjectsInternalStudioContextRefGetWithHttpInfo(ref,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -177,7 +177,7 @@ class InternalApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'StudioContextResponse',) as StudioContextResponse;
     
     }
     return null;
@@ -221,7 +221,7 @@ class InternalApi {
   /// Parameters:
   ///
   /// * [String] ref (required):
-  Future<Object?> projectKeyVersionApiProjectsInternalKeyVersionRefGet(String ref,) async {
+  Future<KeyVersionResponse?> projectKeyVersionApiProjectsInternalKeyVersionRefGet(String ref,) async {
     final response = await projectKeyVersionApiProjectsInternalKeyVersionRefGetWithHttpInfo(ref,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -230,7 +230,7 @@ class InternalApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'KeyVersionResponse',) as KeyVersionResponse;
     
     }
     return null;
@@ -485,7 +485,7 @@ class InternalApi {
   /// Parameters:
   ///
   /// * [UserSyncPayload] userSyncPayload (required):
-  Future<Object?> syncUserIdentityApiProjectsInternalUsersSyncPost(UserSyncPayload userSyncPayload,) async {
+  Future<UserSyncResponse?> syncUserIdentityApiProjectsInternalUsersSyncPost(UserSyncPayload userSyncPayload,) async {
     final response = await syncUserIdentityApiProjectsInternalUsersSyncPostWithHttpInfo(userSyncPayload,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -494,7 +494,7 @@ class InternalApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'UserSyncResponse',) as UserSyncResponse;
     
     }
     return null;

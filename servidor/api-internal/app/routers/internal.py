@@ -1,10 +1,12 @@
 """Rotas internas consumidas por Nginx, Studio e serviços do control plane."""
 
 import re
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, ConfigDict
 
 from app.control_plane_service import sync_user_record
 from app.database import get_pool
@@ -25,6 +27,56 @@ from app.validation import validate_project_id
 
 
 router = APIRouter(tags=["internal"])
+
+
+class UserSyncResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    username: str
+    groups: list[str]
+    is_active: bool
+    email: str | None
+    picture_url: str | None
+    profile: dict[str, Any]
+    profile_version: int
+    profile_updated_at: str | None
+
+
+class ContentIdentityResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    project_id: str
+    current_ref: str
+    aliases: list[str]
+
+
+class StudioContextResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    project_uuid: str
+    tenant_uuid: str | None
+    ref: str
+    display_name: str
+    role: str | None
+    anon_key: str
+    file_size_limit: int
+    project_key_version: int | None
+
+
+class EncKeyResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    enc_service_key: str
+    project_key_version: int | None
+
+
+class KeyVersionResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    project_key_version: int
+
+    project_key_version: Any
 
 
 def _require_studio_nginx(request: Request) -> None:
@@ -153,7 +205,7 @@ async def proxy_global_analytics(
     )
 
 
-@router.post("/api/projects/internal/users/sync")
+@router.post("/api/projects/internal/users/sync", response_model=UserSyncResponse)
 async def sync_user_identity(
     body: UserSyncPayload,
     request: Request,
@@ -176,7 +228,10 @@ async def sync_user_identity(
     return synced
 
 
-@router.get("/api/projects/internal/content-identity/{project_name}")
+@router.get(
+    "/api/projects/internal/content-identity/{project_name}",
+    response_model=ContentIdentityResponse,
+)
 async def get_content_project_identity(
     project_name: str,
     request: Request,
@@ -228,7 +283,10 @@ async def get_content_project_identity(
     )
 
 
-@router.get("/api/projects/internal/studio-context/{ref}")
+@router.get(
+    "/api/projects/internal/studio-context/{ref}",
+    response_model=StudioContextResponse,
+)
 async def get_studio_project_context(
     ref: str,
     request: Request,
@@ -292,7 +350,7 @@ async def get_studio_project_context(
     )
 
 
-@router.get("/api/projects/internal/enc-key/{ref}")
+@router.get("/api/projects/internal/enc-key/{ref}", response_model=EncKeyResponse)
 async def enc_key(
     ref: str,
     request: Request,
@@ -328,7 +386,10 @@ async def enc_key(
     }
 
 
-@router.get("/api/projects/internal/key-version/{ref}")
+@router.get(
+    "/api/projects/internal/key-version/{ref}",
+    response_model=KeyVersionResponse,
+)
 async def project_key_version(
     ref: str,
     request: Request,

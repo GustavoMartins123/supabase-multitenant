@@ -15,7 +15,7 @@ Method | HTTP request | Description
 
 
 # **listJobHistoryApiJobsGet**
-> Object listJobHistoryApiJobsGet(projectUuid, action, status, limit, offset)
+> JobListResponse listJobHistoryApiJobsGet(projectUuid, action, status, limit, offset)
 
 List Job History
 
@@ -52,7 +52,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**JobListResponse**](JobListResponse.md)
 
 ### Authorization
 
@@ -66,7 +66,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **projectStatusApiProjectsStatusJobIdGet**
-> Object projectStatusApiProjectsStatusJobIdGet(jobId)
+> JobResponse projectStatusApiProjectsStatusJobIdGet(jobId)
 
 Project Status
 
@@ -93,7 +93,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**JobResponse**](JobResponse.md)
 
 ### Authorization
 
@@ -107,7 +107,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **retryProjectJobApiJobsJobIdRetryPost**
-> Object retryProjectJobApiJobsJobIdRetryPost(jobId)
+> JobRetryResponse retryProjectJobApiJobsJobIdRetryPost(jobId)
 
 Retry Project Job
 
@@ -136,7 +136,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**JobRetryResponse**](JobRetryResponse.md)
 
 ### Authorization
 

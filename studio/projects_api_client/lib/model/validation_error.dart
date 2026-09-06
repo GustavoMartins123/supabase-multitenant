@@ -30,7 +30,7 @@ class ValidationError {
 
   Object? input;
 
-  List<ValidationErrorLocInner> loc;
+  List<LocationInner> loc;
 
   String msg;
 
@@ -95,7 +95,7 @@ class ValidationError {
       return ValidationError(
         ctx: mapValueOfType<Object>(json, r'ctx'),
         input: mapValueOfType<Object>(json, r'input'),
-        loc: ValidationErrorLocInner.listFromJson(json[r'loc']),
+        loc: LocationInner.listFromJson(json[r'loc']),
         msg: mapValueOfType<String>(json, r'msg')!,
         type: mapValueOfType<String>(json, r'type')!,
       );

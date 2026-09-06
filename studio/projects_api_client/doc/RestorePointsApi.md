@@ -16,7 +16,7 @@ Method | HTTP request | Description
 
 
 # **createProjectRestorePointApiProjectsProjectNameRestorePointsPost**
-> Object createProjectRestorePointApiProjectsProjectNameRestorePointsPost(projectName, restorePointCreate)
+> CreateRestorePointResponse createProjectRestorePointApiProjectsProjectNameRestorePointsPost(projectName, restorePointCreate)
 
 Create Project Restore Point
 
@@ -45,7 +45,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**CreateRestorePointResponse**](CreateRestorePointResponse.md)
 
 ### Authorization
 
@@ -59,7 +59,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **deleteProjectRestorePointApiProjectsProjectNameRestorePointsPointIdDelete**
-> Object deleteProjectRestorePointApiProjectsProjectNameRestorePointsPointIdDelete(projectName, pointId)
+> DeleteRestorePointResponse deleteProjectRestorePointApiProjectsProjectNameRestorePointsPointIdDelete(projectName, pointId)
 
 Delete Project Restore Point
 
@@ -88,7 +88,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**DeleteRestorePointResponse**](DeleteRestorePointResponse.md)
 
 ### Authorization
 
@@ -102,7 +102,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **listProjectRestorePointsApiProjectsProjectNameRestorePointsGet**
-> Object listProjectRestorePointsApiProjectsProjectNameRestorePointsGet(projectName)
+> ListRestorePointsResponse listProjectRestorePointsApiProjectsProjectNameRestorePointsGet(projectName)
 
 List Project Restore Points
 
@@ -129,7 +129,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**ListRestorePointsResponse**](ListRestorePointsResponse.md)
 
 ### Authorization
 
@@ -143,7 +143,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **restoreProjectRestorePointApiProjectsProjectNameRestorePointsPointIdRestorePost**
-> Object restoreProjectRestorePointApiProjectsProjectNameRestorePointsPointIdRestorePost(projectName, pointId)
+> RestoreRestorePointResponse restoreProjectRestorePointApiProjectsProjectNameRestorePointsPointIdRestorePost(projectName, pointId)
 
 Restore Project Restore Point
 
@@ -172,7 +172,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**RestoreRestorePointResponse**](RestoreRestorePointResponse.md)
 
 ### Authorization
 

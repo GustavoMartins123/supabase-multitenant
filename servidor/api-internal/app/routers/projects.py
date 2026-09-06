@@ -9,6 +9,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict
 
 from app.database import get_pool
 from app.dependencies import (
@@ -71,7 +72,56 @@ from app.validation import validate_project_id
 router = APIRouter(tags=["projects"])
 
 
-@router.get("/api/projects")
+class ProjectListItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    project_uuid: str
+    tenant_uuid: str | None
+    name: str
+    display_name: str | None
+    file_size_limit: str
+    storage_limit_token: str
+    internal_token_expires_at: int | None
+    internal_token_expired: bool
+    internal_token_expiring_soon: bool
+    internal_token_expiry_warning_days: int
+    automatic_key_rotation_enabled: bool
+    automatic_key_rotation_lead_days: int
+    automatic_key_rotation_due_at: int | None
+    automatic_key_rotation_blocked: bool
+    automatic_key_rotation_last_error: str | None
+    last_key_rotation_at: str | None
+    opaque_api_keys_status: str
+    opaque_api_key_slot_count: int
+
+
+class QueuedJobResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    job_id: str
+    project: str
+    project_uuid: str | None
+    tenant_uuid: str | None
+    created_by: str | None
+    action: str
+    status: str
+    message: str | None
+    progress: int | None
+    current_step: str | None
+    total_steps: int | None
+    started_at: str | None
+    finished_at: str | None
+    error_code: str | None
+    is_idempotent: bool
+    retryable: bool
+    retry_of: str | None
+    attempt: int
+    created_at: str | None
+    updated_at: str | None
+    queue_position: int
+
+
+@router.get("/api/projects", response_model=list[ProjectListItem])
 async def list_projects(
     request: Request,
     pool=Depends(get_pool)
@@ -176,7 +226,7 @@ async def list_projects(
     return result
 
 
-@router.post("/api/projects", status_code=202)
+@router.post("/api/projects", status_code=202, response_model=QueuedJobResponse)
 async def create_project(
     body: NewProject,
     request: Request,
@@ -244,7 +294,7 @@ async def create_project(
     return await _serialize_queued_job(pool, job_id, position, message)
 
 
-@router.post("/api/projects/duplicate", status_code=202)
+@router.post("/api/projects/duplicate", status_code=202, response_model=QueuedJobResponse)
 async def duplicate_project(
     body: DuplicateProject,
     request: Request,
@@ -331,7 +381,7 @@ async def duplicate_project(
     )
     return await _serialize_queued_job(pool, job_id, position, message)
 
-@router.delete("/api/projects/{project_name}")
+@router.delete("/api/projects/{project_name}", response_model=QueuedJobResponse)
 async def delete_project(
     project_name: str,
     request: Request,

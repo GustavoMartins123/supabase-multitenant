@@ -19,14 +19,14 @@ void main() {
   group('tests for ProjectsApi', () {
     // Create Project
     //
-    //Future<Object> createProjectApiProjectsPost(NewProject newProject) async
+    //Future<QueuedJobResponse> createProjectApiProjectsPost(NewProject newProject) async
     test('test createProjectApiProjectsPost', () async {
       // TODO
     });
 
     // Delete Project
     //
-    //Future<Object> deleteProjectApiProjectsProjectNameDelete(String projectName, { String xStepUpToken }) async
+    //Future<QueuedJobResponse> deleteProjectApiProjectsProjectNameDelete(String projectName, { String xStepUpToken }) async
     test('test deleteProjectApiProjectsProjectNameDelete', () async {
       // TODO
     });
@@ -35,14 +35,14 @@ void main() {
     //
     // Duplica um projeto existente. - Valida acesso do usuário ao projeto original - Cria registro no banco - Dispara job em background para executar script de duplicação
     //
-    //Future<Object> duplicateProjectApiProjectsDuplicatePost(DuplicateProject duplicateProject) async
+    //Future<QueuedJobResponse> duplicateProjectApiProjectsDuplicatePost(DuplicateProject duplicateProject) async
     test('test duplicateProjectApiProjectsDuplicatePost', () async {
       // TODO
     });
 
     // List Projects
     //
-    //Future<Object> listProjectsApiProjectsGet() async
+    //Future<List<ProjectListItem>> listProjectsApiProjectsGet() async
     test('test listProjectsApiProjectsGet', () async {
       // TODO
     });

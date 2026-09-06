@@ -30,6 +30,7 @@ from app.routers.project_members import router as project_members_router
 from app.routers.project_rename import router as project_rename_router
 from app.routers.projects import router as projects_router
 from app.routers.restore_points import router as restore_points_router
+from app.schemas import ProjectS3VectorKeysResponse
 from app.validation import validate_project_id
 
 PROJECTS_ROOT = pathlib.Path("/docker/projects").resolve()
@@ -58,7 +59,7 @@ def _read_project_s3_vector_keys(project_name: str) -> tuple[str, str]:
     return access_key, secret_key
 
 
-@app.get("/api/projects/{project_name}/storage/s3-keys", tags=["project-insights"])
+@app.get("/api/projects/{project_name}/storage/s3-keys", tags=["project-insights"], response_model=ProjectS3VectorKeysResponse)
 async def get_project_s3_vector_keys(
     project_name: str,
     request: Request,

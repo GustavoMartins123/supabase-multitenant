@@ -19,14 +19,14 @@ void main() {
   group('tests for ProjectInsightsApi', () {
     // Execute Project Function
     //
-    //Future<Object> executeProjectFunctionApiProjectsRefExecuteFunctionPost(String ref, Map<String, Object> requestBody) async
+    //Future<List<Map<String, Object>>> executeProjectFunctionApiProjectsRefExecuteFunctionPost(String ref, Map<String, Object> requestBody) async
     test('test executeProjectFunctionApiProjectsRefExecuteFunctionPost', () async {
       // TODO
     });
 
     // Get Project Ai Functions
     //
-    //Future<Object> getProjectAiFunctionsApiProjectsRefFunctionsGet(String ref) async
+    //Future<List<ProjectAIFunctionItem>> getProjectAiFunctionsApiProjectsRefFunctionsGet(String ref) async
     test('test getProjectAiFunctionsApiProjectsRefFunctionsGet', () async {
       // TODO
     });
@@ -35,21 +35,21 @@ void main() {
     //
     // Return the selected tenant's SigV4 pair to an authorized Studio admin.  OpenResty rewrites the Studio's fixed ``/api/get-s3-keys`` endpoint to this project-scoped route. The service HMAC authenticates the Studio-to-control- plane hop and the signed user token is checked here.
     //
-    //Future<Object> getProjectS3VectorKeysApiProjectsProjectNameStorageS3KeysGet(String projectName) async
+    //Future<ProjectS3VectorKeysResponse> getProjectS3VectorKeysApiProjectsProjectNameStorageS3KeysGet(String projectName) async
     test('test getProjectS3VectorKeysApiProjectsProjectNameStorageS3KeysGet', () async {
       // TODO
     });
 
     // Get Project User Telemetry
     //
-    //Future<Object> getProjectUserTelemetryApiProjectsProjectNameTelemetryUsersGet(String projectName, { String period, DateTime start, DateTime end }) async
+    //Future<ProjectUserTelemetryResponse> getProjectUserTelemetryApiProjectsProjectNameTelemetryUsersGet(String projectName, { String period, DateTime start, DateTime end }) async
     test('test getProjectUserTelemetryApiProjectsProjectNameTelemetryUsersGet', () async {
       // TODO
     });
 
     // Get Projects For User
     //
-    //Future<Object> getProjectsForUserApiAdminProjectsInfoPost(Map<String, String> requestBody) async
+    //Future<ProjectsInfoResponse> getProjectsForUserApiAdminProjectsInfoPost(Map<String, String> requestBody) async
     test('test getProjectsForUserApiAdminProjectsInfoPost', () async {
       // TODO
     });
@@ -58,7 +58,7 @@ void main() {
     //
     // Lista todos os usuários disponíveis para admins. Como a API não tem acesso ao cache, retorna uma estrutura que o Nginx pode completar ou usa proxy para Nginx.
     //
-    //Future<Object> listAllUsersForAdminApiAdminProjectsNameAllUsersGet(String name) async
+    //Future<AllUsersResponse> listAllUsersForAdminApiAdminProjectsNameAllUsersGet(String name) async
     test('test listAllUsersForAdminApiAdminProjectsNameAllUsersGet', () async {
       // TODO
     });
@@ -121,7 +121,7 @@ void main() {
 
     // Transfer Project
     //
-    //Future<Object> transferProjectApiProjectsProjectNameTransferPost(String projectName, TransferBody transferBody) async
+    //Future<TransferResponse> transferProjectApiProjectsProjectNameTransferPost(String projectName, TransferBody transferBody) async
     test('test transferProjectApiProjectsProjectNameTransferPost', () async {
       // TODO
     });

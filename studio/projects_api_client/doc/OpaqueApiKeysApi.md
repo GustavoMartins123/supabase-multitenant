@@ -26,7 +26,7 @@ Method | HTTP request | Description
 
 
 # **abortOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationDelete**
-> Object abortOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationDelete(projectName)
+> MigrationAbortResponse abortOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationDelete(projectName)
 
 Abort Opaque Api Key Migration
 
@@ -53,7 +53,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**MigrationAbortResponse**](MigrationAbortResponse.md)
 
 ### Authorization
 
@@ -67,7 +67,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **activateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdActivationPost**
-> Object activateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdActivationPost(projectName, slotId, xStepUpToken)
+> SlotActivationResponse activateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdActivationPost(projectName, slotId, xStepUpToken)
 
 Activate Api Key Slot
 
@@ -98,7 +98,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**SlotActivationResponse**](SlotActivationResponse.md)
 
 ### Authorization
 
@@ -112,7 +112,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **cancelApiKeySlotRotationApiProjectsProjectNameApiKeySlotsSlotIdRotationDelete**
-> Object cancelApiKeySlotRotationApiProjectsProjectNameApiKeySlotsSlotIdRotationDelete(projectName, slotId)
+> SlotCancelResponse cancelApiKeySlotRotationApiProjectsProjectNameApiKeySlotsSlotIdRotationDelete(projectName, slotId)
 
 Cancel Api Key Slot Rotation
 
@@ -141,7 +141,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**SlotCancelResponse**](SlotCancelResponse.md)
 
 ### Authorization
 
@@ -155,7 +155,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **claimApiKeyApiProjectsProjectNameApiKeyRevealsKeyIdClaimPost**
-> Object claimApiKeyApiProjectsProjectNameApiKeyRevealsKeyIdClaimPost(projectName, keyId, xStepUpToken)
+> RevealClaimResponse claimApiKeyApiProjectsProjectNameApiKeyRevealsKeyIdClaimPost(projectName, keyId, xStepUpToken)
 
 Claim Api Key
 
@@ -186,7 +186,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**RevealClaimResponse**](RevealClaimResponse.md)
 
 ### Authorization
 
@@ -200,7 +200,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **confirmApiKeySlotInstallationApiProjectsProjectNameApiKeySlotsSlotIdRotationConfirmationPost**
-> Object confirmApiKeySlotInstallationApiProjectsProjectNameApiKeySlotsSlotIdRotationConfirmationPost(projectName, slotId, confirmApiKeyInstallation)
+> SlotConfirmResponse confirmApiKeySlotInstallationApiProjectsProjectNameApiKeySlotsSlotIdRotationConfirmationPost(projectName, slotId, confirmApiKeyInstallation)
 
 Confirm Api Key Slot Installation
 
@@ -231,7 +231,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**SlotConfirmResponse**](SlotConfirmResponse.md)
 
 ### Authorization
 
@@ -245,7 +245,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **createApiKeySlotApiProjectsProjectNameApiKeySlotsPost**
-> Object createApiKeySlotApiProjectsProjectNameApiKeySlotsPost(projectName, createApiKeySlot, xStepUpToken)
+> IssuedKeyResponse createApiKeySlotApiProjectsProjectNameApiKeySlotsPost(projectName, createApiKeySlot, xStepUpToken)
 
 Create Api Key Slot
 
@@ -276,7 +276,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**IssuedKeyResponse**](IssuedKeyResponse.md)
 
 ### Authorization
 
@@ -290,7 +290,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **cutoverOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationCutoverPost**
-> Object cutoverOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationCutoverPost(projectName)
+> MigrationCutoverResponse cutoverOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationCutoverPost(projectName)
 
 Cutover Opaque Api Key Migration
 
@@ -319,7 +319,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**MigrationCutoverResponse**](MigrationCutoverResponse.md)
 
 ### Authorization
 
@@ -333,7 +333,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getApiKeyRevealsApiProjectsProjectNameApiKeyRevealsGet**
-> Object getApiKeyRevealsApiProjectsProjectNameApiKeyRevealsGet(projectName)
+> RevealListResponse getApiKeyRevealsApiProjectsProjectNameApiKeyRevealsGet(projectName)
 
 Get Api Key Reveals
 
@@ -360,7 +360,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**RevealListResponse**](RevealListResponse.md)
 
 ### Authorization
 
@@ -374,7 +374,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getApiKeySlotsApiProjectsProjectNameApiKeySlotsGet**
-> Object getApiKeySlotsApiProjectsProjectNameApiKeySlotsGet(projectName)
+> SlotListResponse getApiKeySlotsApiProjectsProjectNameApiKeySlotsGet(projectName)
 
 Get Api Key Slots
 
@@ -401,7 +401,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**SlotListResponse**](SlotListResponse.md)
 
 ### Authorization
 
@@ -415,7 +415,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationGet**
-> Object getOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationGet(projectName)
+> MigrationStatusResponse getOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationGet(projectName)
 
 Get Opaque Api Key Migration
 
@@ -442,7 +442,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**MigrationStatusResponse**](MigrationStatusResponse.md)
 
 ### Authorization
 
@@ -456,7 +456,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **prepareOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationPreparePost**
-> Object prepareOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationPreparePost(projectName)
+> MigrationPrepareResponse prepareOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationPreparePost(projectName)
 
 Prepare Opaque Api Key Migration
 
@@ -485,7 +485,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**MigrationPrepareResponse**](MigrationPrepareResponse.md)
 
 ### Authorization
 
@@ -499,7 +499,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **revokeApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdDelete**
-> Object revokeApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdDelete(projectName, slotId)
+> SlotRevokeResponse revokeApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdDelete(projectName, slotId)
 
 Revoke Api Key Slot
 
@@ -528,7 +528,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**SlotRevokeResponse**](SlotRevokeResponse.md)
 
 ### Authorization
 
@@ -542,7 +542,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **rotateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdRotationPost**
-> Object rotateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdRotationPost(projectName, slotId, rotateApiKeySlot, xStepUpToken)
+> IssuedKeyResponse rotateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdRotationPost(projectName, slotId, rotateApiKeySlot, xStepUpToken)
 
 Rotate Api Key Slot
 
@@ -575,7 +575,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**IssuedKeyResponse**](IssuedKeyResponse.md)
 
 ### Authorization
 
@@ -589,7 +589,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **updateApiKeySlotPolicyApiProjectsProjectNameApiKeySlotsSlotIdPatch**
-> Object updateApiKeySlotPolicyApiProjectsProjectNameApiKeySlotsSlotIdPatch(projectName, slotId, updateApiKeySlotPolicy)
+> SlotPolicyUpdateResponse updateApiKeySlotPolicyApiProjectsProjectNameApiKeySlotsSlotIdPatch(projectName, slotId, updateApiKeySlotPolicy)
 
 Update Api Key Slot Policy
 
@@ -620,7 +620,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**SlotPolicyUpdateResponse**](SlotPolicyUpdateResponse.md)
 
 ### Authorization
 

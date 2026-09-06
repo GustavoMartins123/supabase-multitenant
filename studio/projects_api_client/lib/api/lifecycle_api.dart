@@ -67,7 +67,7 @@ class LifecycleApi {
   /// * [String] service (required):
   ///
   /// * [int] lines:
-  Future<Object?> getContainerLogsApiProjectsProjectNameLogsServiceGet(String projectName, String service, { int? lines, }) async {
+  Future<ContainerLogsResponse?> getContainerLogsApiProjectsProjectNameLogsServiceGet(String projectName, String service, { int? lines, }) async {
     final response = await getContainerLogsApiProjectsProjectNameLogsServiceGetWithHttpInfo(projectName, service,  lines: lines, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -76,7 +76,7 @@ class LifecycleApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'ContainerLogsResponse',) as ContainerLogsResponse;
     
     }
     return null;
@@ -120,7 +120,7 @@ class LifecycleApi {
   /// Parameters:
   ///
   /// * [String] projectName (required):
-  Future<Object?> getProjectDockerStatusApiProjectsProjectNameStatusGet(String projectName,) async {
+  Future<ProjectStatusResponse?> getProjectDockerStatusApiProjectsProjectNameStatusGet(String projectName,) async {
     final response = await getProjectDockerStatusApiProjectsProjectNameStatusGetWithHttpInfo(projectName,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -129,7 +129,7 @@ class LifecycleApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'ProjectStatusResponse',) as ProjectStatusResponse;
     
     }
     return null;

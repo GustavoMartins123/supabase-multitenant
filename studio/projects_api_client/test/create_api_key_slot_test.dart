@@ -21,7 +21,7 @@ void main() {
       // TODO
     });
 
-    // AutomaticRotationEnabled automaticRotationEnabled
+    // bool automaticRotationEnabled
     test('to test the property `automaticRotationEnabled`', () async {
       // TODO
     });
@@ -36,7 +36,7 @@ void main() {
       // TODO
     });
 
-    // RotationIntervalDays rotationIntervalDays
+    // int rotationIntervalDays (default value: 90)
     test('to test the property `rotationIntervalDays`', () async {
       // TODO
     });

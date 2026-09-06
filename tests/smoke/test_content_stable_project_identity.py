@@ -12,10 +12,10 @@ class ContentStableProjectIdentityTests(unittest.TestCase):
             ROOT / "servidor/api-internal/app/routers/internal.py"
         ).read_text(encoding="utf-8")
         start = source.index(
-            '@router.get("/api/projects/internal/content-identity/{project_name}")'
+            '"/api/projects/internal/content-identity/{project_name}"'
         )
         end = source.index(
-            '@router.get("/api/projects/internal/studio-context/{ref}")',
+            '"/api/projects/internal/studio-context/{ref}"',
             start,
         )
         route = source[start:end]

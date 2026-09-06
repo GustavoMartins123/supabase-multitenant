@@ -19,7 +19,7 @@ void main() {
   group('tests for LifecycleOpsApi', () {
     // Get Project Settings
     //
-    //Future<Object> getProjectSettingsApiProjectsProjectNameSettingsGet(String projectName) async
+    //Future<GetProjectSettingsResponse> getProjectSettingsApiProjectsProjectNameSettingsGet(String projectName) async
     test('test getProjectSettingsApiProjectsProjectNameSettingsGet', () async {
       // TODO
     });
@@ -28,7 +28,7 @@ void main() {
     //
     // Recreate specific services of a project using docker compose down + up. This is needed (instead of just restart) because env vars are read at container creation time, not on restart.
     //
-    //Future<Object> recreateProjectServicesApiProjectsProjectNameRecreateServicesPost(String projectName, RecreateServices recreateServices) async
+    //Future<RecreateProjectServicesResponse> recreateProjectServicesApiProjectsProjectNameRecreateServicesPost(String projectName, RecreateServices recreateServices) async
     test('test recreateProjectServicesApiProjectsProjectNameRecreateServicesPost', () async {
       // TODO
     });
@@ -37,7 +37,7 @@ void main() {
     //
     // Reinicia os containers do projeto. Enfileirado por projeto.
     //
-    //Future<Object> restartProjectApiProjectsProjectNameRestartPost(String projectName) async
+    //Future<RestartProjectResponse> restartProjectApiProjectsProjectNameRestartPost(String projectName) async
     test('test restartProjectApiProjectsProjectNameRestartPost', () async {
       // TODO
     });
@@ -46,21 +46,21 @@ void main() {
     //
     // Inicia os containers do projeto. Enfileirado por projeto.
     //
-    //Future<Object> startProjectApiProjectsProjectNameStartPost(String projectName) async
+    //Future<StartProjectResponse> startProjectApiProjectsProjectNameStartPost(String projectName) async
     test('test startProjectApiProjectsProjectNameStartPost', () async {
       // TODO
     });
 
     // Stop Project
     //
-    //Future<Object> stopProjectApiProjectsProjectNameStopPost(String projectName) async
+    //Future<StopProjectResponse> stopProjectApiProjectsProjectNameStopPost(String projectName) async
     test('test stopProjectApiProjectsProjectNameStopPost', () async {
       // TODO
     });
 
     // Update Project Settings
     //
-    //Future<Object> updateProjectSettingsApiProjectsProjectNameSettingsPut(String projectName, UpdateSettings updateSettings) async
+    //Future<UpdateProjectSettingsResponse> updateProjectSettingsApiProjectsProjectNameSettingsPut(String projectName, UpdateSettings updateSettings) async
     test('test updateProjectSettingsApiProjectsProjectNameSettingsPut', () async {
       // TODO
     });

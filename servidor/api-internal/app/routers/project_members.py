@@ -1,4 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict
 
 from app.database import get_pool
 from app.dependencies import (
@@ -18,7 +21,26 @@ from app.validation import parse_uuid_value, validate_project_id
 router = APIRouter(tags=["project-members"])
 
 
-@router.post("/api/projects/{project_name}/members")
+class AddMemberResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool
+
+
+class MemberItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    user_id: str
+    role: str
+
+
+class RemoveMemberResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool
+
+
+@router.post("/api/projects/{project_name}/members", response_model=AddMemberResponse)
 async def add_member(
     project_name: str,
     member: AddMember,
@@ -62,7 +84,7 @@ async def add_member(
     return {"ok": True}
 
 
-@router.get("/api/projects/{name}/members")
+@router.get("/api/projects/{name}/members", response_model=list[MemberItem])
 async def list_members_by_ref(
     name: str,
     request: Request,
@@ -93,7 +115,7 @@ async def list_members_by_ref(
 @router.delete(
     "/api/projects/{name}/members/{member_id}",
     status_code=200,
-    response_model=dict
+    response_model=RemoveMemberResponse
 )
 async def remove_member_by_ref(
     name: str,

@@ -6,6 +6,7 @@ import httpx
 from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
+from pydantic import BaseModel, ConfigDict, Field
 from app.control_plane_service import audit_studio_action
 from app.database import get_pool
 from app.dependencies import audit_project_member_change, ensure_project_admin_access, ensure_project_member_access, get_project_role, get_project_row, require_synced_user_record, resolve_authenticated_user, upsert_project_member
@@ -23,7 +24,78 @@ from app.validation import parse_uuid_value, validate_project_id
 router = APIRouter(tags=["project-insights"])
 
 
-@router.post("/api/admin/projects-info")
+class ProjectInfoItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    name: str
+    display_name: str | None
+    status: str
+    running_containers: int
+    total_containers: int
+    file_size_limit: str
+    storage_limit_token: str
+
+
+class ProjectsInfoResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    projects: list[ProjectInfoItem]
+
+
+class AllUsersMemberItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    user_id: str
+    role: str
+    status: str
+
+
+class AllUsersResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    project_name: str
+    project_id: str
+    current_members: list[AllUsersMemberItem]
+    cache_users_needed: bool
+    nginx_route: str
+
+
+class TransferResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    status: str
+    detail: str | None = None
+    project: str | None = None
+    new_owner_id: str | None = None
+
+
+class TelemetryUserItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    user_id: str
+    email: str | None
+    phone: str | None
+    last_login_at: str | None
+    session_count: int
+
+
+class ProjectUserTelemetryResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    project: str
+    period: str
+    start: str
+    end: str
+    active_users: int
+    total_sessions: int
+    users: list[TelemetryUserItem]
+    source: str
+    sessions_are_current_records: bool
+
+
+class ProjectAIFunctionItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    name: str
+    argument_types: str
+    return_type: str
+    comment: str
+    schema_: str = Field(alias="schema")
+
+
+@router.post("/api/admin/projects-info", response_model=ProjectsInfoResponse)
 async def get_projects_for_user(
     body: Dict[str, str],
     request: Request,
@@ -65,7 +137,7 @@ async def get_projects_for_user(
     return {"projects": projects}
 
 
-@router.get("/api/admin/projects/{name}/all-users")
+@router.get("/api/admin/projects/{name}/all-users", response_model=AllUsersResponse)
 async def list_all_users_for_admin(
     name: str,
     request: Request,
@@ -109,7 +181,7 @@ async def list_all_users_for_admin(
     }
 
 
-@router.post("/api/projects/{project_name}/transfer", status_code=200)
+@router.post("/api/projects/{project_name}/transfer", status_code=200, response_model=TransferResponse)
 async def transfer_project(
     project_name: str,
     body: TransferBody,
@@ -191,7 +263,7 @@ async def transfer_project(
     }
 
 
-@router.get("/api/projects/{project_name}/telemetry/users")
+@router.get("/api/projects/{project_name}/telemetry/users", response_model=ProjectUserTelemetryResponse)
 async def get_project_user_telemetry(
     project_name: str,
     request: Request,
@@ -402,7 +474,7 @@ async def proxy_project_meta(
     )
 
 
-@router.get("/api/projects/{ref}/functions")
+@router.get("/api/projects/{ref}/functions", response_model=list[ProjectAIFunctionItem])
 async def get_project_ai_functions(
     ref: str,
     request: Request,
@@ -451,7 +523,7 @@ async def get_project_ai_functions(
     return functions
 
 
-@router.post("/api/projects/{ref}/execute-function")
+@router.post("/api/projects/{ref}/execute-function", response_model=list[dict[str, Any]])
 async def execute_project_function(
     ref: str,
     body: Dict[str, Any],

@@ -58,7 +58,7 @@ class CollaborationApi {
   /// * [String] projectName (required):
   ///
   /// * [ProjectTagAssign] projectTagAssign (required):
-  Future<Object?> assignProjectTagApiProjectsProjectNameTagsPost(String projectName, ProjectTagAssign projectTagAssign,) async {
+  Future<AssignProjectTagResponse?> assignProjectTagApiProjectsProjectNameTagsPost(String projectName, ProjectTagAssign projectTagAssign,) async {
     final response = await assignProjectTagApiProjectsProjectNameTagsPostWithHttpInfo(projectName, projectTagAssign,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -67,7 +67,7 @@ class CollaborationApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AssignProjectTagResponse',) as AssignProjectTagResponse;
     
     }
     return null;
@@ -115,7 +115,7 @@ class CollaborationApi {
   /// * [String] projectName (required):
   ///
   /// * [ProjectHintCreate] projectHintCreate (required):
-  Future<Object?> createProjectHintApiProjectsProjectNameHintsPost(String projectName, ProjectHintCreate projectHintCreate,) async {
+  Future<CreateProjectHintResponse?> createProjectHintApiProjectsProjectNameHintsPost(String projectName, ProjectHintCreate projectHintCreate,) async {
     final response = await createProjectHintApiProjectsProjectNameHintsPostWithHttpInfo(projectName, projectHintCreate,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -124,7 +124,7 @@ class CollaborationApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'CreateProjectHintResponse',) as CreateProjectHintResponse;
     
     }
     return null;
@@ -172,7 +172,7 @@ class CollaborationApi {
   /// * [String] projectName (required):
   ///
   /// * [ProjectNoteCreate] projectNoteCreate (required):
-  Future<Object?> createProjectNoteApiProjectsProjectNameNotesPost(String projectName, ProjectNoteCreate projectNoteCreate,) async {
+  Future<CreateProjectNoteResponse?> createProjectNoteApiProjectsProjectNameNotesPost(String projectName, ProjectNoteCreate projectNoteCreate,) async {
     final response = await createProjectNoteApiProjectsProjectNameNotesPostWithHttpInfo(projectName, projectNoteCreate,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -181,7 +181,7 @@ class CollaborationApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'CreateProjectNoteResponse',) as CreateProjectNoteResponse;
     
     }
     return null;
@@ -229,7 +229,7 @@ class CollaborationApi {
   /// * [String] projectName (required):
   ///
   /// * [ProjectThreadMessageCreate] projectThreadMessageCreate (required):
-  Future<Object?> createProjectThreadMessageApiProjectsProjectNameThreadMessagesPost(String projectName, ProjectThreadMessageCreate projectThreadMessageCreate,) async {
+  Future<CreateThreadMessageResponse?> createProjectThreadMessageApiProjectsProjectNameThreadMessagesPost(String projectName, ProjectThreadMessageCreate projectThreadMessageCreate,) async {
     final response = await createProjectThreadMessageApiProjectsProjectNameThreadMessagesPostWithHttpInfo(projectName, projectThreadMessageCreate,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -238,7 +238,7 @@ class CollaborationApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'CreateThreadMessageResponse',) as CreateThreadMessageResponse;
     
     }
     return null;
@@ -287,7 +287,7 @@ class CollaborationApi {
   /// * [String] projectName (required):
   ///
   /// * [String] noteId (required):
-  Future<Object?> deleteProjectNoteApiProjectsProjectNameNotesNoteIdDelete(String projectName, String noteId,) async {
+  Future<DeleteProjectNoteResponse?> deleteProjectNoteApiProjectsProjectNameNotesNoteIdDelete(String projectName, String noteId,) async {
     final response = await deleteProjectNoteApiProjectsProjectNameNotesNoteIdDeleteWithHttpInfo(projectName, noteId,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -296,7 +296,7 @@ class CollaborationApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'DeleteProjectNoteResponse',) as DeleteProjectNoteResponse;
     
     }
     return null;
@@ -340,7 +340,7 @@ class CollaborationApi {
   /// Parameters:
   ///
   /// * [String] projectName (required):
-  Future<Object?> getProjectCollaborationApiProjectsProjectNameCollaborationGet(String projectName,) async {
+  Future<GetProjectCollaborationResponse?> getProjectCollaborationApiProjectsProjectNameCollaborationGet(String projectName,) async {
     final response = await getProjectCollaborationApiProjectsProjectNameCollaborationGetWithHttpInfo(projectName,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -349,7 +349,7 @@ class CollaborationApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'GetProjectCollaborationResponse',) as GetProjectCollaborationResponse;
     
     }
     return null;
@@ -398,7 +398,7 @@ class CollaborationApi {
   /// * [String] projectName (required):
   ///
   /// * [String] tagId (required):
-  Future<Object?> unassignProjectTagApiProjectsProjectNameTagsTagIdDelete(String projectName, String tagId,) async {
+  Future<UnassignProjectTagResponse?> unassignProjectTagApiProjectsProjectNameTagsTagIdDelete(String projectName, String tagId,) async {
     final response = await unassignProjectTagApiProjectsProjectNameTagsTagIdDeleteWithHttpInfo(projectName, tagId,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -407,7 +407,7 @@ class CollaborationApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'UnassignProjectTagResponse',) as UnassignProjectTagResponse;
     
     }
     return null;
@@ -460,7 +460,7 @@ class CollaborationApi {
   /// * [String] hintId (required):
   ///
   /// * [ProjectHintStatusUpdate] projectHintStatusUpdate (required):
-  Future<Object?> updateProjectHintStatusApiProjectsProjectNameHintsHintIdPut(String projectName, String hintId, ProjectHintStatusUpdate projectHintStatusUpdate,) async {
+  Future<UpdateProjectHintResponse?> updateProjectHintStatusApiProjectsProjectNameHintsHintIdPut(String projectName, String hintId, ProjectHintStatusUpdate projectHintStatusUpdate,) async {
     final response = await updateProjectHintStatusApiProjectsProjectNameHintsHintIdPutWithHttpInfo(projectName, hintId, projectHintStatusUpdate,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -469,7 +469,7 @@ class CollaborationApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'UpdateProjectHintResponse',) as UpdateProjectHintResponse;
     
     }
     return null;
@@ -522,7 +522,7 @@ class CollaborationApi {
   /// * [String] notificationId (required):
   ///
   /// * [ProjectNotificationRead] projectNotificationRead (required):
-  Future<Object?> updateProjectNotificationReadStateApiProjectsProjectNameNotificationsNotificationIdPatch(String projectName, String notificationId, ProjectNotificationRead projectNotificationRead,) async {
+  Future<UpdateNotificationReadResponse?> updateProjectNotificationReadStateApiProjectsProjectNameNotificationsNotificationIdPatch(String projectName, String notificationId, ProjectNotificationRead projectNotificationRead,) async {
     final response = await updateProjectNotificationReadStateApiProjectsProjectNameNotificationsNotificationIdPatchWithHttpInfo(projectName, notificationId, projectNotificationRead,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -531,7 +531,7 @@ class CollaborationApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'UpdateNotificationReadResponse',) as UpdateNotificationReadResponse;
     
     }
     return null;

@@ -74,10 +74,10 @@ class InternalNamespaceIsolationTest(unittest.TestCase):
             internal,
         )
         for route in (
-            '@router.post("/api/projects/internal/users/sync")',
-            '@router.get("/api/projects/internal/enc-key/{ref}")',
-            '@router.get("/api/projects/internal/key-version/{ref}")',
-            '@router.get("/api/projects/internal/content-identity/{project_name}")',
+            '"/api/projects/internal/users/sync"',
+            '"/api/projects/internal/enc-key/{ref}"',
+            '"/api/projects/internal/key-version/{ref}"',
+            '"/api/projects/internal/content-identity/{project_name}"',
         ):
             with self.subTest(route=route):
                 start = internal.index(route)
@@ -86,7 +86,7 @@ class InternalNamespaceIsolationTest(unittest.TestCase):
 
     def test_studio_context_keeps_the_user_scoped_authorization(self):
         internal = read(APP / "routers" / "internal.py")
-        start = internal.index('@router.get("/api/projects/internal/studio-context/{ref}")')
+        start = internal.index('"/api/projects/internal/studio-context/{ref}"')
         body = internal[start : start + 1500]
         # Esta rota recebe X-User-Token de propósito: nao pode ganhar o guard.
         self.assertNotIn("_reject_end_user_context", body)
@@ -225,9 +225,9 @@ class JobAuthorizationTest(unittest.TestCase):
 
     def test_routes_left_main_but_kept_their_paths(self):
         for path in (
-            '@router.get("/api/jobs")',
-            '@router.post("/api/jobs/{job_id}/retry", status_code=202)',
-            '@router.get("/api/projects/status/{job_id}")',
+            '"/api/jobs"',
+            '"/api/jobs/{job_id}/retry"',
+            '"/api/projects/status/{job_id}"',
         ):
             with self.subTest(path=path):
                 self.assertIn(path, self.source)

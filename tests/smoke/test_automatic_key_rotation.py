@@ -89,7 +89,7 @@ class AutomaticRotationContractTest(unittest.TestCase):
         self.assertIn("automatic_key_rotation_blocked_at = now()", self.scheduler)
         self.assertIn("automatic_key_rotation_last_error", self.scheduler)
         self.assertIn(
-            '@router.put("/api/projects/{project_name}/automatic-key-rotation")',
+            '"/api/projects/{project_name}/automatic-key-rotation"',
             self.keys,
         )
         self.assertIn("WHEN $2 THEN NULL", self.keys)

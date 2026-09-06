@@ -7,6 +7,8 @@ import urllib.parse
 import asyncpg
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from typing import Any
+from pydantic import BaseModel, ConfigDict
 
 from app.database import get_pool
 from app.dependencies import (
@@ -19,6 +21,25 @@ from app.project_env_secrets import PROJECTS_ROOT
 from app.validation import validate_project_id
 
 router = APIRouter(tags=["platform-auth"])
+
+
+class AuthUserItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str
+    email: str | None = None
+    phone: str | None = None
+    email_confirmed_at: str | None = None
+    created_at: str | None = None
+    last_sign_in_at: str | None = None
+    raw_user_meta_data: dict[str, Any] | None = None
+    is_sso_user: bool | None = None
+
+
+class AuthUsersResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    users: list[AuthUserItem] = []
+    total: int = 0
+
 
 GOTRUE_INTERNAL_PORT = 9999
 # O Nginx do projeto remove este prefixo antes do GoTrue; aqui a chamada e direta.
@@ -77,7 +98,10 @@ def _require_studio_nginx(request: Request) -> None:
         raise HTTPException(403, "Internal service access required")
 
 
-@router.get("/api/projects/internal/auth-users/{project_name}")
+@router.get(
+    "/api/projects/internal/auth-users/{project_name}",
+    response_model=AuthUsersResponse,
+)
 async def list_project_auth_users(
     project_name: str,
     request: Request,

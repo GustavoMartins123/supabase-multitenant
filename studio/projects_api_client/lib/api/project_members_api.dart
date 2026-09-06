@@ -58,7 +58,7 @@ class ProjectMembersApi {
   /// * [String] projectName (required):
   ///
   /// * [AddMember] addMember (required):
-  Future<Object?> addMemberApiProjectsProjectNameMembersPost(String projectName, AddMember addMember,) async {
+  Future<AddMemberResponse?> addMemberApiProjectsProjectNameMembersPost(String projectName, AddMember addMember,) async {
     final response = await addMemberApiProjectsProjectNameMembersPostWithHttpInfo(projectName, addMember,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -67,7 +67,7 @@ class ProjectMembersApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AddMemberResponse',) as AddMemberResponse;
     
     }
     return null;
@@ -111,7 +111,7 @@ class ProjectMembersApi {
   /// Parameters:
   ///
   /// * [String] name (required):
-  Future<Object?> listMembersByRefApiProjectsNameMembersGet(String name,) async {
+  Future<List<MemberItem>?> listMembersByRefApiProjectsNameMembersGet(String name,) async {
     final response = await listMembersByRefApiProjectsNameMembersGetWithHttpInfo(name,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -120,8 +120,11 @@ class ProjectMembersApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
-    
+      final responseBody = await _decodeBodyBytes(response);
+      return (await apiClient.deserializeAsync(responseBody, 'List<MemberItem>') as List)
+        .cast<MemberItem>()
+        .toList(growable: false);
+
     }
     return null;
   }
@@ -169,7 +172,7 @@ class ProjectMembersApi {
   /// * [String] name (required):
   ///
   /// * [String] memberId (required):
-  Future<Map<String, Object>?> removeMemberByRefApiProjectsNameMembersMemberIdDelete(String name, String memberId,) async {
+  Future<RemoveMemberResponse?> removeMemberByRefApiProjectsNameMembersMemberIdDelete(String name, String memberId,) async {
     final response = await removeMemberByRefApiProjectsNameMembersMemberIdDeleteWithHttpInfo(name, memberId,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -178,8 +181,8 @@ class ProjectMembersApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return Map<String, Object>.from(await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Map<String, Object>'),);
-
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'RemoveMemberResponse',) as RemoveMemberResponse;
+    
     }
     return null;
   }

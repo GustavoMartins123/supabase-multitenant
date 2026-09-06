@@ -16,13 +16,7 @@ class RotateApiKeySlot {
     this.activateAt,
   });
 
-  ///
-  /// Please note: This property should have been non-nullable! Since the specification file
-  /// does not include a default value (using the "default:" property), however, the generated
-  /// source code must fall back to having a nullable type.
-  /// Consider adding a "default:" property in the specification file to hide this note.
-  ///
-  ActivateAt? activateAt;
+  DateTime? activateAt;
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is RotateApiKeySlot &&
@@ -39,7 +33,7 @@ class RotateApiKeySlot {
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
     if (this.activateAt != null) {
-      json[r'activate_at'] = this.activateAt;
+      json[r'activate_at'] = this.activateAt!.toUtc().toIso8601String();
     } else {
       json[r'activate_at'] = null;
     }
@@ -65,7 +59,7 @@ class RotateApiKeySlot {
       }());
 
       return RotateApiKeySlot(
-        activateAt: ActivateAt.fromJson(json[r'activate_at']),
+        activateAt: mapDateTime(json, r'activate_at', r''),
       );
     }
     return null;

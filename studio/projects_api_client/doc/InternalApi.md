@@ -21,7 +21,7 @@ Method | HTTP request | Description
 
 
 # **encKeyApiProjectsInternalEncKeyRefGet**
-> Object encKeyApiProjectsInternalEncKeyRefGet(ref)
+> EncKeyResponse encKeyApiProjectsInternalEncKeyRefGet(ref)
 
 Enc Key
 
@@ -48,7 +48,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**EncKeyResponse**](EncKeyResponse.md)
 
 ### Authorization
 
@@ -62,7 +62,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getContentProjectIdentityApiProjectsInternalContentIdentityProjectNameGet**
-> Object getContentProjectIdentityApiProjectsInternalContentIdentityProjectNameGet(projectName)
+> ContentIdentityResponse getContentProjectIdentityApiProjectsInternalContentIdentityProjectNameGet(projectName)
 
 Get Content Project Identity
 
@@ -91,7 +91,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**ContentIdentityResponse**](ContentIdentityResponse.md)
 
 ### Authorization
 
@@ -105,7 +105,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getStudioProjectContextApiProjectsInternalStudioContextRefGet**
-> Object getStudioProjectContextApiProjectsInternalStudioContextRefGet(ref)
+> StudioContextResponse getStudioProjectContextApiProjectsInternalStudioContextRefGet(ref)
 
 Get Studio Project Context
 
@@ -134,7 +134,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**StudioContextResponse**](StudioContextResponse.md)
 
 ### Authorization
 
@@ -148,7 +148,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **projectKeyVersionApiProjectsInternalKeyVersionRefGet**
-> Object projectKeyVersionApiProjectsInternalKeyVersionRefGet(ref)
+> KeyVersionResponse projectKeyVersionApiProjectsInternalKeyVersionRefGet(ref)
 
 Project Key Version
 
@@ -175,7 +175,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**KeyVersionResponse**](KeyVersionResponse.md)
 
 ### Authorization
 
@@ -353,7 +353,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **syncUserIdentityApiProjectsInternalUsersSyncPost**
-> Object syncUserIdentityApiProjectsInternalUsersSyncPost(userSyncPayload)
+> UserSyncResponse syncUserIdentityApiProjectsInternalUsersSyncPost(userSyncPayload)
 
 Sync User Identity
 
@@ -380,7 +380,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**UserSyncResponse**](UserSyncResponse.md)
 
 ### Authorization
 

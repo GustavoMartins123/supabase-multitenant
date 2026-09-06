@@ -16,7 +16,7 @@ void main() {
   // final instance = RotateApiKeySlot();
 
   group('test RotateApiKeySlot', () {
-    // ActivateAt activateAt
+    // DateTime activateAt
     test('to test the property `activateAt`', () async {
       // TODO
     });

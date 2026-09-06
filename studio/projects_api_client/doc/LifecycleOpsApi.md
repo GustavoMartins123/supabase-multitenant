@@ -18,7 +18,7 @@ Method | HTTP request | Description
 
 
 # **getProjectSettingsApiProjectsProjectNameSettingsGet**
-> Object getProjectSettingsApiProjectsProjectNameSettingsGet(projectName)
+> GetProjectSettingsResponse getProjectSettingsApiProjectsProjectNameSettingsGet(projectName)
 
 Get Project Settings
 
@@ -45,7 +45,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**GetProjectSettingsResponse**](GetProjectSettingsResponse.md)
 
 ### Authorization
 
@@ -59,7 +59,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **recreateProjectServicesApiProjectsProjectNameRecreateServicesPost**
-> Object recreateProjectServicesApiProjectsProjectNameRecreateServicesPost(projectName, recreateServices)
+> RecreateProjectServicesResponse recreateProjectServicesApiProjectsProjectNameRecreateServicesPost(projectName, recreateServices)
 
 Recreate Project Services
 
@@ -90,7 +90,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**RecreateProjectServicesResponse**](RecreateProjectServicesResponse.md)
 
 ### Authorization
 
@@ -104,7 +104,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **restartProjectApiProjectsProjectNameRestartPost**
-> Object restartProjectApiProjectsProjectNameRestartPost(projectName)
+> RestartProjectResponse restartProjectApiProjectsProjectNameRestartPost(projectName)
 
 Restart Project
 
@@ -133,7 +133,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**RestartProjectResponse**](RestartProjectResponse.md)
 
 ### Authorization
 
@@ -147,7 +147,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **startProjectApiProjectsProjectNameStartPost**
-> Object startProjectApiProjectsProjectNameStartPost(projectName)
+> StartProjectResponse startProjectApiProjectsProjectNameStartPost(projectName)
 
 Start Project
 
@@ -176,7 +176,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**StartProjectResponse**](StartProjectResponse.md)
 
 ### Authorization
 
@@ -190,7 +190,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **stopProjectApiProjectsProjectNameStopPost**
-> Object stopProjectApiProjectsProjectNameStopPost(projectName)
+> StopProjectResponse stopProjectApiProjectsProjectNameStopPost(projectName)
 
 Stop Project
 
@@ -217,7 +217,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**StopProjectResponse**](StopProjectResponse.md)
 
 ### Authorization
 
@@ -231,7 +231,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **updateProjectSettingsApiProjectsProjectNameSettingsPut**
-> Object updateProjectSettingsApiProjectsProjectNameSettingsPut(projectName, updateSettings)
+> UpdateProjectSettingsResponse updateProjectSettingsApiProjectsProjectNameSettingsPut(projectName, updateSettings)
 
 Update Project Settings
 
@@ -260,7 +260,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**UpdateProjectSettingsResponse**](UpdateProjectSettingsResponse.md)
 
 ### Authorization
 

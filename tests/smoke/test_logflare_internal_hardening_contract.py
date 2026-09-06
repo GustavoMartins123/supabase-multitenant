@@ -98,7 +98,7 @@ class LogflareInternalHardeningContractTest(unittest.TestCase):
             ROOT / "servidor/api-internal/app/routers/internal.py"
         ).read_text(encoding="utf-8")
         start = internal.index('"/api/internal/analytics/{analytics_path:path}"')
-        end = internal.index('@router.post("/api/projects/internal/users/sync")')
+        end = internal.index('@router.post("/api/projects/internal/users/sync"')
         block = internal[start:end]
 
         self.assertIn("_require_studio_nginx(request)", block)

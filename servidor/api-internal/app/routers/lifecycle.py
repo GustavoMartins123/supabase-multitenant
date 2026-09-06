@@ -1,6 +1,8 @@
 """Leitura de estado e logs do ciclo de vida dos projetos."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, ConfigDict
+from typing import Any
 
 from app.control_plane_service import audit_studio_action
 from app.database import get_pool
@@ -22,6 +24,34 @@ from app.validation import validate_project_id, validate_service_name
 
 
 router = APIRouter(tags=["lifecycle"])
+
+
+class ContainerInfoItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    status: str
+    image: str
+    created: str
+    ports: str
+
+
+class ProjectStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    status: str
+    containers: list[ContainerInfoItem] | None = None
+    running: int
+    total: int
+    agent_offline: bool | None = None
+
+
+class ContainerLogsResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    container: str
+    logs: str
+    status: str
 
 
 async def get_project_status(project_name: str) -> dict:
@@ -72,7 +102,7 @@ async def get_project_status(project_name: str) -> dict:
     }
 
 
-@router.get("/api/projects/{project_name}/status")
+@router.get("/api/projects/{project_name}/status", response_model=ProjectStatusResponse)
 async def get_project_docker_status(
     project_name: str,
     request: Request,
@@ -103,7 +133,7 @@ async def get_project_docker_status(
 
 MAX_LOG_LINES = 1000
 
-@router.get("/api/projects/{project_name}/logs/{service}")
+@router.get("/api/projects/{project_name}/logs/{service}", response_model=ContainerLogsResponse)
 async def get_container_logs(
     project_name: str,
     service: str,

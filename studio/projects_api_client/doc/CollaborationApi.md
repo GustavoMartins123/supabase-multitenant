@@ -21,7 +21,7 @@ Method | HTTP request | Description
 
 
 # **assignProjectTagApiProjectsProjectNameTagsPost**
-> Object assignProjectTagApiProjectsProjectNameTagsPost(projectName, projectTagAssign)
+> AssignProjectTagResponse assignProjectTagApiProjectsProjectNameTagsPost(projectName, projectTagAssign)
 
 Assign Project Tag
 
@@ -50,7 +50,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**AssignProjectTagResponse**](AssignProjectTagResponse.md)
 
 ### Authorization
 
@@ -64,7 +64,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **createProjectHintApiProjectsProjectNameHintsPost**
-> Object createProjectHintApiProjectsProjectNameHintsPost(projectName, projectHintCreate)
+> CreateProjectHintResponse createProjectHintApiProjectsProjectNameHintsPost(projectName, projectHintCreate)
 
 Create Project Hint
 
@@ -93,7 +93,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**CreateProjectHintResponse**](CreateProjectHintResponse.md)
 
 ### Authorization
 
@@ -107,7 +107,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **createProjectNoteApiProjectsProjectNameNotesPost**
-> Object createProjectNoteApiProjectsProjectNameNotesPost(projectName, projectNoteCreate)
+> CreateProjectNoteResponse createProjectNoteApiProjectsProjectNameNotesPost(projectName, projectNoteCreate)
 
 Create Project Note
 
@@ -136,7 +136,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**CreateProjectNoteResponse**](CreateProjectNoteResponse.md)
 
 ### Authorization
 
@@ -150,7 +150,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **createProjectThreadMessageApiProjectsProjectNameThreadMessagesPost**
-> Object createProjectThreadMessageApiProjectsProjectNameThreadMessagesPost(projectName, projectThreadMessageCreate)
+> CreateThreadMessageResponse createProjectThreadMessageApiProjectsProjectNameThreadMessagesPost(projectName, projectThreadMessageCreate)
 
 Create Project Thread Message
 
@@ -179,7 +179,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**CreateThreadMessageResponse**](CreateThreadMessageResponse.md)
 
 ### Authorization
 
@@ -193,7 +193,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **deleteProjectNoteApiProjectsProjectNameNotesNoteIdDelete**
-> Object deleteProjectNoteApiProjectsProjectNameNotesNoteIdDelete(projectName, noteId)
+> DeleteProjectNoteResponse deleteProjectNoteApiProjectsProjectNameNotesNoteIdDelete(projectName, noteId)
 
 Delete Project Note
 
@@ -222,7 +222,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**DeleteProjectNoteResponse**](DeleteProjectNoteResponse.md)
 
 ### Authorization
 
@@ -236,7 +236,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getProjectCollaborationApiProjectsProjectNameCollaborationGet**
-> Object getProjectCollaborationApiProjectsProjectNameCollaborationGet(projectName)
+> GetProjectCollaborationResponse getProjectCollaborationApiProjectsProjectNameCollaborationGet(projectName)
 
 Get Project Collaboration
 
@@ -263,7 +263,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**GetProjectCollaborationResponse**](GetProjectCollaborationResponse.md)
 
 ### Authorization
 
@@ -277,7 +277,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **unassignProjectTagApiProjectsProjectNameTagsTagIdDelete**
-> Object unassignProjectTagApiProjectsProjectNameTagsTagIdDelete(projectName, tagId)
+> UnassignProjectTagResponse unassignProjectTagApiProjectsProjectNameTagsTagIdDelete(projectName, tagId)
 
 Unassign Project Tag
 
@@ -306,7 +306,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**UnassignProjectTagResponse**](UnassignProjectTagResponse.md)
 
 ### Authorization
 
@@ -320,7 +320,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **updateProjectHintStatusApiProjectsProjectNameHintsHintIdPut**
-> Object updateProjectHintStatusApiProjectsProjectNameHintsHintIdPut(projectName, hintId, projectHintStatusUpdate)
+> UpdateProjectHintResponse updateProjectHintStatusApiProjectsProjectNameHintsHintIdPut(projectName, hintId, projectHintStatusUpdate)
 
 Update Project Hint Status
 
@@ -351,7 +351,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**UpdateProjectHintResponse**](UpdateProjectHintResponse.md)
 
 ### Authorization
 
@@ -365,7 +365,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **updateProjectNotificationReadStateApiProjectsProjectNameNotificationsNotificationIdPatch**
-> Object updateProjectNotificationReadStateApiProjectsProjectNameNotificationsNotificationIdPatch(projectName, notificationId, projectNotificationRead)
+> UpdateNotificationReadResponse updateProjectNotificationReadStateApiProjectsProjectNameNotificationsNotificationIdPatch(projectName, notificationId, projectNotificationRead)
 
 Update Project Notification Read State
 
@@ -396,7 +396,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**UpdateNotificationReadResponse**](UpdateNotificationReadResponse.md)
 
 ### Authorization
 

@@ -58,7 +58,7 @@ class ProjectKeysApi {
   /// Parameters:
   ///
   /// * [String] projectName (required):
-  Future<Object?> rotateProjectKeyApiProjectsProjectNameRotateKeyPost(String projectName,) async {
+  Future<RotateProjectKeyResponse?> rotateProjectKeyApiProjectsProjectNameRotateKeyPost(String projectName,) async {
     final response = await rotateProjectKeyApiProjectsProjectNameRotateKeyPostWithHttpInfo(projectName,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -67,7 +67,7 @@ class ProjectKeysApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'RotateProjectKeyResponse',) as RotateProjectKeyResponse;
     
     }
     return null;
@@ -115,7 +115,7 @@ class ProjectKeysApi {
   /// * [String] projectName (required):
   ///
   /// * [AutomaticKeyRotationUpdate] automaticKeyRotationUpdate (required):
-  Future<Object?> updateAutomaticKeyRotationApiProjectsProjectNameAutomaticKeyRotationPut(String projectName, AutomaticKeyRotationUpdate automaticKeyRotationUpdate,) async {
+  Future<AutomaticKeyRotationResponse?> updateAutomaticKeyRotationApiProjectsProjectNameAutomaticKeyRotationPut(String projectName, AutomaticKeyRotationUpdate automaticKeyRotationUpdate,) async {
     final response = await updateAutomaticKeyRotationApiProjectsProjectNameAutomaticKeyRotationPutWithHttpInfo(projectName, automaticKeyRotationUpdate,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -124,7 +124,7 @@ class ProjectKeysApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AutomaticKeyRotationResponse',) as AutomaticKeyRotationResponse;
     
     }
     return null;

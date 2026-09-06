@@ -58,7 +58,7 @@ class ProjectInsightsApi {
   /// * [String] ref (required):
   ///
   /// * [Map<String, Object>] requestBody (required):
-  Future<Object?> executeProjectFunctionApiProjectsRefExecuteFunctionPost(String ref, Map<String, Object> requestBody,) async {
+  Future<List<Map<String, Object>>?> executeProjectFunctionApiProjectsRefExecuteFunctionPost(String ref, Map<String, Object> requestBody,) async {
     final response = await executeProjectFunctionApiProjectsRefExecuteFunctionPostWithHttpInfo(ref, requestBody,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -67,8 +67,11 @@ class ProjectInsightsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
-    
+      final responseBody = await _decodeBodyBytes(response);
+      return (await apiClient.deserializeAsync(responseBody, 'List<Map<String, Object>>') as List)
+        .cast<Map<String, Object>>()
+        .toList(growable: false);
+
     }
     return null;
   }
@@ -111,7 +114,7 @@ class ProjectInsightsApi {
   /// Parameters:
   ///
   /// * [String] ref (required):
-  Future<Object?> getProjectAiFunctionsApiProjectsRefFunctionsGet(String ref,) async {
+  Future<List<ProjectAIFunctionItem>?> getProjectAiFunctionsApiProjectsRefFunctionsGet(String ref,) async {
     final response = await getProjectAiFunctionsApiProjectsRefFunctionsGetWithHttpInfo(ref,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -120,8 +123,11 @@ class ProjectInsightsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
-    
+      final responseBody = await _decodeBodyBytes(response);
+      return (await apiClient.deserializeAsync(responseBody, 'List<ProjectAIFunctionItem>') as List)
+        .cast<ProjectAIFunctionItem>()
+        .toList(growable: false);
+
     }
     return null;
   }
@@ -168,7 +174,7 @@ class ProjectInsightsApi {
   /// Parameters:
   ///
   /// * [String] projectName (required):
-  Future<Object?> getProjectS3VectorKeysApiProjectsProjectNameStorageS3KeysGet(String projectName,) async {
+  Future<ProjectS3VectorKeysResponse?> getProjectS3VectorKeysApiProjectsProjectNameStorageS3KeysGet(String projectName,) async {
     final response = await getProjectS3VectorKeysApiProjectsProjectNameStorageS3KeysGetWithHttpInfo(projectName,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -177,7 +183,7 @@ class ProjectInsightsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'ProjectS3VectorKeysResponse',) as ProjectS3VectorKeysResponse;
     
     }
     return null;
@@ -243,7 +249,7 @@ class ProjectInsightsApi {
   /// * [DateTime] start:
   ///
   /// * [DateTime] end:
-  Future<Object?> getProjectUserTelemetryApiProjectsProjectNameTelemetryUsersGet(String projectName, { String? period, DateTime? start, DateTime? end, }) async {
+  Future<ProjectUserTelemetryResponse?> getProjectUserTelemetryApiProjectsProjectNameTelemetryUsersGet(String projectName, { String? period, DateTime? start, DateTime? end, }) async {
     final response = await getProjectUserTelemetryApiProjectsProjectNameTelemetryUsersGetWithHttpInfo(projectName,  period: period, start: start, end: end, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -252,7 +258,7 @@ class ProjectInsightsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'ProjectUserTelemetryResponse',) as ProjectUserTelemetryResponse;
     
     }
     return null;
@@ -295,7 +301,7 @@ class ProjectInsightsApi {
   /// Parameters:
   ///
   /// * [Map<String, String>] requestBody (required):
-  Future<Object?> getProjectsForUserApiAdminProjectsInfoPost(Map<String, String> requestBody,) async {
+  Future<ProjectsInfoResponse?> getProjectsForUserApiAdminProjectsInfoPost(Map<String, String> requestBody,) async {
     final response = await getProjectsForUserApiAdminProjectsInfoPostWithHttpInfo(requestBody,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -304,7 +310,7 @@ class ProjectInsightsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'ProjectsInfoResponse',) as ProjectsInfoResponse;
     
     }
     return null;
@@ -352,7 +358,7 @@ class ProjectInsightsApi {
   /// Parameters:
   ///
   /// * [String] name (required):
-  Future<Object?> listAllUsersForAdminApiAdminProjectsNameAllUsersGet(String name,) async {
+  Future<AllUsersResponse?> listAllUsersForAdminApiAdminProjectsNameAllUsersGet(String name,) async {
     final response = await listAllUsersForAdminApiAdminProjectsNameAllUsersGetWithHttpInfo(name,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -361,7 +367,7 @@ class ProjectInsightsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AllUsersResponse',) as AllUsersResponse;
     
     }
     return null;
@@ -885,7 +891,7 @@ class ProjectInsightsApi {
   /// * [String] projectName (required):
   ///
   /// * [TransferBody] transferBody (required):
-  Future<Object?> transferProjectApiProjectsProjectNameTransferPost(String projectName, TransferBody transferBody,) async {
+  Future<TransferResponse?> transferProjectApiProjectsProjectNameTransferPost(String projectName, TransferBody transferBody,) async {
     final response = await transferProjectApiProjectsProjectNameTransferPostWithHttpInfo(projectName, transferBody,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -894,7 +900,7 @@ class ProjectInsightsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'TransferResponse',) as TransferResponse;
     
     }
     return null;

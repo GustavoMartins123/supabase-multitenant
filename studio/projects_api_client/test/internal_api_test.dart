@@ -19,7 +19,7 @@ void main() {
   group('tests for InternalApi', () {
     // Enc Key
     //
-    //Future<Object> encKeyApiProjectsInternalEncKeyRefGet(String ref) async
+    //Future<EncKeyResponse> encKeyApiProjectsInternalEncKeyRefGet(String ref) async
     test('test encKeyApiProjectsInternalEncKeyRefGet', () async {
       // TODO
     });
@@ -28,7 +28,7 @@ void main() {
     //
     // Resolve o slug mutável para o UUID estável usado apenas por content.
     //
-    //Future<Object> getContentProjectIdentityApiProjectsInternalContentIdentityProjectNameGet(String projectName) async
+    //Future<ContentIdentityResponse> getContentProjectIdentityApiProjectsInternalContentIdentityProjectNameGet(String projectName) async
     test('test getContentProjectIdentityApiProjectsInternalContentIdentityProjectNameGet', () async {
       // TODO
     });
@@ -37,14 +37,14 @@ void main() {
     //
     // Resolve and authorize the project carried by the Studio URL.
     //
-    //Future<Object> getStudioProjectContextApiProjectsInternalStudioContextRefGet(String ref) async
+    //Future<StudioContextResponse> getStudioProjectContextApiProjectsInternalStudioContextRefGet(String ref) async
     test('test getStudioProjectContextApiProjectsInternalStudioContextRefGet', () async {
       // TODO
     });
 
     // Project Key Version
     //
-    //Future<Object> projectKeyVersionApiProjectsInternalKeyVersionRefGet(String ref) async
+    //Future<KeyVersionResponse> projectKeyVersionApiProjectsInternalKeyVersionRefGet(String ref) async
     test('test projectKeyVersionApiProjectsInternalKeyVersionRefGet', () async {
       // TODO
     });
@@ -79,7 +79,7 @@ void main() {
 
     // Sync User Identity
     //
-    //Future<Object> syncUserIdentityApiProjectsInternalUsersSyncPost(UserSyncPayload userSyncPayload) async
+    //Future<UserSyncResponse> syncUserIdentityApiProjectsInternalUsersSyncPost(UserSyncPayload userSyncPayload) async
     test('test syncUserIdentityApiProjectsInternalUsersSyncPost', () async {
       // TODO
     });

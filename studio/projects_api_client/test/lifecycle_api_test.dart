@@ -19,14 +19,14 @@ void main() {
   group('tests for LifecycleApi', () {
     // Get Container Logs
     //
-    //Future<Object> getContainerLogsApiProjectsProjectNameLogsServiceGet(String projectName, String service, { int lines }) async
+    //Future<ContainerLogsResponse> getContainerLogsApiProjectsProjectNameLogsServiceGet(String projectName, String service, { int lines }) async
     test('test getContainerLogsApiProjectsProjectNameLogsServiceGet', () async {
       // TODO
     });
 
     // Get Project Docker Status
     //
-    //Future<Object> getProjectDockerStatusApiProjectsProjectNameStatusGet(String projectName) async
+    //Future<ProjectStatusResponse> getProjectDockerStatusApiProjectsProjectNameStatusGet(String projectName) async
     test('test getProjectDockerStatusApiProjectsProjectNameStatusGet', () async {
       // TODO
     });

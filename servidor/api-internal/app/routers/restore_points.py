@@ -4,6 +4,7 @@ import datetime as dt
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict
 from typing import Any
 
 from app.control_plane_service import audit_studio_action
@@ -40,6 +41,125 @@ from app.schemas import RestorePointCreate
 from app.validation import parse_uuid_value, validate_project_id
 
 router = APIRouter(tags=["restore-points"])
+
+
+class RestorePointItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    title: str
+    description: str | None
+    status: str
+    is_automatic: bool
+    job_id: str | None
+    created_by: str | None
+    created_by_name: str
+    project_ref_at_creation: str
+    size_bytes: int | None
+    last_restored_at: str | None
+    restore_count: int
+    error: str | None
+    created_at: str | None
+    completed_at: str | None
+
+
+class RestorePointsPermissions(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    can_create: bool
+    can_restore: bool
+    can_delete: bool
+
+
+class ListRestorePointsResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    project: str
+    limit: int
+    permissions: RestorePointsPermissions
+    points: list[RestorePointItem]
+
+
+class CreateRestorePointResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    job_id: str
+    project: str
+    project_uuid: str | None
+    tenant_uuid: str | None
+    created_by: str | None
+    action: str
+    status: str
+    message: str | None
+    progress: int | None
+    current_step: str | None
+    total_steps: int | None
+    started_at: str | None
+    finished_at: str | None
+    error_code: str | None
+    is_idempotent: bool
+    retryable: bool
+    retry_of: str | None
+    attempt: int
+    created_at: str | None
+    updated_at: str | None
+    queue_position: int
+    restore_point_id: str
+
+
+class RestoreRestorePointResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    job_id: str
+    project: str
+    project_uuid: str | None
+    tenant_uuid: str | None
+    created_by: str | None
+    action: str
+    status: str
+    message: str | None
+    progress: int | None
+    current_step: str | None
+    total_steps: int | None
+    started_at: str | None
+    finished_at: str | None
+    error_code: str | None
+    is_idempotent: bool
+    retryable: bool
+    retry_of: str | None
+    attempt: int
+    created_at: str | None
+    updated_at: str | None
+    queue_position: int
+    restore_point_id: str
+    safety_point_id: str
+
+
+class DeleteRestorePointResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    job_id: str
+    project: str
+    project_uuid: str | None
+    tenant_uuid: str | None
+    created_by: str | None
+    action: str
+    status: str
+    message: str | None
+    progress: int | None
+    current_step: str | None
+    total_steps: int | None
+    started_at: str | None
+    finished_at: str | None
+    error_code: str | None
+    is_idempotent: bool
+    retryable: bool
+    retry_of: str | None
+    attempt: int
+    created_at: str | None
+    updated_at: str | None
+    queue_position: int
+    restore_point_id: str
 
 
 def _serialize_restore_point(row: asyncpg.Record) -> dict[str, Any]:
@@ -98,7 +218,7 @@ async def _count_active_restore_points(
     )
 
 
-@router.get("/api/projects/{project_name}/restore-points")
+@router.get("/api/projects/{project_name}/restore-points", response_model=ListRestorePointsResponse)
 async def list_project_restore_points(
     project_name: str,
     request: Request,
@@ -146,7 +266,7 @@ async def list_project_restore_points(
     }
 
 
-@router.post("/api/projects/{project_name}/restore-points", status_code=202)
+@router.post("/api/projects/{project_name}/restore-points", status_code=202, response_model=CreateRestorePointResponse)
 async def create_project_restore_point(
     project_name: str,
     body: RestorePointCreate,
@@ -245,6 +365,7 @@ async def create_project_restore_point(
 @router.post(
     "/api/projects/{project_name}/restore-points/{point_id}/restore",
     status_code=202,
+    response_model=RestoreRestorePointResponse,
 )
 async def restore_project_restore_point(
     project_name: str,
@@ -370,6 +491,7 @@ async def restore_project_restore_point(
 @router.delete(
     "/api/projects/{project_name}/restore-points/{point_id}",
     status_code=202,
+    response_model=DeleteRestorePointResponse,
 )
 async def delete_project_restore_point(
     project_name: str,

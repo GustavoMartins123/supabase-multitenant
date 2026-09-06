@@ -58,7 +58,7 @@ class ProjectRenameApi {
   /// Parameters:
   ///
   /// * [String] projectName (required):
-  Future<Object?> getProjectConfigTokenApiProjectsProjectNameConfigTokenGet(String projectName,) async {
+  Future<ProjectConfigTokenResponse?> getProjectConfigTokenApiProjectsProjectNameConfigTokenGet(String projectName,) async {
     final response = await getProjectConfigTokenApiProjectsProjectNameConfigTokenGetWithHttpInfo(projectName,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -67,7 +67,7 @@ class ProjectRenameApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'ProjectConfigTokenResponse',) as ProjectConfigTokenResponse;
     
     }
     return null;
@@ -115,7 +115,7 @@ class ProjectRenameApi {
   /// Parameters:
   ///
   /// * [String] projectName (required):
-  Future<Object?> getProjectQueueStatusApiProjectsProjectNameQueueStatusGet(String projectName,) async {
+  Future<ProjectQueueStatusResponse?> getProjectQueueStatusApiProjectsProjectNameQueueStatusGet(String projectName,) async {
     final response = await getProjectQueueStatusApiProjectsProjectNameQueueStatusGetWithHttpInfo(projectName,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -124,7 +124,7 @@ class ProjectRenameApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'ProjectQueueStatusResponse',) as ProjectQueueStatusResponse;
     
     }
     return null;
@@ -180,7 +180,7 @@ class ProjectRenameApi {
   /// * [String] projectName (required):
   ///
   /// * [int] limit:
-  Future<Object?> getProjectRenameHistoryApiProjectsProjectNameRenameHistoryGet(String projectName, { int? limit, }) async {
+  Future<ProjectRenameHistoryResponse?> getProjectRenameHistoryApiProjectsProjectNameRenameHistoryGet(String projectName, { int? limit, }) async {
     final response = await getProjectRenameHistoryApiProjectsProjectNameRenameHistoryGetWithHttpInfo(projectName,  limit: limit, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -189,7 +189,7 @@ class ProjectRenameApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'ProjectRenameHistoryResponse',) as ProjectRenameHistoryResponse;
     
     }
     return null;
@@ -241,7 +241,7 @@ class ProjectRenameApi {
   /// * [String] projectName (required):
   ///
   /// * [ProjectRenameRequest] projectRenameRequest (required):
-  Future<Object?> renameProjectApiProjectsProjectNameRenamePost(String projectName, ProjectRenameRequest projectRenameRequest,) async {
+  Future<RenameProjectResponse?> renameProjectApiProjectsProjectNameRenamePost(String projectName, ProjectRenameRequest projectRenameRequest,) async {
     final response = await renameProjectApiProjectsProjectNameRenamePostWithHttpInfo(projectName, projectRenameRequest,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -250,7 +250,7 @@ class ProjectRenameApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'RenameProjectResponse',) as RenameProjectResponse;
     
     }
     return null;
@@ -302,7 +302,7 @@ class ProjectRenameApi {
   /// * [String] projectName (required):
   ///
   /// * [ProjectDisplayNameUpdate] projectDisplayNameUpdate (required):
-  Future<Object?> updateProjectDisplayNameApiProjectsProjectNameDisplayNamePatch(String projectName, ProjectDisplayNameUpdate projectDisplayNameUpdate,) async {
+  Future<UpdateDisplayNameResponse?> updateProjectDisplayNameApiProjectsProjectNameDisplayNamePatch(String projectName, ProjectDisplayNameUpdate projectDisplayNameUpdate,) async {
     final response = await updateProjectDisplayNameApiProjectsProjectNameDisplayNamePatchWithHttpInfo(projectName, projectDisplayNameUpdate,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -311,7 +311,7 @@ class ProjectRenameApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'UpdateDisplayNameResponse',) as UpdateDisplayNameResponse;
     
     }
     return null;

@@ -1,8 +1,10 @@
 """Notas, hints, threads, tags e notificações de colaboração."""
 
 import re
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, ConfigDict
 
 from app.control_plane_service import audit_studio_action, create_studio_notification
 from app.database import get_pool
@@ -27,7 +29,146 @@ from app.validation import parse_uuid_value, validate_project_id
 router = APIRouter(tags=["collaboration"])
 
 
-@router.get("/api/projects/{project_name}/collaboration")
+class CollaborationTagItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str
+    name: str
+    color: str
+    category: str
+    is_system: bool
+    assigned: bool
+
+
+class CollaborationMemberItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str
+    display_name: str
+    username: str
+    role: str
+
+
+class CollaborationNoteItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str
+    visibility: str
+    body: str
+    is_encrypted: bool
+    created_at: str
+    updated_at: str
+    author_user_id: str | None
+    author_name: str
+
+
+class CollaborationHintItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str
+    body: str
+    status: str
+    created_at: str
+    updated_at: str
+    resolved_at: str | None
+    author_user_id: str | None
+    author_name: str
+    target_user_id: str | None
+    target_name: str
+    resolved_by_name: str | None
+    can_update: bool
+
+
+class CollaborationThreadItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str
+    body: str
+    created_at: str
+    updated_at: str
+    author_user_id: str | None
+    author_name: str
+
+
+class CollaborationNotificationItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str
+    kind: str
+    target_type: str
+    target_id: str | None
+    payload: dict[str, Any]
+    actor_name: str
+    read_at: str | None
+    created_at: str
+
+
+class GetProjectCollaborationResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    project: str
+    available_tags: list[CollaborationTagItem]
+    assigned_tags: list[CollaborationTagItem]
+    members: list[CollaborationMemberItem]
+    notes: list[CollaborationNoteItem]
+    hints: list[CollaborationHintItem]
+    thread_messages: list[CollaborationThreadItem]
+    notifications: list[CollaborationNotificationItem]
+
+
+class CreateProjectNoteResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str
+    visibility: str
+    body: str
+    is_encrypted: bool
+    created_at: str
+    updated_at: str
+    author_user_id: str
+    author_name: str
+
+
+class DeleteProjectNoteResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    status: str
+
+
+class CreateProjectHintResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str
+    status: str
+    created_at: str
+    updated_at: str
+
+
+class UpdateProjectHintResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    status: str
+
+
+class CreateThreadMessageResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str
+    created_at: str
+    updated_at: str
+
+
+class UpdateNotificationReadResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str
+    read: bool
+    read_at: str | None
+
+
+class AssignProjectTagResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str
+    name: str
+    color: str
+    category: str
+    is_system: bool
+    assigned: bool
+
+
+class UnassignProjectTagResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    status: str
+
+
+@router.get("/api/projects/{project_name}/collaboration", response_model=GetProjectCollaborationResponse)
 async def get_project_collaboration(
     project_name: str,
     request: Request,
@@ -265,7 +406,7 @@ async def get_project_collaboration(
     }
 
 
-@router.post("/api/projects/{project_name}/notes", status_code=201)
+@router.post("/api/projects/{project_name}/notes", status_code=201, response_model=CreateProjectNoteResponse)
 async def create_project_note(
     project_name: str,
     body: ProjectNoteCreate,
@@ -328,7 +469,7 @@ async def create_project_note(
     }
 
 
-@router.delete("/api/projects/{project_name}/notes/{note_id}")
+@router.delete("/api/projects/{project_name}/notes/{note_id}", response_model=DeleteProjectNoteResponse)
 async def delete_project_note(
     project_name: str,
     note_id: str,
@@ -397,7 +538,7 @@ async def delete_project_note(
     return {"status": "ok"}
 
 
-@router.post("/api/projects/{project_name}/hints", status_code=201)
+@router.post("/api/projects/{project_name}/hints", status_code=201, response_model=CreateProjectHintResponse)
 async def create_project_hint(
     project_name: str,
     body: ProjectHintCreate,
@@ -474,7 +615,7 @@ async def create_project_hint(
     }
 
 
-@router.put("/api/projects/{project_name}/hints/{hint_id}")
+@router.put("/api/projects/{project_name}/hints/{hint_id}", response_model=UpdateProjectHintResponse)
 async def update_project_hint_status(
     project_name: str,
     hint_id: str,
@@ -574,7 +715,7 @@ async def update_project_hint_status(
     return {"status": status}
 
 
-@router.post("/api/projects/{project_name}/thread/messages", status_code=201)
+@router.post("/api/projects/{project_name}/thread/messages", status_code=201, response_model=CreateThreadMessageResponse)
 async def create_project_thread_message(
     project_name: str,
     body: ProjectThreadMessageCreate,
@@ -650,7 +791,7 @@ async def create_project_thread_message(
     }
 
 
-@router.patch("/api/projects/{project_name}/notifications/{notification_id}")
+@router.patch("/api/projects/{project_name}/notifications/{notification_id}", response_model=UpdateNotificationReadResponse)
 async def update_project_notification_read_state(
     project_name: str,
     notification_id: str,
@@ -716,7 +857,7 @@ async def update_project_notification_read_state(
     }
 
 
-@router.post("/api/projects/{project_name}/tags", status_code=201)
+@router.post("/api/projects/{project_name}/tags", status_code=201, response_model=AssignProjectTagResponse)
 async def assign_project_tag(
     project_name: str,
     body: ProjectTagAssign,
@@ -808,7 +949,7 @@ async def assign_project_tag(
     }
 
 
-@router.delete("/api/projects/{project_name}/tags/{tag_id}")
+@router.delete("/api/projects/{project_name}/tags/{tag_id}", response_model=UnassignProjectTagResponse)
 async def unassign_project_tag(
     project_name: str,
     tag_id: str,

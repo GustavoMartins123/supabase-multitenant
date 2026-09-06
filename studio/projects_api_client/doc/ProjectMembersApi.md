@@ -15,7 +15,7 @@ Method | HTTP request | Description
 
 
 # **addMemberApiProjectsProjectNameMembersPost**
-> Object addMemberApiProjectsProjectNameMembersPost(projectName, addMember)
+> AddMemberResponse addMemberApiProjectsProjectNameMembersPost(projectName, addMember)
 
 Add Member
 
@@ -44,7 +44,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**AddMemberResponse**](AddMemberResponse.md)
 
 ### Authorization
 
@@ -58,7 +58,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **listMembersByRefApiProjectsNameMembersGet**
-> Object listMembersByRefApiProjectsNameMembersGet(name)
+> List<MemberItem> listMembersByRefApiProjectsNameMembersGet(name)
 
 List Members By Ref
 
@@ -85,7 +85,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Object**](Object.md)
+[**List<MemberItem>**](MemberItem.md)
 
 ### Authorization
 
@@ -99,7 +99,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **removeMemberByRefApiProjectsNameMembersMemberIdDelete**
-> Map<String, Object> removeMemberByRefApiProjectsNameMembersMemberIdDelete(name, memberId)
+> RemoveMemberResponse removeMemberByRefApiProjectsNameMembersMemberIdDelete(name, memberId)
 
 Remove Member By Ref
 
@@ -128,7 +128,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**Map<String, Object>**](Object.md)
+[**RemoveMemberResponse**](RemoveMemberResponse.md)
 
 ### Authorization
 

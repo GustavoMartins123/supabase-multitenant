@@ -1,5 +1,8 @@
 import uuid
+from typing import Any
+
 import asyncpg
+from pydantic import BaseModel, ConfigDict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -39,11 +42,118 @@ from app.project_backgrounds import (
 router = APIRouter(tags=["project-rename"])
 
 
+class RenameProjectResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    job_id: str
+    project: str
+    project_uuid: str | None
+    tenant_uuid: str | None
+    created_by: str | None
+    action: str
+    status: str
+    message: str | None
+    progress: int | None
+    current_step: str | None
+    total_steps: int | None
+    started_at: str | None
+    finished_at: str | None
+    error_code: str | None
+    is_idempotent: bool
+    retryable: bool
+    retry_of: str | None
+    attempt: int
+    created_at: str | None
+    updated_at: str | None
+    queue_position: int
+    old_name: str
+    new_name: str
+
+
+class UpdateDisplayNameResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    project: str
+    display_name: str
+    status: str
+
+
+class ProjectConfigTokenResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    project: str
+    config_token: str
+
+
+class ProjectQueueInFlightJob(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    job_id: str
+    status: str
+    message: str | None
+    action: str
+    progress: int | None
+    current_step: str | None
+    total_steps: int | None
+    updated_at: str
+
+
+class ProjectQueueStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    project: str
+    is_busy: bool
+    current_job_id: str | None
+    queued: int
+    in_flight: list[ProjectQueueInFlightJob]
+    message: str
+
+
+class RenameHistoryEvent(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: int
+    action: str
+    actor_user_id: str | None
+    actor_name: str
+    target_id: str | None
+    old_value: dict[str, Any] | None
+    new_value: dict[str, Any] | None
+    created_at: str
+
+
+class RenameHistoryEntry(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: int
+    job_id: str
+    actor_user_id: str | None
+    actor_name: str
+    old_name: str
+    new_name: str
+    old_path: str
+    new_path: str
+    status: str
+    error: str | None
+    created_at: str
+    updated_at: str
+    completed_at: str | None
+
+
+class ProjectRenameHistoryResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    project: str
+    requested_name: str
+    events: list[RenameHistoryEvent]
+    renames: list[RenameHistoryEntry]
+
+
 def _validate_rename_target(raw: str) -> str:
     return validate_project_id(raw)
 
 
-@router.post("/api/projects/{project_name}/rename", status_code=202)
+@router.post("/api/projects/{project_name}/rename", status_code=202, response_model=RenameProjectResponse)
 async def rename_project(
     project_name: str,
     body: ProjectRenameRequest,
@@ -220,7 +330,7 @@ async def rename_project(
     )
 
 
-@router.patch("/api/projects/{project_name}/display-name")
+@router.patch("/api/projects/{project_name}/display-name", response_model=UpdateDisplayNameResponse)
 async def update_project_display_name(
     project_name: str,
     body: ProjectDisplayNameUpdate,
@@ -278,7 +388,7 @@ async def update_project_display_name(
     }
 
 
-@router.get("/api/projects/{project_name}/config-token")
+@router.get("/api/projects/{project_name}/config-token", response_model=ProjectConfigTokenResponse)
 async def get_project_config_token(
     project_name: str,
     request: Request,
@@ -324,7 +434,7 @@ async def get_project_config_token(
     )
 
 
-@router.get("/api/projects/{project_name}/queue-status")
+@router.get("/api/projects/{project_name}/queue-status", response_model=ProjectQueueStatusResponse)
 async def get_project_queue_status(
     project_name: str,
     request: Request,
@@ -399,7 +509,7 @@ async def get_project_queue_status(
     }
 
 
-@router.get("/api/projects/{project_name}/rename-history")
+@router.get("/api/projects/{project_name}/rename-history", response_model=ProjectRenameHistoryResponse)
 async def get_project_rename_history(
     project_name: str,
     request: Request,

@@ -1,5 +1,8 @@
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict
 
 from app.database import get_pool
 from app.dependencies import (
@@ -44,7 +47,124 @@ from app.validation import validate_project_id
 router = APIRouter(tags=["lifecycle-ops"])
 
 
-@router.post("/api/projects/{project_name}/stop")
+class StopProjectResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    job_id: str
+    project: str
+    project_uuid: str | None
+    tenant_uuid: str | None
+    created_by: str | None
+    action: str
+    status: str
+    message: str | None
+    progress: int | None
+    current_step: str | None
+    total_steps: int | None
+    started_at: str | None
+    finished_at: str | None
+    error_code: str | None
+    is_idempotent: bool
+    retryable: bool
+    retry_of: str | None
+    attempt: int
+    created_at: str | None
+    updated_at: str | None
+    queue_position: int
+
+
+class StartProjectResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    job_id: str
+    project: str
+    project_uuid: str | None
+    tenant_uuid: str | None
+    created_by: str | None
+    action: str
+    status: str
+    message: str | None
+    progress: int | None
+    current_step: str | None
+    total_steps: int | None
+    started_at: str | None
+    finished_at: str | None
+    error_code: str | None
+    is_idempotent: bool
+    retryable: bool
+    retry_of: str | None
+    attempt: int
+    created_at: str | None
+    updated_at: str | None
+    queue_position: int
+
+
+class RestartProjectResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    job_id: str
+    project: str
+    project_uuid: str | None
+    tenant_uuid: str | None
+    created_by: str | None
+    action: str
+    status: str
+    message: str | None
+    progress: int | None
+    current_step: str | None
+    total_steps: int | None
+    started_at: str | None
+    finished_at: str | None
+    error_code: str | None
+    is_idempotent: bool
+    retryable: bool
+    retry_of: str | None
+    attempt: int
+    created_at: str | None
+    updated_at: str | None
+    queue_position: int
+
+
+class GetProjectSettingsResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    settings: dict[str, str]
+    pending_affected_services: list[str]
+    storage_limit_token: str | None
+
+
+class UpdateProjectSettingsResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    status: str
+    updated_keys: list[str]
+    affected_services: list[str]
+    file_size_limit: str
+    storage_limit_token: str
+    message: str
+
+
+class RecreateProjectServicesResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    job_id: str
+    project: str
+    project_uuid: str | None
+    tenant_uuid: str | None
+    created_by: str | None
+    action: str
+    status: str
+    message: str | None
+    progress: int | None
+    current_step: str | None
+    total_steps: int | None
+    started_at: str | None
+    finished_at: str | None
+    error_code: str | None
+    is_idempotent: bool
+    retryable: bool
+    retry_of: str | None
+    attempt: int
+    created_at: str | None
+    updated_at: str | None
+    queue_position: int
+
+
+@router.post("/api/projects/{project_name}/stop", response_model=StopProjectResponse)
 async def stop_project(
     project_name: str,
     request: Request,
@@ -93,7 +213,7 @@ async def stop_project(
     )
 
 
-@router.post("/api/projects/{project_name}/start", status_code=202)
+@router.post("/api/projects/{project_name}/start", status_code=202, response_model=StartProjectResponse)
 async def start_project(
     project_name: str,
     request: Request,
@@ -144,7 +264,7 @@ async def start_project(
     )
 
 
-@router.post("/api/projects/{project_name}/restart", status_code=202)
+@router.post("/api/projects/{project_name}/restart", status_code=202, response_model=RestartProjectResponse)
 async def restart_project(
     project_name: str,
     request: Request,
@@ -195,7 +315,7 @@ async def restart_project(
     )
 
 
-@router.get("/api/projects/{project_name}/settings")
+@router.get("/api/projects/{project_name}/settings", response_model=GetProjectSettingsResponse)
 async def get_project_settings(
     project_name: str,
     request: Request,
@@ -222,7 +342,7 @@ async def get_project_settings(
     }
 
 
-@router.put("/api/projects/{project_name}/settings")
+@router.put("/api/projects/{project_name}/settings", response_model=UpdateProjectSettingsResponse)
 async def update_project_settings(
     project_name: str,
     body: UpdateSettings,
@@ -281,7 +401,7 @@ async def update_project_settings(
     }
 
 
-@router.post("/api/projects/{project_name}/recreate-services")
+@router.post("/api/projects/{project_name}/recreate-services", response_model=RecreateProjectServicesResponse)
 async def recreate_project_services(
     project_name: str,
     body: RecreateServices,

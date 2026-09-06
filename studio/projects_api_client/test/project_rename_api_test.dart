@@ -21,7 +21,7 @@ void main() {
     //
     // Entrega o token compartilhado aos membros do projeto e registra a leitura.
     //
-    //Future<Object> getProjectConfigTokenApiProjectsProjectNameConfigTokenGet(String projectName) async
+    //Future<ProjectConfigTokenResponse> getProjectConfigTokenApiProjectsProjectNameConfigTokenGet(String projectName) async
     test('test getProjectConfigTokenApiProjectsProjectNameConfigTokenGet', () async {
       // TODO
     });
@@ -30,7 +30,7 @@ void main() {
     //
     // Retorna o estado atual da fila de ações do projeto.  Inclui o job em execução (se houver), o tamanho da fila, e os jobs pendentes/rodando do banco para fins de UI (polling).
     //
-    //Future<Object> getProjectQueueStatusApiProjectsProjectNameQueueStatusGet(String projectName) async
+    //Future<ProjectQueueStatusResponse> getProjectQueueStatusApiProjectsProjectNameQueueStatusGet(String projectName) async
     test('test getProjectQueueStatusApiProjectsProjectNameQueueStatusGet', () async {
       // TODO
     });
@@ -39,7 +39,7 @@ void main() {
     //
     // Retorna auditoria e historico duravel de nome/path do projeto.
     //
-    //Future<Object> getProjectRenameHistoryApiProjectsProjectNameRenameHistoryGet(String projectName, { int limit }) async
+    //Future<ProjectRenameHistoryResponse> getProjectRenameHistoryApiProjectsProjectNameRenameHistoryGet(String projectName, { int limit }) async
     test('test getProjectRenameHistoryApiProjectsProjectNameRenameHistoryGet', () async {
       // TODO
     });
@@ -48,7 +48,7 @@ void main() {
     //
     // Renomeia o slug/path do projeto (migração completa em background).  O escopo inclui: nome interno na meta DB, banco Postgres, roles por projeto, replication slots do Realtime, tenant Supavisor, diretório físico e templates (nginx, docker-compose, .env).
     //
-    //Future<Object> renameProjectApiProjectsProjectNameRenamePost(String projectName, ProjectRenameRequest projectRenameRequest) async
+    //Future<RenameProjectResponse> renameProjectApiProjectsProjectNameRenamePost(String projectName, ProjectRenameRequest projectRenameRequest) async
     test('test renameProjectApiProjectsProjectNameRenamePost', () async {
       // TODO
     });
@@ -57,7 +57,7 @@ void main() {
     //
     // Atualiza apenas o display_name do projeto (sem migrar infraestrutura).
     //
-    //Future<Object> updateProjectDisplayNameApiProjectsProjectNameDisplayNamePatch(String projectName, ProjectDisplayNameUpdate projectDisplayNameUpdate) async
+    //Future<UpdateDisplayNameResponse> updateProjectDisplayNameApiProjectsProjectNameDisplayNamePatch(String projectName, ProjectDisplayNameUpdate projectDisplayNameUpdate) async
     test('test updateProjectDisplayNameApiProjectsProjectNameDisplayNamePatch', () async {
       // TODO
     });

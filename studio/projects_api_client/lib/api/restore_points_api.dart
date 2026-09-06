@@ -58,7 +58,7 @@ class RestorePointsApi {
   /// * [String] projectName (required):
   ///
   /// * [RestorePointCreate] restorePointCreate (required):
-  Future<Object?> createProjectRestorePointApiProjectsProjectNameRestorePointsPost(String projectName, RestorePointCreate restorePointCreate,) async {
+  Future<CreateRestorePointResponse?> createProjectRestorePointApiProjectsProjectNameRestorePointsPost(String projectName, RestorePointCreate restorePointCreate,) async {
     final response = await createProjectRestorePointApiProjectsProjectNameRestorePointsPostWithHttpInfo(projectName, restorePointCreate,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -67,7 +67,7 @@ class RestorePointsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'CreateRestorePointResponse',) as CreateRestorePointResponse;
     
     }
     return null;
@@ -116,7 +116,7 @@ class RestorePointsApi {
   /// * [String] projectName (required):
   ///
   /// * [String] pointId (required):
-  Future<Object?> deleteProjectRestorePointApiProjectsProjectNameRestorePointsPointIdDelete(String projectName, String pointId,) async {
+  Future<DeleteRestorePointResponse?> deleteProjectRestorePointApiProjectsProjectNameRestorePointsPointIdDelete(String projectName, String pointId,) async {
     final response = await deleteProjectRestorePointApiProjectsProjectNameRestorePointsPointIdDeleteWithHttpInfo(projectName, pointId,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -125,7 +125,7 @@ class RestorePointsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'DeleteRestorePointResponse',) as DeleteRestorePointResponse;
     
     }
     return null;
@@ -169,7 +169,7 @@ class RestorePointsApi {
   /// Parameters:
   ///
   /// * [String] projectName (required):
-  Future<Object?> listProjectRestorePointsApiProjectsProjectNameRestorePointsGet(String projectName,) async {
+  Future<ListRestorePointsResponse?> listProjectRestorePointsApiProjectsProjectNameRestorePointsGet(String projectName,) async {
     final response = await listProjectRestorePointsApiProjectsProjectNameRestorePointsGetWithHttpInfo(projectName,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -178,7 +178,7 @@ class RestorePointsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'ListRestorePointsResponse',) as ListRestorePointsResponse;
     
     }
     return null;
@@ -227,7 +227,7 @@ class RestorePointsApi {
   /// * [String] projectName (required):
   ///
   /// * [String] pointId (required):
-  Future<Object?> restoreProjectRestorePointApiProjectsProjectNameRestorePointsPointIdRestorePost(String projectName, String pointId,) async {
+  Future<RestoreRestorePointResponse?> restoreProjectRestorePointApiProjectsProjectNameRestorePointsPointIdRestorePost(String projectName, String pointId,) async {
     final response = await restoreProjectRestorePointApiProjectsProjectNameRestorePointsPointIdRestorePostWithHttpInfo(projectName, pointId,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -236,7 +236,7 @@ class RestorePointsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'RestoreRestorePointResponse',) as RestoreRestorePointResponse;
     
     }
     return null;

@@ -26,7 +26,7 @@ void main() {
       // TODO
     });
 
-    // List<ValidationErrorLocInner> loc (default value: const [])
+    // List<LocationInner> loc (default value: const [])
     test('to test the property `loc`', () async {
       // TODO
     });

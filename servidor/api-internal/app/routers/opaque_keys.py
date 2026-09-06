@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
-from typing import Literal
+from typing import Any, Literal
 
 import asyncpg
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -59,6 +59,173 @@ NO_STORE_HEADERS = {
 }
 
 
+class MigrationStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    project: str
+    status: str
+    prepared_at: str | None
+    activated_at: str | None
+    cutover_started_at: str | None
+    gateway_ready_at: str | None
+    pending_key_count: int
+    confirmed_pending_key_count: int
+    api_keyset_version: int
+
+
+class SlotKeyItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    token_hint: str
+    status: str
+    currently_accepted: bool
+    created_at: str
+    activate_at: str | None
+    expires_at: str | None
+    activated_at: str | None
+    revoked_at: str | None
+    last_used_at: str | None
+    revealed_at: str | None
+    confirmed_at: str | None
+    replaces_key_id: str | None
+    rotation_trigger: str | None
+
+
+class SlotItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    name: str
+    kind: str
+    role: str
+    allowed_services: list[str]
+    automatic_rotation_enabled: bool
+    rotation_interval_days: int | None
+    automatic_rotation_blocked_at: str | None
+    automatic_rotation_last_error: str | None
+    status: str
+    created_at: str
+    keys: list[SlotKeyItem]
+
+
+class RevealItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    key_id: str
+    slot_id: str
+    slot_name: str
+    kind: str
+    created_at: str
+    key_status: str
+    revealed_at: str | None
+
+
+class MigrationAbortResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    project: str
+    status: str
+    api_keyset_version: int
+
+
+class MigrationPrepareResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    project: str
+    status: str
+    key_ids: list[str]
+    next: str
+
+
+class MigrationCutoverResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    project: str
+    status: str
+    gateway_mode: str
+    api_keyset_version: int
+
+
+class IssuedKeyResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    slot_id: str
+    key_id: str
+    api_key: str
+    token_hint: str
+    kind: str
+    status: str
+    activate_at: str | None
+    expires_at: str | None
+    api_keyset_version: int
+
+
+class SlotListResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    project: str
+    api_keyset_version: int
+    slots: list[SlotItem]
+
+
+class SlotPolicyUpdateResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    slot_id: str
+    api_keyset_version: int
+    updated: bool
+
+
+class SlotActivationResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    slot_id: str
+    key_id: str
+    status: str
+    api_keyset_version: int
+
+
+class SlotConfirmResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    slot_id: str
+    key_id: str
+    installation_confirmed: bool
+    api_keyset_version: int
+
+
+class SlotCancelResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    slot_id: str
+    key_id: str
+    status: str
+    api_keyset_version: int
+
+
+class SlotRevokeResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    slot_id: str
+    status: str
+    api_keyset_version: int
+
+
+class RevealListResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    project: str
+    reveals: list[RevealItem]
+
+
+class RevealClaimResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    key_id: str
+    api_key: str
+
+
 class OpaqueKeyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -90,7 +257,10 @@ def _raise_host_command_failure(
     )
 
 
-@router.get("/{project_name}/opaque-api-keys/migration")
+@router.get(
+    "/{project_name}/opaque-api-keys/migration",
+    response_model=MigrationStatusResponse,
+)
 async def get_opaque_api_key_migration(
     project_name: str,
     request: Request,
@@ -175,7 +345,10 @@ async def get_opaque_api_key_migration(
     }
 
 
-@router.delete("/{project_name}/opaque-api-keys/migration")
+@router.delete(
+    "/{project_name}/opaque-api-keys/migration",
+    response_model=MigrationAbortResponse,
+)
 async def abort_opaque_api_key_migration(
     project_name: str,
     request: Request,
@@ -289,6 +462,7 @@ def _migration_lock_name(project_id: uuid.UUID) -> str:
 @router.post(
     "/{project_name}/opaque-api-keys/migration/prepare",
     status_code=201,
+    response_model=MigrationPrepareResponse,
 )
 async def prepare_opaque_api_key_migration(
     project_name: str,
@@ -398,7 +572,10 @@ async def prepare_opaque_api_key_migration(
             await pool.release(conn)
 
 
-@router.post("/{project_name}/opaque-api-keys/migration/cutover")
+@router.post(
+    "/{project_name}/opaque-api-keys/migration/cutover",
+    response_model=MigrationCutoverResponse,
+)
 async def cutover_opaque_api_key_migration(
     project_name: str,
     request: Request,
@@ -588,7 +765,9 @@ def _issued_response(issued, keyset_version: int, *, status_code: int) -> JSONRe
     )
 
 
-@router.get("/{project_name}/api-key-slots")
+@router.get(
+    "/{project_name}/api-key-slots", response_model=SlotListResponse
+)
 async def get_api_key_slots(
     project_name: str,
     request: Request,
@@ -615,7 +794,11 @@ async def get_api_key_slots(
     }
 
 
-@router.post("/{project_name}/api-key-slots", status_code=201)
+@router.post(
+    "/{project_name}/api-key-slots",
+    status_code=201,
+    response_model=IssuedKeyResponse,
+)
 async def create_api_key_slot(
     project_name: str,
     body: CreateApiKeySlot,
@@ -703,7 +886,10 @@ async def create_api_key_slot(
     return _issued_response(issued, version, status_code=201)
 
 
-@router.post("/{project_name}/api-key-slots/{slot_id}/rotation")
+@router.post(
+    "/{project_name}/api-key-slots/{slot_id}/rotation",
+    response_model=IssuedKeyResponse,
+)
 async def rotate_api_key_slot(
     project_name: str,
     slot_id: uuid.UUID,
@@ -790,7 +976,10 @@ async def rotate_api_key_slot(
     return _issued_response(issued, version, status_code=200)
 
 
-@router.patch("/{project_name}/api-key-slots/{slot_id}")
+@router.patch(
+    "/{project_name}/api-key-slots/{slot_id}",
+    response_model=SlotPolicyUpdateResponse,
+)
 async def update_api_key_slot_policy(
     project_name: str,
     slot_id: uuid.UUID,
@@ -868,7 +1057,10 @@ async def update_api_key_slot_policy(
     }
 
 
-@router.post("/{project_name}/api-key-slots/{slot_id}/activation")
+@router.post(
+    "/{project_name}/api-key-slots/{slot_id}/activation",
+    response_model=SlotActivationResponse,
+)
 async def activate_api_key_slot(
     project_name: str,
     slot_id: uuid.UUID,
@@ -941,7 +1133,10 @@ async def activate_api_key_slot(
     }
 
 
-@router.post("/{project_name}/api-key-slots/{slot_id}/rotation-confirmation")
+@router.post(
+    "/{project_name}/api-key-slots/{slot_id}/rotation-confirmation",
+    response_model=SlotConfirmResponse,
+)
 async def confirm_api_key_slot_installation(
     project_name: str,
     slot_id: uuid.UUID,
@@ -989,7 +1184,10 @@ async def confirm_api_key_slot_installation(
     }
 
 
-@router.delete("/{project_name}/api-key-slots/{slot_id}/rotation")
+@router.delete(
+    "/{project_name}/api-key-slots/{slot_id}/rotation",
+    response_model=SlotCancelResponse,
+)
 async def cancel_api_key_slot_rotation(
     project_name: str,
     slot_id: uuid.UUID,
@@ -1035,7 +1233,10 @@ async def cancel_api_key_slot_rotation(
     }
 
 
-@router.delete("/{project_name}/api-key-slots/{slot_id}")
+@router.delete(
+    "/{project_name}/api-key-slots/{slot_id}",
+    response_model=SlotRevokeResponse,
+)
 async def revoke_api_key_slot(
     project_name: str,
     slot_id: uuid.UUID,
@@ -1075,7 +1276,9 @@ async def revoke_api_key_slot(
     }
 
 
-@router.get("/{project_name}/api-key-reveals")
+@router.get(
+    "/{project_name}/api-key-reveals", response_model=RevealListResponse
+)
 async def get_api_key_reveals(
     project_name: str,
     request: Request,
@@ -1099,7 +1302,10 @@ async def get_api_key_reveals(
     return {"project": project_name, "reveals": visible_reveals}
 
 
-@router.post("/{project_name}/api-key-reveals/{key_id}/claim")
+@router.post(
+    "/{project_name}/api-key-reveals/{key_id}/claim",
+    response_model=RevealClaimResponse,
+)
 async def claim_api_key(
     project_name: str,
     key_id: uuid.UUID,

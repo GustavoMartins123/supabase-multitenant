@@ -1,5 +1,5 @@
 import uuid
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Dict, Any, Literal, Optional
 
 ResourceProfile = Literal["small", "medium", "large", "custom"]
@@ -71,3 +71,10 @@ class RestorePointCreate(BaseModel):
 
 class AutomaticKeyRotationUpdate(BaseModel):
     enabled: bool
+
+
+class ProjectS3VectorKeysResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    accessKey: str
+    secretKey: str

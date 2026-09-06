@@ -19,42 +19,42 @@ void main() {
   group('tests for OpaqueApiKeysApi', () {
     // Abort Opaque Api Key Migration
     //
-    //Future<Object> abortOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationDelete(String projectName) async
+    //Future<MigrationAbortResponse> abortOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationDelete(String projectName) async
     test('test abortOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationDelete', () async {
       // TODO
     });
 
     // Activate Api Key Slot
     //
-    //Future<Object> activateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdActivationPost(String projectName, String slotId, { String xStepUpToken }) async
+    //Future<SlotActivationResponse> activateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdActivationPost(String projectName, String slotId, { String xStepUpToken }) async
     test('test activateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdActivationPost', () async {
       // TODO
     });
 
     // Cancel Api Key Slot Rotation
     //
-    //Future<Object> cancelApiKeySlotRotationApiProjectsProjectNameApiKeySlotsSlotIdRotationDelete(String projectName, String slotId) async
+    //Future<SlotCancelResponse> cancelApiKeySlotRotationApiProjectsProjectNameApiKeySlotsSlotIdRotationDelete(String projectName, String slotId) async
     test('test cancelApiKeySlotRotationApiProjectsProjectNameApiKeySlotsSlotIdRotationDelete', () async {
       // TODO
     });
 
     // Claim Api Key
     //
-    //Future<Object> claimApiKeyApiProjectsProjectNameApiKeyRevealsKeyIdClaimPost(String projectName, String keyId, { String xStepUpToken }) async
+    //Future<RevealClaimResponse> claimApiKeyApiProjectsProjectNameApiKeyRevealsKeyIdClaimPost(String projectName, String keyId, { String xStepUpToken }) async
     test('test claimApiKeyApiProjectsProjectNameApiKeyRevealsKeyIdClaimPost', () async {
       // TODO
     });
 
     // Confirm Api Key Slot Installation
     //
-    //Future<Object> confirmApiKeySlotInstallationApiProjectsProjectNameApiKeySlotsSlotIdRotationConfirmationPost(String projectName, String slotId, ConfirmApiKeyInstallation confirmApiKeyInstallation) async
+    //Future<SlotConfirmResponse> confirmApiKeySlotInstallationApiProjectsProjectNameApiKeySlotsSlotIdRotationConfirmationPost(String projectName, String slotId, ConfirmApiKeyInstallation confirmApiKeyInstallation) async
     test('test confirmApiKeySlotInstallationApiProjectsProjectNameApiKeySlotsSlotIdRotationConfirmationPost', () async {
       // TODO
     });
 
     // Create Api Key Slot
     //
-    //Future<Object> createApiKeySlotApiProjectsProjectNameApiKeySlotsPost(String projectName, CreateApiKeySlot createApiKeySlot, { String xStepUpToken }) async
+    //Future<IssuedKeyResponse> createApiKeySlotApiProjectsProjectNameApiKeySlotsPost(String projectName, CreateApiKeySlot createApiKeySlot, { String xStepUpToken }) async
     test('test createApiKeySlotApiProjectsProjectNameApiKeySlotsPost', () async {
       // TODO
     });
@@ -63,28 +63,28 @@ void main() {
     //
     // Stop legacy ingress, activate confirmed keys, and start opaque-only.
     //
-    //Future<Object> cutoverOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationCutoverPost(String projectName) async
+    //Future<MigrationCutoverResponse> cutoverOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationCutoverPost(String projectName) async
     test('test cutoverOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationCutoverPost', () async {
       // TODO
     });
 
     // Get Api Key Reveals
     //
-    //Future<Object> getApiKeyRevealsApiProjectsProjectNameApiKeyRevealsGet(String projectName) async
+    //Future<RevealListResponse> getApiKeyRevealsApiProjectsProjectNameApiKeyRevealsGet(String projectName) async
     test('test getApiKeyRevealsApiProjectsProjectNameApiKeyRevealsGet', () async {
       // TODO
     });
 
     // Get Api Key Slots
     //
-    //Future<Object> getApiKeySlotsApiProjectsProjectNameApiKeySlotsGet(String projectName) async
+    //Future<SlotListResponse> getApiKeySlotsApiProjectsProjectNameApiKeySlotsGet(String projectName) async
     test('test getApiKeySlotsApiProjectsProjectNameApiKeySlotsGet', () async {
       // TODO
     });
 
     // Get Opaque Api Key Migration
     //
-    //Future<Object> getOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationGet(String projectName) async
+    //Future<MigrationStatusResponse> getOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationGet(String projectName) async
     test('test getOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationGet', () async {
       // TODO
     });
@@ -93,28 +93,28 @@ void main() {
     //
     // Prepare rejected opaque keys without changing the running gateway.
     //
-    //Future<Object> prepareOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationPreparePost(String projectName) async
+    //Future<MigrationPrepareResponse> prepareOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationPreparePost(String projectName) async
     test('test prepareOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationPreparePost', () async {
       // TODO
     });
 
     // Revoke Api Key Slot
     //
-    //Future<Object> revokeApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdDelete(String projectName, String slotId) async
+    //Future<SlotRevokeResponse> revokeApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdDelete(String projectName, String slotId) async
     test('test revokeApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdDelete', () async {
       // TODO
     });
 
     // Rotate Api Key Slot
     //
-    //Future<Object> rotateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdRotationPost(String projectName, String slotId, RotateApiKeySlot rotateApiKeySlot, { String xStepUpToken }) async
+    //Future<IssuedKeyResponse> rotateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdRotationPost(String projectName, String slotId, RotateApiKeySlot rotateApiKeySlot, { String xStepUpToken }) async
     test('test rotateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdRotationPost', () async {
       // TODO
     });
 
     // Update Api Key Slot Policy
     //
-    //Future<Object> updateApiKeySlotPolicyApiProjectsProjectNameApiKeySlotsSlotIdPatch(String projectName, String slotId, UpdateApiKeySlotPolicy updateApiKeySlotPolicy) async
+    //Future<SlotPolicyUpdateResponse> updateApiKeySlotPolicyApiProjectsProjectNameApiKeySlotsSlotIdPatch(String projectName, String slotId, UpdateApiKeySlotPolicy updateApiKeySlotPolicy) async
     test('test updateApiKeySlotPolicyApiProjectsProjectNameApiKeySlotsSlotIdPatch', () async {
       // TODO
     });

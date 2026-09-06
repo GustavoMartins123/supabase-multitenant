@@ -21,14 +21,14 @@ void main() {
     //
     // Lista o historico duravel de jobs visivel para o usuario autenticado.
     //
-    //Future<Object> listJobHistoryApiJobsGet({ String projectUuid, String action, String status, int limit, int offset }) async
+    //Future<JobListResponse> listJobHistoryApiJobsGet({ String projectUuid, String action, String status, int limit, int offset }) async
     test('test listJobHistoryApiJobsGet', () async {
       // TODO
     });
 
     // Project Status
     //
-    //Future<Object> projectStatusApiProjectsStatusJobIdGet(String jobId) async
+    //Future<JobResponse> projectStatusApiProjectsStatusJobIdGet(String jobId) async
     test('test projectStatusApiProjectsStatusJobIdGet', () async {
       // TODO
     });
@@ -37,7 +37,7 @@ void main() {
     //
     // Cria uma nova tentativa apenas para acoes explicitamente idempotentes.
     //
-    //Future<Object> retryProjectJobApiJobsJobIdRetryPost(String jobId) async
+    //Future<JobRetryResponse> retryProjectJobApiJobsJobIdRetryPost(String jobId) async
     test('test retryProjectJobApiJobsJobIdRetryPost', () async {
       // TODO
     });

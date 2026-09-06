@@ -53,7 +53,7 @@ class ProjectsApi {
   /// Parameters:
   ///
   /// * [NewProject] newProject (required):
-  Future<Object?> createProjectApiProjectsPost(NewProject newProject,) async {
+  Future<QueuedJobResponse?> createProjectApiProjectsPost(NewProject newProject,) async {
     final response = await createProjectApiProjectsPostWithHttpInfo(newProject,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -62,7 +62,7 @@ class ProjectsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'QueuedJobResponse',) as QueuedJobResponse;
     
     }
     return null;
@@ -114,7 +114,7 @@ class ProjectsApi {
   /// * [String] projectName (required):
   ///
   /// * [String] xStepUpToken:
-  Future<Object?> deleteProjectApiProjectsProjectNameDelete(String projectName, { String? xStepUpToken, }) async {
+  Future<QueuedJobResponse?> deleteProjectApiProjectsProjectNameDelete(String projectName, { String? xStepUpToken, }) async {
     final response = await deleteProjectApiProjectsProjectNameDeleteWithHttpInfo(projectName,  xStepUpToken: xStepUpToken, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -123,7 +123,7 @@ class ProjectsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'QueuedJobResponse',) as QueuedJobResponse;
     
     }
     return null;
@@ -170,7 +170,7 @@ class ProjectsApi {
   /// Parameters:
   ///
   /// * [DuplicateProject] duplicateProject (required):
-  Future<Object?> duplicateProjectApiProjectsDuplicatePost(DuplicateProject duplicateProject,) async {
+  Future<QueuedJobResponse?> duplicateProjectApiProjectsDuplicatePost(DuplicateProject duplicateProject,) async {
     final response = await duplicateProjectApiProjectsDuplicatePostWithHttpInfo(duplicateProject,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -179,7 +179,7 @@ class ProjectsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'QueuedJobResponse',) as QueuedJobResponse;
     
     }
     return null;
@@ -214,7 +214,7 @@ class ProjectsApi {
   }
 
   /// List Projects
-  Future<Object?> listProjectsApiProjectsGet() async {
+  Future<List<ProjectListItem>?> listProjectsApiProjectsGet() async {
     final response = await listProjectsApiProjectsGetWithHttpInfo();
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -223,8 +223,11 @@ class ProjectsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
-    
+      final responseBody = await _decodeBodyBytes(response);
+      return (await apiClient.deserializeAsync(responseBody, 'List<ProjectListItem>') as List)
+        .cast<ProjectListItem>()
+        .toList(growable: false);
+
     }
     return null;
   }

@@ -296,7 +296,9 @@ class ProjectRepository {
     final resp = await _client.put(
       Uri.parse('/api/projects/$ref/automatic-key-rotation'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'enabled': enabled}),
+      body: jsonEncode(
+        generated.AutomaticKeyRotationUpdate(enabled: enabled).toJson(),
+      ),
     );
     _ensureCommandSucceeded(resp);
     final data = decodeJsonObject(
@@ -350,13 +352,23 @@ class ProjectRepository {
         'Content-Type': 'application/json',
         if (stepUpToken != null) 'X-Step-Up-Token': stepUpToken,
       },
-      body: jsonEncode({
-        'name': name,
-        'kind': kind,
-        'allowed_services': allowedServices,
-        'automatic_rotation_enabled': automaticRotationEnabled,
-        'rotation_interval_days': rotationIntervalDays,
-      }),
+      body: jsonEncode(
+        generated.CreateApiKeySlot(
+          name: name,
+          kind: switch (kind) {
+            'publishable' => generated.CreateApiKeySlotKindEnum.publishable,
+            'secret' => generated.CreateApiKeySlotKindEnum.secret,
+            _ => throw ArgumentError.value(
+              kind,
+              'kind',
+              'Use publishable ou secret',
+            ),
+          },
+          allowedServices: allowedServices,
+          automaticRotationEnabled: automaticRotationEnabled,
+          rotationIntervalDays: rotationIntervalDays,
+        ).toJson(),
+      ),
     );
     _ensureCommandSucceeded(resp, allowedStatusCodes: const {201});
     return IssuedOpaqueApiKey.fromJson(
@@ -370,16 +382,19 @@ class ProjectRepository {
     DateTime? activateAt,
     String? stepUpToken,
   }) async {
+    final rotationBody = generated.RotateApiKeySlot(
+      activateAt: activateAt,
+    ).toJson();
+    if (activateAt == null) {
+      rotationBody.remove('activate_at');
+    }
     final resp = await _client.post(
       Uri.parse('/api/projects/$ref/api-key-slots/$slotId/rotation'),
       headers: {
         'Content-Type': 'application/json',
         if (stepUpToken != null) 'X-Step-Up-Token': stepUpToken,
       },
-      body: jsonEncode({
-        if (activateAt != null)
-          'activate_at': activateAt.toUtc().toIso8601String(),
-      }),
+      body: jsonEncode(rotationBody),
     );
     _ensureCommandSucceeded(resp);
     return IssuedOpaqueApiKey.fromJson(
@@ -394,16 +409,24 @@ class ProjectRepository {
     OpaqueApiKeyExpirationPolicyUpdate? expirationPolicy,
     List<String>? allowedServices,
   }) async {
+    final slotPolicyBody = generated.UpdateApiKeySlotPolicy(
+      automaticRotationEnabled: automaticRotationEnabled,
+      rotationIntervalDays: expirationPolicy?.rotationIntervalDays,
+      allowedServices: allowedServices,
+    ).toJson();
+    if (automaticRotationEnabled == null) {
+      slotPolicyBody.remove('automatic_rotation_enabled');
+    }
+    if (expirationPolicy == null) {
+      slotPolicyBody.remove('rotation_interval_days');
+    }
+    if (allowedServices == null) {
+      slotPolicyBody.remove('allowed_services');
+    }
     final resp = await _client.patch(
       Uri.parse('/api/projects/$ref/api-key-slots/$slotId'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        if (automaticRotationEnabled != null)
-          'automatic_rotation_enabled': automaticRotationEnabled,
-        if (expirationPolicy != null)
-          'rotation_interval_days': expirationPolicy.rotationIntervalDays,
-        if (allowedServices != null) 'allowed_services': allowedServices,
-      }),
+      body: jsonEncode(slotPolicyBody),
     );
     _ensureCommandSucceeded(resp);
   }
@@ -432,7 +455,9 @@ class ProjectRepository {
         '/api/projects/$ref/api-key-slots/$slotId/rotation-confirmation',
       ),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'key_id': keyId}),
+      body: jsonEncode(
+        generated.ConfirmApiKeyInstallation(keyId: keyId).toJson(),
+      ),
     );
     _ensureCommandSucceeded(resp);
   }
@@ -529,7 +554,9 @@ class ProjectRepository {
     final resp = await _client.post(
       Uri.parse('/api/admin/projects/$ref/transfer'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'new_owner_id': newOwnerId}),
+      body: jsonEncode(
+        generated.TransferBody(newOwnerId: newOwnerId).toJson(),
+      ),
     );
     _ensureCommandSucceeded(resp);
   }
@@ -670,7 +697,9 @@ class ProjectRepository {
     final resp = await _client.put(
       Uri.parse('/api/projects/$ref/settings'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'settings': settings}),
+      body: jsonEncode(
+        generated.UpdateSettings(settings: settings).toJson(),
+      ),
     );
     _ensureCommandSucceeded(resp);
     final data = decodeJsonObject(
@@ -697,7 +726,9 @@ class ProjectRepository {
     final resp = await _client.post(
       Uri.parse('/api/projects/$ref/recreate-services'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'services': services}),
+      body: jsonEncode(
+        generated.RecreateServices(services: services).toJson(),
+      ),
     );
     _ensureCommandSucceeded(resp, allowedStatusCodes: const {200, 202});
     return ProjectActionResult(
@@ -724,7 +755,10 @@ class ProjectRepository {
     final resp = await _client.post(
       Uri.parse('/api/projects/$ref/notes'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'body': body, 'visibility': visibility}),
+      body: jsonEncode(
+        generated.ProjectNoteCreate(body: body, visibility: visibility)
+            .toJson(),
+      ),
     );
     _ensureCommandSucceeded(resp, allowedStatusCodes: const {201});
   }
@@ -742,11 +776,20 @@ class ProjectRepository {
     String? name,
     String? color,
   }) async {
-    final payload = <String, dynamic>{
-      if (tagId != null) 'tag_id': tagId,
-      if (name != null) 'name': name,
-      if (color != null) 'color': color,
-    };
+    final payload = generated.ProjectTagAssign(
+      tagId: tagId,
+      name: name,
+      color: color,
+    ).toJson();
+    if (tagId == null) {
+      payload.remove('tag_id');
+    }
+    if (name == null) {
+      payload.remove('name');
+    }
+    if (color == null) {
+      payload.remove('color');
+    }
     final resp = await _client.post(
       Uri.parse('/api/projects/$ref/tags'),
       headers: {'Content-Type': 'application/json'},
@@ -770,7 +813,10 @@ class ProjectRepository {
     final resp = await _client.post(
       Uri.parse('/api/projects/$ref/hints'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'target_user_id': targetUserId, 'body': body}),
+      body: jsonEncode(
+        generated.ProjectHintCreate(targetUserId: targetUserId, body: body)
+            .toJson(),
+      ),
     );
     _ensureCommandSucceeded(resp, allowedStatusCodes: const {201});
   }
@@ -783,7 +829,9 @@ class ProjectRepository {
     final resp = await _client.put(
       Uri.parse('/api/projects/$ref/hints/$hintId'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'status': status}),
+      body: jsonEncode(
+        generated.ProjectHintStatusUpdate(status: status).toJson(),
+      ),
     );
     _ensureCommandSucceeded(resp);
   }
@@ -795,7 +843,9 @@ class ProjectRepository {
     final resp = await _client.post(
       Uri.parse('/api/projects/$ref/thread/messages'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'body': body}),
+      body: jsonEncode(
+        generated.ProjectThreadMessageCreate(body: body).toJson(),
+      ),
     );
     _ensureCommandSucceeded(resp, allowedStatusCodes: const {201});
   }
@@ -808,7 +858,9 @@ class ProjectRepository {
     final resp = await _client.patch(
       Uri.parse('/api/projects/$ref/notifications/$notificationId'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'read': read}),
+      body: jsonEncode(
+        generated.ProjectNotificationRead(read: read).toJson(),
+      ),
     );
     _ensureCommandSucceeded(resp);
   }
@@ -818,10 +870,13 @@ class ProjectRepository {
     required String newName,
     String? displayName,
   }) async {
-    final payload = <String, dynamic>{
-      'new_name': newName,
-      if (displayName != null) 'display_name': displayName,
-    };
+    final payload = generated.ProjectRenameRequest(
+      newName: newName,
+      displayName: displayName,
+    ).toJson();
+    if (displayName == null) {
+      payload.remove('display_name');
+    }
     final resp = await _client.post(
       Uri.parse('/api/projects/$ref/rename'),
       headers: {'Content-Type': 'application/json'},
@@ -839,7 +894,9 @@ class ProjectRepository {
     final resp = await _client.patch(
       Uri.parse('/api/projects/$ref/display-name'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'display_name': displayName}),
+      body: jsonEncode(
+        generated.ProjectDisplayNameUpdate(displayName: displayName).toJson(),
+      ),
     );
     _ensureCommandSucceeded(resp);
     final data = decodeJsonObject(resp, context: 'Nome de exibicao do projeto');
@@ -892,14 +949,26 @@ class ProjectRepository {
     String? title,
     String? description,
   }) async {
+    final restoreTitle =
+        title != null && title.trim().isNotEmpty ? title.trim() : null;
+    final restoreDescription =
+        description != null && description.trim().isNotEmpty
+            ? description.trim()
+            : null;
+    final restorePointBody = generated.RestorePointCreate(
+      title: restoreTitle,
+      description: restoreDescription,
+    ).toJson();
+    if (restoreTitle == null) {
+      restorePointBody.remove('title');
+    }
+    if (restoreDescription == null) {
+      restorePointBody.remove('description');
+    }
     final resp = await _client.post(
       Uri.parse('/api/projects/$ref/restore-points'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        if (title != null && title.trim().isNotEmpty) 'title': title.trim(),
-        if (description != null && description.trim().isNotEmpty)
-          'description': description.trim(),
-      }),
+      body: jsonEncode(restorePointBody),
     );
     _ensureCommandSucceeded(resp, allowedStatusCodes: const {202});
     final job = Job.fromResponse(resp);

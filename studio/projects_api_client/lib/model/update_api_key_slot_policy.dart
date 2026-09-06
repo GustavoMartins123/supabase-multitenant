@@ -13,38 +13,22 @@ part of openapi.api;
 class UpdateApiKeySlotPolicy {
   /// Returns a new [UpdateApiKeySlotPolicy] instance.
   UpdateApiKeySlotPolicy({
-    this.allowedServices,
+    this.allowedServices = const [],
     this.automaticRotationEnabled,
     this.rotationIntervalDays,
   });
 
-  ///
-  /// Please note: This property should have been non-nullable! Since the specification file
-  /// does not include a default value (using the "default:" property), however, the generated
-  /// source code must fall back to having a nullable type.
-  /// Consider adding a "default:" property in the specification file to hide this note.
-  ///
-  AllowedServices? allowedServices;
+  List<String>? allowedServices;
 
-  ///
-  /// Please note: This property should have been non-nullable! Since the specification file
-  /// does not include a default value (using the "default:" property), however, the generated
-  /// source code must fall back to having a nullable type.
-  /// Consider adding a "default:" property in the specification file to hide this note.
-  ///
-  AutomaticRotationEnabled? automaticRotationEnabled;
+  bool? automaticRotationEnabled;
 
-  ///
-  /// Please note: This property should have been non-nullable! Since the specification file
-  /// does not include a default value (using the "default:" property), however, the generated
-  /// source code must fall back to having a nullable type.
-  /// Consider adding a "default:" property in the specification file to hide this note.
-  ///
-  RotationIntervalDays1? rotationIntervalDays;
+  /// Minimum value: 1
+  /// Maximum value: 3650
+  int? rotationIntervalDays;
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is UpdateApiKeySlotPolicy &&
-    other.allowedServices == allowedServices &&
+    _deepEquality.equals(other.allowedServices, allowedServices) &&
     other.automaticRotationEnabled == automaticRotationEnabled &&
     other.rotationIntervalDays == rotationIntervalDays;
 
@@ -97,9 +81,11 @@ class UpdateApiKeySlotPolicy {
       }());
 
       return UpdateApiKeySlotPolicy(
-        allowedServices: AllowedServices.fromJson(json[r'allowed_services']),
-        automaticRotationEnabled: AutomaticRotationEnabled.fromJson(json[r'automatic_rotation_enabled']),
-        rotationIntervalDays: RotationIntervalDays1.fromJson(json[r'rotation_interval_days']),
+        allowedServices: json[r'allowed_services'] is Iterable
+            ? (json[r'allowed_services'] as Iterable).cast<String>().toList(growable: false)
+            : const [],
+        automaticRotationEnabled: mapValueOfType<bool>(json, r'automatic_rotation_enabled'),
+        rotationIntervalDays: mapValueOfType<int>(json, r'rotation_interval_days'),
       );
     }
     return null;

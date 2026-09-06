@@ -89,7 +89,7 @@ class JobsApi {
   /// * [int] limit:
   ///
   /// * [int] offset:
-  Future<Object?> listJobHistoryApiJobsGet({ String? projectUuid, String? action, String? status, int? limit, int? offset, }) async {
+  Future<JobListResponse?> listJobHistoryApiJobsGet({ String? projectUuid, String? action, String? status, int? limit, int? offset, }) async {
     final response = await listJobHistoryApiJobsGetWithHttpInfo( projectUuid: projectUuid, action: action, status: status, limit: limit, offset: offset, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -98,7 +98,7 @@ class JobsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'JobListResponse',) as JobListResponse;
     
     }
     return null;
@@ -142,7 +142,7 @@ class JobsApi {
   /// Parameters:
   ///
   /// * [String] jobId (required):
-  Future<Object?> projectStatusApiProjectsStatusJobIdGet(String jobId,) async {
+  Future<JobResponse?> projectStatusApiProjectsStatusJobIdGet(String jobId,) async {
     final response = await projectStatusApiProjectsStatusJobIdGetWithHttpInfo(jobId,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -151,7 +151,7 @@ class JobsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'JobResponse',) as JobResponse;
     
     }
     return null;
@@ -199,7 +199,7 @@ class JobsApi {
   /// Parameters:
   ///
   /// * [String] jobId (required):
-  Future<Object?> retryProjectJobApiJobsJobIdRetryPost(String jobId,) async {
+  Future<JobRetryResponse?> retryProjectJobApiJobsJobIdRetryPost(String jobId,) async {
     final response = await retryProjectJobApiJobsJobIdRetryPostWithHttpInfo(jobId,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
@@ -208,7 +208,7 @@ class JobsApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'JobRetryResponse',) as JobRetryResponse;
     
     }
     return null;

@@ -23,6 +23,268 @@
         "title": "AddMember",
         "type": "object"
       },
+      "AddMemberResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "AddMemberResponse",
+        "type": "object"
+      },
+      "AllUsersMemberItem": {
+        "additionalProperties": true,
+        "properties": {
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "role",
+          "status"
+        ],
+        "title": "AllUsersMemberItem",
+        "type": "object"
+      },
+      "AllUsersResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "cache_users_needed": {
+            "title": "Cache Users Needed",
+            "type": "boolean"
+          },
+          "current_members": {
+            "items": {
+              "$ref": "#/components/schemas/AllUsersMemberItem"
+            },
+            "title": "Current Members",
+            "type": "array"
+          },
+          "nginx_route": {
+            "title": "Nginx Route",
+            "type": "string"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "project_name": {
+            "title": "Project Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_name",
+          "project_id",
+          "current_members",
+          "cache_users_needed",
+          "nginx_route"
+        ],
+        "title": "AllUsersResponse",
+        "type": "object"
+      },
+      "AssignProjectTagResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "assigned": {
+            "title": "Assigned",
+            "type": "boolean"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "color": {
+            "title": "Color",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_system": {
+            "title": "Is System",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "color",
+          "category",
+          "is_system",
+          "assigned"
+        ],
+        "title": "AssignProjectTagResponse",
+        "type": "object"
+      },
+      "AuthUserItem": {
+        "additionalProperties": true,
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "email_confirmed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Confirmed At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_sso_user": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Sso User"
+          },
+          "last_sign_in_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Sign In At"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "raw_user_meta_data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw User Meta Data"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "AuthUserItem",
+        "type": "object"
+      },
+      "AuthUsersResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
+          },
+          "users": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AuthUserItem"
+            },
+            "title": "Users",
+            "type": "array"
+          }
+        },
+        "title": "AuthUsersResponse",
+        "type": "object"
+      },
+      "AutomaticKeyRotationResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "automatic_key_rotation_blocked": {
+            "title": "Automatic Key Rotation Blocked",
+            "type": "boolean"
+          },
+          "automatic_key_rotation_enabled": {
+            "title": "Automatic Key Rotation Enabled",
+            "type": "boolean"
+          },
+          "automatic_key_rotation_last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Automatic Key Rotation Last Error"
+          },
+          "automatic_key_rotation_lead_days": {
+            "title": "Automatic Key Rotation Lead Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "automatic_key_rotation_enabled",
+          "automatic_key_rotation_blocked",
+          "automatic_key_rotation_last_error",
+          "automatic_key_rotation_lead_days"
+        ],
+        "title": "AutomaticKeyRotationResponse",
+        "type": "object"
+      },
       "AutomaticKeyRotationUpdate": {
         "properties": {
           "enabled": {
@@ -34,6 +296,337 @@
           "enabled"
         ],
         "title": "AutomaticKeyRotationUpdate",
+        "type": "object"
+      },
+      "CollaborationHintItem": {
+        "additionalProperties": true,
+        "properties": {
+          "author_name": {
+            "title": "Author Name",
+            "type": "string"
+          },
+          "author_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author User Id"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "can_update": {
+            "title": "Can Update",
+            "type": "boolean"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "resolved_by_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved By Name"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "target_name": {
+            "title": "Target Name",
+            "type": "string"
+          },
+          "target_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target User Id"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "body",
+          "status",
+          "created_at",
+          "updated_at",
+          "resolved_at",
+          "author_user_id",
+          "author_name",
+          "target_user_id",
+          "target_name",
+          "resolved_by_name",
+          "can_update"
+        ],
+        "title": "CollaborationHintItem",
+        "type": "object"
+      },
+      "CollaborationMemberItem": {
+        "additionalProperties": true,
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "display_name",
+          "username",
+          "role"
+        ],
+        "title": "CollaborationMemberItem",
+        "type": "object"
+      },
+      "CollaborationNoteItem": {
+        "additionalProperties": true,
+        "properties": {
+          "author_name": {
+            "title": "Author Name",
+            "type": "string"
+          },
+          "author_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author User Id"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_encrypted": {
+            "title": "Is Encrypted",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "visibility": {
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "visibility",
+          "body",
+          "is_encrypted",
+          "created_at",
+          "updated_at",
+          "author_user_id",
+          "author_name"
+        ],
+        "title": "CollaborationNoteItem",
+        "type": "object"
+      },
+      "CollaborationNotificationItem": {
+        "additionalProperties": true,
+        "properties": {
+          "actor_name": {
+            "title": "Actor Name",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "read_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read At"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id"
+          },
+          "target_type": {
+            "title": "Target Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "target_type",
+          "target_id",
+          "payload",
+          "actor_name",
+          "read_at",
+          "created_at"
+        ],
+        "title": "CollaborationNotificationItem",
+        "type": "object"
+      },
+      "CollaborationTagItem": {
+        "additionalProperties": true,
+        "properties": {
+          "assigned": {
+            "title": "Assigned",
+            "type": "boolean"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "color": {
+            "title": "Color",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_system": {
+            "title": "Is System",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "color",
+          "category",
+          "is_system",
+          "assigned"
+        ],
+        "title": "CollaborationTagItem",
+        "type": "object"
+      },
+      "CollaborationThreadItem": {
+        "additionalProperties": true,
+        "properties": {
+          "author_name": {
+            "title": "Author Name",
+            "type": "string"
+          },
+          "author_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author User Id"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "body",
+          "created_at",
+          "updated_at",
+          "author_user_id",
+          "author_name"
+        ],
+        "title": "CollaborationThreadItem",
         "type": "object"
       },
       "ConfirmApiKeyInstallation": {
@@ -49,6 +642,91 @@
           "key_id"
         ],
         "title": "ConfirmApiKeyInstallation",
+        "type": "object"
+      },
+      "ContainerInfoItem": {
+        "additionalProperties": true,
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "string"
+          },
+          "image": {
+            "title": "Image",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "ports": {
+            "title": "Ports",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "status",
+          "image",
+          "created",
+          "ports"
+        ],
+        "title": "ContainerInfoItem",
+        "type": "object"
+      },
+      "ContainerLogsResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "container": {
+            "title": "Container",
+            "type": "string"
+          },
+          "logs": {
+            "title": "Logs",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "container",
+          "logs",
+          "status"
+        ],
+        "title": "ContainerLogsResponse",
+        "type": "object"
+      },
+      "ContentIdentityResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "current_ref": {
+            "title": "Current Ref",
+            "type": "string"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "current_ref",
+          "aliases"
+        ],
+        "title": "ContentIdentityResponse",
         "type": "object"
       },
       "CreateApiKeySlot": {
@@ -109,6 +787,542 @@
         "title": "CreateApiKeySlot",
         "type": "object"
       },
+      "CreateProjectHintResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "CreateProjectHintResponse",
+        "type": "object"
+      },
+      "CreateProjectNoteResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "author_name": {
+            "title": "Author Name",
+            "type": "string"
+          },
+          "author_user_id": {
+            "title": "Author User Id",
+            "type": "string"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_encrypted": {
+            "title": "Is Encrypted",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "visibility": {
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "visibility",
+          "body",
+          "is_encrypted",
+          "created_at",
+          "updated_at",
+          "author_user_id",
+          "author_name"
+        ],
+        "title": "CreateProjectNoteResponse",
+        "type": "object"
+      },
+      "CreateRestorePointResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "current_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Step"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "is_idempotent": {
+            "title": "Is Idempotent",
+            "type": "boolean"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "project_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Uuid"
+          },
+          "queue_position": {
+            "title": "Queue Position",
+            "type": "integer"
+          },
+          "restore_point_id": {
+            "title": "Restore Point Id",
+            "type": "string"
+          },
+          "retry_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Of"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tenant_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Uuid"
+          },
+          "total_steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Steps"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "job_id",
+          "project",
+          "project_uuid",
+          "tenant_uuid",
+          "created_by",
+          "action",
+          "status",
+          "message",
+          "progress",
+          "current_step",
+          "total_steps",
+          "started_at",
+          "finished_at",
+          "error_code",
+          "is_idempotent",
+          "retryable",
+          "retry_of",
+          "attempt",
+          "created_at",
+          "updated_at",
+          "queue_position",
+          "restore_point_id"
+        ],
+        "title": "CreateRestorePointResponse",
+        "type": "object"
+      },
+      "CreateThreadMessageResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "CreateThreadMessageResponse",
+        "type": "object"
+      },
+      "DeleteProjectNoteResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "DeleteProjectNoteResponse",
+        "type": "object"
+      },
+      "DeleteRestorePointResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "current_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Step"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "is_idempotent": {
+            "title": "Is Idempotent",
+            "type": "boolean"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "project_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Uuid"
+          },
+          "queue_position": {
+            "title": "Queue Position",
+            "type": "integer"
+          },
+          "restore_point_id": {
+            "title": "Restore Point Id",
+            "type": "string"
+          },
+          "retry_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Of"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tenant_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Uuid"
+          },
+          "total_steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Steps"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "job_id",
+          "project",
+          "project_uuid",
+          "tenant_uuid",
+          "created_by",
+          "action",
+          "status",
+          "message",
+          "progress",
+          "current_step",
+          "total_steps",
+          "started_at",
+          "finished_at",
+          "error_code",
+          "is_idempotent",
+          "retryable",
+          "retry_of",
+          "attempt",
+          "created_at",
+          "updated_at",
+          "queue_position",
+          "restore_point_id"
+        ],
+        "title": "DeleteRestorePointResponse",
+        "type": "object"
+      },
       "DuplicateProject": {
         "properties": {
           "copy_data": {
@@ -149,6 +1363,139 @@
         "title": "DuplicateProject",
         "type": "object"
       },
+      "EncKeyResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "enc_service_key": {
+            "title": "Enc Service Key",
+            "type": "string"
+          },
+          "project_key_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Key Version"
+          }
+        },
+        "required": [
+          "enc_service_key",
+          "project_key_version"
+        ],
+        "title": "EncKeyResponse",
+        "type": "object"
+      },
+      "GetProjectCollaborationResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "assigned_tags": {
+            "items": {
+              "$ref": "#/components/schemas/CollaborationTagItem"
+            },
+            "title": "Assigned Tags",
+            "type": "array"
+          },
+          "available_tags": {
+            "items": {
+              "$ref": "#/components/schemas/CollaborationTagItem"
+            },
+            "title": "Available Tags",
+            "type": "array"
+          },
+          "hints": {
+            "items": {
+              "$ref": "#/components/schemas/CollaborationHintItem"
+            },
+            "title": "Hints",
+            "type": "array"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/CollaborationMemberItem"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "notes": {
+            "items": {
+              "$ref": "#/components/schemas/CollaborationNoteItem"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "notifications": {
+            "items": {
+              "$ref": "#/components/schemas/CollaborationNotificationItem"
+            },
+            "title": "Notifications",
+            "type": "array"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "thread_messages": {
+            "items": {
+              "$ref": "#/components/schemas/CollaborationThreadItem"
+            },
+            "title": "Thread Messages",
+            "type": "array"
+          }
+        },
+        "required": [
+          "project",
+          "available_tags",
+          "assigned_tags",
+          "members",
+          "notes",
+          "hints",
+          "thread_messages",
+          "notifications"
+        ],
+        "title": "GetProjectCollaborationResponse",
+        "type": "object"
+      },
+      "GetProjectSettingsResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "pending_affected_services": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Pending Affected Services",
+            "type": "array"
+          },
+          "settings": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Settings",
+            "type": "object"
+          },
+          "storage_limit_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Limit Token"
+          }
+        },
+        "required": [
+          "settings",
+          "pending_affected_services",
+          "storage_limit_token"
+        ],
+        "title": "GetProjectSettingsResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -160,6 +1507,735 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "IssuedKeyResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "activate_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activate At"
+          },
+          "api_key": {
+            "title": "Api Key",
+            "type": "string"
+          },
+          "api_keyset_version": {
+            "title": "Api Keyset Version",
+            "type": "integer"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "key_id": {
+            "title": "Key Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "slot_id": {
+            "title": "Slot Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "token_hint": {
+            "title": "Token Hint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot_id",
+          "key_id",
+          "api_key",
+          "token_hint",
+          "kind",
+          "status",
+          "activate_at",
+          "expires_at",
+          "api_keyset_version"
+        ],
+        "title": "IssuedKeyResponse",
+        "type": "object"
+      },
+      "JobListResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "default": 0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/JobResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "default": 0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "title": "JobListResponse",
+        "type": "object"
+      },
+      "JobResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "attempt": {
+            "default": 1,
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "current_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Step"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "is_idempotent": {
+            "default": false,
+            "title": "Is Idempotent",
+            "type": "boolean"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "project_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Uuid"
+          },
+          "retry_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Of"
+          },
+          "retryable": {
+            "default": false,
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "stderr_tail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stderr Tail"
+          },
+          "stdout_tail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stdout Tail"
+          },
+          "tenant_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Uuid"
+          },
+          "total_steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Steps"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "job_id",
+          "project",
+          "action",
+          "status"
+        ],
+        "title": "JobResponse",
+        "type": "object"
+      },
+      "JobRetryResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "attempt": {
+            "default": 1,
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "current_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Step"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "is_idempotent": {
+            "default": false,
+            "title": "Is Idempotent",
+            "type": "boolean"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "project_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Uuid"
+          },
+          "queue_position": {
+            "default": 0,
+            "title": "Queue Position",
+            "type": "integer"
+          },
+          "retry_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Of"
+          },
+          "retryable": {
+            "default": false,
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tenant_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Uuid"
+          },
+          "total_steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Steps"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "job_id",
+          "project",
+          "action",
+          "status"
+        ],
+        "title": "JobRetryResponse",
+        "type": "object"
+      },
+      "KeyVersionResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "project_key_version": {
+            "title": "Project Key Version"
+          }
+        },
+        "required": [
+          "project_key_version"
+        ],
+        "title": "KeyVersionResponse",
+        "type": "object"
+      },
+      "ListRestorePointsResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "permissions": {
+            "$ref": "#/components/schemas/RestorePointsPermissions"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/RestorePointItem"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "limit",
+          "permissions",
+          "points"
+        ],
+        "title": "ListRestorePointsResponse",
+        "type": "object"
+      },
+      "MemberItem": {
+        "additionalProperties": true,
+        "properties": {
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "role"
+        ],
+        "title": "MemberItem",
+        "type": "object"
+      },
+      "MigrationAbortResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "api_keyset_version": {
+            "title": "Api Keyset Version",
+            "type": "integer"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "status",
+          "api_keyset_version"
+        ],
+        "title": "MigrationAbortResponse",
+        "type": "object"
+      },
+      "MigrationCutoverResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "api_keyset_version": {
+            "title": "Api Keyset Version",
+            "type": "integer"
+          },
+          "gateway_mode": {
+            "title": "Gateway Mode",
+            "type": "string"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "status",
+          "gateway_mode",
+          "api_keyset_version"
+        ],
+        "title": "MigrationCutoverResponse",
+        "type": "object"
+      },
+      "MigrationPrepareResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "key_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Key Ids",
+            "type": "array"
+          },
+          "next": {
+            "title": "Next",
+            "type": "string"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "status",
+          "key_ids",
+          "next"
+        ],
+        "title": "MigrationPrepareResponse",
+        "type": "object"
+      },
+      "MigrationStatusResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "activated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activated At"
+          },
+          "api_keyset_version": {
+            "title": "Api Keyset Version",
+            "type": "integer"
+          },
+          "confirmed_pending_key_count": {
+            "title": "Confirmed Pending Key Count",
+            "type": "integer"
+          },
+          "cutover_started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cutover Started At"
+          },
+          "gateway_ready_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gateway Ready At"
+          },
+          "pending_key_count": {
+            "title": "Pending Key Count",
+            "type": "integer"
+          },
+          "prepared_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prepared At"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "status",
+          "prepared_at",
+          "activated_at",
+          "cutover_started_at",
+          "gateway_ready_at",
+          "pending_key_count",
+          "confirmed_pending_key_count",
+          "api_keyset_version"
+        ],
+        "title": "MigrationStatusResponse",
         "type": "object"
       },
       "NewProject": {
@@ -184,6 +2260,59 @@
           "name"
         ],
         "title": "NewProject",
+        "type": "object"
+      },
+      "ProjectAIFunctionItem": {
+        "additionalProperties": true,
+        "properties": {
+          "argument_types": {
+            "title": "Argument Types",
+            "type": "string"
+          },
+          "comment": {
+            "title": "Comment",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "return_type": {
+            "title": "Return Type",
+            "type": "string"
+          },
+          "schema": {
+            "title": "Schema",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "argument_types",
+          "return_type",
+          "comment",
+          "schema"
+        ],
+        "title": "ProjectAIFunctionItem",
+        "type": "object"
+      },
+      "ProjectConfigTokenResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "config_token": {
+            "title": "Config Token",
+            "type": "string"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "config_token"
+        ],
+        "title": "ProjectConfigTokenResponse",
         "type": "object"
       },
       "ProjectDisplayNameUpdate": {
@@ -233,6 +2362,198 @@
         "title": "ProjectHintStatusUpdate",
         "type": "object"
       },
+      "ProjectInfoItem": {
+        "additionalProperties": true,
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "file_size_limit": {
+            "title": "File Size Limit",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "running_containers": {
+            "title": "Running Containers",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "storage_limit_token": {
+            "title": "Storage Limit Token",
+            "type": "string"
+          },
+          "total_containers": {
+            "title": "Total Containers",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "display_name",
+          "status",
+          "running_containers",
+          "total_containers",
+          "file_size_limit",
+          "storage_limit_token"
+        ],
+        "title": "ProjectInfoItem",
+        "type": "object"
+      },
+      "ProjectListItem": {
+        "additionalProperties": true,
+        "properties": {
+          "automatic_key_rotation_blocked": {
+            "title": "Automatic Key Rotation Blocked",
+            "type": "boolean"
+          },
+          "automatic_key_rotation_due_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Automatic Key Rotation Due At"
+          },
+          "automatic_key_rotation_enabled": {
+            "title": "Automatic Key Rotation Enabled",
+            "type": "boolean"
+          },
+          "automatic_key_rotation_last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Automatic Key Rotation Last Error"
+          },
+          "automatic_key_rotation_lead_days": {
+            "title": "Automatic Key Rotation Lead Days",
+            "type": "integer"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "file_size_limit": {
+            "title": "File Size Limit",
+            "type": "string"
+          },
+          "internal_token_expired": {
+            "title": "Internal Token Expired",
+            "type": "boolean"
+          },
+          "internal_token_expires_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Internal Token Expires At"
+          },
+          "internal_token_expiring_soon": {
+            "title": "Internal Token Expiring Soon",
+            "type": "boolean"
+          },
+          "internal_token_expiry_warning_days": {
+            "title": "Internal Token Expiry Warning Days",
+            "type": "integer"
+          },
+          "last_key_rotation_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Key Rotation At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "opaque_api_key_slot_count": {
+            "title": "Opaque Api Key Slot Count",
+            "type": "integer"
+          },
+          "opaque_api_keys_status": {
+            "title": "Opaque Api Keys Status",
+            "type": "string"
+          },
+          "project_uuid": {
+            "title": "Project Uuid",
+            "type": "string"
+          },
+          "storage_limit_token": {
+            "title": "Storage Limit Token",
+            "type": "string"
+          },
+          "tenant_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Uuid"
+          }
+        },
+        "required": [
+          "project_uuid",
+          "tenant_uuid",
+          "name",
+          "display_name",
+          "file_size_limit",
+          "storage_limit_token",
+          "internal_token_expires_at",
+          "internal_token_expired",
+          "internal_token_expiring_soon",
+          "internal_token_expiry_warning_days",
+          "automatic_key_rotation_enabled",
+          "automatic_key_rotation_lead_days",
+          "automatic_key_rotation_due_at",
+          "automatic_key_rotation_blocked",
+          "automatic_key_rotation_last_error",
+          "last_key_rotation_at",
+          "opaque_api_keys_status",
+          "opaque_api_key_slot_count"
+        ],
+        "title": "ProjectListItem",
+        "type": "object"
+      },
       "ProjectNoteCreate": {
         "properties": {
           "body": {
@@ -262,6 +2583,167 @@
         "title": "ProjectNotificationRead",
         "type": "object"
       },
+      "ProjectQueueInFlightJob": {
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "current_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Step"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total_steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Steps"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "status",
+          "message",
+          "action",
+          "progress",
+          "current_step",
+          "total_steps",
+          "updated_at"
+        ],
+        "title": "ProjectQueueInFlightJob",
+        "type": "object"
+      },
+      "ProjectQueueStatusResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "current_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Job Id"
+          },
+          "in_flight": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectQueueInFlightJob"
+            },
+            "title": "In Flight",
+            "type": "array"
+          },
+          "is_busy": {
+            "title": "Is Busy",
+            "type": "boolean"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "queued": {
+            "title": "Queued",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "project",
+          "is_busy",
+          "current_job_id",
+          "queued",
+          "in_flight",
+          "message"
+        ],
+        "title": "ProjectQueueStatusResponse",
+        "type": "object"
+      },
+      "ProjectRenameHistoryResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/RenameHistoryEvent"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "renames": {
+            "items": {
+              "$ref": "#/components/schemas/RenameHistoryEntry"
+            },
+            "title": "Renames",
+            "type": "array"
+          },
+          "requested_name": {
+            "title": "Requested Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "requested_name",
+          "events",
+          "renames"
+        ],
+        "title": "ProjectRenameHistoryResponse",
+        "type": "object"
+      },
       "ProjectRenameRequest": {
         "properties": {
           "display_name": {
@@ -287,6 +2769,74 @@
           "new_name"
         ],
         "title": "ProjectRenameRequest",
+        "type": "object"
+      },
+      "ProjectS3VectorKeysResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "accessKey": {
+            "title": "Accesskey",
+            "type": "string"
+          },
+          "secretKey": {
+            "title": "Secretkey",
+            "type": "string"
+          }
+        },
+        "required": [
+          "accessKey",
+          "secretKey"
+        ],
+        "title": "ProjectS3VectorKeysResponse",
+        "type": "object"
+      },
+      "ProjectStatusResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "agent_offline": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Offline"
+          },
+          "containers": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ContainerInfoItem"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Containers"
+          },
+          "running": {
+            "title": "Running",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "running",
+          "total"
+        ],
+        "title": "ProjectStatusResponse",
         "type": "object"
       },
       "ProjectTagAssign": {
@@ -342,6 +2892,490 @@
         "title": "ProjectThreadMessageCreate",
         "type": "object"
       },
+      "ProjectUserTelemetryResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "active_users": {
+            "title": "Active Users",
+            "type": "integer"
+          },
+          "end": {
+            "title": "End",
+            "type": "string"
+          },
+          "period": {
+            "title": "Period",
+            "type": "string"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "sessions_are_current_records": {
+            "title": "Sessions Are Current Records",
+            "type": "boolean"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "start": {
+            "title": "Start",
+            "type": "string"
+          },
+          "total_sessions": {
+            "title": "Total Sessions",
+            "type": "integer"
+          },
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/TelemetryUserItem"
+            },
+            "title": "Users",
+            "type": "array"
+          }
+        },
+        "required": [
+          "project",
+          "period",
+          "start",
+          "end",
+          "active_users",
+          "total_sessions",
+          "users",
+          "source",
+          "sessions_are_current_records"
+        ],
+        "title": "ProjectUserTelemetryResponse",
+        "type": "object"
+      },
+      "ProjectsInfoResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "projects": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectInfoItem"
+            },
+            "title": "Projects",
+            "type": "array"
+          }
+        },
+        "required": [
+          "projects"
+        ],
+        "title": "ProjectsInfoResponse",
+        "type": "object"
+      },
+      "QueuedJobResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "current_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Step"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "is_idempotent": {
+            "title": "Is Idempotent",
+            "type": "boolean"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "project_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Uuid"
+          },
+          "queue_position": {
+            "title": "Queue Position",
+            "type": "integer"
+          },
+          "retry_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Of"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tenant_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Uuid"
+          },
+          "total_steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Steps"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "job_id",
+          "project",
+          "project_uuid",
+          "tenant_uuid",
+          "created_by",
+          "action",
+          "status",
+          "message",
+          "progress",
+          "current_step",
+          "total_steps",
+          "started_at",
+          "finished_at",
+          "error_code",
+          "is_idempotent",
+          "retryable",
+          "retry_of",
+          "attempt",
+          "created_at",
+          "updated_at",
+          "queue_position"
+        ],
+        "title": "QueuedJobResponse",
+        "type": "object"
+      },
+      "RecreateProjectServicesResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "current_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Step"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "is_idempotent": {
+            "title": "Is Idempotent",
+            "type": "boolean"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "project_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Uuid"
+          },
+          "queue_position": {
+            "title": "Queue Position",
+            "type": "integer"
+          },
+          "retry_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Of"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tenant_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Uuid"
+          },
+          "total_steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Steps"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "job_id",
+          "project",
+          "project_uuid",
+          "tenant_uuid",
+          "created_by",
+          "action",
+          "status",
+          "message",
+          "progress",
+          "current_step",
+          "total_steps",
+          "started_at",
+          "finished_at",
+          "error_code",
+          "is_idempotent",
+          "retryable",
+          "retry_of",
+          "attempt",
+          "created_at",
+          "updated_at",
+          "queue_position"
+        ],
+        "title": "RecreateProjectServicesResponse",
+        "type": "object"
+      },
       "RecreateServices": {
         "properties": {
           "services": {
@@ -356,6 +3390,614 @@
           "services"
         ],
         "title": "RecreateServices",
+        "type": "object"
+      },
+      "RemoveMemberResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "RemoveMemberResponse",
+        "type": "object"
+      },
+      "RenameHistoryEntry": {
+        "additionalProperties": true,
+        "properties": {
+          "actor_name": {
+            "title": "Actor Name",
+            "type": "string"
+          },
+          "actor_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor User Id"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "new_name": {
+            "title": "New Name",
+            "type": "string"
+          },
+          "new_path": {
+            "title": "New Path",
+            "type": "string"
+          },
+          "old_name": {
+            "title": "Old Name",
+            "type": "string"
+          },
+          "old_path": {
+            "title": "Old Path",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "job_id",
+          "actor_user_id",
+          "actor_name",
+          "old_name",
+          "new_name",
+          "old_path",
+          "new_path",
+          "status",
+          "error",
+          "created_at",
+          "updated_at",
+          "completed_at"
+        ],
+        "title": "RenameHistoryEntry",
+        "type": "object"
+      },
+      "RenameHistoryEvent": {
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "actor_name": {
+            "title": "Actor Name",
+            "type": "string"
+          },
+          "actor_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor User Id"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "new_value": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Value"
+          },
+          "old_value": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Value"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id"
+          }
+        },
+        "required": [
+          "id",
+          "action",
+          "actor_user_id",
+          "actor_name",
+          "target_id",
+          "old_value",
+          "new_value",
+          "created_at"
+        ],
+        "title": "RenameHistoryEvent",
+        "type": "object"
+      },
+      "RenameProjectResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "current_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Step"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "is_idempotent": {
+            "title": "Is Idempotent",
+            "type": "boolean"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "new_name": {
+            "title": "New Name",
+            "type": "string"
+          },
+          "old_name": {
+            "title": "Old Name",
+            "type": "string"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "project_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Uuid"
+          },
+          "queue_position": {
+            "title": "Queue Position",
+            "type": "integer"
+          },
+          "retry_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Of"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tenant_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Uuid"
+          },
+          "total_steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Steps"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "job_id",
+          "project",
+          "project_uuid",
+          "tenant_uuid",
+          "created_by",
+          "action",
+          "status",
+          "message",
+          "progress",
+          "current_step",
+          "total_steps",
+          "started_at",
+          "finished_at",
+          "error_code",
+          "is_idempotent",
+          "retryable",
+          "retry_of",
+          "attempt",
+          "created_at",
+          "updated_at",
+          "queue_position",
+          "old_name",
+          "new_name"
+        ],
+        "title": "RenameProjectResponse",
+        "type": "object"
+      },
+      "RestartProjectResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "current_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Step"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "is_idempotent": {
+            "title": "Is Idempotent",
+            "type": "boolean"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "project_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Uuid"
+          },
+          "queue_position": {
+            "title": "Queue Position",
+            "type": "integer"
+          },
+          "retry_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Of"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tenant_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Uuid"
+          },
+          "total_steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Steps"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "job_id",
+          "project",
+          "project_uuid",
+          "tenant_uuid",
+          "created_by",
+          "action",
+          "status",
+          "message",
+          "progress",
+          "current_step",
+          "total_steps",
+          "started_at",
+          "finished_at",
+          "error_code",
+          "is_idempotent",
+          "retryable",
+          "retry_of",
+          "attempt",
+          "created_at",
+          "updated_at",
+          "queue_position"
+        ],
+        "title": "RestartProjectResponse",
         "type": "object"
       },
       "RestorePointCreate": {
@@ -388,6 +4030,477 @@
         "title": "RestorePointCreate",
         "type": "object"
       },
+      "RestorePointItem": {
+        "additionalProperties": true,
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "created_by_name": {
+            "title": "Created By Name",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_automatic": {
+            "title": "Is Automatic",
+            "type": "boolean"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "last_restored_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Restored At"
+          },
+          "project_ref_at_creation": {
+            "title": "Project Ref At Creation",
+            "type": "string"
+          },
+          "restore_count": {
+            "title": "Restore Count",
+            "type": "integer"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "description",
+          "status",
+          "is_automatic",
+          "job_id",
+          "created_by",
+          "created_by_name",
+          "project_ref_at_creation",
+          "size_bytes",
+          "last_restored_at",
+          "restore_count",
+          "error",
+          "created_at",
+          "completed_at"
+        ],
+        "title": "RestorePointItem",
+        "type": "object"
+      },
+      "RestorePointsPermissions": {
+        "additionalProperties": true,
+        "properties": {
+          "can_create": {
+            "title": "Can Create",
+            "type": "boolean"
+          },
+          "can_delete": {
+            "title": "Can Delete",
+            "type": "boolean"
+          },
+          "can_restore": {
+            "title": "Can Restore",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "can_create",
+          "can_restore",
+          "can_delete"
+        ],
+        "title": "RestorePointsPermissions",
+        "type": "object"
+      },
+      "RestoreRestorePointResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "current_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Step"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "is_idempotent": {
+            "title": "Is Idempotent",
+            "type": "boolean"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "project_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Uuid"
+          },
+          "queue_position": {
+            "title": "Queue Position",
+            "type": "integer"
+          },
+          "restore_point_id": {
+            "title": "Restore Point Id",
+            "type": "string"
+          },
+          "retry_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Of"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "safety_point_id": {
+            "title": "Safety Point Id",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tenant_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Uuid"
+          },
+          "total_steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Steps"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "job_id",
+          "project",
+          "project_uuid",
+          "tenant_uuid",
+          "created_by",
+          "action",
+          "status",
+          "message",
+          "progress",
+          "current_step",
+          "total_steps",
+          "started_at",
+          "finished_at",
+          "error_code",
+          "is_idempotent",
+          "retryable",
+          "retry_of",
+          "attempt",
+          "created_at",
+          "updated_at",
+          "queue_position",
+          "restore_point_id",
+          "safety_point_id"
+        ],
+        "title": "RestoreRestorePointResponse",
+        "type": "object"
+      },
+      "RevealClaimResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "api_key": {
+            "title": "Api Key",
+            "type": "string"
+          },
+          "key_id": {
+            "title": "Key Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key_id",
+          "api_key"
+        ],
+        "title": "RevealClaimResponse",
+        "type": "object"
+      },
+      "RevealItem": {
+        "additionalProperties": true,
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "key_id": {
+            "title": "Key Id",
+            "type": "string"
+          },
+          "key_status": {
+            "title": "Key Status",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "revealed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revealed At"
+          },
+          "slot_id": {
+            "title": "Slot Id",
+            "type": "string"
+          },
+          "slot_name": {
+            "title": "Slot Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key_id",
+          "slot_id",
+          "slot_name",
+          "kind",
+          "created_at",
+          "key_status",
+          "revealed_at"
+        ],
+        "title": "RevealItem",
+        "type": "object"
+      },
+      "RevealListResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "reveals": {
+            "items": {
+              "$ref": "#/components/schemas/RevealItem"
+            },
+            "title": "Reveals",
+            "type": "array"
+          }
+        },
+        "required": [
+          "project",
+          "reveals"
+        ],
+        "title": "RevealListResponse",
+        "type": "object"
+      },
       "RotateApiKeySlot": {
         "additionalProperties": false,
         "properties": {
@@ -407,6 +4520,1146 @@
         "title": "RotateApiKeySlot",
         "type": "object"
       },
+      "RotateProjectKeyResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "current_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Step"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "is_idempotent": {
+            "title": "Is Idempotent",
+            "type": "boolean"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "project_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Uuid"
+          },
+          "queue_position": {
+            "title": "Queue Position",
+            "type": "integer"
+          },
+          "retry_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Of"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tenant_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Uuid"
+          },
+          "total_steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Steps"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "job_id",
+          "project",
+          "project_uuid",
+          "tenant_uuid",
+          "created_by",
+          "action",
+          "status",
+          "message",
+          "progress",
+          "current_step",
+          "total_steps",
+          "started_at",
+          "finished_at",
+          "error_code",
+          "is_idempotent",
+          "retryable",
+          "retry_of",
+          "attempt",
+          "created_at",
+          "updated_at",
+          "queue_position"
+        ],
+        "title": "RotateProjectKeyResponse",
+        "type": "object"
+      },
+      "SlotActivationResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "api_keyset_version": {
+            "title": "Api Keyset Version",
+            "type": "integer"
+          },
+          "key_id": {
+            "title": "Key Id",
+            "type": "string"
+          },
+          "slot_id": {
+            "title": "Slot Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot_id",
+          "key_id",
+          "status",
+          "api_keyset_version"
+        ],
+        "title": "SlotActivationResponse",
+        "type": "object"
+      },
+      "SlotCancelResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "api_keyset_version": {
+            "title": "Api Keyset Version",
+            "type": "integer"
+          },
+          "key_id": {
+            "title": "Key Id",
+            "type": "string"
+          },
+          "slot_id": {
+            "title": "Slot Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot_id",
+          "key_id",
+          "status",
+          "api_keyset_version"
+        ],
+        "title": "SlotCancelResponse",
+        "type": "object"
+      },
+      "SlotConfirmResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "api_keyset_version": {
+            "title": "Api Keyset Version",
+            "type": "integer"
+          },
+          "installation_confirmed": {
+            "title": "Installation Confirmed",
+            "type": "boolean"
+          },
+          "key_id": {
+            "title": "Key Id",
+            "type": "string"
+          },
+          "slot_id": {
+            "title": "Slot Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot_id",
+          "key_id",
+          "installation_confirmed",
+          "api_keyset_version"
+        ],
+        "title": "SlotConfirmResponse",
+        "type": "object"
+      },
+      "SlotItem": {
+        "additionalProperties": true,
+        "properties": {
+          "allowed_services": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Services",
+            "type": "array"
+          },
+          "automatic_rotation_blocked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Automatic Rotation Blocked At"
+          },
+          "automatic_rotation_enabled": {
+            "title": "Automatic Rotation Enabled",
+            "type": "boolean"
+          },
+          "automatic_rotation_last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Automatic Rotation Last Error"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "keys": {
+            "items": {
+              "$ref": "#/components/schemas/SlotKeyItem"
+            },
+            "title": "Keys",
+            "type": "array"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "rotation_interval_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rotation Interval Days"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "role",
+          "allowed_services",
+          "automatic_rotation_enabled",
+          "rotation_interval_days",
+          "automatic_rotation_blocked_at",
+          "automatic_rotation_last_error",
+          "status",
+          "created_at",
+          "keys"
+        ],
+        "title": "SlotItem",
+        "type": "object"
+      },
+      "SlotKeyItem": {
+        "additionalProperties": true,
+        "properties": {
+          "activate_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activate At"
+          },
+          "activated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activated At"
+          },
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed At"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "currently_accepted": {
+            "title": "Currently Accepted",
+            "type": "boolean"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "replaces_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replaces Key Id"
+          },
+          "revealed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revealed At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "rotation_trigger": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rotation Trigger"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "token_hint": {
+            "title": "Token Hint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "token_hint",
+          "status",
+          "currently_accepted",
+          "created_at",
+          "activate_at",
+          "expires_at",
+          "activated_at",
+          "revoked_at",
+          "last_used_at",
+          "revealed_at",
+          "confirmed_at",
+          "replaces_key_id",
+          "rotation_trigger"
+        ],
+        "title": "SlotKeyItem",
+        "type": "object"
+      },
+      "SlotListResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "api_keyset_version": {
+            "title": "Api Keyset Version",
+            "type": "integer"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "slots": {
+            "items": {
+              "$ref": "#/components/schemas/SlotItem"
+            },
+            "title": "Slots",
+            "type": "array"
+          }
+        },
+        "required": [
+          "project",
+          "api_keyset_version",
+          "slots"
+        ],
+        "title": "SlotListResponse",
+        "type": "object"
+      },
+      "SlotPolicyUpdateResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "api_keyset_version": {
+            "title": "Api Keyset Version",
+            "type": "integer"
+          },
+          "slot_id": {
+            "title": "Slot Id",
+            "type": "string"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "slot_id",
+          "api_keyset_version",
+          "updated"
+        ],
+        "title": "SlotPolicyUpdateResponse",
+        "type": "object"
+      },
+      "SlotRevokeResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "api_keyset_version": {
+            "title": "Api Keyset Version",
+            "type": "integer"
+          },
+          "slot_id": {
+            "title": "Slot Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot_id",
+          "status",
+          "api_keyset_version"
+        ],
+        "title": "SlotRevokeResponse",
+        "type": "object"
+      },
+      "StartProjectResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "current_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Step"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "is_idempotent": {
+            "title": "Is Idempotent",
+            "type": "boolean"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "project_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Uuid"
+          },
+          "queue_position": {
+            "title": "Queue Position",
+            "type": "integer"
+          },
+          "retry_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Of"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tenant_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Uuid"
+          },
+          "total_steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Steps"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "job_id",
+          "project",
+          "project_uuid",
+          "tenant_uuid",
+          "created_by",
+          "action",
+          "status",
+          "message",
+          "progress",
+          "current_step",
+          "total_steps",
+          "started_at",
+          "finished_at",
+          "error_code",
+          "is_idempotent",
+          "retryable",
+          "retry_of",
+          "attempt",
+          "created_at",
+          "updated_at",
+          "queue_position"
+        ],
+        "title": "StartProjectResponse",
+        "type": "object"
+      },
+      "StopProjectResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "current_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Step"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "is_idempotent": {
+            "title": "Is Idempotent",
+            "type": "boolean"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "project_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Uuid"
+          },
+          "queue_position": {
+            "title": "Queue Position",
+            "type": "integer"
+          },
+          "retry_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Of"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tenant_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Uuid"
+          },
+          "total_steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Steps"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "job_id",
+          "project",
+          "project_uuid",
+          "tenant_uuid",
+          "created_by",
+          "action",
+          "status",
+          "message",
+          "progress",
+          "current_step",
+          "total_steps",
+          "started_at",
+          "finished_at",
+          "error_code",
+          "is_idempotent",
+          "retryable",
+          "retry_of",
+          "attempt",
+          "created_at",
+          "updated_at",
+          "queue_position"
+        ],
+        "title": "StopProjectResponse",
+        "type": "object"
+      },
+      "StudioContextResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "anon_key": {
+            "title": "Anon Key",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "file_size_limit": {
+            "title": "File Size Limit",
+            "type": "integer"
+          },
+          "project_key_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Key Version"
+          },
+          "project_uuid": {
+            "title": "Project Uuid",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "tenant_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Uuid"
+          }
+        },
+        "required": [
+          "project_uuid",
+          "tenant_uuid",
+          "ref",
+          "display_name",
+          "role",
+          "anon_key",
+          "file_size_limit",
+          "project_key_version"
+        ],
+        "title": "StudioContextResponse",
+        "type": "object"
+      },
+      "TelemetryUserItem": {
+        "additionalProperties": true,
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "last_login_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Login At"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "session_count": {
+            "title": "Session Count",
+            "type": "integer"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "email",
+          "phone",
+          "last_login_at",
+          "session_count"
+        ],
+        "title": "TelemetryUserItem",
+        "type": "object"
+      },
       "TransferBody": {
         "properties": {
           "new_owner_id": {
@@ -418,6 +5671,67 @@
           "new_owner_id"
         ],
         "title": "TransferBody",
+        "type": "object"
+      },
+      "TransferResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "new_owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Owner Id"
+          },
+          "project": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "TransferResponse",
+        "type": "object"
+      },
+      "UnassignProjectTagResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "UnassignProjectTagResponse",
         "type": "object"
       },
       "UpdateApiKeySlotPolicy": {
@@ -463,6 +5777,120 @@
           }
         },
         "title": "UpdateApiKeySlotPolicy",
+        "type": "object"
+      },
+      "UpdateDisplayNameResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "display_name",
+          "status"
+        ],
+        "title": "UpdateDisplayNameResponse",
+        "type": "object"
+      },
+      "UpdateNotificationReadResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "read": {
+            "title": "Read",
+            "type": "boolean"
+          },
+          "read_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read At"
+          }
+        },
+        "required": [
+          "id",
+          "read",
+          "read_at"
+        ],
+        "title": "UpdateNotificationReadResponse",
+        "type": "object"
+      },
+      "UpdateProjectHintResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "UpdateProjectHintResponse",
+        "type": "object"
+      },
+      "UpdateProjectSettingsResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "affected_services": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Affected Services",
+            "type": "array"
+          },
+          "file_size_limit": {
+            "title": "File Size Limit",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "storage_limit_token": {
+            "title": "Storage Limit Token",
+            "type": "string"
+          },
+          "updated_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Updated Keys",
+            "type": "array"
+          }
+        },
+        "required": [
+          "status",
+          "updated_keys",
+          "affected_services",
+          "file_size_limit",
+          "storage_limit_token",
+          "message"
+        ],
+        "title": "UpdateProjectSettingsResponse",
         "type": "object"
       },
       "UpdateSettings": {
@@ -534,6 +5962,85 @@
           "username"
         ],
         "title": "UserSyncPayload",
+        "type": "object"
+      },
+      "UserSyncResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "groups": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "picture_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Picture Url"
+          },
+          "profile": {
+            "additionalProperties": true,
+            "title": "Profile",
+            "type": "object"
+          },
+          "profile_updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Updated At"
+          },
+          "profile_version": {
+            "title": "Profile Version",
+            "type": "integer"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "groups",
+          "is_active",
+          "email",
+          "picture_url",
+          "profile",
+          "profile_version",
+          "profile_updated_at"
+        ],
+        "title": "UserSyncResponse",
         "type": "object"
       },
       "ValidationError": {
@@ -610,7 +6117,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectsInfoResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -651,7 +6160,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AllUsersResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -911,7 +6422,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/JobListResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -952,7 +6465,9 @@
           "202": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/JobRetryResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -981,7 +6496,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectListItem"
+                  },
+                  "title": "Response List Projects Api Projects Get",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"
@@ -1008,7 +6529,9 @@
           "202": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/QueuedJobResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -1048,7 +6571,9 @@
           "202": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/QueuedJobResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -1345,7 +6870,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AuthUsersResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -1386,7 +6913,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ContentIdentityResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -1426,7 +6955,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/EncKeyResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -1466,7 +6997,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/KeyVersionResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -1507,7 +7040,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/StudioContextResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -1546,7 +7081,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/UserSyncResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -1586,7 +7123,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -1626,7 +7165,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MemberItem"
+                  },
+                  "title": "Response List Members By Ref Api Projects  Name  Members Get",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"
@@ -1676,9 +7221,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Remove Member By Ref Api Projects  Name  Members  Member Id  Delete",
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemoveMemberResponse"
                 }
               }
             },
@@ -1735,7 +7278,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/QueuedJobResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -1775,7 +7320,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/RevealListResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -1841,7 +7388,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/RevealClaimResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -1881,7 +7430,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SlotListResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -1945,7 +7496,9 @@
           "201": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/IssuedKeyResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -1995,7 +7548,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SlotRevokeResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -2053,7 +7608,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SlotPolicyUpdateResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -2119,7 +7676,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SlotActivationResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -2169,7 +7728,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SlotCancelResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -2243,7 +7804,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/IssuedKeyResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -2303,7 +7866,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SlotConfirmResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -2353,7 +7918,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AutomaticKeyRotationResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -2393,7 +7960,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/GetProjectCollaborationResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -2434,7 +8003,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectConfigTokenResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -2485,7 +8056,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateDisplayNameResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -2535,7 +8108,9 @@
           "201": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/CreateProjectHintResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -2594,7 +8169,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateProjectHintResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -2655,7 +8232,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ContainerLogsResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -2705,7 +8284,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AddMemberResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -2755,7 +8336,9 @@
           "201": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/CreateProjectNoteResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -2804,7 +8387,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteProjectNoteResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -2863,7 +8448,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateNotificationReadResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -2903,7 +8490,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationAbortResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -2941,7 +8530,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationStatusResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -2982,7 +8573,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationCutoverResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -3023,7 +8616,9 @@
           "201": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationPrepareResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -3064,7 +8659,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectQueueStatusResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -3115,7 +8712,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/RecreateProjectServicesResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -3166,7 +8765,9 @@
           "202": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/RenameProjectResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -3219,7 +8820,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRenameHistoryResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -3260,7 +8863,9 @@
           "202": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/RestartProjectResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -3300,7 +8905,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ListRestorePointsResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -3348,7 +8955,9 @@
           "202": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/CreateRestorePointResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -3397,7 +9006,9 @@
           "202": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteRestorePointResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -3446,7 +9057,9 @@
           "202": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/RestoreRestorePointResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -3487,7 +9100,9 @@
           "202": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/RotateProjectKeyResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -3527,7 +9142,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/GetProjectSettingsResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -3575,7 +9192,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateProjectSettingsResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -3616,7 +9235,9 @@
           "202": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/StartProjectResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -3656,7 +9277,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectStatusResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -3696,7 +9319,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/StopProjectResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -3737,7 +9362,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectS3VectorKeysResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -3787,7 +9414,9 @@
           "201": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AssignProjectTagResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -3836,7 +9465,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/UnassignProjectTagResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -3920,7 +9551,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectUserTelemetryResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -3970,7 +9603,9 @@
           "201": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/CreateThreadMessageResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -4020,7 +9655,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TransferResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -4072,7 +9709,14 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Execute Project Function Api Projects  Ref  Execute Function Post",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"
@@ -4112,7 +9756,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectAIFunctionItem"
+                  },
+                  "title": "Response Get Project Ai Functions Api Projects  Ref  Functions Get",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"

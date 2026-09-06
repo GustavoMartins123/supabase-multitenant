@@ -11,7 +11,7 @@ class StatusAndAvatarRegressionTests(unittest.TestCase):
         source = (
             ROOT / "servidor/api-internal/app/routers/lifecycle.py"
         ).read_text(encoding="utf-8")
-        start = source.index('@router.get("/api/projects/{project_name}/status")')
+        start = source.index('@router.get("/api/projects/{project_name}/status"')
         end = source.index("MAX_LOG_LINES = 1000", start)
         block = source[start:end]
         self.assertLess(
