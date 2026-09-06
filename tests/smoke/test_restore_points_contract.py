@@ -44,15 +44,18 @@ class RestorePointProtocolTest(unittest.TestCase):
 class RestorePointApiSurfaceTest(unittest.TestCase):
     def setUp(self) -> None:
         self.main_source = (API_ROOT / "app" / "main.py").read_text(encoding="utf-8")
+        self.router_source = (
+            API_ROOT / "app" / "routers" / "restore_points.py"
+        ).read_text(encoding="utf-8")
 
     def test_endpoints_exist(self) -> None:
         for route in (
-            '@app.get("/api/projects/{project_name}/restore-points")',
-            '@app.post("/api/projects/{project_name}/restore-points", status_code=202)',
+            '@router.get("/api/projects/{project_name}/restore-points")',
+            '@router.post("/api/projects/{project_name}/restore-points", status_code=202)',
             '"/api/projects/{project_name}/restore-points/{point_id}/restore"',
             '"/api/projects/{project_name}/restore-points/{point_id}"',
         ):
-            self.assertIn(route, self.main_source)
+            self.assertIn(route, self.router_source)
 
     def test_endpoints_apply_role_matrix_and_serialize_limit(self) -> None:
         self.assertIn("RESTORE_POINT_LIMIT = 15", self.main_source)
@@ -89,7 +92,7 @@ class RestorePointApiSurfaceTest(unittest.TestCase):
             self.main_source,
         )
         self.assertGreaterEqual(
-            self.main_source.count("job_id, created_by, project_ref_at_creation"),
+            self.router_source.count("job_id, created_by, project_ref_at_creation"),
             2,
         )
 

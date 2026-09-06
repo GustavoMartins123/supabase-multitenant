@@ -215,6 +215,9 @@ class ProjectIdentityMigrationTest(unittest.IsolatedAsyncioTestCase):
 class ProjectIdentitySourceContractTest(unittest.TestCase):
     def setUp(self) -> None:
         self.main = (API_ROOT / "app" / "main.py").read_text(encoding="utf-8")
+        self.projects = (
+            API_ROOT / "app" / "routers" / "projects.py"
+        ).read_text(encoding="utf-8")
         self.schema = (
             API_ROOT / "app" / "migrations" / "0001_control_plane_baseline.sql"
         ).read_text(encoding="utf-8")
@@ -223,13 +226,13 @@ class ProjectIdentitySourceContractTest(unittest.TestCase):
         # O invariante e id == tenant_uuid vindos do mesmo parametro; a
         # duplicacao usa INSERT ... SELECT para herdar o resource_profile
         # do original na mesma transacao.
-        same_uuid_inserts = self.main.count(
+        same_uuid_inserts = self.projects.count(
             "VALUES($1, $1, $2, $3"
-        ) + self.main.count("SELECT $1, $1, $2, $3")
+        ) + self.projects.count("SELECT $1, $1, $2, $3")
         self.assertGreaterEqual(same_uuid_inserts, 2)
-        self.assertIn("owner_id, resource_profile)", self.main)
+        self.assertIn("owner_id, resource_profile)", self.projects)
         self.assertGreaterEqual(
-            self.main.count('"tenant_uuid": str(project_id)'),
+            self.projects.count('"tenant_uuid": str(project_id)'),
             2,
         )
 

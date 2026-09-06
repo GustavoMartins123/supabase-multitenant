@@ -23,6 +23,13 @@ from app.main import (
     resolve_authenticated_user,
 )
 from app.routers.jobs_api import router as jobs_router
+from app.routers.project_insights import router as project_insights_router
+from app.routers.project_keys import router as project_keys_router
+from app.routers.project_lifecycle_ops import router as project_lifecycle_ops_router
+from app.routers.project_members import router as project_members_router
+from app.routers.project_rename import router as project_rename_router
+from app.routers.projects import router as projects_router
+from app.routers.restore_points import router as restore_points_router
 from app.validation import validate_project_id
 
 PROJECTS_ROOT = pathlib.Path("/docker/projects").resolve()
@@ -91,6 +98,13 @@ async def get_project_s3_vector_keys(
 
 
 app.include_router(jobs_router)
+app.include_router(projects_router)
+app.include_router(project_rename_router)
+app.include_router(restore_points_router)
+app.include_router(project_keys_router)
+app.include_router(project_members_router)
+app.include_router(project_lifecycle_ops_router)
+app.include_router(project_insights_router)
 
 # Registrado por ultimo para ser a camada mais externa: valida a identidade
 # criptografica do caller antes das rotas e dependencias da aplicacao.

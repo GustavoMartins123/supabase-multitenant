@@ -53,11 +53,12 @@ class BackendResourceProfileContract(unittest.TestCase):
                 self.assertIn(f'"{key}"', body[:4000])
 
     def test_main_persists_and_passes_profile_to_agent(self) -> None:
-        main = (APP / "main.py").read_text()
-        self.assertIn("owner_id, resource_profile)", main)
-        self.assertIn('"resource_profile": resource_profile,', main)
+        projects = (APP / "routers" / "projects.py").read_text()
+        ops = (APP / "routers" / "project_lifecycle_ops.py").read_text()
+        self.assertIn("owner_id, resource_profile)", projects)
+        self.assertIn('"resource_profile": resource_profile,', projects)
         self.assertIn(
-            'resolve_resource_limits(updates["PROJECT_RESOURCE_PROFILE"])', main
+            'resolve_resource_limits(updates["PROJECT_RESOURCE_PROFILE"])', ops
         )
 
     def test_worker_reads_the_persisted_profile(self) -> None:
@@ -82,7 +83,8 @@ class BackendResourceProfileContract(unittest.TestCase):
         isso um projeto `large` seria duplicado como `medium` em silencio.
         """
         main = (APP / "main.py").read_text()
-        self.assertIn("SELECT $1, $1, $2, $3, resource_profile", main)
+        projects = (APP / "routers" / "projects.py").read_text()
+        self.assertIn("SELECT $1, $1, $2, $3, resource_profile", projects)
         worker = main.split("async def _duplicate_and_store_keys", 1)[1]
         worker = worker.split("\nasync def ", 1)[0]
         self.assertIn("SELECT resource_profile FROM projects WHERE id = $1", worker)

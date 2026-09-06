@@ -56,6 +56,9 @@ class AutomaticRotationContractTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.main = (API_ROOT / "app" / "main.py").read_text(encoding="utf-8")
+        cls.keys = (API_ROOT / "app" / "routers" / "project_keys.py").read_text(
+            encoding="utf-8"
+        )
         cls.scheduler = (API_ROOT / "app" / "automatic_key_rotation.py").read_text(
             encoding="utf-8"
         )
@@ -86,10 +89,10 @@ class AutomaticRotationContractTest(unittest.TestCase):
         self.assertIn("automatic_key_rotation_blocked_at = now()", self.scheduler)
         self.assertIn("automatic_key_rotation_last_error", self.scheduler)
         self.assertIn(
-            '@app.put("/api/projects/{project_name}/automatic-key-rotation")',
-            self.main,
+            '@router.put("/api/projects/{project_name}/automatic-key-rotation")',
+            self.keys,
         )
-        self.assertIn("WHEN $2 THEN NULL", self.main)
+        self.assertIn("WHEN $2 THEN NULL", self.keys)
 
     def test_manual_and_automatic_rotation_share_the_canonical_runner(self) -> None:
         self.assertIn(

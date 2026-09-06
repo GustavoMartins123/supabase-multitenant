@@ -94,15 +94,18 @@ class KeyGenerationContractTest(unittest.TestCase):
         self.assertEqual(sorted(missing), [])
 
     def test_config_token_is_shared_but_not_used_as_admin_apikey(self):
-        main = (ROOT / "servidor" / "api-internal" / "app" / "main.py").read_text(
+        rename = (ROOT / "servidor" / "api-internal" / "app" / "routers" / "project_rename.py").read_text(
             encoding="utf-8"
         )
-        config_endpoint = main[
-            main.index("async def get_project_config_token") : main.index(
+        insights = (ROOT / "servidor" / "api-internal" / "app" / "routers" / "project_insights.py").read_text(
+            encoding="utf-8"
+        )
+        config_endpoint = rename[
+            rename.index("async def get_project_config_token") : rename.index(
                 "async def get_project_queue_status"
             )
         ]
-        meta_proxy = main[main.index("async def proxy_project_meta") :]
+        meta_proxy = insights[insights.index("async def proxy_project_meta") :]
         self.assertIn("ensure_project_member_access", config_endpoint)
         self.assertIn('column="service_role"', meta_proxy)
         self.assertNotIn('column="config_token"', meta_proxy)
@@ -198,6 +201,9 @@ class KeyGenerationContractTest(unittest.TestCase):
         self.assertIn("!nginx/nginx_*.conf", dockerignore)
 
     def test_opaque_key_status_and_collaboration_tabs_are_exposed(self):
+        projects = (
+            ROOT / "servidor" / "api-internal" / "app" / "routers" / "projects.py"
+        ).read_text(encoding="utf-8")
         main = (ROOT / "servidor" / "api-internal" / "app" / "main.py").read_text(
             encoding="utf-8"
         )
@@ -216,7 +222,7 @@ class KeyGenerationContractTest(unittest.TestCase):
             / "widgets"
             / "project_card.dart"
         ).read_text(encoding="utf-8")
-        self.assertIn('"opaque_api_keys_status"', main)
+        self.assertIn('"opaque_api_keys_status"', projects)
         self.assertNotIn('"anon_token"', main)
         self.assertIn("length: 5", dialog)
         self.assertIn("text: 'Tags'", dialog)

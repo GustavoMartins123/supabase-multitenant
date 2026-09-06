@@ -118,8 +118,9 @@ class UsersListingReaderContract(unittest.TestCase):
         self.assertIn("platform_reader", reader_body)
         self.assertIn("PLATFORM_READER_DB_PASSWORD", reader_body)
         self.assertNotIn("meta_guest", reader_body)
-        self.assertIn('meta_key.startswith("users")', self.main)
-        self.assertIn("get_project_reader_connection_string(ref)", self.main)
+        insights = (API / "routers" / "project_insights.py").read_text(encoding="utf-8")
+        self.assertIn('meta_key.startswith("users")', insights)
+        self.assertIn("get_project_reader_connection_string(ref)", insights)
 
     def test_dedicated_users_route_reads_via_platform_reader(self) -> None:
         self.assertIn("/api/projects/internal/auth-users/{project_name}", self.router)
