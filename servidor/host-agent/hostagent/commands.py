@@ -641,6 +641,31 @@ async def handle_stage_opaque_gateway(
 
     ctx.state.report(
         progress=15,
+        step="render_opaque_gateway",
+        message="Materializando configuracao exclusiva para chaves opacas...",
+    )
+    try:
+        sync_project_generated_files(
+            root=ctx.config.root,
+            scripts_dir=ctx.config.scripts_dir,
+            project_dir=project_dir,
+            project=project,
+        )
+    except RuntimeError as exc:
+        return CommandOutcome(
+            status="failed",
+            error_code="opaque_gateway_render_failed",
+            message=str(exc),
+        )
+    if ctx.state.abort.is_set():
+        return CommandOutcome(
+            status="failed",
+            error_code="lease_lost",
+            message="Lease perdido durante a execucao; processo interrompido.",
+        )
+
+    ctx.state.report(
+        progress=40,
         step="stop_legacy_gateway",
         message="Parando gateway legado antes do corte opaco...",
     )
@@ -653,9 +678,23 @@ async def handle_stage_opaque_gateway(
         ctx,
         cwd=project_dir,
     )
-    if stop_result.timed_out:
+    ctx.state.report(
+        progress=70,
+        step="start_opaque_gateway",
+        message="Religando gateway com a configuracao de chaves opacas...",
+    )
+    start_result = await run_process(
+        [
+            "docker", "compose", "-p", project,
+            "--env-file", "../../.env", "--env-file", ".env",
+            "start", "nginx",
+        ],
+        ctx,
+        cwd=project_dir,
+    )
+    if stop_result.timed_out or start_result.timed_out:
         return CommandOutcome(
-            status="failed", error_code="timeout", exit_code=stop_result.returncode
+            status="failed", error_code="timeout", exit_code=start_result.returncode
         )
     if stop_result.returncode != 0:
         return CommandOutcome(
@@ -664,22 +703,17 @@ async def handle_stage_opaque_gateway(
             exit_code=stop_result.returncode,
             message="Nao foi possivel parar o gateway legado.",
         )
-
-    ctx.state.report(
-        progress=55,
-        step="render_opaque_gateway",
-        message="Materializando configuracao exclusiva para chaves opacas...",
-    )
-    sync_project_generated_files(
-        root=ctx.config.root,
-        scripts_dir=ctx.config.scripts_dir,
-        project_dir=project_dir,
-        project=project,
-    )
+    if start_result.returncode != 0:
+        return CommandOutcome(
+            status="failed",
+            error_code="legacy_gateway_restart_failed",
+            exit_code=start_result.returncode,
+            message="Gateway parado e nao foi possivel religa-lo; verifique o nginx do projeto.",
+        )
     return CommandOutcome(
         status="done",
         exit_code=0,
-        result={"legacy_gateway_stopped": True, "opaque_gateway_staged": True},
+        result={"legacy_gateway_stopped": False, "opaque_gateway_staged": True},
     )
 
 

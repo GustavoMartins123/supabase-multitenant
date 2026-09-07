@@ -603,6 +603,7 @@ class HmacSignatureTest(unittest.TestCase):
         requested_by="2b671a64-40d5-491e-99b0-da01ff1f3342",
         args={},
         issued_at=1_752_000_000,
+        timeout_seconds=600,
     )
 
     def test_roundtrip(self) -> None:
@@ -619,6 +620,7 @@ class HmacSignatureTest(unittest.TestCase):
             "requested_by": "3b671a64-40d5-491e-99b0-da01ff1f3343",
             "args": {"services": ["nginx"]},
             "issued_at": 1_752_000_001,
+            "timeout_seconds": 1,
         }
         for field, value in tampered_cases.items():
             with self.subTest(field=field):

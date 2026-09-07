@@ -7,7 +7,9 @@ Dockerfile e docker-compose do projeto durante o recreate.
 
 from __future__ import annotations
 
+import os
 import re
+import tempfile
 from pathlib import Path
 
 from .envfile import read_canonical_env_value
@@ -37,7 +39,26 @@ def _render_template(template_path: Path, output_path: Path, replacements: dict[
             + ", ".join(unresolved)
         )
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(content, encoding="utf-8")
+    try:
+        existing_mode = output_path.stat().st_mode & 0o777 if output_path.is_file() else 0o600
+    except OSError:
+        existing_mode = 0o600
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{output_path.name}.", suffix=".tmp", dir=output_path.parent
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary_name, existing_mode)
+        os.replace(temporary_name, output_path)
+    except Exception:
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def _build_replacements(root: Path, project_dir: Path, project: str) -> dict[str, str]:

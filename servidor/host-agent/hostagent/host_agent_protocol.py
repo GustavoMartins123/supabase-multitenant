@@ -25,7 +25,7 @@ import re
 import time
 from typing import Any
 
-PROTOCOL_VERSION = "v1"
+PROTOCOL_VERSION = "v2"
 NOTIFY_CHANNEL = "host_agent_commands"
 OUTPUT_TAIL_LIMIT = 8_000
 CONTAINER_LOGS_LIMIT = 256_000
@@ -292,6 +292,7 @@ def command_signature(
     requested_by: str | None,
     args: dict[str, Any] | None,
     issued_at: int,
+    timeout_seconds: int,
 ) -> str:
     """Assina os campos imutaveis de uma intencao gravada no banco."""
     message = "\n".join(
@@ -304,6 +305,7 @@ def command_signature(
             str(requested_by or ""),
             canonical_args_hash(args),
             str(int(issued_at)),
+            str(int(timeout_seconds)),
         )
     )
     return hmac.new(
@@ -322,6 +324,7 @@ def verify_command_signature(
     requested_by: str | None,
     args: dict[str, Any] | None,
     issued_at: int,
+    timeout_seconds: int,
 ) -> bool:
     expected = command_signature(
         secret,
@@ -332,6 +335,7 @@ def verify_command_signature(
         requested_by=requested_by,
         args=args,
         issued_at=issued_at,
+        timeout_seconds=timeout_seconds,
     )
     return hmac.compare_digest(expected, provided_signature or "")
 

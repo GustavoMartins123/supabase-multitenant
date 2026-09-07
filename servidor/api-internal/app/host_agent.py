@@ -99,6 +99,7 @@ async def submit_command(
         requested_by=str(requested_by) if requested_by else None,
         args=args,
         issued_at=issued_at,
+        timeout_seconds=timeout,
     )
     async with pool.acquire() as conn:
         await conn.execute(

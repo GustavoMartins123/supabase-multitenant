@@ -33,7 +33,6 @@ from .commands import (
 )
 from .config import AgentConfig
 from .host_agent_protocol import (
-    COMMAND_TIMEOUTS,
     HOST_AGENT_COMMANDS,
     NOTIFY_CHANNEL,
     evaluate_authorization,
@@ -273,7 +272,7 @@ class HostAgent:
             return
 
         state = RunningCommandState()
-        timeout_seconds = int(record["timeout_seconds"] or COMMAND_TIMEOUTS[command])
+        timeout_seconds = int(record["timeout_seconds"])
         ctx = CommandContext(
             config=self.config,
             state=state,
@@ -399,6 +398,7 @@ class HostAgent:
             requested_by=str(record["requested_by"]) if record["requested_by"] else None,
             args=args,
             issued_at=record["issued_at"],
+            timeout_seconds=int(record["timeout_seconds"]),
         ):
             return ("signature_invalid", "Assinatura HMAC da intencao nao confere.")
 
