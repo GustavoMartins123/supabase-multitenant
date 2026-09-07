@@ -176,6 +176,9 @@ async def rename_project(
 
     auth_user = await resolve_authenticated_user(request, pool)
 
+    display_name_changed = False
+    previous_display: str | None = None
+
     async with pool.acquire() as conn:
         async with conn.transaction():
             project_row = await get_project_row(conn, project_name)
@@ -183,6 +186,10 @@ async def rename_project(
             await conn.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
                 str(project_id),
+            )
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                f"project-name:{new_name}",
             )
             await ensure_project_admin_access(
                 conn,
@@ -197,6 +204,21 @@ async def rename_project(
             )
             if collision:
                 raise HTTPException(409, f"Já existe um projeto com nome '{new_name}'")
+
+            reserved_destination = await conn.fetchval(
+                """
+                SELECT 1
+                FROM project_name_history
+                WHERE new_name = $1
+                  AND status IN ('queued', 'running')
+                LIMIT 1
+                """,
+                new_name,
+            )
+            if reserved_destination:
+                raise HTTPException(
+                    409, f"Ja existe uma renomeacao ativa para o nome '{new_name}'"
+                )
 
             active_rename = await conn.fetchval(
                 """
@@ -258,6 +280,7 @@ async def rename_project(
             if display_name_raw:
                 current_display = project_row["display_name"]
                 if current_display != display_name_raw:
+                    previous_display = current_display
                     await conn.execute(
                         "UPDATE projects SET display_name = $1 WHERE id = $2",
                         display_name_raw,
@@ -273,6 +296,7 @@ async def rename_project(
                         old_value={"display_name": current_display},
                         new_value={"display_name": display_name_raw},
                     )
+                    display_name_changed = True
 
     try:
         position = await _enqueue_project_action(
@@ -310,6 +334,26 @@ async def rename_project(
                     "failed",
                     error="queue_submit_failed",
                 )
+                if display_name_changed:
+                    await conn.execute(
+                        """
+                        UPDATE projects SET display_name = $1
+                        WHERE id = $2 AND display_name = $3
+                        """,
+                        previous_display,
+                        project_id,
+                        display_name_raw,
+                    )
+                    await audit_studio_action(
+                        conn,
+                        project_id=project_id,
+                        actor_user_id=auth_user["db_user_id"],
+                        action="project_display_name_changed",
+                        target_type="project",
+                        target_id=project_name,
+                        old_value={"display_name": display_name_raw},
+                        new_value={"display_name": previous_display},
+                    )
         raise HTTPException(503, "Nao foi possivel enfileirar a renomeacao") from exc
 
     message = (

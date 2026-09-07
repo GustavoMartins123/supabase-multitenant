@@ -1,3 +1,4 @@
+import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -15,6 +16,7 @@ from app.host_agent import worker_alive as host_agent_alive
 from app.jobs import (
     create_project_job as _create_project_job,
     enqueue_project_action as _enqueue_project_action,
+    find_active_project_job as _find_active_project_job,
 )
 from app.main import (
     ALLOWED_RECREATE_SERVICES,
@@ -45,6 +47,50 @@ from app.schemas import RecreateServices, UpdateSettings
 from app.validation import validate_project_id
 
 router = APIRouter(tags=["lifecycle-ops"])
+
+
+def _same_services(existing: Any, match_services: set[str] | None) -> bool:
+    if match_services is None:
+        return True
+    payload = existing["payload"] or {}
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    if not isinstance(payload, dict):
+        return False
+    return set(payload.get("services", [])) == match_services
+
+
+async def _create_lifecycle_job_deduped(
+    pool,
+    project_name: str,
+    auth_user: dict,
+    *,
+    action: str,
+    payload: dict,
+    total_steps: int,
+    message: str,
+    match_services: set[str] | None = None,
+) -> tuple[str, bool]:
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                f"lifecycle-job:{project_name}:{action}",
+            )
+            existing = await _find_active_project_job(conn, project_name, action)
+            if existing is not None and _same_services(existing, match_services):
+                return str(existing["job_id"]), True
+            job_id = await _create_project_job(
+                pool,
+                project_name,
+                auth_user["db_user_id"],
+                message=message,
+                action=action,
+                payload=payload,
+                total_steps=total_steps,
+                connection=conn,
+            )
+            return job_id, False
 
 
 class StopProjectResponse(BaseModel):
@@ -183,15 +229,26 @@ async def stop_project(
             raise HTTPException(503, "Host-agent offline; estado dos containers indisponivel")
         raise HTTPException(404, "No containers found for this project")
 
-    job_id = await _create_project_job(
+    job_id, deduped = await _create_lifecycle_job_deduped(
         pool,
         project_name,
-        auth_user["db_user_id"],
-        message="Parada enfileirada.",
+        auth_user,
         action="stop",
         payload={"project_name": project_name},
         total_steps=max(len(containers), 1),
+        message="Parada enfileirada.",
     )
+    if deduped:
+        return JSONResponse(
+            status_code=200,
+            content=await _serialize_queued_job(
+                pool,
+                job_id,
+                0,
+                "Ja existe uma parada em andamento para este projeto; "
+                "acompanhando o job existente.",
+            ),
+        )
     position = await _enqueue_project_action(
         project_name,
         job_id,
@@ -233,18 +290,29 @@ async def start_project(
             raise HTTPException(503, "Host-agent offline; estado dos containers indisponivel")
         raise HTTPException(404, "No containers found for this project")
 
-    job_id = await _create_project_job(
+    job_id, deduped = await _create_lifecycle_job_deduped(
         pool,
         project_name,
-        auth_user["db_user_id"],
-        message="Inicialização enfileirada.",
+        auth_user,
         action="start",
         payload={
             "project_name": project_name,
             "actor_user_id": str(auth_user["db_user_id"]),
         },
         total_steps=max(len(containers), 1),
+        message="Inicialização enfileirada.",
     )
+    if deduped:
+        return JSONResponse(
+            status_code=200,
+            content=await _serialize_queued_job(
+                pool,
+                job_id,
+                0,
+                "Ja existe uma inicializacao em andamento para este projeto; "
+                "acompanhando o job existente.",
+            ),
+        )
     position = await _enqueue_project_action(
         project_name,
         job_id,
@@ -284,18 +352,29 @@ async def restart_project(
             raise HTTPException(503, "Host-agent offline; estado dos containers indisponivel")
         raise HTTPException(404, "No containers found for this project")
 
-    job_id = await _create_project_job(
+    job_id, deduped = await _create_lifecycle_job_deduped(
         pool,
         project_name,
-        auth_user["db_user_id"],
-        message="Reinicialização enfileirada.",
+        auth_user,
         action="restart",
         payload={
             "project_name": project_name,
             "actor_user_id": str(auth_user["db_user_id"]),
         },
         total_steps=max(len(containers), 1),
+        message="Reinicialização enfileirada.",
     )
+    if deduped:
+        return JSONResponse(
+            status_code=200,
+            content=await _serialize_queued_job(
+                pool,
+                job_id,
+                0,
+                "Ja existe uma reinicializacao em andamento para este projeto; "
+                "acompanhando o job existente.",
+            ),
+        )
     position = await _enqueue_project_action(
         project_name,
         job_id,
@@ -437,15 +516,27 @@ async def recreate_project_services(
         )
 
     services = body.services
-    job_id = await _create_project_job(
+    job_id, deduped = await _create_lifecycle_job_deduped(
         pool,
         project_name,
-        auth_user["db_user_id"],
-        message="Recriação enfileirada.",
+        auth_user,
         action="recreate_services",
         payload={"project_name": project_name, "services": services},
         total_steps=2,
+        message="Recriação enfileirada.",
+        match_services=set(services),
     )
+    if deduped:
+        return JSONResponse(
+            status_code=200,
+            content=await _serialize_queued_job(
+                pool,
+                job_id,
+                0,
+                "Ja existe uma recriacao destes servicos em andamento para "
+                "este projeto; acompanhando o job existente.",
+            ),
+        )
     position = await _enqueue_project_action(
         project_name,
         job_id,

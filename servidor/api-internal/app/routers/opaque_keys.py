@@ -358,8 +358,27 @@ async def abort_opaque_api_key_migration(
     auth_user, project = await _authorize_project_admin(
         request, pool, project_name
     )
+    conn = await pool.acquire()
+    owns_lock = False
+    project = None
     try:
-        async with pool.acquire() as conn:
+        project = await get_project_row(conn, project_name)
+        await ensure_project_admin_access(
+            conn,
+            project_id=project["id"],
+            auth_user=auth_user,
+            message="Project admin permission changed during migration abort",
+        )
+        lock_name = _migration_lock_name(project["id"])
+        owns_lock = await conn.fetchval(
+            "SELECT pg_try_advisory_lock(hashtextextended($1, 0))",
+            lock_name,
+        )
+        if not owns_lock:
+            raise HTTPException(
+                409, "Opaque API key migration is already running"
+            )
+        try:
             async with conn.transaction():
                 project = await get_project_row(conn, project_name)
                 await ensure_project_admin_access(
@@ -380,13 +399,22 @@ async def abort_opaque_api_key_migration(
                     target_id=project_name,
                     new_value={"api_keyset_version": version},
                 )
-    except OpaqueKeyLifecycleError as exc:
-        raise HTTPException(409, str(exc)) from exc
-    return {
-        "project": project_name,
-        "status": "legacy",
-        "api_keyset_version": version,
-    }
+        except OpaqueKeyLifecycleError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {
+            "project": project_name,
+            "status": "legacy",
+            "api_keyset_version": version,
+        }
+    finally:
+        try:
+            if owns_lock and project is not None:
+                await conn.fetchval(
+                    "SELECT pg_advisory_unlock(hashtextextended($1, 0))",
+                    _migration_lock_name(project["id"]),
+                )
+        finally:
+            await pool.release(conn)
 
 
 class CreateApiKeySlot(OpaqueKeyRequest):

@@ -154,6 +154,24 @@ async def create_project_job(
     return str(job_id)
 
 
+async def find_active_project_job(
+    conn: asyncpg.Connection,
+    project_name: str,
+    action: str,
+) -> asyncpg.Record | None:
+    return await conn.fetchrow(
+        """
+        SELECT * FROM jobs
+        WHERE project = $1 AND action = $2
+          AND status IN ('queued', 'running')
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        project_name,
+        action,
+    )
+
+
 async def create_retry_job(
     pool: asyncpg.Pool,
     source_job_id: uuid.UUID,

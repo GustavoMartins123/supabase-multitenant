@@ -337,13 +337,28 @@ async def create_project_restore_point(
                 project_name,
             )
 
-    position = await _enqueue_project_action(
-        project_name,
-        job_id,
-        lambda: _create_restore_point_background(
-            job_id, project_name, auth_user["db_user_id"], point_id
-        ),
-    )
+    try:
+        position = await _enqueue_project_action(
+            project_name,
+            job_id,
+            lambda: _create_restore_point_background(
+                job_id, project_name, auth_user["db_user_id"], point_id
+            ),
+        )
+    except Exception as exc:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE project_restore_points
+                SET status = 'failed', error = $2, updated_at = now()
+                WHERE id = $1 AND status = 'creating'
+                """,
+                point_id,
+                "Nao foi possivel enfileirar a criacao do ponto.",
+            )
+        raise HTTPException(
+            503, "Nao foi possivel enfileirar a criacao do ponto"
+        ) from exc
     message = (
         "Criação do ponto de restauração enfileirada."
         if position == 0
@@ -456,17 +471,41 @@ async def restore_project_restore_point(
                 uuid.UUID(job_id),
             )
 
-    position = await _enqueue_project_action(
-        project_name,
-        job_id,
-        lambda: _restore_project_background(
-            job_id,
+    try:
+        position = await _enqueue_project_action(
             project_name,
-            auth_user["db_user_id"],
-            parsed_point,
-            safety_point_id,
-        ),
-    )
+            job_id,
+            lambda: _restore_project_background(
+                job_id,
+                project_name,
+                auth_user["db_user_id"],
+                parsed_point,
+                safety_point_id,
+            ),
+        )
+    except Exception as exc:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    """
+                    UPDATE project_restore_points
+                    SET status = 'failed', error = $2, updated_at = now()
+                    WHERE id = $1 AND status = 'creating'
+                    """,
+                    safety_point_id,
+                    "Nao foi possivel enfileirar a restauracao.",
+                )
+                await conn.execute(
+                    """
+                    UPDATE project_restore_points
+                    SET status = 'ready', error = NULL, updated_at = now()
+                    WHERE id = $1 AND status = 'restoring'
+                    """,
+                    parsed_point,
+                )
+        raise HTTPException(
+            503, "Nao foi possivel enfileirar a restauracao"
+        ) from exc
     message = (
         "Restauração enfileirada. O projeto ficará indisponível durante o processo."
         if position == 0
@@ -526,6 +565,7 @@ async def delete_project_restore_point(
                     f"Ponto de restauração em estado '{point['status']}'; "
                     "aguarde a operação atual terminar.",
                 )
+            previous_status = point["status"]
             job_id = await _create_project_job(
                 pool,
                 project_name,
@@ -556,13 +596,28 @@ async def delete_project_restore_point(
                 uuid.UUID(job_id),
             )
 
-    position = await _enqueue_project_action(
-        project_name,
-        job_id,
-        lambda: _delete_restore_point_background(
-            job_id, project_name, auth_user["db_user_id"], parsed_point
-        ),
-    )
+    try:
+        position = await _enqueue_project_action(
+            project_name,
+            job_id,
+            lambda: _delete_restore_point_background(
+                job_id, project_name, auth_user["db_user_id"], parsed_point
+            ),
+        )
+    except Exception as exc:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE project_restore_points
+                SET status = $2, updated_at = now()
+                WHERE id = $1 AND status = 'deleting'
+                """,
+                parsed_point,
+                previous_status,
+            )
+        raise HTTPException(
+            503, "Nao foi possivel enfileirar a exclusao do ponto"
+        ) from exc
     return JSONResponse(
         status_code=202,
         content=await _serialize_queued_job(
