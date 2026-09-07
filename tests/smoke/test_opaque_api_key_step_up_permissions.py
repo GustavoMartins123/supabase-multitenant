@@ -72,6 +72,35 @@ class OpaqueApiKeyStepUpPermissionContractTest(unittest.TestCase):
             self.assertIn("ensure_project_admin_access", source)
             self.assertIn('alias="X-Step-Up-Token"', source)
 
+    def test_secret_policy_cancel_and_revoke_require_step_up(self) -> None:
+        update = self.function_source("update_api_key_slot_policy")
+        cancel = self.function_source("cancel_api_key_slot_rotation")
+        revoke = self.function_source("revoke_api_key_slot")
+        for source in (update, cancel, revoke):
+            self.assertIn("ensure_project_admin_access", source)
+            self.assertIn('alias="X-Step-Up-Token"', source)
+            self.assertIn('slot_kind == "secret"', source)
+            self.assertIn("consume_step_up_grant", source)
+        self.assertIn('action="update_secret_key_policy"', update)
+        self.assertIn('action="cancel_secret_key_rotation"', cancel)
+        self.assertIn('action="revoke_secret_key"', revoke)
+        self.assertLess(
+            update.index('slot_kind == "secret"'),
+            update.index("consume_step_up_grant"),
+        )
+        self.assertLess(
+            update.index("consume_step_up_grant"),
+            update.index("update_slot_policy("),
+        )
+        self.assertLess(
+            cancel.index("consume_step_up_grant"),
+            cancel.index("cancel_pending_key("),
+        )
+        self.assertLess(
+            revoke.index("consume_step_up_grant"),
+            revoke.index("disable_slot("),
+        )
+
     def test_gateway_reauthenticates_current_identity_without_forwarding_cookie(self) -> None:
         self.assertIn("location = /api/security/step-up", self.nginx)
         self.assertIn("client_max_body_size 4k;", self.nginx)

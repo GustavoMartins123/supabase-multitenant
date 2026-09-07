@@ -271,13 +271,52 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
       'Todas as versoes desse slot serao revogadas. Os demais slots nao serao alterados.',
     );
     if (!confirmed) return;
-    await _runCommand(() => _controller.disableSlot(slot.id));
+    try {
+      String? stepUpToken;
+      if (slot.kind == 'secret') {
+        stepUpToken = await _requestStepUp(
+          action: StepUpAction.revokeSecretKey,
+          resourceId: slot.id,
+          title: 'Reautenticar para revogar secret key',
+          description:
+              'A revogacao invalida todas as versoes desta secret key.',
+        );
+        if (stepUpToken == null || !mounted) return;
+      }
+      await _runCommand(
+        () => _controller.disableSlot(
+          slot.id,
+          stepUpToken: stepUpToken,
+        ),
+      );
+    } catch (error) {
+      _showError(error);
+    }
   }
 
   Future<void> _toggleAutomatic(OpaqueApiKeySlot slot, bool enabled) async {
-    await _runCommand(
-      () => _controller.updateAutomaticRotation(slot.id, enabled),
-    );
+    try {
+      String? stepUpToken;
+      if (slot.kind == 'secret') {
+        stepUpToken = await _requestStepUp(
+          action: StepUpAction.updateSecretKeyPolicy,
+          resourceId: slot.id,
+          title: 'Reautenticar para alterar policy da secret key',
+          description:
+              'A alteracao afeta rotacao automatica e escopo desta secret key.',
+        );
+        if (stepUpToken == null || !mounted) return;
+      }
+      await _runCommand(
+        () => _controller.updateAutomaticRotation(
+          slot.id,
+          enabled,
+          stepUpToken: stepUpToken,
+        ),
+      );
+    } catch (error) {
+      _showError(error);
+    }
   }
 
   Future<void> _editExpirationPolicy(OpaqueApiKeySlot slot) async {
@@ -303,12 +342,31 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
               'alteração. Uma chave já vencida não será reativada.',
     );
     if (!confirmed) return;
-    await _runCommand(
-      () => _controller.updateExpirationPolicy(slot.id, selection.days),
-      successMessage: neverExpires
-          ? 'A chave ativa agora não expira.'
-          : 'Expiração temporal atualizada.',
-    );
+    try {
+      String? stepUpToken;
+      if (slot.kind == 'secret') {
+        stepUpToken = await _requestStepUp(
+          action: StepUpAction.updateSecretKeyPolicy,
+          resourceId: slot.id,
+          title: 'Reautenticar para alterar expiracao da secret key',
+          description:
+              'A alteracao afeta a validade temporal desta secret key.',
+        );
+        if (stepUpToken == null || !mounted) return;
+      }
+      await _runCommand(
+        () => _controller.updateExpirationPolicy(
+          slot.id,
+          selection.days,
+          stepUpToken: stepUpToken,
+        ),
+        successMessage: neverExpires
+            ? 'A chave ativa agora não expira.'
+            : 'Expiração temporal atualizada.',
+      );
+    } catch (error) {
+      _showError(error);
+    }
   }
 
   Future<void> _cancelPendingRotation(OpaqueApiKeySlot slot) async {
@@ -318,10 +376,28 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           'de expiração atual.',
     );
     if (!confirmed) return;
-    await _runCommand(
-      () => _controller.cancelPendingRotation(slot.id),
-      successMessage: 'Rotação pendente cancelada.',
-    );
+    try {
+      String? stepUpToken;
+      if (slot.kind == 'secret') {
+        stepUpToken = await _requestStepUp(
+          action: StepUpAction.cancelSecretKeyRotation,
+          resourceId: slot.id,
+          title: 'Reautenticar para cancelar rotacao da secret key',
+          description:
+              'O cancelamento revoga a chave pendente desta secret key.',
+        );
+        if (stepUpToken == null || !mounted) return;
+      }
+      await _runCommand(
+        () => _controller.cancelPendingRotation(
+          slot.id,
+          stepUpToken: stepUpToken,
+        ),
+        successMessage: 'Rotação pendente cancelada.',
+      );
+    } catch (error) {
+      _showError(error);
+    }
   }
 
   Future<void> _createSlot() async {

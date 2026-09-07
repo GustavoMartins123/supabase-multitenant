@@ -534,6 +534,7 @@ and uses its own rotation until a fully coordinated migration.
 | `OK-SEC-013` | A member can view/generate claims only for `publishable` | covered by server-side filter and widget test |
 | `OK-SEC-014` | Plaintext `secret` requires admin and action/session-bound step-up | covered by Python/Lua/Flutter contract |
 | `OK-SEC-015` | Step-up grant is short-lived, one-time, and does not replace `X-User-Token` | covered by HMAC domain, prefix, and PostgreSQL ledger |
+| `OK-SEC-016` | `secret` policy change, rotation cancellation, and revocation require admin and action/session-bound step-up | covered by Python/Lua/Flutter contract |
 | `OK-FUN-001` | Project maintains multiple independent slots | implemented |
 | `OK-FUN-002` | Revoking one slot does not affect the others | implemented |
 | `OK-FUN-003` | supabase-js works before/after login | E2E pending |
@@ -548,7 +549,7 @@ and uses its own rotation until a fully coordinated migration.
 
 ## 13. Deferred decisions
 
-- extend step-up to restore, revocation, policy changes, and other destructive
+- extend step-up to restore and other destructive
   actions that do not reveal plaintext;
 - decide whether a future elevated window will allow multiple actions instead of
   the current strictly bound, one-time grants;

@@ -408,6 +408,7 @@ class ProjectRepository {
     bool? automaticRotationEnabled,
     OpaqueApiKeyExpirationPolicyUpdate? expirationPolicy,
     List<String>? allowedServices,
+    String? stepUpToken,
   }) async {
     final slotPolicyBody = generated.UpdateApiKeySlotPolicy(
       automaticRotationEnabled: automaticRotationEnabled,
@@ -425,22 +426,39 @@ class ProjectRepository {
     }
     final resp = await _client.patch(
       Uri.parse('/api/projects/$ref/api-key-slots/$slotId'),
-      headers: {'Content-Type': 'application/json'},
+      headers: {
+        'Content-Type': 'application/json',
+        if (stepUpToken != null) 'X-Step-Up-Token': stepUpToken,
+      },
       body: jsonEncode(slotPolicyBody),
     );
     _ensureCommandSucceeded(resp);
   }
 
-  Future<void> disableOpaqueApiKeySlot(String ref, String slotId) async {
+  Future<void> disableOpaqueApiKeySlot(
+    String ref,
+    String slotId, {
+    String? stepUpToken,
+  }) async {
     final resp = await _client.delete(
       Uri.parse('/api/projects/$ref/api-key-slots/$slotId'),
+      headers: {
+        if (stepUpToken != null) 'X-Step-Up-Token': stepUpToken,
+      },
     );
     _ensureCommandSucceeded(resp);
   }
 
-  Future<void> cancelOpaqueApiKeyRotation(String ref, String slotId) async {
+  Future<void> cancelOpaqueApiKeyRotation(
+    String ref,
+    String slotId, {
+    String? stepUpToken,
+  }) async {
     final resp = await _client.delete(
       Uri.parse('/api/projects/$ref/api-key-slots/$slotId/rotation'),
+      headers: {
+        if (stepUpToken != null) 'X-Step-Up-Token': stepUpToken,
+      },
     );
     _ensureCommandSucceeded(resp);
   }

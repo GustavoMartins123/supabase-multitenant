@@ -8,7 +8,10 @@ enum StepUpAction {
   deleteProject('delete_project'),
   revealSecretKey('reveal_secret_key'),
   createSecretKey('create_secret_key'),
-  rotateSecretKey('rotate_secret_key');
+  rotateSecretKey('rotate_secret_key'),
+  updateSecretKeyPolicy('update_secret_key_policy'),
+  cancelSecretKeyRotation('cancel_secret_key_rotation'),
+  revokeSecretKey('revoke_secret_key');
 
   const StepUpAction(this.wireValue);
 

@@ -234,15 +234,27 @@ final class OpaqueApiKeysController extends AsyncNotifier<OpaqueApiKeysState> {
         ),
       );
 
-  Future<void> disableSlot(String slotId) => _runAndSynchronize(
+  Future<void> disableSlot(
+    String slotId, {
+    String? stepUpToken,
+  }) =>
+      _runAndSynchronize(
         OpaqueApiKeyOperation.slot(
           OpaqueApiKeyOperationKind.disableSlot,
           slotId,
         ),
-        (repository) => repository.disableOpaqueApiKeySlot(projectRef, slotId),
+        (repository) => repository.disableOpaqueApiKeySlot(
+          projectRef,
+          slotId,
+          stepUpToken: stepUpToken,
+        ),
       );
 
-  Future<void> updateAutomaticRotation(String slotId, bool enabled) =>
+  Future<void> updateAutomaticRotation(
+    String slotId,
+    bool enabled, {
+    String? stepUpToken,
+  }) =>
       _runAndSynchronize(
         OpaqueApiKeyOperation.slot(
           OpaqueApiKeyOperationKind.updateAutomaticRotation,
@@ -252,10 +264,15 @@ final class OpaqueApiKeysController extends AsyncNotifier<OpaqueApiKeysState> {
           projectRef,
           slotId,
           automaticRotationEnabled: enabled,
+          stepUpToken: stepUpToken,
         ),
       );
 
-  Future<void> updateExpirationPolicy(String slotId, int? days) =>
+  Future<void> updateExpirationPolicy(
+    String slotId,
+    int? days, {
+    String? stepUpToken,
+  }) =>
       _runAndSynchronize(
         OpaqueApiKeyOperation.slot(
           OpaqueApiKeyOperationKind.updateExpirationPolicy,
@@ -266,16 +283,24 @@ final class OpaqueApiKeysController extends AsyncNotifier<OpaqueApiKeysState> {
           slotId,
           automaticRotationEnabled: days == null ? false : null,
           expirationPolicy: OpaqueApiKeyExpirationPolicyUpdate(days),
+          stepUpToken: stepUpToken,
         ),
       );
 
-  Future<void> cancelPendingRotation(String slotId) => _runAndSynchronize(
+  Future<void> cancelPendingRotation(
+    String slotId, {
+    String? stepUpToken,
+  }) =>
+      _runAndSynchronize(
         OpaqueApiKeyOperation.slot(
           OpaqueApiKeyOperationKind.cancelPendingRotation,
           slotId,
         ),
-        (repository) =>
-            repository.cancelOpaqueApiKeyRotation(projectRef, slotId),
+        (repository) => repository.cancelOpaqueApiKeyRotation(
+          projectRef,
+          slotId,
+          stepUpToken: stepUpToken,
+        ),
       );
 
   Future<IssuedOpaqueApiKey> createSlot({

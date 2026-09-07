@@ -29,6 +29,9 @@ STEP_UP_ACTIONS = frozenset(
         "create_secret_key",
         "rotate_secret_key",
         "activate_secret_key",
+        "update_secret_key_policy",
+        "cancel_secret_key_rotation",
+        "revoke_secret_key",
     }
 )
 

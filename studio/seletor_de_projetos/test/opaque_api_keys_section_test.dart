@@ -212,6 +212,77 @@ void main() {
     expect(find.text(_SecretOpaqueApiKeysApi.secret), findsOneWidget);
     expect(find.byKey(const ValueKey('step-up-password-field')), findsNothing);
   });
+
+  testWidgets('secret revoke reauthenticates and sends one action-bound grant',
+      (tester) async {
+    final api = _SecretOpaqueApiKeysApi();
+    final repository = ProjectRepository(
+      client: ApiClient(client: MockClient(api.handle)),
+    );
+    final stepUpApi = _StepUpApi();
+    final stepUpService = StepUpAuthenticationService(
+      client: ApiClient(client: MockClient(stepUpApi.handle)),
+    );
+    addTearDown(repository.close);
+    addTearDown(stepUpService.close);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (_) async => null);
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          projectRepositoryProvider.overrideWithValue(repository),
+          stepUpAuthenticationServiceProvider.overrideWithValue(stepUpService),
+        ],
+        child: const MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: OpaqueApiKeysSection(
+                projectRef: 'project-ref',
+                canManage: true,
+                projectBusy: false,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Revogar slot'));
+    await tester.pumpAndSettle();
+    expect(find.text('Revogar backend-worker?'), findsOneWidget);
+
+    await tester.tap(find.text('Confirmar'));
+    await tester.pumpAndSettle();
+    expect(api.deleteCalls, 0);
+    expect(
+      find.byKey(const ValueKey('step-up-authentication-dialog')),
+      findsOneWidget,
+    );
+
+    await tester.enterText(
+      find.byKey(const ValueKey('step-up-password-field')),
+      'current-user-password',
+    );
+    await tester.tap(find.text('Reautenticar'));
+    await tester.pumpAndSettle();
+
+    expect(stepUpApi.calls, 1);
+    expect(stepUpApi.payload?['action'], 'revoke_secret_key');
+    expect(stepUpApi.payload?['project'], 'project-ref');
+    expect(stepUpApi.payload?['resource'], _SecretOpaqueApiKeysApi.slotId);
+    expect(api.deleteCalls, 1);
+    expect(api.deleteStepUpToken, _StepUpApi.token);
+    expect(
+      find.byKey(const ValueKey('step-up-password-field')),
+      findsNothing,
+    );
+  });
 }
 
 final class _ControlledOpaqueApiKeysApi {
@@ -313,6 +384,8 @@ final class _SecretOpaqueApiKeysApi {
 
   int claimCalls = 0;
   String? claimStepUpToken;
+  int deleteCalls = 0;
+  String? deleteStepUpToken;
   bool claimed = false;
 
   Future<http.Response> handle(http.Request request) async {
@@ -382,6 +455,15 @@ final class _SecretOpaqueApiKeysApi {
       claimStepUpToken = request.headers['X-Step-Up-Token'];
       claimed = true;
       return _json({'api_key': secret});
+    }
+    if (request.method == 'DELETE' && path.endsWith('/api-key-slots/$slotId')) {
+      deleteCalls++;
+      deleteStepUpToken = request.headers['X-Step-Up-Token'];
+      return _json({
+        'slot_id': slotId,
+        'status': 'disabled',
+        'api_keyset_version': 1,
+      });
     }
     return _json({'detail': 'unexpected ${request.method} $path'}, 500);
   }

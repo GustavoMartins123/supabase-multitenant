@@ -13,6 +13,9 @@ local ACTIONS = {
     create_secret_key = true,
     rotate_secret_key = true,
     activate_secret_key = true,
+    update_secret_key_policy = true,
+    cancel_secret_key_rotation = true,
+    revoke_secret_key = true,
 }
 
 local function respond(status, message)

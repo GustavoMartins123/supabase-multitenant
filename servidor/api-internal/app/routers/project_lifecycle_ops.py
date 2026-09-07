@@ -376,6 +376,7 @@ async def update_project_settings(
 
     final_profile = (
         resolved_limits.get("PROJECT_RESOURCE_PROFILE")
+        or updates.get("PROJECT_RESOURCE_PROFILE")
         or project_row.get("resource_profile")
     )
     if final_profile and final_profile != project_row.get("resource_profile"):

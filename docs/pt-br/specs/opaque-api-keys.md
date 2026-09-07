@@ -531,6 +531,7 @@ com rotação própria até uma migração coordenada completa.
 | `OK-SEC-013` | membro vê/gera claim somente de `publishable` | coberto por filtro server-side e teste de widget |
 | `OK-SEC-014` | plaintext `secret` exige admin e step-up vinculado à ação/sessão | coberto por contrato Python/Lua/Flutter |
 | `OK-SEC-015` | grant de step-up é curto, de uso único e não substitui `X-User-Token` | coberto por domínio HMAC, prefixo e ledger PostgreSQL |
+| `OK-SEC-016` | alteração de policy, cancelamento de rotação e revogação de `secret` exigem admin e step-up vinculado à ação/sessão | coberto por contrato Python/Lua/Flutter |
 | `OK-FUN-001` | projeto mantém vários slots independentes | implementado |
 | `OK-FUN-002` | revogar um slot não afeta os outros | implementado |
 | `OK-FUN-003` | supabase-js funciona antes/depois do login | E2E pendente |
@@ -545,7 +546,7 @@ com rotação própria até uma migração coordenada completa.
 
 ## 13. Decisões adiadas
 
-- ampliar step-up para restore, revogação, alteração de policy e outras ações
+- ampliar step-up para restore e outras ações
   destrutivas que não revelam plaintext;
 - decidir se uma futura janela elevada permitirá várias ações, em vez dos
   grants atuais estritamente vinculados e de uso único;
