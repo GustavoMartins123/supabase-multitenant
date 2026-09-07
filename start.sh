@@ -183,21 +183,21 @@ echo "Iniciando Traefik com File Provider..."
 docker compose -f traefik/docker-compose.yml -f "$CAPACITY_TRAEFIK" --env-file .env up -d
 
 echo "Iniciando projetos Supabase..."
-shopt -s nullglob
-for project_dir in projects/*/; do
-    project_name="$(basename "$project_dir")"
-    [ -f "$project_dir/docker-compose.yml" ] || continue
-
-    echo "Iniciando projeto: $project_name"
-    docker compose -p "$project_name" \
-        -f "$project_dir/docker-compose.yml" \
-        --env-file .env \
-        --env-file "$project_dir/.env" \
-        up --build -d
-done
+# shellcheck disable=SC1091
+source "$ROOT_DIR/servidor/generateProject/lib/project_boot.sh"
+BOOT_PROJECT_FAILURES=0
+if ! start_all_projects "$ROOT_DIR/servidor/projects" "$ROOT_DIR/servidor/.env"; then
+    echo "AVISO: nem todos os projetos iniciaram; o Studio sera iniciado mesmo assim." >&2
+    BOOT_PROJECT_FAILURES=1
+fi
 
 if [ "$DEPLOYMENT_PROFILE" = "single-node" ]; then
     start_studio
+fi
+
+if [ "$BOOT_PROJECT_FAILURES" -ne 0 ]; then
+    echo "Perfil $DEPLOYMENT_PROFILE iniciado com falhas em projetos (ver AVISO acima)." >&2
+    exit 1
 fi
 
 echo "Perfil $DEPLOYMENT_PROFILE iniciado com sucesso."

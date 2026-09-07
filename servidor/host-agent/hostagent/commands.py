@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import secrets
@@ -36,6 +37,8 @@ from .security import (
     resolve_project_dir,
 )
 from .templates import sync_project_generated_files
+
+logger = logging.getLogger("hostagent.commands")
 
 PROJECT_SERVICE_ORDER = ["meta", "auth", "rest", "nginx"]
 _OUTPUT_WINDOW_LIMIT = 64_000
@@ -381,8 +384,12 @@ async def docker_ps_all() -> list[dict[str, Any]]:
     containers: list[dict[str, Any]] = []
     for line in stdout.splitlines():
         line = line.strip()
-        if line:
+        if not line:
+            continue
+        try:
             containers.append(json.loads(line))
+        except ValueError:
+            logger.warning("ignorando linha nao-JSON do docker ps: %r", line[:200])
     return containers
 
 

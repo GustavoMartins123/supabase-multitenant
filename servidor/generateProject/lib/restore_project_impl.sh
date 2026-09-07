@@ -20,6 +20,8 @@ BACKUPS_ROOT="$PROJECT_ROOT/backups"
 source "$SCRIPT_DIR/lib/backup_core.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/realtime_slots.sh"
 source "$SCRIPT_DIR/lib/tenant_reader_role.sh"
 
 NAME_RE='^[a-z_][a-z0-9_]{2,39}$'
@@ -105,8 +107,8 @@ STORAGE_PRERESTORE="${STORAGE_TARGET}.prerestore.$$"
 [[ -d "$STORAGE_TARGET" ]] || die "Namespace Storage atual ausente"
 [[ ! -e "$STORAGE_PRERESTORE" ]] || die "Staging anterior de Storage ainda existe"
 
-SLOT="supabase_realtime_replication_slot_${PROJECT}"; SLOT="${SLOT:0:63}"
-MSG_SLOT="supabase_realtime_messages_replication_slot_${PROJECT}"; MSG_SLOT="${MSG_SLOT:0:63}"
+SLOT="$(realtime_primary_slot "$PROJECT")"
+MSG_SLOT="$(realtime_slot_candidate "supabase_realtime_messages_replication_slot_" "$PROJECT")"
 SLOT_PLUGIN=""
 
 MUTATION_STARTED=0
@@ -211,13 +213,19 @@ say "Criando ponto de seguranca com o estado atual..."
 backup_capture "$PROJECT" "$SAFETY_DIR"
 echo "SAFETY_BACKUP_COMPLETE ${SAFETY_BACKUP_ID}" >&2
 
-if [[ "$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc "SELECT count(*) FROM pg_replication_slots WHERE slot_name = '$SLOT';" | tr -d '[:space:]')" == "1" ]]; then
-  SLOT_PLUGIN=$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc \
-    "SELECT plugin FROM pg_replication_slots WHERE slot_name = '$SLOT';" | tr -d '[:space:]')
-  drop_slot_if_exists "$SLOT"
-  SLOT_DROPPED=1
-fi
-drop_slot_if_exists "$MSG_SLOT"
+mapfile -t KNOWN_SLOTS < <(realtime_slot_candidates_unique "$PROJECT")
+for candidate_slot in "${KNOWN_SLOTS[@]}"; do
+  if [[ "$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc "SELECT count(*) FROM pg_replication_slots WHERE slot_name = '$candidate_slot';" | tr -d '[:space:]')" == "1" ]]; then
+    if [[ "$candidate_slot" != *"messages"* && -z "$SLOT_PLUGIN" ]]; then
+      SLOT_PLUGIN=$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc \
+        "SELECT plugin FROM pg_replication_slots WHERE slot_name = '$candidate_slot';" | tr -d '[:space:]')
+    fi
+    if [[ "$candidate_slot" != *"messages"* ]]; then
+      SLOT_DROPPED=1
+    fi
+    drop_slot_if_exists "$candidate_slot"
+  fi
+done
 
 say "Substituindo banco $DB..."
 docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \

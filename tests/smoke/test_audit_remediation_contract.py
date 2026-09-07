@@ -179,6 +179,7 @@ class F06SlotNaming(unittest.TestCase):
             "servidor/generateProject/lib/generate_project_impl.sh",
             "servidor/generateProject/lib/duplicate_project_impl.sh",
             "servidor/generateProject/lib/rename_project_impl.sh",
+            "servidor/generateProject/lib/restore_project_impl.sh",
         ):
             with self.subTest(script=rel):
                 self.assertIn("realtime_slots.sh", (ROOT / rel).read_text(encoding="utf-8"))
