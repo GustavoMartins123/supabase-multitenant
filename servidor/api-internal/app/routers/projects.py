@@ -423,6 +423,12 @@ async def delete_project(
             )
             if not project_row:
                 raise HTTPException(404, "Project not found")
+            tenant_uuid = parse_tenant_uuid(project_row["tenant_uuid"])
+            if tenant_uuid is None:
+                raise HTTPException(
+                    409,
+                    "Project tenant UUID is missing; run the canonical migration first",
+                )
             await consume_step_up_grant(
                 conn,
                 token=x_step_up_token,
@@ -434,28 +440,21 @@ async def delete_project(
                 project_ref=project_name,
                 resource_id=project_name,
             )
-
-    project_id = project_row["id"]
-    tenant_uuid = parse_tenant_uuid(project_row["tenant_uuid"])
-    if tenant_uuid is None:
-        raise HTTPException(
-            409,
-            "Project tenant UUID is missing; run the canonical migration first",
-        )
-
-    job_id = await _create_project_job(
-        pool,
-        project_name,
-        auth_user["db_user_id"],
-        message="Exclusão enfileirada.",
-        action="delete",
-        payload={
-            "project_name": project_name,
-            "tenant_uuid": str(tenant_uuid),
-        },
-        total_steps=8,
-        project_uuid=project_id,
-    )
+            project_id = project_row["id"]
+            job_id = await _create_project_job(
+                pool,
+                project_name,
+                auth_user["db_user_id"],
+                message="Exclusão enfileirada.",
+                action="delete",
+                payload={
+                    "project_name": project_name,
+                    "tenant_uuid": str(tenant_uuid),
+                },
+                total_steps=8,
+                project_uuid=project_id,
+                connection=conn,
+            )
     position = await _enqueue_project_action(
         project_name,
         job_id,

@@ -38,7 +38,12 @@ ACCESS_KEY_RE = re.compile(r"^[0-9a-fA-F]{32}$")
 SECRET_KEY_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
 
-def _read_project_s3_vector_keys(project_name: str) -> tuple[str, str]:
+def _read_project_s3_vector_keys(
+    project_name: str,
+    *,
+    project_id: object,
+    tenant_uuid: object,
+) -> tuple[str, str]:
     project_dir = (PROJECTS_ROOT / project_name).resolve()
     if project_dir.parent != PROJECTS_ROOT:
         raise HTTPException(400, "Invalid project path")
@@ -48,6 +53,14 @@ def _read_project_s3_vector_keys(project_name: str) -> tuple[str, str]:
         raise HTTPException(409, "Project environment file is missing")
 
     values = dotenv_values(env_path, interpolate=False)
+    file_uuid = str(values.get("PROJECT_UUID") or "").strip().lower()
+    expected_uuids = {str(project_id).strip().lower()}
+    if tenant_uuid:
+        expected_uuids.add(str(tenant_uuid).strip().lower())
+    if not file_uuid or file_uuid not in expected_uuids:
+        raise HTTPException(
+            409, "Project environment identity does not match this project"
+        )
     access_key = str(values.get("S3_PROTOCOL_ACCESS_KEY_ID") or "").strip()
     secret_key = str(values.get("S3_PROTOCOL_ACCESS_KEY_SECRET") or "").strip()
 
@@ -87,7 +100,11 @@ async def get_project_s3_vector_keys(
             ),
         )
 
-    access_key, secret_key = _read_project_s3_vector_keys(project_name)
+    access_key, secret_key = _read_project_s3_vector_keys(
+        project_name,
+        project_id=project["id"],
+        tenant_uuid=project["tenant_uuid"],
+    )
     return JSONResponse(
         content={"accessKey": access_key, "secretKey": secret_key},
         headers={

@@ -142,14 +142,18 @@ async def remove_member_by_ref(
             field_name="member_id",
         )
         target_uuid = target_member["id"] if target_member else parse_uuid_value(member_id)
+        if target_uuid is None:
+            raise HTTPException(404, "Membro não encontrado")
         old_member_row = await get_project_member_row(
             conn,
             project_id=project_id,
             user_id=target_uuid,
         )
         old_role = old_member_row["role"] if old_member_row else None
+        if old_role is None:
+            raise HTTPException(404, "Membro não encontrado")
 
-        if target_uuid is not None and target_uuid == project_row["owner_id"]:
+        if target_uuid == project_row["owner_id"]:
             raise HTTPException(
                 409,
                 "O dono do projeto nao pode ser removido; transfira a posse antes",
@@ -164,6 +168,22 @@ async def remove_member_by_ref(
                     "remover outro admin",
                 )
 
+        if old_role == "admin":
+            remaining_admins = await conn.fetchval(
+                """
+                SELECT count(*)
+                FROM project_members
+                WHERE project_id = $1 AND role = 'admin'
+                """,
+                project_id,
+            )
+            if remaining_admins <= 1:
+                raise HTTPException(
+                    409,
+                    "O projeto ficaria sem admin; promova outro membro a admin "
+                    "antes de remover este",
+                )
+
         await conn.execute(
             """
             DELETE FROM project_members
@@ -173,15 +193,14 @@ async def remove_member_by_ref(
             project_id,
             target_uuid,
         )
-        if old_role is not None:
-            await audit_project_member_change(
-                conn,
-                project_id=project_id,
-                target_user_id=target_uuid,
-                old_role=old_role,
-                new_role=None,
-                action="removed",
-                actor_user_id=auth_user["db_user_id"],
-            )
+        await audit_project_member_change(
+            conn,
+            project_id=project_id,
+            target_user_id=target_uuid,
+            old_role=old_role,
+            new_role=None,
+            action="removed",
+            actor_user_id=auth_user["db_user_id"],
+        )
 
     return {"ok": True}

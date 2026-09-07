@@ -3,8 +3,17 @@ from __future__ import annotations
 import os
 import urllib.parse
 
+from app.validation import validate_project_id
+
+
+def _format_host(hostname: str) -> str:
+    if ":" in hostname and not hostname.startswith("["):
+        return f"[{hostname}]"
+    return hostname
+
 
 def get_project_meta_connection_string(project_ref: str) -> str:
+    project_ref = validate_project_id(project_ref)
     meta_dsn = (os.getenv("META_ADMIN_DSN") or "").strip()
     if not meta_dsn:
         raise RuntimeError("META_ADMIN_DSN ausente no ambiente da Projects API")
@@ -17,13 +26,13 @@ def get_project_meta_connection_string(project_ref: str) -> str:
         dsn._replace(
             path=f"/{urllib.parse.quote(db_name, safe='')}",
             params="",
-            query="",
             fragment="",
         )
     )
 
 
 def get_project_reader_connection_string(project_ref: str) -> str:
+    project_ref = validate_project_id(project_ref)
     meta_dsn = (os.getenv("META_ADMIN_DSN") or "").strip()
     reader_password = (os.getenv("PLATFORM_READER_DB_PASSWORD") or "").strip()
     if not meta_dsn or not reader_password or reader_password == "pass":
@@ -37,14 +46,13 @@ def get_project_reader_connection_string(project_ref: str) -> str:
     db_name = f"_supabase_{project_ref}"
     netloc = (
         f"platform_reader:{urllib.parse.quote(reader_password, safe='')}"
-        f"@{dsn.hostname}:{dsn.port or 5432}"
+        f"@{_format_host(dsn.hostname)}:{dsn.port or 5432}"
     )
     return urllib.parse.urlunparse(
         dsn._replace(
             netloc=netloc,
             path=f"/{urllib.parse.quote(db_name, safe='')}",
             params="",
-            query="",
             fragment="",
         )
     )
