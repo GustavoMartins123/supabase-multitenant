@@ -226,15 +226,17 @@ class OptionalOpaqueKeyExpirationContractTest(unittest.TestCase):
         self.assertIn("status IN ('active', 'pending')", self.service)
 
     def test_scheduler_ignores_never_for_expiration_and_lead_time(self) -> None:
-        candidates = self.scheduler[self.scheduler.index("candidates =") :]
+        candidates = self.scheduler[
+            self.scheduler.index('_DUE_PREPARATIONS_SQL = """') :
+        ]
         self.assertIn("s.rotation_interval_days IS NOT NULL", candidates)
         self.assertIn("k.expires_at IS NOT NULL", candidates)
         self.assertIn(
             "k.expires_at <= now() + make_interval(days => $1)", candidates
         )
         expired = self.scheduler[
-            self.scheduler.index("expired =") : self.scheduler.index(
-                "candidates ="
+            self.scheduler.index('_EXPIRED_ACTIVE_SQL = """') : self.scheduler.index(
+                '_DUE_PREPARATIONS_SQL = """'
             )
         ]
         self.assertIn("k.expires_at IS NOT NULL", expired)

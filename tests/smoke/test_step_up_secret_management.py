@@ -122,7 +122,7 @@ class StepUpSecretManagementContractTest(unittest.TestCase):
     def test_action_allowlist_is_identical_everywhere(self) -> None:
         self.assertEqual(set(STEP_UP_ACTIONS), lua_actions())
         self.assertEqual(set(STEP_UP_ACTIONS), migration_actions())
-        for action in NEW_ACTIONS:
+        for action in (*NEW_ACTIONS, "activate_secret_key"):
             with self.subTest(action=action):
                 self.assertIn(action, STEP_UP_ACTIONS)
                 self.assertIn(action, flutter_actions())

@@ -369,6 +369,37 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
     }
   }
 
+  Future<void> _activatePendingKey(OpaqueApiKeySlot slot) async {
+    final confirmed = await _confirm(
+      'Ativar chave pendente agora?',
+      'A chave pendente passa a valer imediatamente, sem aguardar o corte '
+          'programado. A chave ativa atual sera revogada.',
+    );
+    if (!confirmed) return;
+    try {
+      String? stepUpToken;
+      if (slot.kind == 'secret') {
+        stepUpToken = await _requestStepUp(
+          action: StepUpAction.activateSecretKey,
+          resourceId: slot.id,
+          title: 'Reautenticar para ativar secret key',
+          description:
+              'A ativacao revoga a chave atual e emite a pendente como ativa.',
+        );
+        if (stepUpToken == null || !mounted) return;
+      }
+      await _runCommand(
+        () => _controller.activatePendingKey(
+          slot.id,
+          stepUpToken: stepUpToken,
+        ),
+        successMessage: 'Chave pendente ativada.',
+      );
+    } catch (error) {
+      _showError(error);
+    }
+  }
+
   Future<void> _cancelPendingRotation(OpaqueApiKeySlot slot) async {
     final confirmed = await _confirm(
       'Cancelar rotação pendente?',
@@ -811,6 +842,14 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
                       ? null
                       : () => _rotate(slot),
                 ),
+                if (pending.isNotEmpty && state.migration['status'] == 'active')
+                  SecondaryButton(
+                    label: 'Ativar agora',
+                    icon: Icons.bolt_rounded,
+                    onPressed: _managementDisabled(state)
+                        ? null
+                        : () => _activatePendingKey(slot),
+                  ),
                 if (pending.isNotEmpty && state.migration['status'] == 'active')
                   SecondaryButton(
                     label: 'Cancelar rotação pendente',

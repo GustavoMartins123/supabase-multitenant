@@ -24,6 +24,7 @@ AUTOMATIC_OPAQUE_KEY_ROTATION_LOCK_NAME = (
     "supabase-multitenant:auto-opaque-key-rotation:v1"
 )
 MAX_TRANSITIONS_PER_SCAN = 100
+SCAN_BATCH_SIZE = 10
 
 _automatic_opaque_key_rotation_task: asyncio.Task[None] | None = None
 
@@ -65,30 +66,218 @@ async def scan_automatic_opaque_key_rotations() -> int:
     """Prepare, cut over, and explicitly block invalid automatic schedules."""
 
     pool = await get_pool()
-    transitions = 0
     async with pool.acquire() as conn:
+        owns_scan = await conn.fetchval(
+            "SELECT pg_try_advisory_lock(hashtextextended($1, 0))",
+            AUTOMATIC_OPAQUE_KEY_ROTATION_LOCK_NAME,
+        )
+        if not owns_scan:
+            return 0
+        try:
+            async with conn.transaction():
+                await conn.execute(
+                    """
+                    DELETE FROM project_api_key_reveals r
+                    USING project_api_keys k
+                    WHERE r.key_id = k.id
+                      AND (
+                          k.status IN ('revoked', 'expired')
+                          OR (k.expires_at IS NOT NULL AND k.expires_at <= now())
+                      )
+                    """
+                )
+            transitions = 0
+            remaining = MAX_TRANSITIONS_PER_SCAN - transitions
+            if remaining > 0:
+                transitions += await _drain_phase(
+                    conn, _DUE_ROTATIONS_SQL, (), remaining,
+                    _activate_due_row,
+                )
+            remaining = MAX_TRANSITIONS_PER_SCAN - transitions
+            if remaining > 0:
+                transitions += await _drain_phase(
+                    conn, _UNCONFIRMED_ROTATIONS_SQL, (), remaining,
+                    _block_unconfirmed_row,
+                )
+            remaining = MAX_TRANSITIONS_PER_SCAN - transitions
+            if remaining > 0:
+                transitions += await _drain_phase(
+                    conn, _EXPIRED_PENDING_SQL, (), remaining,
+                    _block_expired_pending_row,
+                )
+            remaining = MAX_TRANSITIONS_PER_SCAN - transitions
+            if remaining > 0:
+                transitions += await _drain_phase(
+                    conn, _EXPIRED_ACTIVE_SQL, (), remaining,
+                    _block_expired_active_row,
+                )
+            remaining = MAX_TRANSITIONS_PER_SCAN - transitions
+            if remaining > 0:
+                transitions += await _drain_phase(
+                    conn,
+                    _DUE_PREPARATIONS_SQL,
+                    (AUTOMATIC_KEY_ROTATION_LEAD_DAYS,),
+                    remaining,
+                    _prepare_due_row,
+                )
+        finally:
+            try:
+                await conn.execute(
+                    "SELECT pg_advisory_unlock(hashtextextended($1, 0))",
+                    AUTOMATIC_OPAQUE_KEY_ROTATION_LOCK_NAME,
+                )
+            except Exception:
+                pass
+    return transitions
+
+
+async def _drain_phase(conn, sql, args, remaining, process) -> int:
+    done = 0
+    while done < remaining:
+        limit = min(SCAN_BATCH_SIZE, remaining - done)
         async with conn.transaction():
-            owns_scan = await conn.fetchval(
-                "SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0))",
-                AUTOMATIC_OPAQUE_KEY_ROTATION_LOCK_NAME,
-            )
-            if not owns_scan:
-                return 0
+            rows = await conn.fetch(sql, *args, limit)
+            for row in rows:
+                await process(conn, row)
+                done += 1
+            if len(rows) < limit:
+                break
+    return done
 
-            await conn.execute(
-                """
-                DELETE FROM project_api_key_reveals r
-                USING project_api_keys k
-                WHERE r.key_id = k.id
-                  AND (
-                      k.status IN ('revoked', 'expired')
-                      OR (k.expires_at IS NOT NULL AND k.expires_at <= now())
-                  )
-                """
-            )
 
-            due = await conn.fetch(
-                """
+async def _activate_due_row(conn, row) -> None:
+    key_id, version = await activate_pending_key(
+        conn,
+        project_id=row["project_id"],
+        slot_id=row["slot_id"],
+    )
+    await audit_studio_action(
+        conn,
+        project_id=row["project_id"],
+        actor_user_id=None,
+        action=(
+            "opaque_api_key_automatically_activated"
+            if row["rotation_trigger"] == "automatic"
+            else "opaque_api_key_scheduled_rotation_activated"
+        ),
+        target_type="project_api_key",
+        target_id=str(key_id),
+        new_value={
+            "slot_id": str(row["slot_id"]),
+            "slot_name": row["name"],
+            "reveal_was_unclaimed": row["reveal_unclaimed"],
+            "api_keyset_version": version,
+        },
+    )
+    await _notify_project_admins(
+        conn,
+        project_id=row["project_id"],
+        kind=(
+            "opaque_api_key_automatically_activated"
+            if row["rotation_trigger"] == "automatic"
+            else "opaque_api_key_scheduled_rotation_activated"
+        ),
+        target_id=str(key_id),
+        payload={
+            "slot_id": str(row["slot_id"]),
+            "slot_name": row["name"],
+            "reveal_was_unclaimed": row["reveal_unclaimed"],
+        },
+    )
+
+
+async def _block_unconfirmed_row(conn, row) -> None:
+    error_code = "pending_replacement_not_confirmed_before_cutover"
+    await _block_slot_with_error(conn, row, error_code, pending_key_id=row["pending_key_id"])
+
+
+async def _block_expired_pending_row(conn, row) -> None:
+    error_code = "pending_replacement_expired_before_activation"
+    await _block_slot_with_error(conn, row, error_code, pending_key_id=row["pending_key_id"])
+
+
+async def _block_expired_active_row(conn, row) -> None:
+    error_code = "active_key_expired_without_pending_replacement"
+    await _block_slot_with_error(conn, row, error_code)
+
+
+async def _block_slot_with_error(conn, row, error_code, pending_key_id=None) -> None:
+    await conn.execute(
+        """
+        UPDATE project_api_key_slots
+        SET automatic_rotation_blocked_at = now(),
+            automatic_rotation_last_error = $2,
+            updated_at = now()
+        WHERE id = $1
+        """,
+        row["slot_id"],
+        error_code,
+    )
+    new_value: dict = {"error_code": error_code}
+    notify_payload: dict = {
+        "slot_name": row["name"],
+        "error_code": error_code,
+    }
+    if pending_key_id is not None:
+        new_value["pending_key_id"] = str(pending_key_id)
+        notify_payload["pending_key_id"] = str(pending_key_id)
+    await audit_studio_action(
+        conn,
+        project_id=row["project_id"],
+        actor_user_id=None,
+        action="opaque_api_key_automatic_rotation_blocked",
+        target_type="project_api_key_slot",
+        target_id=str(row["slot_id"]),
+        new_value=new_value,
+    )
+    await _notify_project_admins(
+        conn,
+        project_id=row["project_id"],
+        kind="opaque_api_key_automatic_rotation_blocked",
+        target_id=str(row["slot_id"]),
+        payload=notify_payload,
+    )
+
+
+async def _prepare_due_row(conn, row) -> None:
+    issued, version = await prepare_slot_rotation(
+        conn,
+        project_id=row["project_id"],
+        slot_id=row["slot_id"],
+        activate_at=row["expires_at"],
+        disclosed_inline=False,
+        rotation_trigger="automatic",
+    )
+    await audit_studio_action(
+        conn,
+        project_id=row["project_id"],
+        actor_user_id=None,
+        action="opaque_api_key_automatic_rotation_prepared",
+        target_type="project_api_key",
+        target_id=str(issued.key_id),
+        new_value={
+            "slot_id": str(row["slot_id"]),
+            "slot_name": row["name"],
+            "activate_at": issued.activate_at.isoformat(),
+            "token_hint": issued.token_hint,
+            "api_keyset_version": version,
+        },
+    )
+    await _notify_project_admins(
+        conn,
+        project_id=row["project_id"],
+        kind="opaque_api_key_automatic_rotation_prepared",
+        target_id=str(issued.key_id),
+        payload={
+            "slot_id": str(row["slot_id"]),
+            "slot_name": row["name"],
+            "activate_at": issued.activate_at.isoformat(),
+            "token_hint": issued.token_hint,
+        },
+    )
+
+
+_DUE_ROTATIONS_SQL = """
                 SELECT s.project_id, s.id AS slot_id, s.name,
                        k.id AS pending_key_id, k.rotation_trigger,
                        k.revealed_at IS NULL AS reveal_unclaimed
@@ -105,56 +294,9 @@ async def scan_automatic_opaque_key_rotations() -> int:
                 ORDER BY k.activate_at, s.id
                 FOR UPDATE OF s, k SKIP LOCKED
                 LIMIT $1
-                """,
-                MAX_TRANSITIONS_PER_SCAN,
-            )
-            for row in due:
-                key_id, version = await activate_pending_key(
-                    conn,
-                    project_id=row["project_id"],
-                    slot_id=row["slot_id"],
-                )
-                await audit_studio_action(
-                    conn,
-                    project_id=row["project_id"],
-                    actor_user_id=None,
-                    action=(
-                        "opaque_api_key_automatically_activated"
-                        if row["rotation_trigger"] == "automatic"
-                        else "opaque_api_key_scheduled_rotation_activated"
-                    ),
-                    target_type="project_api_key",
-                    target_id=str(key_id),
-                    new_value={
-                        "slot_id": str(row["slot_id"]),
-                        "slot_name": row["name"],
-                        "reveal_was_unclaimed": row["reveal_unclaimed"],
-                        "api_keyset_version": version,
-                    },
-                )
-                await _notify_project_admins(
-                    conn,
-                    project_id=row["project_id"],
-                    kind=(
-                        "opaque_api_key_automatically_activated"
-                        if row["rotation_trigger"] == "automatic"
-                        else "opaque_api_key_scheduled_rotation_activated"
-                    ),
-                    target_id=str(key_id),
-                    payload={
-                        "slot_id": str(row["slot_id"]),
-                        "slot_name": row["name"],
-                        "reveal_was_unclaimed": row["reveal_unclaimed"],
-                    },
-                )
-                transitions += 1
-
-            remaining = MAX_TRANSITIONS_PER_SCAN - transitions
-            if remaining <= 0:
-                return transitions
-
-            unconfirmed = await conn.fetch(
                 """
+
+_UNCONFIRMED_ROTATIONS_SQL = """
                 SELECT s.project_id, s.id AS slot_id, s.name,
                        k.id AS pending_key_id
                 FROM project_api_key_slots s
@@ -171,53 +313,9 @@ async def scan_automatic_opaque_key_rotations() -> int:
                 ORDER BY k.activate_at, s.id
                 FOR UPDATE OF s, k SKIP LOCKED
                 LIMIT $1
-                """,
-                remaining,
-            )
-            for row in unconfirmed:
-                error_code = "pending_replacement_not_confirmed_before_cutover"
-                await conn.execute(
-                    """
-                    UPDATE project_api_key_slots
-                    SET automatic_rotation_blocked_at = now(),
-                        automatic_rotation_last_error = $2,
-                        updated_at = now()
-                    WHERE id = $1
-                    """,
-                    row["slot_id"],
-                    error_code,
-                )
-                await audit_studio_action(
-                    conn,
-                    project_id=row["project_id"],
-                    actor_user_id=None,
-                    action="opaque_api_key_automatic_rotation_blocked",
-                    target_type="project_api_key_slot",
-                    target_id=str(row["slot_id"]),
-                    new_value={
-                        "error_code": error_code,
-                        "pending_key_id": str(row["pending_key_id"]),
-                    },
-                )
-                await _notify_project_admins(
-                    conn,
-                    project_id=row["project_id"],
-                    kind="opaque_api_key_automatic_rotation_blocked",
-                    target_id=str(row["slot_id"]),
-                    payload={
-                        "slot_name": row["name"],
-                        "pending_key_id": str(row["pending_key_id"]),
-                        "error_code": error_code,
-                    },
-                )
-                transitions += 1
-
-            remaining = MAX_TRANSITIONS_PER_SCAN - transitions
-            if remaining <= 0:
-                return transitions
-
-            expired_pending = await conn.fetch(
                 """
+
+_EXPIRED_PENDING_SQL = """
                 SELECT s.project_id, s.id AS slot_id, s.name,
                        k.id AS pending_key_id
                 FROM project_api_key_slots s
@@ -234,53 +332,9 @@ async def scan_automatic_opaque_key_rotations() -> int:
                 ORDER BY k.expires_at, s.id
                 FOR UPDATE OF s, k SKIP LOCKED
                 LIMIT $1
-                """,
-                remaining,
-            )
-            for row in expired_pending:
-                error_code = "pending_replacement_expired_before_activation"
-                await conn.execute(
-                    """
-                    UPDATE project_api_key_slots
-                    SET automatic_rotation_blocked_at = now(),
-                        automatic_rotation_last_error = $2,
-                        updated_at = now()
-                    WHERE id = $1
-                    """,
-                    row["slot_id"],
-                    error_code,
-                )
-                await audit_studio_action(
-                    conn,
-                    project_id=row["project_id"],
-                    actor_user_id=None,
-                    action="opaque_api_key_automatic_rotation_blocked",
-                    target_type="project_api_key_slot",
-                    target_id=str(row["slot_id"]),
-                    new_value={
-                        "error_code": error_code,
-                        "pending_key_id": str(row["pending_key_id"]),
-                    },
-                )
-                await _notify_project_admins(
-                    conn,
-                    project_id=row["project_id"],
-                    kind="opaque_api_key_automatic_rotation_blocked",
-                    target_id=str(row["slot_id"]),
-                    payload={
-                        "slot_name": row["name"],
-                        "pending_key_id": str(row["pending_key_id"]),
-                        "error_code": error_code,
-                    },
-                )
-                transitions += 1
-
-            remaining = MAX_TRANSITIONS_PER_SCAN - transitions
-            if remaining <= 0:
-                return transitions
-
-            expired = await conn.fetch(
                 """
+
+_EXPIRED_ACTIVE_SQL = """
                 SELECT s.project_id, s.id AS slot_id, s.name, k.id AS key_id
                 FROM project_api_key_slots s
                 JOIN projects p ON p.id = s.project_id
@@ -303,49 +357,9 @@ async def scan_automatic_opaque_key_rotations() -> int:
                 ORDER BY k.expires_at, s.id
                 FOR UPDATE OF s, k SKIP LOCKED
                 LIMIT $1
-                """,
-                remaining,
-            )
-            for row in expired:
-                error_code = "active_key_expired_without_pending_replacement"
-                await conn.execute(
-                    """
-                    UPDATE project_api_key_slots
-                    SET automatic_rotation_blocked_at = now(),
-                        automatic_rotation_last_error = $2,
-                        updated_at = now()
-                    WHERE id = $1
-                    """,
-                    row["slot_id"],
-                    error_code,
-                )
-                await audit_studio_action(
-                    conn,
-                    project_id=row["project_id"],
-                    actor_user_id=None,
-                    action="opaque_api_key_automatic_rotation_blocked",
-                    target_type="project_api_key_slot",
-                    target_id=str(row["slot_id"]),
-                    new_value={"error_code": error_code},
-                )
-                await _notify_project_admins(
-                    conn,
-                    project_id=row["project_id"],
-                    kind="opaque_api_key_automatic_rotation_blocked",
-                    target_id=str(row["slot_id"]),
-                    payload={
-                        "slot_name": row["name"],
-                        "error_code": error_code,
-                    },
-                )
-                transitions += 1
-
-            remaining = MAX_TRANSITIONS_PER_SCAN - transitions
-            if remaining <= 0:
-                return transitions
-
-            candidates = await conn.fetch(
                 """
+
+_DUE_PREPARATIONS_SQL = """
                 SELECT s.project_id, s.id AS slot_id, s.name,
                        k.id AS active_key_id, k.expires_at
                 FROM project_api_key_slots s
@@ -370,49 +384,7 @@ async def scan_automatic_opaque_key_rotations() -> int:
                 ORDER BY k.expires_at, s.id
                 FOR UPDATE OF s, k SKIP LOCKED
                 LIMIT $2
-                """,
-                AUTOMATIC_KEY_ROTATION_LEAD_DAYS,
-                remaining,
-            )
-            for row in candidates:
-                issued, version = await prepare_slot_rotation(
-                    conn,
-                    project_id=row["project_id"],
-                    slot_id=row["slot_id"],
-                    activate_at=row["expires_at"],
-                    disclosed_inline=False,
-                    rotation_trigger="automatic",
-                )
-                await audit_studio_action(
-                    conn,
-                    project_id=row["project_id"],
-                    actor_user_id=None,
-                    action="opaque_api_key_automatic_rotation_prepared",
-                    target_type="project_api_key",
-                    target_id=str(issued.key_id),
-                    new_value={
-                        "slot_id": str(row["slot_id"]),
-                        "slot_name": row["name"],
-                        "activate_at": issued.activate_at.isoformat(),
-                        "token_hint": issued.token_hint,
-                        "api_keyset_version": version,
-                    },
-                )
-                await _notify_project_admins(
-                    conn,
-                    project_id=row["project_id"],
-                    kind="opaque_api_key_automatic_rotation_prepared",
-                    target_id=str(issued.key_id),
-                    payload={
-                        "slot_id": str(row["slot_id"]),
-                        "slot_name": row["name"],
-                        "activate_at": issued.activate_at.isoformat(),
-                        "token_hint": issued.token_hint,
-                    },
-                )
-                transitions += 1
-
-    return transitions
+                """
 
 
 async def _automatic_opaque_key_rotation_loop() -> None:

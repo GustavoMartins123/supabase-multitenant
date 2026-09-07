@@ -16,6 +16,7 @@ enum OpaqueApiKeyOperationKind {
   claimReveal,
   confirmInstallation,
   rotateSlot,
+  activatePendingKey,
   disableSlot,
   updateAutomaticRotation,
   updateExpirationPolicy,
@@ -228,6 +229,22 @@ final class OpaqueApiKeysController extends AsyncNotifier<OpaqueApiKeysState> {
           slotId,
         ),
         (repository) => repository.rotateOpaqueApiKeySlot(
+          projectRef,
+          slotId,
+          stepUpToken: stepUpToken,
+        ),
+      );
+
+  Future<void> activatePendingKey(
+    String slotId, {
+    String? stepUpToken,
+  }) =>
+      _runAndSynchronize(
+        OpaqueApiKeyOperation.slot(
+          OpaqueApiKeyOperationKind.activatePendingKey,
+          slotId,
+        ),
+        (repository) => repository.activateOpaqueApiKeySlot(
           projectRef,
           slotId,
           stepUpToken: stepUpToken,

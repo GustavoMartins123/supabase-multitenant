@@ -463,6 +463,21 @@ class ProjectRepository {
     _ensureCommandSucceeded(resp);
   }
 
+  Future<void> activateOpaqueApiKeySlot(
+    String ref,
+    String slotId, {
+    String? stepUpToken,
+  }) async {
+    final resp = await _client.post(
+      Uri.parse('/api/projects/$ref/api-key-slots/$slotId/activation'),
+      headers: {
+        'Content-Type': 'application/json',
+        if (stepUpToken != null) 'X-Step-Up-Token': stepUpToken,
+      },
+    );
+    _ensureCommandSucceeded(resp);
+  }
+
   Future<void> confirmOpaqueApiKeyInstallation(
     String ref,
     String slotId,

@@ -283,6 +283,77 @@ void main() {
       findsNothing,
     );
   });
+
+  testWidgets('secret pending key activates early with action-bound grant',
+      (tester) async {
+    final api = _PendingOpaqueApiKeysApi();
+    final repository = ProjectRepository(
+      client: ApiClient(client: MockClient(api.handle)),
+    );
+    final stepUpApi = _StepUpApi();
+    final stepUpService = StepUpAuthenticationService(
+      client: ApiClient(client: MockClient(stepUpApi.handle)),
+    );
+    addTearDown(repository.close);
+    addTearDown(stepUpService.close);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (_) async => null);
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          projectRepositoryProvider.overrideWithValue(repository),
+          stepUpAuthenticationServiceProvider.overrideWithValue(stepUpService),
+        ],
+        child: const MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: OpaqueApiKeysSection(
+                projectRef: 'project-ref',
+                canManage: true,
+                projectBusy: false,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Ativar agora'));
+    await tester.pumpAndSettle();
+    expect(find.text('Ativar chave pendente agora?'), findsOneWidget);
+
+    await tester.tap(find.text('Confirmar'));
+    await tester.pumpAndSettle();
+    expect(api.activationCalls, 0);
+    expect(
+      find.byKey(const ValueKey('step-up-authentication-dialog')),
+      findsOneWidget,
+    );
+
+    await tester.enterText(
+      find.byKey(const ValueKey('step-up-password-field')),
+      'current-user-password',
+    );
+    await tester.tap(find.text('Reautenticar'));
+    await tester.pumpAndSettle();
+
+    expect(stepUpApi.calls, 1);
+    expect(stepUpApi.payload?['action'], 'activate_secret_key');
+    expect(stepUpApi.payload?['project'], 'project-ref');
+    expect(stepUpApi.payload?['resource'], _PendingOpaqueApiKeysApi.slotId);
+    expect(api.activationCalls, 1);
+    expect(api.activationStepUpToken, _StepUpApi.token);
+    expect(
+      find.byKey(const ValueKey('step-up-password-field')),
+      findsNothing,
+    );
+  });
 }
 
 final class _ControlledOpaqueApiKeysApi {
@@ -491,4 +562,99 @@ final class _StepUpApi {
       headers: const {'content-type': 'application/json'},
     );
   }
+}
+
+final class _PendingOpaqueApiKeysApi {
+  static const keyId = '11111111-1111-4111-8111-111111111111';
+  static const pendingKeyId = '33333333-3333-4333-8333-333333333333';
+  static const slotId = '22222222-2222-4222-8222-222222222222';
+
+  int activationCalls = 0;
+  String? activationStepUpToken;
+
+  Future<http.Response> handle(http.Request request) async {
+    final path = request.url.path;
+    if (request.method == 'GET') {
+      if (path.endsWith('/opaque-api-keys/migration')) {
+        return _json({
+          'status': 'active',
+          'pending_key_count': 0,
+          'confirmed_pending_key_count': 0,
+        });
+      }
+      if (path.endsWith('/api-key-slots')) {
+        return _json({
+          'slots': [
+            {
+              'id': slotId,
+              'name': 'backend-worker',
+              'kind': 'secret',
+              'role': 'service_role',
+              'allowed_services': ['rest'],
+              'automatic_rotation_enabled': true,
+              'rotation_interval_days': 90,
+              'status': 'active',
+              'created_at': '2026-08-12T10:00:00Z',
+              'automatic_rotation_blocked_at': null,
+              'automatic_rotation_last_error': null,
+              'keys': [
+                {
+                  'id': keyId,
+                  'token_hint': 'sb_secret_...test',
+                  'status': 'active',
+                  'currently_accepted': true,
+                  'created_at': '2026-08-12T10:00:00Z',
+                  'activate_at': null,
+                  'expires_at': null,
+                  'activated_at': '2026-08-12T10:00:00Z',
+                  'revoked_at': null,
+                  'last_used_at': null,
+                  'revealed_at': null,
+                  'confirmed_at': null,
+                  'rotation_trigger': 'initial',
+                },
+                {
+                  'id': pendingKeyId,
+                  'token_hint': 'sb_secret_...pending',
+                  'status': 'pending',
+                  'currently_accepted': false,
+                  'created_at': '2026-08-12T10:00:00Z',
+                  'activate_at': '2026-12-10T10:00:00Z',
+                  'expires_at': null,
+                  'activated_at': null,
+                  'revoked_at': null,
+                  'last_used_at': null,
+                  'revealed_at': null,
+                  'confirmed_at': '2026-08-12T10:05:00Z',
+                  'rotation_trigger': 'manual',
+                },
+              ],
+            },
+          ],
+        });
+      }
+      if (path.endsWith('/api-key-reveals')) {
+        return _json({'reveals': []});
+      }
+    }
+    if (request.method == 'POST' &&
+        path.endsWith('/api-key-slots/$slotId/activation')) {
+      activationCalls++;
+      activationStepUpToken = request.headers['X-Step-Up-Token'];
+      return _json({
+        'slot_id': slotId,
+        'key_id': pendingKeyId,
+        'status': 'active',
+        'api_keyset_version': 2,
+      });
+    }
+    return _json({'detail': 'unexpected ${request.method} $path'}, 500);
+  }
+
+  static http.Response _json(Object body, [int statusCode = 200]) =>
+      http.Response(
+        jsonEncode(body),
+        statusCode,
+        headers: const {'content-type': 'application/json'},
+      );
 }

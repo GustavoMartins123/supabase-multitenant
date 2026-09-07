@@ -141,10 +141,14 @@ CREATE_PROGRESS_EVENTS: dict[str, ProgressEvent] = {
 ROLLBACK_COMPLETE_MARKER = "HOST_AGENT_ROLLBACK_COMPLETE=1"
 ROLLBACK_FAILED_MARKER = "HOST_AGENT_ROLLBACK_FAILED="
 STALE_STATE_MARKER = "HOST_AGENT_STALE_STATE="
+STORAGE_RESUME_FAILED_MARKER = "HOST_AGENT_STORAGE_RESUME_FAILED=1"
+SERVICES_RESTART_FAILED_MARKER = "HOST_AGENT_SERVICES_RESTART_FAILED=1"
 LIFECYCLE_MARKERS = (
     ROLLBACK_COMPLETE_MARKER,
     ROLLBACK_FAILED_MARKER,
     STALE_STATE_MARKER,
+    STORAGE_RESUME_FAILED_MARKER,
+    SERVICES_RESTART_FAILED_MARKER,
 )
 
 
@@ -849,6 +853,24 @@ async def handle_duplicate_project(ctx: CommandContext, project: str, args: dict
 
 async def handle_delete_project_files(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
     resolve_project_dir(ctx.config.projects_root, project)
+    remaining = await list_project_containers(project)
+    if remaining:
+        names = sorted(
+            {
+                name
+                for entry in remaining
+                for name in container_names(entry)
+                if match_project(entry, project)
+            }
+        )
+        return CommandOutcome(
+            status="failed",
+            error_code="project_containers_present",
+            message=(
+                "Containers do projeto ainda existem; "
+                f"remova-os antes dos arquivos: {', '.join(names[:5])}."
+            ),
+        )
     outcome, _ = await _run_lifecycle_script(
         ctx,
         "delete_project.sh",
@@ -981,13 +1003,31 @@ async def handle_backup_project(ctx: CommandContext, project: str, args: dict[st
         step="capture_backup",
         message="Capturando banco e storage do projeto...",
     )
-    outcome, _ = await _run_lifecycle_script(
+    outcome, process = await _run_lifecycle_script(
         ctx,
         "backup_project.sh",
         [project, backup_id],
         error_code="backup_failed",
         progress_events=BACKUP_PROGRESS_EVENTS,
     )
+    storage_resume_failed = STORAGE_RESUME_FAILED_MARKER in process.markers_seen
+    services_restart_failed = (
+        SERVICES_RESTART_FAILED_MARKER in process.markers_seen
+    )
+    outcome.result = {
+        **(outcome.result or {}),
+        "storage_resume_failed": storage_resume_failed,
+        "services_restart_failed": services_restart_failed,
+    }
+    if outcome.status == "failed" and (
+        storage_resume_failed or services_restart_failed
+    ):
+        outcome.error_code = "backup_resume_failed"
+        outcome.message = (
+            "Backup falhou e o projeto pode estar parado: "
+            + ("tenant Storage segue bloqueado; " if storage_resume_failed else "")
+            + ("containers seguem desligados." if services_restart_failed else "")
+        )
     if outcome.status == "done":
         size = await asyncio.to_thread(_dir_size_bytes, backup_dir)
         outcome.result = {**(outcome.result or {}), "size_bytes": size}
@@ -1032,12 +1072,14 @@ async def handle_restore_project(ctx: CommandContext, project: str, args: dict[s
         "restore_project.sh",
         [project, backup_id, safety_backup_id],
         error_code="restore_failed",
-        markers=("SAFETY_BACKUP_COMPLETE", "ROLLBACK_COMPLETE"),
+        markers=("SAFETY_BACKUP_COMPLETE", "ROLLBACK_COMPLETE", "ROLLBACK_INCOMPLETE"),
     )
     safety_completed = "SAFETY_BACKUP_COMPLETE" in process.markers_seen
     rolled_back = "ROLLBACK_COMPLETE" in process.markers_seen
+    rollback_incomplete = "ROLLBACK_INCOMPLETE" in process.markers_seen
     result: dict[str, Any] = {
         "rolled_back": rolled_back,
+        "rollback_incomplete": rollback_incomplete,
         "safety_backup_completed": safety_completed,
     }
     if safety_completed:
@@ -1045,7 +1087,14 @@ async def handle_restore_project(ctx: CommandContext, project: str, args: dict[s
             _dir_size_bytes, safety_dir
         )
     outcome.result = {**(outcome.result or {}), **result}
-    if outcome.status == "failed" and outcome.error_code == "restore_failed" and rolled_back:
+    if outcome.status == "failed" and rollback_incomplete:
+        outcome.error_code = "restore_rollback_incomplete"
+        outcome.message = (
+            "Restore falhou e o rollback ficou incompleto: o projeto pode "
+            "estar parado ou com dados parcialmente restaurados; "
+            "intervencao manual necessaria."
+        )
+    elif outcome.status == "failed" and outcome.error_code == "restore_failed" and rolled_back:
         outcome.error_code = "restore_rolled_back"
     return outcome
 

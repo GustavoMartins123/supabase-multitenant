@@ -73,19 +73,37 @@ mkdir -p "$BACKUPS_ROOT/$PROJECT_UUID"
 
 STOPPED_CONTAINERS=""
 STORAGE_TENANT_QUIESCED=0
+RESUME_MAX_ATTEMPTS=5
+RESUME_RETRY_DELAY_SECONDS=5
 
 restart_stopped() {
   [[ -n "$STOPPED_CONTAINERS" ]] || return 0
-  backup_start_project_containers "$PROJECT" "$STOPPED_CONTAINERS" || return 1
+  local attempt=1
+  while [[ "$attempt" -le "$RESUME_MAX_ATTEMPTS" ]]; do
+    backup_start_project_containers "$PROJECT" "$STOPPED_CONTAINERS" && return 0
+    [[ "$attempt" -lt "$RESUME_MAX_ATTEMPTS" ]] || return 1
+    sleep "$RESUME_RETRY_DELAY_SECONDS"
+    attempt=$((attempt + 1))
+  done
+  return 1
 }
 
 resume_storage_tenant() {
   [[ "$STORAGE_TENANT_QUIESCED" -eq 1 ]] || return 0
-  storage_patch_tenant_connection "$PROJECT_UUID" "$PROJECT" || return 1
-  storage_validate_tenant "$PROJECT_UUID" "$SERVICE_ROLE_KEY_PROJETO" \
-    "$S3_PROTOCOL_ACCESS_KEY_ID" "$S3_PROTOCOL_ACCESS_KEY_SECRET" \
-    "$S3_PROTOCOL_ENABLED" "$VECTOR_BUCKETS_ENABLED" || return 1
-  STORAGE_TENANT_QUIESCED=0
+  local attempt=1
+  while [[ "$attempt" -le "$RESUME_MAX_ATTEMPTS" ]]; do
+    if storage_patch_tenant_connection "$PROJECT_UUID" "$PROJECT" \
+      && storage_validate_tenant "$PROJECT_UUID" "$SERVICE_ROLE_KEY_PROJETO" \
+        "$S3_PROTOCOL_ACCESS_KEY_ID" "$S3_PROTOCOL_ACCESS_KEY_SECRET" \
+        "$S3_PROTOCOL_ENABLED" "$VECTOR_BUCKETS_ENABLED"; then
+      STORAGE_TENANT_QUIESCED=0
+      return 0
+    fi
+    [[ "$attempt" -lt "$RESUME_MAX_ATTEMPTS" ]] || return 1
+    sleep "$RESUME_RETRY_DELAY_SECONDS"
+    attempt=$((attempt + 1))
+  done
+  return 1
 }
 
 on_error() {
@@ -94,8 +112,14 @@ on_error() {
   set +e
   echo "❌ Backup falhou; religando servicos do projeto..." >&2
   rm -rf "${DEST_DIR}.tmp"
-  resume_storage_tenant || echo "⚠️ Nao foi possivel reativar o tenant Storage de $PROJECT" >&2
-  restart_stopped || echo "⚠️ Nao foi possivel religar todos os servicos de $PROJECT" >&2
+  if ! resume_storage_tenant; then
+    echo "⚠️ Nao foi possivel reativar o tenant Storage de $PROJECT" >&2
+    echo "HOST_AGENT_STORAGE_RESUME_FAILED=1 project=${PROJECT}" >&2
+  fi
+  if ! restart_stopped; then
+    echo "⚠️ Nao foi possivel religar todos os servicos de $PROJECT" >&2
+    echo "HOST_AGENT_SERVICES_RESTART_FAILED=1 project=${PROJECT}" >&2
+  fi
   exit "$status"
 }
 trap on_error ERR
