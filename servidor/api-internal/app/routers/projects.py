@@ -11,6 +11,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
+import asyncpg
+
 from app.database import get_pool
 from app.dependencies import (
     ensure_project_member_access,
@@ -240,6 +242,10 @@ async def create_project(
     auth_user = await resolve_authenticated_user(request, pool)
     async with pool.acquire() as conn:
         async with conn.transaction():
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                f"project-name:{name}",
+            )
             existing = await conn.fetchval(
                 "SELECT id FROM projects WHERE name = $1",
                 name
@@ -247,23 +253,26 @@ async def create_project(
             if existing:
                 raise HTTPException(status_code=409, detail="Project already exists")
             project_id = uuid.uuid4()
-            await conn.execute(
-                """
-                INSERT INTO projects(id, tenant_uuid, name, owner_id, resource_profile)
-                VALUES($1, $1, $2, $3, $4)
-                """,
-                project_id,
-                name,
-                auth_user["db_user_id"],
-                body.resource_profile,
-            )
-            await conn.execute(
+            try:
+                await conn.execute(
                     """
-                    INSERT INTO project_members(project_id, user_id, role)
-                    VALUES($1, $2, 'admin')
+                    INSERT INTO projects(id, tenant_uuid, name, owner_id, resource_profile)
+                    VALUES($1, $1, $2, $3, $4)
                     """,
-                    project_id, auth_user["db_user_id"]
+                    project_id,
+                    name,
+                    auth_user["db_user_id"],
+                    body.resource_profile,
                 )
+                await conn.execute(
+                        """
+                        INSERT INTO project_members(project_id, user_id, role)
+                        VALUES($1, $2, 'admin')
+                        """,
+                        project_id, auth_user["db_user_id"]
+                    )
+            except asyncpg.UniqueViolationError:
+                raise HTTPException(status_code=409, detail="Project already exists")
             job_id = await _create_project_job(
                 pool,
                 name,
@@ -312,6 +321,10 @@ async def duplicate_project(
 
     async with pool.acquire() as conn:
         async with conn.transaction():
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                f"project-name:{new_name}",
+            )
             project_row = await get_project_row(conn, original)
             await ensure_project_member_access(
                 conn,
@@ -327,23 +340,26 @@ async def duplicate_project(
                 raise HTTPException(409, "Nome de projeto já existe")
 
             project_id = uuid.uuid4()
-            await conn.execute(
-                """
-                INSERT INTO projects(id, tenant_uuid, name, owner_id,
-                                     resource_profile)
-                SELECT $1, $1, $2, $3, resource_profile
-                FROM projects WHERE id = $4
-                """,
-                project_id,
-                new_name,
-                auth_user["db_user_id"],
-                project_row["id"],
-            )
+            try:
+                await conn.execute(
+                    """
+                    INSERT INTO projects(id, tenant_uuid, name, owner_id,
+                                         resource_profile)
+                    SELECT $1, $1, $2, $3, resource_profile
+                    FROM projects WHERE id = $4
+                    """,
+                    project_id,
+                    new_name,
+                    auth_user["db_user_id"],
+                    project_row["id"],
+                )
 
-            await conn.execute("""
-                INSERT INTO project_members(project_id, user_id, role)
-                VALUES($1, $2, 'admin')
-            """, project_id, auth_user["db_user_id"])
+                await conn.execute("""
+                    INSERT INTO project_members(project_id, user_id, role)
+                    VALUES($1, $2, 'admin')
+                """, project_id, auth_user["db_user_id"])
+            except asyncpg.UniqueViolationError:
+                raise HTTPException(409, "Nome de projeto já existe")
 
             job_id = await _create_project_job(
                 pool,

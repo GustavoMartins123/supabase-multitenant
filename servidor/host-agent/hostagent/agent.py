@@ -303,6 +303,15 @@ class HostAgent:
             except asyncio.CancelledError:
                 pass
 
+        if state.abort.is_set() and outcome.status != "failed":
+            outcome = CommandOutcome(
+                status="failed",
+                error_code="lease_lost",
+                message="Lease perdido durante a execucao; processo interrompido.",
+            )
+        if state.abort.is_set() and outcome.error_code is None:
+            outcome.error_code = "lease_lost"
+
         persisted = await db.finish_command(
             self.pool,
             command_id,
@@ -336,6 +345,7 @@ class HostAgent:
         logger.info("comando %s finalizado: %s", command_id, outcome.status)
 
     async def _command_heartbeat_loop(self, command_id: uuid.UUID, state: RunningCommandState) -> None:
+        failures = 0
         while True:
             try:
                 await asyncio.wait_for(
@@ -345,8 +355,10 @@ class HostAgent:
             except asyncio.TimeoutError:
                 pass
             state.progress_changed.clear()
+            if state.abort.is_set():
+                return
             try:
-                await db.heartbeat_command(
+                alive = await db.heartbeat_command(
                     self.pool,
                     command_id,
                     self.config.worker_id,
@@ -357,9 +369,17 @@ class HostAgent:
                     current_step=state.current_step,
                     message=state.message,
                 )
+                if not alive:
+                    state.abort.set()
+                    return
                 state.dirty = False
+                failures = 0
             except Exception as exc:  # noqa: BLE001
+                failures += 1
                 logger.warning("heartbeat do comando %s falhou: %s", command_id, exc)
+                if failures >= 3:
+                    state.abort.set()
+                    return
 
     async def _revalidate(
         self,

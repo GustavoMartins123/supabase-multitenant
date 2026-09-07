@@ -168,6 +168,7 @@ class RunningCommandState:
     _stderr: str = ""
     dirty: bool = field(default=False)
     progress_changed: asyncio.Event = field(default_factory=asyncio.Event)
+    abort: asyncio.Event = field(default_factory=asyncio.Event)
 
     def report(
         self,
@@ -295,17 +296,42 @@ async def run_process(
         ),
     )
     timed_out = False
+    abort_task = asyncio.create_task(ctx.state.abort.wait())
+    proc_task = asyncio.create_task(proc.wait())
     try:
-        await asyncio.wait_for(proc.wait(), timeout=ctx.timeout_seconds)
-    except asyncio.TimeoutError:
-        timed_out = True
+        done, _pending = await asyncio.wait(
+            {proc_task, abort_task},
+            timeout=ctx.timeout_seconds,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if abort_task in done and not proc_task.done():
+            _terminate_process_group(proc, signal.SIGTERM)
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=term_grace)
+            except asyncio.TimeoutError:
+                _terminate_process_group(proc, signal.SIGKILL)
+                await proc.wait()
+        elif not done:
+            timed_out = True
+            _terminate_process_group(proc, signal.SIGTERM)
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=term_grace)
+            except asyncio.TimeoutError:
+                _terminate_process_group(proc, signal.SIGKILL)
+                await proc.wait()
+    except asyncio.CancelledError:
         _terminate_process_group(proc, signal.SIGTERM)
         try:
             await asyncio.wait_for(proc.wait(), timeout=term_grace)
         except asyncio.TimeoutError:
             _terminate_process_group(proc, signal.SIGKILL)
             await proc.wait()
+        raise
     finally:
+        if not abort_task.done():
+            abort_task.cancel()
+        if not proc_task.done():
+            proc_task.cancel()
         try:
             await asyncio.wait_for(pumps, timeout=10)
         except asyncio.TimeoutError:

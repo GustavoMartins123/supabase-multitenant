@@ -154,7 +154,7 @@ async def lease_next_command(
         async with conn.transaction():
             row = await conn.fetchrow(
                 """
-                SELECT id
+                SELECT id, project
                 FROM host_agent_commands c
                 WHERE c.status = 'queued'
                   AND NOT (c.project = ANY($1::text[]))
@@ -162,7 +162,6 @@ async def lease_next_command(
                       SELECT 1 FROM host_agent_commands r
                       WHERE r.project = c.project
                         AND r.status = 'running'
-                        AND r.lease_expires_at > now()
                   )
                 ORDER BY c.created_at
                 LIMIT 1
@@ -171,6 +170,20 @@ async def lease_next_command(
                 sorted(busy_projects),
             )
             if row is None:
+                return None
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                f"host-agent-project:{row['project']}",
+            )
+            still_running = await conn.fetchval(
+                """
+                SELECT 1 FROM host_agent_commands
+                WHERE project = $1 AND status = 'running'
+                LIMIT 1
+                """,
+                row["project"],
+            )
+            if still_running is not None:
                 return None
             return await conn.fetchrow(
                 """
@@ -182,7 +195,7 @@ async def lease_next_command(
                     heartbeat_at = now(),
                     started_at = COALESCE(started_at, now()),
                     updated_at = now()
-                WHERE id = $1
+                WHERE id = $1 AND status = 'queued'
                 RETURNING *
                 """,
                 row["id"],
@@ -202,8 +215,8 @@ async def heartbeat_command(
     progress: int | None = None,
     current_step: str | None = None,
     message: str | None = None,
-) -> None:
-    await pool.execute(
+) -> bool:
+    outcome = await pool.execute(
         """
         UPDATE host_agent_commands
         SET lease_expires_at = now() + make_interval(secs => $3::integer),
@@ -225,6 +238,7 @@ async def heartbeat_command(
         current_step,
         message,
     )
+    return outcome == "UPDATE 1"
 
 
 async def finish_command(
@@ -266,7 +280,7 @@ async def finish_command(
         json.dumps(result) if result is not None else None,
         message,
     )
-    return outcome.endswith("1")
+    return outcome == "UPDATE 1"
 
 
 async def reject_command(
