@@ -50,7 +50,7 @@ flowchart LR
     Traefik --> TenantGateway[Nginx do projeto]
 
     ProjectsAPI --> PostgreSQL[(PostgreSQL)]
-    ProjectsAPI --> Docker[Docker Socket]
+    ProjectsAPI --> HostAgent[Host-agent] --> Docker[Docker Socket]
     ProjectsAPI --> Realtime[Realtime global]
     ProjectsAPI --> Supavisor[Supavisor global]
 
