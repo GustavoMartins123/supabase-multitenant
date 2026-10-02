@@ -282,6 +282,60 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
 
+    async def test_admin_cannot_demote_owner_by_upsert(self):
+        response = await self.request(
+            "POST", "/api/projects/projeto_a/members", actor=self.admin2,
+            body=json.dumps({"user_id": str(self.owner), "role": "member"}).encode(),
+        )
+        self.assertEqual(response.status_code, 409, response.text)
+
+    async def test_admin_cannot_demote_peer_by_upsert(self):
+        response = await self.request(
+            "POST", "/api/projects/projeto_a/members", actor=self.admin2,
+            body=json.dumps({"user_id": str(self.admin3), "role": "member"}).encode(),
+        )
+        self.assertEqual(response.status_code, 403, response.text)
+
+    async def test_owner_can_demote_peer_by_upsert(self):
+        response = await self.request(
+            "POST", "/api/projects/projeto_a/members", actor=self.owner,
+            body=json.dumps({"user_id": str(self.admin3), "role": "member"}).encode(),
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+
+    async def test_concurrent_self_demotions_preserve_last_admin(self):
+        await self.pool.execute(
+            "DELETE FROM project_members WHERE project_id=$1 AND user_id=$2",
+            self.project_a, self.owner,
+        )
+        async def demote(actor):
+            return await self.request(
+                "POST", "/api/projects/projeto_a/members", actor=actor,
+                body=json.dumps({"user_id": str(actor), "role": "member"}).encode(),
+            )
+        results = await asyncio.gather(demote(self.admin2), demote(self.admin3))
+        self.assertEqual(sorted(r.status_code for r in results), [200, 409])
+        self.assertEqual(await self.pool.fetchval(
+            "SELECT count(*) FROM project_members WHERE project_id=$1 AND role='admin'",
+            self.project_a,
+        ), 1)
+
+    async def test_concurrent_delete_and_upsert_preserve_last_admin(self):
+        await self.pool.execute(
+            "DELETE FROM project_members WHERE project_id=$1 AND user_id=$2",
+            self.project_a, self.owner,
+        )
+        results = await asyncio.gather(
+            self.request("DELETE", f"/api/projects/projeto_a/members/{self.admin2}", actor=self.admin2),
+            self.request("POST", "/api/projects/projeto_a/members", actor=self.admin3,
+                body=json.dumps({"user_id": str(self.admin3), "role": "member"}).encode()),
+        )
+        self.assertEqual(sorted(r.status_code for r in results), [200, 409])
+        self.assertEqual(await self.pool.fetchval(
+            "SELECT count(*) FROM project_members WHERE project_id=$1 AND role='admin'",
+            self.project_a,
+        ), 1)
+
     async def test_authenticated_user_cannot_grant_themselves_global_admin(self):
         body = json.dumps(
             {

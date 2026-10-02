@@ -200,7 +200,7 @@ async def transfer_project(
             raise HTTPException(403, "Acesso negado – apenas administradores do sistema")
 
         async with conn.transaction():
-            proj_row = await get_project_row(conn, project_name)
+            proj_row = await get_project_row(conn, project_name, for_update=True)
             new_owner_user = await require_synced_user_record(
                 conn,
                 identifier=new_owner,

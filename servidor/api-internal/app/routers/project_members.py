@@ -7,6 +7,7 @@ from app.database import get_pool
 from app.dependencies import (
     audit_project_member_change,
     ensure_project_admin_access,
+    ensure_member_role_change_allowed,
     ensure_project_member_access,
     get_project_member_row,
     get_project_row,
@@ -52,7 +53,7 @@ async def add_member(
     async with pool.acquire() as conn:
         auth_user = await resolve_authenticated_user(request, pool)
         async with conn.transaction():
-            project_row = await get_project_row(conn, project_name)
+            project_row = await get_project_row(conn, project_name, for_update=True)
             await ensure_project_admin_access(
                 conn,
                 project_id=project_row["id"],
@@ -65,6 +66,15 @@ async def add_member(
                 identifier=member.user_id,
                 field_name="user_id",
                 missing_message="Usuário alvo ainda não foi sincronizado com o banco",
+            )
+            old_member = await get_project_member_row(
+                conn, project_id=project_row["id"], user_id=target_user["id"]
+            )
+            await ensure_member_role_change_allowed(
+                conn, project_row=project_row, auth_user=auth_user,
+                target_user_id=target_user["id"],
+                old_role=old_member["role"] if old_member else None,
+                new_role=member.role,
             )
             existing_role = await upsert_project_member(
                 conn,
@@ -127,80 +137,55 @@ async def remove_member_by_ref(
 
     async with pool.acquire() as conn:
         auth_user = await resolve_authenticated_user(request, pool)
-        project_row = await get_project_row(conn, name)
-        project_id = project_row["id"]
-        await ensure_project_admin_access(
-            conn,
-            project_id=project_id,
-            auth_user=auth_user,
-            message="Only admin can remove members",
-        )
-
-        target_member = await get_user_record_by_identifier(
-            conn,
-            identifier=member_id,
-            field_name="member_id",
-        )
-        target_uuid = target_member["id"] if target_member else parse_uuid_value(member_id)
-        if target_uuid is None:
-            raise HTTPException(404, "Membro não encontrado")
-        old_member_row = await get_project_member_row(
-            conn,
-            project_id=project_id,
-            user_id=target_uuid,
-        )
-        old_role = old_member_row["role"] if old_member_row else None
-        if old_role is None:
-            raise HTTPException(404, "Membro não encontrado")
-
-        if target_uuid == project_row["owner_id"]:
-            raise HTTPException(
-                409,
-                "O dono do projeto nao pode ser removido; transfira a posse antes",
+        async with conn.transaction():
+            project_row = await get_project_row(conn, name, for_update=True)
+            project_id = project_row["id"]
+            await ensure_project_admin_access(
+                conn,
+                project_id=project_id,
+                auth_user=auth_user,
+                message="Only admin can remove members",
             )
 
-        if old_role == "admin" and target_uuid != auth_user["db_user_id"]:
-            is_owner = project_row["owner_id"] == auth_user["db_user_id"]
-            if not is_owner and not auth_user["is_global_admin"]:
-                raise HTTPException(
-                    403,
-                    "Apenas o dono do projeto ou um administrador global pode "
-                    "remover outro admin",
-                )
+            target_member = await get_user_record_by_identifier(
+                conn,
+                identifier=member_id,
+                field_name="member_id",
+            )
+            target_uuid = target_member["id"] if target_member else parse_uuid_value(member_id)
+            if target_uuid is None:
+                raise HTTPException(404, "Membro não encontrado")
+            old_member_row = await get_project_member_row(
+                conn,
+                project_id=project_id,
+                user_id=target_uuid,
+            )
+            old_role = old_member_row["role"] if old_member_row else None
+            if old_role is None:
+                raise HTTPException(404, "Membro não encontrado")
 
-        if old_role == "admin":
-            remaining_admins = await conn.fetchval(
+            await ensure_member_role_change_allowed(
+                conn, project_row=project_row, auth_user=auth_user,
+                target_user_id=target_uuid, old_role=old_role, new_role=None,
+            )
+
+            await conn.execute(
                 """
-                SELECT count(*)
-                FROM project_members
-                WHERE project_id = $1 AND role = 'admin'
+                DELETE FROM project_members
+                WHERE project_id = $1
+                  AND user_id = $2
                 """,
                 project_id,
+                target_uuid,
             )
-            if remaining_admins <= 1:
-                raise HTTPException(
-                    409,
-                    "O projeto ficaria sem admin; promova outro membro a admin "
-                    "antes de remover este",
-                )
-
-        await conn.execute(
-            """
-            DELETE FROM project_members
-            WHERE project_id = $1
-              AND user_id = $2
-            """,
-            project_id,
-            target_uuid,
-        )
-        await audit_project_member_change(
-            conn,
-            project_id=project_id,
-            target_user_id=target_uuid,
-            old_role=old_role,
-            new_role=None,
-            action="removed",
-            actor_user_id=auth_user["db_user_id"],
-        )
+            await audit_project_member_change(
+                conn,
+                project_id=project_id,
+                target_user_id=target_uuid,
+                old_role=old_role,
+                new_role=None,
+                action="removed",
+                actor_user_id=auth_user["db_user_id"],
+            )
 
     return {"ok": True}

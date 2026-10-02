@@ -43,6 +43,9 @@ class FakeConn:
     def __init__(self, pool: FakePool) -> None:
         self.pool = pool
 
+    def transaction(self):
+        return FakeAcquire(self)
+
     async def execute(self, query: str, *args: object) -> str:
         self.pool.executes.append((query, args))
         return "DELETE 1"

@@ -145,7 +145,9 @@ async def require_synced_user_record(
     return row
 
 
-async def get_project_row(conn: asyncpg.Connection, project_name: str) -> asyncpg.Record:
+async def get_project_row(
+    conn: asyncpg.Connection, project_name: str, *, for_update: bool = False
+) -> asyncpg.Record:
     row = await conn.fetchrow(
         """
         SELECT id, tenant_uuid, name, display_name, owner_id,
@@ -154,7 +156,7 @@ async def get_project_row(conn: asyncpg.Connection, project_name: str) -> asyncp
                automatic_key_rotation_last_error,
                opaque_gateway_ready_at, resource_profile
         FROM projects WHERE name = $1
-        """,
+        """ + (" FOR UPDATE" if for_update else ""),
         project_name,
     )
     if not row:
@@ -237,6 +239,36 @@ async def upsert_project_member(
     )
 
     return existing_role
+
+
+async def ensure_member_role_change_allowed(
+    conn: asyncpg.Connection,
+    *,
+    project_row: asyncpg.Record,
+    auth_user: dict[str, Any],
+    target_user_id: uuid.UUID,
+    old_role: str | None,
+    new_role: str | None,
+) -> None:
+    """Shared POST/DELETE policy; caller holds the project row lock until commit."""
+    if old_role == new_role:
+        return
+    if target_user_id == project_row["owner_id"] and new_role != "admin":
+        raise HTTPException(409, "O dono do projeto deve permanecer admin; transfira a posse antes")
+    if old_role != "admin" or new_role == "admin":
+        return
+    if (
+        target_user_id != auth_user["db_user_id"]
+        and project_row["owner_id"] != auth_user["db_user_id"]
+        and not auth_user["is_global_admin"]
+    ):
+        raise HTTPException(403, "Apenas o dono ou administrador global pode rebaixar/remover outro admin")
+    admin_count = await conn.fetchval(
+        "SELECT count(*) FROM project_members WHERE project_id = $1 AND role = 'admin'",
+        project_row["id"],
+    )
+    if admin_count <= 1:
+        raise HTTPException(409, "O projeto ficaria sem admin; promova outro membro antes")
 
 
 async def ensure_project_member_access(
