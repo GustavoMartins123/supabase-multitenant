@@ -4,6 +4,7 @@ FROM ghcr.io/cirruslabs/flutter:3.44.0 AS builder
 
 WORKDIR /app
 
+COPY projects_api_client/ ../projects_api_client/
 COPY seletor_de_projetos/pubspec.* ./
 
 RUN flutter pub get

@@ -346,7 +346,7 @@ validate_env_contract() {
         fi
     done
     for required_file in servidor/.env studio/.env; do
-        for required_key in STUDIO_GATEWAY_HMAC_SECRET PROJECTS_API_HMAC_SECRET; do
+        for required_key in STUDIO_GATEWAY_HMAC_SECRET PROJECTS_API_HMAC_SECRET STUDIO_ANALYTICS_HMAC_SECRET; do
             value=$(read_env_value "$required_file" "$required_key" 2>/dev/null || true)
             if [[ -z "$value" || "$value" == "pass" ]]; then
                 print_error "$required_key vazio ou placeholder em $required_file"
@@ -480,6 +480,7 @@ main() {
     SHARED_NGINX_HMAC_SECRET=$(env_secret servidor/.env NGINX_HMAC_SECRET generate_hmac_secret)
     SHARED_INTERNAL_HMAC_SECRET=$(env_secret servidor/.env INTERNAL_HMAC_SECRET generate_hmac_secret)
     HOST_AGENT_HMAC_SECRET=$(env_secret servidor/.env HOST_AGENT_HMAC_SECRET generate_hmac_secret)
+    STUDIO_ANALYTICS_HMAC_SECRET=$(env_secret studio/.env STUDIO_ANALYTICS_HMAC_SECRET generate_hmac_secret)
 
     case "$topology_profile" in
         single-node)
@@ -614,6 +615,7 @@ main() {
     safe_sed "s|^STUDIO_SERVICE_KEY_ENCRYPTION_KEY=.*|STUDIO_SERVICE_KEY_ENCRYPTION_KEY=$STUDIO_SERVICE_KEY_ENCRYPTION_KEY|g" studio/.env
     safe_sed "s|^NGINX_HMAC_SECRET=.*|NGINX_HMAC_SECRET=$SHARED_NGINX_HMAC_SECRET|g" studio/.env
     safe_sed "s|^INTERNAL_HMAC_SECRET=.*|INTERNAL_HMAC_SECRET=$SHARED_INTERNAL_HMAC_SECRET|g" studio/.env
+    safe_sed "s|^STUDIO_ANALYTICS_HMAC_SECRET=.*|STUDIO_ANALYTICS_HMAC_SECRET=$STUDIO_ANALYTICS_HMAC_SECRET|g" studio/.env
     safe_sed "s|^LOGFLARE_PRIVATE_ACCESS_TOKEN=.*|LOGFLARE_PRIVATE_ACCESS_TOKEN=$LOGFLARE_PRIVATE_ACCESS_TOKEN|g" studio/.analytics.env
     safe_sed "s|POSTGRES_NGINX_PASSWORD=pass|POSTGRES_NGINX_PASSWORD=$POSTGRES_NGINX_PASSWORD|g" studio/.env
     safe_sed "s|^SERVER_DOMAIN=.*|SERVER_DOMAIN=${PROTO}://${SERVER_IP}|g" studio/.env
@@ -630,6 +632,7 @@ main() {
     assert_env_value servidor/.env INTERNAL_HMAC_SECRET "$SHARED_INTERNAL_HMAC_SECRET"
     assert_env_value studio/.env INTERNAL_HMAC_SECRET "$SHARED_INTERNAL_HMAC_SECRET"
     assert_env_value servidor/.env HOST_AGENT_HMAC_SECRET "$HOST_AGENT_HMAC_SECRET"
+    assert_env_value studio/.env STUDIO_ANALYTICS_HMAC_SECRET "$STUDIO_ANALYTICS_HMAC_SECRET"
     assert_env_value servidor/.analytics.env LOGFLARE_PUBLIC_ACCESS_TOKEN "$LOGFLARE_PUBLIC_ACCESS_TOKEN"
     assert_env_value servidor/.analytics.env LOGFLARE_PRIVATE_ACCESS_TOKEN "$LOGFLARE_PRIVATE_ACCESS_TOKEN"
     assert_env_value servidor/.analytics.env LOGFLARE_DB_ENCRYPTION_KEY "$LOGFLARE_DB_ENCRYPTION_KEY"
@@ -656,6 +659,7 @@ main() {
     echo "  - NGINX_HMAC_SECRET (servidor e studio; tokens de usuario)"
     echo "  - STUDIO_GATEWAY_HMAC_SECRET (servidor e studio; gerado pelo configurador)"
     echo "  - PROJECTS_API_HMAC_SECRET (servidor e studio; gerado pelo configurador)"
+    echo "  - STUDIO_ANALYTICS_HMAC_SECRET (studio; autenticacao analytics)"
     echo "  - INTERNAL_HMAC_SECRET (servidor e studio)"
     echo "  - HOST_AGENT_HMAC_SECRET (servidor e host-agent)"
     echo "  - SERVER_ADMIN_API_KEYS/AUTH_ENCRYPTION_KEY (somente Storage global)"
