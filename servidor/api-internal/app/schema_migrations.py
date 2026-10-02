@@ -296,6 +296,7 @@ async def _command_apply(*, wait_timeout: float, skip_roles: bool) -> int:
         ensure_key_authorizer_role,
         ensure_platform_app_role,
         ensure_platform_meta_admin_role,
+        ensure_tenant_meta_roles,
     )
 
     key_authorizer_password = (
@@ -350,6 +351,8 @@ async def _command_apply(*, wait_timeout: float, skip_roles: bool) -> int:
                 pool, password=meta_admin_password
             )
             print("[migrations] identidade platform_meta_admin provisionada")
+            await ensure_tenant_meta_roles(pool, admin_dsn=_require_dsn(), password=meta_admin_password)
+            print("[migrations] identidades SQL por tenant provisionadas")
     finally:
         await pool.close()
     return 0

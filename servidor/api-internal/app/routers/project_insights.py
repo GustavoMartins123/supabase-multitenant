@@ -415,11 +415,7 @@ async def proxy_project_meta(
             )
 
     try:
-        meta_key = (request.query_params.get("key") or "").strip().lower()
-        if meta_key.startswith("users"):
-            project_connection_string = get_project_reader_connection_string(ref)
-        else:
-            project_connection_string = get_project_meta_connection_string(ref)
+        project_connection_string = get_project_meta_connection_string(ref, project_row["tenant_uuid"])
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 

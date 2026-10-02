@@ -25,6 +25,7 @@ source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
 source "$SCRIPT_DIR/lib/resource_profiles.sh"
 source "$SCRIPT_DIR/lib/realtime_slots.sh"
 source "$SCRIPT_DIR/lib/tenant_reader_role.sh"
+source "$SCRIPT_DIR/lib/tenant_meta_role.sh"
 
 TRANSACTION_DIR="$PROJECT_ROOT/.generate_transaction_$$"
 CREATED_DIRS=()
@@ -507,6 +508,8 @@ echo "HOST_AGENT_PROGRESS=create:storage_verified"
 
 grant_platform_reader_on_tenant "_supabase_$PROJECT_ID" \
   || die "Falha ao conceder leitura de telemetria ao platform_reader"
+provision_tenant_meta_role "_supabase_$PROJECT_ID" "$PROJECT_UUID" \
+  || die "Falha ao provisionar identidade SQL isolada do projeto"
 
 if [[ -f "$SCRIPT_DIR/lib/platform_capacity.sh" ]]; then
   source "$SCRIPT_DIR/lib/platform_capacity.sh"

@@ -254,6 +254,7 @@ class StartupDoesNotMigrateTest(unittest.TestCase):
             "        ensure_key_authorizer_role,\n"
             "        ensure_platform_app_role,\n"
             "        ensure_platform_meta_admin_role,\n"
+            "        ensure_tenant_meta_roles,\n"
             "    )",
             (APP / "schema_migrations.py").read_text(encoding="utf-8"),
         )

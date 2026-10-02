@@ -9,8 +9,48 @@ precise apenas do DSN administrativo e da senha do papel provisionado.
 from __future__ import annotations
 
 import re
+from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit, quote
 
 import asyncpg
+from app.tenant_meta_identity import tenant_meta_credentials
+
+
+async def ensure_tenant_meta_roles(pool: asyncpg.Pool, *, admin_dsn: str, password: str) -> None:
+    """Privileged migration of every existing tenant; missing DB/identity is an error."""
+    template = Path(__file__).with_name("tenant_meta_role.sql").read_text(encoding="utf-8")
+    # A tenant login must not inherit PostgreSQL's default PUBLIC CONNECT to
+    # cluster databases (including template1). Service grants are explicit.
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            databases = await conn.fetch("SELECT datname FROM pg_database WHERE datallowconn")
+            roles = {r["rolname"] for r in await conn.fetch("SELECT rolname FROM pg_roles")}
+            control_database = await conn.fetchval("SELECT current_database()")
+            for database in databases:
+                name = database["datname"]
+                revoke = await conn.fetchval("SELECT format('REVOKE CONNECT, TEMPORARY ON DATABASE %I FROM PUBLIC', $1::text)", name)
+                await conn.execute(revoke)
+                if name == control_database:
+                    for role in ("platform_app", "key_authorizer", "host_agent_rw", "platform_meta_admin", "platform_reader", "pgbouncer"):
+                        if role in roles:
+                            grant = await conn.fetchval("SELECT format('GRANT CONNECT ON DATABASE %I TO %I', $1::text, $2::text)", name, role)
+                            await conn.execute(grant)
+                if name == "meta_trap" and "meta_guest" in roles:
+                    await conn.execute('GRANT CONNECT ON DATABASE meta_trap TO meta_guest')
+    rows = await pool.fetch("SELECT name, tenant_uuid FROM projects ORDER BY name")
+    dsn = urlsplit(admin_dsn)
+    for row in rows:
+        role, tenant_password = tenant_meta_credentials(row["tenant_uuid"], password)
+        sql = template.replace(":'meta_role'", "'" + role + "'").replace(
+            ":'meta_password'", "'" + tenant_password + "'"
+        )
+        tenant_dsn = urlunsplit(dsn._replace(path="/" + quote("_supabase_" + row["name"], safe="")))
+        conn = await asyncpg.connect(tenant_dsn)
+        try:
+            async with conn.transaction():
+                await conn.execute(sql)
+        finally:
+            await conn.close()
 
 
 KEY_AUTHORIZER_ROLE = "key_authorizer"

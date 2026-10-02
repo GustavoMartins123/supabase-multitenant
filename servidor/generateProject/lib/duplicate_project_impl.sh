@@ -11,6 +11,7 @@ source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
 source "$SCRIPT_DIR/lib/resource_profiles.sh"
 source "$SCRIPT_DIR/lib/realtime_slots.sh"
 source "$SCRIPT_DIR/lib/tenant_reader_role.sh"
+source "$SCRIPT_DIR/lib/tenant_meta_role.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/backup_core.sh"
 
@@ -492,6 +493,8 @@ storage_assert_project_gateway "$PROJECT_UUID" "$NEW_PROJECT" "$SERVICE_TOKEN" \
   || die "Nginx do clone nao resolveu o tenant Storage correto"
 
 vector_sync_project_wrappers "$NEW_PROJECT" || die "Falha ao recriar wrappers vetoriais do clone"
+provision_tenant_meta_role "$NEW_DB" "$PROJECT_UUID" \
+  || die "Falha ao provisionar identidade SQL isolada do clone"
 
 trap - ERR TERM INT HUP
 cleanup_tmp

@@ -23,6 +23,7 @@ source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/realtime_slots.sh"
 source "$SCRIPT_DIR/lib/tenant_reader_role.sh"
+source "$SCRIPT_DIR/lib/tenant_meta_role.sh"
 
 NAME_RE='^[a-z_][a-z0-9_]{2,39}$'
 UUID_RE='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
@@ -324,6 +325,8 @@ storage_validate_tenant "$PROJECT_UUID" "$SERVICE_ROLE_KEY_PROJETO" \
 storage_assert_project_gateway "$PROJECT_UUID" "$PROJECT" "$SERVICE_ROLE_KEY_PROJETO" \
   || die "Nginx nao resolveu o tenant Storage restaurado"
 vector_sync_project_wrappers "$PROJECT" || die "Falha ao sincronizar wrappers vetoriais"
+provision_tenant_meta_role "$DB" "$PROJECT_UUID" \
+  || die "Falha ao provisionar identidade SQL isolada apos restore"
 
 [[ "$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc "SELECT count(*) FROM pg_database WHERE datname = '$DB';" | tr -d '[:space:]')" == "1" ]] \
   || die "Verificacao final do database falhou"

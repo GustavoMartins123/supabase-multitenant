@@ -109,7 +109,7 @@ class UsersListingReaderContract(unittest.TestCase):
             encoding="utf-8"
         )
 
-    def test_users_keyed_meta_queries_use_the_reader_dsn(self) -> None:
+    def test_meta_queries_cannot_select_a_shared_sql_identity(self) -> None:
         connections = (API / "meta_connections.py").read_text(encoding="utf-8")
         self.assertIn("def get_project_reader_connection_string(", connections)
         reader_body = connections.split(
@@ -119,8 +119,8 @@ class UsersListingReaderContract(unittest.TestCase):
         self.assertIn("PLATFORM_READER_DB_PASSWORD", reader_body)
         self.assertNotIn("meta_guest", reader_body)
         insights = (API / "routers" / "project_insights.py").read_text(encoding="utf-8")
-        self.assertIn('meta_key.startswith("users")', insights)
-        self.assertIn("get_project_reader_connection_string(ref)", insights)
+        self.assertNotIn('meta_key.startswith("users")', insights)
+        self.assertIn('get_project_meta_connection_string(ref, project_row["tenant_uuid"])', insights)
 
     def test_dedicated_users_route_reads_via_platform_reader(self) -> None:
         self.assertIn("/api/projects/internal/auth-users/{project_name}", self.router)

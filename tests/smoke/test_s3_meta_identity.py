@@ -101,7 +101,7 @@ class MetaDsnTest(unittest.TestCase):
     def dsn(self, **overrides: str) -> dict[str, str]:
         env = {
             "META_ADMIN_DSN": (
-                "postgresql://admin:secret@db.internal:5433/postgres"
+                "postgresql://admin:01234567890123456789012345678901@db.internal:5433/postgres"
                 "?sslmode=require&connect_timeout=10"
             ),
             "PLATFORM_READER_DB_PASSWORD": "reader-secret",
@@ -111,11 +111,12 @@ class MetaDsnTest(unittest.TestCase):
 
     def test_meta_preserves_query_and_switches_database(self) -> None:
         with mock.patch.dict(os.environ, self.dsn(), clear=False):
-            out = get_project_meta_connection_string("demo")
+            out = get_project_meta_connection_string("demo", "11111111-1111-4111-8111-111111111111")
         self.assertIn("/_supabase_demo", out)
         self.assertIn("sslmode=require", out)
         self.assertIn("connect_timeout=10", out)
-        self.assertIn("admin:secret@", out)
+        self.assertIn("tenant_meta_11111111111141118111111111111111:", out)
+        self.assertNotIn("admin:", out)
 
     def test_reader_preserves_query_and_brackets_ipv6(self) -> None:
         with mock.patch.dict(
@@ -136,7 +137,7 @@ class MetaDsnTest(unittest.TestCase):
     def test_invalid_ref_is_rejected(self) -> None:
         with mock.patch.dict(os.environ, self.dsn(), clear=False):
             with self.assertRaises(HTTPException) as ctx:
-                get_project_meta_connection_string("../escape")
+                get_project_meta_connection_string("../escape", "11111111-1111-4111-8111-111111111111")
             self.assertEqual(ctx.exception.status_code, 400)
             with self.assertRaises(HTTPException) as ctx:
                 get_project_reader_connection_string("UPPER SPACE")

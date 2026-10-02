@@ -4,6 +4,7 @@ import os
 import urllib.parse
 
 from app.validation import validate_project_id
+from app.tenant_meta_identity import tenant_meta_credentials
 
 
 def _format_host(hostname: str) -> str:
@@ -12,7 +13,7 @@ def _format_host(hostname: str) -> str:
     return hostname
 
 
-def get_project_meta_connection_string(project_ref: str) -> str:
+def get_project_meta_connection_string(project_ref: str, tenant_uuid: object) -> str:
     project_ref = validate_project_id(project_ref)
     meta_dsn = (os.getenv("META_ADMIN_DSN") or "").strip()
     if not meta_dsn:
@@ -22,8 +23,11 @@ def get_project_meta_connection_string(project_ref: str) -> str:
         raise RuntimeError("DB_DSN inválido para construir a conexão administrativa do projeto")
 
     db_name = f"_supabase_{project_ref}"
+    role, password = tenant_meta_credentials(tenant_uuid, dsn.password or "")
+    netloc = f"{role}:{password}@{_format_host(dsn.hostname)}:{dsn.port or 5432}"
     return urllib.parse.urlunparse(
         dsn._replace(
+            netloc=netloc,
             path=f"/{urllib.parse.quote(db_name, safe='')}",
             params="",
             fragment="",
