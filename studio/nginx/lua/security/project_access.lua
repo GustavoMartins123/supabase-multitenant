@@ -49,14 +49,14 @@ local function reject_resolution(err)
     )
 end
 
-function _M.enforce(expected_ref)
+function _M.enforce(expected_ref, administrative)
     local ref, resolution_err = request_context.capture(expected_ref)
     if not ref then
         return reject_resolution(resolution_err)
     end
 
     local existing = ngx.ctx.studio_project_context
-    if existing and existing.ref == ref then
+    if existing and existing.ref == ref and (not administrative or existing.enc_admin_key) then
         return existing
     end
 
@@ -66,13 +66,17 @@ function _M.enforce(expected_ref)
     end
     user_context_headers.apply(email, ngx.var.authelia_groups or "")
 
-    local context, err, status = studio_context.load(ref)
+    local context, err, status = studio_context.load(ref, administrative)
     if not context then
         return reject(status or ngx.HTTP_BAD_GATEWAY, err)
     end
 
     ngx.ctx.studio_project_context = context
     return context
+end
+
+function _M.enforce_admin(expected_ref)
+    return _M.enforce(expected_ref, true)
 end
 
 return _M

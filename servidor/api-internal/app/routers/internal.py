@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict
 from app.control_plane_service import sync_user_record
 from app.database import get_pool
 from app.dependencies import (
+    ensure_project_admin_access,
     ensure_project_member_access,
     get_project_role,
     resolve_authenticated_user,
@@ -24,6 +25,7 @@ from app.runtime_config import (
 )
 from app.schemas import UserSyncPayload
 from app.validation import validate_project_id
+from app.studio_administrative_keys import get_studio_administrative_key
 
 
 router = APIRouter(tags=["internal"])
@@ -296,16 +298,20 @@ async def get_studio_project_context(
     ref = validate_project_id(ref)
     _require_studio_nginx(request)
     auth_user = await resolve_authenticated_user(request, pool)
+    access = request.query_params.get("access", "member")
+    if access not in {"member", "admin"}:
+        raise HTTPException(400, "Invalid Studio access mode")
+    enc_admin_key = None
 
     async with pool.acquire() as conn:
         async with conn.transaction():
             project = await conn.fetchrow(
                 """
                 SELECT id, tenant_uuid, name, display_name,
-                       anon_key, project_key_version
+                anon_key, project_key_version
                 FROM projects
                 WHERE name = $1
-                """,
+                """ + (" FOR UPDATE" if access == "admin" else ""),
                 ref,
             )
             if not project:
@@ -316,6 +322,10 @@ async def get_studio_project_context(
                 project_id=project["id"],
                 auth_user=auth_user,
             )
+            if access == "admin":
+                await ensure_project_admin_access(conn, project_id=project["id"], auth_user=auth_user)
+                administrative_key = await get_studio_administrative_key(conn, project_id=project["id"])
+                enc_admin_key = service_key_transport_fernet.encrypt(administrative_key.encode()).decode()
             role = await get_project_role(
                 conn,
                 project_id=project["id"],
@@ -345,6 +355,7 @@ async def get_studio_project_context(
             "anon_key": anon_key,
             "file_size_limit": int(get_project_file_size_limit(project["name"])),
             "project_key_version": project["project_key_version"],
+            "enc_admin_key": enc_admin_key,
         },
         headers={"Cache-Control": "no-store"},
     )

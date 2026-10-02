@@ -320,6 +320,75 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
             self.project_a,
         ), 1)
 
+    async def test_member_cannot_obtain_studio_administrative_credential(self):
+        response = await self.request("GET", "/api/projects/internal/studio-context/projeto_a?access=admin", actor=self.ex_member)
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(await self.pool.fetchval("SELECT count(*) FROM project_studio_keys"), 0)
+
+    async def test_studio_credential_is_stable_private_and_revocable(self):
+        from app.project_secret_service import encrypt_project_secret
+        from app.runtime_config import service_key_transport_fernet
+        from unittest.mock import patch
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                ciphertext = await encrypt_project_secret(conn, project_id=self.project_a, column="anon_key", plaintext="test-anon-key")
+                await conn.execute("UPDATE projects SET anon_key=$1 WHERE id=$2", ciphertext, self.project_a)
+        path = "/api/projects/internal/studio-context/projeto_a?access=admin"
+        with patch("app.routers.internal.get_project_file_size_limit", return_value=5000):
+            first = await self.request("GET", path, actor=self.admin2)
+            second = await self.request("GET", path, actor=self.owner)
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(second.status_code, 200, second.text)
+        key1 = service_key_transport_fernet.decrypt(first.json()["enc_admin_key"].encode())
+        key2 = service_key_transport_fernet.decrypt(second.json()["enc_admin_key"].encode())
+        self.assertEqual(key1, key2)
+        self.assertTrue(key1.startswith(b"sb_secret_"))
+        self.assertNotIn(key1.decode(), first.text)
+        self.assertEqual(await self.pool.fetchval("SELECT count(*) FROM project_api_key_slots"), 0)
+        await self.pool.execute("UPDATE project_studio_keys SET is_active=false, revoked_at=now() WHERE project_id=$1", self.project_a)
+        revoked = await self.request("GET", path, actor=self.owner)
+        self.assertEqual(revoked.status_code, 403, revoked.text)
+
+    async def test_revoked_project_admin_is_denied_on_next_context_request(self):
+        await self.pool.execute("UPDATE project_members SET role='member' WHERE project_id=$1 AND user_id=$2", self.project_a, self.admin2)
+        response = await self.request("GET", "/api/projects/internal/studio-context/projeto_a?access=admin", actor=self.admin2)
+        self.assertEqual(response.status_code, 403, response.text)
+
+    async def test_authorizer_accepts_only_scoped_active_studio_key_not_raw_jwt(self):
+        import importlib.util
+        import httpx
+        from app import opaque_keys
+        from app.studio_administrative_keys import get_studio_administrative_key
+        sys.modules["opaque_keys"] = opaque_keys
+        spec = importlib.util.spec_from_file_location("studio_authorizer_test", ROOT / "servidor/key-authorizer/app.py")
+        authorizer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(authorizer)
+        authorizer._pool = self.pool
+        gateway = "a" * 64
+        await self.pool.execute("UPDATE projects SET api_gateway_token_hash=$1, opaque_keys_activated_at=now() WHERE id=$2", hashlib.sha256(gateway.encode()).digest(), self.project_a)
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                key = await get_studio_administrative_key(conn, project_id=self.project_a)
+        headers = {"X-Project-Ref": "projeto_a", "X-Project-Gateway-Token": gateway,
+            "X-Api-Key-Header": key, "X-Original-Authorization": "Bearer " + key,
+            "X-Allow-Missing-Key": "0", "X-Target-Service": "storage"}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=authorizer.app), base_url="http://authorizer") as client:
+            for service in ("rest", "graphql", "storage"):
+                headers["X-Target-Service"] = service
+                result = await client.get("/v1/authorize", headers=headers)
+                self.assertEqual(result.status_code, 204, result.text)
+                self.assertEqual(result.headers["X-Opaque-Key-Role"], "service_role")
+                self.assertEqual(result.headers["X-Opaque-Preserve-Authorization"], "0")
+            for service in ("auth", "functions", "realtime"):
+                headers["X-Target-Service"] = service
+                self.assertEqual((await client.get("/v1/authorize", headers=headers)).status_code, 403)
+            headers["X-Target-Service"] = "rest"
+            headers["X-Api-Key-Header"] = "eyJhbGciOiJIUzI1NiJ9.raw.jwt"
+            self.assertEqual((await client.get("/v1/authorize", headers=headers)).status_code, 403)
+            headers["X-Api-Key-Header"] = key
+            await self.pool.execute("UPDATE project_studio_keys SET is_active=false WHERE project_id=$1", self.project_a)
+            self.assertEqual((await client.get("/v1/authorize", headers=headers)).status_code, 403)
+
     async def test_concurrent_delete_and_upsert_preserve_last_admin(self):
         await self.pool.execute(
             "DELETE FROM project_members WHERE project_id=$1 AND user_id=$2",

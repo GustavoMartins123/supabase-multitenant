@@ -1,11 +1,10 @@
-local context = require("security.project_access").enforce()
+local context = require("security.project_access").enforce_admin()
 if type(context) ~= "table" then
     return
 end
 require("security.storage_upload_limit").enforce(context)
 
-local get_service_key = require("security.get_service_key")
-local key = get_service_key(context.ref)
+local key = require("security.studio_administrative_key").load(context)
 if not key or key == "" then
     ngx.status = ngx.HTTP_SERVICE_UNAVAILABLE
     ngx.header["Content-Type"] = "application/json; charset=utf-8"
@@ -13,8 +12,4 @@ if not key or key == "" then
     return ngx.exit(ngx.HTTP_SERVICE_UNAVAILABLE)
 end
 ngx.req.set_header("Authorization", "Bearer " .. key)
-if (ngx.var.uri or ""):find("^/storage/v1") or (ngx.var.uri or ""):find("^/object/sign") then
-    ngx.req.clear_header("apikey")
-else
-    ngx.req.set_header("apikey", key)
-end
+ngx.req.set_header("apikey", key)

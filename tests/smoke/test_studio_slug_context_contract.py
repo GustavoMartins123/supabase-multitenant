@@ -69,10 +69,10 @@ class StudioSlugContextContractTest(unittest.TestCase):
                 source = (LUA / "security" / name).read_text(encoding="utf-8")
                 self.assertLess(
                     source.index('require("security.project_access").enforce'),
-                    source.index('require("security.get_service_key")'),
+                    source.index('require("security.get_service_key")' if name == "inject_service_key_apikey.lua" else 'require("security.studio_administrative_key")'),
                 )
-                self.assertIn("enforce()", source)
-                self.assertIn("get_service_key(context.ref)", source)
+                self.assertIn("enforce()" if name == "inject_service_key_apikey.lua" else "enforce_admin()", source)
+                self.assertIn("get_service_key(context.ref)" if name == "inject_service_key_apikey.lua" else ".load(context)", source)
                 self.assertNotIn("project_ref = context.ref", source)
 
     def test_access_gate_captures_context_once_without_repair_fallbacks(self) -> None:
@@ -85,7 +85,7 @@ class StudioSlugContextContractTest(unittest.TestCase):
         self.assertIn("ngx.ctx.studio_request_project_ref", request_context)
         self.assertIn("local ref, resolve_err, source = resolver.resolve()", request_context)
         self.assertIn("ngx.var.project_ref = ref", request_context)
-        self.assertIn('ngx.var.server_path = server_domain .. "/" .. ref .. "/"', request_context)
+        self.assertIn('ngx.var.server_path = server_domain .. "/" .. ref', request_context)
         self.assertIn('ngx.req.set_header("X-Project-Ref", ref)', request_context)
         self.assertIn('ngx.req.clear_header("X-Studio-Project-Ref")', request_context)
         self.assertNotIn("Referer", request_context)
@@ -211,7 +211,9 @@ class StudioSlugContextContractTest(unittest.TestCase):
             with self.subTest(relative=relative):
                 source = (LUA / relative).read_text(encoding="utf-8")
                 gate = source.index('require("security.project_access").enforce')
-                key = source.index('require("security.get_service_key")')
+                key = source.index('require("security.studio_administrative_key")' if relative in {
+                    "security/inject_service_key.lua", "security/inject_service_key_storage.lua", "security/inject_service_key_graphql.lua"
+                } else 'require("security.get_service_key")')
                 unavailable = source.index("project_service_unavailable")
                 self.assertLess(gate, key)
                 self.assertLess(key, unavailable)

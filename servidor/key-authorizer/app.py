@@ -276,6 +276,11 @@ async def authorize(
                           AND k.confirmed_at IS NOT NULL
                       )
                   )
+                UNION ALL
+                SELECT sk.project_id AS id, 'secret' AS kind,
+                       ARRAY['rest','graphql','storage']::text[] AS allowed_services
+                FROM project_studio_keys sk
+                WHERE sk.project_id = $1 AND sk.secret_hash = $2 AND sk.is_active
                 """,
                 project["id"],
                 parsed.digest,

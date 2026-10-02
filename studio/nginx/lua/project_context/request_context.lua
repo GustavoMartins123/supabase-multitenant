@@ -20,7 +20,7 @@ local function apply_proxy_context(ref)
         return nil, "server_domain_missing"
     end
 
-    ngx.var.server_path = server_domain .. "/" .. ref .. "/"
+    ngx.var.server_path = server_domain .. "/" .. ref
     ngx.req.set_header("X-Project-Ref", ref)
     ngx.req.clear_header("X-Studio-Project-Ref")
     return true

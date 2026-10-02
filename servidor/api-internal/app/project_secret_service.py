@@ -136,7 +136,7 @@ async def decrypt_project_secret(
 def _project_material_purpose(purpose: str) -> str:
     """Restrict non-column AAD purposes to explicitly supported material."""
 
-    if not PROJECT_MATERIAL_PURPOSE_RE.fullmatch(purpose):
+    if purpose != "studio-administrative-key" and not PROJECT_MATERIAL_PURPOSE_RE.fullmatch(purpose):
         raise ValueError(f"unsupported project material purpose: {purpose}")
     return purpose
 

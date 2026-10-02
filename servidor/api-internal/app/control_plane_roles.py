@@ -111,6 +111,8 @@ async def ensure_key_authorizer_role(
                 ) ON project_api_keys TO key_authorizer;
                 GRANT UPDATE (last_used_at)
                     ON project_api_keys TO key_authorizer;
+                GRANT SELECT (project_id, secret_hash, is_active)
+                    ON project_studio_keys TO key_authorizer;
                 """
             )
             password_statement = await conn.fetchval(
