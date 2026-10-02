@@ -239,15 +239,20 @@ class MemberRemovalGuardTest(unittest.TestCase):
         source = read(APP / "routers" / "project_members.py")
         start = source.index("async def remove_member_by_ref(")
         body = source[start : start + 3000]
-        self.assertIn('project_row["owner_id"]', body)
-        self.assertIn("transfira a posse antes", body)
+        self.assertIn("ensure_member_role_change_allowed(", body)
+        policy = read(APP / "dependencies.py").split("async def ensure_member_role_change_allowed(", 1)[1]
+        self.assertIn('project_row["owner_id"]', policy)
+        self.assertIn("transfira a posse antes", policy)
 
     def test_peer_admin_cannot_remove_another_admin(self):
         source = read(APP / "routers" / "project_members.py")
         start = source.index("async def remove_member_by_ref(")
         body = source[start : start + 3000]
-        self.assertIn('old_role == "admin"', body)
-        self.assertIn('auth_user["is_global_admin"]', body)
+        self.assertIn("ensure_member_role_change_allowed(", body)
+        self.assertIn("for_update=True", body)
+        policy = read(APP / "dependencies.py").split("async def ensure_member_role_change_allowed(", 1)[1]
+        self.assertIn('old_role != "admin"', policy)
+        self.assertIn('auth_user["is_global_admin"]', policy)
 
 
 class StepUpCoverageTest(unittest.TestCase):
