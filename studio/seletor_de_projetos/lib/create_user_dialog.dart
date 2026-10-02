@@ -26,6 +26,7 @@ class _CreateUserDialogState extends State<CreateUserDialog>
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _installationTokenController = TextEditingController();
   final ApiClient _client = ApiClient();
 
   bool _isLoading = false;
@@ -56,6 +57,7 @@ class _CreateUserDialogState extends State<CreateUserDialog>
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _installationTokenController.dispose();
     _animController.dispose();
     super.dispose();
   }
@@ -72,7 +74,11 @@ class _CreateUserDialogState extends State<CreateUserDialog>
               ? '/api/bootstrap/admin'
               : '/api/admin/users/signup',
         ),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          if (widget.bootstrapMode)
+            'X-Installation-Token': _installationTokenController.text.trim(),
+        },
         body: jsonEncode({
           'username': _usernameController.text.trim(),
           'display_name': _displayNameController.text.trim(),
@@ -183,6 +189,22 @@ class _CreateUserDialogState extends State<CreateUserDialog>
                     const SizedBox(height: 24),
                     const Divider(color: SupabaseColors.border, height: 1),
                     const SizedBox(height: 20),
+                    if (widget.bootstrapMode) ...[
+                      TextFormField(
+                        controller: _installationTokenController,
+                        obscureText: true,
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        decoration: const InputDecoration(
+                          labelText: 'Prova de instalação',
+                          helperText: 'Arquivo local secrets/authelia/STUDIO_BOOTSTRAP_TOKEN',
+                        ),
+                        validator: (value) => value == null || value.trim().length < 43
+                            ? 'Informe a prova gerada pelo setup'
+                            : null,
+                      ),
+                      const SizedBox(height: 16),
+                    ],
                     _buildField(
                       controller: _usernameController,
                       label: 'Nome de usuário',

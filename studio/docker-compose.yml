@@ -13,6 +13,8 @@ secrets:
     file: ./secrets/authelia/SESSION_SECRET
   STORAGE_ENCRYPTION_KEY:
     file: ./secrets/authelia/STORAGE_ENCRYPTION_KEY
+  STUDIO_BOOTSTRAP_TOKEN:
+    file: ./secrets/authelia/STUDIO_BOOTSTRAP_TOKEN
 
 services:
   usersdb-init:
@@ -74,9 +76,11 @@ services:
       STUDIO_EXTRA_CA_CERT_FILE: /etc/studio/extra-ca.pem
       AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE: /var/run/authelia-cli-secrets/JWT_SECRET
       AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE: /var/run/authelia-cli-secrets/STORAGE_ENCRYPTION_KEY
+      STUDIO_BOOTSTRAP_TOKEN_FILE: /run/secrets/STUDIO_BOOTSTRAP_TOKEN
     secrets:
       - JWT_SECRET
       - STORAGE_ENCRYPTION_KEY
+      - STUDIO_BOOTSTRAP_TOKEN
     volumes:
       - ./nginx/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ./authelia:/config

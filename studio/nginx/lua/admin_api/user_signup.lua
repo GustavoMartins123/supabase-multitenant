@@ -32,6 +32,8 @@ local password = user_data.password
 local display_name = user_data.display_name
 local email = user_data.email
 local is_bootstrap_admin = ngx.var.bootstrap_admin == "true"
+local installation_token = ngx.req.get_headers()["X-Installation-Token"]
+local bootstrap_authorization = require("security.bootstrap_authorization")
 
 if not username or username == "" then
     ngx.status = ngx.HTTP_BAD_REQUEST
@@ -141,24 +143,38 @@ local function error_result(status, message)
     }
 end
 
+local function respond_error(status, message)
+    ngx.status = status
+    ngx.header.content_type = "application/json"
+    ngx.say(cjson.encode({error=message}))
+    return ngx.exit(status)
+end
+
 local pre_yaml = user_store.load()
+if not pre_yaml then
+    return respond_error(ngx.HTTP_SERVICE_UNAVAILABLE, "User database unavailable")
+end
+if is_bootstrap_admin then
+    local authorized, proof_err, proof_status = bootstrap_authorization.verify(pre_yaml.users, installation_token)
+    if not authorized then return respond_error(proof_status, proof_err) end
+end
 if pre_yaml and pre_yaml.users then
     local pre_users = pre_yaml.users
     if is_bootstrap_admin and users_have_admin(pre_users) then
-        return error_result(ngx.HTTP_FORBIDDEN, "Initial admin already exists")
+        return respond_error(ngx.HTTP_FORBIDDEN, "Initial admin already exists")
     end
     local pre_username_lower = username:lower()
     for existing_user, user_info in pairs(pre_users) do
         if not is_bootstrap_placeholder(existing_user)
             and existing_user:lower() == pre_username_lower
         then
-            return error_result(ngx.HTTP_CONFLICT, "Username already exists")
+            return respond_error(ngx.HTTP_CONFLICT, "Username already exists")
         end
         if not is_bootstrap_placeholder(existing_user)
             and user_info.email
             and user_info.email:lower() == normalized_email
         then
-            return error_result(ngx.HTTP_CONFLICT, "Email already exists")
+            return respond_error(ngx.HTTP_CONFLICT, "Email already exists")
         end
     end
 end
@@ -183,6 +199,10 @@ local result, mutation_err = user_store.with_lock(function()
 
     if is_bootstrap_admin and users_have_admin(yaml_data.users) then
         return error_result(ngx.HTTP_FORBIDDEN, "Initial admin already exists")
+    end
+    if is_bootstrap_admin then
+        local authorized, proof_err, proof_status = bootstrap_authorization.verify(yaml_data.users, installation_token)
+        if not authorized then return error_result(proof_status, proof_err) end
     end
 
     local username_lower = username:lower()
@@ -232,6 +252,13 @@ local result, mutation_err = user_store.with_lock(function()
     end
     yaml_data.users[username] = new_user_record
 
+    if is_bootstrap_admin then
+        local consumed, consume_err = bootstrap_authorization.consume()
+        if not consumed then
+            ngx.log(ngx.ERR, "Failed to consume installation proof: ", consume_err)
+            return error_result(ngx.HTTP_SERVICE_UNAVAILABLE, "Failed to consume installation proof")
+        end
+    end
     local written, write_err = user_store.write(yaml_data)
     if not written then
         ngx.log(ngx.ERR, "[CREATE_USER] Failed to write YAML: ", write_err)

@@ -37,7 +37,7 @@ AUTHELIA_RUNTIME_EMPTY = (
 # so os arquivos declarados como docker secrets entram nos containers.
 CA_KEY_NAME = "ca.key"
 
-SECRET_FILES = ("JWT_SECRET", "SESSION_SECRET", "STORAGE_ENCRYPTION_KEY")
+SECRET_FILES = ("JWT_SECRET", "SESSION_SECRET", "STORAGE_ENCRYPTION_KEY", "STUDIO_BOOTSTRAP_TOKEN")
 INTERNAL_SERVICE_HMAC_KEYS = (
     "STUDIO_GATEWAY_HMAC_SECRET",
     "PROJECTS_API_HMAC_SECRET",
@@ -432,6 +432,7 @@ def configure_runtime(
     print(f"Authelia renderizado para {host}; valores de segredo omitidos")
     print(f"Configuracao: {target}")
     print(f"Segredos: {secrets_root} (mode 0600)")
+    print(f"Prova de instalacao: {secrets_root / 'STUDIO_BOOTSTRAP_TOKEN'} (nao exposta via HTTP)")
     print(f"TLS: {ssl_root} (folha server.pem; ancora ca.pem)")
     print(f"Chave da CA: {secrets_root / CA_KEY_NAME} (fora de /config)")
     if rotated_ca:
