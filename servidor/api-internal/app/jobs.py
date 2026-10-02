@@ -452,8 +452,9 @@ async def enqueue_project_action(
                     str(payload.get("original_name") or "")
                 )
                 original_id = await conn.fetchval(
-                    "SELECT id FROM projects WHERE name = $1",
+                    "SELECT id FROM projects WHERE name = $1 AND id = $2",
                     original_name,
+                    uuid.UUID(str(payload["original_uuid"])),
                 )
                 if original_id is None:
                     raise RuntimeError(

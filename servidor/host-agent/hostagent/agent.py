@@ -412,6 +412,22 @@ class HostAgent:
         if arg_errors:
             return ("invalid_args", "; ".join(arg_errors))
 
+        if command == "duplicate_project":
+            source = await db.load_authorization_context(
+                self.pool, project=args["original_name"], requested_by=record["requested_by"]
+            )
+            if (
+                not source["project_row_exists"]
+                or str(source["project_id"]) != args["original_uuid"]
+                or str(source["tenant_uuid"]) != args["original_tenant_uuid"]
+            ):
+                return ("authorization_denied:source_identity_mismatch", "Identidade da origem mudou.")
+            if (
+                not source["user_exists"] or not source["user_active"]
+                or not (source["is_global_admin"] or source["member_role"] in {"member", "admin"})
+            ):
+                return ("authorization_denied:source_access_revoked", "Acesso atual a origem negado.")
+
         auth = await db.load_authorization_context(
             self.pool,
             project=project,

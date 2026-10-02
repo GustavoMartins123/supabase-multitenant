@@ -838,7 +838,10 @@ async def handle_create_project(ctx: CommandContext, project: str, args: dict[st
 
 async def handle_duplicate_project(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
     original = str(args["original_name"])
-    resolve_project_dir(ctx.config.projects_root, original, must_exist=True)
+    source_dir = resolve_project_dir(ctx.config.projects_root, original, must_exist=True)
+    physical_uuid = read_canonical_env_value(source_dir / ".env", "PROJECT_UUID")
+    if not isinstance(physical_uuid, str) or physical_uuid.lower() != args["original_tenant_uuid"].lower():
+        return CommandOutcome(status="failed", error_code="source_identity_mismatch", message="UUID fisico da origem diverge da intencao assinada.")
     resolve_project_dir(ctx.config.projects_root, project)
     ctx.state.report(progress=10, step="duplicate_infrastructure", message="Duplicando infraestrutura e banco...")
     env = os.environ.copy()
@@ -851,7 +854,7 @@ async def handle_duplicate_project(ctx: CommandContext, project: str, args: dict
     outcome, _ = await _run_lifecycle_script(
         ctx,
         "duplicate_project.sh",
-        [original, project, str(args["copy_mode"]), str(args["tenant_uuid"])],
+        [original, project, str(args["copy_mode"]), str(args["tenant_uuid"]), str(args["original_tenant_uuid"])],
         env=env,
         error_code="duplicate_failed",
     )

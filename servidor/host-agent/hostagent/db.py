@@ -154,13 +154,13 @@ async def lease_next_command(
         async with conn.transaction():
             row = await conn.fetchrow(
                 """
-                SELECT id, project
+                SELECT id, project, args
                 FROM host_agent_commands c
                 WHERE c.status = 'queued'
-                  AND NOT (c.project = ANY($1::text[]))
+                  AND NOT (ARRAY[c.project, c.args->>'original_name', c.args->>'new_name'] && $1::text[])
                   AND NOT EXISTS (
                       SELECT 1 FROM host_agent_commands r
-                      WHERE r.project = c.project
+                      WHERE ARRAY[r.project, r.args->>'original_name', r.args->>'new_name'] && ARRAY[c.project, c.args->>'original_name', c.args->>'new_name']
                         AND r.status = 'running'
                   )
                 ORDER BY c.created_at
@@ -171,17 +171,22 @@ async def lease_next_command(
             )
             if row is None:
                 return None
-            await conn.execute(
-                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-                f"host-agent-project:{row['project']}",
-            )
+            args = row["args"]
+            if isinstance(args, str):
+                args = json.loads(args)
+            resources = sorted({row["project"], *[args[name] for name in ("original_name", "new_name") if isinstance(args.get(name), str)]})
+            for resource in resources:
+                await conn.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    f"host-agent-project:{resource}",
+                )
             still_running = await conn.fetchval(
                 """
                 SELECT 1 FROM host_agent_commands
-                WHERE project = $1 AND status = 'running'
+                WHERE ARRAY[project, args->>'original_name', args->>'new_name'] && $1::text[] AND status = 'running'
                 LIMIT 1
                 """,
-                row["project"],
+                resources,
             )
             if still_running is not None:
                 return None

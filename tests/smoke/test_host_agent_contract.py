@@ -553,6 +553,8 @@ class ClosedCommandSetTest(unittest.TestCase):
             }),
             ("duplicate_project", "copia", {
                 "original_name": "meuprojeto",
+                "original_uuid": "1b671a64-40d5-491e-99b0-da01ff1f3341",
+                "original_tenant_uuid": "1b671a64-40d5-491e-99b0-da01ff1f3341",
                 "copy_mode": "schema-only",
                 "tenant_uuid": tenant_uuid,
             }),

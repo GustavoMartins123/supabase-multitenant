@@ -368,6 +368,8 @@ async def duplicate_project(
                 action="duplicate",
                 payload={
                     "original_name": original,
+                    "original_uuid": str(project_row["id"]),
+                    "original_tenant_uuid": str(project_row["tenant_uuid"]),
                     "new_name": new_name,
                     "actor_user_id": str(auth_user["db_user_id"]),
                     "copy_data": body.copy_data,

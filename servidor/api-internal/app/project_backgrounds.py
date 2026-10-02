@@ -24,6 +24,7 @@ from app.automatic_key_rotation import block_automatic_key_rotation
 from app.project_deletion import ProjectDeletionError, build_global_delete_token, build_realtime_delete_token, delete_realtime_tenant, delete_supavisor_tenant, drain_database_connections, drop_database_force, drop_supabase_replication_slots, global_admin_connection, load_project_environment, terminate_supavisor_pools
 from app.project_identity import ProjectIdentityError, get_job_project_identity as _get_job_project_identity, parse_tenant_uuid
 from app.database import get_pool
+from app.dependencies import ensure_project_member_access
 
 
 async def _serialize_queued_job(
@@ -400,6 +401,20 @@ async def _duplicate_and_store_keys(
 
     try:
         copy_mode = "with-data" if copy_data else "schema-only"
+        job_payload = await pool.fetchval("SELECT payload FROM jobs WHERE job_id=$1", uuid.UUID(str(job_id)))
+        if isinstance(job_payload, str):
+            job_payload = json.loads(job_payload)
+        original_uuid = uuid.UUID(str(job_payload["original_uuid"]))
+        original_tenant_uuid = uuid.UUID(str(job_payload["original_tenant_uuid"]))
+        async with pool.acquire() as conn:
+            source = await conn.fetchrow("SELECT id, tenant_uuid FROM projects WHERE name=$1 AND id=$2", original_name, original_uuid)
+            if not source or source["tenant_uuid"] != original_tenant_uuid:
+                raise ProjectIdentityError("A identidade da origem da duplicacao mudou")
+            actor = await conn.fetchrow("SELECT is_active, EXISTS(SELECT 1 FROM user_groups WHERE user_id=users.id AND group_name='admin') AS is_global_admin FROM users WHERE id=$1", owner_id)
+            if not actor or not actor["is_active"]:
+                raise ProjectIdentityError("O solicitante da duplicacao nao esta ativo")
+            await ensure_project_member_access(conn, project_id=original_uuid,
+                auth_user={"db_user_id": owner_id, "is_global_admin": actor["is_global_admin"]})
         resolved_project_uuid, tenant_uuid = await _get_job_project_identity(
             pool, job_id
         )
@@ -430,6 +445,8 @@ async def _duplicate_and_store_keys(
             requested_by=owner_id,
             args={
                 "original_name": original_name,
+                "original_uuid": str(original_uuid),
+                "original_tenant_uuid": str(original_tenant_uuid),
                 "copy_mode": copy_mode,
                 "tenant_uuid": str(tenant_uuid),
                 "gateway_token": gateway_token,

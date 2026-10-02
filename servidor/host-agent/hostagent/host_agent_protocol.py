@@ -216,8 +216,13 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
             errors.append("stale_tenants_require_recovery")
         validate_resource_profile()
     elif command == "duplicate_project":
-        reject_unknown({"original_name", "copy_mode", "tenant_uuid", "gateway_token", "resource_profile"})
+        reject_unknown({"original_name", "original_uuid", "original_tenant_uuid", "copy_mode", "tenant_uuid", "gateway_token", "resource_profile"})
         require_project_field("original_name")
+        for source_field in ("original_uuid", "original_tenant_uuid"):
+            if not is_valid_uuid(args.get(source_field)):
+                errors.append("invalid_" + source_field)
+        if args.get("original_name") == project:
+            errors.append("source_equals_destination")
         if args.get("copy_mode") not in COPY_MODES:
             errors.append("invalid_copy_mode")
         if not is_valid_uuid(args.get("tenant_uuid")):

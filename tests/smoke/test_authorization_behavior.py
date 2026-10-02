@@ -138,6 +138,7 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
                 "projects",
                 "users",
                 "internal_hmac_nonces",
+                "host_agent_commands",
             ):
                 await conn.execute(f"TRUNCATE {table} CASCADE")
         database_module._pool = None
@@ -388,6 +389,47 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
             headers["X-Api-Key-Header"] = key
             await self.pool.execute("UPDATE project_studio_keys SET is_active=false WHERE project_id=$1", self.project_a)
             self.assertEqual((await client.get("/v1/authorize", headers=headers)).status_code, 403)
+
+    async def duplicate_intent(self):
+        sys.path.insert(0, str(ROOT / "servidor/host-agent"))
+        from hostagent.host_agent_protocol import command_signature
+        from hostagent.agent import HostAgent
+        from types import SimpleNamespace
+        dest = uuid.uuid4()
+        await self.pool.execute("INSERT INTO projects(id, name, owner_id) VALUES($1,'copy_dest',$2)", dest, self.admin2)
+        await self.pool.execute("INSERT INTO project_members(project_id,user_id,role) VALUES($1,$2,'admin')", dest, self.admin2)
+        args = {"original_name": "projeto_a", "original_uuid": str(self.project_a),
+            "original_tenant_uuid": str(self.project_a), "copy_mode": "schema-only", "tenant_uuid": str(dest)}
+        record = {"id": uuid.uuid4(), "project_uuid": dest, "requested_by": self.admin2,
+            "issued_at": int(time.time()), "timeout_seconds": 600}
+        record["signature"] = command_signature("signed-intent-test", command_id=str(record["id"]),
+            command="duplicate_project", project="copy_dest", project_uuid=str(dest),
+            requested_by=str(self.admin2), args=args, issued_at=record["issued_at"], timeout_seconds=600)
+        agent = HostAgent(SimpleNamespace(hmac_secret="signed-intent-test"))
+        agent.pool = self.pool
+        return agent, record, args
+
+    async def test_signed_duplicate_reauthorizes_source_after_membership_revocation(self):
+        agent, record, args = await self.duplicate_intent()
+        self.assertIsNone(await agent._revalidate(record, "duplicate_project", "copy_dest", args))
+        await self.pool.execute("DELETE FROM project_members WHERE project_id=$1 AND user_id=$2", self.project_a, self.admin2)
+        denial = await agent._revalidate(record, "duplicate_project", "copy_dest", args)
+        self.assertEqual(denial[0], "authorization_denied:source_access_revoked")
+
+    async def test_signed_duplicate_cannot_copy_reused_source_slug(self):
+        agent, record, args = await self.duplicate_intent()
+        await self.pool.execute("UPDATE projects SET name='renamed_source' WHERE id=$1", self.project_a)
+        await self.pool.execute("INSERT INTO projects(id,name,owner_id) VALUES($1,'projeto_a',$2)", uuid.uuid4(), self.admin2)
+        denial = await agent._revalidate(record, "duplicate_project", "copy_dest", args)
+        self.assertEqual(denial[0], "authorization_denied:source_identity_mismatch")
+
+    async def test_agent_serializes_duplicate_source_against_rename(self):
+        agent, record, args = await self.duplicate_intent()
+        from hostagent import db as agent_db
+        await self.pool.execute("INSERT INTO host_agent_commands(id,project,command,args,issued_at,signature,timeout_seconds) VALUES($1,'copy_dest','duplicate_project',$2,0,'test',600)", record["id"], json.dumps(args))
+        await self.pool.execute("INSERT INTO host_agent_commands(id,project,command,args,issued_at,signature,timeout_seconds) VALUES($1,'projeto_a','rename_project',$2,0,'test',600)", uuid.uuid4(), json.dumps({"new_name":"new_source"}))
+        leases = await asyncio.gather(agent_db.lease_next_command(self.pool,"agent1",60,set()), agent_db.lease_next_command(self.pool,"agent2",60,set()))
+        self.assertEqual(sum(row is not None for row in leases), 1)
 
     async def test_concurrent_delete_and_upsert_preserve_last_admin(self):
         await self.pool.execute(

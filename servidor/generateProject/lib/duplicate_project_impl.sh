@@ -28,6 +28,8 @@ ORIGINAL_PROJECT="${1:-}"
 NEW_PROJECT="${2:-}"
 COPY_MODE="${3:-}"
 PROJECT_UUID="${4:-}"
+EXPECTED_ORIGINAL_UUID="${5:-}"
+storage_validate_tenant_id "$EXPECTED_ORIGINAL_UUID" || die "UUID assinado da origem ausente/invalido"
 [[ -n "$ORIGINAL_PROJECT" && -n "$NEW_PROJECT" && -n "$COPY_MODE" && -n "$PROJECT_UUID" ]] \
   || die "Uso: $0 <original_project> <new_project> <with-data|schema-only> <project_uuid>"
 [[ "$COPY_MODE" == "with-data" || "$COPY_MODE" == "schema-only" ]] \
@@ -212,6 +214,8 @@ done
 ORIGINAL_UUID="$(read_project_env_value "$ORIGINAL_DIR/.env" PROJECT_UUID \
   | tr '[:upper:]' '[:lower:]')"
 storage_validate_tenant_id "$ORIGINAL_UUID" || die "PROJECT_UUID do projeto original invalido"
+[[ "$ORIGINAL_UUID" == "${EXPECTED_ORIGINAL_UUID,,}" ]] \
+  || die "Identidade fisica da origem diverge da intencao assinada"
 [[ "$ORIGINAL_UUID" != "$PROJECT_UUID" ]] \
   || die "Clone deve possuir tenant UUID diferente da origem"
 ORIGINAL_SERVICE_ROLE_KEY="$(read_project_env_value "$ORIGINAL_DIR/.env" SERVICE_ROLE_KEY_PROJETO)"
