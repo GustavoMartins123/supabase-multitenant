@@ -69,7 +69,7 @@ class TelemetryUserItem(BaseModel):
     user_id: str
     email: str | None
     phone: str | None
-    last_login_at: str | None
+    last_login_at: dt.datetime | None
     session_count: int
 
 
@@ -77,8 +77,8 @@ class ProjectUserTelemetryResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
     project: str
     period: str
-    start: str
-    end: str
+    start: dt.datetime
+    end: dt.datetime
     active_users: int
     total_sessions: int
     users: list[TelemetryUserItem]

@@ -2985,6 +2985,7 @@
             "type": "integer"
           },
           "end": {
+            "format": "date-time",
             "title": "End",
             "type": "string"
           },
@@ -3005,6 +3006,7 @@
             "type": "string"
           },
           "start": {
+            "format": "date-time",
             "title": "Start",
             "type": "string"
           },
@@ -5707,6 +5709,7 @@
           "last_login_at": {
             "anyOf": [
               {
+                "format": "date-time",
                 "type": "string"
               },
               {

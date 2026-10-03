@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ast
 import datetime as dt
 import sys
 import types
@@ -40,6 +41,52 @@ class FakeConnection:
 
 
 class ProjectTelemetryTest(unittest.TestCase):
+    def test_http_response_serializes_datetime_fields(self) -> None:
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from pydantic import BaseModel, ConfigDict
+
+        source = (APP_ROOT / "app/routers/project_insights.py").read_text(encoding="utf-8")
+        models = ast.Module(
+            body=[
+                node for node in ast.parse(source).body
+                if isinstance(node, ast.ClassDef)
+                and node.name in {"TelemetryUserItem", "ProjectUserTelemetryResponse"}
+            ],
+            type_ignores=[],
+        )
+        namespace = {"dt": dt, "BaseModel": BaseModel, "ConfigDict": ConfigDict}
+        exec(compile(models, "project_insights.py", "exec", dont_inherit=True), namespace)
+        app = FastAPI()
+        now = dt.datetime(2026, 10, 3, 16, 0, tzinfo=UTC)
+        period = resolve_telemetry_period("24h", now=now)
+        connection = FakeConnection([
+            {"user_id": "user-1", "email": None, "phone": None,
+             "last_login_at": now - dt.timedelta(hours=1), "session_count": 2},
+            {"user_id": "user-2", "email": None, "phone": None,
+             "last_login_at": None, "session_count": 1},
+        ])
+
+        @app.get("/telemetry", response_model=namespace["ProjectUserTelemetryResponse"])
+        async def telemetry():
+            return {"project": "meu_projeto", **await fetch_project_user_telemetry(connection, period)}
+
+        with TestClient(app) as client:
+            for rows in (connection.rows, []):
+                connection.rows = rows
+                response = client.get("/telemetry")
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                self.assertEqual(dt.datetime.fromisoformat(payload["start"]), period.start)
+                self.assertEqual(dt.datetime.fromisoformat(payload["end"]), period.end)
+                self.assertEqual(payload["active_users"], len(rows))
+                if rows:
+                    self.assertEqual(
+                        dt.datetime.fromisoformat(payload["users"][0]["last_login_at"]),
+                        rows[0]["last_login_at"],
+                    )
+                    self.assertIsNone(payload["users"][1]["last_login_at"])
+
     def test_predefined_period_is_resolved_in_utc(self) -> None:
         now = dt.datetime(2026, 7, 11, 18, 0, tzinfo=UTC)
         period = resolve_telemetry_period("7d", now=now)

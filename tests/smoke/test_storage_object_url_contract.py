@@ -87,6 +87,27 @@ assert(not wrong_method and err.status == 405, "public-url deveria exigir POST")
 
 
 class BrowserLoadsObjectsFromTheStudioOriginTest(unittest.TestCase):
+    def test_storage_proxies_encode_the_rewritten_path(self) -> None:
+        nginx = read(STUDIO_NGINX)
+        for location in (
+            "location /api/platform/storage {",
+            'location ~ "^/storage/v1/[a-z_][a-z0-9_]{2,39}/object/(?:public|sign)/" {',
+            "location /storage/v1 {",
+        ):
+            block = nginx.split(location, 1)[1].split("\n        }", 1)[0]
+            self.assertIn("proxy_pass $server_path$storage_upstream_uri$is_args$args;", block)
+            self.assertNotIn("proxy_pass $server_path$uri$is_args$args;", block)
+        for injector in (KEY_INJECTOR, LUA / "security/inject_service_key.lua"):
+            self.assertIn('require("utils.proxy_uri").escape_path(ngx.var.uri)', read(injector))
+
+    def test_storage_path_encoding_in_openresty(self) -> None:
+        runtime = shutil.which("resty")
+        if runtime is None:
+            self.skipTest("OpenResty runtime nao esta instalado")
+        script = f'package.path = "{LUA.as_posix()}/?.lua;" .. package.path; ' \
+                 f'dofile("{(ROOT / "tests/smoke/test_storage_proxy_uri.lua").as_posix()}")'
+        subprocess.run([runtime, "-e", script], check=True)
+
     def test_object_route_carries_the_ref_in_the_path(self) -> None:
         nginx = read(STUDIO_NGINX)
         resolver = read(RESOLVER)
