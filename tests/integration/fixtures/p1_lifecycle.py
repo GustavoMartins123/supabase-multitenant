@@ -149,6 +149,13 @@ def main() -> None:
     run(*compose, 'run', '--rm', '--no-deps', 'control-plane-migrations', cwd=server)
     run(*compose, 'up', '-d', '--wait', '--wait-timeout', '180', *services, 'key-authorizer', cwd=server)
 
+    if len(sys.argv) > 3:
+        assert sys.argv[3] == 'end-to-end' and sys.argv[4] in {'single', 'split'}
+        from p1_end_to_end import validate
+        run('docker', 'network', 'connect', 'rede-supabase', 'p1-lifecycle-executor-' + suffix)
+        validate(root, suffix, sys.argv[4], values, '--benchmark' in sys.argv[5:])
+        return
+
     owner = str(uuid.uuid4())
     first_uuid, second_uuid = str(uuid.uuid4()), str(uuid.uuid4())
     sql(f"INSERT INTO users(id,authelia_username) VALUES('{owner}','fixture_owner');")

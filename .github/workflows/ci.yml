@@ -146,9 +146,14 @@ jobs:
             --browser-image session-browser-ci:local \
             --ui-image ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v3
 
-  physical-lifecycle-live:
+  p1-lifecycle-live:
+    name: P1 lifecycle (${{ matrix.topology }})
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        topology: [physical, single, split]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -161,7 +166,7 @@ jobs:
           docker build -t servidor-projects-api:latest -f servidor/api-internal/Dockerfile servidor
           docker tag servidor-projects-api:latest servidor-control-plane-migrations:latest
           docker build -t servidor-key-authorizer:latest -f servidor/key-authorizer/Dockerfile servidor
-          docker build -t p1-executor-ci:local -f tests/integration/fixtures/p1_executor.Dockerfile tests/integration/fixtures
+          docker build -t codex-p1-executor:local -f tests/integration/fixtures/p1_executor.Dockerfile tests/integration/fixtures
       - name: Explicit production service images
         run: |
           docker pull supabase/edge-runtime:v1.74.2
@@ -171,8 +176,24 @@ jobs:
           docker pull darthsim/imgproxy:v4.0.11
           docker pull supabase/gotrue:v2.193.0-rc.3
           docker pull postgrest/postgrest:v14.14
+      - name: Explicit end-to-end dependencies
+        if: matrix.topology != 'physical'
+        run: |
+          docker build -t studio-nginx:latest -f studio/Dockerfile studio
+          docker build -t codex-p1-browser:local -f tests/integration/fixtures/studio_session_browser.Dockerfile tests/integration/fixtures
+          docker pull authelia/authelia:4.39.20
+          docker pull ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v3
+          docker pull traefik:v3.7.6
+          docker pull supabase/postgres-meta:v0.96.1
       - name: Required physical script lifecycle and real Storage/Vectors drill
-        run: python tools/run_p1_lifecycle_tests.py --executor-image p1-executor-ci:local
+        if: matrix.topology == 'physical'
+        run: python tools/run_p1_lifecycle_tests.py --executor-image codex-p1-executor:local
+      - name: Required real browser/API/agent lifecycle and authorization acceptance
+        if: matrix.topology != 'physical'
+        run: |
+          python tools/run_p1_end_to_end_tests.py --executor-image codex-p1-executor:local \
+            --topology '${{ matrix.topology }}' --result '.tmp-appdata/p1-e2e-${{ matrix.topology }}.json'
+
 
   flutter:
     runs-on: ubuntu-latest

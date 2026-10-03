@@ -31,7 +31,7 @@ CI has three non-optional security jobs in `ci.yml`:
 - `functions-security-live`: obtains the explicit Python/Edge Runtime images and
   checks the real Linux projection/lock contract and real runtime worker
   isolation, including credential changes on the next request.
-- `physical-lifecycle-live`: builds the production lifecycle dependencies and
+- `p1-lifecycle-live` (physical matrix entry): builds the production lifecycle dependencies and
   runs the privileged physical script drill described below, including real
   Storage objects, Vectors, FDW SigV4 and Functions projection checks.
 
@@ -76,7 +76,7 @@ docker build -t servidor-projects-api:latest -f servidor/api-internal/Dockerfile
 docker tag servidor-projects-api:latest servidor-control-plane-migrations:latest
 docker build -t servidor-key-authorizer:latest -f servidor/key-authorizer/Dockerfile servidor
 docker build -t p1-executor:local -f tests/integration/fixtures/p1_executor.Dockerfile tests/integration/fixtures
-# Obtain the exact service images listed in physical-lifecycle-live first.
+# Obtain the exact service images listed in p1-lifecycle-live first.
 python tools/run_p1_lifecycle_tests.py --executor-image p1-executor:local
 ```
 
@@ -110,19 +110,74 @@ lifecycle. Delete does not exercise database/control-plane/Storage cleanup.
 It does not simulate split-node transport or prove the Studio permission matrix.
 Local passes and a configured CI job do not prove a remote CI execution.
 
-## Remaining end-to-end acceptance
+## Full browser/API/agent P1 acceptance
 
-These boundary runners do **not** complete the full acceptance matrix. Still
-required before claiming all P1 security integration is complete:
+Build the physical drill images above with the exact executor tag
+`codex-p1-executor:local`, plus the end-to-end dependencies listed in the
+`p1-lifecycle-live` CI job (`studio-nginx:latest`, `codex-p1-browser:local`,
+Authelia, patched Studio, Traefik and postgres-meta). Missing images are explicit
+errors; the runner does not select alternate images or pull implicitly.
 
-- Studio/Lua through real Traefik, API/authorizer and REST/GraphQL/Storage/Vectors;
-- owner/admin/member/ex-member/disabled permissions with real Storage;
-- full API/agent create/duplicate/rename/rotate/restore/delete using the new
-  projection contract, both single-node and split-node (the physical script
-  boundary above is covered separately);
-- externally reachable HTTPS directory callback and host-agent execution in both
-  supported topologies, including certificate validation and outage/revocation.
+```bash
+python tools/run_p1_end_to_end_tests.py --executor-image codex-p1-executor:local \
+  --topology single --result .tmp-appdata/p1-e2e-single.json
+python tools/run_p1_end_to_end_tests.py --executor-image codex-p1-executor:local \
+  --topology split --result .tmp-appdata/p1-e2e-split.json
+```
 
-Existing synthetic-cookie, mocked-upstream and projection-primitive tests prove
-their respective boundaries, not these missing full-stack scenarios. No staging
-installation or real user data is changed by the runners above.
+Both entries are mandatory CI tests without optional skips. The isolated stack
+uses real Authelia logins, cookies, Chromium certificate trust, production Lua,
+Traefik file renderer and gateway plugin, API/authorizer, signed host-agent,
+REST/GraphQL, Storage, pgvector and Edge Runtime. No mutation or authorization
+handler is mocked. Data markers/objects/vectors are seeded only as test data;
+projects, external keys, memberships, step-up and lifecycle are issued through
+the real browser/API. Account IDs come from the production Authelia CLI.
+
+The acceptance covers owner/admin/member/global-admin/outsider access,
+immediate membership removal and disabled-account denial with existing cookies,
+project/header mismatch, scoped external opaque keys and raw service-role JWT
+rejection at the public gateway. It creates a private object, vector bucket and
+index, follows a real Studio signed URL, and verifies clone with data/new UUID,
+rename, internal JWT renewal, backup and restore. Restore is owner-only; full
+delete is global-admin plus real step-up. Cleanup verifies project database,
+control-plane row, object namespace, Functions projection, Realtime/Supavisor
+metadata and two real replication slots; the other tenant stays usable. The
+restricted metadata role remains NOREPLICATION; null, arbitrary and
+cross-database slot requests and platform_app invocation are rejected.
+
+API outage denies access even after credential warming. API and agent HTTPS
+callbacks reject the wrong CA. A queued command is denied after actor revocation
+or callback TLS failure, before physical mutation. Mount/environment inventory
+checks API/Functions isolation, with read-only minimal Functions projections.
+
+**Topology limits:** split is two disjoint Docker networks joined only by an
+HTTPS link, on one Docker engine, not two physical machines or a WAN benchmark.
+Production Compose overlays are checked; fixture service wiring is derived from
+production and instrumented for disposal. The test-only unauthenticated
+`/session-test` page is only a browser origin, never a protected API replacement.
+GeoIP, analytics/logging collection and optional services are not acceptance
+claims here. Resource fixtures bound Nginx/Erlang worker counts for the local
+engine. Auth, Realtime websockets, Meta, logs and snippets are not cross-tenant
+end-to-end claims of this particular drill; their separate tests do not imply
+universal service coverage. Backup encryption and clean-install/upgrade drills
+are also separate release requirements.
+
+## Reproducible container measurements
+
+Add `--benchmark` to either full acceptance command. Measurements start only
+**after all validations pass**, against the surviving real tenant. Five workloads
+(REST, GraphQL, Storage bucket listing, vector index listing and project listing)
+run in the authenticated Chromium session. Each has 10 warmups, then three rounds
+of 80 requests at closed-loop concurrency 1, 4 and 8. Body consumption is included
+in latency; nearest-rank p50/p95/p99, status/error counts, elapsed time and
+throughput are reported. Three idle Docker stats samples and periodic loaded
+samples report CPU/memory; exact image IDs and engine CPU/memory are recorded.
+Warmup failures, timeouts, missing stats and HTTP errors are explicit failures,
+not dropped samples, retries or cached authorization substitutes.
+
+This small synthetic workload measures local overhead, not production capacity
+or physical split-node latency. Different concurrency levels are not a before/
+after optimization comparison. Raw JSON/log evidence remains local in ignored
+`.tmp-appdata`; logs may contain synthetic signed URLs and must not be published.
+No installation, host certificate trust, real account or preexisting container
+is changed. A configured workflow is not evidence of a remote CI execution.

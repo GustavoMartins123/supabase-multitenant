@@ -12,6 +12,7 @@ import io
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tarfile
 import uuid
 
@@ -30,7 +31,7 @@ RESERVED_NETWORKS = {'rede-supabase', 'supabase-storage-control', 'supabase-stor
                      'supabase-storage-gateways', 'supabase-analytics-internal'}
 
 
-def archive() -> bytes:
+def archive(extra_sources: tuple[str, ...] = ()) -> bytes:
     allowed = ('servidor/generateProject/', 'servidor/volumes/db/', 'servidor/volumes/functions/',
                'servidor/volumes/pooler/', 'servidor/volumes/storage-proxy/', 'servidor/api-internal/app/',
                'servidor/auth_template/')
@@ -42,6 +43,7 @@ def archive() -> bytes:
              if p in exact or p.startswith(allowed)]
     paths += ['tests/integration/fixtures/p1_lifecycle.py', 'tests/integration/fixtures/functions_probe/index.ts',
               'servidor/generateProject/lib/vector_rekey_sql.py']
+    paths.extend(extra_sources)
     payload = io.BytesIO()
     with tarfile.open(fileobj=payload, mode='w') as tar:
         for name in sorted(set(paths)):
@@ -57,11 +59,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--executor-image', required=True)
     args = parser.parse_args()
+    execute(args.executor_image)
+
+
+def execute(executor_image: str, *, fixture_arguments: tuple[str, ...] = (),
+            extra_sources: tuple[str, ...] = (), result_file: Path | None = None) -> None:
+    assert isinstance(sys.stdout, io.TextIOWrapper) and isinstance(sys.stderr, io.TextIOWrapper), 'CLI text streams required'
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
     collisions = RESERVED_CONTAINERS & set(run('docker', 'ps', '-a', '--format', '{{.Names}}').splitlines())
     collisions |= RESERVED_NETWORKS & set(run('docker', 'network', 'ls', '--format', '{{.Name}}').splitlines())
     if collisions:
         raise RuntimeError('Refusing installed/colliding resources: ' + ', '.join(sorted(collisions)))
-    if run('docker', 'image', 'inspect', args.executor_image, '--format', '{{.Os}}') != 'linux':
+    if run('docker', 'image', 'inspect', executor_image, '--format', '{{.Os}}') != 'linux':
         raise RuntimeError('Existing Linux executor image required')
     suffix = uuid.uuid4().hex[:12]
     selector = LABEL + '=' + suffix
@@ -74,12 +84,22 @@ def main() -> None:
             raise RuntimeError('Unexpected engine volume path; no secondary path permitted')
         run('docker', 'create', '--name', executor, '--pull=never', '--label', selector,
             '-v', volume + ':' + path, '-v', '/var/run/docker.sock:/var/run/docker.sock',
-            '--entrypoint', 'sleep', args.executor_image, 'infinity')
+            '--entrypoint', 'sleep', executor_image, 'infinity')
         run('docker', 'start', executor)
-        run('docker', 'exec', '-i', executor, 'tar', '-xf', '-', '-C', path, data=archive())
+        run('docker', 'exec', '-i', executor, 'tar', '-xf', '-', '-C', path, data=archive(extra_sources))
         # Stream test output to private caller log, do not hide a failure or a skip.
         status = subprocess.call(['docker', 'exec', executor, 'python',
-                                  path + '/tests/integration/fixtures/p1_lifecycle.py', path, suffix])
+                                  path + '/tests/integration/fixtures/p1_lifecycle.py', path, suffix, *fixture_arguments])
+        if result_file is not None:
+            artifact = subprocess.run(['docker', 'exec', executor, 'cat', path + '/p1-result.json'],
+                                      capture_output=True, text=True, encoding='utf-8')
+            if artifact.returncode == 0:
+                result_file.parent.mkdir(parents=True, exist_ok=True)
+                result_file.write_text(artifact.stdout, encoding='utf-8')
+            elif status == 0:
+                raise RuntimeError('Completed acceptance result is missing')
+            else:
+                print('No completed acceptance artifact; the drill failed before reporting results')
         if status:
             for container in run('docker', 'ps', '-aq', '--filter', 'label=' + selector).splitlines():
                 if run('docker', 'inspect', container, '--format', '{{.Name}}') != '/' + executor:
