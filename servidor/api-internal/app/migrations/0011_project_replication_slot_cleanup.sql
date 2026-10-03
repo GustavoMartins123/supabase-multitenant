@@ -5,7 +5,8 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog
 AS $cleanup$
 DECLARE target_database text;
 BEGIN
-  IF project_ref !~ '^[a-z_][a-z0-9_]{2,39}$'
+  IF project_ref IS NULL OR slot IS NULL
+     OR project_ref !~ '^[a-z_][a-z0-9_]{2,39}$'
      OR slot NOT IN (
        left('supabase_realtime_messages_replication_slot_' || project_ref, 63),
        left('supabase_realtime_replication_slot_' || project_ref, 63)
