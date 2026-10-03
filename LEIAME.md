@@ -156,6 +156,8 @@ bash setup.sh single-node
 
 Para instalar tudo em uma única máquina, `single-node` usa o IP local detectado para o servidor principal e o Studio, sem perguntar a topologia.
 
+Com Docker Desktop e WSL, informe o endereço do Windows publicado pelo Docker: `bash setup.sh single-node <ip-do-windows>`. O setup emite certificados do Studio e Traefik com a mesma CA privada e habilita HTTPS. Instale `studio/authelia/ssl/ca.pem` como CA confiável na máquina do navegador; não desative a verificação de certificados.
+
 Para duas máquinas, use `bash setup.sh split-node <ip-ou-dominio-do-servidor>`. Executar `bash setup.sh` sem perfil mantém o fluxo interativo anterior.
 
 O IP ou domínio solicitado pelo script representa o **servidor principal**, onde rodam Traefik, Projects API e os serviços dos projetos.

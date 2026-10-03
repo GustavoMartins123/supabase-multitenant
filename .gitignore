@@ -51,3 +51,4 @@ studio/docker-compose.capacity.yml
 servidor/traefik/docker-compose.capacity.yml
 
 servidor/traefik/acme.json
+servidor/traefik/certs/traefik/

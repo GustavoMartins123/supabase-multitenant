@@ -409,6 +409,8 @@ def configure_runtime(
     rotate_secrets: bool = False,
     rotate_ca: bool = False,
     server_env: Path = SERVER_ENV,
+    server_host: str | None = None,
+    server_tls_root: Path = REPO_ROOT / "servidor/traefik/certs/traefik",
 ) -> None:
     origin, host = parse_origin(studio_origin)
     try:
@@ -429,6 +431,16 @@ def configure_runtime(
         ca_key=secrets_root / CA_KEY_NAME,
         rotate_ca=rotate_ca,
     )
+    if server_host is not None:
+        _, validated_host = parse_origin(f"https://{server_host}")
+        issue_server_certificate(
+            server_tls_root,
+            host=validated_host,
+            ca_certificate=ssl_root / "ca.pem",
+            ca_key=secrets_root / CA_KEY_NAME,
+        )
+        os.replace(server_tls_root / "server.pem", server_tls_root / "tls.crt")
+        os.replace(server_tls_root / "server.key", server_tls_root / "tls.key")
     # This file contains only non-secret Authelia settings. Both the Authelia
     # process and the OpenResty worker need to read it from the shared bind
     # mount; secrets remain in the dedicated mode-0600 files below.
@@ -464,6 +476,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         description="Gera configuracao, secrets e TLS locais do Studio."
     )
     parser.add_argument("--studio-origin", required=True)
+    parser.add_argument("--server-host", help="emite TLS do Traefik com a mesma CA interna")
     parser.add_argument(
         "--force",
         action="store_true",
@@ -493,6 +506,7 @@ def main(argv: list[str] | None = None) -> int:
             force=args.force,
             rotate_secrets=args.rotate_secrets,
             rotate_ca=args.rotate_ca,
+            server_host=args.server_host,
         )
         return 0
     except (RuntimeConfigError, OSError) as exc:

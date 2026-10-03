@@ -21,6 +21,22 @@ class SetupTopologyProfileContractTests(unittest.TestCase):
             self.assertIn("bash setup.sh single-node", source)
             self.assertIn("bash start.sh single-node", source)
 
+    def test_published_address_is_explicit_and_tls_is_required(self) -> None:
+        setup = (ROOT / "setup.sh").read_text(encoding="utf-8")
+        self.assertIn('validate_ip "$configured_server"', setup)
+        self.assertIn('LOCAL_IP="$configured_server"', setup)
+        self.assertNotIn("/etc/resolv.conf", setup)
+        self.assertNotIn('PROTO="http"', setup)
+        self.assertIn('TRAEFIK_ENABLE_TLS=true', setup)
+        self.assertIn('--server-host "$SERVER_IP"', setup)
+
+    def test_setup_resolves_geoip_paths_under_the_server_directory(self) -> None:
+        setup = (ROOT / "setup.sh").read_text(encoding="utf-8")
+        self.assertIn('$SCRIPT_DIR/servidor/traefik/geoip/GeoLite2-Country.mmdb', setup)
+        self.assertIn('$SCRIPT_DIR/servidor/traefik/logs_backup/geo', setup)
+        self.assertIn('safe_sed "s|^MMDB_PATH=.*', setup)
+        self.assertIn('safe_sed "s|^BACKUP_DIR=.*', setup)
+
 
 if __name__ == "__main__":
     unittest.main()

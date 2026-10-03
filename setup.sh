@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -Ee
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -346,14 +346,19 @@ validate_env_contract() {
         fi
     done
     for required_file in servidor/.env studio/.env; do
-        for required_key in STUDIO_GATEWAY_HMAC_SECRET PROJECTS_API_HMAC_SECRET STUDIO_ANALYTICS_HMAC_SECRET; do
+        for required_key in STUDIO_GATEWAY_HMAC_SECRET PROJECTS_API_HMAC_SECRET; do
             value=$(read_env_value "$required_file" "$required_key" 2>/dev/null || true)
-            if [[ -z "$value" || "$value" == "pass" ]]; then
+            if [[ ! "$value" =~ ^[0-9a-fA-F]{64}$ ]]; then
                 print_error "$required_key vazio ou placeholder em $required_file"
                 fail=1
             fi
         done
     done
+    value=$(read_env_value studio/.env STUDIO_ANALYTICS_HMAC_SECRET 2>/dev/null || true)
+    if [[ ! "$value" =~ ^[0-9a-fA-F]{64}$ ]]; then
+        print_error "STUDIO_ANALYTICS_HMAC_SECRET invalido em studio/.env"
+        fail=1
+    fi
     if ! python3 - servidor/.env <<'PYEOF'
 import ipaddress
 import sys
@@ -402,7 +407,7 @@ PYEOF
 print_setup_usage() {
     cat <<'EOF'
 Uso:
-  bash setup.sh single-node
+  bash setup.sh single-node [IP_PUBLICADO]
   bash setup.sh split-node [IP_OU_DOMINIO_DO_SERVIDOR]
   bash setup.sh
 
@@ -454,14 +459,11 @@ main() {
         exit 1
     fi
     print_status "Detectando IP local da máquina..."
-    LOCAL_IP=$(ip route get 8.8.8.8 | awk '{print $7; exit}')
-
-    if [ -z "$LOCAL_IP" ]; then
-        LOCAL_IP=$(grep nameserver /etc/resolv.conf | awk '{print $2}') 
-    fi
-
-    if [ -z "$LOCAL_IP" ]; then
-        LOCAL_IP=$(hostname -I | awk '{print $1}')
+    if [[ "$topology_profile" == "single-node" && -n "$configured_server" ]]; then
+        validate_ip "$configured_server" || { print_error "IP publicado invalido"; return 1; }
+        LOCAL_IP="$configured_server"
+    else
+        LOCAL_IP=$(ip route get 8.8.8.8 | awk '{print $7; exit}')
     fi
     
     if [ -z "$LOCAL_IP" ]; then
@@ -480,14 +482,12 @@ main() {
     SHARED_NGINX_HMAC_SECRET=$(env_secret servidor/.env NGINX_HMAC_SECRET generate_hmac_secret)
     SHARED_INTERNAL_HMAC_SECRET=$(env_secret servidor/.env INTERNAL_HMAC_SECRET generate_hmac_secret)
     HOST_AGENT_HMAC_SECRET=$(env_secret servidor/.env HOST_AGENT_HMAC_SECRET generate_hmac_secret)
+    STUDIO_GATEWAY_HMAC_SECRET=$(env_secret servidor/.env STUDIO_GATEWAY_HMAC_SECRET generate_hmac_secret)
+    PROJECTS_API_HMAC_SECRET=$(env_secret servidor/.env PROJECTS_API_HMAC_SECRET generate_hmac_secret)
     STUDIO_ANALYTICS_HMAC_SECRET=$(env_secret studio/.env STUDIO_ANALYTICS_HMAC_SECRET generate_hmac_secret)
 
     case "$topology_profile" in
         single-node)
-            if [[ -n "$configured_server" ]]; then
-                print_error "O perfil single-node usa automaticamente o IP local e nao aceita um servidor separado."
-                return 1
-            fi
             SERVER_IP="$LOCAL_IP"
             confirm_network_topology "$LOCAL_IP" "$SERVER_IP" false
             ;;
@@ -578,13 +578,12 @@ main() {
     safe_sed "s|^NGINX_HMAC_SECRET=.*|NGINX_HMAC_SECRET=$SHARED_NGINX_HMAC_SECRET|g" servidor/.env
     safe_sed "s|^INTERNAL_HMAC_SECRET=.*|INTERNAL_HMAC_SECRET=$SHARED_INTERNAL_HMAC_SECRET|g" servidor/.env
     safe_sed "s|^HOST_AGENT_HMAC_SECRET=.*|HOST_AGENT_HMAC_SECRET=$HOST_AGENT_HMAC_SECRET|g" servidor/.env
+    safe_sed "s|^STUDIO_GATEWAY_HMAC_SECRET=.*|STUDIO_GATEWAY_HMAC_SECRET=$STUDIO_GATEWAY_HMAC_SECRET|g" servidor/.env
+    safe_sed "s|^PROJECTS_API_HMAC_SECRET=.*|PROJECTS_API_HMAC_SECRET=$PROJECTS_API_HMAC_SECRET|g" servidor/.env
     safe_sed "s|PROJECT_DELETE_PASSWORD=pass|PROJECT_DELETE_PASSWORD=$PROJECT_DELETE_PASSWORD|g" servidor/.env
-    if [[ "$SERVER_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
-    [[ "$SERVER_IP" =~ : ]]; then
-        PROTO="http"
-    else
-        PROTO="https"
-    fi
+    PROTO="https"
+    safe_sed "s|^TRAEFIK_ENABLE_TLS=.*|TRAEFIK_ENABLE_TLS=true|g" servidor/.env
+    safe_sed "s|^TRAEFIK_TLS_MODE=.*|TRAEFIK_TLS_MODE=file|g" servidor/.env
     safe_sed "s|SERVER_URL=pass|SERVER_URL=${SERVER_IP}|g" servidor/.env
     safe_sed "s|SERVER_PROTO=pass|SERVER_PROTO=${PROTO}|g" servidor/.env
     safe_sed "s|^PUSH_API_URL=.*|PUSH_API_URL=https://${LOCAL_IP}:${STUDIO_HTTPS_PORT}/api/internal/push|g" servidor/.env
@@ -615,6 +614,8 @@ main() {
     safe_sed "s|^STUDIO_SERVICE_KEY_ENCRYPTION_KEY=.*|STUDIO_SERVICE_KEY_ENCRYPTION_KEY=$STUDIO_SERVICE_KEY_ENCRYPTION_KEY|g" studio/.env
     safe_sed "s|^NGINX_HMAC_SECRET=.*|NGINX_HMAC_SECRET=$SHARED_NGINX_HMAC_SECRET|g" studio/.env
     safe_sed "s|^INTERNAL_HMAC_SECRET=.*|INTERNAL_HMAC_SECRET=$SHARED_INTERNAL_HMAC_SECRET|g" studio/.env
+    safe_sed "s|^STUDIO_GATEWAY_HMAC_SECRET=.*|STUDIO_GATEWAY_HMAC_SECRET=$STUDIO_GATEWAY_HMAC_SECRET|g" studio/.env
+    safe_sed "s|^PROJECTS_API_HMAC_SECRET=.*|PROJECTS_API_HMAC_SECRET=$PROJECTS_API_HMAC_SECRET|g" studio/.env
     safe_sed "s|^STUDIO_ANALYTICS_HMAC_SECRET=.*|STUDIO_ANALYTICS_HMAC_SECRET=$STUDIO_ANALYTICS_HMAC_SECRET|g" studio/.env
     safe_sed "s|^LOGFLARE_PRIVATE_ACCESS_TOKEN=.*|LOGFLARE_PRIVATE_ACCESS_TOKEN=$LOGFLARE_PRIVATE_ACCESS_TOKEN|g" studio/.analytics.env
     safe_sed "s|POSTGRES_NGINX_PASSWORD=pass|POSTGRES_NGINX_PASSWORD=$POSTGRES_NGINX_PASSWORD|g" studio/.env
@@ -678,6 +679,7 @@ main() {
     print_status "Gerando configuracao local e certificados do Studio/Authelia..."
     python3 tools/configure_studio_runtime.py \
         --studio-origin "https://${LOCAL_IP}:${STUDIO_HTTPS_PORT}" \
+        --server-host "$SERVER_IP" \
         --force
 
     print_status "Copiando certificado do Studio para o servidor Python..."
@@ -703,7 +705,8 @@ main() {
     print_status "Configurando update_geoip.sh com o caminho real..."
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     backup_file "servidor/traefik/update_geoip.sh"
-    safe_sed "s|seucaminho|$SCRIPT_DIR|g" servidor/traefik/update_geoip.sh
+    safe_sed "s|^MMDB_PATH=.*|MMDB_PATH=\"$SCRIPT_DIR/servidor/traefik/geoip/GeoLite2-Country.mmdb\"|" servidor/traefik/update_geoip.sh
+    safe_sed "s|^BACKUP_DIR=.*|BACKUP_DIR=\"$SCRIPT_DIR/servidor/traefik/logs_backup/geo\"|" servidor/traefik/update_geoip.sh
     safe_sed "s|HOST_PROJECT_ROOT=\"pass\"|HOST_PROJECT_ROOT=\"$SCRIPT_DIR\"|g" servidor/.env
 
     bash servidor/verify_key_config.sh

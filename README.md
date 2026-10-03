@@ -156,6 +156,8 @@ bash setup.sh single-node
 
 For a one-machine installation, `single-node` makes the detected local IP the address of both the main server and Studio, without an interactive topology prompt.
 
+With Docker Desktop and WSL, specify the Windows address published by Docker: `bash setup.sh single-node <windows-ip>`. Setup issues Studio and Traefik certificates using the same private CA and enables HTTPS. Trust `studio/authelia/ssl/ca.pem` on the browser machine; do not bypass certificate verification.
+
 For two machines, use `bash setup.sh split-node <server-ip-or-domain>`. Running `bash setup.sh` without a profile keeps the legacy interactive flow.
 
 The script also detects the IP of the current machine, used by the local Studio, Authelia, the self-signed certificate and internal integrations.

@@ -60,6 +60,24 @@ class SetupSecretGenerationContract(unittest.TestCase):
         ]
         self.assertRegex(body, r"openssl rand -hex 32\n")
 
+    def test_setup_provisions_shared_service_hmacs_before_runtime(self) -> None:
+        for key in ("STUDIO_GATEWAY_HMAC_SECRET", "PROJECTS_API_HMAC_SECRET"):
+            self.assertIn(
+                f"{key}=$(env_secret servidor/.env {key} generate_hmac_secret)",
+                self.setup,
+            )
+            for env in ("servidor/.env", "studio/.env"):
+                self.assertIn(
+                    f'safe_sed "s|^{key}=.*|{key}=${key}|g" {env}', self.setup
+                )
+
+    def test_analytics_secret_is_required_only_in_studio(self) -> None:
+        self.assertNotIn(
+            "for required_key in STUDIO_GATEWAY_HMAC_SECRET PROJECTS_API_HMAC_SECRET STUDIO_ANALYTICS_HMAC_SECRET",
+            self.setup,
+        )
+        self.assertIn("read_env_value studio/.env STUDIO_ANALYTICS_HMAC_SECRET", self.setup)
+
     def test_env_example_has_no_other_placeholder_db_password(self) -> None:
         leftovers = [
             line.split("=", 1)[0]
