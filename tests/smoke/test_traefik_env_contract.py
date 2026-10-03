@@ -26,13 +26,18 @@ class TraefikEnvContractTests(unittest.TestCase):
         self.assertEqual(set(), compose_variables - example_variables)
 
     def test_start_and_stop_load_server_env_for_traefik(self) -> None:
+        start = (ROOT / "start.sh").read_text(encoding="utf-8")
+        self.assertIn(
+            'TRAEFIK_COMPOSE=(docker compose -f traefik/docker-compose.yml -f "$CAPACITY_TRAEFIK")',
+            start,
+        )
+        self.assertIn('"${TRAEFIK_COMPOSE[@]}" --env-file .env up -d', start)
         expected = (
             r"docker compose -f traefik/docker-compose\.yml"
             r'(?: -f "\$CAPACITY_TRAEFIK")? --env-file \.env'
         )
-        for script_name in ("start.sh", "stop_containers.sh"):
-            source = (ROOT / script_name).read_text(encoding="utf-8")
-            self.assertRegex(source, expected)
+        stop = (ROOT / "stop_containers.sh").read_text(encoding="utf-8")
+        self.assertRegex(stop, expected)
 
 
 if __name__ == "__main__":
