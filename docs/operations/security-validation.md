@@ -181,3 +181,50 @@ after optimization comparison. Raw JSON/log evidence remains local in ignored
 `.tmp-appdata`; logs may contain synthetic signed URLs and must not be published.
 No installation, host certificate trust, real account or preexisting container
 is changed. A configured workflow is not evidence of a remote CI execution.
+
+## Directory scaling microbenchmark
+
+```bash
+python tools/run_directory_benchmark.py --studio-image studio-nginx:latest \
+  --result .tmp-appdata/p1-directory.json
+```
+
+This separate microbenchmark runs the actual snapshot, YAML parser and filesystem
+locks in an engine-local tmpfs with 25, 100 and 500 synthetic persisted identities,
+five rounds each. It counts real YAML parses and reports median elapsed time. It
+does not replace the authenticated HTTP benchmark or measure maximum capacity.
+
+The measured quadratic path reread/parsed the entire identity YAML once per user.
+The batch resolver now acquires the identity lock once and indexes a single fresh
+document per snapshot. There is no cross-request cache: edits are read again on
+the next request, and invalid/missing/duplicate identities fail explicitly rather
+than substituting an empty identity document. New identities still use the
+canonical Authelia generate/export operation under the same lock. The mandatory
+auth runner checks the real batch reader, fresh edits and fail-closed cases;
+the full browser drill checks actual CLI provisioning and immediate revocation.
+
+On the local 16-CPU Linux Docker engine, the initial five-round measurement moved
+the 500-user median from 4,903 ms / 501 YAML parses to 22 ms / 2 parses. This is a
+directory-snapshot result, not a claim of the same speedup for all HTTP requests.
+The pre-optimization full HTTP run after the Fernet clock correction completed
+3,600 requests with zero errors. Fernet refreshes the canonical wall clock before
+reading seconds; future-token rejection and expiry remain strict and are checked
+with real Python-issued tokens in OpenResty. Raw evidence remains private/local.
+
+### Outstanding session stability gate
+
+The successful baseline is not evidence that every subsequent run passed. Other
+full drills passed functional acceptance but then returned 401 during benchmark
+warmup, with the browser cookie still present. Such runs fail; they are not
+retried, reauthenticated or removed from the evidence set. Temporary verbose
+diagnostics have been removed from the benchmark path.
+
+A separate deterministic Go reproduction using the exact Authelia 4.39.20
+memory-provider source demonstrates a session-key ownership defect: its
+`getSessionKey` uses the zero-copy `strconv.B2S` on request-backed bytes. Reusing
+that buffer makes the stored session inaccessible under its original identifier.
+This supports investigation of the intermittent 401 but does not alone establish
+the full request-level causal chain. A backend remediation and clean single/split
+benchmark reruns remain required before claiming stable P1 completion. Neither
+an optional Redis recommendation nor a passing short two-session browser probe
+closes that gate.
