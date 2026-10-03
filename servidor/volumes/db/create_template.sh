@@ -61,6 +61,18 @@ pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
   | grep -v "COMMENT ON EXTENSION pg_cron" \
   | psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d _supabase_template
 
+# Extension-owned GraphQL schemas/wrappers can lose their API-role ACLs across
+# pg_dump/restore. Provision the canonical GraphQL contract in the template,
+# never grant access to unrelated schemas or replace the resolver with a stub.
+echo "Validando GraphQL e seus grants no template..."
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname _supabase_template <<-'EOSQL'
+CREATE EXTENSION IF NOT EXISTS pg_graphql;
+GRANT USAGE ON SCHEMA graphql, graphql_public TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION graphql.resolve TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION graphql_public.graphql(text, text, jsonb, jsonb)
+  TO anon, authenticated, service_role;
+EOSQL
+
 # Falha durante a inicializacao do Postgres caso o dump deixe de transportar a
 # extensao. Assim nenhum projeto pode ser criado a partir de um template sem
 # suporte ao backend vetorial.
