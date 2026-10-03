@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import base64
 import json
 import os
 from pathlib import Path
@@ -241,6 +242,8 @@ def validate(root: Path, suffix: str, topology: str, values: dict[str, str], ben
     print('REAL END-TO-END TOPOLOGY:', topology, flush=True)
     alpha, beta, renamed = 'e2e_a_' + suffix, 'e2e_b_' + suffix, 'e2e_r_' + suffix
     expect('anonymous', 'GET', '/api/projects', 401)
+    basic = base64.b64encode(('p1_owner:' + credentials['owner']['password']).encode()).decode()
+    expect('anonymous', 'GET', '/api/projects', 401, headers={'Authorization': 'Basic ' + basic})
     job('owner', 'POST', '/api/projects', {'name': alpha, 'resource_profile': 'small'})
     print('PASS real browser -> Lua -> Traefik -> API -> signed host-agent create', flush=True)
     def projection(ref):
@@ -315,6 +318,7 @@ if(!response.ok){console.error(response.status+': '+await response.text());proce
     vectors = '/api/platform/storage/' + alpha + '/vector-buckets'
     # Repeated authorization validation, not a performance measurement/report.
     expect('owner', 'GET', rest, 200)
+    expect('owner', 'GET', rest, 200, headers={'Authorization': 'Bearer invalid-caller-credential'})
     command = {'actor': 'owner', 'method': 'GET', 'path': rest, 'headers': {},
                'benchmark': {'samples': 3, 'concurrency': 1}}
     with urllib.request.urlopen(urllib.request.Request('http://p1-browser:8765', data=json.dumps(command).encode(),

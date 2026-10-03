@@ -46,6 +46,29 @@ class RealSessionTest(unittest.TestCase):
                 }''')
                 self.assertEqual(result['status'], 200, result['body'])
                 self.assertEqual(json.loads(result['body'])['actor'], credentials['username'])
+                reauth = page.evaluate('''async credentials => (await fetch('/api/security/step-up', {
+                    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+                        password:credentials.password,action:'delete_project',project:'probe_project',resource:'probe_project'})})).status''', credentials)
+                self.assertEqual(reauth, 200)
+                # A valid session must survive a short idle period without relogin.
+                page.wait_for_timeout(10000)
+                self.assertEqual(page.evaluate('''async () => (await fetch('/api/csrf-probe', {
+                    method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status'''), 200)
+
+                # Independent simultaneous sessions must remain authenticated.
+                other_context = browser.new_context()
+                other_page = other_context.new_page()
+                other_page.goto(origin + '/session-test')
+                self.assertEqual(other_page.evaluate('''async credentials => (await fetch('/auth/api/firstfactor', {
+                    method:'POST',headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify({...credentials,keepMeLoggedIn:false,
+                        targetURL:location.origin+'/session-test'})})).status''', credentials), 200)
+                for _ in range(12):
+                    page.wait_for_timeout(1100)
+                    for active_page in (page, other_page):
+                        self.assertEqual(active_page.evaluate('''async () => (await fetch('/api/csrf-probe', {
+                            method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status'''), 200)
+                other_context.close()
 
                 # Same hostname, distinct port: cookies are shared but origins are not.
                 page.goto(origin + ':444')
