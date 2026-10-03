@@ -138,39 +138,7 @@ vector_rekey_physical_tables() {
   docker exec supabase-db psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" \
     -d "$database" -c \
     "COPY (SELECT bucket_id, name FROM storage.vector_indexes ORDER BY bucket_id, name) TO STDOUT WITH (FORMAT csv)" \
-    | python3 -c '
-import csv
-import hashlib
-import sys
-
-source, destination = sys.argv[1:]
-print("BEGIN;")
-for bucket, index in csv.reader(sys.stdin):
-    def physical(tenant):
-        value = f"pgvector__{bucket}".encode() + b"\0" + f"{tenant}-{index}".encode()
-        return "vector_" + hashlib.sha256(value).hexdigest()[:24]
-    old = physical(source)
-    new = physical(destination)
-    print(f"""
-DO $rekey$
-BEGIN
-  IF to_regclass('storage_vectors.{old}') IS NOT NULL
-     AND to_regclass('storage_vectors.{new}') IS NULL THEN
-    ALTER TABLE storage_vectors.{old} RENAME TO {new};
-    IF to_regclass('storage_vectors.{old}_hnsw') IS NOT NULL THEN
-      ALTER INDEX storage_vectors.{old}_hnsw RENAME TO {new}_hnsw;
-    END IF;
-  ELSIF to_regclass('storage_vectors.{old}') IS NULL
-        AND to_regclass('storage_vectors.{new}') IS NOT NULL THEN
-    NULL;
-  ELSE
-    RAISE EXCEPTION 'ambiguous vector table rekey: {old} -> {new}';
-  END IF;
-END
-$rekey$;
-""")
-print("COMMIT;")
-' "$source_tenant" "$destination_tenant" \
+    | python3 "$STORAGE_LIFECYCLE_DIR/vector_rekey_sql.py" "$source_tenant" "$destination_tenant" \
     | docker exec -i supabase-db psql -X -q -v ON_ERROR_STOP=1 \
       -U "$POSTGRES_USER" -d "$database"
 }
