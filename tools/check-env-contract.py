@@ -42,7 +42,7 @@ REAL_FILES = [
 
 PYTHON_SCAN_DIRS = [
     "servidor/api-internal/app",
-    "servidor/host-agent",
+    "servidor/host-agent/hostagent",
     "servidor/traefik",
     "tools",
 ]

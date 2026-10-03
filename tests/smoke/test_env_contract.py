@@ -28,6 +28,22 @@ def load_tool():
 
 
 class EnvContractToolTest(unittest.TestCase):
+    def test_installed_host_agent_dependencies_are_not_platform_sources(self) -> None:
+        import tempfile
+
+        tool = load_tool()
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            for relative, variable in (
+                ("servidor/host-agent/hostagent/config.py", "HOST_AGENT_DB_PASSWORD"),
+                ("servidor/host-agent/.venv/lib/python/site-packages/pip/vendor.py", "PIP_VENDOR_ONLY"),
+            ):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f'import os\nos.getenv("{variable}")\n', encoding="utf-8")
+            with mock.patch.object(tool, "ROOT", root):
+                self.assertEqual(tool.scan_python(), {"HOST_AGENT_DB_PASSWORD"})
+
     def test_tool_passes_on_the_current_tree(self) -> None:
         completed = subprocess.run(
             [sys.executable, str(TOOL)],
