@@ -406,6 +406,8 @@ async def _duplicate_and_store_keys(
             job_payload = json.loads(job_payload)
         original_uuid = uuid.UUID(str(job_payload["original_uuid"]))
         original_tenant_uuid = uuid.UUID(str(job_payload["original_tenant_uuid"]))
+        from app.directory_service import confirm_directory
+        await confirm_directory(pool)
         async with pool.acquire() as conn:
             source = await conn.fetchrow("SELECT id, tenant_uuid FROM projects WHERE name=$1 AND id=$2", original_name, original_uuid)
             if not source or source["tenant_uuid"] != original_tenant_uuid:

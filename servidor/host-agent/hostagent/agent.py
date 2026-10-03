@@ -412,9 +412,21 @@ class HostAgent:
         if arg_errors:
             return ("invalid_args", "; ".join(arg_errors))
 
+        canonical_user = None
+        if record["requested_by"] is not None:
+            from .directory_transport import read_directory, DirectoryUnavailable
+            try:
+                snapshot = await read_directory(self.config.studio_directory_url, self.config.studio_directory_secret, self.config.studio_directory_ca_file)
+                matches = [u for u in snapshot["users"] if u["id"] == str(record["requested_by"])]
+                if len(matches) != 1 or matches[0].get("is_active") is not True:
+                    return ("authorization_denied:directory_revoked", "Actor revoked in canonical directory.")
+                canonical_user = matches[0]
+            except (DirectoryUnavailable, KeyError, TypeError):
+                return ("authorization_denied:directory_unavailable", "Canonical directory could not be proved.")
+
         if command == "duplicate_project":
             source = await db.load_authorization_context(
-                self.pool, project=args["original_name"], requested_by=record["requested_by"]
+                self.pool, project=args["original_name"], requested_by=record["requested_by"], canonical_user=canonical_user
             )
             if (
                 not source["project_row_exists"]
@@ -432,6 +444,7 @@ class HostAgent:
             self.pool,
             project=project,
             requested_by=record["requested_by"],
+            canonical_user=canonical_user,
         )
         project_uuid_matches = True
         if record["project_uuid"] is not None and auth["project_id"] is not None:

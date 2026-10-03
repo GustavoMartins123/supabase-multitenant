@@ -40,6 +40,10 @@ async def resolve_authenticated_user(
     pool: asyncpg.Pool,
 ) -> dict[str, Any]:
     signed_user_id, token_claims = resolve_user_claims_from_hmac_token(request)
+    from app.directory_service import confirm_directory
+    snapshot = await confirm_directory(pool)
+    if token_claims.get("directory_revision") != snapshot.revision:
+        raise HTTPException(403, "User token does not match the canonical directory")
     login_session = str(token_claims.get("login_session") or "")
     if not re.fullmatch(r"[A-Za-z0-9_-]{43}", login_session):
         login_session = ""

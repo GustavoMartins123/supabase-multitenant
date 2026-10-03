@@ -105,17 +105,16 @@ class AutheliaYamlConcurrencyContractTests(unittest.TestCase):
         self.assertIn("file_store.atomic_write(IDS_PATH, serialized, FILE_MODE)", source)
         self.assertIn("os.rename(tmp_path, IDS_PATH)", source)
 
-    def test_watcher_reload_uses_same_lock_and_rejects_stale_backend_sync(self) -> None:
+    def test_periodic_full_directory_reconciliation_uses_same_lock(self) -> None:
         source = INIT_WORKER.read_text(encoding="utf-8")
         self.assertIn('require("admin_api.authelia_user_store")', source)
-        self.assertIn("user_store.with_lock(load_users_locked)", source)
-        self.assertIn("snapshot_still_current(payload, current_user)", source)
-        self.assertIn("user_store.with_lock(function()", source)
-        self.assertIn("[SYNC] Snapshot obsoleto ignorado", source)
-        self.assertIn("close_write,moved_to", source)
-        self.assertIn("line:sub(-#target_file) == target_file", source)
-        self.assertNotIn("line:match(target_file)", source)
-        self.assertNotIn("refresh_lock", source)
+        self.assertIn("store.with_lock(function()", source)
+        self.assertIn("directory.read_locked(false)", source)
+        self.assertIn("sync.sync_directory()", source)
+        self.assertIn("ngx.timer.every(5, reconcile)", source)
+        self.assertNotIn("max_bootstrap_attempts", source)
+        self.assertNotIn("snapshot_still_current", source)
+        self.assertNotIn("cache:get_keys", source)
 
     def test_avatar_mutations_surface_lock_contention_as_retryable(self) -> None:
         source = (ADMIN / "user_avatar_handler.lua").read_text(encoding="utf-8")

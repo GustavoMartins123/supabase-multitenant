@@ -1323,6 +1323,90 @@
         "title": "DeleteRestorePointResponse",
         "type": "object"
       },
+      "DirectorySnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Revision",
+            "type": "string"
+          },
+          "sequence": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 9007199254740991.0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/DirectoryUser"
+            },
+            "maxItems": 10000,
+            "title": "Users",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sequence",
+          "revision",
+          "users"
+        ],
+        "title": "DirectorySnapshot",
+        "type": "object"
+      },
+      "DirectoryUser": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "groups": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "source": {
+            "additionalProperties": true,
+            "title": "Source",
+            "type": "object"
+          },
+          "username": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "display_name",
+          "groups",
+          "is_active",
+          "source"
+        ],
+        "title": "DirectoryUser",
+        "type": "object"
+      },
       "DuplicateProject": {
         "properties": {
           "copy_data": {
@@ -5910,140 +5994,6 @@
         "title": "UpdateSettings",
         "type": "object"
       },
-      "UserSyncPayload": {
-        "properties": {
-          "display_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Display Name"
-          },
-          "groups": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Groups",
-            "type": "array"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "is_active": {
-            "default": true,
-            "title": "Is Active",
-            "type": "boolean"
-          },
-          "source": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "additionalProperties": true,
-                "type": "object"
-              }
-            ],
-            "default": "studio_sync",
-            "title": "Source"
-          },
-          "username": {
-            "title": "Username",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "username"
-        ],
-        "title": "UserSyncPayload",
-        "type": "object"
-      },
-      "UserSyncResponse": {
-        "additionalProperties": true,
-        "properties": {
-          "email": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Email"
-          },
-          "groups": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Groups",
-            "type": "array"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "is_active": {
-            "title": "Is Active",
-            "type": "boolean"
-          },
-          "picture_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Picture Url"
-          },
-          "profile": {
-            "additionalProperties": true,
-            "title": "Profile",
-            "type": "object"
-          },
-          "profile_updated_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Profile Updated At"
-          },
-          "profile_version": {
-            "title": "Profile Version",
-            "type": "integer"
-          },
-          "username": {
-            "title": "Username",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "username",
-          "groups",
-          "is_active",
-          "email",
-          "picture_url",
-          "profile",
-          "profile_version",
-          "profile_updated_at"
-        ],
-        "title": "UserSyncResponse",
-        "type": "object"
-      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -7072,7 +7022,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UserSyncPayload"
+                "$ref": "#/components/schemas/DirectorySnapshot"
               }
             }
           },
@@ -7082,9 +7032,7 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserSyncResponse"
-                }
+                "schema": {}
               }
             },
             "description": "Successful Response"

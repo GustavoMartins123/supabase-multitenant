@@ -3,7 +3,7 @@ if type(context) ~= "table" then
     return
 end
 
-local groups = ngx.var.authelia_groups or ""
+local groups = ngx.ctx.canonical_groups or ""
 if not require("security.admin_groups").is_admin(groups) then
     ngx.log(ngx.ERR, "[ADMIN] Access denied - not admin. Groups: ", groups)
     ngx.status = ngx.HTTP_FORBIDDEN

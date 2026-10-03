@@ -6,24 +6,17 @@ local user_hmac_token = require("security.user_hmac_token")
 local M = {}
 
 function M.apply(email, groups)
-    local normalized_email = user_identity.normalize_email(email)
-    local cache = ngx.shared.users_cache
-    local user_id = ""
-    local user_data
-
-    if cache then
-        user_id = cache:get("email:" .. normalized_email) or ""
-        if user_id ~= "" then
-            local user_data_json = cache:get(user_id)
-            if user_data_json then
-                user_data = cjson.decode(user_data_json)
-            end
-        end
+    local canonical, err = require("admin_api.directory_snapshot").for_email(email)
+    if not canonical then
+        ngx.log(ngx.ERR, "[AUTH] Canonical directory unavailable: ", err)
+        return ngx.exit(ngx.HTTP_SERVICE_UNAVAILABLE)
     end
-
-    if user_data and user_data.user_uuid and user_data.user_uuid ~= "" then
-        user_id = user_data.user_uuid
-    end
+    local entry = canonical.user
+    if not entry.is_active then return ngx.exit(ngx.HTTP_FORBIDDEN) end
+    groups = table.concat(entry.groups, ",")
+    ngx.ctx.canonical_groups = groups
+    local user_id = entry.id
+    local user_data = {username=entry.username, display_name=entry.display_name, user_uuid=entry.id}
 
     ngx.req.set_header("Remote-Groups", groups or "")
     ngx.req.set_header("X-User-Groups", groups or "")
@@ -46,6 +39,7 @@ function M.apply(email, groups)
             username = user_data and user_data.username or nil,
             display_name = user_data and user_data.display_name or nil,
             groups = groups or "",
+            directory_revision = canonical.revision,
             login_session = session_fingerprint,
         })
         if token then
@@ -55,10 +49,11 @@ function M.apply(email, groups)
             end)
         else
             ngx.log(ngx.ERR, "[AUTH] Falha ao assinar token de usuario: ", token_err or "erro desconhecido")
+            return ngx.exit(ngx.HTTP_SERVICE_UNAVAILABLE)
         end
     end
 
-    return user_id
+    return user_id, groups, entry
 end
 
 return M

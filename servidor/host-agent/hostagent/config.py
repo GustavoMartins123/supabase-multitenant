@@ -34,6 +34,9 @@ class AgentConfig:
     shutdown_grace: int
     schema_wait_timeout: float
     db_command_timeout: float
+    studio_directory_url: str = ""
+    studio_directory_secret: str = ""
+    studio_directory_ca_file: str | None = None
 
 
 def _float_env(env: dict[str, str], key: str, default: float) -> float:
@@ -108,6 +111,10 @@ def load_config(root: str | Path) -> AgentConfig:
         raise ConfigError("HOST_AGENT_HMAC_SECRET ausente ou placeholder")
 
     dsn = build_db_dsn_from_env(env)
+    directory_url = _env_lookup(env, "STUDIO_CACHE_INVALIDATION_URL")
+    directory_secret = _env_lookup(env, "PROJECTS_API_HMAC_SECRET")
+    if not directory_url or not directory_secret:
+        raise ConfigError("STUDIO_CACHE_INVALIDATION_URL/PROJECTS_API_HMAC_SECRET required for canonical user authorization")
 
     worker_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
 
@@ -117,6 +124,9 @@ def load_config(root: str | Path) -> AgentConfig:
         scripts_dir=scripts_dir,
         backups_root=backups_root,
         dsn=dsn,
+        studio_directory_url=directory_url,
+        studio_directory_secret=directory_secret,
+        studio_directory_ca_file=str(root_path / "certs" / "ca.pem"),
         hmac_secret=hmac_secret,
         worker_id=worker_id,
         poll_interval=_float_env(env, "HOST_AGENT_POLL_INTERVAL", 2.0),

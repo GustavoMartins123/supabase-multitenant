@@ -82,6 +82,12 @@ async def submit_command(
     timeout_seconds: int | None = None,
 ) -> uuid.UUID:
     """Grava a intencao assinada e acorda o agent via NOTIFY."""
+    if requested_by is not None:
+        from app.directory_service import confirm_directory
+        snapshot = await confirm_directory(pool)
+        actor = next((u for u in snapshot.users if u.id == requested_by), None)
+        if actor is None or not actor.is_active:
+            raise HostAgentError("authorization_denied", "Actor revoked in canonical directory")
     args = args or {}
     errors = validate_command_args(command, project, args)
     if errors:

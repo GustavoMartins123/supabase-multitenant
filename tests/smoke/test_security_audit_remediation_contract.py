@@ -338,7 +338,7 @@ class ForgedIdentityHeaderTest(unittest.TestCase):
         # Precisa rodar antes de qualquer return early do guard.
         self.assertLess(
             guard.index('require("security.forged_identity").strip()'),
-            guard.index("ngx.req.set_uri"),
+            guard.index('require("security.csrf").enforce()'),
         )
 
 

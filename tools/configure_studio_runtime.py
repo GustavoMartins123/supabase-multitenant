@@ -408,6 +408,7 @@ def configure_runtime(
     force: bool = False,
     rotate_secrets: bool = False,
     rotate_ca: bool = False,
+    server_env: Path = SERVER_ENV,
 ) -> None:
     origin, host = parse_origin(studio_origin)
     try:
@@ -433,6 +434,12 @@ def configure_runtime(
     # mount; secrets remain in the dedicated mode-0600 files below.
     atomic_write(target, rendered, mode=0o644, replace=force)
     atomic_write(target.parent / ".studio-origin", origin, mode=0o644, replace=True)
+    sequence_path = target.parent / ".studio-directory-sequence"
+    if not sequence_path.exists():
+        atomic_write(sequence_path, "0", mode=0o666, replace=False)
+    if server_env.is_file():
+        server_content = server_env.read_text(encoding="utf-8")
+        atomic_write(server_env, _set_env_value(server_content, "STUDIO_CACHE_INVALIDATION_URL", origin), mode=0o600, replace=True)
 
     print(f"Authelia renderizado para {host}; valores de segredo omitidos")
     print(f"Configuracao: {target}")

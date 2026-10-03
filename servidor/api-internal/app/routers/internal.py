@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict
 
 from app.control_plane_service import sync_user_record
+from app.directory_service import DirectorySnapshot, reconcile_directory
 from app.database import get_pool
 from app.dependencies import (
     ensure_project_admin_access,
@@ -207,9 +208,9 @@ async def proxy_global_analytics(
     )
 
 
-@router.post("/api/projects/internal/users/sync", response_model=UserSyncResponse)
+@router.post("/api/projects/internal/users/sync")
 async def sync_user_identity(
-    body: UserSyncPayload,
+    body: DirectorySnapshot,
     request: Request,
     pool=Depends(get_pool),
 ):
@@ -218,15 +219,7 @@ async def sync_user_identity(
 
     async with pool.acquire() as conn:
         async with conn.transaction():
-            synced = await sync_user_record(
-                conn,
-                user_id=body.id,
-                username=body.username,
-                display_name=body.display_name,
-                groups=body.groups,
-                is_active=body.is_active,
-                source=body.source,
-            )
+            synced = await reconcile_directory(conn, body)
     return synced
 
 

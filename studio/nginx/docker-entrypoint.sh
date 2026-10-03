@@ -32,7 +32,7 @@ chmod 644 /config/configuration.runtime.yml
 chown 65534:65534 /config 2>/dev/null || true
 chmod 777 /config || true
 
-for file in /config/users_database.yml /config/ids.yml /config/db.sqlite3; do
+for file in /config/users_database.yml /config/ids.yml /config/db.sqlite3 /config/.studio-directory-sequence; do
     [ -e "$file" ] || continue
     if chown 65534:65534 "$file" 2>/dev/null; then
         chmod 666 "$file"

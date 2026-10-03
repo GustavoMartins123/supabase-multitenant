@@ -25,7 +25,8 @@ local function request_sync(body)
         return nil, sign_err or "falha ao assinar sync interno"
     end
 
-    local host = string.match(API_ORIGIN, "//([^/:]+)") or "localhost"
+    local host = string.match(API_ORIGIN, "^https?://([^/]+)$")
+    if not host then return nil, "SERVER_DOMAIN must be a canonical HTTP origin" end
     local headers = {
         ["Content-Type"] = "application/json",
         ["Host"] = host,
@@ -47,29 +48,27 @@ local function request_sync(body)
     )
 end
 
-function M.sync_user(payload)
-    if HMAC_SECRET == "" then
-        return nil, "STUDIO_GATEWAY_HMAC_SECRET ausente"
-    end
-    if API_ORIGIN == "" then
-        return nil, "SERVER_DOMAIN ausente"
-    end
-
-    local body = cjson.encode(payload)
-    if not body then
-        return nil, "falha ao serializar payload"
-    end
-
+function M.sync_directory()
+    -- All callers hold users_database.yml's lock through the API transaction.
+    local snapshot, snapshot_err = require("admin_api.directory_snapshot").read_locked(true)
+    if not snapshot then return nil, snapshot_err end
+    local body, encode_err = cjson.encode(snapshot)
+    if not body then return nil, encode_err end
     local res, err = request_sync(body)
-    if not res then
-        return nil, err or "falha ao acessar a API por SERVER_DOMAIN"
-    end
-    if res.status < 200 or res.status >= 300 then
-        return nil, string.format("sync retornou status %s: %s", res.status, res.body or "")
-    end
+    if not res then return nil, err end
+    if res.status ~= 200 then return nil, "directory sync rejected: " .. tostring(res.status) end
+    local decoded = cjson.decode(res.body)
+    if type(decoded) ~= "table" or decoded.revision ~= snapshot.revision then return nil, "invalid directory acknowledgement" end
+    return decoded
+end
 
-    local decoded = cjson.decode(res.body or "{}")
-    return decoded or true, nil
+function M.sync_user(payload)
+    local directory, err = M.sync_directory()
+    if not directory then return nil, err end
+    for _, user in ipairs(directory.users or {}) do
+        if user.id == payload.id then return user end
+    end
+    return nil, "user absent from confirmed directory"
 end
 
 return M

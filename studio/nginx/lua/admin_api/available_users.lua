@@ -13,7 +13,7 @@ end
 local include_members = ngx.var.arg_include_members == "true"
 local mode = ngx.var.arg_mode or "owner"
 local admin_groups = require("security.admin_groups")
-if mode == "admin" and not admin_groups.is_admin(ngx.var.authelia_groups or "") then
+if mode == "admin" and not admin_groups.is_admin(ngx.ctx.canonical_groups or "") then
     ngx.log(ngx.WARN, "[AVAILABLE] mode=admin solicitado por nao-admin para ", slug)
     mode = "owner"
 end

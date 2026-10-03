@@ -204,11 +204,11 @@ class UserCacheReloadHardeningTest(unittest.TestCase):
     def test_reload_publishes_snapshot_without_global_flush(self) -> None:
         source = read(LUA / "init" / "init_worker.lua")
         self.assertNotIn("cache:flush_all()", source)
-        self.assertIn("local snapshot = {}", source)
+        self.assertIn("directory.read_locked(false)", source)
         self.assertIn('cache:set("__yaml_user_keys"', source)
         self.assertLess(
-            source.index("for key, value in pairs(snapshot) do"),
-            source.index("for key in pairs(old_keys) do"),
+            source.index("for _, user in ipairs(snapshot.users) do"),
+            source.index("for _, key in ipairs(old) do"),
         )
 
     def test_user_enumerators_ignore_internal_snapshot_keys(self) -> None:

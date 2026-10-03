@@ -308,7 +308,7 @@ class F15AdminModeGate(unittest.TestCase):
         lua = (
             ROOT / "studio/nginx/lua/admin_api/available_users.lua"
         ).read_text(encoding="utf-8")
-        gate_at = lua.index('admin_groups.is_admin(ngx.var.authelia_groups or "")')
+        gate_at = lua.index('admin_groups.is_admin(ngx.ctx.canonical_groups or "")')
         downgrade_at = lua.index('mode = "owner"')
         branch_at = lua.index('if mode == "admin" then')
         self.assertLess(gate_at, branch_at)

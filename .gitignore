@@ -20,6 +20,7 @@ studio/authelia/ssl/
 studio/secrets/
 studio/authelia/.studio-origin
 studio/authelia/.studio-bootstrap-consumed
+studio/authelia/.studio-directory-sequence
 servidor/.env
 servidor/.analytics.env
 servidor/.storage.env

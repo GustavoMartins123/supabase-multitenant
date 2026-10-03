@@ -40,7 +40,10 @@ assert(processor.normalize_uuid("11111111-2222-3333-4444-555555555555/../x") == 
 
     def test_cache_loads_picture_from_authelia(self) -> None:
         source = (ROOT / "studio/nginx/lua/init/init_worker.lua").read_text(encoding="utf-8")
-        self.assertIn('picture = attr.picture or ""', source)
+        self.assertIn('picture=user.source.profile.picture', source)
+        snapshot = (ROOT / "studio/nginx/lua/admin_api/directory_snapshot.lua").read_text(encoding="utf-8")
+        self.assertIn('"picture"', snapshot)
+        self.assertIn('profile[field] = attr[field] or ""', snapshot)
 
     def test_authenticated_directory_can_serve_any_active_user(self) -> None:
         source = (

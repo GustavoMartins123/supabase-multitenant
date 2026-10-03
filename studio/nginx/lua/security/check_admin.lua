@@ -2,10 +2,12 @@ local groups = ngx.var.authelia_groups or ""
 local email = ngx.var.authelia_email or ""
 local admin_groups = require("security.admin_groups")
 local user_context_headers = require("project_context.user_context_headers")
-local is_admin = admin_groups.is_admin(groups)
+local is_admin = false
 
 if email ~= "" then
-    user_context_headers.apply(email, groups)
+    local _, canonical_groups = user_context_headers.apply(email, groups)
+    groups = canonical_groups
+    is_admin = admin_groups.is_admin(groups)
 end
 
 if not is_admin then

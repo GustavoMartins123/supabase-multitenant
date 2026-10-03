@@ -21,6 +21,8 @@ import secrets
 import sys
 import time
 import unittest
+import copy
+from unittest import mock
 import uuid
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -123,6 +125,20 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
         self.pool = await asyncpg.create_pool(self.dsn, min_size=1, max_size=4)
         database_module._pool = self.pool
         await self._seed_fixture()
+        self.directory_sequence = 0
+        self.directory_users = [dict(id=str(user_id), username=name, display_name=name, groups=["active"], is_active=True, source={"name":"test"}) for user_id, name in ((self.owner,"owner"),(self.admin2,"admin2"),(self.admin3,"admin3"),(self.ex_member,"exmember"),(self.outsider,"outsider"))]
+        async def canonical_read(*args):
+            self.directory_sequence += 1
+            return {"sequence":self.directory_sequence, "revision":self.directory_revision(), "users":copy.deepcopy(self.directory_users)}
+        # Mock only the remote YAML transport. Reconciliation and authorization
+        # still run against the real PostgreSQL database.
+        self.directory_patch = mock.patch("app.directory_service.read_directory", side_effect=canonical_read)
+        self.directory_patch.start()
+        self.addCleanup(self.directory_patch.stop)
+        sys.path.insert(0, str(ROOT / "servidor/host-agent"))
+        self.agent_directory_patch = mock.patch("hostagent.directory_transport.read_directory", side_effect=canonical_read)
+        self.agent_directory_patch.start()
+        self.addCleanup(self.agent_directory_patch.stop)
 
         from app.asgi import app
 
@@ -139,6 +155,7 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
                 "users",
                 "internal_hmac_nonces",
                 "host_agent_commands",
+                "studio_directory_state",
             ):
                 await conn.execute(f"TRUNCATE {table} CASCADE")
         database_module._pool = None
@@ -185,7 +202,10 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
                     role,
                 )
 
-    def user_token(self, user_id: uuid.UUID) -> str:
+    def directory_revision(self):
+        return hashlib.sha256(json.dumps(self.directory_users, sort_keys=True).encode()).hexdigest()
+
+    def user_token(self, user_id: uuid.UUID, directory_revision=None) -> str:
         from app.security_tokens import USER_TOKEN_AUDIENCE
 
         now = int(time.time())
@@ -196,6 +216,7 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
             "iat": now,
             "exp": now + 300,
             "login_session": base64url(secrets.token_bytes(32)),
+            "directory_revision": directory_revision or self.directory_revision(),
         }
         encoded = base64url(json.dumps(payload).encode())
         signature = hmac.new(
@@ -405,7 +426,7 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
         record["signature"] = command_signature("signed-intent-test", command_id=str(record["id"]),
             command="duplicate_project", project="copy_dest", project_uuid=str(dest),
             requested_by=str(self.admin2), args=args, issued_at=record["issued_at"], timeout_seconds=600)
-        agent = HostAgent(SimpleNamespace(hmac_secret="signed-intent-test"))
+        agent = HostAgent(SimpleNamespace(hmac_secret="signed-intent-test", studio_directory_url="https://canonical.test", studio_directory_secret=PROJECTS_API_SECRET, studio_directory_ca_file=None))
         agent.pool = self.pool
         return agent, record, args
 
@@ -415,6 +436,96 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
         await self.pool.execute("DELETE FROM project_members WHERE project_id=$1 AND user_id=$2", self.project_a, self.admin2)
         denial = await agent._revalidate(record, "duplicate_project", "copy_dest", args)
         self.assertEqual(denial[0], "authorization_denied:source_access_revoked")
+
+    async def test_pending_agent_job_obeys_yaml_disable_without_database_sync(self):
+        agent, record, args = await self.duplicate_intent()
+        for user in self.directory_users:
+            if user['id'] == str(self.admin2):
+                user['is_active'] = False
+        self.assertTrue(await self.pool.fetchval('SELECT is_active FROM users WHERE id=$1', self.admin2))
+        denial = await agent._revalidate(record, 'duplicate_project', 'copy_dest', args)
+        self.assertEqual(denial[0], 'authorization_denied:directory_revoked')
+
+    async def test_pending_global_admin_job_obeys_yaml_group_revocation_with_stale_db_group(self):
+        agent, record, args = await self.duplicate_intent()
+        from hostagent.host_agent_protocol import command_signature
+        record['requested_by'] = self.outsider
+        record['signature'] = command_signature('signed-intent-test', command_id=str(record['id']), command='duplicate_project', project='copy_dest', project_uuid=str(record['project_uuid']), requested_by=str(self.outsider), args=args, issued_at=record['issued_at'], timeout_seconds=600)
+        user = next(u for u in self.directory_users if u['id']==str(self.outsider))
+        user['groups'] = ['admin','active']
+        await self.pool.execute("INSERT INTO user_groups(user_id,group_name,source) VALUES($1,'admin','test')", self.outsider)
+        self.assertIsNone(await agent._revalidate(record,'duplicate_project','copy_dest',args))
+        user['groups'] = ['active']
+        self.assertTrue(await self.pool.fetchval("SELECT EXISTS(SELECT 1 FROM user_groups WHERE user_id=$1 AND group_name='admin')", self.outsider))
+        denial = await agent._revalidate(record,'duplicate_project','copy_dest',args)
+        self.assertEqual(denial[0], 'authorization_denied:source_access_revoked')
+
+    async def test_directory_outage_denies_api_and_agent_even_with_active_database_user(self):
+        from app.directory_transport import DirectoryUnavailable
+        with mock.patch('app.directory_service.read_directory', side_effect=DirectoryUnavailable('offline')):
+            response = await self.request('GET', '/api/projects/projeto_a/members', actor=self.owner)
+        self.assertEqual(response.status_code, 503)
+        agent, record, args = await self.duplicate_intent()
+        from hostagent.directory_transport import DirectoryUnavailable as AgentDirectoryUnavailable
+        with mock.patch('hostagent.directory_transport.read_directory', side_effect=AgentDirectoryUnavailable('offline')):
+            denial = await agent._revalidate(record, 'duplicate_project', 'copy_dest', args)
+        self.assertEqual(denial[0], 'authorization_denied:directory_unavailable')
+
+    async def test_removed_directory_account_is_disabled_and_groups_removed_transactionally(self):
+        await self.pool.execute("INSERT INTO user_groups(user_id,group_name,source) VALUES($1,'admin','test')", self.owner)
+        self.directory_users = [u for u in self.directory_users if u['id'] != str(self.owner)]
+        response = await self.request('GET', '/api/projects/projeto_a/members', actor=self.owner)
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(await self.pool.fetchval('SELECT is_active FROM users WHERE id=$1', self.owner))
+        self.assertEqual(await self.pool.fetchval('SELECT count(*) FROM user_groups WHERE user_id=$1', self.owner), 0)
+
+    async def test_out_of_order_directory_snapshot_cannot_restore_removed_admin_group(self):
+        from app.directory_service import DirectorySnapshot, reconcile_directory
+        from fastapi import HTTPException
+        current = DirectorySnapshot(sequence=20, revision='b'*64, users=self.directory_users)
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                await reconcile_directory(conn, current)
+        stale_users = copy.deepcopy(self.directory_users)
+        stale_users[0]['groups'].append('admin')
+        stale = DirectorySnapshot(sequence=19, revision='a'*64, users=stale_users)
+        async with self.pool.acquire() as conn:
+            with self.assertRaises(HTTPException) as error:
+                async with conn.transaction():
+                    await reconcile_directory(conn, stale)
+        self.assertEqual(error.exception.status_code, 409)
+        self.assertFalse(await self.pool.fetchval("SELECT EXISTS(SELECT 1 FROM user_groups WHERE user_id=$1 AND group_name='admin')", self.owner))
+
+    @unittest.skipUnless(os.environ.get('STUDIO_DIRECTORY_TEST_URL'), 'Start real OpenResty directory harness')
+    async def test_live_openresty_snapshot_revokes_admin_in_real_postgres_and_api(self):
+        import urllib.request
+        from app.directory_transport import read_directory
+        origin = os.environ['STUDIO_DIRECTORY_TEST_URL']
+        async def seed(groups):
+            body = json.dumps({'users':{'admin':{'email':'admin@example.test','displayname':'Admin','groups':groups,'disabled':False}}}).encode()
+            def post():
+                with urllib.request.urlopen(urllib.request.Request(origin+'/test/seed',data=body),timeout=10) as response:
+                    response.read()
+            await asyncio.to_thread(post)
+        async def live_read(*args):
+            return await read_directory(origin, PROJECTS_API_SECRET, None)
+        await seed(['admin','active'])
+        snapshot = await live_read()
+        actor = uuid.UUID(snapshot['users'][0]['id'])
+        path = '/api/projects/projeto_a/members'
+        headers = self.signed_headers('GET', path, None, b'')
+        headers['X-User-Token'] = self.user_token(actor, snapshot['revision'])
+        with mock.patch('app.directory_service.read_directory', side_effect=live_read):
+            response = await self.request('GET',path,headers=headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        await seed(['active'])
+        snapshot = await live_read()
+        headers = self.signed_headers('GET', path, None, b'')
+        headers['X-User-Token'] = self.user_token(actor, snapshot['revision'])
+        with mock.patch('app.directory_service.read_directory', side_effect=live_read):
+            response = await self.request('GET',path,headers=headers)
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertFalse(await self.pool.fetchval("SELECT EXISTS(SELECT 1 FROM user_groups WHERE user_id=$1 AND group_name='admin')", actor))
 
     async def test_signed_duplicate_cannot_copy_reused_source_slug(self):
         agent, record, args = await self.duplicate_intent()
@@ -448,13 +559,7 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
         ), 1)
 
     async def test_authenticated_user_cannot_grant_themselves_global_admin(self):
-        body = json.dumps(
-            {
-                "id": str(self.outsider),
-                "username": "outsider",
-                "groups": ["admin"],
-            }
-        ).encode()
+        body = json.dumps({"sequence":1,"revision":self.directory_revision(),"users":[{"id":str(self.outsider),"username":"outsider","display_name":"Outsider","groups":["admin"],"is_active":True,"source":{"name":"test"}}]}).encode()
         response = await self.request(
             "POST",
             "/api/projects/internal/users/sync",

@@ -317,6 +317,7 @@ async def load_authorization_context(
     *,
     project: str,
     requested_by: uuid.UUID | None,
+    canonical_user: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Carrega do banco os fatos usados pela matriz de autorizacao."""
     context: dict[str, Any] = {
@@ -345,10 +346,10 @@ async def load_authorization_context(
                 """,
                 requested_by,
             )
-            if user_row:
+            if user_row and canonical_user and canonical_user.get("id") == str(requested_by):
                 context["user_exists"] = True
-                context["user_active"] = bool(user_row["is_active"])
-                context["is_global_admin"] = bool(user_row["is_global_admin"])
+                context["user_active"] = user_row["is_active"] and canonical_user.get("is_active") is True
+                context["is_global_admin"] = "admin" in canonical_user.get("groups", [])
 
         project_row = await conn.fetchrow(
             """
