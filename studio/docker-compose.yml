@@ -121,13 +121,8 @@ services:
       - /tmp:size=256m,mode=1777
   studio:
     container_name: supabase-studio
-    build:
-      context: ./studio-slug
-      dockerfile: Dockerfile
-      args:
-        SUPABASE_STUDIO_COMMIT: ${SUPABASE_STUDIO_COMMIT:-20290c71bdc48bef1720bfe7d292f3b9e6154f7d}
-        SUPABASE_STUDIO_REPOSITORY: ${SUPABASE_STUDIO_REPOSITORY:-https://github.com/supabase/supabase.git}
     image: ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v4
+    pull_policy: always
     restart: unless-stopped
     logging: *vector-logging
     healthcheck:

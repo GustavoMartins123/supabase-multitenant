@@ -20,3 +20,20 @@ O contrato do patch é intencionalmente estrito:
 O Dockerfile verifica o patch contra o SHA fixado antes de aplicá-lo. Se o
 upstream mudar, o build falha em vez de produzir uma imagem parcialmente
 compatível.
+
+## Distribuição
+
+A instalação usa a imagem pronta do GHCR. `start.sh` baixa as imagens antes
+de iniciar os serviços; somente o gateway OpenResty é construído localmente.
+Falha no download interrompe a inicialização, sem usar uma imagem local como
+substituta nem construir o Studio.
+
+O build e a publicação são operações de manutenção, executadas na raiz do repo:
+
+```sh
+docker compose -f studio/docker-compose.maintenance.yml build studio
+docker compose -f studio/docker-compose.maintenance.yml push studio
+```
+
+Publique a nova tag antes de distribuir a configuração que a utiliza.
+O CI de build já usa cache do GitHub Actions; instalações não precisam desse cache.

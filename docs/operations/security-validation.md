@@ -49,7 +49,7 @@ python tools/run_studio_session_tests.py \
   --studio-image studio-nginx:latest \
   --authelia-image authelia/authelia:4.39.20 --redis-image redis:8.2.2-alpine \
   --runtime-image session-runtime:local --browser-image session-browser:local \
-  --ui-image ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v3
+  --ui-image ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v4
 ```
 
 The runner creates a unique network/volume, generates a synthetic account and CA

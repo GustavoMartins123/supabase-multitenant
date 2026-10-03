@@ -150,10 +150,13 @@ class StudioSlugContextContractTest(unittest.TestCase):
         )
 
         full_sha = "20290c71bdc48bef1720bfe7d292f3b9e6154f7d"
-        self.assertIn(full_sha, env)
+        self.assertNotIn("SUPABASE_STUDIO_COMMIT", env)
+        self.assertNotIn("SUPABASE_STUDIO_REPOSITORY", env)
         self.assertIn(full_sha, studio_dockerfile)
         self.assertIn("git -C /src apply --check", studio_dockerfile)
-        self.assertIn("context: ./studio-slug", compose)
+        maintenance = (ROOT / "studio/docker-compose.maintenance.yml").read_text(encoding="utf-8")
+        self.assertIn("context: ./studio-slug", maintenance)
+        self.assertNotIn("context: ./studio-slug", compose)
         self.assertIn("ghcr.io/gustavomartins123/multitenant-studio:", compose)
         self.assertIn("studio_compat/project_context_response.lua", nginx)
         self.assertIn("X-Studio-Project-Ref", studio_patch)
@@ -167,6 +170,19 @@ class StudioSlugContextContractTest(unittest.TestCase):
         )
         self.assertNotIn("STUDIO_PROJECT_CONTEXT_MODE", env)
         self.assertIn("COPY nginx/lua/ /usr/local/openresty/lualib/", gateway_dockerfile)
+
+    def test_installation_and_maintenance_share_the_published_image(self) -> None:
+        import yaml
+
+        runtime = yaml.safe_load((ROOT / "studio/docker-compose.yml").read_text(encoding="utf-8"))
+        maintenance = yaml.safe_load((ROOT / "studio/docker-compose.maintenance.yml").read_text(encoding="utf-8"))
+        service = runtime["services"]["studio"]
+        self.assertNotIn("build", service)
+        self.assertEqual(service["pull_policy"], "always")
+        self.assertEqual(service["image"], maintenance["services"]["studio"]["image"])
+        self.assertTrue(service["image"].endswith(":20290c7-context-v4"))
+        self.assertEqual(maintenance["services"]["studio"]["build"]["context"], "./studio-slug")
+        self.assertEqual(set(maintenance["services"]), {"studio"})
 
     def test_nginx_gates_dynamic_routes_before_generic_fallbacks(self) -> None:
         nginx = (ROOT / "studio/nginx/nginx.conf").read_text(encoding="utf-8")

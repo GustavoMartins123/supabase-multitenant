@@ -137,7 +137,7 @@ jobs:
           docker build -t session-runtime-ci:local -f tests/integration/fixtures/studio_session_runtime.Dockerfile tests/integration/fixtures
           docker pull authelia/authelia:4.39.20
           docker pull redis:8.2.2-alpine
-          docker pull ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v3
+          docker pull ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v4
       - name: Required real Authelia browser CSRF acceptance (verified TLS, no skips)
         run: |
           python tools/run_studio_session_tests.py \
@@ -145,7 +145,7 @@ jobs:
             --authelia-image authelia/authelia:4.39.20 --redis-image redis:8.2.2-alpine \
             --runtime-image session-runtime-ci:local \
             --browser-image session-browser-ci:local \
-            --ui-image ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v3
+            --ui-image ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v4
 
   p1-lifecycle-live:
     name: Lifecycle and authorization (${{ matrix.topology }})
@@ -184,7 +184,7 @@ jobs:
           docker build -t codex-p1-browser:local -f tests/integration/fixtures/studio_session_browser.Dockerfile tests/integration/fixtures
           docker pull authelia/authelia:4.39.20
           docker pull redis:8.2.2-alpine
-          docker pull ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v3
+          docker pull ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v4
           docker pull traefik:v3.7.6
           docker pull supabase/postgres-meta:v0.96.1
       - name: Required physical script lifecycle and real Storage/Vectors drill

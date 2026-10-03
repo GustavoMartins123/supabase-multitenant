@@ -41,7 +41,12 @@ start_studio() {
     if [ -n "$(sed -n 's/^DOCKER_DESKTOP_WSL_HOST=//p' "$ROOT_DIR/servidor/.env")" ]; then
         STUDIO_COMPOSE+=(-f docker-compose.desktop-wsl.yml)
     fi
-    "${STUDIO_COMPOSE[@]}" up --build -d
+    "${STUDIO_COMPOSE[@]}" pull --ignore-buildable --policy always \
+        || die "falha ao baixar as imagens do Studio; publique a versao configurada no GHCR e verifique o acesso ao registry."
+    "${STUDIO_COMPOSE[@]}" build nginx \
+        || die "falha ao construir o gateway OpenResty."
+    "${STUDIO_COMPOSE[@]}" up --no-build --pull never -d \
+        || die "falha ao iniciar o Studio com as imagens obtidas."
     echo "Studio iniciado."
 }
 
