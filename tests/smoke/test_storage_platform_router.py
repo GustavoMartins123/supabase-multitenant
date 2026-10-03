@@ -67,7 +67,8 @@ class StoragePlatformRouterTests(unittest.TestCase):
     def test_create_renames_the_studio_bucket_field(self) -> None:
         rewrite = REWRITE.read_text(encoding="utf-8")
 
-        self.assertIn('body.vectorBucketName or body.bucketName', rewrite)
+        self.assertIn('local vector_bucket_name = body.bucketName', rewrite)
+        self.assertIn('if body.vectorBucketName ~= nil then', rewrite)
         self.assertIn('set_json_body({ vectorBucketName = vector_bucket_name })', rewrite)
 
     def test_vector_bucket_detail_uses_get_vector_bucket_and_unwraps_response(self) -> None:
@@ -146,7 +147,9 @@ assert(indexes.vector_bucket_name == "rrrr", indexes.vector_bucket_name)
         self.assertIn('dataType = body.dataType', rewrite)
         self.assertIn('dimension = body.dimension', rewrite)
         self.assertIn('distanceMetric = body.distanceMetric', rewrite)
-        self.assertIn('nonFilterableMetadataKeys = metadata_keys', rewrite)
+        self.assertIn('nonFilterableMetadataKeys = json_array(metadata_keys)', rewrite)
+        self.assertIn('if metadata_keys ~= nil and #metadata_keys > 0 then', rewrite)
+        self.assertIn('storage_platform_invalid_metadata_keys', rewrite)
 
     def test_delete_routes_use_real_storage_vector_operations(self) -> None:
         router = ROUTER.read_text(encoding="utf-8")

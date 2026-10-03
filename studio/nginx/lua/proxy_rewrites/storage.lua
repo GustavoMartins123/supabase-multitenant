@@ -92,7 +92,11 @@ local function set_route_body(route)
                 "storage_platform_invalid_json"
         end
 
-        local vector_bucket_name = body.vectorBucketName or body.bucketName
+        local vector_bucket_name = body.bucketName
+        if body.vectorBucketName ~= nil then
+            return nil, "Use o campo canonico bucketName", ngx.HTTP_BAD_REQUEST,
+                "storage_platform_invalid_field"
+        end
         if type(vector_bucket_name) ~= "string" or vector_bucket_name == "" then
             return nil, "bucketName e obrigatorio para criar um vector bucket",
                 ngx.HTTP_BAD_REQUEST, "storage_platform_bucket_name_missing"
@@ -109,21 +113,35 @@ local function set_route_body(route)
         end
 
         local metadata_keys = body.metadataKeys
-        if type(metadata_keys) ~= "table" then
-            metadata_keys = {}
+        if metadata_keys ~= nil and type(metadata_keys) ~= "table" then
+            return nil, "metadataKeys deve ser uma lista de strings", ngx.HTTP_BAD_REQUEST,
+                "storage_platform_invalid_metadata_keys"
         end
-        metadata_keys = json_array(metadata_keys)
-
-        return set_json_body({
+        if metadata_keys ~= nil then
+            for position, value in pairs(metadata_keys) do
+                if type(position) ~= "number" or position < 1 or position > #metadata_keys
+                    or type(value) ~= "string" or value == ""
+                then
+                    return nil, "metadataKeys deve ser uma lista de strings nao vazias", ngx.HTTP_BAD_REQUEST,
+                        "storage_platform_invalid_metadata_keys"
+                end
+            end
+        end
+        local payload = {
             vectorBucketName = route.vector_bucket_name,
             indexName = body.indexName,
             dataType = body.dataType,
             dimension = body.dimension,
             distanceMetric = body.distanceMetric,
-            metadataConfiguration = {
-                nonFilterableMetadataKeys = metadata_keys,
-            },
-        })
+        }
+        -- This is an optional upstream field, but if present Storage requires
+        -- at least one key. An empty list means no excluded metadata keys.
+        if metadata_keys ~= nil and #metadata_keys > 0 then
+            payload.metadataConfiguration = {
+                nonFilterableMetadataKeys = json_array(metadata_keys),
+            }
+        end
+        return set_json_body(payload)
     end
 
     return nil, "Modo de corpo do Storage nao reconhecido: " .. tostring(route.body_mode),
