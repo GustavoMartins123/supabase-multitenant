@@ -56,7 +56,7 @@ class BackendResourceProfileContract(unittest.TestCase):
         projects = (APP / "routers" / "projects.py").read_text(encoding="utf-8")
         ops = (APP / "routers" / "project_lifecycle_ops.py").read_text(encoding="utf-8")
         backgrounds = (APP / "project_backgrounds.py").read_text(encoding="utf-8")
-        self.assertIn("owner_id, resource_profile)", projects)
+        self.assertIn("owner_id, resource_profile, public_ref)", projects)
         self.assertIn('"resource_profile": resource_profile,', backgrounds)
         self.assertIn(
             'resolve_resource_limits(updates["PROJECT_RESOURCE_PROFILE"])', ops
@@ -322,6 +322,7 @@ class ProtocolAndAgentContract(unittest.TestCase):
         uuid_ok = "9c8ce9f0-3b4e-4bcb-a739-2c1e8ad0e9aa"
         base = {
             "tenant_uuid": uuid_ok,
+            "public_ref": "abcdefghijklmnopqrst",
             "recover_stale": False,
             "stale_tenant_uuids": [],
         }
@@ -347,6 +348,7 @@ class ProtocolAndAgentContract(unittest.TestCase):
                     "original_tenant_uuid": "1b671a64-40d5-491e-99b0-da01ff1f3341",
                     "copy_mode": "schema-only",
                     "tenant_uuid": uuid_ok,
+            "public_ref": "abcdefghijklmnopqrst",
                     "resource_profile": "medium",
                 },
             ),

@@ -197,7 +197,9 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
         ):
             errors.append("invalid_services")
     elif command == "create_project":
-        reject_unknown({"tenant_uuid", "recover_stale", "stale_tenant_uuids", "gateway_token", "resource_profile"})
+        reject_unknown({"tenant_uuid", "public_ref", "recover_stale", "stale_tenant_uuids", "gateway_token", "resource_profile"})
+        if not isinstance(args.get("public_ref"), str) or not re.fullmatch(r"[a-z]{20}", args["public_ref"]):
+            errors.append("invalid_public_ref")
         if not is_valid_uuid(args.get("tenant_uuid")):
             errors.append("invalid_tenant_uuid")
         if "gateway_token" in args and not is_valid_gateway_token(args.get("gateway_token")):
@@ -216,7 +218,9 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
             errors.append("stale_tenants_require_recovery")
         validate_resource_profile()
     elif command == "duplicate_project":
-        reject_unknown({"original_name", "original_uuid", "original_tenant_uuid", "copy_mode", "tenant_uuid", "gateway_token", "resource_profile"})
+        reject_unknown({"original_name", "original_uuid", "original_tenant_uuid", "copy_mode", "tenant_uuid", "public_ref", "gateway_token", "resource_profile"})
+        if not isinstance(args.get("public_ref"), str) or not re.fullmatch(r"[a-z]{20}", args["public_ref"]):
+            errors.append("invalid_public_ref")
         require_project_field("original_name")
         for source_field in ("original_uuid", "original_tenant_uuid"):
             if not is_valid_uuid(args.get(source_field)):

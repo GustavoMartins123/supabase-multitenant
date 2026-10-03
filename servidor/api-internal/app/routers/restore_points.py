@@ -14,7 +14,7 @@ from app.dependencies import (
     ensure_project_member_access,
     ensure_project_owner_access,
     get_project_role,
-    get_project_row,
+    get_public_project_row,
     resolve_authenticated_user,
 )
 from app.host_agent import command_result, run_command_for_job as run_host_agent_command_for_job
@@ -38,7 +38,7 @@ from app.project_identity import (
     get_job_project_identity as _get_job_project_identity,
 )
 from app.schemas import RestorePointCreate
-from app.validation import parse_uuid_value, validate_project_id
+from app.validation import parse_uuid_value, validate_project_ref
 
 router = APIRouter(tags=["restore-points"])
 
@@ -218,17 +218,17 @@ async def _count_active_restore_points(
     )
 
 
-@router.get("/api/projects/{project_name}/restore-points", response_model=ListRestorePointsResponse)
+@router.get("/api/projects/{project_ref}/restore-points", response_model=ListRestorePointsResponse)
 async def list_project_restore_points(
-    project_name: str,
+    project_ref: str,
     request: Request,
     pool=Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     auth_user = await resolve_authenticated_user(request, pool)
 
     async with pool.acquire() as conn:
-        project_row = await get_project_row(conn, project_name)
+        project_row = await get_public_project_row(conn, project_ref)
         await ensure_project_member_access(
             conn,
             project_id=project_row["id"],
@@ -255,7 +255,7 @@ async def list_project_restore_points(
         )
 
     return {
-        "project": project_name,
+        "project": project_ref,
         "limit": RESTORE_POINT_LIMIT,
         "permissions": {
             "can_create": is_global_admin or is_owner or role == "admin",
@@ -266,14 +266,14 @@ async def list_project_restore_points(
     }
 
 
-@router.post("/api/projects/{project_name}/restore-points", status_code=202, response_model=CreateRestorePointResponse)
+@router.post("/api/projects/{project_ref}/restore-points", status_code=202, response_model=CreateRestorePointResponse)
 async def create_project_restore_point(
-    project_name: str,
+    project_ref: str,
     body: RestorePointCreate,
     request: Request,
     pool=Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     auth_user = await resolve_authenticated_user(request, pool)
     title = (body.title or "").strip() or dt.datetime.now().strftime("%d/%m/%Y %H:%M")
     description = (body.description or "").strip() or None
@@ -281,7 +281,8 @@ async def create_project_restore_point(
 
     async with pool.acquire() as conn:
         async with conn.transaction():
-            project_row = await get_project_row(conn, project_name)
+            project_row = await get_public_project_row(conn, project_ref)
+            project_name = project_row["name"]
             project_id = project_row["id"]
             await conn.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
@@ -334,7 +335,7 @@ async def create_project_restore_point(
                 description,
                 uuid.UUID(job_id),
                 auth_user["db_user_id"],
-                project_name,
+                project_ref,
             )
 
     try:
@@ -363,7 +364,7 @@ async def create_project_restore_point(
         "Criação do ponto de restauração enfileirada."
         if position == 0
         else f"Criação enfileirada. Existem {position} ações antes desta na "
-        f"fila para {project_name}."
+        f"fila para {project_ref}."
     )
     return JSONResponse(
         status_code=202,
@@ -378,17 +379,17 @@ async def create_project_restore_point(
 
 
 @router.post(
-    "/api/projects/{project_name}/restore-points/{point_id}/restore",
+    "/api/projects/{project_ref}/restore-points/{point_id}/restore",
     status_code=202,
     response_model=RestoreRestorePointResponse,
 )
 async def restore_project_restore_point(
-    project_name: str,
+    project_ref: str,
     point_id: str,
     request: Request,
     pool=Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     parsed_point = parse_uuid_value(point_id)
     if parsed_point is None:
         raise HTTPException(400, "Id do ponto de restauração inválido")
@@ -397,7 +398,8 @@ async def restore_project_restore_point(
 
     async with pool.acquire() as conn:
         async with conn.transaction():
-            project_row = await get_project_row(conn, project_name)
+            project_row = await get_public_project_row(conn, project_ref)
+            project_name = project_row["name"]
             project_id = project_row["id"]
             await conn.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
@@ -459,7 +461,7 @@ async def restore_project_restore_point(
                 safety_title,
                 uuid.UUID(job_id),
                 auth_user["db_user_id"],
-                project_name,
+                project_ref,
             )
             await conn.execute(
                 """
@@ -510,7 +512,7 @@ async def restore_project_restore_point(
         "Restauração enfileirada. O projeto ficará indisponível durante o processo."
         if position == 0
         else f"Restauração enfileirada. Existem {position} ações antes desta "
-        f"na fila para {project_name}."
+        f"na fila para {project_ref}."
     )
     return JSONResponse(
         status_code=202,
@@ -528,17 +530,17 @@ async def restore_project_restore_point(
 
 
 @router.delete(
-    "/api/projects/{project_name}/restore-points/{point_id}",
+    "/api/projects/{project_ref}/restore-points/{point_id}",
     status_code=202,
     response_model=DeleteRestorePointResponse,
 )
 async def delete_project_restore_point(
-    project_name: str,
+    project_ref: str,
     point_id: str,
     request: Request,
     pool=Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     parsed_point = parse_uuid_value(point_id)
     if parsed_point is None:
         raise HTTPException(400, "Id do ponto de restauração inválido")
@@ -546,7 +548,8 @@ async def delete_project_restore_point(
 
     async with pool.acquire() as conn:
         async with conn.transaction():
-            project_row = await get_project_row(conn, project_name)
+            project_row = await get_public_project_row(conn, project_ref)
+            project_name = project_row["name"]
             project_id = project_row["id"]
             await conn.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",

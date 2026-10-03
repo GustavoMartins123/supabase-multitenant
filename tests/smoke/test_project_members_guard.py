@@ -130,7 +130,7 @@ class RemoveMemberGuardTest(unittest.IsolatedAsyncioTestCase):
 
         patches = [
             mock.patch.object(router, "resolve_authenticated_user", _auth),
-            mock.patch.object(router, "get_project_row", _row),
+            mock.patch.object(router, "get_public_project_row", _row),
             mock.patch.object(router, "ensure_project_admin_access", _admin),
             mock.patch.object(
                 router, "get_user_record_by_identifier", _user_record
@@ -144,7 +144,7 @@ class RemoveMemberGuardTest(unittest.IsolatedAsyncioTestCase):
 
     async def call_remove(self, member_id: str) -> dict:
         return await router.remove_member_by_ref(
-            "demo", member_id, object(), self.pool
+            "abcdefghijklmnopqrst", member_id, object(), self.pool
         )
 
     async def test_unknown_identifier_is_404(self) -> None:

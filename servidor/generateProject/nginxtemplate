@@ -229,9 +229,9 @@ http {
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $real_scheme;
             proxy_set_header X-Forwarded-Host $host;
-            proxy_set_header X-Forwarded-Uri /{{project_id}}$request_uri;
-            proxy_set_header X-Original-URI /{{project_id}}$request_uri;
-            proxy_set_header X-Original-URL $real_scheme://$host/{{project_id}}$request_uri;
+            proxy_set_header X-Forwarded-Uri /{{project_public_ref}}$request_uri;
+            proxy_set_header X-Original-URI /{{project_public_ref}}$request_uri;
+            proxy_set_header X-Original-URL $real_scheme://$host/{{project_public_ref}}$request_uri;
             proxy_set_header apikey $opaque_upstream_apikey;
             proxy_set_header Authorization $opaque_upstream_authorization;
             proxy_set_header X-Api-Key-Id $opaque_key_id;
@@ -255,9 +255,9 @@ http {
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $real_scheme;
             proxy_set_header X-Forwarded-Host $host;
-            proxy_set_header X-Forwarded-Uri /{{project_id}}$request_uri;
-            proxy_set_header X-Original-URI /{{project_id}}$request_uri;
-            proxy_set_header X-Original-URL $real_scheme://$host/{{project_id}}$request_uri;
+            proxy_set_header X-Forwarded-Uri /{{project_public_ref}}$request_uri;
+            proxy_set_header X-Original-URI /{{project_public_ref}}$request_uri;
+            proxy_set_header X-Original-URL $real_scheme://$host/{{project_public_ref}}$request_uri;
             add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
@@ -273,9 +273,9 @@ http {
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $real_scheme;
             proxy_set_header X-Forwarded-Host $host;
-            proxy_set_header X-Forwarded-Uri /{{project_id}}$request_uri;
-            proxy_set_header X-Original-URI /{{project_id}}$request_uri;
-            proxy_set_header X-Original-URL $real_scheme://$host/{{project_id}}$request_uri;
+            proxy_set_header X-Forwarded-Uri /{{project_public_ref}}$request_uri;
+            proxy_set_header X-Original-URI /{{project_public_ref}}$request_uri;
+            proxy_set_header X-Original-URL $real_scheme://$host/{{project_public_ref}}$request_uri;
             add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
@@ -291,9 +291,9 @@ http {
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $real_scheme;
             proxy_set_header X-Forwarded-Host $host;
-            proxy_set_header X-Forwarded-Uri /{{project_id}}$request_uri;
-            proxy_set_header X-Original-URI /{{project_id}}$request_uri;
-            proxy_set_header X-Original-URL $real_scheme://$host/{{project_id}}$request_uri;
+            proxy_set_header X-Forwarded-Uri /{{project_public_ref}}$request_uri;
+            proxy_set_header X-Original-URI /{{project_public_ref}}$request_uri;
+            proxy_set_header X-Original-URL $real_scheme://$host/{{project_public_ref}}$request_uri;
             add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey';
@@ -434,7 +434,7 @@ http {
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $real_scheme;
             proxy_set_header X-Forwarded-Host "{{project_uuid}}.storage.internal";
-            proxy_set_header X-Forwarded-Prefix "/{{project_id}}/storage/v1";
+            proxy_set_header X-Forwarded-Prefix "/{{project_public_ref}}/storage/v1";
 
             proxy_set_header Tus-Resumable $http_tus_resumable;
             proxy_set_header Tus-Version $http_tus_version;
@@ -450,7 +450,7 @@ http {
 
             proxy_pass http://$storage_upstream;
 
-            proxy_redirect ~^https?://[^/]+/{{project_id}}/storage/v1/upload/resumable/(.*)$ $real_scheme://$http_host/{{project_id}}/storage/v1/upload/resumable/$1;
+            proxy_redirect ~^https?://[^/]+/{{project_public_ref}}/storage/v1/upload/resumable/(.*)$ $real_scheme://$http_host/{{project_public_ref}}/storage/v1/upload/resumable/$1;
 
             proxy_request_buffering off;
 

@@ -41,6 +41,7 @@ class RendererTlsBehaviorTest(unittest.TestCase):
         project.mkdir()
         (project / ".env").write_text(
             "PROJECT_ID=projeto_a\n"
+            "PROJECT_PUBLIC_REF=abcdefghijklmnopqrst\n"
             "PROJECT_UUID=9c8ce9f0-3b4e-4bcb-a739-2c1e8ad0e9aa\n",
             encoding="utf-8",
         )

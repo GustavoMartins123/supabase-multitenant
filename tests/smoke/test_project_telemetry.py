@@ -143,7 +143,7 @@ class ProjectTelemetryTest(unittest.TestCase):
             encoding="utf-8"
         )
         route_start = insights_source.index(
-            '@router.get("/api/projects/{project_name}/telemetry/users"'
+            '@router.get("/api/projects/{project_ref}/telemetry/users"'
         )
         route_end = insights_source.index("\n@router.api_route(", route_start)
         route_source = insights_source[route_start:route_end]
@@ -158,7 +158,7 @@ class ProjectTelemetryTest(unittest.TestCase):
             encoding="utf-8"
         )
         route_start = insights_source.index(
-            '@router.get("/api/projects/{project_name}/telemetry/users"'
+            '@router.get("/api/projects/{project_ref}/telemetry/users"'
         )
         route_end = insights_source.index("\n@router.api_route(", route_start)
         route_source = insights_source[route_start:route_end]

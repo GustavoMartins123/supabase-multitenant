@@ -155,6 +155,7 @@ class LifecycleDedupTest(unittest.IsolatedAsyncioTestCase):
             return {"db_user_id": self.user_id}
 
         async def _row(*args: object, **kwargs: object) -> dict:
+            self.assertEqual(args[1], "abcdefghijklmnopqrst")
             return {
                 "id": uuid.uuid4(),
                 "name": "demo",
@@ -165,6 +166,7 @@ class LifecycleDedupTest(unittest.IsolatedAsyncioTestCase):
             return None
 
         async def _containers(*args: object, **kwargs: object) -> list:
+            self.assertEqual(args[0], "demo")
             return [{"Names": "supabase-nginx-demo"}]
 
         async def _create(
@@ -178,6 +180,7 @@ class LifecycleDedupTest(unittest.IsolatedAsyncioTestCase):
             total_steps: int = 1,
             **kwargs: object,
         ) -> str:
+            self.assertEqual(project_name, "demo")
             job_id = str(uuid.uuid4())
             self.pool.jobs.append(
                 make_job(job_id, project_name, action, payload or {}, self.pool.clock)
@@ -190,7 +193,7 @@ class LifecycleDedupTest(unittest.IsolatedAsyncioTestCase):
 
         patches = [
             mock.patch.object(ops, "resolve_authenticated_user", _auth),
-            mock.patch.object(ops, "get_project_row", _row),
+            mock.patch.object(ops, "get_public_project_row", _row),
             mock.patch.object(ops, "ensure_project_admin_access", _admin),
             mock.patch.object(ops, "get_project_containers", _containers),
             mock.patch.object(ops, "_create_project_job", _create),
@@ -204,8 +207,8 @@ class LifecycleDedupTest(unittest.IsolatedAsyncioTestCase):
         return [job["job_id"] for job in self.pool.jobs]
 
     async def test_double_stop_returns_the_in_flight_job(self) -> None:
-        first = await ops.stop_project("demo", object(), self.pool)
-        second = await ops.stop_project("demo", object(), self.pool)
+        first = await ops.stop_project("abcdefghijklmnopqrst", object(), self.pool)
+        second = await ops.stop_project("abcdefghijklmnopqrst", object(), self.pool)
         self.assertEqual(first.status_code, 202)
         self.assertEqual(second.status_code, 200)
         self.assertEqual(len(self.pool.jobs), 1)
@@ -215,18 +218,18 @@ class LifecycleDedupTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.enqueued, 1)
 
     async def test_stop_then_start_creates_two_jobs(self) -> None:
-        await ops.stop_project("demo", object(), self.pool)
-        await ops.start_project("demo", object(), self.pool)
+        await ops.stop_project("abcdefghijklmnopqrst", object(), self.pool)
+        await ops.start_project("abcdefghijklmnopqrst", object(), self.pool)
         self.assertEqual(len(self.pool.jobs), 2)
         self.assertEqual(self.enqueued, 2)
 
     async def test_recreate_same_services_dedups(self) -> None:
         body = RecreateServices(services=["nginx"])
         first = await ops.recreate_project_services(
-            "demo", body, object(), self.pool
+            "abcdefghijklmnopqrst", body, object(), self.pool
         )
         second = await ops.recreate_project_services(
-            "demo", body, object(), self.pool
+            "abcdefghijklmnopqrst", body, object(), self.pool
         )
         self.assertEqual(first.status_code, 202)
         self.assertEqual(second.status_code, 200)
@@ -234,10 +237,10 @@ class LifecycleDedupTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_recreate_different_services_creates_another_job(self) -> None:
         await ops.recreate_project_services(
-            "demo", RecreateServices(services=["nginx"]), object(), self.pool
+            "abcdefghijklmnopqrst", RecreateServices(services=["nginx"]), object(), self.pool
         )
         await ops.recreate_project_services(
-            "demo", RecreateServices(services=["auth"]), object(), self.pool
+            "abcdefghijklmnopqrst", RecreateServices(services=["auth"]), object(), self.pool
         )
         self.assertEqual(len(self.pool.jobs), 2)
         self.assertEqual(self.enqueued, 2)

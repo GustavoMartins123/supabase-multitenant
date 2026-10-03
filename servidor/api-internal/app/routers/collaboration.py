@@ -12,7 +12,7 @@ from app.dependencies import (
     ensure_project_member_access,
     get_project_member_row,
     get_project_role,
-    get_project_row,
+    get_public_project_row,
     resolve_authenticated_user,
 )
 from app.schemas import (
@@ -23,7 +23,7 @@ from app.schemas import (
     ProjectTagAssign,
     ProjectThreadMessageCreate,
 )
-from app.validation import parse_uuid_value, validate_project_id
+from app.validation import parse_uuid_value, validate_project_ref
 
 
 router = APIRouter(tags=["collaboration"])
@@ -168,17 +168,17 @@ class UnassignProjectTagResponse(BaseModel):
     status: str
 
 
-@router.get("/api/projects/{project_name}/collaboration", response_model=GetProjectCollaborationResponse)
+@router.get("/api/projects/{project_ref}/collaboration", response_model=GetProjectCollaborationResponse)
 async def get_project_collaboration(
-    project_name: str,
+    project_ref: str,
     request: Request,
     pool=Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     auth_user = await resolve_authenticated_user(request, pool)
 
     async with pool.acquire() as conn:
-        project = await get_project_row(conn, project_name)
+        project = await get_public_project_row(conn, project_ref)
         project_id = project["id"]
         await ensure_project_member_access(
             conn,
@@ -327,7 +327,7 @@ async def get_project_collaboration(
     ]
 
     return {
-        "project": project_name,
+        "project": project_ref,
         "available_tags": available_tags,
         "assigned_tags": [tag for tag in available_tags if tag["assigned"]],
         "members": [
@@ -406,14 +406,14 @@ async def get_project_collaboration(
     }
 
 
-@router.post("/api/projects/{project_name}/notes", status_code=201, response_model=CreateProjectNoteResponse)
+@router.post("/api/projects/{project_ref}/notes", status_code=201, response_model=CreateProjectNoteResponse)
 async def create_project_note(
-    project_name: str,
+    project_ref: str,
     body: ProjectNoteCreate,
     request: Request,
     pool=Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     visibility = body.visibility.strip().lower()
     note_body = body.body.strip()
 
@@ -427,7 +427,7 @@ async def create_project_note(
     auth_user = await resolve_authenticated_user(request, pool)
     async with pool.acquire() as conn:
         async with conn.transaction():
-            project = await get_project_row(conn, project_name)
+            project = await get_public_project_row(conn, project_ref)
             project_id = project["id"]
             await ensure_project_member_access(
                 conn,
@@ -469,14 +469,14 @@ async def create_project_note(
     }
 
 
-@router.delete("/api/projects/{project_name}/notes/{note_id}", response_model=DeleteProjectNoteResponse)
+@router.delete("/api/projects/{project_ref}/notes/{note_id}", response_model=DeleteProjectNoteResponse)
 async def delete_project_note(
-    project_name: str,
+    project_ref: str,
     note_id: str,
     request: Request,
     pool=Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     parsed_note_id = parse_uuid_value(note_id)
     if parsed_note_id is None:
         raise HTTPException(400, "note_id inválido")
@@ -484,7 +484,7 @@ async def delete_project_note(
     auth_user = await resolve_authenticated_user(request, pool)
     async with pool.acquire() as conn:
         async with conn.transaction():
-            project = await get_project_row(conn, project_name)
+            project = await get_public_project_row(conn, project_ref)
             project_id = project["id"]
             await ensure_project_member_access(
                 conn,
@@ -538,14 +538,14 @@ async def delete_project_note(
     return {"status": "ok"}
 
 
-@router.post("/api/projects/{project_name}/hints", status_code=201, response_model=CreateProjectHintResponse)
+@router.post("/api/projects/{project_ref}/hints", status_code=201, response_model=CreateProjectHintResponse)
 async def create_project_hint(
-    project_name: str,
+    project_ref: str,
     body: ProjectHintCreate,
     request: Request,
     pool=Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     hint_body = body.body.strip()
     if not hint_body:
         raise HTTPException(400, "body é obrigatório")
@@ -555,7 +555,7 @@ async def create_project_hint(
     auth_user = await resolve_authenticated_user(request, pool)
     async with pool.acquire() as conn:
         async with conn.transaction():
-            project = await get_project_row(conn, project_name)
+            project = await get_public_project_row(conn, project_ref)
             project_id = project["id"]
             await ensure_project_member_access(
                 conn,
@@ -615,15 +615,15 @@ async def create_project_hint(
     }
 
 
-@router.put("/api/projects/{project_name}/hints/{hint_id}", response_model=UpdateProjectHintResponse)
+@router.put("/api/projects/{project_ref}/hints/{hint_id}", response_model=UpdateProjectHintResponse)
 async def update_project_hint_status(
-    project_name: str,
+    project_ref: str,
     hint_id: str,
     body: ProjectHintStatusUpdate,
     request: Request,
     pool=Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     parsed_hint_id = parse_uuid_value(hint_id)
     if parsed_hint_id is None:
         raise HTTPException(400, "hint_id inválido")
@@ -635,7 +635,7 @@ async def update_project_hint_status(
     auth_user = await resolve_authenticated_user(request, pool)
     async with pool.acquire() as conn:
         async with conn.transaction():
-            project = await get_project_row(conn, project_name)
+            project = await get_public_project_row(conn, project_ref)
             project_id = project["id"]
             await ensure_project_member_access(
                 conn,
@@ -715,14 +715,14 @@ async def update_project_hint_status(
     return {"status": status}
 
 
-@router.post("/api/projects/{project_name}/thread/messages", status_code=201, response_model=CreateThreadMessageResponse)
+@router.post("/api/projects/{project_ref}/thread/messages", status_code=201, response_model=CreateThreadMessageResponse)
 async def create_project_thread_message(
-    project_name: str,
+    project_ref: str,
     body: ProjectThreadMessageCreate,
     request: Request,
     pool=Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     message_body = body.body.strip()
     if not message_body:
         raise HTTPException(400, "body é obrigatório")
@@ -732,7 +732,7 @@ async def create_project_thread_message(
     auth_user = await resolve_authenticated_user(request, pool)
     async with pool.acquire() as conn:
         async with conn.transaction():
-            project = await get_project_row(conn, project_name)
+            project = await get_public_project_row(conn, project_ref)
             project_id = project["id"]
             await ensure_project_member_access(
                 conn,
@@ -791,15 +791,15 @@ async def create_project_thread_message(
     }
 
 
-@router.patch("/api/projects/{project_name}/notifications/{notification_id}", response_model=UpdateNotificationReadResponse)
+@router.patch("/api/projects/{project_ref}/notifications/{notification_id}", response_model=UpdateNotificationReadResponse)
 async def update_project_notification_read_state(
-    project_name: str,
+    project_ref: str,
     notification_id: str,
     body: ProjectNotificationRead,
     request: Request,
     pool=Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     parsed_notification_id = parse_uuid_value(notification_id)
     if parsed_notification_id is None:
         raise HTTPException(400, "notification_id invalido")
@@ -807,7 +807,7 @@ async def update_project_notification_read_state(
     auth_user = await resolve_authenticated_user(request, pool)
     async with pool.acquire() as conn:
         async with conn.transaction():
-            project = await get_project_row(conn, project_name)
+            project = await get_public_project_row(conn, project_ref)
             project_id = project["id"]
             notification = await conn.fetchrow(
                 """
@@ -857,14 +857,14 @@ async def update_project_notification_read_state(
     }
 
 
-@router.post("/api/projects/{project_name}/tags", status_code=201, response_model=AssignProjectTagResponse)
+@router.post("/api/projects/{project_ref}/tags", status_code=201, response_model=AssignProjectTagResponse)
 async def assign_project_tag(
-    project_name: str,
+    project_ref: str,
     body: ProjectTagAssign,
     request: Request,
     pool=Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     auth_user = await resolve_authenticated_user(request, pool)
 
     color = (body.color or "#3ECF8E").strip()
@@ -873,7 +873,7 @@ async def assign_project_tag(
 
     async with pool.acquire() as conn:
         async with conn.transaction():
-            project = await get_project_row(conn, project_name)
+            project = await get_public_project_row(conn, project_ref)
             project_id = project["id"]
             await ensure_project_member_access(
                 conn,
@@ -949,14 +949,14 @@ async def assign_project_tag(
     }
 
 
-@router.delete("/api/projects/{project_name}/tags/{tag_id}", response_model=UnassignProjectTagResponse)
+@router.delete("/api/projects/{project_ref}/tags/{tag_id}", response_model=UnassignProjectTagResponse)
 async def unassign_project_tag(
-    project_name: str,
+    project_ref: str,
     tag_id: str,
     request: Request,
     pool=Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     parsed_tag_id = parse_uuid_value(tag_id)
     if parsed_tag_id is None:
         raise HTTPException(400, "tag_id inválido")
@@ -964,7 +964,7 @@ async def unassign_project_tag(
     auth_user = await resolve_authenticated_user(request, pool)
     async with pool.acquire() as conn:
         async with conn.transaction():
-            project = await get_project_row(conn, project_name)
+            project = await get_public_project_row(conn, project_ref)
             project_id = project["id"]
             await ensure_project_member_access(
                 conn,

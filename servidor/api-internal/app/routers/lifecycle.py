@@ -10,7 +10,7 @@ from app.dependencies import (
     ensure_project_admin_access,
     ensure_project_member_access,
     get_project_role,
-    get_project_row,
+    get_public_project_row,
     resolve_authenticated_user,
 )
 from app.host_agent import (
@@ -20,7 +20,7 @@ from app.host_agent import (
     run_command as run_host_agent_command,
     worker_alive as host_agent_alive,
 )
-from app.validation import validate_project_id, validate_service_name
+from app.validation import validate_project_ref, validate_service_name
 
 
 router = APIRouter(tags=["lifecycle"])
@@ -102,18 +102,19 @@ async def get_project_status(project_name: str) -> dict:
     }
 
 
-@router.get("/api/projects/{project_name}/status", response_model=ProjectStatusResponse)
+@router.get("/api/projects/{project_ref}/status", response_model=ProjectStatusResponse)
 async def get_project_docker_status(
-    project_name: str,
+    project_ref: str,
     request: Request,
     pool=Depends(get_pool)
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
 
     auth_user = await resolve_authenticated_user(request, pool)
 
     async with pool.acquire() as conn:
-        project_row = await get_project_row(conn, project_name)
+        project_row = await get_public_project_row(conn, project_ref)
+        project_name = project_row["name"]
         await ensure_project_member_access(
             conn,
             project_id=project_row["id"],
@@ -133,20 +134,21 @@ async def get_project_docker_status(
 
 MAX_LOG_LINES = 1000
 
-@router.get("/api/projects/{project_name}/logs/{service}", response_model=ContainerLogsResponse)
+@router.get("/api/projects/{project_ref}/logs/{service}", response_model=ContainerLogsResponse)
 async def get_container_logs(
-    project_name: str,
+    project_ref: str,
     service: str,
     request: Request,
     pool=Depends(get_pool),
     lines: int = Query(100, ge=1, le=MAX_LOG_LINES)
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     service = validate_service_name(service)
 
     async with pool.acquire() as conn:
         auth_user = await resolve_authenticated_user(request, pool)
-        project_row = await get_project_row(conn, project_name)
+        project_row = await get_public_project_row(conn, project_ref)
+        project_name = project_row["name"]
         await ensure_project_admin_access(
             conn,
             project_id=project_row["id"],
@@ -196,5 +198,5 @@ async def get_container_logs(
     except HostAgentOffline as exc:
         raise HTTPException(503, str(exc)) from exc
     except Exception as exc:
-        print(f"[project_logs] {project_name}/{service}: {exc}")
+        print(f"[project_logs] {project_ref}/{service}: {exc}")
         raise HTTPException(500, "Error accessing container logs") from exc

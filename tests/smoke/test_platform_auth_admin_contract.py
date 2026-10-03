@@ -17,7 +17,7 @@ class AuthAdminProxyContract(unittest.TestCase):
 
     def test_route_proxies_to_the_tenant_gotrue(self) -> None:
         self.assertIn(
-            "/api/projects/internal/auth-admin/{project_name}/{gotrue_path:path}",
+            "/api/projects/internal/auth-admin/{project_ref}/{gotrue_path:path}",
             self.source,
         )
         self.assertIn(
@@ -120,10 +120,10 @@ class UsersListingReaderContract(unittest.TestCase):
         self.assertNotIn("meta_guest", reader_body)
         insights = (API / "routers" / "project_insights.py").read_text(encoding="utf-8")
         self.assertNotIn('meta_key.startswith("users")', insights)
-        self.assertIn('get_project_meta_connection_string(ref, project_row["tenant_uuid"])', insights)
+        self.assertIn('get_project_meta_connection_string(project_row["name"], project_row["tenant_uuid"])', insights)
 
     def test_dedicated_users_route_reads_via_platform_reader(self) -> None:
-        self.assertIn("/api/projects/internal/auth-users/{project_name}", self.router)
+        self.assertIn("/api/projects/internal/auth-users/{project_ref}", self.router)
         self.assertIn("FROM auth.users", self.router)
         self.assertIn('"platform_reader"', self.router)
         self.assertIn("ensure_project_admin_access", self.router)

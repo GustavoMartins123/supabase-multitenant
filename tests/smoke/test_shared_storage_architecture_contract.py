@@ -123,7 +123,7 @@ class SharedStorageTopologyContractTest(unittest.TestCase):
             'proxy_set_header X-Forwarded-Host "{{project_uuid}}.storage.internal";',
             storage_location,
         )
-        self.assertIn('proxy_set_header X-Forwarded-Prefix "/{{project_id}}/storage/v1";', storage_location)
+        self.assertIn('proxy_set_header X-Forwarded-Prefix "/{{project_public_ref}}/storage/v1";', storage_location)
         self.assertNotIn("proxy_set_header X-Forwarded-Host $http_x_forwarded_host", storage_location)
         self.assertIn("supabase-storage-global:5000", nginx)
 

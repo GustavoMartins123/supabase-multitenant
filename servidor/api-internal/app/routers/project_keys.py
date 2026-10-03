@@ -13,7 +13,7 @@ from app.control_plane_service import audit_studio_action
 from app.database import get_pool
 from app.dependencies import (
     ensure_project_admin_access,
-    get_project_row,
+    get_public_project_row,
     resolve_authenticated_user,
 )
 from app.host_agent import (
@@ -44,7 +44,7 @@ from app.project_secret_service import store_project_secrets
 from app.runtime_config import AUTOMATIC_KEY_ROTATION_LEAD_DAYS
 from app.schemas import AutomaticKeyRotationUpdate
 from app.service_key_cache import invalidate_service_key_cache
-from app.validation import validate_project_id
+from app.validation import validate_project_ref
 
 router = APIRouter(tags=["project-keys"])
 
@@ -85,21 +85,21 @@ class RotateProjectKeyResponse(BaseModel):
 
 
 @router.put(
-    "/api/projects/{project_name}/automatic-key-rotation",
+    "/api/projects/{project_ref}/automatic-key-rotation",
     response_model=AutomaticKeyRotationResponse,
 )
 async def update_automatic_key_rotation(
-    project_name: str,
+    project_ref: str,
     body: AutomaticKeyRotationUpdate,
     request: Request,
     pool=Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     auth_user = await resolve_authenticated_user(request, pool)
 
     async with pool.acquire() as conn:
         async with conn.transaction():
-            project_row = await get_project_row(conn, project_name)
+            project_row = await get_public_project_row(conn, project_ref)
             await ensure_project_admin_access(
                 conn,
                 project_id=project_row["id"],
@@ -168,22 +168,23 @@ async def update_automatic_key_rotation(
 
 
 @router.post(
-    "/api/projects/{project_name}/rotate-key",
+    "/api/projects/{project_ref}/rotate-key",
     status_code=202,
     response_model=RotateProjectKeyResponse,
 )
 async def rotate_project_key(
-    project_name: str,
+    project_ref: str,
     request: Request,
     pool=Depends(get_pool),
 ):
     """Rotaciona anon/service_role via script. Enfileirado por projeto."""
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     auth_user = await resolve_authenticated_user(request, pool)
 
     async with pool.acquire() as conn:
         async with conn.transaction():
-            project_row = await get_project_row(conn, project_name)
+            project_row = await get_public_project_row(conn, project_ref)
+            project_name = project_row["name"]
             await ensure_project_admin_access(
                 conn,
                 project_id=project_row["id"],
@@ -244,7 +245,7 @@ async def rotate_project_key(
         "Rotação enfileirada."
         if position == 0
         else f"Rotação enfileirada. Existem {position} ações antes desta na "
-        f"fila para {project_name}."
+        f"fila para {project_ref}."
     )
     return JSONResponse(
         status_code=202,

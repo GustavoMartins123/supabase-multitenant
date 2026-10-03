@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 import secrets
 import string
+import json
+import uuid
 from typing import Any, Protocol
 
 
@@ -48,3 +50,23 @@ async def resolve_public_project(
     if row is None:
         raise PublicProjectNotFound("Project not found")
     return row
+
+
+async def get_provisioning_public_ref(conn: ProjectLookupConnection, job_id: str) -> str:
+    row = await conn.fetchrow(
+        """
+        SELECT p.public_ref, j.payload
+        FROM jobs j JOIN projects p ON p.id = j.project_uuid
+        WHERE j.job_id = $1
+        """,
+        uuid.UUID(str(job_id)),
+    )
+    if row is None:
+        raise PublicProjectNotFound("Provisioning project not found")
+    public_ref = validate_public_ref(row["public_ref"])
+    payload = row["payload"]
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    if not isinstance(payload, dict) or payload.get("public_ref") != public_ref:
+        raise ValueError("Provisioning public reference differs from the durable job intent")
+    return public_ref

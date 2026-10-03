@@ -11,6 +11,7 @@ REPO_ROOT="$(dirname "$SERVER_ROOT")"
 REPORTS_ROOT="$SERVER_ROOT/storage-migration-reports"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
+source "$SCRIPT_DIR/lib/project_public_ref.sh"
 
 for command in docker jq openssl python3 tar gzip sed grep systemctl; do
   command -v "$command" >/dev/null 2>&1 || die "$command nao esta instalado"
@@ -343,6 +344,7 @@ render_project_env() {
     --arg service_role_key "$SERVICE_ROLE_KEY_PROJETO" \
     --arg project_id "$project" \
     --arg project_uuid "$PROJECT_UUID" \
+    --arg project_public_ref "$PROJECT_PUBLIC_REF" \
     --arg config_token "$CONFIG_TOKEN_PROJETO" \
     --arg jwt_secret "$JWT_SECRET_PROJETO" \
     --arg api_gateway_token "$API_GATEWAY_TOKEN_PROJETO" \
@@ -355,7 +357,7 @@ render_project_env() {
     --arg s3_protocol_access_key_id "$access_key" \
     --arg s3_protocol_access_key_secret "$secret_key" \
     '{anon_key:$anon_key, service_role_key:$service_role_key,
-      project_id:$project_id, project_uuid:$project_uuid,
+      project_id:$project_id, project_uuid:$project_uuid, project_public_ref:$project_public_ref,
       config_token:$config_token, jwt_secret:$jwt_secret,
       api_gateway_token:$api_gateway_token, server_url:$server_url,
       public_base_url:$public_base_url, project_public_url:$project_public_url,
@@ -480,6 +482,8 @@ migrate_project() (
   source "$env_file"
   set +a
   PROJECT_UUID="$(tr '[:upper:]' '[:lower:]' <<<"${PROJECT_UUID:-}")"
+  PROJECT_PUBLIC_REF="$(project_public_ref_read "$env_file")" || return 1
+  project_public_ref_assert "$project" "$PROJECT_UUID" "$PROJECT_PUBLIC_REF" || return 1
   storage_validate_tenant_id "$PROJECT_UUID" || return 1
   for variable in JWT_SECRET_PROJETO ANON_KEY_PROJETO SERVICE_ROLE_KEY_PROJETO \
     CONFIG_TOKEN_PROJETO API_GATEWAY_TOKEN_PROJETO FILE_SIZE_LIMIT \
@@ -503,7 +507,7 @@ migrate_project() (
     VECTOR_MAX_INDEXES="$(canonical_env_value "$SCRIPT_DIR/.envtemplate" VECTOR_MAX_INDEXES)"
   fi
   PUBLIC_BASE_URL="$(normalize_public_base_url "$SERVER_URL" "${SERVER_PROTO:-}")"
-  PROJECT_PUBLIC_URL="$PUBLIC_BASE_URL/$project"
+  PROJECT_PUBLIC_URL="$PUBLIC_BASE_URL/$PROJECT_PUBLIC_REF"
   PROJECT_AUTH_EXTERNAL_URL="$PROJECT_PUBLIC_URL/auth/v1"
   export PROJECT_UUID SERVICE_ROLE_KEY_PROJETO
 

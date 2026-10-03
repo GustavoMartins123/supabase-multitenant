@@ -9,7 +9,9 @@ class NewProject(BaseModel):
     resource_profile: ResourceProfile = "medium"
 
 class DuplicateProject(BaseModel):
-    original_name: str
+    model_config = ConfigDict(extra="forbid")
+
+    original_public_ref: str = Field(pattern=r"^[a-z]{20}$", min_length=20, max_length=20)
     new_name: str
     copy_data: bool = False
     resource_profile: Optional[ResourceProfile] = None

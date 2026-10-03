@@ -25,6 +25,7 @@ from app.project_deletion import ProjectDeletionError, build_global_delete_token
 from app.project_identity import ProjectIdentityError, get_job_project_identity as _get_job_project_identity, parse_tenant_uuid
 from app.database import get_pool
 from app.dependencies import ensure_project_member_access
+from app.project_public_ref import get_provisioning_public_ref
 
 
 async def _serialize_queued_job(
@@ -183,6 +184,7 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
         )
         if project_uuid != resolved_project_uuid:
             raise ProjectIdentityError("projects.id do job mudou durante criacao")
+        public_ref = await get_provisioning_public_ref(pool, job_id)
         recover_stale, stale_tenant_uuids = await _failed_create_recovery_context(
             pool,
             job_id=job_id,
@@ -213,6 +215,7 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
             requested_by=user,
             args={
                 "tenant_uuid": str(tenant_uuid),
+                "public_ref": public_ref,
                 "recover_stale": recover_stale,
                 "stale_tenant_uuids": stale_tenant_uuids,
                 "gateway_token": gateway_token,
@@ -259,6 +262,8 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
             current_step="extract_keys",
         )
         keys = _read_project_secret_keys(project_name)
+        if keys["public_ref"] != public_ref:
+            raise ProjectIdentityError("Referencia publica gerada diverge da intencao")
         env_tenant_uuid = parse_tenant_uuid(keys["tenant_uuid"])
         if env_tenant_uuid != tenant_uuid:
             await _set_job_status(
@@ -422,6 +427,7 @@ async def _duplicate_and_store_keys(
         )
         if project_uuid != resolved_project_uuid:
             raise ProjectIdentityError("projects.id do job mudou durante duplicacao")
+        public_ref = await get_provisioning_public_ref(pool, job_id)
 
         resource_profile = await pool.fetchval(
             "SELECT resource_profile FROM projects WHERE id = $1",
@@ -451,6 +457,7 @@ async def _duplicate_and_store_keys(
                 "original_tenant_uuid": str(original_tenant_uuid),
                 "copy_mode": copy_mode,
                 "tenant_uuid": str(tenant_uuid),
+                "public_ref": public_ref,
                 "gateway_token": gateway_token,
                 "resource_profile": resource_profile,
             },
@@ -475,6 +482,8 @@ async def _duplicate_and_store_keys(
             current_step="extract_keys",
         )
         keys = _read_project_secret_keys(new_name)
+        if keys["public_ref"] != public_ref:
+            raise ProjectIdentityError("Referencia publica do clone diverge da intencao")
         env_tenant_uuid = parse_tenant_uuid(keys["tenant_uuid"])
         if env_tenant_uuid != tenant_uuid:
             await _set_job_status(

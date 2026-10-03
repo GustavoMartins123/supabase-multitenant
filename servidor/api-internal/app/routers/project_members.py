@@ -10,14 +10,14 @@ from app.dependencies import (
     ensure_member_role_change_allowed,
     ensure_project_member_access,
     get_project_member_row,
-    get_project_row,
+    get_public_project_row,
     get_user_record_by_identifier,
     require_synced_user_record,
     resolve_authenticated_user,
     upsert_project_member,
 )
 from app.schemas import AddMember
-from app.validation import parse_uuid_value, validate_project_id
+from app.validation import parse_uuid_value, validate_project_ref
 
 router = APIRouter(tags=["project-members"])
 
@@ -41,19 +41,19 @@ class RemoveMemberResponse(BaseModel):
     ok: bool
 
 
-@router.post("/api/projects/{project_name}/members", response_model=AddMemberResponse)
+@router.post("/api/projects/{project_ref}/members", response_model=AddMemberResponse)
 async def add_member(
-    project_name: str,
+    project_ref: str,
     member: AddMember,
     request: Request,
     pool=Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
 
     async with pool.acquire() as conn:
         auth_user = await resolve_authenticated_user(request, pool)
         async with conn.transaction():
-            project_row = await get_project_row(conn, project_name, for_update=True)
+            project_row = await get_public_project_row(conn, project_ref, for_update=True)
             await ensure_project_admin_access(
                 conn,
                 project_id=project_row["id"],
@@ -94,17 +94,17 @@ async def add_member(
     return {"ok": True}
 
 
-@router.get("/api/projects/{name}/members", response_model=list[MemberItem])
+@router.get("/api/projects/{project_ref}/members", response_model=list[MemberItem])
 async def list_members_by_ref(
-    name: str,
+    project_ref: str,
     request: Request,
     pool=Depends(get_pool),
 ):
-    name = validate_project_id(name)
+    project_ref = validate_project_ref(project_ref)
 
     async with pool.acquire() as conn:
         auth_user = await resolve_authenticated_user(request, pool)
-        row = await get_project_row(conn, name)
+        row = await get_public_project_row(conn, project_ref)
         pid = row["id"]
         await ensure_project_member_access(conn, project_id=pid, auth_user=auth_user)
 
@@ -123,22 +123,22 @@ async def list_members_by_ref(
 
 
 @router.delete(
-    "/api/projects/{name}/members/{member_id}",
+    "/api/projects/{project_ref}/members/{member_id}",
     status_code=200,
     response_model=RemoveMemberResponse
 )
 async def remove_member_by_ref(
-    name: str,
+    project_ref: str,
     member_id: str,
     request: Request,
     pool=Depends(get_pool),
 ):
-    name = validate_project_id(name)
+    project_ref = validate_project_ref(project_ref)
 
     async with pool.acquire() as conn:
         auth_user = await resolve_authenticated_user(request, pool)
         async with conn.transaction():
-            project_row = await get_project_row(conn, name, for_update=True)
+            project_row = await get_public_project_row(conn, project_ref, for_update=True)
             project_id = project_row["id"]
             await ensure_project_admin_access(
                 conn,

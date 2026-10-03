@@ -9,7 +9,7 @@ from app.database import get_pool
 from app.dependencies import (
     ensure_project_admin_access,
     ensure_project_member_access,
-    get_project_row,
+    get_public_project_row,
     resolve_authenticated_user,
 )
 from app.host_agent import worker_alive as host_agent_alive
@@ -44,7 +44,7 @@ from app.project_settings import (
     split_resource_directives,
 )
 from app.schemas import RecreateServices, UpdateSettings
-from app.validation import validate_project_id
+from app.validation import validate_project_ref
 
 router = APIRouter(tags=["lifecycle-ops"])
 
@@ -210,17 +210,18 @@ class RecreateProjectServicesResponse(BaseModel):
     queue_position: int
 
 
-@router.post("/api/projects/{project_name}/stop", response_model=StopProjectResponse)
+@router.post("/api/projects/{project_ref}/stop", response_model=StopProjectResponse)
 async def stop_project(
-    project_name: str,
+    project_ref: str,
     request: Request,
     pool=Depends(get_pool)
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
 
     async with pool.acquire() as conn:
         auth_user = await resolve_authenticated_user(request, pool)
-        project_row = await get_project_row(conn, project_name)
+        project_row = await get_public_project_row(conn, project_ref)
+        project_name = project_row["name"]
         await ensure_project_admin_access(conn, project_id=project_row["id"], auth_user=auth_user)
 
     containers = await get_project_containers(project_name)
@@ -262,7 +263,7 @@ async def stop_project(
         "Parada enfileirada."
         if position == 0
         else f"Parada enfileirada. Existem {position} ações antes desta na "
-        f"fila para {project_name}."
+        f"fila para {project_ref}."
     )
     return JSONResponse(
         status_code=202,
@@ -270,18 +271,19 @@ async def stop_project(
     )
 
 
-@router.post("/api/projects/{project_name}/start", status_code=202, response_model=StartProjectResponse)
+@router.post("/api/projects/{project_ref}/start", status_code=202, response_model=StartProjectResponse)
 async def start_project(
-    project_name: str,
+    project_ref: str,
     request: Request,
     pool=Depends(get_pool)
 ):
     """Inicia os containers do projeto. Enfileirado por projeto."""
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
 
     async with pool.acquire() as conn:
         auth_user = await resolve_authenticated_user(request, pool)
-        project_row = await get_project_row(conn, project_name)
+        project_row = await get_public_project_row(conn, project_ref)
+        project_name = project_row["name"]
         await ensure_project_admin_access(conn, project_id=project_row["id"], auth_user=auth_user)
 
     containers = await get_project_containers(project_name)
@@ -324,7 +326,7 @@ async def start_project(
         "Inicialização enfileirada."
         if position == 0
         else f"Inicialização enfileirada. Existem {position} ações antes desta "
-        f"na fila para {project_name}."
+        f"na fila para {project_ref}."
     )
     return JSONResponse(
         status_code=202,
@@ -332,18 +334,19 @@ async def start_project(
     )
 
 
-@router.post("/api/projects/{project_name}/restart", status_code=202, response_model=RestartProjectResponse)
+@router.post("/api/projects/{project_ref}/restart", status_code=202, response_model=RestartProjectResponse)
 async def restart_project(
-    project_name: str,
+    project_ref: str,
     request: Request,
     pool=Depends(get_pool)
 ):
     """Reinicia os containers do projeto. Enfileirado por projeto."""
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
 
     async with pool.acquire() as conn:
         auth_user = await resolve_authenticated_user(request, pool)
-        project_row = await get_project_row(conn, project_name)
+        project_row = await get_public_project_row(conn, project_ref)
+        project_name = project_row["name"]
         await ensure_project_admin_access(conn, project_id=project_row["id"], auth_user=auth_user)
 
     containers = await get_project_containers(project_name)
@@ -386,7 +389,7 @@ async def restart_project(
         "Reinicialização enfileirada."
         if position == 0
         else f"Reinicialização enfileirada. Existem {position} ações antes "
-        f"desta na fila para {project_name}."
+        f"desta na fila para {project_ref}."
     )
     return JSONResponse(
         status_code=202,
@@ -394,22 +397,23 @@ async def restart_project(
     )
 
 
-@router.get("/api/projects/{project_name}/settings", response_model=GetProjectSettingsResponse)
+@router.get("/api/projects/{project_ref}/settings", response_model=GetProjectSettingsResponse)
 async def get_project_settings(
-    project_name: str,
+    project_ref: str,
     request: Request,
     pool=Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
 
     async with pool.acquire() as conn:
         auth_user = await resolve_authenticated_user(request, pool)
-        project_row = await get_project_row(conn, project_name)
+        project_row = await get_public_project_row(conn, project_ref)
+        project_name = project_row["name"]
         await ensure_project_member_access(conn, project_id=project_row["id"], auth_user=auth_user)
 
     env_path = _get_project_env_path(project_name)
     if not env_path.exists():
-        raise HTTPException(404, f"Arquivo .env não encontrado para o projeto '{project_name}'")
+        raise HTTPException(404, f"Arquivo .env não encontrado para o projeto '{project_ref}'")
 
     settings = _read_env_whitelisted(env_path)
     pending = _read_project_pending_settings(project_name)
@@ -421,25 +425,26 @@ async def get_project_settings(
     }
 
 
-@router.put("/api/projects/{project_name}/settings", response_model=UpdateProjectSettingsResponse)
+@router.put("/api/projects/{project_ref}/settings", response_model=UpdateProjectSettingsResponse)
 async def update_project_settings(
-    project_name: str,
+    project_ref: str,
     body: UpdateSettings,
     request: Request,
     pool=Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
 
     async with pool.acquire() as conn:
         auth_user = await resolve_authenticated_user(request, pool)
-        project_row = await get_project_row(conn, project_name)
+        project_row = await get_public_project_row(conn, project_ref)
+        project_name = project_row["name"]
         await ensure_project_admin_access(conn, project_id=project_row["id"], auth_user=auth_user)
 
     updates = _normalize_settings_updates(body.settings)
 
     env_path = _get_project_env_path(project_name)
     if not env_path.exists():
-        raise HTTPException(404, f"Arquivo .env não encontrado para o projeto '{project_name}'")
+        raise HTTPException(404, f"Arquivo .env não encontrado para o projeto '{project_ref}'")
 
     had_profile_directive = "PROJECT_RESOURCE_PROFILE" in updates
     updates, resolved_limits = split_resource_directives(
@@ -460,9 +465,9 @@ async def update_project_settings(
     )
     if final_profile and final_profile != project_row.get("resource_profile"):
         await pool.execute(
-            "UPDATE projects SET resource_profile = $1 WHERE name = $2",
+            "UPDATE projects SET resource_profile = $1 WHERE id = $2",
             final_profile,
-            project_name,
+            project_row["id"],
         )
 
     affected = _get_affected_services(list(updates.keys()))
@@ -481,9 +486,9 @@ async def update_project_settings(
     }
 
 
-@router.post("/api/projects/{project_name}/recreate-services", response_model=RecreateProjectServicesResponse)
+@router.post("/api/projects/{project_ref}/recreate-services", response_model=RecreateProjectServicesResponse)
 async def recreate_project_services(
-    project_name: str,
+    project_ref: str,
     body: RecreateServices,
     request: Request,
     pool=Depends(get_pool),
@@ -493,11 +498,12 @@ async def recreate_project_services(
     This is needed (instead of just restart) because env vars are read at
     container creation time, not on restart.
     """
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
 
     async with pool.acquire() as conn:
         auth_user = await resolve_authenticated_user(request, pool)
-        project_row = await get_project_row(conn, project_name)
+        project_row = await get_public_project_row(conn, project_ref)
+        project_name = project_row["name"]
         await ensure_project_admin_access(conn, project_id=project_row["id"], auth_user=auth_user)
 
     invalid_services = set(body.services) - ALLOWED_RECREATE_SERVICES
@@ -550,7 +556,7 @@ async def recreate_project_services(
         "Recriação enfileirada."
         if position == 0
         else f"Recriação enfileirada. Existem {position} ações antes desta na "
-        f"fila para {project_name}."
+        f"fila para {project_ref}."
     )
     return JSONResponse(
         status_code=202,

@@ -41,7 +41,8 @@ from .host_agent_protocol import (
     validate_command_args,
     verify_command_signature,
 )
-from .security import PathConfinementError
+from .security import PathConfinementError, resolve_project_dir
+from .envfile import read_canonical_env_value
 
 AGENT_VERSION = "1.0.0"
 LEASE_REAP_GRACE_SECONDS = 60
@@ -450,6 +451,22 @@ class HostAgent:
         if record["project_uuid"] is not None and auth["project_id"] is not None:
             project_uuid_matches = auth["project_id"] == record["project_uuid"]
         intent_tenant_uuid = args.get("tenant_uuid")
+        if command in {"create_project", "duplicate_project"} and args["public_ref"] != auth["public_ref"]:
+            return (
+                "authorization_denied:public_ref_mismatch",
+                "Referencia publica da intencao diverge do control plane.",
+            )
+        if command in {"recreate_services", "rotate_keys", "restore_project"}:
+            try:
+                directory = resolve_project_dir(self.config.projects_root, project, must_exist=True)
+                physical_ref = read_canonical_env_value(directory / ".env", "PROJECT_PUBLIC_REF")
+                if physical_ref is None or physical_ref != auth["public_ref"]:
+                    raise ValueError("public_ref mismatch")
+            except (OSError, RuntimeError, ValueError, PathConfinementError):
+                return (
+                    "authorization_denied:public_ref_mismatch",
+                    "Referencia publica fisica diverge do control plane.",
+                )
         if (
             intent_tenant_uuid is not None
             and auth.get("tenant_uuid") is not None

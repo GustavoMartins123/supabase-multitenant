@@ -13,12 +13,12 @@ from pydantic import BaseModel, ConfigDict
 from app.database import get_pool
 from app.dependencies import (
     ensure_project_admin_access,
-    get_project_row,
+    get_public_project_row,
     resolve_authenticated_user,
 )
 from app.project_deletion import load_project_environment
 from app.project_env_secrets import PROJECTS_ROOT
-from app.validation import validate_project_id
+from app.validation import validate_project_ref
 
 router = APIRouter(tags=["platform-auth"])
 
@@ -99,21 +99,22 @@ def _require_studio_nginx(request: Request) -> None:
 
 
 @router.get(
-    "/api/projects/internal/auth-users/{project_name}",
+    "/api/projects/internal/auth-users/{project_ref}",
     response_model=AuthUsersResponse,
 )
 async def list_project_auth_users(
-    project_name: str,
+    project_ref: str,
     request: Request,
     page: int = 1,
     per_page: int = 50,
     pool=Depends(get_pool),
 ) -> Response:
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     _require_studio_nginx(request)
     auth_user = await resolve_authenticated_user(request, pool)
     async with pool.acquire() as conn:
-        project_row = await get_project_row(conn, project_name)
+        project_row = await get_public_project_row(conn, project_ref)
+        project_name = project_row["name"]
         await ensure_project_admin_access(
             conn,
             project_id=project_row["id"],
@@ -133,7 +134,7 @@ async def list_project_auth_users(
             timeout=10,
         )
     except (OSError, asyncpg.PostgresError) as exc:
-        print(f"[auth_users_list] {project_name}: {exc}")
+        print(f"[auth_users_list] {project_ref}: {exc}")
         raise HTTPException(502, "Falha ao ler usuarios do projeto.") from exc
 
     try:
@@ -150,7 +151,7 @@ async def list_project_auth_users(
             (page - 1) * per_page,
         )
     except asyncpg.PostgresError as exc:
-        print(f"[auth_users_list] {project_name}: {exc}")
+        print(f"[auth_users_list] {project_ref}: {exc}")
         raise HTTPException(502, "Falha ao ler usuarios do projeto.") from exc
     finally:
         await reader_conn.close()
@@ -208,43 +209,44 @@ def _project_service_key(project_name: str) -> str:
 
 
 @router.api_route(
-    "/api/projects/internal/auth-admin/{project_name}/{gotrue_path:path}",
+    "/api/projects/internal/auth-admin/{project_ref}/{gotrue_path:path}",
     methods=["GET"],
     operation_id="proxy_project_auth_admin_get",
 )
 @router.api_route(
-    "/api/projects/internal/auth-admin/{project_name}/{gotrue_path:path}",
+    "/api/projects/internal/auth-admin/{project_ref}/{gotrue_path:path}",
     methods=["POST"],
     operation_id="proxy_project_auth_admin_post",
 )
 @router.api_route(
-    "/api/projects/internal/auth-admin/{project_name}/{gotrue_path:path}",
+    "/api/projects/internal/auth-admin/{project_ref}/{gotrue_path:path}",
     methods=["PUT"],
     operation_id="proxy_project_auth_admin_put",
 )
 @router.api_route(
-    "/api/projects/internal/auth-admin/{project_name}/{gotrue_path:path}",
+    "/api/projects/internal/auth-admin/{project_ref}/{gotrue_path:path}",
     methods=["PATCH"],
     operation_id="proxy_project_auth_admin_patch",
 )
 @router.api_route(
-    "/api/projects/internal/auth-admin/{project_name}/{gotrue_path:path}",
+    "/api/projects/internal/auth-admin/{project_ref}/{gotrue_path:path}",
     methods=["DELETE"],
     operation_id="proxy_project_auth_admin_delete",
 )
 async def proxy_project_auth_admin(
-    project_name: str,
+    project_ref: str,
     gotrue_path: str,
     request: Request,
     pool=Depends(get_pool),
 ) -> Response:
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     _require_studio_nginx(request)
     gotrue_path = _normalized_gotrue_path(gotrue_path)
 
     auth_user = await resolve_authenticated_user(request, pool)
     async with pool.acquire() as conn:
-        project_row = await get_project_row(conn, project_name)
+        project_row = await get_public_project_row(conn, project_ref)
+        project_name = project_row["name"]
         await ensure_project_admin_access(
             conn,
             project_id=project_row["id"],
@@ -275,7 +277,7 @@ async def proxy_project_auth_admin(
                 content=await request.body(),
             )
     except httpx.HTTPError as exc:
-        print(f"[auth_admin_proxy] {project_name}: {exc}")
+        print(f"[auth_admin_proxy] {project_ref}: {exc}")
         raise HTTPException(
             502, "Falha ao acessar o GoTrue do projeto."
         ) from exc

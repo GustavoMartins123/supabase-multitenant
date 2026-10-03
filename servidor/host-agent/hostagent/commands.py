@@ -805,6 +805,7 @@ async def handle_create_project(ctx: CommandContext, project: str, args: dict[st
         [
             project,
             str(args["tenant_uuid"]),
+            str(args["public_ref"]),
             "true" if recover_stale else "false",
             *stale_tenant_uuids,
         ],
@@ -854,7 +855,7 @@ async def handle_duplicate_project(ctx: CommandContext, project: str, args: dict
     outcome, _ = await _run_lifecycle_script(
         ctx,
         "duplicate_project.sh",
-        [original, project, str(args["copy_mode"]), str(args["tenant_uuid"]), str(args["original_tenant_uuid"])],
+        [original, project, str(args["copy_mode"]), str(args["tenant_uuid"]), str(args["original_tenant_uuid"]), str(args["public_ref"])],
         env=env,
         error_code="duplicate_failed",
     )

@@ -325,6 +325,7 @@ class HostAgentRoleContractTest(unittest.TestCase):
                 "name",
                 "owner_id",
                 "tenant_uuid",
+                "public_ref",
                 "automatic_key_rotation_enabled",
             },
             "users": {"id", "is_active"},
@@ -547,17 +548,20 @@ class ClosedCommandSetTest(unittest.TestCase):
             ("recreate_services", "meuprojeto", {"services": ["auth", "nginx"]}),
             ("create_project", "meuprojeto", {
                 "tenant_uuid": tenant_uuid,
+                "public_ref": "abcdefghijklmnopqrst",
                 "recover_stale": False,
                 "stale_tenant_uuids": [],
             }),
             ("create_project", "meuprojeto", {
                 "tenant_uuid": tenant_uuid,
+                "public_ref": "abcdefghijklmnopqrst",
                 "recover_stale": True,
                 "stale_tenant_uuids": [
                     "1b671a64-40d5-491e-99b0-da01ff1f3341"
                 ],
             }),
             ("duplicate_project", "copia", {
+                "public_ref": "abcdefghijklmnopqrst",
                 "original_name": "meuprojeto",
                 "original_uuid": "1b671a64-40d5-491e-99b0-da01ff1f3341",
                 "original_tenant_uuid": "1b671a64-40d5-491e-99b0-da01ff1f3341",

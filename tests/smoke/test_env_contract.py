@@ -12,6 +12,7 @@ import importlib.util
 import pathlib
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -155,16 +156,14 @@ class EnvNetworkValidationTest(unittest.TestCase):
 class EnvRealFileHygieneTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tool = load_tool()
-        self.tmpdir = ROOT / ".tmp-env-contract-test"
-        self.tmpdir.mkdir(exist_ok=True)
-        self.addCleanup(
-            lambda: __import__("shutil").rmtree(self.tmpdir, ignore_errors=True)
-        )
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.tmpdir = pathlib.Path(directory.name)
+        self.tool.ROOT = self.tmpdir
 
     def _write(self, name: str, content: str) -> str:
-        relative = f".tmp-env-contract-test/{name}"
-        (ROOT / relative).write_text(content, encoding="utf-8")
-        return relative
+        (self.tmpdir / name).write_text(content, encoding="utf-8")
+        return name
 
     def _check(self, files: list[str]) -> object:
         report = self.tool.Report()

@@ -9,7 +9,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 from app.control_plane_service import audit_studio_action
 from app.database import get_pool
-from app.dependencies import audit_project_member_change, ensure_project_admin_access, ensure_project_member_access, get_project_role, get_project_row, require_synced_user_record, resolve_authenticated_user, upsert_project_member
+from app.dependencies import audit_project_member_change, ensure_project_admin_access, ensure_project_member_access, get_project_role, get_public_project_row, require_synced_user_record, resolve_authenticated_user, upsert_project_member
 from app.main import AI_TOOL_MAX_ROWS, AI_TOOL_TIMEOUT_MS, _extract_project_admin_apikey, get_project_conn
 from app.project_backgrounds import _get_project_file_size_limit, _get_project_storage_limit_token
 from app.meta_connections import get_project_meta_connection_string, get_project_reader_connection_string
@@ -19,7 +19,7 @@ from app.project_telemetry import TelemetryValidationError, fetch_project_user_t
 from app.routers.lifecycle import get_project_status
 from app.runtime_config import PG_META_CRYPTO_KEY, PG_META_INTERNAL_URL
 from app.schemas import TransferBody
-from app.validation import parse_uuid_value, validate_project_id
+from app.validation import parse_uuid_value, validate_project_ref
 
 router = APIRouter(tags=["project-insights"])
 
@@ -27,6 +27,7 @@ router = APIRouter(tags=["project-insights"])
 class ProjectInfoItem(BaseModel):
     model_config = ConfigDict(extra="allow")
     name: str
+    public_ref: str = Field(pattern=r"^[a-z]{20}$", min_length=20, max_length=20)
     display_name: str | None
     status: str
     running_containers: int
@@ -114,7 +115,7 @@ async def get_projects_for_user(
 
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT DISTINCT p.name, p.display_name
+            SELECT DISTINCT p.name, p.display_name, p.public_ref
             FROM projects p
             JOIN project_members m ON p.id = m.project_id
             WHERE m.user_id = $1
@@ -126,6 +127,7 @@ async def get_projects_for_user(
             project_status = await get_project_status(r["name"])
             projects.append({
                 "name": r["name"],
+                "public_ref": r["public_ref"],
                 "display_name": r["display_name"],
                 "status": project_status["status"],
                 "running_containers": project_status["running"],
@@ -137,9 +139,9 @@ async def get_projects_for_user(
     return {"projects": projects}
 
 
-@router.get("/api/admin/projects/{name}/all-users", response_model=AllUsersResponse)
+@router.get("/api/admin/projects/{project_ref}/all-users", response_model=AllUsersResponse)
 async def list_all_users_for_admin(
-    name: str,
+    project_ref: str,
     request: Request,
     pool=Depends(get_pool),
 ):
@@ -148,18 +150,13 @@ async def list_all_users_for_admin(
     Como a API não tem acesso ao cache, retorna uma estrutura
     que o Nginx pode completar ou usa proxy para Nginx.
     """
-    name = validate_project_id(name)
+    project_ref = validate_project_ref(project_ref)
     auth_user = await resolve_authenticated_user(request, pool)
     if not auth_user["is_global_admin"]:
         raise HTTPException(403, "admin access required")
 
     async with pool.acquire() as conn:
-        project = await conn.fetchrow(
-            "SELECT id FROM projects WHERE name = $1",
-            name,
-        )
-        if not project:
-            raise HTTPException(404, "project not found")
+        project = await get_public_project_row(conn, project_ref)
 
         current_members = await conn.fetch(
             "SELECT user_id, role FROM project_members WHERE project_id=$1",
@@ -167,7 +164,8 @@ async def list_all_users_for_admin(
         )
 
     return {
-        "project_name": name,
+        "project_name": project["name"],
+        "public_ref": project_ref,
         "project_id": project["id"],
         "current_members": [
             {
@@ -177,18 +175,18 @@ async def list_all_users_for_admin(
             } for m in current_members
         ],
         "cache_users_needed": True,
-        "nginx_route": f"/api/projects/{name}/all-users"
+        "nginx_route": f"/api/projects/{project_ref}/all-users"
     }
 
 
-@router.post("/api/projects/{project_name}/transfer", status_code=200, response_model=TransferResponse)
+@router.post("/api/projects/{project_ref}/transfer", status_code=200, response_model=TransferResponse)
 async def transfer_project(
-    project_name: str,
+    project_ref: str,
     body: TransferBody,
     request: Request,
     pool                   = Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
 
     new_owner = body.new_owner_id.strip()
     if not new_owner:
@@ -200,7 +198,7 @@ async def transfer_project(
             raise HTTPException(403, "Acesso negado – apenas administradores do sistema")
 
         async with conn.transaction():
-            proj_row = await get_project_row(conn, project_name, for_update=True)
+            proj_row = await get_public_project_row(conn, project_ref, for_update=True)
             new_owner_user = await require_synced_user_record(
                 conn,
                 identifier=new_owner,
@@ -257,15 +255,15 @@ async def transfer_project(
                 )
 
     return {
-        "project": project_name,
+        "project": project_ref,
         "new_owner_id": str(new_owner_user["id"]),
         "status": "transferred"
     }
 
 
-@router.get("/api/projects/{project_name}/telemetry/users", response_model=ProjectUserTelemetryResponse)
+@router.get("/api/projects/{project_ref}/telemetry/users", response_model=ProjectUserTelemetryResponse)
 async def get_project_user_telemetry(
-    project_name: str,
+    project_ref: str,
     request: Request,
     response: Response,
     period: str = Query("24h"),
@@ -273,7 +271,7 @@ async def get_project_user_telemetry(
     end: dt.datetime | None = Query(None),
     pool=Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     auth_user = await resolve_authenticated_user(request, pool)
 
     try:
@@ -286,7 +284,7 @@ async def get_project_user_telemetry(
         raise HTTPException(422, str(exc)) from exc
 
     async with pool.acquire() as conn:
-        project_row = await get_project_row(conn, project_name)
+        project_row = await get_public_project_row(conn, project_ref)
         project_role = await get_project_role(
             conn,
             project_id=project_row["id"],
@@ -308,7 +306,7 @@ async def get_project_user_telemetry(
             actor_user_id=auth_user["db_user_id"],
             action="project_auth_telemetry_read",
             target_type="project_auth_telemetry",
-            target_id=project_name,
+            target_id=project_ref,
             new_value={
                 "period": telemetry_period.key,
                 "start": telemetry_period.start.isoformat(),
@@ -318,7 +316,7 @@ async def get_project_user_telemetry(
 
     project_conn: asyncpg.Connection | None = None
     try:
-        project_conn = await get_project_conn(project_name)
+        project_conn = await get_project_conn(project_row["name"])
         result = await fetch_project_user_telemetry(
             project_conn,
             telemetry_period,
@@ -340,7 +338,7 @@ async def get_project_user_telemetry(
             await project_conn.close()
 
     response.headers["Cache-Control"] = "no-store"
-    return {"project": project_name, **result}
+    return {"project": project_ref, **result}
 
 
 @router.api_route(
@@ -389,12 +387,12 @@ async def proxy_project_meta(
     meta_path: str = "",
     pool=Depends(get_pool)
 ):
-    ref = validate_project_id(ref)
+    ref = validate_project_ref(ref)
     auth_user = await resolve_authenticated_user(request, pool)
 
     async with pool.acquire() as conn:
         async with conn.transaction():
-            project_row = await get_project_row(conn, ref)
+            project_row = await get_public_project_row(conn, ref)
             await ensure_project_admin_access(
                 conn,
                 project_id=project_row["id"],
@@ -415,7 +413,7 @@ async def proxy_project_meta(
             )
 
     try:
-        project_connection_string = get_project_meta_connection_string(ref, project_row["tenant_uuid"])
+        project_connection_string = get_project_meta_connection_string(project_row["name"], project_row["tenant_uuid"])
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 
@@ -476,15 +474,15 @@ async def get_project_ai_functions(
     request: Request,
     pool=Depends(get_pool)
 ):
-    ref = validate_project_id(ref)
+    ref = validate_project_ref(ref)
     async with pool.acquire() as conn:
         auth_user = await resolve_authenticated_user(request, pool)
-        project_row = await get_project_row(conn, ref)
+        project_row = await get_public_project_row(conn, ref)
         await ensure_project_member_access(conn, project_id=project_row["id"], auth_user=auth_user)
 
     proj_conn = None
     try:
-        proj_conn = await get_project_conn(ref)
+        proj_conn = await get_project_conn(project_row["name"])
         rows = await proj_conn.fetch("""
             SELECT
                 p.proname AS name,
@@ -511,6 +509,7 @@ async def get_project_ai_functions(
         clean_desc = re.sub(r"\[AI\]", "", comment, flags=re.IGNORECASE).strip()
         functions.append({
             "name": r["name"],
+                "public_ref": r["public_ref"],
             "argument_types": r["argument_types"] or "",
             "return_type": r["return_type"] or "void",
             "comment": clean_desc,
@@ -526,7 +525,7 @@ async def execute_project_function(
     request: Request,
     pool=Depends(get_pool)
 ):
-    ref = validate_project_id(ref)
+    ref = validate_project_ref(ref)
     
     function_name = body.get("function_name")
     arguments = body.get("arguments", {})
@@ -542,7 +541,7 @@ async def execute_project_function(
 
     async with pool.acquire() as conn:
         auth_user = await resolve_authenticated_user(request, pool)
-        project_row = await get_project_row(conn, ref)
+        project_row = await get_public_project_row(conn, ref)
         await ensure_project_admin_access(
             conn,
             project_id=project_row["id"],
@@ -553,7 +552,7 @@ async def execute_project_function(
 
     proj_conn = None
     try:
-        proj_conn = await get_project_conn(ref)
+        proj_conn = await get_project_conn(project_row["name"])
 
         candidates = await proj_conn.fetch("""
             SELECT

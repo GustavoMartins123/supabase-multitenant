@@ -80,6 +80,7 @@ def _build_replacements(root: Path, project_dir: Path, project: str) -> dict[str
         "JWT_SECRET_PROJETO",
         "API_GATEWAY_TOKEN_PROJETO",
         "PROJECT_UUID",
+        "PROJECT_PUBLIC_REF",
     )
     project_env_path = project_dir / ".env"
     raw_project_env = {
@@ -119,13 +120,17 @@ def _build_replacements(root: Path, project_dir: Path, project: str) -> dict[str
         raise RuntimeError("SERVICE_ROLE_KEY_PROJETO invalida no .env do projeto")
 
     public_base_url = _normalize_public_base_url(server_url, server_proto)
-    project_public_url = f"{public_base_url}/{project}"
+    public_ref = project_env["PROJECT_PUBLIC_REF"]
+    if not re.fullmatch(r"[a-z]{20}", public_ref):
+        raise RuntimeError("PROJECT_PUBLIC_REF invalido no .env do projeto")
+    project_public_url = f"{public_base_url}/{public_ref}"
 
     return {
         "anon_key": project_env["ANON_KEY_PROJETO"],
         "service_role_key": project_env["SERVICE_ROLE_KEY_PROJETO"],
         "project_id": project,
         "project_uuid": project_env["PROJECT_UUID"],
+        "project_public_ref": public_ref,
         "config_token": project_env["CONFIG_TOKEN_PROJETO"],
         "jwt_secret": project_env["JWT_SECRET_PROJETO"],
         "api_gateway_token": project_env["API_GATEWAY_TOKEN_PROJETO"],

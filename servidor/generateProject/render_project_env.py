@@ -10,6 +10,8 @@ import re
 import sys
 import tempfile
 
+from project_env_urls import render_project_url_values
+
 
 OBSOLETE_STORAGE_KEYS = {
     "STORAGE_IMAGE",
@@ -39,6 +41,10 @@ OBSOLETE_STORAGE_KEYS = {
 PROTECTED_KEYS = {
     "PROJECT_ID",
     "PROJECT_UUID",
+    "PROJECT_PUBLIC_REF",
+    "SITE_URL",
+    "ADDITIONAL_REDIRECT_URLS",
+    "API_EXTERNAL_URL",
     "POSTGRES_DATABASE",
     "PROJECT_ROOT",
     "ANON_KEY_PROJETO",
@@ -85,6 +91,7 @@ def main() -> int:
         raise SystemExit("replacements invalidos")
 
     current_values, current_order = read_assignments(current_path)
+    project_url_values = render_project_url_values(current_values, replacements)
     obsolete = sorted(
         OBSOLETE_STORAGE_KEYS.intersection(current_values)
         | {
@@ -112,6 +119,8 @@ def main() -> int:
             template_keys.add(key)
             if key in current_values and key not in PROTECTED_KEYS:
                 value = current_values[key]
+            if key in project_url_values:
+                value = project_url_values[key]
             rendered.append(f"{key}={value}")
         elif commented:
             key, _ = commented.groups()

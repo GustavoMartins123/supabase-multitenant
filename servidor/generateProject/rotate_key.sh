@@ -10,6 +10,7 @@ source "$SCRIPT_DIR/lib/functions_config.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
 source "$SCRIPT_DIR/lib/resource_profiles.sh"
+source "$SCRIPT_DIR/lib/project_public_ref.sh"
 
 TRANSACTION_DIR="$PROJECT_ROOT/.rotate_transaction_$$"
 MODIFIED_FILES=()
@@ -144,6 +145,8 @@ replace_env_value() {
 CONFIG_TOKEN=$(get_env_value "CONFIG_TOKEN_PROJETO" "$PROJECT_DIR/.env")
 JWT_SECRET_PROJETO=$(get_env_value "JWT_SECRET_PROJETO" "$PROJECT_DIR/.env")
 PROJECT_UUID=$(get_env_value "PROJECT_UUID" "$PROJECT_DIR/.env")
+PROJECT_PUBLIC_REF="$(project_public_ref_read "$PROJECT_DIR/.env")" \
+  || die "Referencia publica ausente ou invalida"
 API_GATEWAY_TOKEN_PROJETO=$(get_env_value "API_GATEWAY_TOKEN_PROJETO" "$PROJECT_DIR/.env")
 CURRENT_ANON=$(get_env_value "ANON_KEY_PROJETO" "$PROJECT_DIR/.env")
 CURRENT_SERVICE=$(get_env_value "SERVICE_ROLE_KEY_PROJETO" "$PROJECT_DIR/.env")
@@ -153,6 +156,8 @@ S3_PROTOCOL_ACCESS_KEY_SECRET=$(get_env_value "S3_PROTOCOL_ACCESS_KEY_SECRET" "$
 S3_PROTOCOL_ENABLED=$(get_env_value "S3_PROTOCOL_ENABLED" "$PROJECT_DIR/.env")
 VECTOR_BUCKETS_ENABLED=$(get_env_value "VECTOR_BUCKETS_ENABLED" "$PROJECT_DIR/.env")
 PROJECT_UUID="$(tr '[:upper:]' '[:lower:]' <<<"$PROJECT_UUID")"
+project_public_ref_assert "$PROJECT_ID" "$PROJECT_UUID" "$PROJECT_PUBLIC_REF" \
+  || die "Referencia publica diverge do control plane"
 
 [[ "$CONFIG_TOKEN" =~ ^[a-f0-9]{64}$ ]] \
   || die "CONFIG_TOKEN_PROJETO invalido"
@@ -215,7 +220,7 @@ echo "   Usando issuer: $PROJECT_UUID"
 NEW_ANON=$(generate_jwt    "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now,\"exp\":$exp,\"jti\":\"$anon_jti\"}"         "$JWT_SECRET_PROJETO")
 NEW_SERVICE=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now,\"exp\":$exp,\"jti\":\"$service_jti\"}" "$JWT_SECRET_PROJETO")
 PUBLIC_BASE_URL="$(normalize_public_base_url "$SERVER_URL" "${SERVER_PROTO:-}")"
-PROJECT_PUBLIC_URL="$PUBLIC_BASE_URL/$PROJECT_ID"
+PROJECT_PUBLIC_URL="$PUBLIC_BASE_URL/$PROJECT_PUBLIC_REF"
 PROJECT_AUTH_EXTERNAL_URL="$PROJECT_PUBLIC_URL/auth/v1"
 
 template_to_file() {
@@ -240,6 +245,7 @@ template_to_file() {
     -e "s|{{service_role_key}}|$service_role_key|g" \
     -e "s|{{project_id}}|$project_id|g" \
     -e "s|{{project_uuid}}|$project_uuid|g" \
+    -e "s|{{project_public_ref}}|$PROJECT_PUBLIC_REF|g" \
     -e "s|{{config_token}}|$config_token|g" \
     -e "s|{{jwt_secret}}|$jwt_secret|g" \
     -e "s|{{api_gateway_token}}|$(escape_sed_replacement "$API_GATEWAY_TOKEN_PROJETO")|g" \

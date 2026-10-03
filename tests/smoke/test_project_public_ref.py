@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "servidor" / "api-internal"))
 from app.project_public_ref import (  # noqa: E402
     PublicProjectNotFound,
     generate_public_ref,
+    get_provisioning_public_ref,
     resolve_public_project,
     validate_public_ref,
 )
@@ -80,6 +81,23 @@ class PublicRefLookupTest(unittest.IsolatedAsyncioTestCase):
         conn = AsyncMock()
         await resolve_public_project(conn, "d" * 20, for_update=True)
         self.assertTrue(conn.fetchrow.call_args.args[0].endswith(" FOR UPDATE"))
+
+    async def test_provisioning_binds_reference_to_durable_intent(self) -> None:
+        conn = AsyncMock()
+        for payload in ({"public_ref": "a" * 20}, '{"public_ref":"' + "a" * 20 + '"}'):
+            conn.fetchrow.return_value = {"public_ref": "a" * 20, "payload": payload}
+            self.assertEqual(
+                await get_provisioning_public_ref(conn, "00000000-0000-4000-8000-000000000000"),
+                "a" * 20,
+            )
+
+    async def test_provisioning_rejects_missing_or_stale_intent(self) -> None:
+        conn = AsyncMock()
+        for row in (None, {"public_ref": "a" * 20, "payload": {}},
+                    {"public_ref": "a" * 20, "payload": {"public_ref": "b" * 20}}):
+            conn.fetchrow.return_value = row
+            with self.subTest(row=row), self.assertRaises((ValueError, PublicProjectNotFound)):
+                await get_provisioning_public_ref(conn, "00000000-0000-4000-8000-000000000000")
 
 
 if __name__ == "__main__":

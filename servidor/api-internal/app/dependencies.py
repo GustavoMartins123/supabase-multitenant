@@ -14,7 +14,8 @@ from app.security_tokens import (
     resolve_user_claims_from_hmac_token as resolve_signed_user_claims,
     resolve_user_id_from_hmac_token as resolve_signed_user_id,
 )
-from app.validation import normalize_groups, parse_uuid_value
+from app.project_public_ref import PublicProjectNotFound, resolve_public_project
+from app.validation import normalize_groups, parse_uuid_value, validate_project_ref
 
 
 def resolve_user_id_from_hmac_token(request: Request) -> uuid.UUID:
@@ -166,6 +167,16 @@ async def get_project_row(
     if not row:
         raise HTTPException(404, "Project not found")
     return row
+
+
+async def get_public_project_row(
+    conn: asyncpg.Connection, project_ref: str, *, for_update: bool = False
+) -> asyncpg.Record:
+    project_ref = validate_project_ref(project_ref)
+    try:
+        return await resolve_public_project(conn, project_ref, for_update=for_update)
+    except PublicProjectNotFound as exc:
+        raise HTTPException(404, "Project not found") from exc
 
 
 async def get_project_role(

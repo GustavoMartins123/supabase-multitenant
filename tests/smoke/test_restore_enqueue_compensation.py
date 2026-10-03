@@ -112,6 +112,7 @@ class RestoreEnqueueCompensationTest(unittest.IsolatedAsyncioTestCase):
             return {"db_user_id": self.user_id}
 
         async def _row(*args: object, **kwargs: object) -> dict:
+            self.assertEqual(args[1], "abcdefghijklmnopqrst")
             return {
                 "id": self.project_id,
                 "name": "demo",
@@ -130,7 +131,7 @@ class RestoreEnqueueCompensationTest(unittest.IsolatedAsyncioTestCase):
 
         patches = [
             mock.patch.object(router, "resolve_authenticated_user", _auth),
-            mock.patch.object(router, "get_project_row", _row),
+            mock.patch.object(router, "get_public_project_row", _row),
             mock.patch.object(router, "ensure_project_admin_access", _access),
             mock.patch.object(router, "ensure_project_owner_access", _access),
             mock.patch.object(router, "_fetch_restore_point_locked", _point),
@@ -143,7 +144,7 @@ class RestoreEnqueueCompensationTest(unittest.IsolatedAsyncioTestCase):
     async def test_create_marks_point_failed(self) -> None:
         with self.assertRaises(HTTPException) as ctx:
             await router.create_project_restore_point(
-                "demo", RestorePointCreate(), object(), self.pool
+                "abcdefghijklmnopqrst", RestorePointCreate(), object(), self.pool
             )
         self.assertEqual(ctx.exception.status_code, 503)
         inserted = [
@@ -152,6 +153,7 @@ class RestoreEnqueueCompensationTest(unittest.IsolatedAsyncioTestCase):
             if "INSERT INTO project_restore_points" in query
         ]
         self.assertEqual(len(inserted), 1)
+        self.assertEqual(inserted[0][-1], "abcdefghijklmnopqrst")
         failed = point_updates(self.pool, "status = 'failed'")
         self.assertEqual(len(failed), 1)
         self.assertEqual(failed[0][1][0], inserted[0][0])
@@ -164,7 +166,7 @@ class RestoreEnqueueCompensationTest(unittest.IsolatedAsyncioTestCase):
         target = str(uuid.uuid4())
         with self.assertRaises(HTTPException) as ctx:
             await router.restore_project_restore_point(
-                "demo", target, object(), self.pool
+                "abcdefghijklmnopqrst", target, object(), self.pool
             )
         self.assertEqual(ctx.exception.status_code, 503)
         safety_failed = [
@@ -180,7 +182,7 @@ class RestoreEnqueueCompensationTest(unittest.IsolatedAsyncioTestCase):
     async def test_delete_restores_previous_status(self) -> None:
         with self.assertRaises(HTTPException) as ctx:
             await router.delete_project_restore_point(
-                "demo", str(self.point_id), object(), self.pool
+                "abcdefghijklmnopqrst", str(self.point_id), object(), self.pool
             )
         self.assertEqual(ctx.exception.status_code, 503)
         reverted = [

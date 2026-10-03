@@ -26,6 +26,7 @@ source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
 source "$SCRIPT_DIR/lib/realtime_slots.sh"
 source "$SCRIPT_DIR/lib/tenant_reader_role.sh"
 source "$SCRIPT_DIR/lib/tenant_meta_role.sh"
+source "$SCRIPT_DIR/lib/project_public_ref.sh"
 
 NAME_RE='^[a-z_][a-z0-9_]{2,39}$'
 UUID_RE='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
@@ -62,6 +63,10 @@ for variable in JWT_SECRET PROJECT_UUID ANON_KEY_PROJETO SERVICE_ROLE_KEY_PROJET
   [[ -n "${!variable:-}" ]] || die "$variable ausente"
 done
 PROJECT_UUID="$(echo "$PROJECT_UUID" | tr '[:upper:]' '[:lower:]')"
+PROJECT_PUBLIC_REF="$(project_public_ref_read "$PROJECT_DIR/.env")" \
+  || die "Referencia publica ausente ou invalida"
+project_public_ref_assert "$PROJECT" "$PROJECT_UUID" "$PROJECT_PUBLIC_REF" \
+  || die "Referencia publica diverge do control plane"
 [[ "$PROJECT_UUID" =~ $UUID_RE ]] || die "PROJECT_UUID invalido"
 export PROJECT_UUID SERVICE_ROLE_KEY_PROJETO S3_PROTOCOL_CREDENTIAL_ID \
   S3_PROTOCOL_ACCESS_KEY_ID S3_PROTOCOL_ACCESS_KEY_SECRET VECTOR_BUCKETS_ENABLED

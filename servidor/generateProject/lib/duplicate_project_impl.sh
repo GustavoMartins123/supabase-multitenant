@@ -14,6 +14,7 @@ source "$SCRIPT_DIR/lib/resource_profiles.sh"
 source "$SCRIPT_DIR/lib/realtime_slots.sh"
 source "$SCRIPT_DIR/lib/tenant_reader_role.sh"
 source "$SCRIPT_DIR/lib/tenant_meta_role.sh"
+source "$SCRIPT_DIR/lib/project_public_ref.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/backup_core.sh"
 
@@ -31,9 +32,11 @@ NEW_PROJECT="${2:-}"
 COPY_MODE="${3:-}"
 PROJECT_UUID="${4:-}"
 EXPECTED_ORIGINAL_UUID="${5:-}"
+PROJECT_PUBLIC_REF="${6:-}"
+project_public_ref_validate "$PROJECT_PUBLIC_REF" || die "Referencia publica invalida"
 storage_validate_tenant_id "$EXPECTED_ORIGINAL_UUID" || die "UUID assinado da origem ausente/invalido"
 [[ -n "$ORIGINAL_PROJECT" && -n "$NEW_PROJECT" && -n "$COPY_MODE" && -n "$PROJECT_UUID" ]] \
-  || die "Uso: $0 <original_project> <new_project> <with-data|schema-only> <project_uuid>"
+  || die "Uso: $0 <original_project> <new_project> <with-data|schema-only> <project_uuid> <original_tenant_uuid> <public_ref>"
 [[ "$COPY_MODE" == "with-data" || "$COPY_MODE" == "schema-only" ]] \
   || die "copy_mode deve ser with-data ou schema-only"
 
@@ -76,6 +79,8 @@ ORIGINAL_DB="_supabase_$ORIGINAL_PROJECT"
 NEW_DB="_supabase_$NEW_PROJECT"
 OUT_DIR="$PROJECT_ROOT/projects/$NEW_PROJECT"
 ORIGINAL_DIR="$PROJECT_ROOT/projects/$ORIGINAL_PROJECT"
+project_public_ref_assert "$NEW_PROJECT" "$PROJECT_UUID" "$PROJECT_PUBLIC_REF" \
+  || die "Referencia publica nao corresponde ao clone"
 functions_config_lock "$ORIGINAL_PROJECT" "$NEW_PROJECT"
 TMP_DIR="$(mktemp -d /tmp/duplicate-project.XXXXXX)"
 DUMP_FILE="$TMP_DIR/main.sql"
@@ -277,7 +282,7 @@ generate_jwt() {
 }
 
 PUBLIC_BASE_URL="$(normalize_public_base_url "$SERVER_URL" "${SERVER_PROTO:-}")"
-PROJECT_PUBLIC_URL="$PUBLIC_BASE_URL/$NEW_PROJECT"
+PROJECT_PUBLIC_URL="$PUBLIC_BASE_URL/$PROJECT_PUBLIC_REF"
 PROJECT_AUTH_EXTERNAL_URL="$PROJECT_PUBLIC_URL/auth/v1"
 JWT_SECRET_PROJETO=$(openssl rand -base64 32 | tr '/+' '_-' | tr -d '\n\r')
 now_epoch=$(date +%s)
@@ -300,6 +305,7 @@ template_to_file() {
     -e "s|{{service_role_key}}|$(escape_sed_replacement "$SERVICE_TOKEN")|g" \
     -e "s|{{project_id}}|$(escape_sed_replacement "$NEW_PROJECT")|g" \
     -e "s|{{project_uuid}}|$(escape_sed_replacement "$PROJECT_UUID")|g" \
+    -e "s|{{project_public_ref}}|$PROJECT_PUBLIC_REF|g" \
     -e "s|{{config_token}}|$(escape_sed_replacement "$CONFIG_TOKEN_PROJETO")|g" \
     -e "s|{{jwt_secret}}|$(escape_sed_replacement "$JWT_SECRET_PROJETO")|g" \
     -e "s|{{api_gateway_token}}|$(escape_sed_replacement "$API_GATEWAY_TOKEN_PROJETO")|g" \

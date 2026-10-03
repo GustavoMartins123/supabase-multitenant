@@ -183,7 +183,7 @@ async def ensure_host_agent_rw_role(
                     TO host_agent_rw;
 
                 GRANT SELECT (
-                    id, name, owner_id, tenant_uuid,
+                    id, name, owner_id, tenant_uuid, public_ref,
                     automatic_key_rotation_enabled
                 ) ON projects TO host_agent_rw;
                 GRANT SELECT (id, is_active) ON users TO host_agent_rw;

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import pathlib
+import tempfile
 import unittest
 from unittest import mock
 
@@ -16,7 +17,9 @@ spec.loader.exec_module(module)
 
 class FileProviderRendererTests(unittest.TestCase):
     def test_cli_stages_middlewares_inside_the_dynamic_directory(self) -> None:
-        root = ROOT / ".tmp-traefik-middleware-stage-test"
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = pathlib.Path(temp.name) / "fixture"
         root_env = root / "server.env"
         projects = root / "projects"
         middlewares = root / "middlewares.yml"
@@ -57,7 +60,9 @@ class FileProviderRendererTests(unittest.TestCase):
             root.rmdir()
 
     def test_renderer_discovers_valid_projects_and_uses_uuid_scope(self) -> None:
-        fixture_root = ROOT / ".tmp-traefik-render-test"
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        fixture_root = pathlib.Path(temp.name) / "fixture"
         projects = fixture_root / "projects"
         project = projects / "meu_projeto"
         project.mkdir(parents=True, exist_ok=True)
@@ -69,7 +74,8 @@ class FileProviderRendererTests(unittest.TestCase):
         )
         (project / ".env").write_text(
             "PROJECT_ID=meu_projeto\n"
-            "PROJECT_UUID=11111111-2222-3333-4444-555555555555\n",
+            "PROJECT_UUID=11111111-2222-3333-4444-555555555555\n"
+            "PROJECT_PUBLIC_REF=abcdefghijklmnopqrst\n",
             encoding="utf-8",
         )
         try:

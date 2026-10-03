@@ -42,6 +42,11 @@ async def host_agent_schema_ready(dsn: str) -> bool:
                           AND table_name = 'projects'
                           AND column_name = 'tenant_uuid'
                     )
+                    AND EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_schema = current_schema()
+                          AND table_name = 'projects' AND column_name = 'public_ref'
+                    )
                 """
             )
         )
@@ -329,6 +334,7 @@ async def load_authorization_context(
         "project_row_exists": False,
         "project_id": None,
         "tenant_uuid": None,
+        "public_ref": None,
         "automatic_key_rotation_enabled": False,
     }
     async with pool.acquire() as conn:
@@ -353,7 +359,7 @@ async def load_authorization_context(
 
         project_row = await conn.fetchrow(
             """
-            SELECT id, owner_id, tenant_uuid,
+            SELECT id, owner_id, tenant_uuid, public_ref,
                    automatic_key_rotation_enabled
             FROM projects WHERE name = $1
             """,
@@ -363,6 +369,7 @@ async def load_authorization_context(
             context["project_row_exists"] = True
             context["project_id"] = project_row["id"]
             context["tenant_uuid"] = project_row["tenant_uuid"]
+            context["public_ref"] = project_row["public_ref"]
             context["automatic_key_rotation_enabled"] = bool(
                 project_row["automatic_key_rotation_enabled"]
             )

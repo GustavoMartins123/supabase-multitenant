@@ -6,6 +6,7 @@ import uuid
 from fastapi import HTTPException
 
 from app.host_agent_protocol import ProjectNameValidator
+from app.project_public_ref import validate_public_ref
 
 
 SERVICE_NAME_RE = re.compile(r"^[a-z][a-z0-9\-]{0,39}$")
@@ -48,6 +49,13 @@ def validate_project_id(raw: str) -> str:
     if name in ProjectNameValidator.RESERVED_API_NAMES:
         raise HTTPException(400, "Nome invalido: namespace reservado da API.")
     return name
+
+
+def validate_project_ref(raw: str) -> str:
+    try:
+        return validate_public_ref(raw)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 def validate_service_name(raw: str) -> str:

@@ -50,10 +50,10 @@ class RestorePointApiSurfaceTest(unittest.TestCase):
 
     def test_endpoints_exist(self) -> None:
         for route in (
-            '@router.get("/api/projects/{project_name}/restore-points"',
-            '@router.post("/api/projects/{project_name}/restore-points"',
-            '"/api/projects/{project_name}/restore-points/{point_id}/restore"',
-            '"/api/projects/{project_name}/restore-points/{point_id}"',
+            '@router.get("/api/projects/{project_ref}/restore-points"',
+            '@router.post("/api/projects/{project_ref}/restore-points"',
+            '"/api/projects/{project_ref}/restore-points/{point_id}/restore"',
+            '"/api/projects/{project_ref}/restore-points/{point_id}"',
         ):
             self.assertIn(route, self.router_source)
 

@@ -16,7 +16,7 @@ import asyncpg
 from app.database import get_pool
 from app.dependencies import (
     ensure_project_member_access,
-    get_project_row,
+    get_public_project_row,
     resolve_authenticated_user,
 )
 from app.jobs import (
@@ -70,7 +70,7 @@ from app.runtime_config import (
 )
 from app.schemas import DuplicateProject, NewProject
 from app.step_up_auth import consume_step_up_grant
-from app.validation import validate_project_id
+from app.validation import validate_project_id, validate_project_ref
 
 router = APIRouter(tags=["projects"])
 
@@ -328,7 +328,7 @@ async def duplicate_project(
     - Cria registro no banco
     - Dispara job em background para executar script de duplicação
     """
-    original = validate_project_id(body.original_name)
+    original_ref = validate_project_ref(body.original_public_ref)
     new_name = validate_project_id(body.new_name)
     auth_user = await resolve_authenticated_user(request, pool)
 
@@ -338,12 +338,13 @@ async def duplicate_project(
                 "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
                 f"project-name:{new_name}",
             )
-            project_row = await get_project_row(conn, original)
+            project_row = await get_public_project_row(conn, original_ref)
             await ensure_project_member_access(
                 conn,
                 project_id=project_row["id"],
                 auth_user=auth_user,
             )
+            original = project_row["name"]
 
             exists = await conn.fetchval(
                 "SELECT EXISTS(SELECT 1 FROM projects WHERE name = $1)",
@@ -422,14 +423,14 @@ async def duplicate_project(
         pool, job_id, position, message, extra={"public_ref": public_ref}
     )
 
-@router.delete("/api/projects/{project_name}", response_model=QueuedJobResponse)
+@router.delete("/api/projects/{project_ref}", response_model=QueuedJobResponse)
 async def delete_project(
-    project_name: str,
+    project_ref: str,
     request: Request,
     x_step_up_token: str | None = Header(None, alias="X-Step-Up-Token"),
     pool=Depends(get_pool)
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
 
     auth_user = await resolve_authenticated_user(request, pool)
     if not auth_user["is_global_admin"]:
@@ -437,17 +438,8 @@ async def delete_project(
 
     async with pool.acquire() as conn:
         async with conn.transaction():
-            project_row = await conn.fetchrow(
-                """
-                SELECT id, tenant_uuid
-                FROM projects
-                WHERE name = $1
-                FOR UPDATE
-                """,
-                project_name,
-            )
-            if not project_row:
-                raise HTTPException(404, "Project not found")
+            project_row = await get_public_project_row(conn, project_ref, for_update=True)
+            project_name = project_row["name"]
             tenant_uuid = parse_tenant_uuid(project_row["tenant_uuid"])
             if tenant_uuid is None:
                 raise HTTPException(
@@ -462,8 +454,8 @@ async def delete_project(
                 auth_user=auth_user,
                 action="delete_project",
                 project_id=project_row["id"],
-                project_ref=project_name,
-                resource_id=project_name,
+                project_ref=project_ref,
+                resource_id=project_ref,
             )
             project_id = project_row["id"]
             job_id = await _create_project_job(
@@ -494,5 +486,5 @@ async def delete_project(
     )
     return JSONResponse(
         status_code=202,
-        content=await _serialize_queued_job(pool, job_id, position, message),
+        content=await _serialize_queued_job(pool, job_id, position, message, extra={"public_ref": project_ref}),
     )

@@ -14,6 +14,7 @@ import uuid
 
 
 PROJECT_RE = re.compile(r"^[a-z_][a-z0-9_]{2,39}$")
+PUBLIC_REF_RE = re.compile(r"[a-z]{20}\Z", re.ASCII)
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
 TLS_MODES = {"file", "acme"}
@@ -77,7 +78,7 @@ def resolve_tls_settings(settings: dict[str, str], cert_dir: pathlib.Path | None
     }
 
 
-def read_env(path: pathlib.Path) -> dict[str, str]:
+def read_env(path: pathlib.Path, *, strict_identity: bool = False) -> dict[str, str]:
     values: dict[str, str] = {}
     if not path.is_file():
         return values
@@ -86,6 +87,12 @@ def read_env(path: pathlib.Path) -> dict[str, str]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
+        normalized_key = key.strip().removeprefix("export ").strip()
+        if strict_identity and normalized_key in {"PROJECT_ID", "PROJECT_UUID", "PROJECT_PUBLIC_REF"}:
+            if raw_line != f"{normalized_key}={value}" or value != value.strip() or '"' in value or "'" in value:
+                raise ValueError(f"{normalized_key} nao canonico em {path}")
+        if key.strip() in values:
+            raise ValueError(f"Atribuicao duplicada em {path}: {key.strip()}")
         value = value.strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
             value = value[1:-1]
@@ -130,21 +137,32 @@ def render(
         "scannerBanTime": settings.get("TRAEFIK_GUARD_SCANNER_BAN_TIME", "1h"),
     }
 
-    projects: list[tuple[str, str]] = []
+    projects: list[tuple[str, str, str]] = []
+    seen_refs: set[str] = set()
     if projects_dir.is_dir():
         for project_dir in sorted(projects_dir.iterdir(), key=lambda path: path.name):
             if not project_dir.is_dir() or not PROJECT_RE.fullmatch(project_dir.name):
                 continue
-            project_env = read_env(project_dir / ".env")
-            project_id = project_env.get("PROJECT_ID", project_dir.name)
+            env_path = project_dir / ".env"
+            if project_dir.is_symlink() or env_path.is_symlink():
+                raise ValueError(f"Symlink de projeto recusado: {project_dir.name}")
+            if not env_path.exists():
+                continue
+            project_env = read_env(env_path, strict_identity=True)
+            project_id = project_env.get("PROJECT_ID", "")
             project_uuid = project_env.get("PROJECT_UUID", "")
+            public_ref = project_env.get("PROJECT_PUBLIC_REF", "")
             if project_id != project_dir.name or not PROJECT_RE.fullmatch(project_id):
-                continue
+                raise ValueError(f"PROJECT_ID invalido: {project_dir.name}")
             try:
-                project_uuid = str(uuid.UUID(project_uuid))
-            except ValueError:
-                continue
-            projects.append((project_id, project_uuid))
+                if str(uuid.UUID(project_uuid)) != project_uuid:
+                    raise ValueError("UUID nao canonico")
+            except ValueError as exc:
+                raise ValueError(f"PROJECT_UUID invalido: {project_id}") from exc
+            if not PUBLIC_REF_RE.fullmatch(public_ref) or public_ref in seen_refs:
+                raise ValueError(f"PROJECT_PUBLIC_REF invalido ou duplicado: {project_id}")
+            seen_refs.add(public_ref)
+            projects.append((project_id, project_uuid, public_ref))
 
     lines = [
         "# Gerado por render_dynamic_config.py. Nao edite manualmente.",
@@ -169,11 +187,11 @@ def render(
             "      service: projects-api",
         ]
     )
-    for project_id, _ in projects:
+    for project_id, _, public_ref in projects:
         lines.extend(
             [
                 f"    project-{project_id}:",
-                f"      rule: \"Path(`/{project_id}`) || PathPrefix(`/{project_id}/`)\"",
+                f"      rule: \"Path(`/{public_ref}`) || PathPrefix(`/{public_ref}/`)\"",
                 "      entryPoints:",
             ]
         )
@@ -228,7 +246,7 @@ def render(
                 "        permanent: true",
             ]
         )
-    for project_id, project_uuid in projects:
+    for project_id, project_uuid, public_ref in projects:
         lines.extend(
             [
                 f"    project-guard-{project_id}:",
@@ -248,7 +266,7 @@ def render(
                 f"    project-strip-{project_id}:",
                 "      stripPrefix:",
                 "        prefixes:",
-                f"          - \"/{project_id}\"",
+                f"          - \"/{public_ref}\"",
             ]
         )
 
@@ -261,7 +279,7 @@ def render(
             f"          - url: \"http://projects-api:{api_port}\"",
         ]
     )
-    for project_id, _ in projects:
+    for project_id, _, _ in projects:
         lines.extend(
             [
                 f"    project-{project_id}:",
@@ -326,11 +344,16 @@ def main() -> int:
     args = parser.parse_args()
 
     while True:
-        write_atomic(
-            args.output.parent / "00-middlewares.yml",
-            args.middlewares_file.read_text(encoding="utf-8"),
-        )
-        write_atomic(args.output, render(args.root_env, args.projects_dir, args.tls_cert_dir))
+        try:
+            content = render(args.root_env, args.projects_dir, args.tls_cert_dir)
+            write_atomic(
+                args.output.parent / "00-middlewares.yml",
+                args.middlewares_file.read_text(encoding="utf-8"),
+            )
+            write_atomic(args.output, content)
+        except (ValueError, OSError) as exc:
+            write_atomic(args.output, "http:\n  routers: {}\n  middlewares: {}\n  services: {}\n")
+            raise SystemExit(f"Configuracao de rotas retirada: {exc}") from exc
         if not args.watch:
             return 0
         time.sleep(max(args.interval, 0.5))

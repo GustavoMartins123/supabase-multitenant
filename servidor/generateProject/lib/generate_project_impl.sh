@@ -28,6 +28,7 @@ source "$SCRIPT_DIR/lib/resource_profiles.sh"
 source "$SCRIPT_DIR/lib/realtime_slots.sh"
 source "$SCRIPT_DIR/lib/tenant_reader_role.sh"
 source "$SCRIPT_DIR/lib/tenant_meta_role.sh"
+source "$SCRIPT_DIR/lib/project_public_ref.sh"
 
 TRANSACTION_DIR="$PROJECT_ROOT/.generate_transaction_$$"
 CREATED_DIRS=()
@@ -196,10 +197,12 @@ done
 
 PROJECT_ID="${1:-}"
 PROJECT_UUID="${2:-}"
-RECOVER_STALE="${3:-}"
-STALE_TENANT_UUIDS=("${@:4}")
+PROJECT_PUBLIC_REF="${3:-}"
+RECOVER_STALE="${4:-}"
+STALE_TENANT_UUIDS=("${@:5}")
 [[ -n "$PROJECT_ID" && -n "$PROJECT_UUID" && -n "$RECOVER_STALE" ]] \
-  || die "Uso: $0 <project_id> <project_uuid> <recover_stale> [stale_tenant_uuid ...]"
+  || die "Uso: $0 <project_id> <project_uuid> <public_ref> <recover_stale> [stale_tenant_uuid ...]"
+project_public_ref_validate "$PROJECT_PUBLIC_REF" || die "Referencia publica invalida"
 [[ "$PROJECT_UUID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] \
   || die "project_uuid inválido"
 [[ "$RECOVER_STALE" == "true" || "$RECOVER_STALE" == "false" ]] \
@@ -231,6 +234,8 @@ for word in "${RESERVED_API[@]}"; do
 done
 
 OUT_DIR="$PROJECT_ROOT/projects/$PROJECT_ID"
+project_public_ref_assert "$PROJECT_ID" "$PROJECT_UUID" "$PROJECT_PUBLIC_REF" \
+  || die "Referencia publica nao corresponde ao projeto"
 functions_config_lock "$PROJECT_ID"
 
 docker_must_exist() {
@@ -355,7 +360,7 @@ normalize_public_base_url() {
 escape_sed_replacement() { printf '%s' "$1" | sed -e 's/[&|\\]/\\&/g'; }
 
 PUBLIC_BASE_URL="$(normalize_public_base_url "$SERVER_URL" "${SERVER_PROTO:-}")"
-PROJECT_PUBLIC_URL="$PUBLIC_BASE_URL/$PROJECT_ID"
+PROJECT_PUBLIC_URL="$PUBLIC_BASE_URL/$PROJECT_PUBLIC_REF"
 PROJECT_AUTH_EXTERNAL_URL="$PROJECT_PUBLIC_URL/auth/v1"
 
 template_to_file() {
@@ -365,6 +370,7 @@ template_to_file() {
     -e "s|{{service_role_key}}|$(escape_sed_replacement "$SERVICE_TOKEN")|g" \
     -e "s|{{project_id}}|$(escape_sed_replacement "$PROJECT_ID")|g" \
     -e "s|{{project_uuid}}|$(escape_sed_replacement "$PROJECT_UUID")|g" \
+    -e "s|{{project_public_ref}}|$PROJECT_PUBLIC_REF|g" \
     -e "s|{{config_token}}|$(escape_sed_replacement "$CONFIG_TOKEN_PROJETO")|g" \
     -e "s|{{jwt_secret}}|$(escape_sed_replacement "$JWT_SECRET_PROJETO")|g" \
     -e "s|{{api_gateway_token}}|$(escape_sed_replacement "$API_GATEWAY_TOKEN_PROJETO")|g" \
