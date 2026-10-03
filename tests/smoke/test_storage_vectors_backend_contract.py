@@ -22,6 +22,17 @@ STORAGE_LIBRARY = ROOT / "servidor/generateProject/lib/storage_multitenant.sh"
 
 
 class StorageVectorsBackendContractTests(unittest.TestCase):
+    def test_sigv4_host_is_separate_from_tenant_routing(self) -> None:
+        compose = GLOBAL_COMPOSE.read_text(encoding="utf-8")
+        self.assertIn("S3_PROTOCOL_NON_CANONICAL_HOST_HEADER: host", compose)
+        self.assertIn('S3_ALLOW_FORWARDED_HEADER: "false"', compose)
+        gateway = (ROOT / "servidor/generateProject/nginxtemplate").read_text(encoding="utf-8")
+        vector = gateway.split("location /vector/ {", 1)[1].split("\n        }", 1)[0]
+        self.assertIn("proxy_set_header Host $http_host;", vector)
+        self.assertIn('proxy_set_header X-Forwarded-Host "{{project_uuid}}.storage.internal";', vector)
+        data_plane = (ROOT / "servidor/volumes/storage-proxy/nginx.conf").read_text(encoding="utf-8")
+        self.assertIn("proxy_set_header Host $http_host;", data_plane)
+
     def test_project_template_enables_real_pgvector_backend(self) -> None:
         env = ENV_TEMPLATE.read_text(encoding="utf-8")
         compose = GLOBAL_COMPOSE.read_text(encoding="utf-8")

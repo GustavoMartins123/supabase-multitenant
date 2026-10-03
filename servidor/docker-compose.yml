@@ -324,6 +324,10 @@ services:
       IMAGE_TRANSFORMATION_ENABLED: ${STORAGE_IMAGE_TRANSFORMATION_ENABLED:?defina STORAGE_IMAGE_TRANSFORMATION_ENABLED}
       IMGPROXY_URL: http://imgproxy:5001
       S3_PROTOCOL_ENABLED: "true"
+      # Tenant routing uses X-Forwarded-Host; SigV4 must verify the original
+      # signed Host (including port), preserved by both Storage proxies.
+      S3_PROTOCOL_NON_CANONICAL_HOST_HEADER: host
+      S3_ALLOW_FORWARDED_HEADER: "false"
       VECTOR_ENABLED: ${STORAGE_VECTOR_ENABLED:?defina STORAGE_VECTOR_ENABLED}
       VECTOR_BUCKET_PROVIDER: pgvector
       VECTOR_DATABASE_CREATE: "false"
