@@ -252,6 +252,12 @@ class BackendResourceProfileContract(unittest.TestCase):
             create.index("grant_platform_reader_on_tenant"),
         )
 
+        clone = (ROOT / 'servidor/generateProject/lib/duplicate_project_impl.sh').read_text(encoding='utf-8')
+        self.assertNotIn('provision_platform_reader "$NEW_DB"', clone)
+        self.assertLess(clone.index('provision_platform_reader_role'), clone.index('< "$DUMP_FILE"'))
+        self.assertLess(clone.index('< "$DUMP_FILE"'), clone.index('grant_platform_reader_on_tenant "$NEW_DB"'))
+        self.assertLess(clone.index('up --build -d'), clone.index('grant_platform_reader_on_tenant "$NEW_DB"'))
+
 
 class StaleRecoveryContract(unittest.TestCase):
     """A recuperacao precisa aguentar um diretorio meio-criado."""

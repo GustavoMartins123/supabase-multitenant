@@ -69,6 +69,8 @@ for variable in POSTGRES_HOST POSTGRES_PASSWORD POSTGRES_PORT MAX_CONCURRENT_USE
 done
 [[ "$MAX_CONCURRENT_USERS" =~ ^[1-9][0-9]*$ ]] \
   || die "MAX_CONCURRENT_USERS deve ser um inteiro positivo"
+[[ "${API_GATEWAY_TOKEN_PROJETO:-}" =~ ^[0-9a-f]{64}$ ]] \
+  || die "API_GATEWAY_TOKEN_PROJETO canonico deve ser fornecido pelo control plane"
 
 ORIGINAL_DB="_supabase_$ORIGINAL_PROJECT"
 NEW_DB="_supabase_$NEW_PROJECT"
@@ -284,7 +286,6 @@ ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":
 SERVICE_TOKEN=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now_epoch,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
 GLOBAL_ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now_epoch,\"exp\":$exp}" "$JWT_SECRET")
 CONFIG_TOKEN_PROJETO=$(openssl rand -hex 32 | tr -d '\n\r')
-API_GATEWAY_TOKEN_PROJETO="${API_GATEWAY_TOKEN_PROJETO:-$(openssl rand -hex 32 | tr -d '\n\r')}"
 FILE_SIZE_LIMIT="$(grep -m1 '^FILE_SIZE_LIMIT=' "$SCRIPT_DIR/.envtemplate" | cut -d= -f2-)"
 ENABLE_IMAGE_TRANSFORMATION="$(grep -m1 '^ENABLE_IMAGE_TRANSFORMATION=' "$SCRIPT_DIR/.envtemplate" | cut -d= -f2-)"
 S3_PROTOCOL_ENABLED="$(grep -m1 '^S3_PROTOCOL_ENABLED=' "$SCRIPT_DIR/.envtemplate" | cut -d= -f2-)"
@@ -326,7 +327,7 @@ CREATED_DB=1
 
 docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
   "REVOKE CONNECT, TEMPORARY ON DATABASE $NEW_DB FROM PUBLIC; GRANT CONNECT, TEMPORARY ON DATABASE $NEW_DB TO pgbouncer; GRANT CONNECT, TEMPORARY ON DATABASE $NEW_DB TO authenticator; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $NEW_DB TO supabase_storage_admin; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $NEW_DB TO supabase_auth_admin;"
-  provision_platform_reader "$NEW_DB"
+provision_platform_reader_role
 
 if [[ "$COPY_MODE" == "with-data" ]]; then
   for source_service in nginx rest auth meta; do
@@ -505,6 +506,7 @@ storage_assert_project_gateway "$PROJECT_UUID" "$NEW_PROJECT" "$SERVICE_TOKEN" \
   || die "Nginx do clone nao resolveu o tenant Storage correto"
 
 vector_sync_project_wrappers "$NEW_PROJECT" || die "Falha ao recriar wrappers vetoriais do clone"
+grant_platform_reader_on_tenant "$NEW_DB"
 provision_tenant_meta_role "$NEW_DB" "$PROJECT_UUID" \
   || die "Falha ao provisionar identidade SQL isolada do clone"
 

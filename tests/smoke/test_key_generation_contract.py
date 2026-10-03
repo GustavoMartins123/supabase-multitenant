@@ -8,6 +8,14 @@ GENERATE = ROOT / "servidor" / "generateProject"
 
 
 class KeyGenerationContractTest(unittest.TestCase):
+    def test_gateway_token_is_required_before_physical_creation(self):
+        for name in ('generate_project_impl.sh', 'duplicate_project_impl.sh'):
+            script = (GENERATE / 'lib' / name).read_text(encoding='utf-8')
+            with self.subTest(script=name):
+                self.assertIn('[[ "${API_GATEWAY_TOKEN_PROJETO:-}" =~ ^[0-9a-f]{64}$ ]]', script)
+                self.assertLess(script.index('API_GATEWAY_TOKEN_PROJETO canonico'), script.index('OUT_DIR='))
+                self.assertNotIn('API_GATEWAY_TOKEN_PROJETO="${API_GATEWAY_TOKEN_PROJETO:-$(openssl', script)
+
     def test_setup_and_runtime_config_require_explicit_internal_hmac_keys(self):
         setup = (ROOT / "setup.sh").read_text(encoding="utf-8")
         studio_example = (ROOT / "studio" / ".env.example").read_text(encoding="utf-8")
