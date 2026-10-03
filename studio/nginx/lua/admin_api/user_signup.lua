@@ -294,7 +294,7 @@ local result, mutation_err = user_store.with_lock(function()
         end
         return error_result(
             ngx.HTTP_BAD_GATEWAY,
-            "User created in Authelia but failed to sync with backend"
+            "User creation rolled back after backend synchronization failed"
         )
     end
 
