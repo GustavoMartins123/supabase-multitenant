@@ -160,6 +160,8 @@ With Docker Desktop and WSL, specify the Windows address published by Docker: `b
 
 For a literal IP endpoint, Traefik serves the explicitly configured IP certificate even when the client sends no DNS SNI. DNS deployments retain strict SNI. Missing certificates abort configuration; clients must verify both the private CA and the destination's certificate identity.
 
+The administrative gateway still connects directly to that IP. Because OpenResty's hostname verifier uses DNS certificate identities, setup also issues the backend identity `supabase-backend.internal` and configures `STUDIO_BACKEND_TLS_NAME` for both Lua HTTPS calls and Nginx proxies. This is the required TLS peer name, not a DNS alias, alternate route or failover target. The private CA and hostname verification remain mandatory. Studio startup rebuilds its images from the current checkout rather than reusing stale local gateway code.
+
 For a fresh Docker Desktop/WSL installation, use `SETUP_DOCKER_DESKTOP_WSL_HOST=<windows-wsl-interface-ip> bash setup.sh single-node <windows-ip>`. This selects a Linux Docker volume for PostgreSQL and publishes its port only on the private WSL interface for the host-agent. Do not use the Wi-Fi/LAN address for this variable. Existing databases require an explicit backup/restore into the new volume before selecting this profile; setup does not migrate data.
 
 This profile uses `servidor/host-agent/.docker` for both startup and unattended host-agent builds, without modifying the operator's Docker credentials. The generated configuration pulls public images anonymously. For private registries, authenticate explicitly with `docker --config servidor/host-agent/.docker login <registry>`; the Windows credential helper is not used by the Linux service.

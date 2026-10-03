@@ -129,11 +129,23 @@ class InternalServiceKeyHardeningTest(unittest.TestCase):
             nginx,
         )
         self.assertIn(
-            'os.getenv("SERVICE_KEY_VERIFY_TLS") or "true"',
+            'M.verify_internal = true',
             outbound_tls,
         )
         self.assertIn("options.ssl_verify = M.verify_internal", outbound_tls)
         self.assertIn("outbound_tls.apply_internal", client)
+
+    def test_backend_tls_identity_dispatch_runs_in_lua(self) -> None:
+        runtime = lua_runtime()
+        if runtime is None:
+            raise unittest.SkipTest("runtime Lua nao esta instalado")
+        subprocess.run(
+            [runtime, str(ROOT / "tests/smoke/test_backend_tls_identity.lua")],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
     def test_fernet_constructor_and_decrypt_are_both_protected(self) -> None:
         client = read(LUA / "security" / "get_service_key.lua")

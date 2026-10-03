@@ -37,6 +37,15 @@ class SetupTopologyProfileContractTests(unittest.TestCase):
         self.assertIn('safe_sed "s|^MMDB_PATH=.*', setup)
         self.assertIn('safe_sed "s|^BACKUP_DIR=.*', setup)
 
+    def test_ip_deployments_use_one_dns_identity_for_lua_tls(self) -> None:
+        setup = (ROOT / "setup.sh").read_text(encoding="utf-8")
+        start = (ROOT / "start.sh").read_text(encoding="utf-8")
+        self.assertIn('BACKEND_HOST="supabase-backend.internal"', setup)
+        self.assertIn('RUNTIME_DNS_ARGS=(--server-dns-host "$BACKEND_HOST")', setup)
+        self.assertIn('SERVER_DOMAIN=${PROTO}://${SERVER_IP}', setup)
+        self.assertIn('STUDIO_BACKEND_TLS_NAME="$BACKEND_HOST"', setup)
+        self.assertIn('"${STUDIO_COMPOSE[@]}" up --build -d', start)
+
 
 if __name__ == "__main__":
     unittest.main()

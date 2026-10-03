@@ -41,7 +41,7 @@ class InternalTlsHardeningTest(unittest.TestCase):
         helper = read("studio/nginx/lua/utils/outbound_tls.lua")
         self.assertIn("lua_ssl_trusted_certificate /var/run/studio-ca-bundle.pem;", nginx)
         self.assertIn("outbound_tls.apply_internal", lua)
-        self.assertIn('os.getenv("SERVICE_KEY_VERIFY_TLS") or "true"', helper)
+        self.assertIn('M.verify_internal = true', helper)
         self.assertIn("options.ssl_verify = M.verify_internal", helper)
         self.assertIn("options.ssl_server_name = hostname(url)", helper)
 

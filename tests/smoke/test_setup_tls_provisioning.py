@@ -29,6 +29,7 @@ class SetupTlsProvisioningTests(unittest.TestCase):
                     secrets_root=root / "secrets",
                     server_env=root / "missing.env",
                     server_host="192.0.2.10",
+                    server_dns_host="supabase-backend.internal",
                     server_tls_root=root / "traefik",
                 )
             for leaf in (root / "ssl/server.pem", root / "traefik/tls.crt"):
@@ -41,6 +42,17 @@ class SetupTlsProvisioningTests(unittest.TestCase):
             self.assertTrue((root / "traefik/tls.key").is_file())
             self.assertFalse((root / "traefik/server.key").exists())
             self.assertFalse((root / "traefik/ca.key").exists())
+            result = subprocess.run(
+                ["openssl", "verify", "-CAfile", str(root / "ssl/ca.pem"),
+                 "-verify_hostname", "supabase-backend.internal", str(root / "traefik/tls.crt")],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_internal_dns_identity_rejects_literal_ips_and_configuration_injection(self):
+        for identity in ("192.0.2.10", "backend.internal\nDNS:other.internal", "backend.internal:443"):
+            with self.subTest(identity=identity), self.assertRaises(runtime.RuntimeConfigError):
+                runtime.certificate_sans("192.0.2.10", identity)
 
 
 if __name__ == "__main__":

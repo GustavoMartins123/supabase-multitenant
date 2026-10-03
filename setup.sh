@@ -606,6 +606,14 @@ PYEOF
     safe_sed "s|^PROJECTS_API_HMAC_SECRET=.*|PROJECTS_API_HMAC_SECRET=$PROJECTS_API_HMAC_SECRET|g" servidor/.env
     safe_sed "s|PROJECT_DELETE_PASSWORD=pass|PROJECT_DELETE_PASSWORD=$PROJECT_DELETE_PASSWORD|g" servidor/.env
     PROTO="https"
+    BACKEND_HOST="$SERVER_IP"
+    STUDIO_BACKEND_TLS_NAME=""
+    RUNTIME_DNS_ARGS=()
+    if [[ "$(validate_input "$SERVER_IP")" == "ip" ]]; then
+        BACKEND_HOST="supabase-backend.internal"
+        STUDIO_BACKEND_TLS_NAME="$BACKEND_HOST"
+        RUNTIME_DNS_ARGS=(--server-dns-host "$BACKEND_HOST")
+    fi
     safe_sed "s|^TRAEFIK_ENABLE_TLS=.*|TRAEFIK_ENABLE_TLS=true|g" servidor/.env
     safe_sed "s|^TRAEFIK_TLS_MODE=.*|TRAEFIK_TLS_MODE=file|g" servidor/.env
     safe_sed "s|SERVER_URL=pass|SERVER_URL=${SERVER_IP}|g" servidor/.env
@@ -644,6 +652,14 @@ PYEOF
     safe_sed "s|^LOGFLARE_PRIVATE_ACCESS_TOKEN=.*|LOGFLARE_PRIVATE_ACCESS_TOKEN=$LOGFLARE_PRIVATE_ACCESS_TOKEN|g" studio/.analytics.env
     safe_sed "s|POSTGRES_NGINX_PASSWORD=pass|POSTGRES_NGINX_PASSWORD=$POSTGRES_NGINX_PASSWORD|g" studio/.env
     safe_sed "s|^SERVER_DOMAIN=.*|SERVER_DOMAIN=${PROTO}://${SERVER_IP}|g" studio/.env
+    python3 - studio/.env "$STUDIO_BACKEND_TLS_NAME" <<'PYEOF'
+from pathlib import Path
+import sys
+from tools.configure_studio_runtime import _set_env_value, atomic_write
+path = Path(sys.argv[1])
+content = _set_env_value(path.read_text(encoding="utf-8"), "STUDIO_BACKEND_TLS_NAME", sys.argv[2])
+atomic_write(path, content, mode=0o600, replace=True)
+PYEOF
     if [[ "$SERVER_IP" != "$LOCAL_IP" ]]; then
         safe_sed "s|^VECTOR_FLUENTD_ADDRESS=.*|VECTOR_FLUENTD_ADDRESS=${SERVER_IP}:24224|g" studio/.env
     fi
@@ -704,6 +720,7 @@ PYEOF
     python3 tools/configure_studio_runtime.py \
         --studio-origin "https://${LOCAL_IP}:${STUDIO_HTTPS_PORT}" \
         --server-host "$SERVER_IP" \
+        "${RUNTIME_DNS_ARGS[@]}" \
         --force
 
     print_status "Copiando certificado do Studio para o servidor Python..."

@@ -232,7 +232,7 @@ def ensure_secret_files(root: Path, *, rotate: bool) -> tuple[Path, ...]:
     return tuple(written)
 
 
-def certificate_sans(host: str) -> str:
+def certificate_sans(host: str, dns_host: str | None = None) -> str:
     entries = ["DNS:authelia", "DNS:nginx", "DNS:localhost", "IP:127.0.0.1"]
     try:
         address = ipaddress.ip_address(host)
@@ -242,6 +242,10 @@ def certificate_sans(host: str) -> str:
         item = f"IP:{address.compressed}"
     if item not in entries:
         entries.append(item)
+    if dns_host is not None:
+        if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9-]*(?:\.[a-zA-Z0-9][a-zA-Z0-9-]*)+", dns_host):
+            raise RuntimeConfigError("identidade DNS interna invalida")
+        entries.append(f"DNS:{dns_host.lower()}")
     return ",".join(entries)
 
 
@@ -291,6 +295,7 @@ def issue_server_certificate(
     host: str,
     ca_certificate: Path,
     ca_key: Path,
+    dns_host: str | None = None,
 ) -> None:
     """Emite a folha servida por nginx e Authelia, assinada pela CA.
 
@@ -312,7 +317,7 @@ def issue_server_certificate(
                     "basicConstraints=critical,CA:FALSE",
                     "keyUsage=critical,digitalSignature,keyEncipherment",
                     "extendedKeyUsage=serverAuth",
-                    f"subjectAltName={certificate_sans(host)}",
+                    f"subjectAltName={certificate_sans(host, dns_host)}",
                     "",
                 )
             ),
@@ -411,7 +416,12 @@ def configure_runtime(
     server_env: Path = SERVER_ENV,
     server_host: str | None = None,
     server_tls_root: Path = REPO_ROOT / "servidor/traefik/certs/traefik",
+    server_dns_host: str | None = None,
 ) -> None:
+    if server_dns_host is not None:
+        if server_host is None:
+            raise RuntimeConfigError("identidade DNS interna exige --server-host")
+        certificate_sans(server_host, server_dns_host)
     origin, host = parse_origin(studio_origin)
     try:
         template_text = template.read_text(encoding="utf-8")
@@ -438,6 +448,7 @@ def configure_runtime(
             host=validated_host,
             ca_certificate=ssl_root / "ca.pem",
             ca_key=secrets_root / CA_KEY_NAME,
+            dns_host=server_dns_host,
         )
         os.replace(server_tls_root / "server.pem", server_tls_root / "tls.crt")
         os.replace(server_tls_root / "server.key", server_tls_root / "tls.key")
@@ -477,6 +488,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--studio-origin", required=True)
     parser.add_argument("--server-host", help="emite TLS do Traefik com a mesma CA interna")
+    parser.add_argument("--server-dns-host", help="identidade DNS canonica do backend administrativo")
     parser.add_argument(
         "--force",
         action="store_true",
@@ -507,6 +519,7 @@ def main(argv: list[str] | None = None) -> int:
             rotate_secrets=args.rotate_secrets,
             rotate_ca=args.rotate_ca,
             server_host=args.server_host,
+            server_dns_host=args.server_dns_host,
         )
         return 0
     except (RuntimeConfigError, OSError) as exc:
