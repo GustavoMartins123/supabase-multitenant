@@ -56,6 +56,8 @@ class StudioRuntimeContractTests(unittest.TestCase):
         self.assertIn('uri:sub(1, 5) == "/api/"', handler)
         self.assertIn('uri:sub(1, 15) == "/_internal_api/"', handler)
         self.assertIn("ngx.HTTP_UNAUTHORIZED", handler)
+        self.assertIn('ngx.var.request_uri', handler)
+        self.assertNotIn('ngx.var.uri or', handler)
         self.assertIn('content_type = "application/json; charset=utf-8"', handler)
         self.assertIn("ngx.redirect", handler)
 
