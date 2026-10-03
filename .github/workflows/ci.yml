@@ -146,6 +146,34 @@ jobs:
             --browser-image session-browser-ci:local \
             --ui-image ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v3
 
+  physical-lifecycle-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build production lifecycle dependencies
+        run: |
+          docker build -t servidor-db:latest servidor/volumes/db
+          docker build -t servidor-realtime:latest -f servidor/volumes/realtime/Dockerfile servidor
+          docker build -t servidor-projects-api:latest -f servidor/api-internal/Dockerfile servidor
+          docker tag servidor-projects-api:latest servidor-control-plane-migrations:latest
+          docker build -t servidor-key-authorizer:latest -f servidor/key-authorizer/Dockerfile servidor
+          docker build -t p1-executor-ci:local -f tests/integration/fixtures/p1_executor.Dockerfile tests/integration/fixtures
+      - name: Explicit production service images
+        run: |
+          docker pull supabase/edge-runtime:v1.74.2
+          docker pull supabase/supavisor:2.9.7
+          docker pull supabase/storage-api:v1.61.12
+          docker pull nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim
+          docker pull darthsim/imgproxy:v4.0.11
+          docker pull supabase/gotrue:v2.193.0-rc.3
+          docker pull postgrest/postgrest:v14.14
+      - name: Required physical script lifecycle and real Storage/Vectors drill
+        run: python tools/run_p1_lifecycle_tests.py --executor-image p1-executor-ci:local
+
   flutter:
     runs-on: ubuntu-latest
     timeout-minutes: 25

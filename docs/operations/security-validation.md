@@ -22,7 +22,7 @@ is proven over TCP, not initdb's temporary Unix-socket server. The directory
 fixture uses the production Lua/YAML/lock/sequence/HMAC code; Authelia's ID-export
 subprocess is mocked and its sync destination acknowledges fixture snapshots.
 
-CI has two non-optional jobs in `ci.yml`:
+CI has three non-optional security jobs in `ci.yml`:
 
 - `authorization-security-live`: builds the production Studio/OpenResty image,
   obtains PostgreSQL 15 explicitly, then runs API/agent authorization, revocation,
@@ -31,6 +31,9 @@ CI has two non-optional jobs in `ci.yml`:
 - `functions-security-live`: obtains the explicit Python/Edge Runtime images and
   checks the real Linux projection/lock contract and real runtime worker
   isolation, including credential changes on the next request.
+- `physical-lifecycle-live`: builds the production lifecycle dependencies and
+  runs the privileged physical script drill described below, including real
+  Storage objects, Vectors, FDW SigV4 and Functions projection checks.
 
 The local smoke suite still has optional platform/load/DSN tests. A green smoke
 run or Compose model validation is not a substitute for these mandatory runners.
@@ -64,6 +67,49 @@ does not replace or prove any project/Storage mutation. This closes the real-coo
 CSRF boundary, not the full project permission/lifecycle acceptance below. Private
 installation env files are never mounted; cleanup failure is an explicit error.
 
+## Physical script lifecycle, Storage and Vectors
+
+```bash
+docker build -t servidor-db:latest servidor/volumes/db
+docker build -t servidor-realtime:latest -f servidor/volumes/realtime/Dockerfile servidor
+docker build -t servidor-projects-api:latest -f servidor/api-internal/Dockerfile servidor
+docker tag servidor-projects-api:latest servidor-control-plane-migrations:latest
+docker build -t servidor-key-authorizer:latest -f servidor/key-authorizer/Dockerfile servidor
+docker build -t p1-executor:local -f tests/integration/fixtures/p1_executor.Dockerfile tests/integration/fixtures
+# Obtain the exact service images listed in physical-lifecycle-live first.
+python tools/run_p1_lifecycle_tests.py --executor-image p1-executor:local
+```
+
+This drill needs an unused canonical Docker namespace throughout execution.
+It refuses preexisting production container/network names before creating any
+resources; do not run alongside an installation or another physical drill.
+There is no installation-path or external-DSN option. Only tracked source from a
+narrow allowlist is copied into a uniquely labelled engine-local volume. The
+privileged executor uses the socket to run the real lifecycle scripts; none of
+the HTTP services receives it. Cleanup checks the exclusive run label again
+before removal and never performs global pruning.
+
+The stack uses production-derived Compose services, database initialization,
+migrations, authorizer, shared Storage data/control networks, Edge Runtime and
+generated tenant gateways. Test-only changes concern logging, resource ownership
+and runtime source mounts. Synthetic control-plane rows and opaque-key activation
+are seeded with the real activation primitive before invoking the scripts.
+
+The drill checks create, clone with data/new UUID, rename, internal JWT renewal,
+backup, restore and **delete-files only**. Real database markers, private Storage
+objects and vector data survive clone/rename and are recovered after mutation by
+restore. The real FDW import exercises SigV4 through both proxies; valid signed
+requests succeed, altered signatures and source credentials sent through the
+clone gateway are rejected, including a forged tenant routing header. Every
+mutating lifecycle checks the exact 0600 Functions projection against the real
+worker. The surviving clone remains usable after file deletion of the other
+project. Missing/invalid canonical gateway tokens fail before physical creation.
+
+This is the **privileged script boundary**, not an authorized browser/API/agent
+lifecycle. Delete does not exercise database/control-plane/Storage cleanup.
+It does not simulate split-node transport or prove the Studio permission matrix.
+Local passes and a configured CI job do not prove a remote CI execution.
+
 ## Remaining end-to-end acceptance
 
 These boundary runners do **not** complete the full acceptance matrix. Still
@@ -71,8 +117,9 @@ required before claiming all P1 security integration is complete:
 
 - Studio/Lua through real Traefik, API/authorizer and REST/GraphQL/Storage/Vectors;
 - owner/admin/member/ex-member/disabled permissions with real Storage;
-- physical create/duplicate/rename/rotate/restore/delete using the new projection
-  contract, both single-node and split-node;
+- full API/agent create/duplicate/rename/rotate/restore/delete using the new
+  projection contract, both single-node and split-node (the physical script
+  boundary above is covered separately);
 - externally reachable HTTPS directory callback and host-agent execution in both
   supported topologies, including certificate validation and outage/revocation.
 
