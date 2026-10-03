@@ -2600,6 +2600,13 @@
             "title": "Project Uuid",
             "type": "string"
           },
+          "public_ref": {
+            "maxLength": 20,
+            "minLength": 20,
+            "pattern": "^[a-z]{20}$",
+            "title": "Public Ref",
+            "type": "string"
+          },
           "storage_limit_token": {
             "title": "Storage Limit Token",
             "type": "string"
@@ -2620,6 +2627,7 @@
           "project_uuid",
           "tenant_uuid",
           "name",
+          "public_ref",
           "display_name",
           "file_size_limit",
           "storage_limit_token",

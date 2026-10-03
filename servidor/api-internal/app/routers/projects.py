@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 import asyncpg
 
@@ -61,6 +61,7 @@ from app.project_identity import (
     parse_tenant_uuid,
 )
 from app.project_secret_service import store_project_secrets
+from app.project_public_ref import generate_public_ref
 from app.runtime_config import (
     AUTOMATIC_KEY_ROTATION_LEAD_DAYS,
     KEY_EXPIRY_WARNING_DAYS,
@@ -80,6 +81,7 @@ class ProjectListItem(BaseModel):
     project_uuid: str
     tenant_uuid: str | None
     name: str
+    public_ref: str = Field(pattern=r"^[a-z]{20}$", min_length=20, max_length=20)
     display_name: str | None
     file_size_limit: str
     storage_limit_token: str
@@ -133,7 +135,7 @@ async def list_projects(
     async with pool.acquire() as conn:
         async with conn.transaction():
             rows = await conn.fetch("""
-                SELECT p.id, p.tenant_uuid, p.name, p.display_name,
+                SELECT p.id, p.tenant_uuid, p.name, p.public_ref, p.display_name,
                        p.automatic_key_rotation_enabled,
                        p.automatic_key_rotation_blocked_at,
                        p.automatic_key_rotation_last_error,
@@ -175,6 +177,7 @@ async def list_projects(
                         str(r["tenant_uuid"]) if r["tenant_uuid"] else None
                     ),
                     "name": r["name"],
+                    "public_ref": r["public_ref"],
                     "display_name": r["display_name"],
                     "file_size_limit": _get_project_file_size_limit(r["name"]),
                     "storage_limit_token": _get_project_storage_limit_token(r["name"]),
@@ -253,16 +256,18 @@ async def create_project(
             if existing:
                 raise HTTPException(status_code=409, detail="Project already exists")
             project_id = uuid.uuid4()
+            public_ref = generate_public_ref()
             try:
                 await conn.execute(
                     """
-                    INSERT INTO projects(id, tenant_uuid, name, owner_id, resource_profile)
-                    VALUES($1, $1, $2, $3, $4)
+                    INSERT INTO projects(id, tenant_uuid, name, owner_id, resource_profile, public_ref)
+                    VALUES($1, $1, $2, $3, $4, $5)
                     """,
                     project_id,
                     name,
                     auth_user["db_user_id"],
                     body.resource_profile,
+                    public_ref,
                 )
                 await conn.execute(
                         """
@@ -271,8 +276,13 @@ async def create_project(
                         """,
                         project_id, auth_user["db_user_id"]
                     )
-            except asyncpg.UniqueViolationError:
-                raise HTTPException(status_code=409, detail="Project already exists")
+            except asyncpg.UniqueViolationError as exc:
+                detail = (
+                    "Public project reference already allocated"
+                    if exc.constraint_name == "projects_public_ref_key"
+                    else "Project already exists"
+                )
+                raise HTTPException(status_code=409, detail=detail) from exc
             job_id = await _create_project_job(
                 pool,
                 name,
@@ -280,6 +290,7 @@ async def create_project(
                 action="create",
                 payload={
                     "project_name": name,
+                    "public_ref": public_ref,
                     "actor_user_id": str(auth_user["db_user_id"]),
                     "tenant_uuid": str(project_id),
                 },
@@ -300,7 +311,9 @@ async def create_project(
         if position == 0
         else f"Criação enfileirada. Existem {position} ações antes desta na fila para {name}."
     )
-    return await _serialize_queued_job(pool, job_id, position, message)
+    return await _serialize_queued_job(
+        pool, job_id, position, message, extra={"public_ref": public_ref}
+    )
 
 
 @router.post("/api/projects/duplicate", status_code=202, response_model=QueuedJobResponse)
@@ -340,26 +353,33 @@ async def duplicate_project(
                 raise HTTPException(409, "Nome de projeto já existe")
 
             project_id = uuid.uuid4()
+            public_ref = generate_public_ref()
             try:
                 await conn.execute(
                     """
                     INSERT INTO projects(id, tenant_uuid, name, owner_id,
-                                         resource_profile)
-                    SELECT $1, $1, $2, $3, resource_profile
+                                         resource_profile, public_ref)
+                    SELECT $1, $1, $2, $3, resource_profile, $5
                     FROM projects WHERE id = $4
                     """,
                     project_id,
                     new_name,
                     auth_user["db_user_id"],
                     project_row["id"],
+                    public_ref,
                 )
 
                 await conn.execute("""
                     INSERT INTO project_members(project_id, user_id, role)
                     VALUES($1, $2, 'admin')
                 """, project_id, auth_user["db_user_id"])
-            except asyncpg.UniqueViolationError:
-                raise HTTPException(409, "Nome de projeto já existe")
+            except asyncpg.UniqueViolationError as exc:
+                detail = (
+                    "Public project reference already allocated"
+                    if exc.constraint_name == "projects_public_ref_key"
+                    else "Nome de projeto já existe"
+                )
+                raise HTTPException(409, detail) from exc
 
             job_id = await _create_project_job(
                 pool,
@@ -371,6 +391,7 @@ async def duplicate_project(
                     "original_uuid": str(project_row["id"]),
                     "original_tenant_uuid": str(project_row["tenant_uuid"]),
                     "new_name": new_name,
+                    "public_ref": public_ref,
                     "actor_user_id": str(auth_user["db_user_id"]),
                     "copy_data": body.copy_data,
                     "tenant_uuid": str(project_id),
@@ -397,7 +418,9 @@ async def duplicate_project(
         if position == 0
         else f"Duplicação enfileirada. Existem {position} ações antes desta na fila para {new_name}."
     )
-    return await _serialize_queued_job(pool, job_id, position, message)
+    return await _serialize_queued_job(
+        pool, job_id, position, message, extra={"public_ref": public_ref}
+    )
 
 @router.delete("/api/projects/{project_name}", response_model=QueuedJobResponse)
 async def delete_project(
