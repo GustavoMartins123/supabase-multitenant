@@ -318,6 +318,8 @@ async def ensure_platform_meta_admin_role(
                 $$;
 
                 GRANT pg_read_all_data TO platform_meta_admin;
+                GRANT EXECUTE ON FUNCTION public.drop_project_replication_slot(text,text)
+                  TO platform_meta_admin;
 
                 DO $$
                 DECLARE

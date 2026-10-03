@@ -274,7 +274,7 @@ async def drop_supabase_replication_slots(
 
     async def drop_slot(slot: str) -> None:
         try:
-            await conn.execute("SELECT pg_drop_replication_slot($1)", slot)
+            await conn.execute("SELECT public.drop_project_replication_slot($1, $2)", project_name, slot)
         except Exception as exc:
             if "does not exist" not in str(exc):
                 print(f"[delete_project] drop slot {slot}: {exc}")
