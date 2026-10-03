@@ -258,6 +258,8 @@ gunzip -c "$SRC_DIR/realtime-structure.sql.gz" \
   | docker exec -i supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$DB" >/dev/null
 gunzip -c "$SRC_DIR/realtime-migrations.sql.gz" \
   | docker exec -i supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$DB" >/dev/null
+docker exec -i supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$DB" \
+  < "$PROJECT_ROOT/volumes/db/graphql.sql"
 
 docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$DB" <<'SQL'
 CREATE EXTENSION IF NOT EXISTS vector SCHEMA public;

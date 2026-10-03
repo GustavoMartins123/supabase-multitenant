@@ -370,6 +370,8 @@ if [[ "$COPY_MODE" == "with-data" ]]; then
 fi
 
 docker exec -i supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$NEW_DB" < "$DUMP_FILE"
+docker exec -i supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$NEW_DB" \
+  < "$PROJECT_ROOT/volumes/db/graphql.sql"
 [[ -s "$RT_STRUCTURE_FILE" ]] || die "Dump da estrutura Realtime ficou vazio"
 [[ -s "$RT_MIGRATIONS_FILE" ]] || die "Dump das migrations Realtime ficou vazio"
 docker exec -i supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$NEW_DB" < "$RT_STRUCTURE_FILE"

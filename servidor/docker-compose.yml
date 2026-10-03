@@ -47,6 +47,12 @@ services:
       #################################
       # create database template
       - ./volumes/db/create_template.sh://docker-entrypoint-initdb.d/zzz-create_template.sh:Z
+      - type: bind
+        source: ./volumes/db/graphql.sql
+        target: /etc/supabase/graphql.sql
+        read_only: true
+        bind:
+          create_host_path: false
       #################################
       # Use named volume to persist pgsodium decryption key between restarts
       - db-config:/etc/postgresql-custom
