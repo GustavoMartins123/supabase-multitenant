@@ -18,6 +18,8 @@ import urllib.error
 import urllib.request
 import uuid
 
+from cryptography.fernet import Fernet
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -71,6 +73,7 @@ def main() -> None:
             *mount(ROOT / 'studio/nginx/lua', '/workspace/studio/nginx/lua'),
             *mount(fixtures / 'studio_directory.nginx.conf', '/workspace/tests/integration/fixtures/studio_directory.nginx.conf'),
             *mount(fixtures / 'studio_directory_start.sh', '/workspace/tests/integration/fixtures/studio_directory_start.sh'),
+            *mount(fixtures / 'fernet_clock_probe.lua', '/workspace/tests/integration/fixtures/fernet_clock_probe.lua'),
             '--entrypoint', 'sh', args.studio_image, '/workspace/tests/integration/fixtures/studio_directory_start.sh')
         started.append(directory)
         url = 'http://127.0.0.1:' + port(directory, '8080/tcp')
@@ -88,6 +91,20 @@ def main() -> None:
                 raise RuntimeError('OpenResty startup timeout: ' + run('docker', 'logs', directory))
             time.sleep(0.5)
         dsn = f'postgresql://{args.postgres_user}:{password}@127.0.0.1:{port(database, "5432/tcp")}/postgres'
+        issued = int(run('docker', 'exec', directory, 'date', '+%s').strip())
+        key = Fernet.generate_key()
+        cipher = Fernet(key)
+        tokens = {'key': key.decode(),
+                  'valid': cipher.encrypt_at_time(b'sb_secret_synthetic', issued).decode(),
+                  'future': cipher.encrypt_at_time(b'sb_secret_synthetic', issued + 60).decode(),
+                  'expired': cipher.encrypt_at_time(b'sb_secret_synthetic', issued - 120).decode()}
+        checked = subprocess.run(['docker', 'exec', '-i', directory, '/usr/local/openresty/bin/resty',
+                                  '-I', '/workspace/studio/nginx/lua',
+                                  '/workspace/tests/integration/fixtures/fernet_clock_probe.lua'],
+                                 input=json.dumps(tokens), text=True, capture_output=True)
+        if checked.returncode:
+            raise RuntimeError('Required actual OpenResty Fernet clock/interoperability checks failed')
+        print(checked.stdout.strip())
         # Separate interpreters preserve each module's import-time environment.
         script = '''import importlib.util, os, sys, unittest
 os.environ['CONTROL_PLANE_TEST_DSN'] = sys.argv[2]
