@@ -95,7 +95,7 @@ class TenantContainersDoNotReceiveTheGlobalEnvTest(unittest.TestCase):
 
         functions = service_block(self.server, "functions")
         for name in ("POSTGRES_USER", "POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_PASSWORD"):
-            self.assertIn(f"{name}: ${{{name}}}", functions)
+            self.assertNotIn(f"{name}:", functions)
 
         auth = service_block(self.template, "auth")
         self.assertIn(
@@ -117,7 +117,9 @@ class EdgeFunctionWorkersGetOnlyTheirTenantEnvTest(unittest.TestCase):
         # `...globalEnv` entregava as 133 variaveis do servidor ao worker que
         # executa a function, e de la para `Deno.env`.
         self.assertNotIn("...globalEnv", self.main)
-        self.assertIn("let workerEnv: Record<string, string> = {}", self.main)
+        self.assertIn("const workerEnv = tenant.env", self.main)
+        self.assertNotIn("globalEnv", self.main)
+        self.assertNotIn("tenantCache", self.main)
 
     def test_worker_env_carries_the_tenant_contract(self) -> None:
         for name in (

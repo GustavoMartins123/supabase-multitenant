@@ -42,12 +42,12 @@ class F01FunctionsDsn(unittest.TestCase):
             with self.subTest(key=key):
                 self.assertIn(key, self.source)
 
-    def test_compose_functions_dsn_stays_pooler_scoped(self) -> None:
+    def test_compose_functions_does_not_receive_a_cluster_dsn(self) -> None:
         compose = (ROOT / "servidor/docker-compose.yml").read_text(encoding="utf-8")
-        block = compose.split("SUPABASE_DB_URL:", 1)[1].split("\n", 1)[0]
-        self.assertIn("${FUNCTIONS_DB_USER}", block)
-        self.assertIn("${POSTGRES_POOLER}", block)
-        self.assertNotIn("@${POSTGRES_HOST}", block)
+        block = compose.split("\n  functions:",1)[1].split("\n  storage:",1)[0]
+        self.assertNotIn("SUPABASE_DB_URL", block)
+        self.assertNotIn("POSTGRES_PASSWORD", block)
+        self.assertNotIn("JWT_SECRET", block)
 
 
 class F02SharedPasswordScope(unittest.TestCase):
