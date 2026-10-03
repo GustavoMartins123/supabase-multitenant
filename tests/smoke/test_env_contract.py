@@ -13,6 +13,7 @@ import pathlib
 import subprocess
 import sys
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 TOOL = ROOT / "tools" / "check-env-contract.py"
@@ -185,9 +186,11 @@ class EnvComposeEnvSynthesisTest(unittest.TestCase):
 
         tool = load_tool()
         with tempfile.TemporaryDirectory() as tmp:
-            target = tool._example_env_for_compose(
-                "studio/.env.example", pathlib.Path(tmp)
-            )
+            root = pathlib.Path(tmp)
+            (root / "studio").mkdir()
+            (root / "studio/.env.example").write_text("STUDIO_GATEWAY_HMAC_SECRET=\nSERVICE_KEY_CACHE_TTL_SECONDS=60\n", encoding="utf-8")
+            with mock.patch.object(tool, "ROOT", root):
+                target = tool._example_env_for_compose("studio/.env.example", root)
             values = tool.parse_env_file(target)
             self.assertEqual(
                 values["STUDIO_GATEWAY_HMAC_SECRET"], "dummy"

@@ -118,11 +118,12 @@ class StorageVectorLifecycleIntegrationTests(unittest.TestCase):
         self.assertIn('project_ref:match("^[a-z_][a-z0-9_]*$")', pg_meta)
 
     def test_project_ref_resolver_accepts_explicit_path_and_rejects_mismatch(self) -> None:
+        container = os.environ.get("STUDIO_LUA_TEST_CONTAINER")
         runtime = shutil.which("lua5.1") or shutil.which("lua") or shutil.which("resty")
-        if runtime is None:
+        if not container and runtime is None:
             self.skipTest("runtime Lua nao esta instalado")
 
-        lua_root = STUDIO_LUA.as_posix()
+        lua_root = "/workspace/studio/nginx/lua" if container else STUDIO_LUA.as_posix()
         script = f'''
 package.path = "{lua_root}/?.lua;{lua_root}/?/init.lua;" .. package.path
 _G.ngx = {{
@@ -141,7 +142,10 @@ local mismatch, mismatch_err = resolver.resolve()
 assert(mismatch == nil)
 assert(mismatch_err == "project_ref_mismatch")
 '''
-        subprocess.run([runtime, "-e", script], check=True, env=os.environ.copy())
+        if container:
+            subprocess.run(["docker", "exec", "-i", container, "/usr/local/openresty/luajit/bin/luajit", "-"], input=script, text=True, check=True, env=os.environ.copy())
+        else:
+            subprocess.run([runtime, "-e", script], check=True, env=os.environ.copy())
 
     def test_python_and_shell_syntax(self) -> None:
         asgi_path = ROOT / "servidor/api-internal/app/asgi.py"
