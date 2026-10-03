@@ -74,6 +74,7 @@ def main() -> None:
             *mount(fixtures / 'studio_directory.nginx.conf', '/workspace/tests/integration/fixtures/studio_directory.nginx.conf'),
             *mount(fixtures / 'studio_directory_start.sh', '/workspace/tests/integration/fixtures/studio_directory_start.sh'),
             *mount(fixtures / 'fernet_clock_probe.lua', '/workspace/tests/integration/fixtures/fernet_clock_probe.lua'),
+            *mount(fixtures / 'identifiers_batch_probe.lua', '/workspace/tests/integration/fixtures/identifiers_batch_probe.lua'),
             '--entrypoint', 'sh', args.studio_image, '/workspace/tests/integration/fixtures/studio_directory_start.sh')
         started.append(directory)
         url = 'http://127.0.0.1:' + port(directory, '8080/tcp')
@@ -104,6 +105,13 @@ def main() -> None:
                                  input=json.dumps(tokens), text=True, capture_output=True)
         if checked.returncode:
             raise RuntimeError('Required actual OpenResty Fernet clock/interoperability checks failed')
+        print(checked.stdout.strip())
+        checked = subprocess.run(['docker', 'exec', directory, '/usr/local/openresty/bin/resty',
+                                  '-I', '/workspace/studio/nginx/lua',
+                                  '/workspace/tests/integration/fixtures/identifiers_batch_probe.lua'],
+                                 text=True, capture_output=True)
+        if checked.returncode:
+            raise RuntimeError('Required actual OpenResty identity batch checks failed: ' + checked.stderr)
         print(checked.stdout.strip())
         # Separate interpreters preserve each module's import-time environment.
         script = '''import importlib.util, os, sys, unittest

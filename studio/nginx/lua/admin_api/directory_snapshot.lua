@@ -19,6 +19,13 @@ function M.read_locked(assign_sequence)
     assert(cjson.array_mt, "cjson array metatable is required")
     local users = setmetatable({}, cjson.array_mt)
     local seen_email = {}
+    local usernames = {}
+    for username in pairs(data.users) do
+        if username ~= "__bootstrap_placeholder__" then usernames[#usernames + 1] = username end
+    end
+    table.sort(usernames)
+    local user_ids, _, id_err = identifiers.ensure_identifiers(usernames)
+    if not user_ids then return nil, id_err end
     for username, attr in pairs(data.users) do
         if username ~= "__bootstrap_placeholder__" then
             if type(attr) ~= "table" or (attr.groups ~= nil and type(attr.groups) ~= "table") then return nil, "invalid directory user" end
@@ -26,8 +33,8 @@ function M.read_locked(assign_sequence)
             local groups = admin_groups.parse(table.concat(attr.groups or {}, ","))
             if not groups then return nil, "invalid directory groups" end
             setmetatable(groups, cjson.array_mt)
-            local user_id, _, id_err = identifiers.ensure_identifier(username)
-            if not user_id then return nil, id_err end
+            local user_id = user_ids[username]
+            if not user_id then return nil, "canonical user identifier absent" end
             local active = false
             for _, group in ipairs(groups) do if group == "active" then active = true end end
             local email = identity.normalize_email(attr.email or "")

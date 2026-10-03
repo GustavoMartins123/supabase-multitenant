@@ -105,6 +105,17 @@ class AutheliaYamlConcurrencyContractTests(unittest.TestCase):
         self.assertIn("file_store.atomic_write(IDS_PATH, serialized, FILE_MODE)", source)
         self.assertIn("os.rename(tmp_path, IDS_PATH)", source)
 
+    def test_directory_batches_fresh_identifier_reads_without_missing_file_substitution(self) -> None:
+        source = (ADMIN / "directory_snapshot.lua").read_text(encoding="utf-8")
+        self.assertIn("identifiers.ensure_identifiers(usernames)", source)
+        self.assertNotIn("identifiers.ensure_identifier(username)", source)
+        identity_source = (ADMIN / "authelia_identifiers.lua").read_text(encoding="utf-8")
+        self.assertNotIn("return { identifiers = {} }", identity_source)
+        self.assertNotIn("document.identifiers = {}", identity_source)
+        self.assertIn('return nil, "identidade openid vazia ou duplicada"', identity_source)
+        self.assertIn('return nil, nil, "username duplicado"', identity_source)
+        self.assertIn("local function index_document(document)", identity_source)
+
     def test_periodic_full_directory_reconciliation_uses_same_lock(self) -> None:
         source = INIT_WORKER.read_text(encoding="utf-8")
         self.assertIn('require("admin_api.authelia_user_store")', source)
