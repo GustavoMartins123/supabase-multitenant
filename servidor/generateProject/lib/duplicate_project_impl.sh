@@ -7,6 +7,8 @@ die() { echo "❌  $*" >&2; return 1; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 # shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/functions_config.sh"
+# shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
 source "$SCRIPT_DIR/lib/resource_profiles.sh"
 source "$SCRIPT_DIR/lib/realtime_slots.sh"
@@ -72,6 +74,7 @@ ORIGINAL_DB="_supabase_$ORIGINAL_PROJECT"
 NEW_DB="_supabase_$NEW_PROJECT"
 OUT_DIR="$PROJECT_ROOT/projects/$NEW_PROJECT"
 ORIGINAL_DIR="$PROJECT_ROOT/projects/$ORIGINAL_PROJECT"
+functions_config_lock "$ORIGINAL_PROJECT" "$NEW_PROJECT"
 TMP_DIR="$(mktemp -d /tmp/duplicate-project.XXXXXX)"
 DUMP_FILE="$TMP_DIR/main.sql"
 RT_STRUCTURE_FILE="$TMP_DIR/realtime-structure.sql"
@@ -120,6 +123,10 @@ rollback() {
   echo "❌ Duplicacao falhou; limpando recursos do clone..." >&2
 
   resume_source_project || rollback_failed=1
+
+  if [[ "${FUNCTIONS_WITHDRAWN[$NEW_PROJECT]:-0}" == 1 ]]; then
+    functions_config_withdraw "$NEW_PROJECT" || rollback_failed=1
+  fi
 
   if [[ "$COMPOSE_STARTED" -eq 1 && -d "$OUT_DIR" ]]; then
     (cd "$OUT_DIR" && docker compose -p "$NEW_PROJECT" \
@@ -306,6 +313,7 @@ template_to_file() {
     "$template" > "$output"
 }
 
+functions_config_withdraw "$NEW_PROJECT"
 mkdir -p "$OUT_DIR/nginx" "$OUT_DIR/pooler"
 CREATED_DIR=1
 
@@ -499,6 +507,8 @@ storage_assert_project_gateway "$PROJECT_UUID" "$NEW_PROJECT" "$SERVICE_TOKEN" \
 vector_sync_project_wrappers "$NEW_PROJECT" || die "Falha ao recriar wrappers vetoriais do clone"
 provision_tenant_meta_role "$NEW_DB" "$PROJECT_UUID" \
   || die "Falha ao provisionar identidade SQL isolada do clone"
+
+functions_config_publish "$NEW_PROJECT"
 
 trap - ERR TERM INT HUP
 cleanup_tmp

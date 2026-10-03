@@ -10,6 +10,7 @@ declare const EdgeRuntime: {
       memoryLimitMb: number
       workerTimeoutMs: number
       noModuleCache: boolean
+      forceCreate: boolean
       importMapPath: string | null
       envVars: [string, string][]
     }): Promise<{ fetch(req: Request): Promise<Response> }>
@@ -19,7 +20,7 @@ declare const EdgeRuntime: {
 const verifyJwtSetting = Deno.env.get('VERIFY_JWT')
 if (verifyJwtSetting !== 'true' && verifyJwtSetting !== 'false') throw new Error('VERIFY_JWT must be explicit')
 const VERIFY_JWT = verifyJwtSetting === 'true'
-const PROJECTS_DIR = '/home/deno/projects'
+const TENANTS_DIR = '/home/deno/tenant-config'
 const REF_PATTERN = /^[a-z_][a-z0-9_]{2,39}$/
 
 interface TenantConfig {
@@ -27,40 +28,28 @@ interface TenantConfig {
   jwtSecret: string
 }
 
-function parseDotenv(text: string): Record<string, string> {
-  const out: Record<string, string> = {}
-  const required = new Set(['ANON_KEY_PROJETO', 'SERVICE_ROLE_KEY_PROJETO', 'JWT_SECRET_PROJETO'])
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.trim()
-    if (!line || line.startsWith('#')) continue
-    const eq = line.indexOf('=')
-    if (eq === -1) continue
-    const key = line.slice(0, eq).trim()
-    if (!required.has(key)) continue
-    const value = line.slice(eq + 1)
-    if (key in out || rawLine !== line || line.slice(0, eq) !== key || !value || value !== value.trim() || value.startsWith('"') || value.startsWith("'")) throw new Error('noncanonical tenant credential')
-    out[key] = value
+function parseTenantConfig(text: string, ref: string): { anon: string; service: string; jwtSecret: string } {
+  const parsed = JSON.parse(text)
+  const fields = ['project_ref', 'project_uuid', 'anon_key', 'service_role_key', 'jwt_secret']
+  if (!parsed || Array.isArray(parsed) || Object.keys(parsed).length !== fields.length ||
+      fields.some(key => typeof parsed[key] !== 'string' || !parsed[key] || parsed[key] !== parsed[key].trim()) ||
+      parsed.project_ref !== ref || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(parsed.project_uuid)) {
+    throw new Error('noncanonical tenant projection')
   }
-  if (Object.keys(out).length !== required.size) throw new Error('incomplete tenant credentials')
-  return out
+  return { anon: parsed.anon_key, service: parsed.service_role_key, jwtSecret: parsed.jwt_secret }
 }
 
 async function loadTenant(ref: string): Promise<TenantConfig | null> {
   if (!REF_PATTERN.test(ref)) return null
-
-  const path = `${PROJECTS_DIR}/${ref}/.env`
-  let raw: string
+  const path = `${TENANTS_DIR}/${ref}.json`
+  let anon: string, service: string, jwtSecret: string
   try {
-    raw = await Deno.readTextFile(path)
+    const info = await Deno.lstat(path)
+    if (!info.isFile || info.isSymlink || info.size > 65536) return null
+    ;({ anon, service, jwtSecret } = parseTenantConfig(await Deno.readTextFile(path), ref))
   } catch {
     return null
   }
-
-  let parsed: Record<string, string>
-  try { parsed = parseDotenv(raw) } catch { return null }
-  const anon = parsed['ANON_KEY_PROJETO']
-  const service = parsed['SERVICE_ROLE_KEY_PROJETO']
-  const jwtSecret = parsed['JWT_SECRET_PROJETO']
 
   const env: Record<string, string> = {
     SUPABASE_URL: `http://supabase-nginx-${ref}:8080`,
@@ -146,6 +135,7 @@ serve(async (req: Request) => {
       memoryLimitMb: 150,
       workerTimeoutMs: 60 * 1000,
       noModuleCache: false,
+      forceCreate: true,
       importMapPath: null,
       envVars,
     })

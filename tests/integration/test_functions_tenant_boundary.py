@@ -4,6 +4,8 @@ import hashlib
 import hmac
 import json
 import os
+from pathlib import Path
+import tempfile
 import time
 import unittest
 import urllib.error
@@ -55,3 +57,49 @@ class FunctionsTenantBoundaryTest(unittest.TestCase):
 
     def test_missing_tenant_configuration_fails_closed(self):
         self.assertEqual(self.call('test_absent',token('test_absent'))[0],503)
+
+    def test_workers_receive_only_their_tenant_and_cannot_read_supervisor_files(self):
+        for ref in ('test_alpha', 'test_beta', 'test_alpha'):
+            status, body = self.call(ref, token(ref), path='/probe')
+            self.assertEqual(status, 200, body)
+            data = json.loads(body)
+            self.assertEqual(data['env']['PROJECT_REF'], ref)
+            self.assertEqual(data['env']['SUPABASE_ANON_KEY'], 'synthetic-anon-' + ref)
+            self.assertEqual(data['env']['SUPABASE_SERVICE_ROLE_KEY'], 'synthetic-service-' + ref)
+            self.assertEqual(data['env']['JWT_SECRET'], ref + '-synthetic-jwt-secret-for-test-only')
+            for secret in ('POSTGRES_PASSWORD', 'SUPABASE_DB_URL', 'JWT_SECRET_PROJETO'):
+                self.assertNotIn(secret, data['env'])
+            self.assertFalse(any(data['reads'].values()), data)
+
+    def test_projection_changes_and_withdrawal_take_effect_on_next_request(self):
+        directory = Path(os.environ['FUNCTIONS_PROJECTION_TEST_DIR'])
+        path = directory / 'test_alpha.json'
+        original = path.read_bytes()
+        config = json.loads(original)
+        self.assertEqual(config['anon_key'], 'synthetic-anon-test_alpha', 'synthetic fixture required')
+
+        def replace(data):
+            fd, name = tempfile.mkstemp(dir=directory)
+            with os.fdopen(fd, 'wb') as stream:
+                stream.write(data)
+            os.replace(name, path)
+
+        try:
+            status, body = self.call('test_alpha', token('test_alpha'), path='/probe')
+            self.assertEqual(status, 200, body)
+            config['anon_key'] = 'synthetic-anon-rotated'
+            replace(json.dumps(config).encode())
+            status, body = self.call('test_alpha', token('test_alpha'), path='/probe')
+            self.assertEqual(status, 200, body)
+            self.assertEqual(json.loads(body)['env']['SUPABASE_ANON_KEY'], 'synthetic-anon-rotated')
+            path.unlink()
+            self.assertEqual(self.call('test_alpha', token('test_alpha'))[0], 503)
+            config['project_ref'] = 'test_beta'
+            replace(json.dumps(config).encode())
+            self.assertEqual(self.call('test_alpha', token('test_alpha'))[0], 503)
+            config['project_ref'] = 'test_alpha'
+            config['unexpected_secret'] = 'synthetic-unexpected'
+            replace(json.dumps(config).encode())
+            self.assertEqual(self.call('test_alpha', token('test_alpha'))[0], 503)
+        finally:
+            replace(original)

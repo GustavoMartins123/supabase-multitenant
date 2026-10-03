@@ -21,6 +21,8 @@ read_canonical_env_value() {
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 # shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/functions_config.sh"
+# shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
 source "$SCRIPT_DIR/lib/resource_profiles.sh"
 source "$SCRIPT_DIR/lib/realtime_slots.sh"
@@ -126,6 +128,10 @@ rollback_transaction() {
   set +e
   echo "❌ Erro detectado! Revertendo alterações..."
 
+  if [[ "$FUNCTIONS_CONFIG_LOCKED" == 1 ]] && [[ "${FUNCTIONS_WITHDRAWN[$PROJECT_ID]:-0}" == 1 ]]; then
+    functions_config_withdraw "$PROJECT_ID" || rollback_failed=1
+  fi
+
   if [[ "$COMPOSE_STARTED" -eq 1 && -n "${OUT_DIR:-}" && -d "$OUT_DIR" ]]; then
     (cd "$OUT_DIR" && docker compose -p "$PROJECT_ID" \
       --env-file ../../.env --env-file .env down --remove-orphans) >/dev/null 2>&1 \
@@ -223,6 +229,7 @@ for word in "${RESERVED_API[@]}"; do
 done
 
 OUT_DIR="$PROJECT_ROOT/projects/$PROJECT_ID"
+functions_config_lock "$PROJECT_ID"
 
 docker_must_exist() {
   docker inspect "$1" >/dev/null 2>&1 || die "Contêiner $1 não encontrado"
@@ -432,6 +439,7 @@ VECTOR_MAX_INDEXES="$(read_canonical_env_value "$SCRIPT_DIR/.envtemplate" VECTOR
 storage_wait_global || die "Storage compartilhado indisponivel"
 
 if [[ "$RECOVER_STALE" == "true" ]]; then
+  functions_config_withdraw "$PROJECT_ID"
   cleanup_stale_state || die "Não foi possível limpar resíduos da tentativa anterior"
 else
   stale_db_status=0
@@ -449,6 +457,7 @@ else
   fi
 fi
 
+functions_config_withdraw "$PROJECT_ID"
 init_transaction
 echo "HOST_AGENT_PROGRESS=create:transaction_initialized"
 mkdir -p "$OUT_DIR/nginx" "$OUT_DIR/pooler"
@@ -518,4 +527,5 @@ if [[ -f "$SCRIPT_DIR/lib/platform_capacity.sh" ]]; then
 fi
 
 echo "✅  Projeto $PROJECT_ID configurado com Storage Vectors e SigV4"
+functions_config_publish "$PROJECT_ID"
 commit_transaction

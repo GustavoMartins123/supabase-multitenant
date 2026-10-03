@@ -65,6 +65,10 @@ python3 "$ROOT_DIR/tools/configure_api_resource_profiles.py" \
     --output "$ROOT_DIR/servidor/.resource-profiles.env" \
     || die "falha ao gerar configuracao delimitada de perfis da Projects API."
 
+python3 "$ROOT_DIR/servidor/generateProject/functions_config.py" \
+    --root "$ROOT_DIR/servidor" sync \
+    || die "falha ao gerar projecao delimitada de credenciais das Functions."
+
 [ -f "$ROOT_DIR/servidor/.storage.env" ] \
     || die "servidor/.storage.env ausente; execute setup.sh ou a migracao do Storage compartilhado."
 

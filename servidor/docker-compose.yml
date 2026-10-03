@@ -262,8 +262,13 @@ services:
     networks:
       - rede-supabase
     volumes:
-      - ./volumes/functions:/home/deno/functions:Z
-      - ./projects:/home/deno/projects:ro,Z
+      - ./volumes/functions:/home/deno/functions:ro,Z
+      - type: bind
+        source: ./.functions-tenants
+        target: /home/deno/tenant-config
+        read_only: true
+        bind:
+          create_host_path: false
     depends_on:
       db:
         condition: service_healthy  

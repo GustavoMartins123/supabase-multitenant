@@ -8,6 +8,9 @@ PROJECT_ID="${1:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/functions_config.sh"
+functions_config_lock "$PROJECT_ID"
 PROJECTS_ROOT="$(cd "$PROJECT_ROOT/projects" && pwd -P)"
 PROJECT_DIR="$PROJECTS_ROOT/$PROJECT_ID"
 [[ "$(dirname "$PROJECT_DIR")" == "$PROJECTS_ROOT" ]] \
@@ -20,9 +23,11 @@ if [ -d "$PROJECT_DIR" ]; then
     | grep -E "^(supabase-[a-z0-9]+-${PROJECT_ID}|${PROJECT_ID}-[a-z0-9_.-]+-[0-9]+)$" || true)"
   [[ -z "$leftover" ]] \
     || { echo "containers do projeto ainda existem; remova-os antes dos arquivos: $(printf '%s' "$leftover" | tr '\n' ' ')" >&2; exit 1; }
+  functions_config_withdraw "$PROJECT_ID"
   rm -rf "$PROJECT_DIR"
   echo "✅ Diretório $PROJECT_DIR removido com sucesso."
 else
+  functions_config_withdraw "$PROJECT_ID"
   echo "⚠️ Diretório $PROJECT_DIR não encontrado."
 fi
 

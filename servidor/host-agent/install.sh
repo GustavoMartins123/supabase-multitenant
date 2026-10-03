@@ -96,7 +96,10 @@ run_as_service_user() {
 migrate_runtime_ownership() {
   local runtime_dir storage_run_as storage_uid service_uid
   say "Ajustando arquivos de lifecycle para $SERVICE_USER:$SERVICE_GROUP ..."
-  for runtime_dir in "$SERVIDOR_DIR/projects" "$SERVIDOR_DIR/backups" \
+  mkdir -p "$SERVIDOR_DIR/.functions-tenants" "$SERVIDOR_DIR/.functions-locks"
+  chmod 700 "$SERVIDOR_DIR/.functions-tenants" "$SERVIDOR_DIR/.functions-locks"
+  for runtime_dir in "$SERVIDOR_DIR/.functions-tenants" "$SERVIDOR_DIR/.functions-locks" \
+    "$SERVIDOR_DIR/projects" "$SERVIDOR_DIR/backups" \
     "$SERVIDOR_DIR/volumes/storage"; do
     [[ -e "$runtime_dir" ]] || continue
     find "$runtime_dir" -xdev -uid 0 \

@@ -25,6 +25,8 @@ NEW_NAME="${2:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/functions_config.sh"
 PROJECTS_ROOT="$PROJECT_ROOT/projects"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
@@ -124,6 +126,8 @@ rollback_on_error() {
   if [[ "$MUTATION_STARTED" -eq 0 ]]; then cleanup; exit "$status"; fi
 
   local rollback_failed=0 code pid old_slot_exists
+  functions_config_withdraw "$NEW_NAME" || rollback_failed=1
+  functions_config_withdraw "$OLD_NAME" || rollback_failed=1
   echo "❌ Rename falhou; revertendo alteracoes..." >&2
 
   if [[ "$NEW_COMPOSE_STARTED" -eq 1 && -d "$NEW_DIR" ]]; then
@@ -192,6 +196,10 @@ rollback_on_error() {
     fi
   fi
 
+  if [[ "$rollback_failed" -eq 0 ]]; then
+    functions_config_publish "$OLD_NAME" || rollback_failed=1
+  fi
+
   [[ "$rollback_failed" -eq 0 ]] \
     && echo "ROLLBACK_COMPLETE ${NEW_NAME}=${OLD_NAME}" >&2 \
     || echo "ROLLBACK_INCOMPLETE ${NEW_NAME}=${OLD_NAME}" >&2
@@ -207,6 +215,8 @@ trap cleanup EXIT
 NAME_RE='^[a-z_][a-z0-9_]{2,39}$'
 [[ "$OLD_NAME" =~ $NAME_RE && "$NEW_NAME" =~ $NAME_RE ]] \
   || die "Nomes devem usar minusculas, digitos ou _ (3-40 caracteres)"
+functions_config_lock "$OLD_NAME" "$NEW_NAME"
+
 RESERVED=(default select from where insert update delete table create drop join group order limit into index view trigger procedure function database schema primary foreign key constraint unique null not and or in like between exists having union inner left right outer cross on as case when then else end if while for begin commit rollback)
 for word in "${RESERVED[@]}"; do [[ "$NEW_NAME" != "$word" ]] || die "'$NEW_NAME' e palavra reservada"; done
 RESERVED_ROUTES=(admin phpmyadmin xmlrpc actuator)
@@ -305,6 +315,8 @@ OLD_SLOT="$(realtime_primary_slot "$OLD_NAME")"
 NEW_SLOT="$(realtime_primary_slot "$NEW_NAME")"
 
 say "Parando stack antiga..."
+functions_config_withdraw "$OLD_NAME"
+functions_config_withdraw "$NEW_NAME"
 MUTATION_STARTED=1
 OLD_COMPOSE_STOPPED=1
 compose_old down --remove-orphans
@@ -442,6 +454,8 @@ vector_sync_project_wrappers "$NEW_NAME" || die "Falha ao atualizar endpoints do
 [[ "$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc "SELECT count(*) FROM pg_database WHERE datname = '$NEW_DB';" | tr -d '[:space:]')" == "1" ]] || die "Verificacao final do database falhou"
 [[ "$(docker exec supabase-db psql -U supabase_admin -d "$META_DB" -tAc "SELECT count(*) FROM projects WHERE name = '$NEW_NAME';" | tr -d '[:space:]')" == "1" ]] || die "Verificacao final da metadata falhou"
 [[ "$(compose_new ps --status running --services | wc -l | tr -d '[:space:]')" -gt 0 ]] || die "Nenhum servico do novo projeto esta rodando"
+
+functions_config_publish "$NEW_NAME"
 
 trap - ERR TERM INT HUP
 cleanup

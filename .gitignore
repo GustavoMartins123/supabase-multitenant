@@ -23,6 +23,8 @@ studio/authelia/.studio-bootstrap-consumed
 studio/authelia/.studio-directory-sequence
 servidor/.env
 servidor/.resource-profiles.env
+servidor/.functions-tenants/
+servidor/.functions-locks/
 servidor/.analytics.env
 servidor/.storage.env
 servidor/.legacy-migration.env

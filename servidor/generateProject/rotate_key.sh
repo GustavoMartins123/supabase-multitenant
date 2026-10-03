@@ -6,6 +6,8 @@ die() { echo "❌ $*" >&2; exit 1; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 # shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/functions_config.sh"
+# shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
 source "$SCRIPT_DIR/lib/resource_profiles.sh"
 
@@ -39,6 +41,9 @@ rollback_transaction() {
   trap - ERR
   set +e
   local runtime_restored=true
+  if [[ "$FUNCTIONS_CONFIG_LOCKED" == 1 ]] && [[ "${FUNCTIONS_WITHDRAWN[$PROJECT_ID]:-0}" == 1 ]]; then
+    functions_config_withdraw "$PROJECT_ID" || runtime_restored=false
+  fi
   echo "❌ Erro detectado! Revertendo alterações..."
 
   if [[ "$STORAGE_KEYS_UPDATED" == "true" ]]; then
@@ -52,7 +57,7 @@ rollback_transaction() {
     for file in "${MODIFIED_FILES[@]}"; do
       local backup_path="$TRANSACTION_DIR/$(echo "$file" | tr '/' '_')"
       if [[ -f "$backup_path" ]]; then
-        cp "$backup_path" "$file"
+        cp "$backup_path" "$file" || runtime_restored=false
         echo "   Restaurado: $(basename "$file")"
       fi
     done
@@ -69,6 +74,9 @@ rollback_transaction() {
         runtime_restored=false
         echo "❌ Arquivos restaurados, mas o runtime anterior do Nginx não pôde ser confirmado." >&2
       fi
+    fi
+    if [[ "$runtime_restored" == "true" ]]; then
+      functions_config_publish "$PROJECT_ID" || runtime_restored=false
     fi
     if [[ "$runtime_restored" == "true" ]]; then
       rm -rf "$TRANSACTION_DIR"
@@ -96,6 +104,7 @@ PROJECT_ID="${1:-}"
 [[ "$PROJECT_ID" =~ ^[a-z_][a-z0-9_]{2,39}$ ]] \
   || die "PROJECT_ID invalido"
 
+functions_config_lock "$PROJECT_ID"
 PROJECT_DIR="$PROJECT_ROOT/projects/$PROJECT_ID"
 [[ -d "$PROJECT_DIR" ]] || die "Projeto '$PROJECT_ID' não encontrado em $PROJECT_DIR"
 for command in docker openssl sed grep; do
@@ -242,6 +251,7 @@ template_to_file() {
     "$template" > "$outfile"
 }
 
+functions_config_withdraw "$PROJECT_ID"
 init_transaction
 
 storage_patch_tenant_keys "$PROJECT_UUID" "$NEW_ANON" "$NEW_SERVICE" \
@@ -284,4 +294,5 @@ echo ""
 echo "⚠️  NOTA: O JWT_SECRET_PROJETO não foi alterado"
 echo "   Apenas os tokens foram regenerados com o mesmo secret."
 
+functions_config_publish "$PROJECT_ID"
 commit_transaction

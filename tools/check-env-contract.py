@@ -70,6 +70,8 @@ ENV_ASSIGN_RE = re.compile(r"^\s*(?:-\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*[:=]")
 PLACEHOLDER_TOKEN_RE = re.compile(r"<[^<>\s]+>")
 
 KNOWN_OPTIONAL = {
+    "FUNCTIONS_TENANT_TEST_URL": "harness sintetico obrigatorio em run_functions_security_tests.py, nunca runtime",
+    "FUNCTIONS_PROJECTION_TEST_DIR": "diretorio sintetico do mesmo harness, nunca runtime",
     "ANALYTICS_INTERNAL_URL": "default em runtime_config.py",
     "DB_DSN": "computado no environment do Compose",
     "LEGACY_FERNET_SECRET": "migracao opt-in (migrate_project_secrets.py)",

@@ -14,6 +14,8 @@ SAFETY_BACKUP_ID="${3:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/functions_config.sh"
 PROJECTS_ROOT="$PROJECT_ROOT/projects"
 BACKUPS_ROOT="$PROJECT_ROOT/backups"
 # shellcheck disable=SC1091
@@ -39,6 +41,7 @@ for command in docker jq openssl tar gzip; do
   command -v "$command" >/dev/null || die "Comando obrigatorio ausente: $command"
 done
 
+functions_config_lock "$PROJECT"
 PROJECT_DIR="$PROJECTS_ROOT/$PROJECT"
 DB="_supabase_$PROJECT"
 PRERESTORE_DB="${DB}_prerestore"
@@ -149,6 +152,7 @@ rollback_on_error() {
   if [[ "$MUTATION_STARTED" -eq 0 ]]; then exit "$status"; fi
 
   local rollback_failed=0
+  functions_config_withdraw "$PROJECT" || rollback_failed=1
   echo "❌ Restore falhou; revertendo alteracoes..." >&2
 
   backup_stop_project_containers "$PROJECT" >/dev/null 2>&1
@@ -183,6 +187,10 @@ rollback_on_error() {
   fi
   backup_start_project_containers "$PROJECT" >/dev/null 2>&1 || rollback_failed=1
 
+  if [[ "$rollback_failed" -eq 0 ]]; then
+    functions_config_publish "$PROJECT" || rollback_failed=1
+  fi
+
   [[ "$rollback_failed" -eq 0 ]] \
     && echo "ROLLBACK_COMPLETE ${PROJECT}=${BACKUP_ID}" >&2 \
     || echo "ROLLBACK_INCOMPLETE ${PROJECT}=${BACKUP_ID}" >&2
@@ -197,6 +205,7 @@ now=$(date +%s)
 GLOBAL_ANON_TOKEN="$(backup_generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now,\"exp\":$((now + 3600))}" "$JWT_SECRET")"
 
 say "Parando servicos do projeto $PROJECT..."
+functions_config_withdraw "$PROJECT"
 MUTATION_STARTED=1
 backup_stop_project_containers "$PROJECT" >/dev/null
 code="$(backup_http_code realtime-dev.supabase-realtime POST "/api/tenants/$PROJECT_UUID/shutdown" "$ANON_KEY_PROJETO")"
@@ -330,6 +339,8 @@ provision_tenant_meta_role "$DB" "$PROJECT_UUID" \
 
 [[ "$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc "SELECT count(*) FROM pg_database WHERE datname = '$DB';" | tr -d '[:space:]')" == "1" ]] \
   || die "Verificacao final do database falhou"
+
+functions_config_publish "$PROJECT"
 
 trap - ERR TERM INT HUP
 cleanup_failed=0
