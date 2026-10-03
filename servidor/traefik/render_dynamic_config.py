@@ -67,13 +67,7 @@ def resolve_tls_settings(settings: dict[str, str], cert_dir: pathlib.Path | None
                     "TRAEFIK_TLS_MODE=file exige "
                     f"{TLS_CERT_NAME} e {TLS_KEY_NAME} em {base}; ausentes: {missing}"
                 )
-            container_cert = f"{CONTAINER_CERT_DIR}/{TLS_CERT_NAME}"
-            container_key = f"{CONTAINER_CERT_DIR}/{TLS_KEY_NAME}"
-            tls_block = [
-                "      tls:",
-                f"        certFile: {yaml_quote(container_cert)}",
-                f"        keyFile: {yaml_quote(container_key)}",
-            ]
+            tls_block = ["      tls: {}"]
     return {
         "enable": enable,
         "mode": mode,
@@ -275,6 +269,16 @@ def render(
                 f"          - url: \"http://supabase-nginx-{project_id}:8080\"",
             ]
         )
+    if enable_tls and tls["mode"] == "file":
+        lines.extend([
+            "tls:",
+            "  certificates:",
+            f"    - certFile: {yaml_quote(f'{CONTAINER_CERT_DIR}/{TLS_CERT_NAME}')}",
+            f"      keyFile: {yaml_quote(f'{CONTAINER_CERT_DIR}/{TLS_KEY_NAME}')}",
+            "  options:",
+            "    default:",
+            "      sniStrict: true",
+        ])
     return "\n".join(lines) + "\n"
 
 

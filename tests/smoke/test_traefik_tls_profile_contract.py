@@ -11,6 +11,7 @@ import importlib.util
 import pathlib
 import tempfile
 import unittest
+import yaml
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -79,6 +80,14 @@ class RendererTlsBehaviorTest(unittest.TestCase):
         self.assertNotIn("- web\n      priority: 500", output)
         self.assertIn("/certs/traefik/tls.crt", output)
         self.assertIn("/certs/traefik/tls.key", output)
+        model = yaml.safe_load(output)
+        self.assertEqual(model['http']['routers']['projects-api']['tls'], {})
+        self.assertEqual(model['http']['routers']['project-projeto_a']['tls'], {})
+        self.assertEqual(model['tls']['certificates'], [{
+            'certFile': '/certs/traefik/tls.crt',
+            'keyFile': '/certs/traefik/tls.key',
+        }])
+        self.assertTrue(model['tls']['options']['default']['sniStrict'])
         self.assertIn("force-https:", output)
         self.assertIn("force-https-redirect:", output)
         self.assertIn("permanent: true", output)
