@@ -24,7 +24,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def run(*args: str) -> str:
-    return subprocess.check_output(list(args), text=True, stderr=subprocess.STDOUT)
+    result = subprocess.run(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if result.returncode:
+        raise RuntimeError(f'{args[0]} {args[1]} failed ({result.returncode}): {result.stdout}')
+    return result.stdout
 
 
 def mount(source: Path, target: str, readonly: bool = True) -> list[str]:
@@ -43,7 +46,8 @@ def main() -> None:
         fixture = Path(name)
         scripts = fixture / 'servidor/generateProject'
         (scripts / 'lib').mkdir(parents=True)
-        for path in ('functions_config.py', 'lib/functions_config.sh'):
+        for path in ('functions_config.py', 'lib/functions_config.sh',
+                     'lib/backup_project_impl.sh', 'lib/restore_project_impl.sh'):
             shutil.copy2(ROOT / 'servidor/generateProject' / path, scripts / path)
         tests = fixture / 'tests/integration'
         tests.mkdir(parents=True)
@@ -51,7 +55,7 @@ def main() -> None:
         lifecycle_checks = '''import sys, unittest
 suite = unittest.defaultTestLoader.discover('tests/integration', pattern='test_functions_projection_lifecycle.py')
 result = unittest.TextTestRunner(verbosity=2).run(suite)
-sys.exit(0 if result.wasSuccessful() and not result.skipped and result.testsRun >= 6 else 1)
+sys.exit(0 if result.wasSuccessful() and not result.skipped and result.testsRun >= 7 else 1)
 '''
         print(run('docker', 'run', '--rm', '--pull=never', '--entrypoint', 'python3', *mount(fixture, '/workspace'),
                   '-w', '/workspace', args.lifecycle_image, '-c', lifecycle_checks))

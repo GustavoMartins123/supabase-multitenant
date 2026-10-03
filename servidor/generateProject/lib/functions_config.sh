@@ -23,6 +23,7 @@ functions_config_lock() {
     FUNCTIONS_TENANT_LOCK_FDS[$ref]="$fd"
   done < <(printf '%s\n' "$@" | LC_ALL=C sort -u)
   FUNCTIONS_CONFIG_LOCKED=1
+  FUNCTIONS_CONFIG_ROOT="$PROJECT_ROOT"
 }
 
 functions_config_action() {
@@ -30,7 +31,7 @@ functions_config_action() {
   [[ "$FUNCTIONS_CONFIG_LOCKED" == 1 && -n "${FUNCTIONS_TENANT_LOCK_FDS[$ref]:-}" ]] || {
     echo 'Functions lifecycle lock missing' >&2; return 1;
   }
-  python3 "$SCRIPT_DIR/functions_config.py" --root "$PROJECT_ROOT" \
+  python3 "$SCRIPT_DIR/functions_config.py" --root "$FUNCTIONS_CONFIG_ROOT" \
     --lock-fd "$FUNCTIONS_GLOBAL_LOCK_FD" \
     --tenant-lock-fd "${FUNCTIONS_TENANT_LOCK_FDS[$ref]}" "$action" "$ref"
 }

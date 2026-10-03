@@ -57,6 +57,15 @@ class FunctionsProjectionLifecycleTest(unittest.TestCase):
         self.assertEqual((self.root / '.functions-tenants/test_alpha.json').stat().st_mode & 0o777, 0o600)
         self.assertEqual((self.root / '.functions-tenants').stat().st_mode & 0o777, 0o700)
 
+    def test_project_compose_root_cannot_redirect_held_lifecycle_lock(self):
+        self.shell('functions_config_lock test_alpha; PROJECT_ROOT=/nonexistent-compose-bind-root; '
+                   'functions_config_withdraw test_alpha; functions_config_publish test_alpha')
+        self.assertEqual(self.read('test_alpha')['project_ref'], 'test_alpha')
+        for name in ('backup_project_impl.sh', 'restore_project_impl.sh'):
+            script = (ROOT / 'servidor/generateProject/lib' / name).read_text(encoding='utf-8')
+            loaded = script.index('source "$PROJECT_DIR/.env"')
+            self.assertIn('PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"', script[loaded:script.index('for variable', loaded)])
+
     def test_create_duplicate_rotate_restore_rename_delete_projection_transitions(self):
         # These are the real shared projection primitives used by all six scripts.
         self.shell('functions_config_lock test_alpha; functions_config_withdraw test_alpha; functions_config_publish test_alpha')

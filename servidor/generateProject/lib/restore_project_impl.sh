@@ -53,6 +53,9 @@ set -a
 source "$PROJECT_ROOT/.env"
 source "$PROJECT_DIR/.env"
 set +a
+# The project env defines PROJECT_ROOT for Compose's host bind mounts. It is
+# not the server root used by lifecycle locks and tenant SQL provisioning.
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 for variable in JWT_SECRET PROJECT_UUID ANON_KEY_PROJETO SERVICE_ROLE_KEY_PROJETO \
   S3_PROTOCOL_CREDENTIAL_ID S3_PROTOCOL_ACCESS_KEY_ID \
   S3_PROTOCOL_ACCESS_KEY_SECRET S3_PROTOCOL_ENABLED VECTOR_BUCKETS_ENABLED; do
