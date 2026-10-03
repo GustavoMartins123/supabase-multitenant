@@ -185,8 +185,8 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
                     name,
                 )
             await conn.execute(
-                "INSERT INTO projects(id, tenant_uuid, name, owner_id, public_ref) "
-                "VALUES($1, $1, 'projeto_a', $2, 'abcdefghijklmnopqrst')",
+                "INSERT INTO projects(id, tenant_uuid, name, display_name, owner_id, public_ref) "
+                "VALUES($1, $1, 'projeto_a', 'Projeto A', $2, 'abcdefghijklmnopqrst')",
                 self.project_a,
                 self.owner,
             )
@@ -573,11 +573,46 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json()["project"], "abcdefghijklmnopqrst")
         project = await self.pool.fetchrow("SELECT name,public_ref FROM projects WHERE id=$1", self.project_a)
         self.assertEqual(dict(project), {"name":"projeto_a", "public_ref":"abcdefghijklmnopqrst"})
+        response = await self.request("GET", path + "/rename-history", actor=self.owner)
+        self.assertEqual(response.status_code, 200, response.text)
+        events = response.json()["events"]
+        self.assertEqual(events[0]["action"], "project_display_name_changed")
+        self.assertEqual(events[0]["new_value"], {"display_name": "Friendly label"})
+        self.assertEqual(response.json()["project"], "abcdefghijklmnopqrst")
         response = await self.request("GET", path + "/queue-status", actor=self.ex_member)
         self.assertEqual(response.status_code, 200, response.text)
         for suffix in ("queue-status", "config-token", "rename-history"):
             response = await self.request("GET", f"/api/projects/projeto_a/{suffix}", actor=self.owner)
             self.assertEqual(response.status_code, 400, response.text)
+
+    async def test_available_users_uses_canonical_directory_and_public_reference(self):
+        path = "/api/projects/abcdefghijklmnopqrst/available-users"
+        result = await self.request("GET", path + "?include_members=true&mode=owner", actor=self.owner)
+        self.assertEqual(result.status_code, 200, result.text)
+        users = {user["user_id"]: user for user in result.json()}
+        self.assertEqual(set(users), {str(self.ex_member), str(self.outsider)})
+        self.assertEqual(users[str(self.ex_member)]["status"], "member")
+        self.assertEqual(users[str(self.outsider)]["status"], "available")
+        result = await self.request("GET", path, actor=self.admin2)
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual([user["user_id"] for user in result.json()], [str(self.outsider)])
+        for actor in (self.ex_member, self.outsider):
+            result = await self.request("GET", path, actor=actor)
+            self.assertEqual(result.status_code, 403, result.text)
+        result = await self.request("GET", path + "?mode=admin", actor=self.owner)
+        self.assertEqual(result.status_code, 403, result.text)
+        result = await self.request("GET", path + "?mode=invalid", actor=self.owner)
+        self.assertEqual(result.status_code, 422, result.text)
+        result = await self.request("GET", "/api/projects/projeto_a/available-users", actor=self.owner)
+        self.assertEqual(result.status_code, 400, result.text)
+
+    async def test_available_users_excludes_inactive_canonical_users(self):
+        for user in self.directory_users:
+            if user["id"] == str(self.outsider):
+                user["is_active"] = False
+        result = await self.request("GET", "/api/projects/abcdefghijklmnopqrst/available-users", actor=self.owner)
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(result.json(), [])
 
     async def test_public_context_keeps_all_three_identities_separate(self):
         from app.project_secret_service import encrypt_project_secret
@@ -796,7 +831,7 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
         from hostagent.agent import HostAgent
         from types import SimpleNamespace
         dest = uuid.uuid4()
-        await self.pool.execute("INSERT INTO projects(id, tenant_uuid, name, owner_id, public_ref) VALUES($1,$1,'copy_dest',$2,'bcdefghijklmnopqrstu')", dest, self.admin2)
+        await self.pool.execute("INSERT INTO projects(id, tenant_uuid, name, display_name, owner_id, public_ref) VALUES($1,$1,'copy_dest','Copy destination',$2,'bcdefghijklmnopqrstu')", dest, self.admin2)
         await self.pool.execute("INSERT INTO project_members(project_id,user_id,role) VALUES($1,$2,'admin')", dest, self.admin2)
         args = {"original_name": "projeto_a", "original_uuid": str(self.project_a),
             "original_tenant_uuid": str(self.project_a), "copy_mode": "schema-only", "tenant_uuid": str(dest), "public_ref": "bcdefghijklmnopqrstu"}
@@ -909,7 +944,7 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
     async def test_signed_duplicate_cannot_copy_reused_source_slug(self):
         agent, record, args = await self.duplicate_intent()
         await self.pool.execute("UPDATE projects SET name='renamed_source' WHERE id=$1", self.project_a)
-        await self.pool.execute("INSERT INTO projects(id,tenant_uuid,name,owner_id,public_ref) VALUES($1,$1,'projeto_a',$2,'cdefghijklmnopqrstuv')", uuid.uuid4(), self.admin2)
+        await self.pool.execute("INSERT INTO projects(id,tenant_uuid,name,display_name,owner_id,public_ref) VALUES($1,$1,'projeto_a','Projeto A',$2,'cdefghijklmnopqrstuv')", uuid.uuid4(), self.admin2)
         denial = await agent._revalidate(record, "duplicate_project", "copy_dest", args)
         self.assertEqual(denial[0], "authorization_denied:source_identity_mismatch")
 

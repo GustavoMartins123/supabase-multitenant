@@ -69,6 +69,8 @@ async def main() -> None:
                 "INSERT INTO project_members(project_id, user_id, role) VALUES($1,$2,'admin')",
                 project_id, user_id,
             )
+        unnamed_id = identities[1][0]
+        await conn.execute("UPDATE projects SET display_name=NULL WHERE id=$1", unnamed_id)
         before = await conn.fetch("SELECT * FROM projects ORDER BY id")
         collision_migration = replace(
             reference_migration,
@@ -92,7 +94,10 @@ async def main() -> None:
         assert [m.version for m in applied] == [m.version for m in catalog[ref_index:]]
         after = await conn.fetch("SELECT * FROM projects ORDER BY id")
         for original, migrated in zip(before, after):
-            assert dict(original) == {k: v for k, v in migrated.items() if k != "public_ref"}
+            expected = dict(original)
+            if original["id"] == unnamed_id:
+                expected["display_name"] = original["name"]
+            assert expected == {k: v for k, v in migrated.items() if k != "public_ref"}
             assert len(migrated["public_ref"]) == 20
             assert migrated["public_ref"].isascii() and migrated["public_ref"].islower()
             assert (await resolve_public_project(conn, migrated["public_ref"]))["id"] == migrated["id"]
@@ -119,6 +124,13 @@ async def main() -> None:
         assert created["id"] == created_id and created["tenant_uuid"] == created_id
         assert cloned["id"] == clone_id and cloned["tenant_uuid"] == clone_id
         assert cloned["resource_profile"] == source["resource_profile"]
+        assert created["display_name"] == "created_project"
+        assert cloned["display_name"] == "cloned_project"
+        for invalid_name in (None, "", "   ", "a" * 81):
+            await expect_constraint(
+                conn, "UPDATE projects SET display_name=$1 WHERE id=$2", invalid_name, clone_id,
+                error=asyncpg.NotNullViolationError if invalid_name is None else asyncpg.CheckViolationError,
+            )
         print("PASS: create and duplicate allocate independent UUIDs and public references")
 
         for invalid in (None, "", "a" * 19, "a" * 21, "A" * 20,

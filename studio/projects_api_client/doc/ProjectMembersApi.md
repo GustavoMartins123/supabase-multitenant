@@ -10,6 +10,7 @@ All URIs are relative to *http://localhost*
 Method | HTTP request | Description
 ------------- | ------------- | -------------
 [**addMemberApiProjectsProjectRefMembersPost**](ProjectMembersApi.md#addmemberapiprojectsprojectrefmemberspost) | **POST** /api/projects/{project_ref}/members | Add Member
+[**listAvailableProjectUsersApiProjectsProjectRefAvailableUsersGet**](ProjectMembersApi.md#listavailableprojectusersapiprojectsprojectrefavailableusersget) | **GET** /api/projects/{project_ref}/available-users | List Available Project Users
 [**listMembersByRefApiProjectsProjectRefMembersGet**](ProjectMembersApi.md#listmembersbyrefapiprojectsprojectrefmembersget) | **GET** /api/projects/{project_ref}/members | List Members By Ref
 [**removeMemberByRefApiProjectsProjectRefMembersMemberIdDelete**](ProjectMembersApi.md#removememberbyrefapiprojectsprojectrefmembersmemberiddelete) | **DELETE** /api/projects/{project_ref}/members/{member_id} | Remove Member By Ref
 
@@ -25,7 +26,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectMembersApi();
 final projectRef = projectRef_example; // String |
-final addMember = AddMember(); // AddMember | 
+final addMember = AddMember(); // AddMember |
 
 try {
     final result = api_instance.addMemberApiProjectsProjectRefMembersPost(projectRef, addMember);
@@ -40,7 +41,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **addMember** | [**AddMember**](AddMember.md)|  | 
+ **addMember** | [**AddMember**](AddMember.md)|  |
 
 ### Return type
 
@@ -53,6 +54,51 @@ No authorization required
 ### HTTP request headers
 
  - **Content-Type**: application/json
+ - **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **listAvailableProjectUsersApiProjectsProjectRefAvailableUsersGet**
+> List<AvailableProjectUser> listAvailableProjectUsersApiProjectsProjectRefAvailableUsersGet(projectRef, includeMembers, mode)
+
+List Available Project Users
+
+### Example
+```dart
+import 'package:projects_api_client/api.dart';
+
+final api_instance = ProjectMembersApi();
+final projectRef = projectRef_example; // String |
+final includeMembers = true; // bool |
+final mode = mode_example; // String |
+
+try {
+    final result = api_instance.listAvailableProjectUsersApiProjectsProjectRefAvailableUsersGet(projectRef, includeMembers, mode);
+    print(result);
+} catch (e) {
+    print('Exception when calling ProjectMembersApi->listAvailableProjectUsersApiProjectsProjectRefAvailableUsersGet: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **projectRef** | **String**|  |
+ **includeMembers** | **bool**|  | [optional] [default to false]
+ **mode** | **String**|  | [optional] [default to 'owner']
+
+### Return type
+
+[**List<AvailableProjectUser>**](AvailableProjectUser.md)
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
  - **Accept**: application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
@@ -109,7 +155,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectMembersApi();
 final projectRef = projectRef_example; // String |
-final memberId = memberId_example; // String | 
+final memberId = memberId_example; // String |
 
 try {
     final result = api_instance.removeMemberByRefApiProjectsProjectRefMembersMemberIdDelete(projectRef, memberId);
@@ -124,7 +170,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **memberId** | **String**|  | 
+ **memberId** | **String**|  |
 
 ### Return type
 

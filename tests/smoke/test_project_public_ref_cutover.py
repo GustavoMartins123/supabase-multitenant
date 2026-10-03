@@ -141,6 +141,22 @@ class ServerCutoverTests(unittest.TestCase):
         self.assertEqual(data["technical_name"], "technical_project")
         self.assertEqual(data["project_uuid"], TENANT)
 
+    def test_historical_derived_auth_url_requires_durable_catalog_evidence(self):
+        env = self.directory / ".env"
+        raw = env.read_text().replace(
+            "https://api.example.test/technical_project/auth/v1",
+            "https://api.example.test/old_project/auth/v1",
+        )
+        env.write_text(raw)
+        before = digest(self.directory)
+        with self.assertRaisesRegex(RuntimeError, "Auth URL"):
+            servers.prepare(self.root, [{**CATALOG[0], "legacy_names": []}])
+        self.assertEqual(digest(self.directory), before)
+        with patch.object(servers, "require_stopped"):
+            servers.prepare(self.root, CATALOG, apply=True)
+        self.assertIn("API_EXTERNAL_URL=https://api.example.test/" + REF + "/auth/v1", env.read_text())
+        self.assertIn("PRIVATE_SECRET=unchanged", env.read_text())
+
     def test_failed_render_restores_exact_files(self):
         before = digest(self.directory)
         with patch.object(servers, "require_stopped"), patch.object(

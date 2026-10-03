@@ -43,7 +43,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = CollaborationApi();
 final projectRef = projectRef_example; // String |
-final projectTagAssign = ProjectTagAssign(); // ProjectTagAssign | 
+final projectTagAssign = ProjectTagAssign(); // ProjectTagAssign |
 
 try {
     final result = api_instance.assignProjectTagApiProjectsProjectRefTagsPost(projectRef, projectTagAssign);
@@ -127,6 +127,7 @@ Class | Method | HTTP request | Description
 *ProjectKeysApi* | [**rotateProjectKeyApiProjectsProjectRefRotateKeyPost**](doc//ProjectKeysApi.md#rotateprojectkeyapiprojectsprojectrefrotatekeypost) | **POST** /api/projects/{project_ref}/rotate-key | Rotate Project Key
 *ProjectKeysApi* | [**updateAutomaticKeyRotationApiProjectsProjectRefAutomaticKeyRotationPut**](doc//ProjectKeysApi.md#updateautomatickeyrotationapiprojectsprojectrefautomatickeyrotationput) | **PUT** /api/projects/{project_ref}/automatic-key-rotation | Update Automatic Key Rotation
 *ProjectMembersApi* | [**addMemberApiProjectsProjectRefMembersPost**](doc//ProjectMembersApi.md#addmemberapiprojectsprojectrefmemberspost) | **POST** /api/projects/{project_ref}/members | Add Member
+*ProjectMembersApi* | [**listAvailableProjectUsersApiProjectsProjectRefAvailableUsersGet**](doc//ProjectMembersApi.md#listavailableprojectusersapiprojectsprojectrefavailableusersget) | **GET** /api/projects/{project_ref}/available-users | List Available Project Users
 *ProjectMembersApi* | [**listMembersByRefApiProjectsProjectRefMembersGet**](doc//ProjectMembersApi.md#listmembersbyrefapiprojectsprojectrefmembersget) | **GET** /api/projects/{project_ref}/members | List Members By Ref
 *ProjectMembersApi* | [**removeMemberByRefApiProjectsProjectRefMembersMemberIdDelete**](doc//ProjectMembersApi.md#removememberbyrefapiprojectsprojectrefmembersmemberiddelete) | **DELETE** /api/projects/{project_ref}/members/{member_id} | Remove Member By Ref
 *ProjectRenameApi* | [**getProjectConfigTokenApiProjectsProjectRefConfigTokenGet**](doc//ProjectRenameApi.md#getprojectconfigtokenapiprojectsprojectrefconfigtokenget) | **GET** /api/projects/{project_ref}/config-token | Get Project Config Token
@@ -155,6 +156,7 @@ Class | Method | HTTP request | Description
  - [AuthUsersResponse](doc//AuthUsersResponse.md)
  - [AutomaticKeyRotationResponse](doc//AutomaticKeyRotationResponse.md)
  - [AutomaticKeyRotationUpdate](doc//AutomaticKeyRotationUpdate.md)
+ - [AvailableProjectUser](doc//AvailableProjectUser.md)
  - [CollaborationHintItem](doc//CollaborationHintItem.md)
  - [CollaborationMemberItem](doc//CollaborationMemberItem.md)
  - [CollaborationNoteItem](doc//CollaborationNoteItem.md)

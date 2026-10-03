@@ -82,7 +82,7 @@ class ProjectListItem(BaseModel):
     tenant_uuid: str | None
     name: str
     public_ref: str = Field(pattern=r"^[a-z]{20}$", min_length=20, max_length=20)
-    display_name: str | None
+    display_name: str
     file_size_limit: str
     storage_limit_token: str
     internal_token_expires_at: int | None
@@ -260,8 +260,8 @@ async def create_project(
             try:
                 await conn.execute(
                     """
-                    INSERT INTO projects(id, tenant_uuid, name, owner_id, resource_profile, public_ref)
-                    VALUES($1, $1, $2, $3, $4, $5)
+                    INSERT INTO projects(id, tenant_uuid, name, display_name, owner_id, resource_profile, public_ref)
+                    VALUES($1, $1, $2, $2, $3, $4, $5)
                     """,
                     project_id,
                     name,
@@ -358,9 +358,9 @@ async def duplicate_project(
             try:
                 await conn.execute(
                     """
-                    INSERT INTO projects(id, tenant_uuid, name, owner_id,
+                    INSERT INTO projects(id, tenant_uuid, name, display_name, owner_id,
                                          resource_profile, public_ref)
-                    SELECT $1, $1, $2, $3, resource_profile, $5
+                    SELECT $1, $1, $2, $2, $3, resource_profile, $5
                     FROM projects WHERE id = $4
                     """,
                     project_id,

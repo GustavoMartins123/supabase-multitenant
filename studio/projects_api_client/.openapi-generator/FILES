@@ -11,6 +11,7 @@ doc/AuthUserItem.md
 doc/AuthUsersResponse.md
 doc/AutomaticKeyRotationResponse.md
 doc/AutomaticKeyRotationUpdate.md
+doc/AvailableProjectUser.md
 doc/CollaborationApi.md
 doc/CollaborationHintItem.md
 doc/CollaborationMemberItem.md
@@ -149,6 +150,7 @@ lib/model/auth_user_item.dart
 lib/model/auth_users_response.dart
 lib/model/automatic_key_rotation_response.dart
 lib/model/automatic_key_rotation_update.dart
+lib/model/available_project_user.dart
 lib/model/collaboration_hint_item.dart
 lib/model/collaboration_member_item.dart
 lib/model/collaboration_note_item.dart
@@ -253,6 +255,7 @@ test/auth_user_item_test.dart
 test/auth_users_response_test.dart
 test/automatic_key_rotation_response_test.dart
 test/automatic_key_rotation_update_test.dart
+test/available_project_user_test.dart
 test/collaboration_api_test.dart
 test/collaboration_hint_item_test.dart
 test/collaboration_member_item_test.dart

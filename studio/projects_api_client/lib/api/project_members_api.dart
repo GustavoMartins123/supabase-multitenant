@@ -73,6 +73,77 @@ class ProjectMembersApi {
     return null;
   }
 
+  /// List Available Project Users
+  ///
+  /// Note: This method returns the HTTP [Response].
+  ///
+  /// Parameters:
+  ///
+  /// * [String] projectRef (required):
+  ///
+  /// * [bool] includeMembers:
+  ///
+  /// * [String] mode:
+  Future<Response> listAvailableProjectUsersApiProjectsProjectRefAvailableUsersGetWithHttpInfo(String projectRef, { bool? includeMembers, String? mode, }) async {
+    // ignore: prefer_const_declarations
+    final path = r'/api/projects/{project_ref}/available-users'
+      .replaceAll('{project_ref}', projectRef);
+
+    // ignore: prefer_final_locals
+    Object? postBody;
+
+    final queryParams = <QueryParam>[];
+    final headerParams = <String, String>{};
+    final formParams = <String, String>{};
+
+    if (includeMembers != null) {
+      queryParams.addAll(_queryParams('', 'include_members', includeMembers));
+    }
+    if (mode != null) {
+      queryParams.addAll(_queryParams('', 'mode', mode));
+    }
+
+    const contentTypes = <String>[];
+
+
+    return apiClient.invokeAPI(
+      path,
+      'GET',
+      queryParams,
+      postBody,
+      headerParams,
+      formParams,
+      contentTypes.isEmpty ? null : contentTypes.first,
+    );
+  }
+
+  /// List Available Project Users
+  ///
+  /// Parameters:
+  ///
+  /// * [String] projectRef (required):
+  ///
+  /// * [bool] includeMembers:
+  ///
+  /// * [String] mode:
+  Future<List<AvailableProjectUser>?> listAvailableProjectUsersApiProjectsProjectRefAvailableUsersGet(String projectRef, { bool? includeMembers, String? mode, }) async {
+    final response = await listAvailableProjectUsersApiProjectsProjectRefAvailableUsersGetWithHttpInfo(projectRef,  includeMembers: includeMembers, mode: mode, );
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, await _decodeBodyBytes(response));
+    }
+    // When a remote server returns no body with a status of 204, we shall not decode it.
+    // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
+    // FormatException when trying to decode an empty string.
+    if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
+      final responseBody = await _decodeBodyBytes(response);
+      return (await apiClient.deserializeAsync(responseBody, 'List<AvailableProjectUser>') as List)
+        .cast<AvailableProjectUser>()
+        .toList(growable: false);
+
+    }
+    return null;
+  }
+
   /// List Members By Ref
   ///
   /// Note: This method returns the HTTP [Response].

@@ -298,6 +298,56 @@
         "title": "AutomaticKeyRotationUpdate",
         "type": "object"
       },
+      "AvailableProjectUser": {
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "picture_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Picture Url"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "member",
+              "available"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "display_name",
+          "username",
+          "is_active",
+          "status",
+          "picture_url"
+        ],
+        "title": "AvailableProjectUser",
+        "type": "object"
+      },
       "CollaborationHintItem": {
         "additionalProperties": true,
         "properties": {
@@ -2495,15 +2545,8 @@
         "additionalProperties": true,
         "properties": {
           "display_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Display Name"
+            "title": "Display Name",
+            "type": "string"
           },
           "file_size_limit": {
             "title": "File Size Limit",
@@ -2598,15 +2641,8 @@
             "type": "integer"
           },
           "display_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Display Name"
+            "title": "Display Name",
+            "type": "string"
           },
           "file_size_limit": {
             "title": "File Size Limit",
@@ -7953,6 +7989,76 @@
         "summary": "Update Automatic Key Rotation",
         "tags": [
           "project-keys"
+        ]
+      }
+    },
+    "/api/projects/{project_ref}/available-users": {
+      "get": {
+        "operationId": "list_available_project_users_api_projects__project_ref__available_users_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_ref",
+            "required": true,
+            "schema": {
+              "title": "Project Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_members",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Members",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mode",
+            "required": false,
+            "schema": {
+              "default": "owner",
+              "enum": [
+                "owner",
+                "admin"
+              ],
+              "title": "Mode",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AvailableProjectUser"
+                  },
+                  "title": "Response List Available Project Users Api Projects  Project Ref  Available Users Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Available Project Users",
+        "tags": [
+          "project-members"
         ]
       }
     },

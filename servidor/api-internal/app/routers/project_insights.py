@@ -30,7 +30,7 @@ class ProjectInfoItem(BaseModel):
     is_caller_project_admin: bool
     name: str
     public_ref: str = Field(pattern=r"^[a-z]{20}$", min_length=20, max_length=20)
-    display_name: str | None
+    display_name: str
     status: str
     running_containers: int
     total_containers: int

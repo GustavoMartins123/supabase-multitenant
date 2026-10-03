@@ -87,7 +87,7 @@ class BackendResourceProfileContract(unittest.TestCase):
         main = (APP / "main.py").read_text(encoding="utf-8")
         projects = (APP / "routers" / "projects.py").read_text(encoding="utf-8")
         backgrounds = (APP / "project_backgrounds.py").read_text(encoding="utf-8")
-        self.assertIn("SELECT $1, $1, $2, $3, resource_profile", projects)
+        self.assertIn("SELECT $1, $1, $2, $2, $3, resource_profile", projects)
         worker = backgrounds.split("async def _duplicate_and_store_keys", 1)[1]
         worker = worker.split("\nasync def ", 1)[0]
         self.assertIn("SELECT resource_profile FROM projects WHERE id = $1", worker)

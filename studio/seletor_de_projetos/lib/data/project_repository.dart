@@ -134,11 +134,15 @@ class ProjectRepository {
       final project = Map<String, dynamic>.from(item);
       final id = project['id'];
       final publicRef = project['public_ref'];
+      final displayName = project['display_name'];
       if (id is! String ||
           !RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
               .hasMatch(id) ||
           publicRef is! String ||
-          !RegExp(r'^[a-z]{20}$').hasMatch(publicRef)) {
+          !RegExp(r'^[a-z]{20}$').hasMatch(publicRef) ||
+          displayName is! String ||
+          displayName.trim().isEmpty ||
+          displayName.length > 80) {
         throw const FormatException('Projeto sem identidade canonica');
       }
       projects.add(project);

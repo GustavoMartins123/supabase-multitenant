@@ -227,12 +227,16 @@ class UserCacheReloadHardeningTest(unittest.TestCase):
         for relative in (
             "admin_api/all_users.lua",
             "admin_api/users_list.lua",
-            "admin_api/available_users.lua",
         ):
             with self.subTest(relative=relative):
                 source = read(LUA / relative)
                 self.assertIn(':match("^__")', source)
                 self.assertNotIn('~= "__mtime"', source)
+
+    def test_available_users_is_proxied_to_canonical_backend_directory(self) -> None:
+        source = read(ROOT / "studio/nginx/nginx.conf")
+        self.assertIn("proxy_pass $server_domain/api/projects/$slug/available-users$is_args$args;", source)
+        self.assertNotIn("admin_api/available_users.lua", source)
 
 
 if __name__ == "__main__":

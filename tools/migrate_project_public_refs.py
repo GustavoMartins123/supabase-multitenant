@@ -86,10 +86,10 @@ def prepare(root: Path, projects: list[dict], *, apply: bool = False) -> list[st
             raise RuntimeError("Physical public reference diverges from the catalog")
         configured = {key: read_canonical_env_value(env, key) for key in
                       ("API_EXTERNAL_URL", "SITE_URL", "ADDITIONAL_REDIRECT_URLS")}
-        if configured["API_EXTERNAL_URL"] not in {
-            base + "/" + project["name"] + "/auth/v1",
-            base + "/" + project["public_ref"] + "/auth/v1",
-        }:
+        source_names = {project["name"], *project["legacy_names"]}
+        allowed_auth_urls = {base + "/" + name + "/auth/v1" for name in source_names}
+        allowed_auth_urls.add(base + "/" + project["public_ref"] + "/auth/v1")
+        if configured["API_EXTERNAL_URL"] not in allowed_auth_urls:
             raise RuntimeError("Existing Auth URL is not canonical")
         values = render_project_url_values(configured, {"project_public_url": base + "/" + project["public_ref"]})
         values["PROJECT_PUBLIC_REF"] = project["public_ref"]

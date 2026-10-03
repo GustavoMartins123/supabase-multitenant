@@ -2,6 +2,7 @@ import 'package:seletor_de_projetos/models/project_docker_status.dart';
 
 class ProjectInfo {
   final String name;
+  final String displayName;
   final String id;
   final String publicRef;
   final String status;
@@ -12,6 +13,7 @@ class ProjectInfo {
   Future<ProjectDockerStatus>? statusFuture;
   ProjectInfo({
     required this.name,
+    required this.displayName,
     required this.id,
     required this.publicRef,
     required this.status,
@@ -23,6 +25,7 @@ class ProjectInfo {
 
   factory ProjectInfo.fromJson(Map<String, dynamic> json) => ProjectInfo(
         name: json['name'],
+        displayName: json['display_name'] as String,
         id: json['id'] as String,
         publicRef: json['public_ref'] as String,
         status: json['status'],

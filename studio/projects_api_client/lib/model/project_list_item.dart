@@ -44,7 +44,7 @@ class ProjectListItem {
 
   int automaticKeyRotationLeadDays;
 
-  String? displayName;
+  String displayName;
 
   String fileSizeLimit;
 
@@ -102,7 +102,7 @@ class ProjectListItem {
     (automaticKeyRotationEnabled.hashCode) +
     (automaticKeyRotationLastError == null ? 0 : automaticKeyRotationLastError!.hashCode) +
     (automaticKeyRotationLeadDays.hashCode) +
-    (displayName == null ? 0 : displayName!.hashCode) +
+    (displayName.hashCode) +
     (fileSizeLimit.hashCode) +
     (internalTokenExpired.hashCode) +
     (internalTokenExpiresAt == null ? 0 : internalTokenExpiresAt!.hashCode) +
@@ -135,11 +135,7 @@ class ProjectListItem {
       json[r'automatic_key_rotation_last_error'] = null;
     }
       json[r'automatic_key_rotation_lead_days'] = this.automaticKeyRotationLeadDays;
-    if (this.displayName != null) {
       json[r'display_name'] = this.displayName;
-    } else {
-      json[r'display_name'] = null;
-    }
       json[r'file_size_limit'] = this.fileSizeLimit;
       json[r'internal_token_expired'] = this.internalTokenExpired;
     if (this.internalTokenExpiresAt != null) {
@@ -192,7 +188,7 @@ class ProjectListItem {
         automaticKeyRotationEnabled: mapValueOfType<bool>(json, r'automatic_key_rotation_enabled')!,
         automaticKeyRotationLastError: mapValueOfType<String>(json, r'automatic_key_rotation_last_error'),
         automaticKeyRotationLeadDays: mapValueOfType<int>(json, r'automatic_key_rotation_lead_days')!,
-        displayName: mapValueOfType<String>(json, r'display_name'),
+        displayName: mapValueOfType<String>(json, r'display_name')!,
         fileSizeLimit: mapValueOfType<String>(json, r'file_size_limit')!,
         internalTokenExpired: mapValueOfType<bool>(json, r'internal_token_expired')!,
         internalTokenExpiresAt: mapValueOfType<int>(json, r'internal_token_expires_at'),

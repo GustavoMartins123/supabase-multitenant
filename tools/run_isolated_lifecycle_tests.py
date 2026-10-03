@@ -65,7 +65,8 @@ def main() -> None:
             raise RuntimeError("Could not load existing lifecycle images")
         os.environ["DOCKER_HOST"] = "tcp://127.0.0.1:" + port["HostPort"]
         execute(args.executor_image,
-                extra_sources=("servidor/api-internal/app/migrations/0014_job_public_reference.sql",))
+                extra_sources=("servidor/api-internal/app/migrations/0014_job_public_reference.sql",
+                               "servidor/api-internal/app/migrations/0015_project_display_name.sql"))
     finally:
         if previous_host is None:
             os.environ.pop("DOCKER_HOST", None)

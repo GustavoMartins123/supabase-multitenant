@@ -28,7 +28,7 @@ class ProjectCard extends ConsumerStatefulWidget {
     required this.automaticKeyRotationEnabled,
     required this.automaticKeyRotationBlocked,
     required this.automaticKeyRotationLeadDays,
-    this.displayName,
+    required this.displayName,
     this.serverDomain,
     this.automaticKeyRotationLastError,
     this.isLoading = false,
@@ -39,7 +39,7 @@ class ProjectCard extends ConsumerStatefulWidget {
   final String technicalName;
   final String opaqueApiKeysStatus;
   final int opaqueApiKeySlotCount;
-  final String? displayName;
+  final String displayName;
   final String? serverDomain;
   final bool automaticKeyRotationEnabled;
   final bool automaticKeyRotationBlocked;
@@ -196,11 +196,11 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
                             children: [
                               Flexible(
                                 child: Tooltip(
-                                  message: widget.technicalName,
+                                  message: widget.displayName,
                                   waitDuration:
                                       const Duration(milliseconds: 500),
                                   child: Text(
-                                    widget.technicalName,
+                                    widget.displayName,
                                     style: const TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.bold,
@@ -211,23 +211,6 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
                                   ),
                                 ),
                               ),
-                              if (widget.displayName != null &&
-                                  widget.displayName!.isNotEmpty &&
-                                  widget.displayName != widget.technicalName) ...[
-                                const SizedBox(width: 8),
-                                Flexible(
-                                  child: Text(
-                                    '· ${widget.displayName!}',
-                                    style: const TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.normal,
-                                      color: SupabaseColors.textSecondary,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
                               const SizedBox(width: 8),
                               Container(
                                 width: 8,
@@ -564,7 +547,7 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      widget.technicalName,
+                      widget.displayName,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(

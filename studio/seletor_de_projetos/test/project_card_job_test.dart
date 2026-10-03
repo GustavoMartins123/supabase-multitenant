@@ -27,6 +27,7 @@ void main() {
                 child: ProjectCard(
                   refKey: 'abcdefghijklmnopqrst',
                   technicalName: 'meu_projeto',
+                  displayName: 'Meu projeto',
                   opaqueApiKeysStatus: 'provisioning',
                   opaqueApiKeySlotCount: 0,
                   activeJob: job,
@@ -46,7 +47,8 @@ void main() {
       ),
     );
 
-    expect(find.text('meu_projeto'), findsOneWidget);
+    expect(find.text('Meu projeto'), findsOneWidget);
+    expect(find.text('meu_projeto'), findsNothing);
     expect(find.text('CRIANDO PROJETO · EM EXECUÇÃO'), findsOneWidget);
     expect(
       find.text('Provisionando infraestrutura do projeto...'),

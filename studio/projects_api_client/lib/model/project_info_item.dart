@@ -25,7 +25,7 @@ class ProjectInfoItem {
     required this.totalContainers,
   });
 
-  String? displayName;
+  String displayName;
 
   String fileSizeLimit;
 
@@ -61,7 +61,7 @@ class ProjectInfoItem {
   @override
   int get hashCode =>
     // ignore: unnecessary_parenthesis
-    (displayName == null ? 0 : displayName!.hashCode) +
+    (displayName.hashCode) +
     (fileSizeLimit.hashCode) +
     (id.hashCode) +
     (isCallerProjectAdmin.hashCode) +
@@ -77,11 +77,7 @@ class ProjectInfoItem {
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
-    if (this.displayName != null) {
       json[r'display_name'] = this.displayName;
-    } else {
-      json[r'display_name'] = null;
-    }
       json[r'file_size_limit'] = this.fileSizeLimit;
       json[r'id'] = this.id;
       json[r'is_caller_project_admin'] = this.isCallerProjectAdmin;
@@ -113,7 +109,7 @@ class ProjectInfoItem {
       }());
 
       return ProjectInfoItem(
-        displayName: mapValueOfType<String>(json, r'display_name'),
+        displayName: mapValueOfType<String>(json, r'display_name')!,
         fileSizeLimit: mapValueOfType<String>(json, r'file_size_limit')!,
         id: mapValueOfType<String>(json, r'id')!,
         isCallerProjectAdmin: mapValueOfType<bool>(json, r'is_caller_project_admin')!,

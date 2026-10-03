@@ -166,7 +166,7 @@ def main() -> None:
 
     def seed(ref: str, tenant: str) -> None:
         public_refs[ref] = "a" * 20 if ref == project else ("c" * 20 if ref == copied else "d" * 20)
-        sql(f"INSERT INTO projects(id,tenant_uuid,name,owner_id,public_ref) VALUES('{tenant}','{tenant}','{ref}','{owner}','{public_refs[ref]}');")
+        sql(f"INSERT INTO projects(id,tenant_uuid,name,display_name,owner_id,public_ref) VALUES('{tenant}','{tenant}','{ref}','{ref}','{owner}','{public_refs[ref]}');")
         # Same canonical activation primitive/order used by the API before it
         # dispatches create/duplicate. This fixture does not authorize an actor.
         token = secrets.token_hex(32)

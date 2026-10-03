@@ -51,6 +51,7 @@ part 'model/auth_user_item.dart';
 part 'model/auth_users_response.dart';
 part 'model/automatic_key_rotation_response.dart';
 part 'model/automatic_key_rotation_update.dart';
+part 'model/available_project_user.dart';
 part 'model/collaboration_hint_item.dart';
 part 'model/collaboration_member_item.dart';
 part 'model/collaboration_note_item.dart';

@@ -26,7 +26,6 @@ import 'widgets/project_settings/members_section.dart';
 import 'widgets/project_settings/env_settings_section.dart';
 import 'widgets/project_settings/user_telemetry_section.dart';
 import 'widgets/project_settings/opaque_api_keys_section.dart';
-import 'models/project_member.dart';
 import 'models/all_users.dart';
 
 const _kTabs = <({String label, IconData icon})>[
@@ -43,12 +42,12 @@ class ProjectSettingsDialog extends ConsumerStatefulWidget {
     required this.automaticKeyRotationEnabled,
     required this.automaticKeyRotationBlocked,
     required this.automaticKeyRotationLeadDays,
-    this.displayName,
+    required this.displayName,
     this.automaticKeyRotationLastError,
   });
 
   final String ref;
-  final String? displayName;
+  final String displayName;
   final bool automaticKeyRotationEnabled;
   final bool automaticKeyRotationBlocked;
   final String? automaticKeyRotationLastError;
@@ -66,7 +65,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
   late TabController _tabController;
 
   late String _currentConfigToken;
-  String? _currentDisplayName;
+  late String _currentDisplayName;
   late final TextEditingController _displayNameController;
   late bool _automaticKeyRotationEnabled;
   late bool _automaticKeyRotationBlocked;
@@ -95,7 +94,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     _currentConfigToken = '';
     _currentDisplayName = widget.displayName;
     _displayNameController = TextEditingController(
-      text: widget.displayName ?? '',
+      text: widget.displayName,
     );
   }
 
@@ -109,7 +108,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
 
   Future<void> _saveDisplayName() async {
     final newName = _displayNameController.text.trim();
-    if (newName == (_currentDisplayName ?? '')) {
+    if (newName == _currentDisplayName) {
       return;
     }
     setState(() => _savingDisplayName = true);
@@ -120,11 +119,11 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
       if (!mounted) return;
       setState(() {
         _currentDisplayName = saved;
-        _displayNameController.text = _currentDisplayName ?? '';
+        _displayNameController.text = _currentDisplayName;
       });
       await ref.read(projectListProvider.notifier).refresh();
       if (!mounted) return;
-      _showSnack('Nome de exibição atualizado.', SupabaseColors.success);
+      _showSnack('Nome do projeto atualizado.', SupabaseColors.success);
     } catch (e) {
       final msg = e.toString().replaceFirst('Exception: ', '');
       _showSnack('Erro ao atualizar nome: $msg', SupabaseColors.error);
@@ -242,23 +241,32 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
   @override
   Widget build(BuildContext context) {
     final configAsync = ref.watch(configProvider);
-    final serverDomain = configAsync.value?['server_domain'] as String? ?? '';
-    final projectUrl =
-        serverDomain.isNotEmpty ? '$serverDomain/${widget.ref}' : widget.ref;
+    if (configAsync.isLoading) return _buildLoadingDialog();
+    if (configAsync.hasError) {
+      return _buildErrorDialog(
+          'Não foi possível carregar a URL: ${configAsync.error}');
+    }
+    final serverDomain = configAsync.requireValue['server_domain'];
+    final baseUrl = serverDomain is String ? Uri.tryParse(serverDomain) : null;
+    if (baseUrl == null ||
+        !baseUrl.hasAuthority ||
+        (baseUrl.scheme != 'https' && baseUrl.scheme != 'http')) {
+      return _buildErrorDialog(
+          'A URL base do servidor não está configurada corretamente.');
+    }
+    final projectUrl = '$serverDomain/${widget.ref}';
 
     final membersAsync = ref.watch(projectMembersProvider(widget.ref));
     final activeJob = ref.watch(activeProjectJobProvider(widget.ref));
     final projectBusy = activeJob != null;
-    final myId = Session().myId;
-    final myRole = membersAsync.value
-        ?.firstWhere(
-          (m) => m.userId == myId,
-          orElse: () => ProjectMember(userId: '', role: 'member'),
-        )
-        .role;
-
-    if (myRole == null && membersAsync.isLoading) {
-      return _buildLoadingDialog();
+    if (membersAsync.isLoading) return _buildLoadingDialog();
+    if (membersAsync.hasError) {
+      return _buildErrorDialog(
+          'Não foi possível verificar o acesso: ${membersAsync.error}');
+    }
+    String? myRole;
+    for (final member in membersAsync.requireValue) {
+      if (member.userId == Session().myId) myRole = member.role;
     }
 
     final isAdmin = myRole == 'admin' || Session().isSysAdmin;
@@ -354,9 +362,9 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     return _buildTabBody([
       StatusSection(projectRef: widget.ref),
       const SizedBox(height: 20),
-      _buildUrlSection(projectUrl),
+      _buildUrlSection(projectUrl, myRole, projectBusy),
       const SizedBox(height: 20),
-      _buildIdentitySection(myRole, projectBusy),
+      _buildProjectNameSection(myRole, projectBusy),
     ]);
   }
 
@@ -428,7 +436,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  widget.ref,
+                  _currentDisplayName,
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
@@ -479,6 +487,21 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     );
   }
 
+  Widget _buildErrorDialog(String message) {
+    return Dialog(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(message),
+          const SizedBox(height: 16),
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Fechar')),
+        ]),
+      ),
+    );
+  }
+
   Widget _buildLoadingDialog() {
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -515,7 +538,8 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     );
   }
 
-  Widget _buildUrlSection(String projectUrl) {
+  Widget _buildUrlSection(String projectUrl, String? myRole, bool projectBusy) {
+    final canManage = myRole == 'admin' || Session().isSysAdmin;
     return SectionWidget(
       title: 'URL DO PROJETO',
       child: Container(
@@ -525,34 +549,55 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
           borderRadius: BorderRadius.circular(6),
           border: Border.all(color: SupabaseColors.border),
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Icon(
-              Icons.link_rounded,
-              size: 16,
-              color: SupabaseColors.textMuted,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: SelectableText(
-                projectUrl.isNotEmpty ? projectUrl : 'Carregando...',
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontFamily: 'monospace',
-                  color: SupabaseColors.textSecondary,
+            Row(
+              children: [
+                const Icon(Icons.link_rounded,
+                    size: 16, color: SupabaseColors.textMuted),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: SelectableText(projectUrl,
+                      style: const TextStyle(
+                          fontSize: 13,
+                          fontFamily: 'monospace',
+                          color: SupabaseColors.textSecondary)),
                 ),
-              ),
+                IconButtonWidget(
+                  icon: Icons.copy_rounded,
+                  tooltip: 'Copiar URL',
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: projectUrl));
+                    _showSnack('URL copiada!', SupabaseColors.success);
+                  },
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            IconButtonWidget(
-              icon: Icons.copy_rounded,
-              tooltip: 'Copiar URL',
-              onPressed: projectUrl.isNotEmpty
-                  ? () {
-                      Clipboard.setData(ClipboardData(text: projectUrl));
-                      _showSnack('URL copiada!', SupabaseColors.success);
-                    }
-                  : null,
+            const SizedBox(height: 10),
+            const Text(
+                'Gerar outra URL invalida a anterior. O nome do projeto não muda.',
+                style:
+                    TextStyle(fontSize: 12, color: SupabaseColors.textMuted)),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              children: [
+                TextButton.icon(
+                  onPressed: _openHistoryDialog,
+                  icon: const Icon(Icons.history_rounded, size: 16),
+                  label: const Text('Histórico de alterações'),
+                ),
+                if (canManage)
+                  SecondaryButton(
+                    label: 'Gerar nova URL',
+                    icon: Icons.link_rounded,
+                    onPressed: _savingDisplayName || projectBusy
+                        ? null
+                        : _openRenameDialog,
+                  ),
+              ],
             ),
           ],
         ),
@@ -560,137 +605,45 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     );
   }
 
-  Widget _buildIdentitySection(String? myRole, bool projectBusy) {
-    final isAdmin = myRole == 'admin' || Session().isSysAdmin;
-    final hasDisplayChange =
-        _displayNameController.text.trim() != (_currentDisplayName ?? '');
-
+  Widget _buildProjectNameSection(String? myRole, bool projectBusy) {
+    final canManage = myRole == 'admin' || Session().isSysAdmin;
+    final hasChange = _displayNameController.text.trim() != _currentDisplayName;
     return SectionWidget(
-      title: 'IDENTIDADE DO PROJETO',
+      title: 'NOME DO PROJETO',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: SupabaseColors.bg300,
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: SupabaseColors.border),
+          TextField(
+            key: const ValueKey('project-name-field'),
+            controller: _displayNameController,
+            enabled: canManage && !_savingDisplayName && !projectBusy,
+            maxLength: 80,
+            style: const TextStyle(
+                fontSize: 13, color: SupabaseColors.textPrimary),
+            decoration: const InputDecoration(
+              isDense: true,
+              labelText: 'Nome do projeto',
+              helperText:
+                  'Alterar o nome não modifica a URL nem a infraestrutura.',
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Text(
-                      'SLUG / PATH',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1,
-                        color: SupabaseColors.textMuted,
-                      ),
-                    ),
-                    const Spacer(),
-                    TextButton.icon(
-                      onPressed: () => _openHistoryDialog(),
-                      icon: const Icon(Icons.history_rounded, size: 14),
-                      label: const Text('Histórico'),
-                      style: TextButton.styleFrom(
-                        foregroundColor: SupabaseColors.textSecondary,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Expanded(
-                      child: SelectableText(
-                        widget.ref,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontFamily: 'monospace',
-                          color: SupabaseColors.textPrimary,
-                        ),
-                      ),
-                    ),
-                    if (isAdmin) ...[
-                      const SizedBox(width: 8),
-                      SecondaryButton(
-                        label: 'Gerar nova URL',
-                        icon: Icons.link_rounded,
-                        onPressed: _savingDisplayName || projectBusy
-                            ? null
-                            : _openRenameDialog,
-                      ),
-                    ],
-                  ],
-                ),
-              ],
-            ),
+            onChanged: (_) => setState(() {}),
           ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: SupabaseColors.bg300,
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: SupabaseColors.border),
+          if (canManage) ...[
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerRight,
+              child: SecondaryButton(
+                onPressed: !hasChange ||
+                        _displayNameController.text.trim().isEmpty ||
+                        _savingDisplayName ||
+                        projectBusy
+                    ? null
+                    : _saveDisplayName,
+                icon: Icons.edit_outlined,
+                label: _savingDisplayName ? 'Salvando...' : 'Renomear projeto',
+              ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'NOME DE EXIBIÇÃO',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1,
-                    color: SupabaseColors.textMuted,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: _displayNameController,
-                  enabled: isAdmin && !_savingDisplayName && !projectBusy,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: SupabaseColors.textPrimary,
-                  ),
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    hintText: 'Nome humano do projeto',
-                  ),
-                  onChanged: (_) {
-                    if (mounted) setState(() {});
-                  },
-                ),
-                if (isAdmin) ...[
-                  const SizedBox(height: 10),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: SecondaryButton(
-                      onPressed:
-                          !hasDisplayChange || _savingDisplayName || projectBusy
-                              ? null
-                              : _saveDisplayName,
-                      icon: Icons.save_outlined,
-                      label: _savingDisplayName
-                          ? 'Salvando...'
-                          : 'Salvar display name',
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
+          ],
         ],
       ),
     );

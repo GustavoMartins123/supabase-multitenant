@@ -224,7 +224,7 @@ class ControlPlaneMigrationsIntegrationTest(unittest.IsolatedAsyncioTestCase):
         )
         project_id = await connection.fetchval(
             """
-            INSERT INTO projects(name, owner_id) VALUES($1, $2)
+            INSERT INTO projects(name, display_name, owner_id, public_ref) VALUES($1, $1, $2, 'abcdefghijklmnopqrst')
             RETURNING id::text
             """,
             "projeto_novo",

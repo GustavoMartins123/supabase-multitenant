@@ -68,7 +68,7 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
     try {
       final notifier = ref.read(projectListProvider.notifier);
       final ok = await notifier.createProjectAndWait(name,
-            resourceProfile: resourceProfile);
+          resourceProfile: resourceProfile);
       if (!mounted) return;
       _snack(
         ok ? 'Projeto criado!' : 'Falhou ao criar',
@@ -305,9 +305,8 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
                       onPressed: _creating || hasProjectCreationInFlight
                           ? null
                           : () async {
-                              final result =
-                                  await showDialog<
-                                      ({String name, String resourceProfile})>(
+                              final result = await showDialog<
+                                  ({String name, String resourceProfile})>(
                                 context: context,
                                 builder: (_) => const NewProjectDialog(),
                               );
@@ -586,7 +585,7 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
       activeJob: project['active_job'],
       isFavorite: isFavorite,
       serverDomain: serverDomain,
-      displayName: project['display_name'] as String?,
+      displayName: project['display_name'] as String,
       automaticKeyRotationEnabled:
           project['automatic_key_rotation_enabled'] as bool,
       automaticKeyRotationBlocked:

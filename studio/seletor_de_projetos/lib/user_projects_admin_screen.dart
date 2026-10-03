@@ -415,7 +415,7 @@ class _UserProjectsAdminScreenState
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            project.name,
+                            project.displayName,
                             style: const TextStyle(
                               fontSize: 15,
                               fontWeight: FontWeight.w600,

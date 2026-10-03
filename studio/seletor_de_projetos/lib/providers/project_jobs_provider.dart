@@ -266,6 +266,7 @@ List<Map<String, dynamic>> mergeProjectsWithJobs({
     indexes[job.projectUuid!] = result.length;
     result.add({
       'name': project,
+      'display_name': project,
       'id': job.projectUuid!,
       'public_ref': job.publicRef!,
       'opaque_api_keys_status': 'provisioning',

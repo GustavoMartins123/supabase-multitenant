@@ -13,6 +13,7 @@ Before following any flow, distinguish:
 - `project_uuid`: `projects.id`, canonical and immutable identity;
 - `tenant_uuid`: persisted binding for Realtime/JWT/backups; equals `projects.id` for new projects and may preserve the legacy UUID;
 - `name` / `PROJECT_ID`: stable technical name used by directories, Compose, databases and internal DNS;
+- `display_name`: required editable project title, initially set from the creation name;
 - `public_ref` / `PROJECT_PUBLIC_REF`: 20 random lowercase letters used exclusively by public paths and Studio project selection;
 - `_supabase_<technical_name>`: database;
 - Realtime tenant: identified by UUID;
@@ -22,6 +23,10 @@ Before following any flow, distinguish:
 - temporary broadcast slot: suffixed by a UUID-derived hash.
 
 Before any mutable Storage operation on an existing project, the lifecycle queries `projects.tenant_uuid` in the control plane and requires it to equal the environment's canonical `PROJECT_UUID`. A mismatch, missing row, or query failure ends the operation before touching the registry, database, or namespace.
+
+The Studio's project settings expose separate actions: **Rename project** updates only `display_name`, while **Generate new URL** rotates only `public_ref` and derived service URLs. Cards and administrative lists display the editable title. Renaming does not change the public URL, technical name, database, keys or containers. Both changes appear in the identity history.
+
+Available-member candidates come from the backend's reconciled canonical directory, not a Lua cache. The endpoint requires a project administrator or a global administrator; `mode=admin` additionally requires global administration. Inactive users and existing project administrators are excluded, and ordinary members are included only when explicitly requested.
 
 ## Creation
 
@@ -113,6 +118,8 @@ python3 tools/migrate_project_public_refs.py --root "$SERVER_ROOT" --apply
 ```
 
 `SERVER_ROOT` is the absolute path to the installation's `servidor` directory. The tool preserves technical identities and secrets, renders canonical project files and active Functions projections, and refuses running services or divergent identities. Start or recreate project services only after the server and Studio migrations have both succeeded.
+
+An Auth URL derived from a previous technical name is accepted for this offline migration only when a successful rename in the durable catalog proves that name belongs to the same project. This does not create an alias or retain the old route.
 
 Transfer the private catalog to the Studio host when using two machines. Migrate the mounted snippets directory explicitly while its `nginx` container is stopped:
 
