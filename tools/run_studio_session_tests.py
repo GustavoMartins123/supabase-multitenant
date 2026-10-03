@@ -35,6 +35,7 @@ def fixture_archive() -> bytes:
              'studio/nginx/docker-entrypoint.sh', 'studio/authelia/configuration.yml.template',
              'studio/authelia/users_database.yml.example', 'studio/authelia/ids.yml.example',
              'tests/integration/test_studio_real_session.py',
+             'studio/redis/start-sessions.sh', 'studio/redis/healthcheck.sh',
              'tests/integration/fixtures/studio_session_probe.conf']
     paths += run('git', '-C', str(ROOT), 'ls-files', 'studio/nginx/lua').splitlines()
     payload = io.BytesIO()
@@ -52,11 +53,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--studio-image', required=True)
     parser.add_argument('--authelia-image', required=True)
+    parser.add_argument('--redis-image', required=True)
     parser.add_argument('--runtime-image', required=True, help='Linux Python + openssl image')
     parser.add_argument('--browser-image', required=True, help='Built studio_session_browser.Dockerfile')
     parser.add_argument('--ui-image', required=True, help='Production Supabase Studio image')
     args = parser.parse_args()
-    for image in (args.studio_image, args.authelia_image, args.runtime_image, args.browser_image, args.ui_image):
+    for image in (args.studio_image, args.authelia_image, args.redis_image, args.runtime_image, args.browser_image, args.ui_image):
         if run('docker', 'image', 'inspect', image, '--format', '{{.Os}}') != 'linux':
             raise RuntimeError('Existing Linux images required')
     suffix = uuid.uuid4().hex[:12]
@@ -68,6 +70,9 @@ def main() -> None:
     try:
         run('docker', 'network', 'create', network)
         networks.append(network)
+        sessions_network = 'studio-sessions-' + suffix
+        run('docker', 'network', 'create', '--internal', sessions_network)
+        networks.append(sessions_network)
         run('docker', 'volume', 'create', volume)
         volumes.append(volume)
         seed = 'studio-session-seed-' + suffix
@@ -114,6 +119,24 @@ path.write_text(text)
         # Engine-local binds are synthetic files in our unique named volume.
         config = config_path + '/studio/authelia'
         secrets_path = config_path + '/studio/secrets/authelia'
+        redis = 'studio-session-redis-' + suffix
+        redis_volume = 'studio-session-redis-data-' + suffix
+        run('docker', 'volume', 'create', redis_volume)
+        volumes.append(redis_volume)
+        run('docker', 'create', '--name', redis, '--pull=never', '--network', sessions_network,
+            '--network-alias', 'redis-sessions', '--read-only', '--tmpfs', '/tmp:rw,mode=1777',
+            '--memory', '384m', '--cpus', '0.5',
+            '-v', redis_volume + ':/data',
+            '-v', secrets_path + '/REDIS_SESSION_PASSWORD:/run/secrets/REDIS_SESSION_PASSWORD:ro',
+            '-v', config_path + '/studio/redis:/scripts:ro', '--entrypoint', 'sh',
+            args.redis_image, '/scripts/start-sessions.sh')
+        containers.append(redis)
+        run('docker', 'start', redis)
+        deadline = time.monotonic() + 30
+        while subprocess.run(['docker', 'exec', redis, 'sh', '/scripts/healthcheck.sh'], capture_output=True).returncode:
+            if time.monotonic() > deadline:
+                raise RuntimeError('Redis session readiness failed')
+            time.sleep(0.5)
         authelia = 'studio-session-authelia-' + suffix
         secret_args = []
         for name, variable in [('JWT_SECRET', 'IDENTITY_VALIDATION_RESET_PASSWORD_JWT'),
@@ -122,8 +145,12 @@ path.write_text(text)
             secret_args += ['-v', f'{secrets_path}/{name}:/run/secrets/{name}:ro', '-e', f'{key}=/run/secrets/{name}']
         run('docker', 'create', '--name', authelia, '--pull=never', '--network', network,
             '--network-alias', 'authelia', '-v', config + ':/config', *secret_args,
+            '-v', secrets_path + '/REDIS_SESSION_PASSWORD:/run/secrets/REDIS_SESSION_PASSWORD:ro',
+            '-e', 'AUTHELIA_SESSION_REDIS_PASSWORD_FILE=/run/secrets/REDIS_SESSION_PASSWORD',
+            '-e', 'AUTHELIA_SESSION_REDIS_HOST=redis-sessions',
             args.authelia_image, 'authelia', '--config=/config/configuration.runtime.yml')
         containers.append(authelia)
+        run('docker', 'network', 'connect', sessions_network, authelia)
         run('docker', 'start', authelia)
         nginx = 'studio-session-nginx-' + suffix
         studio = 'studio-session-ui-' + suffix

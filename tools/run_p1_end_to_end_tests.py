@@ -23,6 +23,7 @@ def main() -> None:
              if p.startswith(('studio/nginx/lua/', 'servidor/host-agent/hostagent/',
                               'servidor/traefik/plugins-local/'))]
     extra += ['studio/nginx/nginx.conf', 'studio/nginx/docker-entrypoint.sh',
+              'studio/redis/start-sessions.sh', 'studio/redis/healthcheck.sh',
               'studio/authelia/configuration.yml.template', 'studio/authelia/users_database.yml.example',
               'studio/authelia/ids.yml.example', 'tools/configure_studio_runtime.py',
               'servidor/traefik/render_dynamic_config.py',

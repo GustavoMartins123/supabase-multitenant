@@ -23,7 +23,7 @@ from p1_lifecycle import environment, run, sql
 def validate(root: Path, suffix: str, topology: str, values: dict[str, str], benchmark: bool) -> None:
     server = root / 'servidor'
     labels = {'codex.p1.run': suffix}
-    for image in ('studio-nginx:latest', 'authelia/authelia:4.39.20', 'codex-p1-browser:local',
+    for image in ('studio-nginx:latest', 'authelia/authelia:4.39.20', 'redis:8.2.2-alpine', 'codex-p1-browser:local',
                   'ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v3', 'traefik:v3.7.6',
                   'servidor-projects-api:latest', 'supabase/postgres-meta:v0.96.1'):
         assert run('docker', 'image', 'inspect', image, '--format', '{{.Os}}') == 'linux', image
@@ -84,13 +84,35 @@ def validate(root: Path, suffix: str, topology: str, values: dict[str, str], ben
         run('docker', 'start', identifier)
         return name
 
+    sessions_network = 'p1-sessions-' + suffix
+    run('docker', 'network', 'create', '--internal', '--label', 'codex.p1.run=' + suffix, sessions_network)
+    redis_volume = 'p1-sessions-data-' + suffix
+    run('docker', 'volume', 'create', '--label', 'codex.p1.run=' + suffix, redis_volume)
+    redis = create('p1-redis-' + suffix, 'redis:8.2.2-alpine', sessions_network,
+                   '--network-alias', 'redis-sessions', '--read-only', '--tmpfs', '/tmp:rw,mode=1777',
+                   '--memory', '384m', '--cpus', '0.5',
+                   '-v', redis_volume + ':/data',
+                   '-v', str(secret_dir / 'REDIS_SESSION_PASSWORD') + ':/run/secrets/REDIS_SESSION_PASSWORD:ro',
+                   '-v', str(root / 'studio/redis') + ':/scripts:ro',
+                   '--entrypoint', 'sh', command=('/scripts/start-sessions.sh',))
+
+    def redis_ready():
+        deadline = time.monotonic() + 30
+        while subprocess.run(['docker', 'exec', redis, 'sh', '/scripts/healthcheck.sh'], capture_output=True).returncode:
+            assert time.monotonic() < deadline, 'Redis readiness failed'
+            time.sleep(0.5)
+
+    redis_ready()
     secret_args = []
     for name, variable in [('JWT_SECRET', 'IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE'),
-                           ('SESSION_SECRET', 'SESSION_SECRET_FILE'), ('STORAGE_ENCRYPTION_KEY', 'STORAGE_ENCRYPTION_KEY_FILE')]:
+                           ('SESSION_SECRET', 'SESSION_SECRET_FILE'), ('STORAGE_ENCRYPTION_KEY', 'STORAGE_ENCRYPTION_KEY_FILE'),
+                           ('REDIS_SESSION_PASSWORD', 'SESSION_REDIS_PASSWORD_FILE')]:
         secret_args += ['-v', f'{secret_dir}/{name}:/run/secrets/{name}:ro', '-e', f'AUTHELIA_{variable}=/run/secrets/{name}']
-    create('p1-authelia-' + suffix, 'authelia/authelia:4.39.20', front,
+    create('p1-authelia-' + suffix, 'authelia/authelia:4.39.20', sessions_network,
            '--network-alias', 'authelia', '-v', str(config) + ':/config', *secret_args,
+           '-e', 'AUTHELIA_SESSION_REDIS_HOST=redis-sessions',
            command=('authelia', '--config=/config/configuration.runtime.yml'))
+    run('docker', 'network', 'connect', '--alias', 'authelia', front, 'p1-authelia-' + suffix)
     create('p1-ui-' + suffix, 'ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v3', front,
            '--network-alias', 'studio', '-e', 'HOSTNAME=0.0.0.0')
     nginx_config = root / 'studio/nginx/nginx.conf'
@@ -498,12 +520,31 @@ asyncio.run(main())'''
     projection(beta)
     assert expect('owner', 'GET', '/api/platform/projects/' + beta + '/api/rest/lifecycle_marker?select=id,value', 200)[0]['value'] == 'original'
     print('PASS step-up protected full API/agent delete; surviving tenant still works', flush=True)
+    session_path = '/api/platform/projects/' + beta + '/api/rest/lifecycle_marker?select=id,value'
+    run('docker', 'stop', redis)
+    denial = request('owner', 'GET', session_path)
+    assert denial['status'] == 401 and json.loads(denial['body'])['error'] == 'authentication required'
+    run('docker', 'start', redis)
+    redis_ready()
+    expect('owner', 'GET', session_path, 200)
+    run('docker', 'restart', 'p1-authelia-' + suffix)
+    deadline = time.monotonic() + 60
+    while subprocess.run(['docker', 'exec', nginx, 'curl', '--silent', '--fail', '--cacert', '/config/ssl/ca.pem',
+                         'https://authelia:9091/auth/api/health'], capture_output=True).returncode:
+        assert time.monotonic() < deadline, 'Authelia restart readiness failed'
+        time.sleep(0.5)
+    expect('owner', 'GET', session_path, 200)
+    assert run('docker', 'exec', redis, 'redis-cli', 'ping') == 'NOAUTH Authentication required.'
+    redis_state = json.loads(run('docker', 'inspect', redis))[0]
+    assert set(redis_state['NetworkSettings']['Networks']) == {sessions_network}
+    assert not redis_state['HostConfig']['PortBindings']
+    print('PASS Redis outage fail-closed, persistent session restart and no unauthenticated Redis access', flush=True)
     access_log = run('docker', 'logs', traefik)
     assert 'projects-api@file' in access_log and 'project-' + beta + '@file' in access_log
     result = {'topology': topology, 'validated': ['real-session', 'tls-ca', 'role-matrix', 'immediate-revocation',
               'rest-graphql-storage-vectors', 'api-agent-lifecycle', 'queued-agent-revocation', 'callback-wrong-ca',
               'full-delete', 'api-outage', 'mount-isolation', 'external-opaque-tenant-isolation',
-              'replication-slot-scope'], 'benchmark': None}
+              'replication-slot-scope', 'redis-session-persistence', 'redis-outage-fail-closed'], 'benchmark': None}
     if benchmark:
         from p1_benchmark import measure
         result['benchmark'] = measure(suffix, {

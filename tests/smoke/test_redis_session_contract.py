@@ -49,5 +49,5 @@ class RedisSessionContractTest(unittest.TestCase):
         self.assertIn('umask 077', script)
         source = (ROOT / 'tests/integration/fixtures/p1_end_to_end.py').read_text(encoding='utf-8')
         self.assertIn("denial['status'] == 401", source)
-        self.assertIn("json.loads(denial['body'])['error'] == 'authentication_required'", source)
+        self.assertIn("json.loads(denial['body'])['error'] == 'authentication required'", source)
         self.assertIn("'redis-session-persistence'", source)
