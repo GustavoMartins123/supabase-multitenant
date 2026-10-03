@@ -114,7 +114,7 @@ jobs:
 
   authorization-security-live:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -131,6 +131,20 @@ jobs:
           python tools/run_auth_security_tests.py \
             --postgres-image postgres:15 --postgres-user postgres \
             --studio-image studio-security-ci:local
+      - name: Explicit real-session test images
+        run: |
+          docker build -t session-browser-ci:local -f tests/integration/fixtures/studio_session_browser.Dockerfile tests/integration/fixtures
+          docker build -t session-runtime-ci:local -f tests/integration/fixtures/studio_session_runtime.Dockerfile tests/integration/fixtures
+          docker pull authelia/authelia:4.39.20
+          docker pull ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v3
+      - name: Required real Authelia browser CSRF acceptance (verified TLS, no skips)
+        run: |
+          python tools/run_studio_session_tests.py \
+            --studio-image studio-security-ci:local \
+            --authelia-image authelia/authelia:4.39.20 \
+            --runtime-image session-runtime-ci:local \
+            --browser-image session-browser-ci:local \
+            --ui-image ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v3
 
   flutter:
     runs-on: ubuntu-latest
