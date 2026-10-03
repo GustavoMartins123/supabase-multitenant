@@ -30,7 +30,7 @@ interface TenantConfig {
 function parseDotenv(text: string): Record<string, string> {
   const out: Record<string, string> = {}
   const required = new Set(['ANON_KEY_PROJETO', 'SERVICE_ROLE_KEY_PROJETO', 'JWT_SECRET_PROJETO'])
-  for (const rawLine of text.split('\n')) {
+  for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim()
     if (!line || line.startsWith('#')) continue
     const eq = line.indexOf('=')
