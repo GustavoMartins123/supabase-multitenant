@@ -41,7 +41,7 @@ start_studio() {
     if [ -n "$(sed -n 's/^DOCKER_DESKTOP_WSL_HOST=//p' "$ROOT_DIR/servidor/.env")" ]; then
         STUDIO_COMPOSE+=(-f docker-compose.desktop-wsl.yml)
     fi
-    "${STUDIO_COMPOSE[@]}" up -d
+    "${STUDIO_COMPOSE[@]}" up --build -d
     echo "Studio iniciado."
 }
 
@@ -210,7 +210,7 @@ TRAEFIK_COMPOSE=(docker compose -f traefik/docker-compose.yml -f "$CAPACITY_TRAE
 if [ -n "$desktop_wsl_host" ]; then
     TRAEFIK_COMPOSE+=(-f traefik/docker-compose.desktop-wsl.yml)
 fi
-"${TRAEFIK_COMPOSE[@]}" --env-file .env up -d
+"${TRAEFIK_COMPOSE[@]}" --env-file .env up -d --force-recreate
 
 echo "Iniciando projetos Supabase..."
 # shellcheck disable=SC1091
