@@ -761,8 +761,11 @@ atomic_write(env_path, content, mode=0o600, replace=True)
 PYEOF
     fi
     backup_file "servidor/traefik/update_geoip.sh"
+    cp servidor/traefik/update_geoip.sh.example servidor/traefik/update_geoip.sh
+    touch servidor/traefik/access.log
     safe_sed "s|^MMDB_PATH=.*|MMDB_PATH=\"$SCRIPT_DIR/servidor/traefik/geoip/GeoLite2-Country.mmdb\"|" servidor/traefik/update_geoip.sh
     safe_sed "s|^BACKUP_DIR=.*|BACKUP_DIR=\"$SCRIPT_DIR/servidor/traefik/logs_backup/geo\"|" servidor/traefik/update_geoip.sh
+    chmod 755 servidor/traefik/update_geoip.sh
     safe_sed "s|HOST_PROJECT_ROOT=\"pass\"|HOST_PROJECT_ROOT=\"$SCRIPT_DIR\"|g" servidor/.env
 
     bash servidor/verify_key_config.sh

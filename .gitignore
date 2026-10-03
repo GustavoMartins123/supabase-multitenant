@@ -52,6 +52,8 @@ studio/docker-compose.capacity.yml
 servidor/traefik/docker-compose.capacity.yml
 
 servidor/traefik/acme.json
+servidor/traefik/update_geoip.sh
+servidor/volumes/storage/objects/
 servidor/traefik/certs/traefik/
 servidor/traefik/plugins-storage/archives/
 servidor/traefik/plugins-storage/sources/

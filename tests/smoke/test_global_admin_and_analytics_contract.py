@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+import shutil
+import subprocess
 from pathlib import Path
 
 
@@ -35,6 +37,31 @@ class GlobalAdminVisibilityContractTest(unittest.TestCase):
 
 
 class SupabaseAnalyticsContractTest(unittest.TestCase):
+    def test_log_drain_urls_preserve_the_internal_gateway_prefix(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("Node runtime nao esta instalado")
+        subprocess.run([node, str(ROOT / "tests/smoke/test_studio_log_drain_urls.cjs")], check=True)
+
+    def test_analytics_inherits_the_complete_authenticated_identity(self) -> None:
+        nginx = (ROOT / "studio/nginx/nginx.conf").read_text(encoding="utf-8")
+        parent_start = nginx.index("auth_request /authelia;")
+        parent = nginx[parent_start:nginx.index("error_page 401", parent_start)]
+        for variable, header in (
+            ("authelia_email", "remote_email"),
+            ("authelia_username", "remote_user"),
+            ("authelia_groups", "remote_groups"),
+        ):
+            self.assertRegex(
+                parent,
+                rf"auth_request_set\s+\${variable}\s+\$upstream_http_{header};",
+            )
+        start = nginx.index("location ~* ^/api/platform/projects/[^/]+/analytics(?:/|$) {")
+        location = nginx[start:nginx.index("\n        }", start)]
+        self.assertNotIn("auth_request_set", location)
+        self.assertNotIn("auth_request off", location)
+        self.assertIn("security/studio_project_admin_access.lua", location)
+
     def setUp(self) -> None:
         self.server_compose = (ROOT / "servidor" / "docker-compose.yml").read_text(
             encoding="utf-8"

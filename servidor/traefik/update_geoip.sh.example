@@ -1,7 +1,7 @@
 #!/bin/bash
 
-MMDB_PATH="seucaminho/traefik/geoip/GeoLite2-Country.mmdb"
-BACKUP_DIR="seucaminho/traefik/logs_backup/geo"
+MMDB_PATH="__MMDB_PATH__"
+BACKUP_DIR="__BACKUP_DIR__"
 BASE_URL="https://github.com/P3TERX/GeoLite.mmdb/releases/download"
 FILE_NAME="GeoLite2-Country.mmdb"
 GITHUB_API="https://api.github.com/repos/P3TERX/GeoLite.mmdb/releases/latest"
@@ -44,37 +44,6 @@ else
     log "Não foi possível consultar a API do GitHub, tentando método alternativo..."
 fi
 
-if [[ "$DOWNLOADED" == false ]]; then
-    log "Usando método alternativo: tentativas sequenciais..."
-    DAYS_AHEAD=7
-    MAX_RETRIES=14
-    TARGET_EPOCH=$(date -d "+${DAYS_AHEAD} days" +%s)
-    
-    for ((i = 0; i <= MAX_RETRIES; i++)); do
-        TRY_EPOCH=$(( TARGET_EPOCH - i * 86400 ))
-        TRY_DATE=$(date -d "@${TRY_EPOCH}" +%Y.%m.%d)
-        URL="${BASE_URL}/${TRY_DATE}/${FILE_NAME}"
-
-        log "Tentando: $URL"
-
-        HTTP_CODE=$(curl -sL -o /tmp/geolite_tmp.mmdb -w "%{http_code}" "$URL")
-
-        if [[ "$HTTP_CODE" == "200" ]]; then
-            if file /tmp/geolite_tmp.mmdb | grep -q "data\|MaxMind\|mmdb"; then
-                DOWNLOADED=true
-                DOWNLOADED_URL="$URL"
-                log "Download OK: $TRY_DATE (HTTP $HTTP_CODE)"
-                break
-            else
-                log "Arquivo inválido em $TRY_DATE, continuando..."
-                rm -f /tmp/geolite_tmp.mmdb
-            fi
-        else
-            log "Não encontrado em $TRY_DATE (HTTP $HTTP_CODE)"
-            rm -f /tmp/geolite_tmp.mmdb
-        fi
-    done
-fi
 
 if [[ "$DOWNLOADED" == true ]]; then
     MMDB_DIR=$(dirname "$MMDB_PATH")
@@ -97,5 +66,5 @@ if [[ "$DOWNLOADED" == true ]]; then
 else
     log "Nenhuma versão nova encontrada após $MAX_RETRIES tentativas. Mantendo arquivo atual."
     rm -f /tmp/geolite_tmp.mmdb
-    exit 0
+    exit 1
 fi
