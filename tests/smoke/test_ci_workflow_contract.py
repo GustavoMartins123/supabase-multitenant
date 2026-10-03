@@ -55,6 +55,17 @@ class CiWorkflowContract(unittest.TestCase):
             with self.subTest(target=target):
                 self.assertIn(target, source)
 
+    def test_required_security_harnesses_are_in_ci_and_reject_skips(self) -> None:
+        source = WORKFLOW.read_text(encoding="utf-8")
+        for name in ("functions", "auth"):
+            tool = f"tools/run_{name}_security_tests.py"
+            self.assertIn(tool, source)
+            runner = (ROOT / tool).read_text(encoding="utf-8")
+            self.assertIn("result.skipped", runner)
+            self.assertIn("--pull=never", runner)
+        self.assertIn("--postgres-image postgres:15 --postgres-user postgres", source)
+        self.assertIn("--edge-image supabase/edge-runtime:v1.74.2", source)
+
     def test_e2e_suite_stays_opt_in(self) -> None:
         e2e = (
             ROOT / "tests" / "smoke" / "test_platform_e2e_integration.py"

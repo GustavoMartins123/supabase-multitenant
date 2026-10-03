@@ -94,6 +94,44 @@ jobs:
           MIGRATIONS_ADMIN_DSN: postgresql://postgres:postgres@127.0.0.1:5432/postgres
         run: python -m pytest tests/integration/test_control_plane_migrations_postgres.py -q
 
+  functions-security-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Explicit disposable test images
+        run: |
+          docker pull python:3.12-slim-bookworm
+          docker pull supabase/edge-runtime:v1.74.2
+      - name: Required Functions filesystem and worker isolation checks (no skips)
+        run: |
+          python tools/run_functions_security_tests.py \
+            --lifecycle-image python:3.12-slim-bookworm \
+            --edge-image supabase/edge-runtime:v1.74.2
+
+  authorization-security-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Security test dependencies
+        run: python -m pip install -r servidor/api-internal/requirements.txt -r servidor/host-agent/requirements.txt
+      - name: Build production OpenResty image and obtain disposable PostgreSQL
+        run: |
+          docker build -t studio-security-ci:local -f studio/Dockerfile studio
+          docker pull postgres:15
+      - name: Required authorization, revocation, directory and tenant SQL checks (no skips)
+        run: |
+          python tools/run_auth_security_tests.py \
+            --postgres-image postgres:15 --postgres-user postgres \
+            --studio-image studio-security-ci:local
+
   flutter:
     runs-on: ubuntu-latest
     timeout-minutes: 25

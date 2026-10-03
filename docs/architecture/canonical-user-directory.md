@@ -56,3 +56,9 @@ removal, snapshot ordering and queued-agent revocation in real PostgreSQL. With
 `STUDIO_DIRECTORY_TEST_URL`, it additionally uses real OpenResty snapshots to
 revoke an active global admin through the real API. These boundary tests do not
 claim a complete real Authelia/Traefik split-node installation test.
+
+`tools/run_auth_security_tests.py` creates the mandatory disposable PostgreSQL
+and OpenResty harnesses, rejecting any skipped test. CI runs it in the
+`authorization-security-live` job. See
+[security validation](../operations/security-validation.md) for exact commands
+and the full-stack acceptance that these boundary tests do not cover.

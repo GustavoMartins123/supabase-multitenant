@@ -48,9 +48,13 @@ def main() -> None:
         tests = fixture / 'tests/integration'
         tests.mkdir(parents=True)
         shutil.copy2(ROOT / 'tests/integration/test_functions_projection_lifecycle.py', tests)
+        lifecycle_checks = '''import sys, unittest
+suite = unittest.defaultTestLoader.discover('tests/integration', pattern='test_functions_projection_lifecycle.py')
+result = unittest.TextTestRunner(verbosity=2).run(suite)
+sys.exit(0 if result.wasSuccessful() and not result.skipped and result.testsRun >= 6 else 1)
+'''
         print(run('docker', 'run', '--rm', '--pull=never', '--entrypoint', 'python3', *mount(fixture, '/workspace'),
-                  '-w', '/workspace', args.lifecycle_image, '-m', 'unittest', 'discover', '-s', 'tests/integration',
-                  '-p', 'test_functions_projection_lifecycle.py', '-v'))
+                  '-w', '/workspace', args.lifecycle_image, '-c', lifecycle_checks))
         server = fixture / 'runtime'
         for index, ref in enumerate(('test_alpha', 'test_beta')):
             directory = server / 'projects' / ref

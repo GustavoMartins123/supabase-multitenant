@@ -72,6 +72,9 @@ PLACEHOLDER_TOKEN_RE = re.compile(r"<[^<>\s]+>")
 KNOWN_OPTIONAL = {
     "FUNCTIONS_TENANT_TEST_URL": "harness sintetico obrigatorio em run_functions_security_tests.py, nunca runtime",
     "FUNCTIONS_PROJECTION_TEST_DIR": "diretorio sintetico do mesmo harness, nunca runtime",
+    "CONTROL_PLANE_TEST_DSN": "DSN descartavel gerado pelo runner obrigatorio de seguranca, nunca runtime",
+    "TENANT_SQL_TEST_ADMIN_DSN": "cluster exclusivo do runner de seguranca SQL, nunca runtime",
+    "STUDIO_DIRECTORY_TEST_URL": "OpenResty sintetico do runner de seguranca, nunca runtime",
     "ANALYTICS_INTERNAL_URL": "default em runtime_config.py",
     "DB_DSN": "computado no environment do Compose",
     "LEGACY_FERNET_SECRET": "migracao opt-in (migrate_project_secrets.py)",
