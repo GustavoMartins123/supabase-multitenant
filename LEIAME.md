@@ -162,6 +162,8 @@ Para uma instalação nova no Docker Desktop/WSL, use `SETUP_DOCKER_DESKTOP_WSL_
 
 Esse perfil usa `servidor/host-agent/.docker` tanto na inicialização quanto nos builds não interativos do host-agent, sem modificar as credenciais Docker do operador. A configuração gerada baixa imagens públicas anonimamente. Para registros privados, autentique explicitamente com `docker --config servidor/host-agent/.docker login <registro>`; o serviço Linux não usa o helper de credenciais do Windows.
 
+Nesse perfil, a configuração gravável do Traefik, o diretório/SQLite do Authelia e os snippets também ficam em volumes Linux do Docker. `studio/authelia` fornece configuração e certificados do setup, não o banco administrativo em uso. A inicialização preenche um volume novo uma única vez, preserva o estado existente no volume e recusa migrar automaticamente um SQLite existente no host. Faça backup desses volumes antes de qualquer reset; nunca use `down -v` para reiniciar.
+
 Para duas máquinas, use `bash setup.sh split-node <ip-ou-dominio-do-servidor>`. Executar `bash setup.sh` sem perfil mantém o fluxo interativo anterior.
 
 O IP ou domínio solicitado pelo script representa o **servidor principal**, onde rodam Traefik, Projects API e os serviços dos projetos.

@@ -34,6 +34,22 @@ class DesktopWslContractTests(unittest.TestCase):
         self.assertIn('DOCKER_CONFIG=$(escape_systemd_value "$HOST_AGENT_DOCKER_CONFIG")', installer)
         self.assertIn('config.json" ] || die', start)
 
+    def test_writable_administrative_and_traefik_state_use_linux_volumes(self):
+        traefik = (ROOT / "servidor/traefik/docker-compose.desktop-wsl.yml").read_text(encoding="utf-8")
+        studio = (ROOT / "studio/docker-compose.desktop-wsl.yml").read_text(encoding="utf-8")
+        self.assertIn("desktop-traefik-dynamic:/dynamic", traefik)
+        self.assertIn("desktop-traefik-dynamic:/etc/traefik/dynamic:ro", traefik)
+        self.assertEqual(studio.count("usersdb:/config"), 2)
+        self.assertIn("condition: service_completed_successfully", studio)
+        self.assertIn("desktop-snippets:/app/snippets", studio)
+
+    def test_administrative_initialization_preserves_live_data_and_excludes_ca_key(self):
+        source = (ROOT / "studio/initialize-usersdb.sh").read_text(encoding="utf-8")
+        self.assertIn("if [ ! -f /config/.desktop-initialized ]; then", source)
+        self.assertIn("Existing administrative data requires explicit migration", source)
+        self.assertNotIn("ca.key", source)
+        self.assertNotIn("|| true", source)
+
 
 if __name__ == "__main__":
     unittest.main()

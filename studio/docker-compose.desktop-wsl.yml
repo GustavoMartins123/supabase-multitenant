@@ -1,0 +1,26 @@
+services:
+  usersdb-init:
+    command: ["sh", "/usr/local/bin/initialize-usersdb.sh"]
+    volumes:
+      - ./initialize-usersdb.sh:/usr/local/bin/initialize-usersdb.sh:ro
+      - ./snippets:/seed-snippets:ro
+      - desktop-snippets:/snippets
+  authelia:
+    volumes:
+      - usersdb:/config
+    depends_on:
+      usersdb-init:
+        condition: service_completed_successfully
+  nginx:
+    volumes:
+      - usersdb:/config
+      - desktop-snippets:/app/snippets
+    depends_on:
+      usersdb-init:
+        condition: service_completed_successfully
+  studio:
+    volumes:
+      - desktop-snippets:/app/snippets
+
+volumes:
+  desktop-snippets:

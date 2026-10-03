@@ -162,6 +162,8 @@ For a fresh Docker Desktop/WSL installation, use `SETUP_DOCKER_DESKTOP_WSL_HOST=
 
 This profile uses `servidor/host-agent/.docker` for both startup and unattended host-agent builds, without modifying the operator's Docker credentials. The generated configuration pulls public images anonymously. For private registries, authenticate explicitly with `docker --config servidor/host-agent/.docker login <registry>`; the Windows credential helper is not used by the Linux service.
 
+Writable Traefik configuration, Authelia's directory/SQLite state and snippets also live in Linux Docker volumes in this profile. `studio/authelia` supplies setup configuration and certificates, not the live administrative database. Initialization seeds a new volume once, preserves existing volume state and refuses automatic migration of an existing host SQLite database. Back up these volumes before any reset; never use `down -v` to restart.
+
 For two machines, use `bash setup.sh split-node <server-ip-or-domain>`. Running `bash setup.sh` without a profile keeps the legacy interactive flow.
 
 The script also detects the IP of the current machine, used by the local Studio, Authelia, the self-signed certificate and internal integrations.

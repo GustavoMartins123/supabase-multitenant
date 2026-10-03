@@ -37,7 +37,11 @@ require_host_agent_installation() {
 start_studio() {
     echo "Iniciando Studio, Authelia e OpenResty..."
     cd "$ROOT_DIR/studio"
-    docker compose -f docker-compose.yml -f docker-compose.capacity.yml up -d
+    STUDIO_COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.capacity.yml)
+    if [ -n "$(sed -n 's/^DOCKER_DESKTOP_WSL_HOST=//p' "$ROOT_DIR/servidor/.env")" ]; then
+        STUDIO_COMPOSE+=(-f docker-compose.desktop-wsl.yml)
+    fi
+    "${STUDIO_COMPOSE[@]}" up -d
     echo "Studio iniciado."
 }
 
@@ -202,7 +206,11 @@ done
 
 echo
 echo "Iniciando Traefik com File Provider..."
-docker compose -f traefik/docker-compose.yml -f "$CAPACITY_TRAEFIK" --env-file .env up -d
+TRAEFIK_COMPOSE=(docker compose -f traefik/docker-compose.yml -f "$CAPACITY_TRAEFIK")
+if [ -n "$desktop_wsl_host" ]; then
+    TRAEFIK_COMPOSE+=(-f traefik/docker-compose.desktop-wsl.yml)
+fi
+"${TRAEFIK_COMPOSE[@]}" --env-file .env up -d
 
 echo "Iniciando projetos Supabase..."
 # shellcheck disable=SC1091
