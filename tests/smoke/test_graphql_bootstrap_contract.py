@@ -1,4 +1,4 @@
-"""Canonical PostgREST/GraphQL bootstrap, complemented by the real P1 drill."""
+"""Canonical PostgREST/GraphQL bootstrap, complemented by the real lifecycle drill."""
 from pathlib import Path
 import unittest
 

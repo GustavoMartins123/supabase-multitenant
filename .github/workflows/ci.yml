@@ -148,7 +148,7 @@ jobs:
             --ui-image ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v3
 
   p1-lifecycle-live:
-    name: P1 lifecycle (${{ matrix.topology }})
+    name: Lifecycle and authorization (${{ matrix.topology }})
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:

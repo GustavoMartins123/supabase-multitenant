@@ -31,7 +31,7 @@ CI has three non-optional security jobs in `ci.yml`:
 - `functions-security-live`: obtains the explicit Python/Edge Runtime images and
   checks the real Linux projection/lock contract and real runtime worker
   isolation, including credential changes on the next request.
-- `p1-lifecycle-live` (physical matrix entry): builds the production lifecycle dependencies and
+- The lifecycle CI job (physical matrix entry): builds the production lifecycle dependencies and
   runs the privileged physical script drill described below, including real
   Storage objects, Vectors, FDW SigV4 and Functions projection checks.
 
@@ -76,7 +76,7 @@ docker build -t servidor-projects-api:latest -f servidor/api-internal/Dockerfile
 docker tag servidor-projects-api:latest servidor-control-plane-migrations:latest
 docker build -t servidor-key-authorizer:latest -f servidor/key-authorizer/Dockerfile servidor
 docker build -t p1-executor:local -f tests/integration/fixtures/p1_executor.Dockerfile tests/integration/fixtures
-# Obtain the exact service images listed in p1-lifecycle-live first.
+# Obtain the exact service images listed in the lifecycle CI job first.
 python tools/run_p1_lifecycle_tests.py --executor-image p1-executor:local
 ```
 
@@ -110,11 +110,11 @@ lifecycle. Delete does not exercise database/control-plane/Storage cleanup.
 It does not simulate split-node transport or prove the Studio permission matrix.
 Local passes and a configured CI job do not prove a remote CI execution.
 
-## Full browser/API/agent P1 acceptance
+## Full browser/API/agent acceptance
 
 Build the physical drill images above with the exact executor tag
 `codex-p1-executor:local`, plus the end-to-end dependencies listed in the
-`p1-lifecycle-live` CI job (`studio-nginx:latest`, `codex-p1-browser:local`,
+Lifecycle and authorization CI job (`studio-nginx:latest`, `codex-p1-browser:local`,
 Authelia, patched Studio, Traefik and postgres-meta). Missing images are explicit
 errors; the runner does not select alternate images or pull implicitly.
 
@@ -244,7 +244,7 @@ validation attempts failed because the fixture expected the wrong outage status
 and then the wrong JSON spelling; those assertions were corrected to match the
 canonical denial, without weakening it or adding retries.
 
-P1 acceptance is complete for these local disposable container topologies.
+Browser/API/agent acceptance passed for these local disposable container topologies.
 Split still means disjoint networks on one engine, not a verified physical WAN.
 No remote CI run, universal cross-tenant coverage for every optional service,
 production deployment or availability guarantee is claimed. Raw evidence remains

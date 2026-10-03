@@ -1,4 +1,4 @@
-"""CI permanente nao pode sumir silenciosamente (P0 #1 do backlog)."""
+"""Contrato de presenca e cobertura do workflow de integracao continua."""
 
 from __future__ import annotations
 

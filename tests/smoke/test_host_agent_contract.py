@@ -1,6 +1,6 @@
 """Contrato do host-agent: comandos fechados, HMAC, paths e sanitizacao.
 
-Fixa as garantias do P0 estrutural: a Projects API nao executa Docker nem
+Verifica o isolamento de execucao: a Projects API nao executa Docker nem
 shell; toda execucao fisica passa pelo host-agent com assinatura HMAC,
 reautorizacao, confinamento de paths e saida sanitizada.
 """
