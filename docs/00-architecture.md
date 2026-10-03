@@ -344,7 +344,7 @@ Operational profiles are explicit:
 
 - `./start.sh single-node` starts the server and Studio on the same host;
 - `./start.sh split-node-server` starts the main server;
-- `./start.sh split-node-studio` starts Studio, OpenResty, and Authelia on the administrative node.
+- `./start.sh split-node-studio` starts Studio, OpenResty, Authelia, and session Redis on the administrative node.
 
 The same profiles are accepted by `stop_containers.sh`. In split-node mode, all Studio calls to the Projects API use `SERVER_DOMAIN`.
 
@@ -356,7 +356,7 @@ The host-agent remains outside the containers as a systemd service, even in the 
 
 ### Two machines
 
-The local machine runs Studio, OpenResty, and Authelia. The main server runs the data plane, Projects API, and host-agent.
+The local machine runs Studio, OpenResty, Authelia, and session Redis. The main server runs the data plane, Projects API, and host-agent.
 
 The topology must not be represented by different permanent branches. The distinction belongs in address, certificate, and route configuration.
 

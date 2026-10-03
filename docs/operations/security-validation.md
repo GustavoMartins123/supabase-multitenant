@@ -47,7 +47,7 @@ docker build -t session-browser:local -f tests/integration/fixtures/studio_sessi
 docker build -t session-runtime:local -f tests/integration/fixtures/studio_session_runtime.Dockerfile tests/integration/fixtures
 python tools/run_studio_session_tests.py \
   --studio-image studio-nginx:latest \
-  --authelia-image authelia/authelia:4.39.20 \
+  --authelia-image authelia/authelia:4.39.20 --redis-image redis:8.2.2-alpine \
   --runtime-image session-runtime:local --browser-image session-browser:local \
   --ui-image ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v3
 ```
@@ -126,7 +126,7 @@ python tools/run_p1_end_to_end_tests.py --executor-image codex-p1-executor:local
 ```
 
 Both entries are mandatory CI tests without optional skips. The isolated stack
-uses real Authelia logins, cookies, Chromium certificate trust, production Lua,
+uses real Authelia logins, Redis sessions, cookies, Chromium certificate trust, production Lua,
 Traefik file renderer and gateway plugin, API/authorizer, signed host-agent,
 REST/GraphQL, Storage, pgvector and Edge Runtime. No mutation or authorization
 handler is mocked. Data markers/objects/vectors are seeded only as test data;
@@ -211,20 +211,41 @@ The pre-optimization full HTTP run after the Fernet clock correction completed
 reading seconds; future-token rejection and expiry remain strict and are checked
 with real Python-issued tokens in OpenResty. Raw evidence remains private/local.
 
-### Outstanding session stability gate
+### Session stability validation with Redis
 
-The successful baseline is not evidence that every subsequent run passed. Other
-full drills passed functional acceptance but then returned 401 during benchmark
-warmup, with the browser cookie still present. Such runs fail; they are not
-retried, reauthenticated or removed from the evidence set. Temporary verbose
-diagnostics have been removed from the benchmark path.
+Before Redis, some full drills passed functional acceptance but returned 401
+in benchmark warmup while the browser cookie remained present. Those runs failed;
+they were not reauthenticated or removed from the evidence. A separate exact-source
+Go reproduction exposed mutable session-key ownership in Authelia's memory
+provider; it did not alone prove the entire request-level causal chain.
 
-A separate deterministic Go reproduction using the exact Authelia 4.39.20
-memory-provider source demonstrates a session-key ownership defect: its
-`getSessionKey` uses the zero-copy `strconv.B2S` on request-backed bytes. Reusing
-that buffer makes the stored session inaccessible under its original identifier.
-This supports investigation of the intermittent 401 but does not alone establish
-the full request-level causal chain. A backend remediation and clean single/split
-benchmark reruns remain required before claiming stable P1 completion. Neither
-an optional Redis recommendation nor a passing short two-session browser probe
-closes that gate.
+Redis is now the mandatory session backend, not an optional recovery path. The
+full drill stops Redis and requires the canonical protected API to return 401
+with JSON `authentication required`. It then restarts Redis and Authelia and
+requires the original browser session to work without relogin. Unauthenticated
+Redis access is denied, its port is unpublished and its only network is the
+private session network. Configuration and cutover are documented in
+[OpenResty/Lua architecture](../architecture/openresty-lua.md#browser-sessions).
+
+Local Linux Docker validation on 2026-10-03 passed all 15 acceptance categories
+in each topology, followed sequentially by the bounded HTTP benchmark:
+
+| Topology | Measured requests | HTTP errors | p50 at concurrency 1, across workloads | Throughput at concurrency 8, across workloads |
+| --- | ---: | ---: | --- | --- |
+| single | 3,600 | 0 | 44.4–56.8 ms | 22.31–26.83 requests/s |
+| split | 3,600 | 0 | 44.8–57.9 ms | 22.66–26.47 requests/s |
+
+Each run also passed all 50 warmup requests. The earlier unexpected session 401
+was not reproduced in these two clean runs. Redis used approximately 5 MiB in
+the collected load samples, within its 384 MiB container limit. The HTTP results
+are not a speedup claim or maximum-capacity estimate; the independently measured
+directory improvement remains a 500-user snapshot result. Two earlier Redis
+validation attempts failed because the fixture expected the wrong outage status
+and then the wrong JSON spelling; those assertions were corrected to match the
+canonical denial, without weakening it or adding retries.
+
+P1 acceptance is complete for these local disposable container topologies.
+Split still means disjoint networks on one engine, not a verified physical WAN.
+No remote CI run, universal cross-tenant coverage for every optional service,
+production deployment or availability guarantee is claimed. Raw evidence remains
+private in ignored `.tmp-appdata` files.
