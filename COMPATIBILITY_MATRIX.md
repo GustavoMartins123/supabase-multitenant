@@ -43,6 +43,7 @@ tested against. One row per moving part; the platform row is the canonical
 | OpenResty (Studio gateway) | `openresty/openresty:1.31.1.1-1-bookworm-fat` | `studio/Dockerfile` |
 | Nginx (data-plane proxy) | `nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim` | `servidor/.env.example` (`STORAGE_DATA_PLANE_PROXY_IMAGE`), `servidor/traefik/docker-compose.yml` |
 | Authelia | `authelia/authelia:4.39.20` | `studio/docker-compose.yml` |
+| Redis (Authelia sessions) | `redis:8.2.2-alpine` | `studio/docker-compose.yml` |
 | Postgres (control plane) | `postgres:16.13-alpine3.23` | `studio/postgres/Dockerfile` |
 | Python (API image) | `python:3.12.13-slim` | `servidor/api-internal/Dockerfile` |
 | Elixir / OTP (Realtime) | `1.18` / `27.3` on `bookworm-20250929-slim` | `servidor/volumes/realtime/Dockerfile` |

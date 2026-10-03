@@ -14,6 +14,12 @@ identity_validation:
     jwt_lifespan: '5 minutes'
     jwt_algorithm: 'HS256'
 session:
+  redis:
+    host: redis-sessions
+    port: 6379
+    database_index: 0
+    timeout: '1s'
+    max_retries: 0
   cookies:
     - name: authelia_session
       domain: __STUDIO_HOST__

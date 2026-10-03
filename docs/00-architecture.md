@@ -16,6 +16,7 @@ The primary isolation boundaries are the PostgreSQL database, JWT secret, tenant
 flowchart TB
     User[User] --> StudioGateway[Studio OpenResty\nHTTPS :9091]
     StudioGateway --> Authelia[Authelia]
+    Authelia --> Sessions[Redis sessions - Studio node only]
     StudioGateway --> Selector[Flutter]
     StudioGateway --> Studio[Supabase Studio]
 

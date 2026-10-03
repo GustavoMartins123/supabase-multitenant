@@ -188,7 +188,6 @@ function M.find_identifier(username)
     return identifiers[clean_username], nil
 end
 
--- One fresh identity document and one lock per snapshot, never a cross-request cache.
 function M.ensure_identifiers(usernames)
     if type(usernames) ~= "table" then return nil, nil, "lista de usernames invalida" end
     local count = 0
@@ -217,7 +216,6 @@ function M.ensure_identifiers(usernames)
         for _, username in ipairs(requested) do
             created[username] = false
             if not identifiers[username] then
-                -- Canonical provisioning of a new identity, not a substituted ID.
                 local generated, generate_err = generate_identifier(username)
                 if not generated then return { error = generate_err } end
                 identifiers, read_err = identifiers_by_username()

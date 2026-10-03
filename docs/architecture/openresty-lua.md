@@ -77,6 +77,34 @@ directly to the API.
 paths and injects the project service key. Methods or paths outside the known
 list are rejected with HTTP 400.
 
+### Browser sessions
+
+Human authentication has one carrier: the Authelia browser cookie. OpenResty
+does not forward caller Basic/Bearer credentials to the verification endpoint.
+Sessions live exclusively in `redis-sessions` on the Studio node, including in
+split-node deployments; the server node does not need access to Redis.
+
+Redis has no published port and shares only the internal `auth-sessions`
+network with Authelia. Its dedicated generated `REDIS_SESSION_PASSWORD` secret
+is mounted only in those two services. Authelia encrypts session data with
+`SESSION_SECRET` before storing it. Redis uses an AOF volume, `everysec` fsync,
+a 256 MiB data limit and `noeviction` within a 384 MiB container limit.
+
+Unavailable Redis, invalid credentials or a full store fail authentication
+explicitly. There is no in-memory backend or cached authorization path on
+failure. Membership and account revocation are still checked against the fresh
+canonical directory/control plane; persisted sessions do not preserve revoked
+permissions. Restarting Authelia or Redis preserves valid sessions without
+relogin. Losing the session volume or changing `SESSION_SECRET` invalidates
+sessions; AOF `everysec` can lose up to one second of recent writes on a crash.
+
+For an existing installation, rerender the runtime with
+`python3 tools/configure_studio_runtime.py --studio-origin https://HOST --force`
+before starting the updated Studio Compose. This creates the new private secret
+without rotating existing ones. Old in-memory sessions cannot be migrated and
+users must log in once after cutover. Operational checks and evidence are in
+[Security validation](../operations/security-validation.md).
+
 ### Administrative groups
 
 Authelia's `Remote-Groups` header is treated as a CSV list, normalized with
