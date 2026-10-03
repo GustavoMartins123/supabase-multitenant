@@ -10,7 +10,7 @@ Uso:
 
 Sem `--compose`, nao precisa de Docker nem de `.env` gerados: e puro
 estatico e roda no CI. Com `--compose`, valida a interpolacao real dos
-Composes (pula com aviso se `docker compose` nao existir).
+Composes com env-files sinteticos isolados (erro se Docker estiver ausente).
 """
 
 from __future__ import annotations
@@ -398,7 +398,7 @@ def _example_env_for_compose(relative: str, tmpdir: pathlib.Path) -> pathlib.Pat
         f"{key}={value if value.strip() else 'dummy'}"
         for key, value in values.items()
     ]
-    target = tmpdir / (pathlib.Path(relative).parent.name + ".env")
+    target = tmpdir / pathlib.Path(relative).name.removesuffix(".example")
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return target
 
@@ -408,7 +408,7 @@ def check_compose_profiles(report: Report) -> None:
 
     docker = shutil.which("docker")
     if docker is None:
-        report.warning("docker ausente: pulando `compose config -q`")
+        report.error("docker ausente: validacao Compose obrigatoria nao executada")
         return
     combos = [
         (["servidor/docker-compose.yml"], "servidor/.env.example"),
@@ -432,8 +432,20 @@ def check_compose_profiles(report: Report) -> None:
     with tempfile.TemporaryDirectory(prefix="env-contract-") as tmp:
         tmpdir = pathlib.Path(tmp)
         for files, env in combos:
-            env_file = _example_env_for_compose(env, tmpdir)
-            cmd = [docker, "compose", "--env-file", str(env_file)]
+            # Compose resolves service env_file relative to its project dir.
+            # Never read installation secrets or generate files in that tree.
+            project_dir = tmpdir / pathlib.Path(files[0]).parent
+            project_dir.mkdir(parents=True, exist_ok=True)
+            env_file = _example_env_for_compose(env, project_dir)
+            env_root = pathlib.Path(env).parent
+            auxiliaries = {
+                "servidor": (".analytics.env.example", ".storage.env.example"),
+                "studio": (".analytics.env.example",),
+            }[env_root.as_posix()]
+            for name in auxiliaries:
+                _example_env_for_compose((env_root / name).as_posix(), project_dir)
+            cmd = [docker, "compose", "--project-directory", str(project_dir),
+                   "--env-file", str(env_file)]
             for relative in files:
                 cmd += ["-f", str(ROOT / relative)]
             cmd += ["config", "-q"]

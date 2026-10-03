@@ -181,6 +181,33 @@ class EnvRealFileHygieneTest(unittest.TestCase):
 
 
 class EnvComposeEnvSynthesisTest(unittest.TestCase):
+    def test_compose_uses_only_isolated_example_env_files(self) -> None:
+        tool = load_tool()
+        seen = []
+
+        def check(command, **kwargs):
+            project = pathlib.Path(command[command.index("--project-directory") + 1])
+            self.assertFalse(project.is_relative_to(ROOT))
+            self.assertTrue((project / ".env").is_file())
+            for name in (".analytics.env", ".storage.env") if "servidor" in project.parts else (".analytics.env",):
+                self.assertTrue((project / name).is_file())
+            seen.append(command)
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        report = tool.Report()
+        with mock.patch.object(tool.shutil, "which", return_value="docker"), mock.patch.object(tool.subprocess, "run", side_effect=check):
+            tool.check_compose_profiles(report)
+        self.assertEqual(report.errors, [])
+        self.assertEqual(len(seen), 5)
+
+    def test_requested_compose_validation_fails_without_docker(self) -> None:
+        tool = load_tool()
+        report = tool.Report()
+        with mock.patch.object(tool.shutil, "which", return_value=None):
+            tool.check_compose_profiles(report)
+        self.assertEqual(len(report.errors), 1)
+        self.assertEqual(report.warnings, [])
+
     def test_empty_example_values_become_dummy(self) -> None:
         import tempfile
 
