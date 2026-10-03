@@ -11,18 +11,23 @@
 import 'package:projects_api_client/api.dart';
 import 'package:test/test.dart';
 
-// tests for ProjectRenameRequest
+// tests for DirectorySnapshot
 void main() {
-  // final instance = ProjectRenameRequest();
+  // final instance = DirectorySnapshot();
 
-  group('test ProjectRenameRequest', () {
-    // String displayName
-    test('to test the property `displayName`', () async {
+  group('test DirectorySnapshot', () {
+    // String revision
+    test('to test the property `revision`', () async {
       // TODO
     });
 
-    // String newName
-    test('to test the property `newName`', () async {
+    // int sequence
+    test('to test the property `sequence`', () async {
+      // TODO
+    });
+
+    // List<DirectoryUser> users (default value: const [])
+    test('to test the property `users`', () async {
       // TODO
     });
 

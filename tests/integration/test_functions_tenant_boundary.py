@@ -12,6 +12,8 @@ import urllib.error
 import urllib.request
 
 
+PUBLIC_REFS = {'test_alpha': 'a'*20, 'test_beta': 'b'*20, 'test_absent': 'c'*20}
+
 def token(ref):
     def encode(value):
         return base64.urlsafe_b64encode(value).decode().rstrip('=')
@@ -27,7 +29,8 @@ class FunctionsTenantBoundaryTest(unittest.TestCase):
     def call(self, ref=None, jwt=None, path='/hello'):
         headers = {}
         if ref is not None:
-            headers['X-Project-Ref'] = ref
+            headers['X-Project-Ref'] = PUBLIC_REFS[ref] if ref in PUBLIC_REFS else ref
+            headers['X-Project-Name'] = ref
         if jwt is not None:
             headers['Authorization'] = 'Bearer '+jwt
         try:
@@ -63,7 +66,7 @@ class FunctionsTenantBoundaryTest(unittest.TestCase):
             status, body = self.call(ref, token(ref), path='/probe')
             self.assertEqual(status, 200, body)
             data = json.loads(body)
-            self.assertEqual(data['env']['PROJECT_REF'], ref)
+            self.assertEqual(data['env']['PROJECT_REF'], PUBLIC_REFS[ref])
             self.assertEqual(data['env']['SUPABASE_ANON_KEY'], 'synthetic-anon-' + ref)
             self.assertEqual(data['env']['SUPABASE_SERVICE_ROLE_KEY'], 'synthetic-service-' + ref)
             self.assertEqual(data['env']['JWT_SECRET'], ref + '-synthetic-jwt-secret-for-test-only')
@@ -94,10 +97,10 @@ class FunctionsTenantBoundaryTest(unittest.TestCase):
             self.assertEqual(json.loads(body)['env']['SUPABASE_ANON_KEY'], 'synthetic-anon-rotated')
             path.unlink()
             self.assertEqual(self.call('test_alpha', token('test_alpha'))[0], 503)
-            config['project_ref'] = 'test_beta'
+            config['project_ref'] = PUBLIC_REFS['test_beta']
             replace(json.dumps(config).encode())
             self.assertEqual(self.call('test_alpha', token('test_alpha'))[0], 503)
-            config['project_ref'] = 'test_alpha'
+            config['project_ref'] = PUBLIC_REFS['test_alpha']
             config['unexpected_secret'] = 'synthetic-unexpected'
             replace(json.dumps(config).encode())
             self.assertEqual(self.call('test_alpha', token('test_alpha'))[0], 503)

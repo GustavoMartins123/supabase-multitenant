@@ -57,3 +57,8 @@ servidor/volumes/storage/objects/
 servidor/traefik/certs/traefik/
 servidor/traefik/plugins-storage/archives/
 servidor/traefik/plugins-storage/sources/
+
+# Private offline migration artifacts
+.public-reference-cutover/
+.snippet-namespace-migration/
+project-reference-catalog*.json

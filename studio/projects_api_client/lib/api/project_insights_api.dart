@@ -134,17 +134,17 @@ class ProjectInsightsApi {
 
   /// Get Project S3 Vector Keys
   ///
-  /// Return the selected tenant's SigV4 pair to an authorized Studio admin.  OpenResty rewrites the Studio's fixed ``/api/get-s3-keys`` endpoint to this project-scoped route. The service HMAC authenticates the Studio-to-control- plane hop and the signed user token is checked here.
+  /// Return the selected tenant's SigV4 pair to an authorized Studio admin.
   ///
   /// Note: This method returns the HTTP [Response].
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<Response> getProjectS3VectorKeysApiProjectsProjectNameStorageS3KeysGetWithHttpInfo(String projectName,) async {
+  /// * [String] projectRef (required):
+  Future<Response> getProjectS3VectorKeysApiProjectsProjectRefStorageS3KeysGetWithHttpInfo(String projectRef,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/storage/s3-keys'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/storage/s3-keys'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -169,13 +169,13 @@ class ProjectInsightsApi {
 
   /// Get Project S3 Vector Keys
   ///
-  /// Return the selected tenant's SigV4 pair to an authorized Studio admin.  OpenResty rewrites the Studio's fixed ``/api/get-s3-keys`` endpoint to this project-scoped route. The service HMAC authenticates the Studio-to-control- plane hop and the signed user token is checked here.
+  /// Return the selected tenant's SigV4 pair to an authorized Studio admin.
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<ProjectS3VectorKeysResponse?> getProjectS3VectorKeysApiProjectsProjectNameStorageS3KeysGet(String projectName,) async {
-    final response = await getProjectS3VectorKeysApiProjectsProjectNameStorageS3KeysGetWithHttpInfo(projectName,);
+  /// * [String] projectRef (required):
+  Future<ProjectS3VectorKeysResponse?> getProjectS3VectorKeysApiProjectsProjectRefStorageS3KeysGet(String projectRef,) async {
+    final response = await getProjectS3VectorKeysApiProjectsProjectRefStorageS3KeysGetWithHttpInfo(projectRef,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -195,17 +195,17 @@ class ProjectInsightsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] period:
   ///
   /// * [DateTime] start:
   ///
   /// * [DateTime] end:
-  Future<Response> getProjectUserTelemetryApiProjectsProjectNameTelemetryUsersGetWithHttpInfo(String projectName, { String? period, DateTime? start, DateTime? end, }) async {
+  Future<Response> getProjectUserTelemetryApiProjectsProjectRefTelemetryUsersGetWithHttpInfo(String projectRef, { String? period, DateTime? start, DateTime? end, }) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/telemetry/users'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/telemetry/users'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -242,15 +242,15 @@ class ProjectInsightsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] period:
   ///
   /// * [DateTime] start:
   ///
   /// * [DateTime] end:
-  Future<ProjectUserTelemetryResponse?> getProjectUserTelemetryApiProjectsProjectNameTelemetryUsersGet(String projectName, { String? period, DateTime? start, DateTime? end, }) async {
-    final response = await getProjectUserTelemetryApiProjectsProjectNameTelemetryUsersGetWithHttpInfo(projectName,  period: period, start: start, end: end, );
+  Future<ProjectUserTelemetryResponse?> getProjectUserTelemetryApiProjectsProjectRefTelemetryUsersGet(String projectRef, { String? period, DateTime? start, DateTime? end, }) async {
+    final response = await getProjectUserTelemetryApiProjectsProjectRefTelemetryUsersGetWithHttpInfo(projectRef,  period: period, start: start, end: end, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -324,11 +324,11 @@ class ProjectInsightsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] name (required):
-  Future<Response> listAllUsersForAdminApiAdminProjectsNameAllUsersGetWithHttpInfo(String name,) async {
+  /// * [String] projectRef (required):
+  Future<Response> listAllUsersForAdminApiAdminProjectsProjectRefAllUsersGetWithHttpInfo(String projectRef,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/admin/projects/{name}/all-users'
-      .replaceAll('{name}', name);
+    final path = r'/api/admin/projects/{project_ref}/all-users'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -357,9 +357,9 @@ class ProjectInsightsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] name (required):
-  Future<AllUsersResponse?> listAllUsersForAdminApiAdminProjectsNameAllUsersGet(String name,) async {
-    final response = await listAllUsersForAdminApiAdminProjectsNameAllUsersGetWithHttpInfo(name,);
+  /// * [String] projectRef (required):
+  Future<AllUsersResponse?> listAllUsersForAdminApiAdminProjectsProjectRefAllUsersGet(String projectRef,) async {
+    final response = await listAllUsersForAdminApiAdminProjectsProjectRefAllUsersGetWithHttpInfo(projectRef,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -855,13 +855,13 @@ class ProjectInsightsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [TransferBody] transferBody (required):
-  Future<Response> transferProjectApiProjectsProjectNameTransferPostWithHttpInfo(String projectName, TransferBody transferBody,) async {
+  Future<Response> transferProjectApiProjectsProjectRefTransferPostWithHttpInfo(String projectRef, TransferBody transferBody,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/transfer'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/transfer'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody = transferBody;
@@ -888,11 +888,11 @@ class ProjectInsightsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [TransferBody] transferBody (required):
-  Future<TransferResponse?> transferProjectApiProjectsProjectNameTransferPost(String projectName, TransferBody transferBody,) async {
-    final response = await transferProjectApiProjectsProjectNameTransferPostWithHttpInfo(projectName, transferBody,);
+  Future<TransferResponse?> transferProjectApiProjectsProjectRefTransferPost(String projectRef, TransferBody transferBody,) async {
+    final response = await transferProjectApiProjectsProjectRefTransferPostWithHttpInfo(projectRef, transferBody,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }

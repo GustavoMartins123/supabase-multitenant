@@ -13,22 +13,10 @@ part of openapi.api;
 class ValidationError {
   /// Returns a new [ValidationError] instance.
   ValidationError({
-    this.ctx,
-    this.input,
     this.loc = const [],
     required this.msg,
     required this.type,
   });
-
-  ///
-  /// Please note: This property should have been non-nullable! Since the specification file
-  /// does not include a default value (using the "default:" property), however, the generated
-  /// source code must fall back to having a nullable type.
-  /// Consider adding a "default:" property in the specification file to hide this note.
-  ///
-  Object? ctx;
-
-  Object? input;
 
   List<LocationInner> loc;
 
@@ -38,8 +26,6 @@ class ValidationError {
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is ValidationError &&
-    other.ctx == ctx &&
-    other.input == input &&
     _deepEquality.equals(other.loc, loc) &&
     other.msg == msg &&
     other.type == type;
@@ -47,27 +33,15 @@ class ValidationError {
   @override
   int get hashCode =>
     // ignore: unnecessary_parenthesis
-    (ctx == null ? 0 : ctx!.hashCode) +
-    (input == null ? 0 : input!.hashCode) +
     (loc.hashCode) +
     (msg.hashCode) +
     (type.hashCode);
 
   @override
-  String toString() => 'ValidationError[ctx=$ctx, input=$input, loc=$loc, msg=$msg, type=$type]';
+  String toString() => 'ValidationError[loc=$loc, msg=$msg, type=$type]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
-    if (this.ctx != null) {
-      json[r'ctx'] = this.ctx;
-    } else {
-      json[r'ctx'] = null;
-    }
-    if (this.input != null) {
-      json[r'input'] = this.input;
-    } else {
-      json[r'input'] = null;
-    }
       json[r'loc'] = this.loc;
       json[r'msg'] = this.msg;
       json[r'type'] = this.type;
@@ -93,8 +67,6 @@ class ValidationError {
       }());
 
       return ValidationError(
-        ctx: mapValueOfType<Object>(json, r'ctx'),
-        input: mapValueOfType<Object>(json, r'input'),
         loc: LocationInner.listFromJson(json[r'loc']),
         msg: mapValueOfType<String>(json, r'msg')!,
         type: mapValueOfType<String>(json, r'type')!,

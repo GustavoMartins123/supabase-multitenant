@@ -39,10 +39,7 @@ def _render_template(template_path: Path, output_path: Path, replacements: dict[
             + ", ".join(unresolved)
         )
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        existing_mode = output_path.stat().st_mode & 0o777 if output_path.is_file() else 0o600
-    except OSError:
-        existing_mode = 0o600
+    existing_mode = output_path.stat().st_mode & 0o777 if output_path.exists() else 0o600
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{output_path.name}.", suffix=".tmp", dir=output_path.parent
     )

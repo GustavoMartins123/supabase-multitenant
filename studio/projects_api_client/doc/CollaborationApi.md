@@ -9,19 +9,19 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
-[**assignProjectTagApiProjectsProjectNameTagsPost**](CollaborationApi.md#assignprojecttagapiprojectsprojectnametagspost) | **POST** /api/projects/{project_name}/tags | Assign Project Tag
-[**createProjectHintApiProjectsProjectNameHintsPost**](CollaborationApi.md#createprojecthintapiprojectsprojectnamehintspost) | **POST** /api/projects/{project_name}/hints | Create Project Hint
-[**createProjectNoteApiProjectsProjectNameNotesPost**](CollaborationApi.md#createprojectnoteapiprojectsprojectnamenotespost) | **POST** /api/projects/{project_name}/notes | Create Project Note
-[**createProjectThreadMessageApiProjectsProjectNameThreadMessagesPost**](CollaborationApi.md#createprojectthreadmessageapiprojectsprojectnamethreadmessagespost) | **POST** /api/projects/{project_name}/thread/messages | Create Project Thread Message
-[**deleteProjectNoteApiProjectsProjectNameNotesNoteIdDelete**](CollaborationApi.md#deleteprojectnoteapiprojectsprojectnamenotesnoteiddelete) | **DELETE** /api/projects/{project_name}/notes/{note_id} | Delete Project Note
-[**getProjectCollaborationApiProjectsProjectNameCollaborationGet**](CollaborationApi.md#getprojectcollaborationapiprojectsprojectnamecollaborationget) | **GET** /api/projects/{project_name}/collaboration | Get Project Collaboration
-[**unassignProjectTagApiProjectsProjectNameTagsTagIdDelete**](CollaborationApi.md#unassignprojecttagapiprojectsprojectnametagstagiddelete) | **DELETE** /api/projects/{project_name}/tags/{tag_id} | Unassign Project Tag
-[**updateProjectHintStatusApiProjectsProjectNameHintsHintIdPut**](CollaborationApi.md#updateprojecthintstatusapiprojectsprojectnamehintshintidput) | **PUT** /api/projects/{project_name}/hints/{hint_id} | Update Project Hint Status
-[**updateProjectNotificationReadStateApiProjectsProjectNameNotificationsNotificationIdPatch**](CollaborationApi.md#updateprojectnotificationreadstateapiprojectsprojectnamenotificationsnotificationidpatch) | **PATCH** /api/projects/{project_name}/notifications/{notification_id} | Update Project Notification Read State
+[**assignProjectTagApiProjectsProjectRefTagsPost**](CollaborationApi.md#assignprojecttagapiprojectsprojectreftagspost) | **POST** /api/projects/{project_ref}/tags | Assign Project Tag
+[**createProjectHintApiProjectsProjectRefHintsPost**](CollaborationApi.md#createprojecthintapiprojectsprojectrefhintspost) | **POST** /api/projects/{project_ref}/hints | Create Project Hint
+[**createProjectNoteApiProjectsProjectRefNotesPost**](CollaborationApi.md#createprojectnoteapiprojectsprojectrefnotespost) | **POST** /api/projects/{project_ref}/notes | Create Project Note
+[**createProjectThreadMessageApiProjectsProjectRefThreadMessagesPost**](CollaborationApi.md#createprojectthreadmessageapiprojectsprojectrefthreadmessagespost) | **POST** /api/projects/{project_ref}/thread/messages | Create Project Thread Message
+[**deleteProjectNoteApiProjectsProjectRefNotesNoteIdDelete**](CollaborationApi.md#deleteprojectnoteapiprojectsprojectrefnotesnoteiddelete) | **DELETE** /api/projects/{project_ref}/notes/{note_id} | Delete Project Note
+[**getProjectCollaborationApiProjectsProjectRefCollaborationGet**](CollaborationApi.md#getprojectcollaborationapiprojectsprojectrefcollaborationget) | **GET** /api/projects/{project_ref}/collaboration | Get Project Collaboration
+[**unassignProjectTagApiProjectsProjectRefTagsTagIdDelete**](CollaborationApi.md#unassignprojecttagapiprojectsprojectreftagstagiddelete) | **DELETE** /api/projects/{project_ref}/tags/{tag_id} | Unassign Project Tag
+[**updateProjectHintStatusApiProjectsProjectRefHintsHintIdPut**](CollaborationApi.md#updateprojecthintstatusapiprojectsprojectrefhintshintidput) | **PUT** /api/projects/{project_ref}/hints/{hint_id} | Update Project Hint Status
+[**updateProjectNotificationReadStateApiProjectsProjectRefNotificationsNotificationIdPatch**](CollaborationApi.md#updateprojectnotificationreadstateapiprojectsprojectrefnotificationsnotificationidpatch) | **PATCH** /api/projects/{project_ref}/notifications/{notification_id} | Update Project Notification Read State
 
 
-# **assignProjectTagApiProjectsProjectNameTagsPost**
-> AssignProjectTagResponse assignProjectTagApiProjectsProjectNameTagsPost(projectName, projectTagAssign)
+# **assignProjectTagApiProjectsProjectRefTagsPost**
+> AssignProjectTagResponse assignProjectTagApiProjectsProjectRefTagsPost(projectRef, projectTagAssign)
 
 Assign Project Tag
 
@@ -30,14 +30,14 @@ Assign Project Tag
 import 'package:projects_api_client/api.dart';
 
 final api_instance = CollaborationApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final projectTagAssign = ProjectTagAssign(); // ProjectTagAssign | 
 
 try {
-    final result = api_instance.assignProjectTagApiProjectsProjectNameTagsPost(projectName, projectTagAssign);
+    final result = api_instance.assignProjectTagApiProjectsProjectRefTagsPost(projectRef, projectTagAssign);
     print(result);
 } catch (e) {
-    print('Exception when calling CollaborationApi->assignProjectTagApiProjectsProjectNameTagsPost: $e\n');
+    print('Exception when calling CollaborationApi->assignProjectTagApiProjectsProjectRefTagsPost: $e\n');
 }
 ```
 
@@ -45,7 +45,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **projectTagAssign** | [**ProjectTagAssign**](ProjectTagAssign.md)|  | 
 
 ### Return type
@@ -63,8 +63,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **createProjectHintApiProjectsProjectNameHintsPost**
-> CreateProjectHintResponse createProjectHintApiProjectsProjectNameHintsPost(projectName, projectHintCreate)
+# **createProjectHintApiProjectsProjectRefHintsPost**
+> CreateProjectHintResponse createProjectHintApiProjectsProjectRefHintsPost(projectRef, projectHintCreate)
 
 Create Project Hint
 
@@ -73,14 +73,14 @@ Create Project Hint
 import 'package:projects_api_client/api.dart';
 
 final api_instance = CollaborationApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final projectHintCreate = ProjectHintCreate(); // ProjectHintCreate | 
 
 try {
-    final result = api_instance.createProjectHintApiProjectsProjectNameHintsPost(projectName, projectHintCreate);
+    final result = api_instance.createProjectHintApiProjectsProjectRefHintsPost(projectRef, projectHintCreate);
     print(result);
 } catch (e) {
-    print('Exception when calling CollaborationApi->createProjectHintApiProjectsProjectNameHintsPost: $e\n');
+    print('Exception when calling CollaborationApi->createProjectHintApiProjectsProjectRefHintsPost: $e\n');
 }
 ```
 
@@ -88,7 +88,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **projectHintCreate** | [**ProjectHintCreate**](ProjectHintCreate.md)|  | 
 
 ### Return type
@@ -106,8 +106,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **createProjectNoteApiProjectsProjectNameNotesPost**
-> CreateProjectNoteResponse createProjectNoteApiProjectsProjectNameNotesPost(projectName, projectNoteCreate)
+# **createProjectNoteApiProjectsProjectRefNotesPost**
+> CreateProjectNoteResponse createProjectNoteApiProjectsProjectRefNotesPost(projectRef, projectNoteCreate)
 
 Create Project Note
 
@@ -116,14 +116,14 @@ Create Project Note
 import 'package:projects_api_client/api.dart';
 
 final api_instance = CollaborationApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final projectNoteCreate = ProjectNoteCreate(); // ProjectNoteCreate | 
 
 try {
-    final result = api_instance.createProjectNoteApiProjectsProjectNameNotesPost(projectName, projectNoteCreate);
+    final result = api_instance.createProjectNoteApiProjectsProjectRefNotesPost(projectRef, projectNoteCreate);
     print(result);
 } catch (e) {
-    print('Exception when calling CollaborationApi->createProjectNoteApiProjectsProjectNameNotesPost: $e\n');
+    print('Exception when calling CollaborationApi->createProjectNoteApiProjectsProjectRefNotesPost: $e\n');
 }
 ```
 
@@ -131,7 +131,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **projectNoteCreate** | [**ProjectNoteCreate**](ProjectNoteCreate.md)|  | 
 
 ### Return type
@@ -149,8 +149,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **createProjectThreadMessageApiProjectsProjectNameThreadMessagesPost**
-> CreateThreadMessageResponse createProjectThreadMessageApiProjectsProjectNameThreadMessagesPost(projectName, projectThreadMessageCreate)
+# **createProjectThreadMessageApiProjectsProjectRefThreadMessagesPost**
+> CreateThreadMessageResponse createProjectThreadMessageApiProjectsProjectRefThreadMessagesPost(projectRef, projectThreadMessageCreate)
 
 Create Project Thread Message
 
@@ -159,14 +159,14 @@ Create Project Thread Message
 import 'package:projects_api_client/api.dart';
 
 final api_instance = CollaborationApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final projectThreadMessageCreate = ProjectThreadMessageCreate(); // ProjectThreadMessageCreate | 
 
 try {
-    final result = api_instance.createProjectThreadMessageApiProjectsProjectNameThreadMessagesPost(projectName, projectThreadMessageCreate);
+    final result = api_instance.createProjectThreadMessageApiProjectsProjectRefThreadMessagesPost(projectRef, projectThreadMessageCreate);
     print(result);
 } catch (e) {
-    print('Exception when calling CollaborationApi->createProjectThreadMessageApiProjectsProjectNameThreadMessagesPost: $e\n');
+    print('Exception when calling CollaborationApi->createProjectThreadMessageApiProjectsProjectRefThreadMessagesPost: $e\n');
 }
 ```
 
@@ -174,7 +174,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **projectThreadMessageCreate** | [**ProjectThreadMessageCreate**](ProjectThreadMessageCreate.md)|  | 
 
 ### Return type
@@ -192,8 +192,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **deleteProjectNoteApiProjectsProjectNameNotesNoteIdDelete**
-> DeleteProjectNoteResponse deleteProjectNoteApiProjectsProjectNameNotesNoteIdDelete(projectName, noteId)
+# **deleteProjectNoteApiProjectsProjectRefNotesNoteIdDelete**
+> DeleteProjectNoteResponse deleteProjectNoteApiProjectsProjectRefNotesNoteIdDelete(projectRef, noteId)
 
 Delete Project Note
 
@@ -202,14 +202,14 @@ Delete Project Note
 import 'package:projects_api_client/api.dart';
 
 final api_instance = CollaborationApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final noteId = noteId_example; // String | 
 
 try {
-    final result = api_instance.deleteProjectNoteApiProjectsProjectNameNotesNoteIdDelete(projectName, noteId);
+    final result = api_instance.deleteProjectNoteApiProjectsProjectRefNotesNoteIdDelete(projectRef, noteId);
     print(result);
 } catch (e) {
-    print('Exception when calling CollaborationApi->deleteProjectNoteApiProjectsProjectNameNotesNoteIdDelete: $e\n');
+    print('Exception when calling CollaborationApi->deleteProjectNoteApiProjectsProjectRefNotesNoteIdDelete: $e\n');
 }
 ```
 
@@ -217,7 +217,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **noteId** | **String**|  | 
 
 ### Return type
@@ -235,8 +235,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **getProjectCollaborationApiProjectsProjectNameCollaborationGet**
-> GetProjectCollaborationResponse getProjectCollaborationApiProjectsProjectNameCollaborationGet(projectName)
+# **getProjectCollaborationApiProjectsProjectRefCollaborationGet**
+> GetProjectCollaborationResponse getProjectCollaborationApiProjectsProjectRefCollaborationGet(projectRef)
 
 Get Project Collaboration
 
@@ -245,13 +245,13 @@ Get Project Collaboration
 import 'package:projects_api_client/api.dart';
 
 final api_instance = CollaborationApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 
 try {
-    final result = api_instance.getProjectCollaborationApiProjectsProjectNameCollaborationGet(projectName);
+    final result = api_instance.getProjectCollaborationApiProjectsProjectRefCollaborationGet(projectRef);
     print(result);
 } catch (e) {
-    print('Exception when calling CollaborationApi->getProjectCollaborationApiProjectsProjectNameCollaborationGet: $e\n');
+    print('Exception when calling CollaborationApi->getProjectCollaborationApiProjectsProjectRefCollaborationGet: $e\n');
 }
 ```
 
@@ -259,7 +259,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
 
 ### Return type
 
@@ -276,8 +276,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **unassignProjectTagApiProjectsProjectNameTagsTagIdDelete**
-> UnassignProjectTagResponse unassignProjectTagApiProjectsProjectNameTagsTagIdDelete(projectName, tagId)
+# **unassignProjectTagApiProjectsProjectRefTagsTagIdDelete**
+> UnassignProjectTagResponse unassignProjectTagApiProjectsProjectRefTagsTagIdDelete(projectRef, tagId)
 
 Unassign Project Tag
 
@@ -286,14 +286,14 @@ Unassign Project Tag
 import 'package:projects_api_client/api.dart';
 
 final api_instance = CollaborationApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final tagId = tagId_example; // String | 
 
 try {
-    final result = api_instance.unassignProjectTagApiProjectsProjectNameTagsTagIdDelete(projectName, tagId);
+    final result = api_instance.unassignProjectTagApiProjectsProjectRefTagsTagIdDelete(projectRef, tagId);
     print(result);
 } catch (e) {
-    print('Exception when calling CollaborationApi->unassignProjectTagApiProjectsProjectNameTagsTagIdDelete: $e\n');
+    print('Exception when calling CollaborationApi->unassignProjectTagApiProjectsProjectRefTagsTagIdDelete: $e\n');
 }
 ```
 
@@ -301,7 +301,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **tagId** | **String**|  | 
 
 ### Return type
@@ -319,8 +319,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **updateProjectHintStatusApiProjectsProjectNameHintsHintIdPut**
-> UpdateProjectHintResponse updateProjectHintStatusApiProjectsProjectNameHintsHintIdPut(projectName, hintId, projectHintStatusUpdate)
+# **updateProjectHintStatusApiProjectsProjectRefHintsHintIdPut**
+> UpdateProjectHintResponse updateProjectHintStatusApiProjectsProjectRefHintsHintIdPut(projectRef, hintId, projectHintStatusUpdate)
 
 Update Project Hint Status
 
@@ -329,15 +329,15 @@ Update Project Hint Status
 import 'package:projects_api_client/api.dart';
 
 final api_instance = CollaborationApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final hintId = hintId_example; // String | 
 final projectHintStatusUpdate = ProjectHintStatusUpdate(); // ProjectHintStatusUpdate | 
 
 try {
-    final result = api_instance.updateProjectHintStatusApiProjectsProjectNameHintsHintIdPut(projectName, hintId, projectHintStatusUpdate);
+    final result = api_instance.updateProjectHintStatusApiProjectsProjectRefHintsHintIdPut(projectRef, hintId, projectHintStatusUpdate);
     print(result);
 } catch (e) {
-    print('Exception when calling CollaborationApi->updateProjectHintStatusApiProjectsProjectNameHintsHintIdPut: $e\n');
+    print('Exception when calling CollaborationApi->updateProjectHintStatusApiProjectsProjectRefHintsHintIdPut: $e\n');
 }
 ```
 
@@ -345,7 +345,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **hintId** | **String**|  | 
  **projectHintStatusUpdate** | [**ProjectHintStatusUpdate**](ProjectHintStatusUpdate.md)|  | 
 
@@ -364,8 +364,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **updateProjectNotificationReadStateApiProjectsProjectNameNotificationsNotificationIdPatch**
-> UpdateNotificationReadResponse updateProjectNotificationReadStateApiProjectsProjectNameNotificationsNotificationIdPatch(projectName, notificationId, projectNotificationRead)
+# **updateProjectNotificationReadStateApiProjectsProjectRefNotificationsNotificationIdPatch**
+> UpdateNotificationReadResponse updateProjectNotificationReadStateApiProjectsProjectRefNotificationsNotificationIdPatch(projectRef, notificationId, projectNotificationRead)
 
 Update Project Notification Read State
 
@@ -374,15 +374,15 @@ Update Project Notification Read State
 import 'package:projects_api_client/api.dart';
 
 final api_instance = CollaborationApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final notificationId = notificationId_example; // String | 
 final projectNotificationRead = ProjectNotificationRead(); // ProjectNotificationRead | 
 
 try {
-    final result = api_instance.updateProjectNotificationReadStateApiProjectsProjectNameNotificationsNotificationIdPatch(projectName, notificationId, projectNotificationRead);
+    final result = api_instance.updateProjectNotificationReadStateApiProjectsProjectRefNotificationsNotificationIdPatch(projectRef, notificationId, projectNotificationRead);
     print(result);
 } catch (e) {
-    print('Exception when calling CollaborationApi->updateProjectNotificationReadStateApiProjectsProjectNameNotificationsNotificationIdPatch: $e\n');
+    print('Exception when calling CollaborationApi->updateProjectNotificationReadStateApiProjectsProjectRefNotificationsNotificationIdPatch: $e\n');
 }
 ```
 
@@ -390,7 +390,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **notificationId** | **String**|  | 
  **projectNotificationRead** | [**ProjectNotificationRead**](ProjectNotificationRead.md)|  | 
 

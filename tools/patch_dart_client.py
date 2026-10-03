@@ -4,8 +4,8 @@
    inválido (vira `X();`), o operador == termina em `&&` pendente
    (vira `|| other is X;`) e o hashCode fica sem expressão
    (vira `=> 0;`; toda instância vazia é igual, hash constante correto).
-2. Fallback de enum com literal string (`?? 'medium'`) onde o campo
-   exige o enum: vira `?? const Enum._('literal')`.
+2. Defaults de enum declarados no schema se aplicam apenas a campos ausentes;
+   valores desconhecidos geram FormatException.
 3. Cast de lista de mapas: `.cast<Map>()` devolve
    `List<Map<dynamic, dynamic>>`, incompatível com o retorno
    `List<Map<String, Object>>` declarado: vira
@@ -55,7 +55,9 @@ def patch(path: pathlib.Path) -> dict[str, int]:
 
     def _enum(match: re.Match[str]) -> str:
         counts["enum_fallback"] += 1
-        return f"{match.group(1)}.fromJson({match.group(2)}) ?? const {match.group(1)}._('{match.group(3)}')"
+        return (f"{match.group(2)} == null ? const {match.group(1)}._('{match.group(3)}') "
+                f": ({match.group(1)}.fromJson({match.group(2)}) "
+                f"?? (throw const FormatException('Invalid {match.group(1)}')))")
 
     text, _ = ENUM_FALLBACK.subn(_enum, text)
     if any(counts.values()):

@@ -16,6 +16,7 @@ void main() {
         'job_id': 'job-1',
         'project': 'meu_projeto',
         'project_uuid': 'project-uuid',
+        'public_ref': 'aaaaaaaaaaaaaaaaaaaa',
         'tenant_uuid': 'tenant-uuid',
         'created_by': 'user-1',
         'action': 'create',
@@ -37,31 +38,24 @@ void main() {
       expect(job.createdAt, isNotNull);
     });
 
-    test('accepts only the old or new project context during rename', () {
+    test('rename polling uses only the original public reference', () {
       const completedRename = Job(
         'job-rename',
-        project: 'projeto_novo',
-        createdBy: 'user-1',
+        project: 'projeto_tecnico',
+        publicRef: 'aaaaaaaaaaaaaaaaaaaa',
         action: 'rename',
         status: 'done',
       );
-
-      expect(
-        completedRename.verifyContext(
-          acceptedProjects: const {'projeto_antigo', 'projeto_novo'},
-          action: 'rename',
-          createdBy: 'user-1',
-        ),
-        same(completedRename),
-      );
-      expect(
-        () => completedRename.verifyContext(
-          acceptedProjects: const {'projeto_antigo', 'outro_projeto'},
-          action: 'rename',
-          createdBy: 'user-1',
-        ),
-        throwsFormatException,
-      );
+      expect(completedRename.verifyContext(project: 'aaaaaaaaaaaaaaaaaaaa'),
+          same(completedRename));
+      for (final ref in [
+        'bbbbbbbbbbbbbbbbbbbb',
+        'projeto_tecnico',
+        'project-uuid'
+      ]) {
+        expect(() => completedRename.verifyContext(project: ref),
+            throwsFormatException);
+      }
     });
   });
 
@@ -114,6 +108,8 @@ void main() {
         const Job(
           'job-race',
           project: 'meu_projeto',
+          projectUuid: 'project-uuid',
+          publicRef: 'aaaaaaaaaaaaaaaaaaaa',
           action: 'create',
           createdBy: 'user-1',
           status: 'running',
@@ -121,7 +117,7 @@ void main() {
           progress: 60,
           currentStep: 'create_supavisor_tenant',
         ),
-        project: 'meu_projeto',
+        project: 'aaaaaaaaaaaaaaaaaaaa',
         action: 'create',
         createdBy: 'user-1',
       );
@@ -140,12 +136,17 @@ void main() {
       final older = Job(
         'job-merge',
         project: 'meu_projeto',
+        projectUuid: 'project-uuid',
+        publicRef: 'aaaaaaaaaaaaaaaaaaaa',
         status: 'queued',
         progress: 5,
         updatedAt: DateTime.utc(2026, 7, 19, 13, 14, 30),
       );
       final newer = Job(
         'job-merge',
+        project: 'meu_projeto',
+        projectUuid: 'project-uuid',
+        publicRef: 'aaaaaaaaaaaaaaaaaaaa',
         status: 'running',
         message: 'Pool de conexoes configurado.',
         progress: 60,
@@ -169,6 +170,8 @@ void main() {
       const job = Job(
         'job-1',
         project: 'meu_projeto',
+        projectUuid: 'project-uuid',
+        publicRef: 'aaaaaaaaaaaaaaaaaaaa',
         createdBy: 'user-1',
         action: 'create',
         status: 'running',
@@ -191,6 +194,8 @@ void main() {
       const job = Job(
         'job-2',
         project: 'compartilhado',
+        projectUuid: 'project-uuid',
+        publicRef: 'aaaaaaaaaaaaaaaaaaaa',
         createdBy: 'other-user',
         action: 'restart',
         status: 'queued',
@@ -198,7 +203,11 @@ void main() {
 
       final projects = mergeProjectsWithJobs(
         projects: const [
-          {'name': 'compartilhado', 'anon_token': 'token'},
+          {
+            'name': 'compartilhado',
+            'id': 'project-uuid',
+            'public_ref': 'aaaaaaaaaaaaaaaaaaaa'
+          },
         ],
         jobs: const [job],
         currentUserId: 'user-1',
@@ -249,12 +258,16 @@ void main() {
       final running = Job(
         'job-running',
         project: 'meu_projeto',
+        projectUuid: 'project-uuid',
+        publicRef: 'aaaaaaaaaaaaaaaaaaaa',
         status: 'running',
         createdAt: DateTime.utc(2026, 7, 19, 1),
       );
       final queued = Job(
         'job-queued',
         project: 'meu_projeto',
+        projectUuid: 'project-uuid',
+        publicRef: 'aaaaaaaaaaaaaaaaaaaa',
         status: 'queued',
         createdAt: DateTime.utc(2026, 7, 19, 2),
       );

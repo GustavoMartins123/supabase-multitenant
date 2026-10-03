@@ -71,17 +71,15 @@ class InternalApi {
 
   /// Get Content Project Identity
   ///
-  /// Resolve o slug mutável para o UUID estável usado apenas por content.
-  ///
   /// Note: This method returns the HTTP [Response].
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<Response> getContentProjectIdentityApiProjectsInternalContentIdentityProjectNameGetWithHttpInfo(String projectName,) async {
+  /// * [String] projectRef (required):
+  Future<Response> getContentProjectIdentityApiProjectsInternalContentIdentityProjectRefGetWithHttpInfo(String projectRef,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/internal/content-identity/{project_name}'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/internal/content-identity/{project_ref}'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -106,13 +104,11 @@ class InternalApi {
 
   /// Get Content Project Identity
   ///
-  /// Resolve o slug mutável para o UUID estável usado apenas por content.
-  ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<ContentIdentityResponse?> getContentProjectIdentityApiProjectsInternalContentIdentityProjectNameGet(String projectName,) async {
-    final response = await getContentProjectIdentityApiProjectsInternalContentIdentityProjectNameGetWithHttpInfo(projectName,);
+  /// * [String] projectRef (required):
+  Future<ContentIdentityResponse?> getContentProjectIdentityApiProjectsInternalContentIdentityProjectRefGet(String projectRef,) async {
+    final response = await getContentProjectIdentityApiProjectsInternalContentIdentityProjectRefGetWithHttpInfo(projectRef,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -454,13 +450,13 @@ class InternalApi {
   ///
   /// Parameters:
   ///
-  /// * [UserSyncPayload] userSyncPayload (required):
-  Future<Response> syncUserIdentityApiProjectsInternalUsersSyncPostWithHttpInfo(UserSyncPayload userSyncPayload,) async {
+  /// * [DirectorySnapshot] directorySnapshot (required):
+  Future<Response> syncUserIdentityApiProjectsInternalUsersSyncPostWithHttpInfo(DirectorySnapshot directorySnapshot,) async {
     // ignore: prefer_const_declarations
     final path = r'/api/projects/internal/users/sync';
 
     // ignore: prefer_final_locals
-    Object? postBody = userSyncPayload;
+    Object? postBody = directorySnapshot;
 
     final queryParams = <QueryParam>[];
     final headerParams = <String, String>{};
@@ -484,9 +480,9 @@ class InternalApi {
   ///
   /// Parameters:
   ///
-  /// * [UserSyncPayload] userSyncPayload (required):
-  Future<UserSyncResponse?> syncUserIdentityApiProjectsInternalUsersSyncPost(UserSyncPayload userSyncPayload,) async {
-    final response = await syncUserIdentityApiProjectsInternalUsersSyncPostWithHttpInfo(userSyncPayload,);
+  /// * [DirectorySnapshot] directorySnapshot (required):
+  Future<Object?> syncUserIdentityApiProjectsInternalUsersSyncPost(DirectorySnapshot directorySnapshot,) async {
+    final response = await syncUserIdentityApiProjectsInternalUsersSyncPostWithHttpInfo(directorySnapshot,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -494,7 +490,7 @@ class InternalApi {
     // At the time of writing this, `dart:convert` will throw an "Unexpected end of input"
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
-      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'UserSyncResponse',) as UserSyncResponse;
+      return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
     
     }
     return null;

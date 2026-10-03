@@ -7,6 +7,7 @@ class Job {
     this.id, {
     this.project,
     this.projectUuid,
+    this.publicRef,
     this.tenantUuid,
     this.createdBy,
     this.action,
@@ -23,6 +24,7 @@ class Job {
 
   final String? project;
   final String? projectUuid;
+  final String? publicRef;
   final String? tenantUuid;
   final String? createdBy;
   final String? action;
@@ -46,6 +48,7 @@ class Job {
       id,
       project: json['project']?.toString(),
       projectUuid: json['project_uuid']?.toString(),
+      publicRef: json['public_ref'] as String?,
       tenantUuid: json['tenant_uuid']?.toString(),
       createdBy: json['created_by']?.toString(),
       action: json['action']?.toString(),
@@ -61,18 +64,10 @@ class Job {
 
   Job verifyContext({
     String? project,
-    Iterable<String>? acceptedProjects,
     String? action,
     String? createdBy,
   }) {
-    if (project != null && acceptedProjects != null) {
-      throw ArgumentError(
-        'Use project ou acceptedProjects, nunca os dois',
-      );
-    }
-    final validProjects =
-        project == null ? acceptedProjects?.toSet() : <String>{project};
-    if (validProjects != null && !validProjects.contains(this.project)) {
+    if (project != null && publicRef != project) {
       throw const FormatException(
         'Contrato do job invalido: project divergente ou ausente',
       );

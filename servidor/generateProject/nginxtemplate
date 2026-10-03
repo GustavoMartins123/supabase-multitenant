@@ -499,7 +499,8 @@ http {
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_set_header X-Project-Ref {{project_id}};
+            proxy_set_header X-Project-Ref {{project_public_ref}};
+            proxy_set_header X-Project-Name {{project_id}};
             proxy_set_header apikey $opaque_upstream_apikey;
             proxy_set_header Authorization $opaque_upstream_authorization;
             proxy_set_header X-Api-Key-Id $opaque_key_id;

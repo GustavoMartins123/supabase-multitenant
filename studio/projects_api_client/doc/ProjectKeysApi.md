@@ -9,12 +9,12 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
-[**rotateProjectKeyApiProjectsProjectNameRotateKeyPost**](ProjectKeysApi.md#rotateprojectkeyapiprojectsprojectnamerotatekeypost) | **POST** /api/projects/{project_name}/rotate-key | Rotate Project Key
-[**updateAutomaticKeyRotationApiProjectsProjectNameAutomaticKeyRotationPut**](ProjectKeysApi.md#updateautomatickeyrotationapiprojectsprojectnameautomatickeyrotationput) | **PUT** /api/projects/{project_name}/automatic-key-rotation | Update Automatic Key Rotation
+[**rotateProjectKeyApiProjectsProjectRefRotateKeyPost**](ProjectKeysApi.md#rotateprojectkeyapiprojectsprojectrefrotatekeypost) | **POST** /api/projects/{project_ref}/rotate-key | Rotate Project Key
+[**updateAutomaticKeyRotationApiProjectsProjectRefAutomaticKeyRotationPut**](ProjectKeysApi.md#updateautomatickeyrotationapiprojectsprojectrefautomatickeyrotationput) | **PUT** /api/projects/{project_ref}/automatic-key-rotation | Update Automatic Key Rotation
 
 
-# **rotateProjectKeyApiProjectsProjectNameRotateKeyPost**
-> RotateProjectKeyResponse rotateProjectKeyApiProjectsProjectNameRotateKeyPost(projectName)
+# **rotateProjectKeyApiProjectsProjectRefRotateKeyPost**
+> RotateProjectKeyResponse rotateProjectKeyApiProjectsProjectRefRotateKeyPost(projectRef)
 
 Rotate Project Key
 
@@ -25,13 +25,13 @@ Rotaciona anon/service_role via script. Enfileirado por projeto.
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectKeysApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 
 try {
-    final result = api_instance.rotateProjectKeyApiProjectsProjectNameRotateKeyPost(projectName);
+    final result = api_instance.rotateProjectKeyApiProjectsProjectRefRotateKeyPost(projectRef);
     print(result);
 } catch (e) {
-    print('Exception when calling ProjectKeysApi->rotateProjectKeyApiProjectsProjectNameRotateKeyPost: $e\n');
+    print('Exception when calling ProjectKeysApi->rotateProjectKeyApiProjectsProjectRefRotateKeyPost: $e\n');
 }
 ```
 
@@ -39,7 +39,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
 
 ### Return type
 
@@ -56,8 +56,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **updateAutomaticKeyRotationApiProjectsProjectNameAutomaticKeyRotationPut**
-> AutomaticKeyRotationResponse updateAutomaticKeyRotationApiProjectsProjectNameAutomaticKeyRotationPut(projectName, automaticKeyRotationUpdate)
+# **updateAutomaticKeyRotationApiProjectsProjectRefAutomaticKeyRotationPut**
+> AutomaticKeyRotationResponse updateAutomaticKeyRotationApiProjectsProjectRefAutomaticKeyRotationPut(projectRef, automaticKeyRotationUpdate)
 
 Update Automatic Key Rotation
 
@@ -66,14 +66,14 @@ Update Automatic Key Rotation
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectKeysApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final automaticKeyRotationUpdate = AutomaticKeyRotationUpdate(); // AutomaticKeyRotationUpdate | 
 
 try {
-    final result = api_instance.updateAutomaticKeyRotationApiProjectsProjectNameAutomaticKeyRotationPut(projectName, automaticKeyRotationUpdate);
+    final result = api_instance.updateAutomaticKeyRotationApiProjectsProjectRefAutomaticKeyRotationPut(projectRef, automaticKeyRotationUpdate);
     print(result);
 } catch (e) {
-    print('Exception when calling ProjectKeysApi->updateAutomaticKeyRotationApiProjectsProjectNameAutomaticKeyRotationPut: $e\n');
+    print('Exception when calling ProjectKeysApi->updateAutomaticKeyRotationApiProjectsProjectRefAutomaticKeyRotationPut: $e\n');
 }
 ```
 
@@ -81,7 +81,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **automaticKeyRotationUpdate** | [**AutomaticKeyRotationUpdate**](AutomaticKeyRotationUpdate.md)|  | 
 
 ### Return type

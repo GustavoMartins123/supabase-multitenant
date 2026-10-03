@@ -19,6 +19,7 @@ STUDIO_CONTRACT_TESTS = (
     "test_service_key_cache_contract", "test_opaque_api_keys",
     "test_opaque_api_key_optional_expiration", "test_opaque_api_key_step_up_permissions",
     "test_s3_meta_identity", "test_storage_vector_lifecycle_integration",
+    "test_content_stable_project_identity", "test_python_review_fixes",
     "test_studio_slug_context_contract", "test_internal_hmac_migration",
     "test_lua_security_hardening", "test_hmac_contracts",
     "test_project_reference_rotation", "test_rename_destination_guard", "test_host_agent_contract",

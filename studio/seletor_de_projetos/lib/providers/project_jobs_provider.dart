@@ -15,7 +15,7 @@ final projectJobsProvider =
 final activeProjectJobProvider = Provider.family<Job?, String>((ref, project) {
   final jobs = ref.watch(projectJobsProvider).value ?? const <Job>[];
   return preferredActiveJob(
-    jobs.where((job) => job.project == project && job.isInFlight),
+    jobs.where((job) => job.publicRef == project && job.isInFlight),
   );
 });
 
@@ -69,14 +69,12 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
   void track(
     Job job, {
     String? project,
-    Iterable<String>? acceptedProjects,
     String? action,
     String? createdBy,
   }) {
     if (_disposed) return;
     final tracked = job.verifyContext(
       project: project,
-      acceptedProjects: acceptedProjects,
       action: action,
       createdBy: createdBy,
     );
@@ -92,13 +90,11 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
   void updateFromJson(
     Map<String, dynamic> json, {
     String? project,
-    Iterable<String>? acceptedProjects,
     String? action,
     String? createdBy,
   }) {
     final job = Job.fromJson(json).verifyContext(
       project: project,
-      acceptedProjects: acceptedProjects,
       action: action,
       createdBy: createdBy,
     );
@@ -145,7 +141,6 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
   Future<JobWaitResult> waitFor(
     Job job, {
     String? project,
-    Iterable<String>? acceptedProjects,
     String? action,
     String? createdBy,
     Duration every = const Duration(seconds: 3),
@@ -156,7 +151,6 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
     track(
       job,
       project: project,
-      acceptedProjects: acceptedProjects,
       action: action,
       createdBy: effectiveCreatedBy,
     );
@@ -169,7 +163,6 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
           updateFromJson(
             data,
             project: project,
-            acceptedProjects: acceptedProjects,
             action: action,
             createdBy: effectiveCreatedBy,
           );
@@ -183,6 +176,19 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
 }
 
 Job mergeJobSnapshots(Job current, Job incoming) {
+  for (final pair in [
+    (current.id, incoming.id),
+    (current.project, incoming.project),
+    (current.projectUuid, incoming.projectUuid),
+    (current.publicRef, incoming.publicRef),
+    (current.tenantUuid, incoming.tenantUuid),
+    (current.createdBy, incoming.createdBy),
+    (current.action, incoming.action),
+  ]) {
+    if (pair.$1 != pair.$2) {
+      throw const FormatException('Identidade imutavel do job divergente');
+    }
+  }
   final currentDate = current.updatedAt ?? current.createdAt;
   final incomingDate = incoming.updatedAt ?? incoming.createdAt;
   final incomingIsNewer = switch ((currentDate, incomingDate)) {
@@ -193,7 +199,6 @@ Job mergeJobSnapshots(Job current, Job incoming) {
       !incomingValue.isBefore(currentValue),
   };
   final newest = incomingIsNewer ? incoming : current;
-  final olderSnapshot = incomingIsNewer ? current : incoming;
   final progressValues =
       [current.progress, incoming.progress].whereType<int>().toList();
   final progress = progressValues.isEmpty
@@ -205,16 +210,17 @@ Job mergeJobSnapshots(Job current, Job incoming) {
 
   return Job(
     current.id,
-    project: newest.project ?? olderSnapshot.project,
-    projectUuid: newest.projectUuid ?? olderSnapshot.projectUuid,
-    tenantUuid: newest.tenantUuid ?? olderSnapshot.tenantUuid,
-    createdBy: newest.createdBy ?? olderSnapshot.createdBy,
-    action: newest.action ?? olderSnapshot.action,
+    project: newest.project,
+    projectUuid: newest.projectUuid,
+    publicRef: newest.publicRef,
+    tenantUuid: newest.tenantUuid,
+    createdBy: newest.createdBy,
+    action: newest.action,
     status: status,
-    message: newest.message ?? olderSnapshot.message,
+    message: newest.message,
     progress: progress,
-    currentStep: newest.currentStep ?? olderSnapshot.currentStep,
-    totalSteps: newest.totalSteps ?? olderSnapshot.totalSteps,
+    currentStep: newest.currentStep,
+    totalSteps: newest.totalSteps,
     createdAt: current.createdAt ?? incoming.createdAt,
     updatedAt: incomingDate == null ||
             (currentDate != null && currentDate.isAfter(incomingDate))
@@ -231,7 +237,7 @@ List<Map<String, dynamic>> mergeProjectsWithJobs({
   final result = projects.map(Map<String, dynamic>.from).toList();
   final indexes = <String, int>{};
   for (var i = 0; i < result.length; i++) {
-    final name = result[i]['name']?.toString();
+    final name = result[i]['id'] as String?;
     if (name != null) indexes[name] = i;
   }
 
@@ -239,7 +245,7 @@ List<Map<String, dynamic>> mergeProjectsWithJobs({
     final project = job.project;
     if (project == null || project.isEmpty) continue;
 
-    final index = indexes[project];
+    final index = indexes[job.projectUuid];
     if (index != null) {
       final currentJob = result[index]['active_job'] as Job?;
       result[index]['active_job'] = preferredActiveJob([
@@ -254,9 +260,14 @@ List<Map<String, dynamic>> mergeProjectsWithJobs({
             job.createdBy == currentUserId;
     if (!createsVisibleProject) continue;
 
-    indexes[project] = result.length;
+    if (job.projectUuid == null || job.publicRef == null) {
+      throw const FormatException('Job de criacao sem identidade canonica');
+    }
+    indexes[job.projectUuid!] = result.length;
     result.add({
       'name': project,
+      'id': job.projectUuid!,
+      'public_ref': job.publicRef!,
       'opaque_api_keys_status': 'provisioning',
       'opaque_api_key_slot_count': 0,
       'automatic_key_rotation_enabled': true,

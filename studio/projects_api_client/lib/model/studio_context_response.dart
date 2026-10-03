@@ -20,6 +20,7 @@ class StudioContextResponse {
     required this.projectUuid,
     required this.ref,
     required this.role,
+    required this.technicalName,
     required this.tenantUuid,
   });
 
@@ -37,6 +38,8 @@ class StudioContextResponse {
 
   String? role;
 
+  String technicalName;
+
   String? tenantUuid;
 
   @override
@@ -48,6 +51,7 @@ class StudioContextResponse {
     other.projectUuid == projectUuid &&
     other.ref == ref &&
     other.role == role &&
+    other.technicalName == technicalName &&
     other.tenantUuid == tenantUuid;
 
   @override
@@ -60,10 +64,11 @@ class StudioContextResponse {
     (projectUuid.hashCode) +
     (ref.hashCode) +
     (role == null ? 0 : role!.hashCode) +
+    (technicalName.hashCode) +
     (tenantUuid == null ? 0 : tenantUuid!.hashCode);
 
   @override
-  String toString() => 'StudioContextResponse[anonKey=$anonKey, displayName=$displayName, fileSizeLimit=$fileSizeLimit, projectKeyVersion=$projectKeyVersion, projectUuid=$projectUuid, ref=$ref, role=$role, tenantUuid=$tenantUuid]';
+  String toString() => 'StudioContextResponse[anonKey=$anonKey, displayName=$displayName, fileSizeLimit=$fileSizeLimit, projectKeyVersion=$projectKeyVersion, projectUuid=$projectUuid, ref=$ref, role=$role, technicalName=$technicalName, tenantUuid=$tenantUuid]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -82,6 +87,7 @@ class StudioContextResponse {
     } else {
       json[r'role'] = null;
     }
+      json[r'technical_name'] = this.technicalName;
     if (this.tenantUuid != null) {
       json[r'tenant_uuid'] = this.tenantUuid;
     } else {
@@ -116,6 +122,7 @@ class StudioContextResponse {
         projectUuid: mapValueOfType<String>(json, r'project_uuid')!,
         ref: mapValueOfType<String>(json, r'ref')!,
         role: mapValueOfType<String>(json, r'role'),
+        technicalName: mapValueOfType<String>(json, r'technical_name')!,
         tenantUuid: mapValueOfType<String>(json, r'tenant_uuid'),
       );
     }
@@ -171,6 +178,7 @@ class StudioContextResponse {
     'project_uuid',
     'ref',
     'role',
+    'technical_name',
     'tenant_uuid',
   };
 }

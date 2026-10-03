@@ -1,145 +1,17 @@
-local cjson = require("cjson.safe")
-local http = require("resty.http")
-local outbound_tls = require("utils.outbound_tls")
-local internal_hmac = require("security.internal_hmac")
-
 local M = {}
 
-local SERVER_DOMAIN = (os.getenv("SERVER_DOMAIN") or ""):gsub("/+$", "")
-local SERVER_HOSTNAME = string.match(SERVER_DOMAIN, "//([^/:]+)") or "localhost"
-local SERVICE_HMAC_SECRET = os.getenv("STUDIO_GATEWAY_HMAC_SECRET") or ""
-local CACHE_TTL_SECONDS = 30
-local cache = ngx.shared.service_keys
-
-local function valid_project_ref(value)
-    return type(value) == "string"
-        and ngx.re.match(value, [[^[a-z_][a-z0-9_]{2,39}$]], "jo") ~= nil
-end
-
-local function valid_uuid(value)
-    return type(value) == "string"
-        and ngx.re.match(
-            value,
-            [[^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$]],
-            "jo"
-        ) ~= nil
-end
-
-local function cache_key(project_ref)
-    return "content:project-identity:" .. project_ref
-end
-
-local function normalize_identity(payload, requested_ref)
-    if type(payload) ~= "table" then
-        return nil, "invalid identity payload"
-    end
-
-    local project_id = tostring(payload.project_id or ""):lower()
-    if not valid_uuid(project_id) then
-        return nil, "invalid stable project id"
-    end
-
-    local current_ref = payload.current_ref
-    if not valid_project_ref(current_ref) then
-        current_ref = requested_ref
-    end
-
-    local aliases = {}
-    local seen = {}
-    local function append(value)
-        if valid_project_ref(value) and not seen[value] then
-            seen[value] = true
-            table.insert(aliases, value)
-        end
-    end
-
-    append(current_ref)
-    append(requested_ref)
-    for _, value in ipairs(payload.aliases or {}) do
-        append(value)
-    end
-
-    return {
-        project_id = project_id,
-        current_ref = current_ref,
-        aliases = aliases,
-    }
-end
-
-local function fetch_identity(project_ref)
-    if SERVER_DOMAIN == "" or SERVICE_HMAC_SECRET == "" then
-        return nil, "content identity configuration is missing"
-    end
-
-    local target = "/api/projects/internal/content-identity/" .. ngx.escape_uri(project_ref)
-    local signed_headers, sign_err = internal_hmac.sign_headers(
-        SERVICE_HMAC_SECRET,
-        "studio-nginx",
-        "GET",
-        target,
-        ""
-    )
-    if not signed_headers then
-        return nil, "content identity signing failed: " .. (sign_err or "unknown error")
-    end
-    signed_headers["Accept"] = "application/json"
-    signed_headers["Host"] = SERVER_HOSTNAME
-
-    local client = http.new()
-    client:set_timeout(2000)
-    local response, err = client:request_uri(
-        SERVER_DOMAIN .. target,
-        outbound_tls.apply_internal(SERVER_DOMAIN, {
-            method = "GET",
-            headers = signed_headers,
-            keepalive = true,
-        })
-    )
-
-    if not response then
-        return nil, "content identity request failed: " .. (err or "unknown error")
-    end
-    if response.status ~= ngx.HTTP_OK then
-        return nil, "content identity returned HTTP " .. tostring(response.status)
-    end
-
-    local decoded, decode_err = cjson.decode(response.body or "")
-    if not decoded then
-        return nil, "content identity JSON is invalid: " .. (decode_err or "decode failed")
-    end
-    return normalize_identity(decoded, project_ref)
-end
-
 function M.resolve(project_ref)
-    if not valid_project_ref(project_ref) then
-        return nil, "invalid selected project ref"
+    local context = ngx.ctx.studio_project_context
+    if type(project_ref) ~= "string" or not project_ref:match("^[a-z]+$") or #project_ref ~= 20 then
+        return nil, "invalid public project reference"
     end
-
-    if cache then
-        local cached = cache:get(cache_key(project_ref))
-        if cached then
-            local decoded = cjson.decode(cached)
-            local identity = decoded and normalize_identity(decoded, project_ref)
-            if identity then
-                return identity
-            end
-            cache:delete(cache_key(project_ref))
-        end
+    if type(context) ~= "table" or context.ref ~= project_ref
+        or type(context.project_uuid) ~= "string"
+        or not context.project_uuid:match("^[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]%-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]%-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]%-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]%-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]$")
+        or #context.project_uuid ~= 36 then
+        return nil, "verified project context is required"
     end
-
-    local identity, err = fetch_identity(project_ref)
-    if not identity then
-        return nil, err
-    end
-
-    if cache then
-        local encoded = cjson.encode(identity)
-        if encoded then
-            cache:set(cache_key(project_ref), encoded, CACHE_TTL_SECONDS)
-        end
-    end
-
-    return identity
+    return { project_id = context.project_uuid, current_ref = context.ref }
 end
 
 return M

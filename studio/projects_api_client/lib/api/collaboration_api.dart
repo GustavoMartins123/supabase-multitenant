@@ -22,13 +22,13 @@ class CollaborationApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [ProjectTagAssign] projectTagAssign (required):
-  Future<Response> assignProjectTagApiProjectsProjectNameTagsPostWithHttpInfo(String projectName, ProjectTagAssign projectTagAssign,) async {
+  Future<Response> assignProjectTagApiProjectsProjectRefTagsPostWithHttpInfo(String projectRef, ProjectTagAssign projectTagAssign,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/tags'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/tags'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody = projectTagAssign;
@@ -55,11 +55,11 @@ class CollaborationApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [ProjectTagAssign] projectTagAssign (required):
-  Future<AssignProjectTagResponse?> assignProjectTagApiProjectsProjectNameTagsPost(String projectName, ProjectTagAssign projectTagAssign,) async {
-    final response = await assignProjectTagApiProjectsProjectNameTagsPostWithHttpInfo(projectName, projectTagAssign,);
+  Future<AssignProjectTagResponse?> assignProjectTagApiProjectsProjectRefTagsPost(String projectRef, ProjectTagAssign projectTagAssign,) async {
+    final response = await assignProjectTagApiProjectsProjectRefTagsPostWithHttpInfo(projectRef, projectTagAssign,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -79,13 +79,13 @@ class CollaborationApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [ProjectHintCreate] projectHintCreate (required):
-  Future<Response> createProjectHintApiProjectsProjectNameHintsPostWithHttpInfo(String projectName, ProjectHintCreate projectHintCreate,) async {
+  Future<Response> createProjectHintApiProjectsProjectRefHintsPostWithHttpInfo(String projectRef, ProjectHintCreate projectHintCreate,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/hints'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/hints'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody = projectHintCreate;
@@ -112,11 +112,11 @@ class CollaborationApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [ProjectHintCreate] projectHintCreate (required):
-  Future<CreateProjectHintResponse?> createProjectHintApiProjectsProjectNameHintsPost(String projectName, ProjectHintCreate projectHintCreate,) async {
-    final response = await createProjectHintApiProjectsProjectNameHintsPostWithHttpInfo(projectName, projectHintCreate,);
+  Future<CreateProjectHintResponse?> createProjectHintApiProjectsProjectRefHintsPost(String projectRef, ProjectHintCreate projectHintCreate,) async {
+    final response = await createProjectHintApiProjectsProjectRefHintsPostWithHttpInfo(projectRef, projectHintCreate,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -136,13 +136,13 @@ class CollaborationApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [ProjectNoteCreate] projectNoteCreate (required):
-  Future<Response> createProjectNoteApiProjectsProjectNameNotesPostWithHttpInfo(String projectName, ProjectNoteCreate projectNoteCreate,) async {
+  Future<Response> createProjectNoteApiProjectsProjectRefNotesPostWithHttpInfo(String projectRef, ProjectNoteCreate projectNoteCreate,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/notes'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/notes'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody = projectNoteCreate;
@@ -169,11 +169,11 @@ class CollaborationApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [ProjectNoteCreate] projectNoteCreate (required):
-  Future<CreateProjectNoteResponse?> createProjectNoteApiProjectsProjectNameNotesPost(String projectName, ProjectNoteCreate projectNoteCreate,) async {
-    final response = await createProjectNoteApiProjectsProjectNameNotesPostWithHttpInfo(projectName, projectNoteCreate,);
+  Future<CreateProjectNoteResponse?> createProjectNoteApiProjectsProjectRefNotesPost(String projectRef, ProjectNoteCreate projectNoteCreate,) async {
+    final response = await createProjectNoteApiProjectsProjectRefNotesPostWithHttpInfo(projectRef, projectNoteCreate,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -193,13 +193,13 @@ class CollaborationApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [ProjectThreadMessageCreate] projectThreadMessageCreate (required):
-  Future<Response> createProjectThreadMessageApiProjectsProjectNameThreadMessagesPostWithHttpInfo(String projectName, ProjectThreadMessageCreate projectThreadMessageCreate,) async {
+  Future<Response> createProjectThreadMessageApiProjectsProjectRefThreadMessagesPostWithHttpInfo(String projectRef, ProjectThreadMessageCreate projectThreadMessageCreate,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/thread/messages'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/thread/messages'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody = projectThreadMessageCreate;
@@ -226,11 +226,11 @@ class CollaborationApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [ProjectThreadMessageCreate] projectThreadMessageCreate (required):
-  Future<CreateThreadMessageResponse?> createProjectThreadMessageApiProjectsProjectNameThreadMessagesPost(String projectName, ProjectThreadMessageCreate projectThreadMessageCreate,) async {
-    final response = await createProjectThreadMessageApiProjectsProjectNameThreadMessagesPostWithHttpInfo(projectName, projectThreadMessageCreate,);
+  Future<CreateThreadMessageResponse?> createProjectThreadMessageApiProjectsProjectRefThreadMessagesPost(String projectRef, ProjectThreadMessageCreate projectThreadMessageCreate,) async {
+    final response = await createProjectThreadMessageApiProjectsProjectRefThreadMessagesPostWithHttpInfo(projectRef, projectThreadMessageCreate,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -250,13 +250,13 @@ class CollaborationApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] noteId (required):
-  Future<Response> deleteProjectNoteApiProjectsProjectNameNotesNoteIdDeleteWithHttpInfo(String projectName, String noteId,) async {
+  Future<Response> deleteProjectNoteApiProjectsProjectRefNotesNoteIdDeleteWithHttpInfo(String projectRef, String noteId,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/notes/{note_id}'
-      .replaceAll('{project_name}', projectName)
+    final path = r'/api/projects/{project_ref}/notes/{note_id}'
+      .replaceAll('{project_ref}', projectRef)
       .replaceAll('{note_id}', noteId);
 
     // ignore: prefer_final_locals
@@ -284,11 +284,11 @@ class CollaborationApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] noteId (required):
-  Future<DeleteProjectNoteResponse?> deleteProjectNoteApiProjectsProjectNameNotesNoteIdDelete(String projectName, String noteId,) async {
-    final response = await deleteProjectNoteApiProjectsProjectNameNotesNoteIdDeleteWithHttpInfo(projectName, noteId,);
+  Future<DeleteProjectNoteResponse?> deleteProjectNoteApiProjectsProjectRefNotesNoteIdDelete(String projectRef, String noteId,) async {
+    final response = await deleteProjectNoteApiProjectsProjectRefNotesNoteIdDeleteWithHttpInfo(projectRef, noteId,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -308,11 +308,11 @@ class CollaborationApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<Response> getProjectCollaborationApiProjectsProjectNameCollaborationGetWithHttpInfo(String projectName,) async {
+  /// * [String] projectRef (required):
+  Future<Response> getProjectCollaborationApiProjectsProjectRefCollaborationGetWithHttpInfo(String projectRef,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/collaboration'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/collaboration'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -339,9 +339,9 @@ class CollaborationApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<GetProjectCollaborationResponse?> getProjectCollaborationApiProjectsProjectNameCollaborationGet(String projectName,) async {
-    final response = await getProjectCollaborationApiProjectsProjectNameCollaborationGetWithHttpInfo(projectName,);
+  /// * [String] projectRef (required):
+  Future<GetProjectCollaborationResponse?> getProjectCollaborationApiProjectsProjectRefCollaborationGet(String projectRef,) async {
+    final response = await getProjectCollaborationApiProjectsProjectRefCollaborationGetWithHttpInfo(projectRef,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -361,13 +361,13 @@ class CollaborationApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] tagId (required):
-  Future<Response> unassignProjectTagApiProjectsProjectNameTagsTagIdDeleteWithHttpInfo(String projectName, String tagId,) async {
+  Future<Response> unassignProjectTagApiProjectsProjectRefTagsTagIdDeleteWithHttpInfo(String projectRef, String tagId,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/tags/{tag_id}'
-      .replaceAll('{project_name}', projectName)
+    final path = r'/api/projects/{project_ref}/tags/{tag_id}'
+      .replaceAll('{project_ref}', projectRef)
       .replaceAll('{tag_id}', tagId);
 
     // ignore: prefer_final_locals
@@ -395,11 +395,11 @@ class CollaborationApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] tagId (required):
-  Future<UnassignProjectTagResponse?> unassignProjectTagApiProjectsProjectNameTagsTagIdDelete(String projectName, String tagId,) async {
-    final response = await unassignProjectTagApiProjectsProjectNameTagsTagIdDeleteWithHttpInfo(projectName, tagId,);
+  Future<UnassignProjectTagResponse?> unassignProjectTagApiProjectsProjectRefTagsTagIdDelete(String projectRef, String tagId,) async {
+    final response = await unassignProjectTagApiProjectsProjectRefTagsTagIdDeleteWithHttpInfo(projectRef, tagId,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -419,15 +419,15 @@ class CollaborationApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] hintId (required):
   ///
   /// * [ProjectHintStatusUpdate] projectHintStatusUpdate (required):
-  Future<Response> updateProjectHintStatusApiProjectsProjectNameHintsHintIdPutWithHttpInfo(String projectName, String hintId, ProjectHintStatusUpdate projectHintStatusUpdate,) async {
+  Future<Response> updateProjectHintStatusApiProjectsProjectRefHintsHintIdPutWithHttpInfo(String projectRef, String hintId, ProjectHintStatusUpdate projectHintStatusUpdate,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/hints/{hint_id}'
-      .replaceAll('{project_name}', projectName)
+    final path = r'/api/projects/{project_ref}/hints/{hint_id}'
+      .replaceAll('{project_ref}', projectRef)
       .replaceAll('{hint_id}', hintId);
 
     // ignore: prefer_final_locals
@@ -455,13 +455,13 @@ class CollaborationApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] hintId (required):
   ///
   /// * [ProjectHintStatusUpdate] projectHintStatusUpdate (required):
-  Future<UpdateProjectHintResponse?> updateProjectHintStatusApiProjectsProjectNameHintsHintIdPut(String projectName, String hintId, ProjectHintStatusUpdate projectHintStatusUpdate,) async {
-    final response = await updateProjectHintStatusApiProjectsProjectNameHintsHintIdPutWithHttpInfo(projectName, hintId, projectHintStatusUpdate,);
+  Future<UpdateProjectHintResponse?> updateProjectHintStatusApiProjectsProjectRefHintsHintIdPut(String projectRef, String hintId, ProjectHintStatusUpdate projectHintStatusUpdate,) async {
+    final response = await updateProjectHintStatusApiProjectsProjectRefHintsHintIdPutWithHttpInfo(projectRef, hintId, projectHintStatusUpdate,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -481,15 +481,15 @@ class CollaborationApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] notificationId (required):
   ///
   /// * [ProjectNotificationRead] projectNotificationRead (required):
-  Future<Response> updateProjectNotificationReadStateApiProjectsProjectNameNotificationsNotificationIdPatchWithHttpInfo(String projectName, String notificationId, ProjectNotificationRead projectNotificationRead,) async {
+  Future<Response> updateProjectNotificationReadStateApiProjectsProjectRefNotificationsNotificationIdPatchWithHttpInfo(String projectRef, String notificationId, ProjectNotificationRead projectNotificationRead,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/notifications/{notification_id}'
-      .replaceAll('{project_name}', projectName)
+    final path = r'/api/projects/{project_ref}/notifications/{notification_id}'
+      .replaceAll('{project_ref}', projectRef)
       .replaceAll('{notification_id}', notificationId);
 
     // ignore: prefer_final_locals
@@ -517,13 +517,13 @@ class CollaborationApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] notificationId (required):
   ///
   /// * [ProjectNotificationRead] projectNotificationRead (required):
-  Future<UpdateNotificationReadResponse?> updateProjectNotificationReadStateApiProjectsProjectNameNotificationsNotificationIdPatch(String projectName, String notificationId, ProjectNotificationRead projectNotificationRead,) async {
-    final response = await updateProjectNotificationReadStateApiProjectsProjectNameNotificationsNotificationIdPatchWithHttpInfo(projectName, notificationId, projectNotificationRead,);
+  Future<UpdateNotificationReadResponse?> updateProjectNotificationReadStateApiProjectsProjectRefNotificationsNotificationIdPatch(String projectRef, String notificationId, ProjectNotificationRead projectNotificationRead,) async {
+    final response = await updateProjectNotificationReadStateApiProjectsProjectRefNotificationsNotificationIdPatchWithHttpInfo(projectRef, notificationId, projectNotificationRead,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }

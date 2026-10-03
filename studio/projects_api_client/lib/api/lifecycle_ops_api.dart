@@ -22,11 +22,11 @@ class LifecycleOpsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<Response> getProjectSettingsApiProjectsProjectNameSettingsGetWithHttpInfo(String projectName,) async {
+  /// * [String] projectRef (required):
+  Future<Response> getProjectSettingsApiProjectsProjectRefSettingsGetWithHttpInfo(String projectRef,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/settings'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/settings'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -53,9 +53,9 @@ class LifecycleOpsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<GetProjectSettingsResponse?> getProjectSettingsApiProjectsProjectNameSettingsGet(String projectName,) async {
-    final response = await getProjectSettingsApiProjectsProjectNameSettingsGetWithHttpInfo(projectName,);
+  /// * [String] projectRef (required):
+  Future<GetProjectSettingsResponse?> getProjectSettingsApiProjectsProjectRefSettingsGet(String projectRef,) async {
+    final response = await getProjectSettingsApiProjectsProjectRefSettingsGetWithHttpInfo(projectRef,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -77,13 +77,13 @@ class LifecycleOpsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [RecreateServices] recreateServices (required):
-  Future<Response> recreateProjectServicesApiProjectsProjectNameRecreateServicesPostWithHttpInfo(String projectName, RecreateServices recreateServices,) async {
+  Future<Response> recreateProjectServicesApiProjectsProjectRefRecreateServicesPostWithHttpInfo(String projectRef, RecreateServices recreateServices,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/recreate-services'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/recreate-services'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody = recreateServices;
@@ -112,11 +112,11 @@ class LifecycleOpsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [RecreateServices] recreateServices (required):
-  Future<RecreateProjectServicesResponse?> recreateProjectServicesApiProjectsProjectNameRecreateServicesPost(String projectName, RecreateServices recreateServices,) async {
-    final response = await recreateProjectServicesApiProjectsProjectNameRecreateServicesPostWithHttpInfo(projectName, recreateServices,);
+  Future<RecreateProjectServicesResponse?> recreateProjectServicesApiProjectsProjectRefRecreateServicesPost(String projectRef, RecreateServices recreateServices,) async {
+    final response = await recreateProjectServicesApiProjectsProjectRefRecreateServicesPostWithHttpInfo(projectRef, recreateServices,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -138,11 +138,11 @@ class LifecycleOpsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<Response> restartProjectApiProjectsProjectNameRestartPostWithHttpInfo(String projectName,) async {
+  /// * [String] projectRef (required):
+  Future<Response> restartProjectApiProjectsProjectRefRestartPostWithHttpInfo(String projectRef,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/restart'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/restart'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -171,9 +171,9 @@ class LifecycleOpsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<RestartProjectResponse?> restartProjectApiProjectsProjectNameRestartPost(String projectName,) async {
-    final response = await restartProjectApiProjectsProjectNameRestartPostWithHttpInfo(projectName,);
+  /// * [String] projectRef (required):
+  Future<RestartProjectResponse?> restartProjectApiProjectsProjectRefRestartPost(String projectRef,) async {
+    final response = await restartProjectApiProjectsProjectRefRestartPostWithHttpInfo(projectRef,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -195,11 +195,11 @@ class LifecycleOpsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<Response> startProjectApiProjectsProjectNameStartPostWithHttpInfo(String projectName,) async {
+  /// * [String] projectRef (required):
+  Future<Response> startProjectApiProjectsProjectRefStartPostWithHttpInfo(String projectRef,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/start'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/start'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -228,9 +228,9 @@ class LifecycleOpsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<StartProjectResponse?> startProjectApiProjectsProjectNameStartPost(String projectName,) async {
-    final response = await startProjectApiProjectsProjectNameStartPostWithHttpInfo(projectName,);
+  /// * [String] projectRef (required):
+  Future<StartProjectResponse?> startProjectApiProjectsProjectRefStartPost(String projectRef,) async {
+    final response = await startProjectApiProjectsProjectRefStartPostWithHttpInfo(projectRef,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -250,11 +250,11 @@ class LifecycleOpsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<Response> stopProjectApiProjectsProjectNameStopPostWithHttpInfo(String projectName,) async {
+  /// * [String] projectRef (required):
+  Future<Response> stopProjectApiProjectsProjectRefStopPostWithHttpInfo(String projectRef,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/stop'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/stop'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -281,9 +281,9 @@ class LifecycleOpsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<StopProjectResponse?> stopProjectApiProjectsProjectNameStopPost(String projectName,) async {
-    final response = await stopProjectApiProjectsProjectNameStopPostWithHttpInfo(projectName,);
+  /// * [String] projectRef (required):
+  Future<StopProjectResponse?> stopProjectApiProjectsProjectRefStopPost(String projectRef,) async {
+    final response = await stopProjectApiProjectsProjectRefStopPostWithHttpInfo(projectRef,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -303,13 +303,13 @@ class LifecycleOpsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [UpdateSettings] updateSettings (required):
-  Future<Response> updateProjectSettingsApiProjectsProjectNameSettingsPutWithHttpInfo(String projectName, UpdateSettings updateSettings,) async {
+  Future<Response> updateProjectSettingsApiProjectsProjectRefSettingsPutWithHttpInfo(String projectRef, UpdateSettings updateSettings,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/settings'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/settings'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody = updateSettings;
@@ -336,11 +336,11 @@ class LifecycleOpsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [UpdateSettings] updateSettings (required):
-  Future<UpdateProjectSettingsResponse?> updateProjectSettingsApiProjectsProjectNameSettingsPut(String projectName, UpdateSettings updateSettings,) async {
-    final response = await updateProjectSettingsApiProjectsProjectNameSettingsPutWithHttpInfo(projectName, updateSettings,);
+  Future<UpdateProjectSettingsResponse?> updateProjectSettingsApiProjectsProjectRefSettingsPut(String projectRef, UpdateSettings updateSettings,) async {
+    final response = await updateProjectSettingsApiProjectsProjectRefSettingsPutWithHttpInfo(projectRef, updateSettings,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }

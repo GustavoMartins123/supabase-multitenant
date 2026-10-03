@@ -13,12 +13,17 @@ local function virtual_snippet_id(name, virtual_folder_id)
         return deterministic_uuid({ virtual_folder_id, string.format("%s.sql", name) })
     end
 
-    return deterministic_uuid({ string.format("%s.sql", name) })
+    error("Canonical snippet namespace is required")
 end
 
 local function to_virtual_snippet(snippet, virtual_id, virtual_folder_id)
     local cloned = namespace.clone_table(snippet)
-    cloned.id = virtual_id or virtual_snippet_id(cloned.name or "")
+    assert(type(virtual_id) == "string" and virtual_id ~= "", "Canonical snippet ID is required")
+    cloned.id = virtual_id
+    if type(cloned.content) == "table" then
+        cloned.content = namespace.clone_table(cloned.content)
+        cloned.content.content_id = virtual_id
+    end
     cloned.folder_id = virtual_folder_id or cjson.null
     return cloned
 end
@@ -28,15 +33,7 @@ local function resolve_virtual_snippet_id(project_ref, user_id, snippet, virtual
         return nil
     end
 
-    local preferred = namespace.get_preferred_virtual_id(project_ref, user_id, snippet.id)
-    if preferred and preferred ~= "" then
-        namespace.set_mapped_actual_id(project_ref, user_id, preferred, snippet.id, true)
-        return preferred
-    end
-
-    local canonical = virtual_snippet_id(snippet.name or "", id_namespace or virtual_folder_id)
-    namespace.set_mapped_actual_id(project_ref, user_id, canonical, snippet.id, false)
-    return canonical
+    return virtual_snippet_id(snippet.name or "", id_namespace or virtual_folder_id)
 end
 
 local function normalize_limit(value)
@@ -74,14 +71,13 @@ local function parse_boolean(value)
     return nil
 end
 
-local function virtualize_snippet(scope_key, user_id, namespace_state, snippet, forced_virtual_id)
+local function virtualize_snippet(scope_key, user_id, namespace_state, snippet)
     local virtual_folder = namespace.resolve_virtual_folder_id_for_snippet(namespace_state, snippet)
     local id_namespace = virtual_folder
     if not id_namespace and namespace_state.root_folder then
         id_namespace = namespace_state.root_folder.id
     end
-    local virtual_id = forced_virtual_id
-        or resolve_virtual_snippet_id(
+    local virtual_id = resolve_virtual_snippet_id(
             scope_key,
             user_id,
             snippet,
@@ -97,57 +93,12 @@ local function resolve_actual_folder(scope_key, user_id, namespace_state, reques
     end
 
     local entry = namespace_state.child_by_virtual_id[requested_folder_id]
-        or namespace_state.child_by_actual_id[requested_folder_id]
-    if entry then
-        if user_id and requested_folder_id ~= entry.actual.id then
-            namespace.set_mapped_actual_folder_id(scope_key, user_id, requested_folder_id, entry.actual.id, true)
-        end
-        return entry.actual
-    end
-
-    if user_id then
-        local mapped_actual_id = namespace.get_mapped_actual_folder_id(scope_key, user_id, requested_folder_id)
-        if mapped_actual_id and mapped_actual_id ~= "" then
-            entry = namespace_state.child_by_actual_id[mapped_actual_id]
-            if entry then
-                namespace.set_mapped_actual_folder_id(scope_key, user_id, requested_folder_id, entry.actual.id, true)
-                return entry.actual
-            end
-        end
-    end
-
-    for _, folder_entry in ipairs(namespace_state.child_folders) do
-        for _, alias in ipairs(folder_entry.aliases or {}) do
-            if alias == requested_folder_id then
-                if user_id then
-                    namespace.set_mapped_actual_folder_id(
-                        scope_key,
-                        user_id,
-                        requested_folder_id,
-                        folder_entry.actual.id,
-                        requested_folder_id ~= folder_entry.actual.id
-                    )
-                end
-                return folder_entry.actual
-            end
-        end
-    end
-
-    return nil
+    return entry and entry.actual or nil
 end
 
 local function find_actual_snippet_in_collection(scope_key, user_id, request_id, namespace_state, snippets)
     if not request_id or request_id == "" then
         return nil
-    end
-
-    local mapped_actual_id = namespace.get_mapped_actual_id(scope_key, user_id, request_id)
-    if mapped_actual_id and mapped_actual_id ~= "" then
-        for _, snippet in ipairs(snippets or {}) do
-            if snippet.id == mapped_actual_id then
-                return snippet
-            end
-        end
     end
 
     for _, snippet in ipairs(snippets or {}) do
@@ -157,7 +108,6 @@ local function find_actual_snippet_in_collection(scope_key, user_id, request_id,
             id_namespace = namespace_state.root_folder.id
         end
 
-        local canonical_id = virtual_snippet_id(snippet.name, id_namespace)
         local visible_id = resolve_virtual_snippet_id(
             scope_key,
             user_id,
@@ -165,24 +115,9 @@ local function find_actual_snippet_in_collection(scope_key, user_id, request_id,
             virtual_folder,
             id_namespace
         )
-        local legacy_id = virtual_snippet_id(snippet.name, virtual_folder)
-        local matches = snippet.id == request_id
-            or canonical_id == request_id
-            or visible_id == request_id
-            or legacy_id == request_id
-
-        if not matches and snippet.folder_id and snippet.folder_id ~= cjson.null then
-            local folder_entry = namespace_state.child_by_actual_id[snippet.folder_id]
-            for _, alias in ipairs((folder_entry and folder_entry.aliases) or {}) do
-                if virtual_snippet_id(snippet.name, alias) == request_id then
-                    matches = true
-                    break
-                end
-            end
-        end
+        local matches = visible_id == request_id
 
         if matches then
-            namespace.set_mapped_actual_id(scope_key, user_id, request_id, snippet.id, visible_id == request_id)
             return snippet
         end
     end

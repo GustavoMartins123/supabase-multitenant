@@ -2,7 +2,7 @@
 
 The lifecycle is orchestrated by the Projects API, but physical execution (Docker and the scripts in `servidor/generateProject/`) happens on the [host-agent](host-agent.md): the API writes the signed intent to the database and waits for the agent to execute the closed command.
 
-The Vector steps embedded in create, duplicate, rename, and restore — S3 buckets/indexes, per-project SigV4 credentials, and FDW wrappers — are specified in [Shared Storage, S3, and Storage Vectors](storage-vectors-lifecycle.md), the canonical source for that topic. This document describes when those steps run, not how they are implemented.
+The Vector steps embedded in create, duplicate, and restore — S3 buckets/indexes, per-project SigV4 credentials, and FDW wrappers — are specified in [Shared Storage, S3, and Storage Vectors](storage-vectors-lifecycle.md), the canonical source for that topic. This document describes when those steps run, not how they are implemented.
 
 Long-running operations are represented by persistent jobs. The HTTP endpoint normally creates the job and returns its identifier; execution continues in the project's serialized queue.
 
@@ -12,12 +12,13 @@ Before following any flow, distinguish:
 
 - `project_uuid`: `projects.id`, canonical and immutable identity;
 - `tenant_uuid`: persisted binding for Realtime/JWT/backups; equals `projects.id` for new projects and may preserve the legacy UUID;
-- `project_ref`: mutable slug used in URLs and physical resources;
-- `_supabase_<project_ref>`: database;
+- `name` / `PROJECT_ID`: stable technical name used by directories, Compose, databases and internal DNS;
+- `public_ref` / `PROJECT_PUBLIC_REF`: 20 random lowercase letters used exclusively by public paths and Studio project selection;
+- `_supabase_<technical_name>`: database;
 - Realtime tenant: identified by UUID;
 - Storage tenant: identified by the immutable `tenant_uuid`;
-- Supavisor tenant: identified by the project ref;
-- main CDC slot: suffixed by the project ref;
+- Supavisor tenant: identified by the technical name;
+- main CDC slot: suffixed by the technical name;
 - temporary broadcast slot: suffixed by a UUID-derived hash.
 
 Before any mutable Storage operation on an existing project, the lifecycle queries `projects.tenant_uuid` in the control plane and requires it to equal the environment's canonical `PROJECT_UUID`. A mismatch, missing row, or query failure ends the operation before touching the registry, database, or namespace.
@@ -27,12 +28,12 @@ Before any mutable Storage operation on an existing project, the lifecycle queri
 Summary:
 
 1. the API validates the user and name;
-2. generates `projects.id` once and persists the same value in `tenant_uuid`;
+2. generates `projects.id`, `tenant_uuid` and an independent cryptographically random `public_ref`;
 3. creates the job with both durable identifiers;
 4. the script generates the JWT secret, internal anon/service-role JWTs, config token, and opaque gateway-exclusive token;
-5. creates `_supabase_<project_ref>` from `_supabase_template`;
+5. creates `_supabase_<technical_name>` from `_supabase_template`;
 6. registers the Realtime tenant with `external_id = tenant_uuid`;
-7. registers the Supavisor tenant with `external_id = project_ref`;
+7. registers the Supavisor tenant with `external_id = technical_name`;
 8. creates the physical namespace and registers the tenant in global Storage through the Admin API;
 9. creates tenant-exclusive S3/SigV4 credentials;
 10. generates `.env`, compose, Dockerfile, and Nginx configuration without local Storage or imgproxy;
@@ -49,7 +50,7 @@ The JWT uses the UUID as its issuer:
 }
 ```
 
-The database name and main slot continue to use the project ref. The temporary broadcast slot uses a hash derived from the tenant UUID.
+The database name and main slot continue to use the technical name. The temporary broadcast slot uses a hash derived from the tenant UUID.
 
 ### Rollback
 
@@ -65,7 +66,7 @@ Shell rollback does not replace the API's final validation. Partial failures mus
 
 ## Duplication
 
-Duplication creates another project with a new UUID, new keys, and new tenants.
+Duplication creates another project with a new UUID, new public reference, new keys, and new tenants.
 
 Modes:
 
@@ -85,71 +86,44 @@ Even when data is copied, the new project's identity is independent:
 
 The copy does not reuse secrets or object references. `schema-only` creates an empty namespace. `with-data` captures the source with its services stopped and the Storage tenant in fail-closed maintenance, copies files to the new UUID, reidentifies Vector's physical tables, and removes copied FDWs/Vault secrets before creating new credentials.
 
-## Rename
+## Public URL rotation
 
-Rename changes the project ref but preserves both `projects.id` and `projects.tenant_uuid`.
+`POST /api/projects/{public_ref}/rename` accepts an empty JSON object. The server reserves a new random reference in `project_reference_history` and submits a durable job. The caller cannot select a name or a reference.
 
-Resources that follow the new name:
+The host-agent withdraws the Functions projection and stops the project's Auth and Nginx before replacing the public reference and derived URLs. It recreates only those two services that were previously running, then publishes the updated Functions projection. Custom application URLs and redirect entries remain unchanged; only defaults derived from the previous project URL are replaced.
 
-- project directory;
-- `.env` and templates;
-- container names;
-- Traefik route;
-- `_supabase_<project_ref>` database;
-- Supavisor tenant;
-- Realtime main slot;
-- physical references used by services;
-- Studio snippet directories.
+The operation does not rename directories, databases, containers, Supavisor tenants or replication slots. Internal UUIDs, JWT secrets, API keys, Storage objects, Vectors, collaboration records and memberships remain unchanged. Studio snippets use a namespace based on the immutable project UUID, so they do not move during rotation.
 
-Resources that retain the same identity:
+The old URL becomes invalid. There is no name-based alias, UUID route, historical URL resolution or redirect. Application clients must switch their configured project URL; previously issued signed Storage URLs containing the old prefix also become invalid. Existing browser tabs must select the new project URL.
 
-- project UUID;
-- membership;
-- notes, tags, hints, and threads;
-- audit records;
-- Realtime `external_id`;
-- Storage tenant ID and object namespace;
-- S3/SigV4 credentials;
-- UUID-derived temporary broadcast slot;
-- JWT keys, unless another rotation operation is requested.
+Each job keeps the public reference captured at submission in `jobs.public_ref`; polling does not substitute the new reference. Its `project` field remains the technical name. History records bind old and new references to the actor, project and job.
 
-### History
+Failure triggers transactional rollback of the reference, generated files and previous service state. If rollback cannot be confirmed, Auth and Nginx remain stopped and the job requires explicit recovery.
 
-Each rename creates a record in `project_name_history` with:
+### Existing installations
 
-- previous name;
-- new name;
-- previous path;
-- new path;
-- associated job;
-- status;
-- error and timestamps.
+Perform the change in a maintenance window with Projects API, host-agent, Functions supervisor, Studio gateway and project Auth/Nginx stopped. Keep PostgreSQL and the shared services available. Complete or cancel active lifecycle jobs before stopping the control plane. Back up the installation before applying schema migrations.
 
-### Supavisor
+Run the versioned control-plane migration service with the updated code. On the server host, export a private catalog and inspect the dry run:
 
-The old Supavisor tenant must be removed before creating the new one to avoid an identity conflict.
+```bash
+python3 tools/migrate_project_public_refs.py --root "$SERVER_ROOT" --export-catalog project-reference-catalog.json
+python3 tools/migrate_project_public_refs.py --root "$SERVER_ROOT"
+python3 tools/migrate_project_public_refs.py --root "$SERVER_ROOT" --apply
+```
 
-If a failure occurs after removal, rollback attempts to restore the old tenant.
+`SERVER_ROOT` is the absolute path to the installation's `servidor` directory. The tool preserves technical identities and secrets, renders canonical project files and active Functions projections, and refuses running services or divergent identities. Start or recreate project services only after the server and Studio migrations have both succeeded.
 
-### Realtime
+Transfer the private catalog to the Studio host when using two machines. Migrate the mounted snippets directory explicitly while its `nginx` container is stopped:
 
-The tenant remains identified by UUID. Rename updates database-bound resources, including the main slot and CDC extension configuration, without changing the canonical `external_id`.
+```bash
+python3 tools/migrate_snippet_namespaces.py --snippets-dir "$SNIPPETS_DIR" --catalog project-reference-catalog.json
+python3 tools/migrate_snippet_namespaces.py --snippets-dir "$SNIPPETS_DIR" --catalog project-reference-catalog.json --apply
+```
 
-### Storage
+`SNIPPETS_DIR` is the host directory mounted as Studio's SQL snippets volume. Conflicting SQL, ambiguous historical ownership or symlinks abort before mutation. Interrupted transactions retain private integrity-checked journals; use the same tool with `--rollback` while services remain stopped. A successful migration removes its journal. Never version catalogs, journals, installation paths or generated environments.
 
-The tenant is put into fail-closed maintenance before the database rename. The lifecycle replaces `databasePoolUrl` with a deliberately unreachable URL and confirms through the data plane that the tenant responds with an error; `null` is not used because official Storage would fall back to `databaseUrl`. After the rename, the lifecycle updates canonical `databaseUrl` and `databasePoolUrl` through the Admin API, runs the official migrations, and validates the same tenant UUID through the new Nginx. No object is moved; only Vector-wrapper endpoints containing the project ref are reconciled.
-
-### Snippets
-
-Supabase Studio stores snippets in directories that include the user and project slug.
-
-After the main rename, the API calls OpenResty's internal endpoint to rename these directories.
-
-The migration is best-effort:
-
-- a snippet failure does not invalidate the already-renamed project;
-- the job records a warning;
-- the directories may require manual correction or a dedicated retry.
+Deploy matching API, host-agent, Functions supervisor and Studio gateway versions together. Use a new Studio image tag; end users pull that image rather than rebuild Flutter.
 
 ## Opaque API keys
 
@@ -246,7 +220,7 @@ The Storage update sends `PATCH /tenants/<tenant_uuid>` and does not restart glo
 
 ## Restore points
 
-A restore point captures **data, not identity**: a dump of the `_supabase_<project_ref>` database (without the `realtime` schema, which is captured separately as in duplication) and a tar containing only `volumes/storage/objects/<tenant_uuid>/`. Format-2 `manifest.json` includes the UUID, Storage tenant ID, layout, ref at capture time, Postgres version, and the tables in the Realtime publication.
+A restore point captures **data, not identity**: a dump of the `_supabase_<technical_name>` database (without the `realtime` schema, which is captured separately as in duplication) and a tar containing only `volumes/storage/objects/<tenant_uuid>/`. Format-2 `manifest.json` includes the UUID, Storage tenant ID, layout, ref at capture time, Postgres version, and the tables in the Realtime publication.
 
 The point excludes: `.env`, JWT secret, anon/service keys, config token, Realtime/Supavisor tenants, and container configuration. Therefore a point remains restorable after key rotation and rename — files live in `servidor/backups/<tenant_uuid>/<point_id>/`, keyed by the `tenant_uuid` persisted in the control plane and mirrored in `PROJECT_UUID` in the project `.env` (immutable during rename). A backup never traverses the global root or includes another tenant's namespace.
 

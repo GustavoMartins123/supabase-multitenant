@@ -10,6 +10,8 @@ Each project receives its own PostgreSQL database, JWT secret, Realtime tenant, 
 
 Projects use multiple opaque publishable/secret API-key slots. Expiration is optional per key; expiring slots can rotate automatically before expiration, while internal anon/service-role JWTs remain server-only. Administrators can disable automatic rotation per project or slot, and failed rotations stop explicitly until intervention.
 
+Projects are addressed by an independent 20-letter random reference: `https://<server>/<public_ref>` and `/project/<public_ref>` in Studio. The technical name does not determine the URL. **Generate new URL** rotates only that reference; the previous URL stops working without an alias or redirect. See [Project lifecycle](docs/architecture/project-lifecycle.md) for maintenance migration instructions.
+
 > This is an unofficial project under active development.
 
 ---
@@ -102,7 +104,7 @@ The `host-agent` is also a platform-wide component, but it runs as a systemd ser
 - Nginx;
 - GoTrue;
 - PostgREST;
-- database `_supabase_<project_ref>`;
+- database `_supabase_<technical_name>`;
 - project configuration directory.
 
 Storage and ImgProxy are no longer created per project. Storage objects are namespaced by the project's immutable tenant UUID, while each project Nginx injects the trusted tenant identity before traffic reaches the shared Storage data plane.

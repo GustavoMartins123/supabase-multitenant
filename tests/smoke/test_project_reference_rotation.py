@@ -268,7 +268,8 @@ PY
             (self.root / ".functions-tenants" / (NAME + ".json")).read_text()
         )
         self.assertEqual(projection["project_uuid"], TENANT)
-        self.assertEqual(projection["project_ref"], NAME)
+        self.assertEqual(projection["technical_name"], NAME)
+        self.assertEqual(projection["project_ref"], OLD)
         self.assertFalse((self.root / ".functions-locks" / (NAME + ".withdrawn")).exists())
 
     def test_atomic_write_does_not_reuse_crash_leftover_name(self):

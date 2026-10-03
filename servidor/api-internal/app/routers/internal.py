@@ -52,7 +52,6 @@ class ContentIdentityResponse(BaseModel):
 
     project_id: str
     current_ref: str
-    aliases: list[str]
 
 
 class StudioContextResponse(BaseModel):
@@ -226,56 +225,17 @@ async def sync_user_identity(
 
 
 @router.get(
-    "/api/projects/internal/content-identity/{project_name}",
+    "/api/projects/internal/content-identity/{project_ref}",
     response_model=ContentIdentityResponse,
 )
-async def get_content_project_identity(
-    project_name: str,
-    request: Request,
-    pool=Depends(get_pool),
-):
-    """Resolve o slug mutável para o UUID estável usado apenas por content."""
-    project_name = validate_project_id(project_name)
+async def get_content_project_identity(project_ref: str, request: Request, pool=Depends(get_pool)):
+    project_ref = validate_project_ref(project_ref)
     _require_studio_nginx(request)
     _reject_end_user_context(request)
-
     async with pool.acquire() as conn:
-        project = await conn.fetchrow(
-            "SELECT id, name FROM projects WHERE name = $1",
-            project_name,
-        )
-        if not project:
-            raise HTTPException(404, "Project not found")
-
-        history = await conn.fetch(
-            """
-            SELECT old_name, new_name
-            FROM project_name_history
-            WHERE project_id = $1
-              AND status = 'succeeded'
-            ORDER BY created_at ASC
-            """,
-            project["id"],
-        )
-
-    aliases: list[str] = []
-    seen: set[str] = set()
-    candidates = (
-        [project["name"]]
-        + [row["old_name"] for row in history]
-        + [row["new_name"] for row in history]
-    )
-    for candidate in candidates:
-        if candidate and candidate not in seen:
-            seen.add(candidate)
-            aliases.append(candidate)
-
+        project = await get_public_project_row(conn, project_ref)
     return JSONResponse(
-        content={
-            "project_id": str(project["id"]),
-            "current_ref": project["name"],
-            "aliases": aliases,
-        },
+        content={"project_id": str(project["id"]), "current_ref": project["public_ref"]},
         headers={"Cache-Control": "no-store"},
     )
 

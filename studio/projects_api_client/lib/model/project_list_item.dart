@@ -29,6 +29,7 @@ class ProjectListItem {
     required this.opaqueApiKeySlotCount,
     required this.opaqueApiKeysStatus,
     required this.projectUuid,
+    required this.publicRef,
     required this.storageLimitToken,
     required this.tenantUuid,
   });
@@ -65,6 +66,8 @@ class ProjectListItem {
 
   String projectUuid;
 
+  String publicRef;
+
   String storageLimitToken;
 
   String? tenantUuid;
@@ -87,6 +90,7 @@ class ProjectListItem {
     other.opaqueApiKeySlotCount == opaqueApiKeySlotCount &&
     other.opaqueApiKeysStatus == opaqueApiKeysStatus &&
     other.projectUuid == projectUuid &&
+    other.publicRef == publicRef &&
     other.storageLimitToken == storageLimitToken &&
     other.tenantUuid == tenantUuid;
 
@@ -109,11 +113,12 @@ class ProjectListItem {
     (opaqueApiKeySlotCount.hashCode) +
     (opaqueApiKeysStatus.hashCode) +
     (projectUuid.hashCode) +
+    (publicRef.hashCode) +
     (storageLimitToken.hashCode) +
     (tenantUuid == null ? 0 : tenantUuid!.hashCode);
 
   @override
-  String toString() => 'ProjectListItem[automaticKeyRotationBlocked=$automaticKeyRotationBlocked, automaticKeyRotationDueAt=$automaticKeyRotationDueAt, automaticKeyRotationEnabled=$automaticKeyRotationEnabled, automaticKeyRotationLastError=$automaticKeyRotationLastError, automaticKeyRotationLeadDays=$automaticKeyRotationLeadDays, displayName=$displayName, fileSizeLimit=$fileSizeLimit, internalTokenExpired=$internalTokenExpired, internalTokenExpiresAt=$internalTokenExpiresAt, internalTokenExpiringSoon=$internalTokenExpiringSoon, internalTokenExpiryWarningDays=$internalTokenExpiryWarningDays, lastKeyRotationAt=$lastKeyRotationAt, name=$name, opaqueApiKeySlotCount=$opaqueApiKeySlotCount, opaqueApiKeysStatus=$opaqueApiKeysStatus, projectUuid=$projectUuid, storageLimitToken=$storageLimitToken, tenantUuid=$tenantUuid]';
+  String toString() => 'ProjectListItem[automaticKeyRotationBlocked=$automaticKeyRotationBlocked, automaticKeyRotationDueAt=$automaticKeyRotationDueAt, automaticKeyRotationEnabled=$automaticKeyRotationEnabled, automaticKeyRotationLastError=$automaticKeyRotationLastError, automaticKeyRotationLeadDays=$automaticKeyRotationLeadDays, displayName=$displayName, fileSizeLimit=$fileSizeLimit, internalTokenExpired=$internalTokenExpired, internalTokenExpiresAt=$internalTokenExpiresAt, internalTokenExpiringSoon=$internalTokenExpiringSoon, internalTokenExpiryWarningDays=$internalTokenExpiryWarningDays, lastKeyRotationAt=$lastKeyRotationAt, name=$name, opaqueApiKeySlotCount=$opaqueApiKeySlotCount, opaqueApiKeysStatus=$opaqueApiKeysStatus, projectUuid=$projectUuid, publicRef=$publicRef, storageLimitToken=$storageLimitToken, tenantUuid=$tenantUuid]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -153,6 +158,7 @@ class ProjectListItem {
       json[r'opaque_api_key_slot_count'] = this.opaqueApiKeySlotCount;
       json[r'opaque_api_keys_status'] = this.opaqueApiKeysStatus;
       json[r'project_uuid'] = this.projectUuid;
+      json[r'public_ref'] = this.publicRef;
       json[r'storage_limit_token'] = this.storageLimitToken;
     if (this.tenantUuid != null) {
       json[r'tenant_uuid'] = this.tenantUuid;
@@ -197,6 +203,7 @@ class ProjectListItem {
         opaqueApiKeySlotCount: mapValueOfType<int>(json, r'opaque_api_key_slot_count')!,
         opaqueApiKeysStatus: mapValueOfType<String>(json, r'opaque_api_keys_status')!,
         projectUuid: mapValueOfType<String>(json, r'project_uuid')!,
+        publicRef: mapValueOfType<String>(json, r'public_ref')!,
         storageLimitToken: mapValueOfType<String>(json, r'storage_limit_token')!,
         tenantUuid: mapValueOfType<String>(json, r'tenant_uuid'),
       );
@@ -262,6 +269,7 @@ class ProjectListItem {
     'opaque_api_key_slot_count',
     'opaque_api_keys_status',
     'project_uuid',
+    'public_ref',
     'storage_limit_token',
     'tenant_uuid',
   };

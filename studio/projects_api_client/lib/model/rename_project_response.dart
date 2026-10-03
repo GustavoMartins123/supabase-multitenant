@@ -23,11 +23,12 @@ class RenameProjectResponse {
     required this.isIdempotent,
     required this.jobId,
     required this.message,
-    required this.newName,
-    required this.oldName,
+    required this.newRef,
+    required this.oldRef,
     required this.progress,
     required this.project,
     required this.projectUuid,
+    required this.publicRef,
     required this.queuePosition,
     required this.retryOf,
     required this.retryable,
@@ -58,15 +59,17 @@ class RenameProjectResponse {
 
   String? message;
 
-  String newName;
+  String newRef;
 
-  String oldName;
+  String oldRef;
 
   int? progress;
 
   String project;
 
   String? projectUuid;
+
+  String? publicRef;
 
   int queuePosition;
 
@@ -96,11 +99,12 @@ class RenameProjectResponse {
     other.isIdempotent == isIdempotent &&
     other.jobId == jobId &&
     other.message == message &&
-    other.newName == newName &&
-    other.oldName == oldName &&
+    other.newRef == newRef &&
+    other.oldRef == oldRef &&
     other.progress == progress &&
     other.project == project &&
     other.projectUuid == projectUuid &&
+    other.publicRef == publicRef &&
     other.queuePosition == queuePosition &&
     other.retryOf == retryOf &&
     other.retryable == retryable &&
@@ -123,11 +127,12 @@ class RenameProjectResponse {
     (isIdempotent.hashCode) +
     (jobId.hashCode) +
     (message == null ? 0 : message!.hashCode) +
-    (newName.hashCode) +
-    (oldName.hashCode) +
+    (newRef.hashCode) +
+    (oldRef.hashCode) +
     (progress == null ? 0 : progress!.hashCode) +
     (project.hashCode) +
     (projectUuid == null ? 0 : projectUuid!.hashCode) +
+    (publicRef == null ? 0 : publicRef!.hashCode) +
     (queuePosition.hashCode) +
     (retryOf == null ? 0 : retryOf!.hashCode) +
     (retryable.hashCode) +
@@ -138,7 +143,7 @@ class RenameProjectResponse {
     (updatedAt == null ? 0 : updatedAt!.hashCode);
 
   @override
-  String toString() => 'RenameProjectResponse[action=$action, attempt=$attempt, createdAt=$createdAt, createdBy=$createdBy, currentStep=$currentStep, errorCode=$errorCode, finishedAt=$finishedAt, isIdempotent=$isIdempotent, jobId=$jobId, message=$message, newName=$newName, oldName=$oldName, progress=$progress, project=$project, projectUuid=$projectUuid, queuePosition=$queuePosition, retryOf=$retryOf, retryable=$retryable, startedAt=$startedAt, status=$status, tenantUuid=$tenantUuid, totalSteps=$totalSteps, updatedAt=$updatedAt]';
+  String toString() => 'RenameProjectResponse[action=$action, attempt=$attempt, createdAt=$createdAt, createdBy=$createdBy, currentStep=$currentStep, errorCode=$errorCode, finishedAt=$finishedAt, isIdempotent=$isIdempotent, jobId=$jobId, message=$message, newRef=$newRef, oldRef=$oldRef, progress=$progress, project=$project, projectUuid=$projectUuid, publicRef=$publicRef, queuePosition=$queuePosition, retryOf=$retryOf, retryable=$retryable, startedAt=$startedAt, status=$status, tenantUuid=$tenantUuid, totalSteps=$totalSteps, updatedAt=$updatedAt]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -176,8 +181,8 @@ class RenameProjectResponse {
     } else {
       json[r'message'] = null;
     }
-      json[r'new_name'] = this.newName;
-      json[r'old_name'] = this.oldName;
+      json[r'new_ref'] = this.newRef;
+      json[r'old_ref'] = this.oldRef;
     if (this.progress != null) {
       json[r'progress'] = this.progress;
     } else {
@@ -188,6 +193,11 @@ class RenameProjectResponse {
       json[r'project_uuid'] = this.projectUuid;
     } else {
       json[r'project_uuid'] = null;
+    }
+    if (this.publicRef != null) {
+      json[r'public_ref'] = this.publicRef;
+    } else {
+      json[r'public_ref'] = null;
     }
       json[r'queue_position'] = this.queuePosition;
     if (this.retryOf != null) {
@@ -249,11 +259,12 @@ class RenameProjectResponse {
         isIdempotent: mapValueOfType<bool>(json, r'is_idempotent')!,
         jobId: mapValueOfType<String>(json, r'job_id')!,
         message: mapValueOfType<String>(json, r'message'),
-        newName: mapValueOfType<String>(json, r'new_name')!,
-        oldName: mapValueOfType<String>(json, r'old_name')!,
+        newRef: mapValueOfType<String>(json, r'new_ref')!,
+        oldRef: mapValueOfType<String>(json, r'old_ref')!,
         progress: mapValueOfType<int>(json, r'progress'),
         project: mapValueOfType<String>(json, r'project')!,
         projectUuid: mapValueOfType<String>(json, r'project_uuid'),
+        publicRef: mapValueOfType<String>(json, r'public_ref'),
         queuePosition: mapValueOfType<int>(json, r'queue_position')!,
         retryOf: mapValueOfType<String>(json, r'retry_of'),
         retryable: mapValueOfType<bool>(json, r'retryable')!,
@@ -319,11 +330,12 @@ class RenameProjectResponse {
     'is_idempotent',
     'job_id',
     'message',
-    'new_name',
-    'old_name',
+    'new_ref',
+    'old_ref',
     'progress',
     'project',
     'project_uuid',
+    'public_ref',
     'queue_position',
     'retry_of',
     'retryable',

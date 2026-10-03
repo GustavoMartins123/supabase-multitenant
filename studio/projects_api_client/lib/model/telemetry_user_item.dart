@@ -22,7 +22,7 @@ class TelemetryUserItem {
 
   String? email;
 
-  String? lastLoginAt;
+  DateTime? lastLoginAt;
 
   String? phone;
 
@@ -58,7 +58,7 @@ class TelemetryUserItem {
       json[r'email'] = null;
     }
     if (this.lastLoginAt != null) {
-      json[r'last_login_at'] = this.lastLoginAt;
+      json[r'last_login_at'] = this.lastLoginAt!.toUtc().toIso8601String();
     } else {
       json[r'last_login_at'] = null;
     }
@@ -92,7 +92,7 @@ class TelemetryUserItem {
 
       return TelemetryUserItem(
         email: mapValueOfType<String>(json, r'email'),
-        lastLoginAt: mapValueOfType<String>(json, r'last_login_at'),
+        lastLoginAt: mapDateTime(json, r'last_login_at', r''),
         phone: mapValueOfType<String>(json, r'phone'),
         sessionCount: mapValueOfType<int>(json, r'session_count')!,
         userId: mapValueOfType<String>(json, r'user_id')!,

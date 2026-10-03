@@ -26,6 +26,7 @@ class JobResponse {
     this.progress,
     required this.project,
     this.projectUuid,
+    required this.publicRef,
     this.retryOf,
     this.retryable = false,
     this.startedAt,
@@ -63,6 +64,8 @@ class JobResponse {
 
   String? projectUuid;
 
+  String? publicRef;
+
   String? retryOf;
 
   bool retryable;
@@ -96,6 +99,7 @@ class JobResponse {
     other.progress == progress &&
     other.project == project &&
     other.projectUuid == projectUuid &&
+    other.publicRef == publicRef &&
     other.retryOf == retryOf &&
     other.retryable == retryable &&
     other.startedAt == startedAt &&
@@ -122,6 +126,7 @@ class JobResponse {
     (progress == null ? 0 : progress!.hashCode) +
     (project.hashCode) +
     (projectUuid == null ? 0 : projectUuid!.hashCode) +
+    (publicRef == null ? 0 : publicRef!.hashCode) +
     (retryOf == null ? 0 : retryOf!.hashCode) +
     (retryable.hashCode) +
     (startedAt == null ? 0 : startedAt!.hashCode) +
@@ -133,7 +138,7 @@ class JobResponse {
     (updatedAt == null ? 0 : updatedAt!.hashCode);
 
   @override
-  String toString() => 'JobResponse[action=$action, attempt=$attempt, createdAt=$createdAt, createdBy=$createdBy, currentStep=$currentStep, errorCode=$errorCode, finishedAt=$finishedAt, isIdempotent=$isIdempotent, jobId=$jobId, message=$message, progress=$progress, project=$project, projectUuid=$projectUuid, retryOf=$retryOf, retryable=$retryable, startedAt=$startedAt, status=$status, stderrTail=$stderrTail, stdoutTail=$stdoutTail, tenantUuid=$tenantUuid, totalSteps=$totalSteps, updatedAt=$updatedAt]';
+  String toString() => 'JobResponse[action=$action, attempt=$attempt, createdAt=$createdAt, createdBy=$createdBy, currentStep=$currentStep, errorCode=$errorCode, finishedAt=$finishedAt, isIdempotent=$isIdempotent, jobId=$jobId, message=$message, progress=$progress, project=$project, projectUuid=$projectUuid, publicRef=$publicRef, retryOf=$retryOf, retryable=$retryable, startedAt=$startedAt, status=$status, stderrTail=$stderrTail, stdoutTail=$stdoutTail, tenantUuid=$tenantUuid, totalSteps=$totalSteps, updatedAt=$updatedAt]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -181,6 +186,11 @@ class JobResponse {
       json[r'project_uuid'] = this.projectUuid;
     } else {
       json[r'project_uuid'] = null;
+    }
+    if (this.publicRef != null) {
+      json[r'public_ref'] = this.publicRef;
+    } else {
+      json[r'public_ref'] = null;
     }
     if (this.retryOf != null) {
       json[r'retry_of'] = this.retryOf;
@@ -254,6 +264,7 @@ class JobResponse {
         progress: mapValueOfType<int>(json, r'progress'),
         project: mapValueOfType<String>(json, r'project')!,
         projectUuid: mapValueOfType<String>(json, r'project_uuid'),
+        publicRef: mapValueOfType<String>(json, r'public_ref'),
         retryOf: mapValueOfType<String>(json, r'retry_of'),
         retryable: mapValueOfType<bool>(json, r'retryable') ?? false,
         startedAt: mapValueOfType<String>(json, r'started_at'),
@@ -313,6 +324,7 @@ class JobResponse {
     'action',
     'job_id',
     'project',
+    'public_ref',
     'status',
   };
 }

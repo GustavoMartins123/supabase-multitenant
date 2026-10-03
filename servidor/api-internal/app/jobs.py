@@ -124,12 +124,12 @@ async def create_project_job(
         await conn.execute(
             """
             INSERT INTO jobs(
-                job_id, project, project_uuid, owner_id, created_by,
+                job_id, project, project_uuid, owner_id, created_by, public_ref,
                 status, message, action, payload, total_steps, progress,
                 current_step, is_idempotent, retryable, retry_of, attempt
             )
             VALUES(
-                $1, $2, $3, $4, $4, 'queued', $5, $6, $7::jsonb, $8, 0,
+                $1, $2, $3, $4, $4, (SELECT public_ref FROM projects WHERE id=$3 AND name=$2), 'queued', $5, $6, $7::jsonb, $8, 0,
                 'queued', $9, $9, $10, $11
             )
             """,
@@ -239,6 +239,7 @@ def serialize_job(row: asyncpg.Record, *, include_output: bool = False) -> dict[
     result = {
         "job_id": str(row["job_id"]),
         "project": row["project"],
+        "public_ref": row["public_ref"],
         "project_uuid": str(row["project_uuid"]) if row["project_uuid"] else None,
         "tenant_uuid": str(tenant_uuid) if tenant_uuid else None,
         "created_by": str(row["created_by"]) if row["created_by"] else None,

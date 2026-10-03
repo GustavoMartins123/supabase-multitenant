@@ -17,6 +17,12 @@ final projectRepositoryProvider = Provider((ref) {
   return repository;
 });
 
+class ReferenceRotationSubmission {
+  const ReferenceRotationSubmission(this.job, this.newRef);
+  final Job job;
+  final String newRef;
+}
+
 class ProjectActionResult {
   const ProjectActionResult({this.message, this.job});
 
@@ -125,12 +131,23 @@ class ProjectRepository {
           'Lista de projetos: item invalido',
         );
       }
-      projects.add(Map<String, dynamic>.from(item));
+      final project = Map<String, dynamic>.from(item);
+      final id = project['id'];
+      final publicRef = project['public_ref'];
+      if (id is! String ||
+          !RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+              .hasMatch(id) ||
+          publicRef is! String ||
+          !RegExp(r'^[a-z]{20}$').hasMatch(publicRef)) {
+        throw const FormatException('Projeto sem identidade canonica');
+      }
+      projects.add(project);
     }
     return projects;
   }
 
-  Future<Job> createProject(String name, {String resourceProfile = 'medium'}) async {
+  Future<Job> createProject(String name,
+      {String resourceProfile = 'medium'}) async {
     final body = generated.NewProject(
       name: name,
       resourceProfile: switch (resourceProfile) {
@@ -161,7 +178,7 @@ class ProjectRepository {
     String? resourceProfile,
   }) async {
     final body = generated.DuplicateProject(
-      originalName: originalName,
+      originalPublicRef: originalName,
       newName: newName,
       copyData: copyData,
       resourceProfile: switch (resourceProfile) {
@@ -359,10 +376,10 @@ class ProjectRepository {
             'publishable' => generated.CreateApiKeySlotKindEnum.publishable,
             'secret' => generated.CreateApiKeySlotKindEnum.secret,
             _ => throw ArgumentError.value(
-              kind,
-              'kind',
-              'Use publishable ou secret',
-            ),
+                kind,
+                'kind',
+                'Use publishable ou secret',
+              ),
           },
           allowedServices: allowedServices,
           automaticRotationEnabled: automaticRotationEnabled,
@@ -898,26 +915,24 @@ class ProjectRepository {
     _ensureCommandSucceeded(resp);
   }
 
-  Future<Job> renameProject(
-    String ref, {
-    required String newName,
-    String? displayName,
-  }) async {
-    final payload = generated.ProjectRenameRequest(
-      newName: newName,
-      displayName: displayName,
-    ).toJson();
-    if (displayName == null) {
-      payload.remove('display_name');
-    }
+  Future<ReferenceRotationSubmission> renameProject(String ref) async {
     final resp = await _client.post(
       Uri.parse('/api/projects/$ref/rename'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(payload),
+      body: jsonEncode(const <String, dynamic>{}),
     );
     _ensureCommandSucceeded(resp, allowedStatusCodes: const {202});
-    final job = Job.fromResponse(resp);
-    return job;
+    final data = decodeJsonObject(resp, context: 'Nova URL do projeto');
+    final newRef = data['new_ref'];
+    if (data['old_ref'] != ref ||
+        newRef is! String ||
+        !RegExp(r'^[a-z]{20}$').hasMatch(newRef) ||
+        newRef == ref) {
+      throw const FormatException('Referencia publica da rotacao invalida');
+    }
+    final job =
+        Job.fromJson(data).verifyContext(project: ref, action: 'rename');
+    return ReferenceRotationSubmission(job, newRef);
   }
 
   Future<String> updateProjectDisplayName(
@@ -1033,12 +1048,12 @@ class ProjectRepository {
     _ensureCommandSucceeded(resp);
     final data = decodeJsonObject(
       resp,
-      context: 'Historico de nomes do projeto',
+      context: 'Historico de URLs do projeto',
     );
     if (data['events'] is! List) {
       throw const ApiException(
         ApiFailureKind.invalidResponse,
-        'Resposta invalida ao carregar historico de nomes',
+        'Resposta invalida ao carregar historico de URLs',
       );
     }
     return (data['events'] as List<dynamic>)

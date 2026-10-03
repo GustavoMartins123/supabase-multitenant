@@ -15,7 +15,7 @@ class DuplicateProject {
   DuplicateProject({
     this.copyData = false,
     required this.newName,
-    required this.originalName,
+    required this.originalPublicRef,
     this.resourceProfile,
   });
 
@@ -23,7 +23,7 @@ class DuplicateProject {
 
   String newName;
 
-  String originalName;
+  String originalPublicRef;
 
   DuplicateProjectResourceProfileEnum? resourceProfile;
 
@@ -31,7 +31,7 @@ class DuplicateProject {
   bool operator ==(Object other) => identical(this, other) || other is DuplicateProject &&
     other.copyData == copyData &&
     other.newName == newName &&
-    other.originalName == originalName &&
+    other.originalPublicRef == originalPublicRef &&
     other.resourceProfile == resourceProfile;
 
   @override
@@ -39,17 +39,17 @@ class DuplicateProject {
     // ignore: unnecessary_parenthesis
     (copyData.hashCode) +
     (newName.hashCode) +
-    (originalName.hashCode) +
+    (originalPublicRef.hashCode) +
     (resourceProfile == null ? 0 : resourceProfile!.hashCode);
 
   @override
-  String toString() => 'DuplicateProject[copyData=$copyData, newName=$newName, originalName=$originalName, resourceProfile=$resourceProfile]';
+  String toString() => 'DuplicateProject[copyData=$copyData, newName=$newName, originalPublicRef=$originalPublicRef, resourceProfile=$resourceProfile]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
       json[r'copy_data'] = this.copyData;
       json[r'new_name'] = this.newName;
-      json[r'original_name'] = this.originalName;
+      json[r'original_public_ref'] = this.originalPublicRef;
     if (this.resourceProfile != null) {
       json[r'resource_profile'] = this.resourceProfile;
     } else {
@@ -79,7 +79,7 @@ class DuplicateProject {
       return DuplicateProject(
         copyData: mapValueOfType<bool>(json, r'copy_data') ?? false,
         newName: mapValueOfType<String>(json, r'new_name')!,
-        originalName: mapValueOfType<String>(json, r'original_name')!,
+        originalPublicRef: mapValueOfType<String>(json, r'original_public_ref')!,
         resourceProfile: DuplicateProjectResourceProfileEnum.fromJson(json[r'resource_profile']),
       );
     }
@@ -129,7 +129,7 @@ class DuplicateProject {
   /// The list of required keys that must be present in a JSON.
   static const requiredKeys = <String>{
     'new_name',
-    'original_name',
+    'original_public_ref',
   };
 }
 

@@ -51,7 +51,7 @@ def main() -> None:
     server = root / 'servidor'
     labels = {'codex.p1.run': suffix}
     project = 'p1_' + suffix
-    renamed = 'p1_renamed_' + suffix
+    new_ref = 'b' * 20
     copied = 'p1_copy_' + suffix
     for image in ('servidor-db:latest', 'servidor-realtime:latest', 'servidor-control-plane-migrations:latest',
                   'supabase/edge-runtime:v1.74.2', 'supabase/supavisor:2.9.7', 'supabase/storage-api:v1.61.12',
@@ -64,7 +64,7 @@ def main() -> None:
               'FUNCTIONS_VERIFY_JWT': 'true', 'NUM_ACCEPTORS': '4',
               'REALTIME_ERL_AFLAGS': '"+S 2:2 -proto_dist inet_tcp"',
               'POOLER_ERL_AFLAGS': '"+S 2:2 -proto_dist inet_tcp"',
-              'SERVER_DOMAIN': 'https://server.p1.test', 'SERVER_PROTO': 'https',
+              'SERVER_DOMAIN': 'https://server.p1.test', 'SERVER_URL': 'server.p1.test', 'SERVER_PROTO': 'https',
               'PROJECTS_API_ALLOWED_IP_RANGES': '172.50.0.0/16',
               'PUSH_API_URL': 'https://studio.p1.test/api/internal/push',
               'PROJECTS_API_PORT': '18000', 'PG_META_PORT': '8080',
@@ -161,9 +161,12 @@ def main() -> None:
     sql(f"INSERT INTO users(id,authelia_username) VALUES('{owner}','fixture_owner');")
 
     gateway_tokens: dict[str, str] = {}
+    public_refs: dict[str, str] = {}
+    opaque_keys: dict[str, str] = {}
 
     def seed(ref: str, tenant: str) -> None:
-        sql(f"INSERT INTO projects(id,tenant_uuid,name,owner_id) VALUES('{tenant}','{tenant}','{ref}','{owner}');")
+        public_refs[ref] = "a" * 20 if ref == project else ("c" * 20 if ref == copied else "d" * 20)
+        sql(f"INSERT INTO projects(id,tenant_uuid,name,owner_id,public_ref) VALUES('{tenant}','{tenant}','{ref}','{owner}','{public_refs[ref]}');")
         # Same canonical activation primitive/order used by the API before it
         # dispatches create/duplicate. This fixture does not authorize an actor.
         token = secrets.token_hex(32)
@@ -179,8 +182,9 @@ def main() -> None:
             connection = await asyncpg.connect(os.environ['DB_DSN'])
             try:
                 async with connection.transaction():
-                    await bootstrap_project_opaque_keys(connection, project_id=uuid.UUID(tenant),
+                    issued = await bootstrap_project_opaque_keys(connection, project_id=uuid.UUID(tenant),
                                                         created_by=uuid.UUID(owner), gateway_token=token)
+                    opaque_keys[ref] = issued[1].token
             finally:
                 await connection.close()
         asyncio.run(activate())
@@ -189,6 +193,8 @@ def main() -> None:
         print('Running real lifecycle', script, flush=True)
         if script in {'generate_project.sh', 'duplicate_project.sh'}:
             ref = arguments[0] if script == 'generate_project.sh' else arguments[1]
+            arguments = ((*arguments[:2], public_refs[ref], *arguments[2:])
+                         if script == 'generate_project.sh' else (*arguments, public_refs[ref]))
             run('env', 'API_GATEWAY_TOKEN_PROJETO=' + gateway_tokens[ref], 'bash',
                 str(server / 'generateProject' / script), *arguments, cwd=server)
         else:
@@ -198,11 +204,11 @@ def main() -> None:
         path = server / '.functions-tenants' / (ref + '.json')
         result = json.loads(path.read_text())
         env = environment(server / 'projects' / ref / '.env')
-        assert result == {'project_ref': ref, 'project_uuid': tenant,
+        assert result == {'project_ref': public_refs[ref], 'technical_name': ref, 'project_uuid': tenant,
                           'anon_key': env['ANON_KEY_PROJETO'], 'service_role_key': env['SERVICE_ROLE_KEY_PROJETO'],
                           'jwt_secret': env['JWT_SECRET_PROJETO']}
         assert path.stat().st_mode & 0o777 == 0o600
-        data = run('curl', '--fail', '--silent', '--show-error', '-H', 'X-Project-Ref: ' + ref,
+        data = run('curl', '--fail', '--silent', '--show-error', '-H', 'X-Project-Ref: ' + public_refs[ref], '-H', 'X-Project-Name: ' + ref,
                    '-H', 'Authorization: Bearer ' + result['service_role_key'],
                    'http://supabase-edge-functions:9000/p1_probe')
         returned = json.loads(data)['env']
@@ -212,6 +218,30 @@ def main() -> None:
         assert not {'POSTGRES_PASSWORD', 'DATABASE_URL', 'HOST_AGENT_HMAC_SECRET'} & returned.keys()
         print('Projection and real Edge worker verified:', ref, flush=True)
         return result
+
+    def check_gateway(ref: str, marker: bool = True) -> None:
+        env = environment(server / 'projects' / ref / '.env')
+        assert env['API_EXTERNAL_URL'] == 'https://server.p1.test/' + public_refs[ref] + '/auth/v1'
+        auth = json.loads(run('curl', '--fail', '--silent', '--show-error',
+                             '-H', 'apikey: ' + opaque_keys[ref],
+                             'http://supabase-nginx-' + ref + ':8080/auth/v1/health'))
+        assert auth['name'] == 'GoTrue'
+        if marker:
+            sql("NOTIFY pgrst, 'reload schema';", '_supabase_' + ref)
+            request = urllib.request.Request(
+                'http://supabase-nginx-' + ref + ':8080/rest/v1/lifecycle_marker?select=value',
+                headers={'apikey': opaque_keys[ref]})
+            deadline = time.monotonic() + 20
+            while True:
+                try:
+                    with urllib.request.urlopen(request, timeout=10) as response:
+                        assert json.load(response) == [{'value': 'original'}]
+                    break
+                except urllib.error.HTTPError as error:
+                    if error.code != 404 or time.monotonic() > deadline:
+                        raise
+                    time.sleep(0.2)
+        print('Real Auth and REST gateway verified:', public_refs[ref], flush=True)
 
     def vector_request(ref: str, operation: str, payload: dict) -> dict | None:
         env = environment(server / 'projects' / ref / '.env')
@@ -304,8 +334,8 @@ process.stdout.write(body);});'''
     seed(project, first_uuid)
     lifecycle('generate_project.sh', project, first_uuid, 'false')
     initial = check_projection(project, first_uuid)
-    for script, arguments in [('generate_project.sh', ('p1_missing_' + suffix, str(uuid.uuid4()), 'false')),
-                              ('duplicate_project.sh', (project, 'p1_missing_' + suffix, 'with-data', str(uuid.uuid4()), first_uuid))]:
+    for script, arguments in [('generate_project.sh', ('p1_missing_' + suffix, str(uuid.uuid4()), 'd' * 20, 'false')),
+                              ('duplicate_project.sh', (project, 'p1_missing_' + suffix, 'with-data', str(uuid.uuid4()), first_uuid, 'd' * 20))]:
         for token in (None, 'not-a-canonical-gateway-token'):
             child_env = os.environ.copy()
             child_env.pop('API_GATEWAY_TOKEN_PROJETO', None)
@@ -321,6 +351,7 @@ process.stdout.write(body);});'''
     object_request(project, 'POST', '/bucket', '{"id":"p1-files","name":"p1-files","public":false}', 'application/json')
     object_request(project, 'POST', '/object/p1-files/original.txt', 'original object', 'text/plain')
     check_object(project)
+    check_gateway(project)
     vector_request(project, 'CreateVectorBucket', {'vectorBucketName': 'p1-vectors'})
     vector_request(project, 'CreateIndex', {**vector_identity, 'dataType': 'float32', 'dimension': 3, 'distanceMetric': 'cosine'})
     vector_request(project, 'PutVectors', {**vector_identity, 'vectors': [{'key': 'original', 'data': {'float32': [1, 0, 0]}}]})
@@ -328,6 +359,7 @@ process.stdout.write(body);});'''
     seed(copied, second_uuid)
     lifecycle('duplicate_project.sh', project, copied, 'with-data', second_uuid, first_uuid)
     check_projection(copied, second_uuid)
+    check_gateway(copied)
     check_vector(copied)
     check_object(copied)
     check_signed_gateway(copied, copied, 200)
@@ -335,35 +367,58 @@ process.stdout.write(body);});'''
     check_signed_gateway(copied, project, 403)
     print('Real SigV4 gateway: valid signature accepted; forged signature and cross-tenant credential denied', flush=True)
     assert sql('SELECT value FROM public.lifecycle_marker WHERE id=1;', '_supabase_' + copied) == 'original'
-    lifecycle('rename_project.sh', project, renamed)
-    assert not (server / '.functions-tenants' / (project + '.json')).exists()
-    assert (server / '.functions-locks' / (project + '.withdrawn')).is_file()
-    check_projection(renamed, first_uuid)
-    check_vector(renamed)
-    check_object(renamed)
-    lifecycle('rotate_key.sh', renamed)
-    rotated = check_projection(renamed, first_uuid)
+    job_id = str(uuid.uuid4())
+    sql(f'''INSERT INTO jobs(job_id,project,project_uuid,created_by,action,status,public_ref,payload) VALUES('{job_id}','{project}','{first_uuid}','{owner}','rename','running','{public_refs[project]}','{{"actor_user_id":"{owner}","old_ref":"{public_refs[project]}","new_ref":"{new_ref}"}}'::jsonb);''')
+    sql(f"INSERT INTO project_reference_history(project_id,old_ref,new_ref,status,actor_user_id,job_id) VALUES('{first_uuid}','{public_refs[project]}','{new_ref}','running','{owner}','{job_id}');")
+    old_ref = public_refs[project]
+    lifecycle('rename_project.sh', project, first_uuid, first_uuid, old_ref, new_ref)
+    public_refs[project] = new_ref
+    assert sql(f"SELECT public_ref FROM projects WHERE id='{first_uuid}';") == new_ref
+    assert sql(f"SELECT public_ref FROM jobs WHERE job_id='{job_id}';") == old_ref
+    assert (server / 'projects' / project).is_dir()
+    assert not (server / 'projects' / new_ref).exists()
+    status = run('curl', '--silent', '-o', '/dev/null', '-w', '%{http_code}',
+                 '-H', 'X-Project-Ref: ' + old_ref, '-H', 'X-Project-Name: ' + project,
+                 '-H', 'Authorization: Bearer ' + initial['service_role_key'],
+                 'http://supabase-edge-functions:9000/p1_probe')
+    assert status == '503', status
+    sql(f"UPDATE project_reference_history SET status='succeeded' WHERE job_id='{job_id}'; UPDATE jobs SET status='done' WHERE job_id='{job_id}';")
+    check_projection(project, first_uuid)
+    check_gateway(project)
+    check_vector(project)
+    check_object(project)
+    lifecycle('rotate_key.sh', project)
+    rotated = check_projection(project, first_uuid)
     # rotate_key renews the internal JWT pair, not the tenant signing secret.
     assert rotated['jwt_secret'] == initial['jwt_secret']
     assert rotated['anon_key'] != initial['anon_key']
     assert rotated['service_role_key'] != initial['service_role_key']
     check_projection(copied, second_uuid)
     backup, safety = str(uuid.uuid4()), str(uuid.uuid4())
-    lifecycle('backup_project.sh', renamed, backup)
-    sql("UPDATE public.lifecycle_marker SET value='changed';", '_supabase_' + renamed)
-    object_request(renamed, 'PUT', '/object/p1-files/original.txt', 'changed object', 'text/plain')
-    lifecycle('restore_project.sh', renamed, backup, safety)
-    assert sql('SELECT value FROM public.lifecycle_marker WHERE id=1;', '_supabase_' + renamed) == 'original'
-    check_projection(renamed, first_uuid)
-    check_vector(renamed)
-    check_object(renamed)
+    lifecycle('backup_project.sh', project, backup)
+    sql("UPDATE public.lifecycle_marker SET value='changed';", '_supabase_' + project)
+    object_request(project, 'PUT', '/object/p1-files/original.txt', 'changed object', 'text/plain')
+    lifecycle('restore_project.sh', project, backup, safety)
+    assert sql('SELECT value FROM public.lifecycle_marker WHERE id=1;', '_supabase_' + project) == 'original'
+    check_projection(project, first_uuid)
+    check_gateway(project)
+    check_vector(project)
+    check_object(project)
     # The file-removal primitive explicitly requires containers to be gone.
-    run('docker', 'compose', '-p', renamed, '--env-file', '../../.env', '--env-file', '.env', 'down', cwd=server / 'projects' / renamed)
-    lifecycle('delete_project.sh', renamed)
-    assert not (server / 'projects' / renamed).exists()
-    assert not (server / '.functions-tenants' / (renamed + '.json')).exists()
-    assert (server / '.functions-locks' / (renamed + '.withdrawn')).is_file()
+    run('docker', 'compose', '-p', project, '--env-file', '../../.env', '--env-file', '.env', 'down', cwd=server / 'projects' / project)
+    lifecycle('delete_project.sh', project)
+    assert not (server / 'projects' / project).exists()
+    assert not (server / '.functions-tenants' / (project + '.json')).exists()
+    assert (server / '.functions-locks' / (project + '.withdrawn')).is_file()
     check_projection(copied, second_uuid)
+    schema_only = 'schema_copy_' + suffix
+    third_uuid = str(uuid.uuid4())
+    seed(schema_only, third_uuid)
+    lifecycle('duplicate_project.sh', copied, schema_only, 'schema-only', third_uuid, second_uuid)
+    check_projection(schema_only, third_uuid)
+    check_gateway(schema_only, marker=False)
+    assert sql('SELECT count(*) FROM public.lifecycle_marker;', '_supabase_' + schema_only) == '0'
+    assert sql('SELECT count(*) FROM storage.objects;', '_supabase_' + schema_only) == '0'
     config = json.loads(run('docker', 'inspect', 'supabase-edge-functions'))[0]
     assert {m['Destination'] for m in config['Mounts']} == {'/home/deno/functions', '/home/deno/tenant-config'}
     assert config['Config']['Env'] and not any(e.startswith(('POSTGRES_PASSWORD=', 'JWT_SECRET=', 'SUPABASE_SERVICE_ROLE_KEY=')) for e in config['Config']['Env'])

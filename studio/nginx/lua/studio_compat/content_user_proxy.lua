@@ -112,20 +112,19 @@ function _M.handle_content()
             user_id,
             incoming_id
         )
-        if not existing and canonical_virtual_id ~= incoming_id then
-            existing = virt.resolve_actual_snippet(
-                api_project_ref,
-                namespace_state,
-                project_scope,
-                user_id,
-                canonical_virtual_id
+        if not existing and incoming_id and incoming_id ~= canonical_virtual_id then
+            local collision = virt.resolve_actual_snippet(
+                api_project_ref, namespace_state, project_scope, user_id, canonical_virtual_id
             )
+            if collision then
+                return client.respond_json(409, { error = { message = "Snippet name already exists" } })
+            end
         end
 
         if existing then
             payload.id = existing.id
         else
-            payload.id = incoming_id or canonical_virtual_id
+            payload.id = namespace.actual_snippet_id(target_folder.id, payload.name or "")
         end
 
         if type(payload.content) == "table" then
@@ -151,12 +150,7 @@ function _M.handle_content()
 
         local saved = client.parse_json_response(res)
         if type(saved) == "table" and saved.name then
-            local preferred_virtual_id = incoming_id or canonical_virtual_id
-            namespace.set_mapped_actual_id(project_scope, user_id, preferred_virtual_id, saved.id, true)
-            if canonical_virtual_id ~= preferred_virtual_id then
-                namespace.set_mapped_actual_id(project_scope, user_id, canonical_virtual_id, saved.id, false)
-            end
-            saved = virt.virtualize_snippet(project_scope, user_id, namespace_state, saved, preferred_virtual_id)
+            saved = virt.virtualize_snippet(project_scope, user_id, namespace_state, saved)
         end
 
         return client.respond_json(res.status, saved)
@@ -513,7 +507,7 @@ function _M.handle_item()
 
     local payload = client.parse_json_response(res)
     if type(payload) == "table" and payload.name then
-        payload = virt.virtualize_snippet(project_scope, user_id, namespace_state, payload, item_id)
+        payload = virt.virtualize_snippet(project_scope, user_id, namespace_state, payload)
     end
 
     return client.respond_json(200, payload)

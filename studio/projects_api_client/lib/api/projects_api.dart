@@ -74,13 +74,13 @@ class ProjectsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] xStepUpToken:
-  Future<Response> deleteProjectApiProjectsProjectNameDeleteWithHttpInfo(String projectName, { String? xStepUpToken, }) async {
+  Future<Response> deleteProjectApiProjectsProjectRefDeleteWithHttpInfo(String projectRef, { String? xStepUpToken, }) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -111,11 +111,11 @@ class ProjectsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] xStepUpToken:
-  Future<QueuedJobResponse?> deleteProjectApiProjectsProjectNameDelete(String projectName, { String? xStepUpToken, }) async {
-    final response = await deleteProjectApiProjectsProjectNameDeleteWithHttpInfo(projectName,  xStepUpToken: xStepUpToken, );
+  Future<QueuedJobResponse?> deleteProjectApiProjectsProjectRefDelete(String projectRef, { String? xStepUpToken, }) async {
+    final response = await deleteProjectApiProjectsProjectRefDeleteWithHttpInfo(projectRef,  xStepUpToken: xStepUpToken, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }

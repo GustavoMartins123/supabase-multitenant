@@ -1,6 +1,5 @@
 .gitignore
 .openapi-generator-ignore
-.travis.yml
 README.md
 analysis_options.yaml
 doc/AddMember.md
@@ -30,6 +29,8 @@ doc/CreateRestorePointResponse.md
 doc/CreateThreadMessageResponse.md
 doc/DeleteProjectNoteResponse.md
 doc/DeleteRestorePointResponse.md
+doc/DirectorySnapshot.md
+doc/DirectoryUser.md
 doc/DuplicateProject.md
 doc/EncKeyResponse.md
 doc/GetProjectCollaborationResponse.md
@@ -51,7 +52,6 @@ doc/MigrationAbortResponse.md
 doc/MigrationCutoverResponse.md
 doc/MigrationPrepareResponse.md
 doc/MigrationStatusResponse.md
-doc/ModelSource.md
 doc/NewProject.md
 doc/OpaqueApiKeysApi.md
 doc/PlatformAuthApi.md
@@ -71,7 +71,6 @@ doc/ProjectQueueInFlightJob.md
 doc/ProjectQueueStatusResponse.md
 doc/ProjectRenameApi.md
 doc/ProjectRenameHistoryResponse.md
-doc/ProjectRenameRequest.md
 doc/ProjectS3VectorKeysResponse.md
 doc/ProjectStatusResponse.md
 doc/ProjectTagAssign.md
@@ -118,10 +117,7 @@ doc/UpdateNotificationReadResponse.md
 doc/UpdateProjectHintResponse.md
 doc/UpdateProjectSettingsResponse.md
 doc/UpdateSettings.md
-doc/UserSyncPayload.md
-doc/UserSyncResponse.md
 doc/ValidationError.md
-git_push.sh
 lib/api.dart
 lib/api/collaboration_api.dart
 lib/api/internal_api.dart
@@ -170,6 +166,8 @@ lib/model/create_restore_point_response.dart
 lib/model/create_thread_message_response.dart
 lib/model/delete_project_note_response.dart
 lib/model/delete_restore_point_response.dart
+lib/model/directory_snapshot.dart
+lib/model/directory_user.dart
 lib/model/duplicate_project.dart
 lib/model/enc_key_response.dart
 lib/model/get_project_collaboration_response.dart
@@ -187,7 +185,6 @@ lib/model/migration_abort_response.dart
 lib/model/migration_cutover_response.dart
 lib/model/migration_prepare_response.dart
 lib/model/migration_status_response.dart
-lib/model/model_source.dart
 lib/model/new_project.dart
 lib/model/project_ai_function_item.dart
 lib/model/project_config_token_response.dart
@@ -201,7 +198,6 @@ lib/model/project_notification_read.dart
 lib/model/project_queue_in_flight_job.dart
 lib/model/project_queue_status_response.dart
 lib/model/project_rename_history_response.dart
-lib/model/project_rename_request.dart
 lib/model/project_s3_vector_keys_response.dart
 lib/model/project_status_response.dart
 lib/model/project_tag_assign.dart
@@ -246,8 +242,6 @@ lib/model/update_notification_read_response.dart
 lib/model/update_project_hint_response.dart
 lib/model/update_project_settings_response.dart
 lib/model/update_settings.dart
-lib/model/user_sync_payload.dart
-lib/model/user_sync_response.dart
 lib/model/validation_error.dart
 pubspec.yaml
 test/add_member_response_test.dart
@@ -277,6 +271,8 @@ test/create_restore_point_response_test.dart
 test/create_thread_message_response_test.dart
 test/delete_project_note_response_test.dart
 test/delete_restore_point_response_test.dart
+test/directory_snapshot_test.dart
+test/directory_user_test.dart
 test/duplicate_project_test.dart
 test/enc_key_response_test.dart
 test/get_project_collaboration_response_test.dart
@@ -298,7 +294,6 @@ test/migration_abort_response_test.dart
 test/migration_cutover_response_test.dart
 test/migration_prepare_response_test.dart
 test/migration_status_response_test.dart
-test/model_source_test.dart
 test/new_project_test.dart
 test/opaque_api_keys_api_test.dart
 test/platform_auth_api_test.dart
@@ -318,7 +313,6 @@ test/project_queue_in_flight_job_test.dart
 test/project_queue_status_response_test.dart
 test/project_rename_api_test.dart
 test/project_rename_history_response_test.dart
-test/project_rename_request_test.dart
 test/project_s3_vector_keys_response_test.dart
 test/project_status_response_test.dart
 test/project_tag_assign_test.dart
@@ -365,6 +359,4 @@ test/update_notification_read_response_test.dart
 test/update_project_hint_response_test.dart
 test/update_project_settings_response_test.dart
 test/update_settings_test.dart
-test/user_sync_payload_test.dart
-test/user_sync_response_test.dart
 test/validation_error_test.dart

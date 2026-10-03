@@ -22,13 +22,13 @@ class ProjectMembersApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [AddMember] addMember (required):
-  Future<Response> addMemberApiProjectsProjectNameMembersPostWithHttpInfo(String projectName, AddMember addMember,) async {
+  Future<Response> addMemberApiProjectsProjectRefMembersPostWithHttpInfo(String projectRef, AddMember addMember,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/members'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/members'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody = addMember;
@@ -55,11 +55,11 @@ class ProjectMembersApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [AddMember] addMember (required):
-  Future<AddMemberResponse?> addMemberApiProjectsProjectNameMembersPost(String projectName, AddMember addMember,) async {
-    final response = await addMemberApiProjectsProjectNameMembersPostWithHttpInfo(projectName, addMember,);
+  Future<AddMemberResponse?> addMemberApiProjectsProjectRefMembersPost(String projectRef, AddMember addMember,) async {
+    final response = await addMemberApiProjectsProjectRefMembersPostWithHttpInfo(projectRef, addMember,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -79,11 +79,11 @@ class ProjectMembersApi {
   ///
   /// Parameters:
   ///
-  /// * [String] name (required):
-  Future<Response> listMembersByRefApiProjectsNameMembersGetWithHttpInfo(String name,) async {
+  /// * [String] projectRef (required):
+  Future<Response> listMembersByRefApiProjectsProjectRefMembersGetWithHttpInfo(String projectRef,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{name}/members'
-      .replaceAll('{name}', name);
+    final path = r'/api/projects/{project_ref}/members'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -110,9 +110,9 @@ class ProjectMembersApi {
   ///
   /// Parameters:
   ///
-  /// * [String] name (required):
-  Future<List<MemberItem>?> listMembersByRefApiProjectsNameMembersGet(String name,) async {
-    final response = await listMembersByRefApiProjectsNameMembersGetWithHttpInfo(name,);
+  /// * [String] projectRef (required):
+  Future<List<MemberItem>?> listMembersByRefApiProjectsProjectRefMembersGet(String projectRef,) async {
+    final response = await listMembersByRefApiProjectsProjectRefMembersGetWithHttpInfo(projectRef,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -135,13 +135,13 @@ class ProjectMembersApi {
   ///
   /// Parameters:
   ///
-  /// * [String] name (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] memberId (required):
-  Future<Response> removeMemberByRefApiProjectsNameMembersMemberIdDeleteWithHttpInfo(String name, String memberId,) async {
+  Future<Response> removeMemberByRefApiProjectsProjectRefMembersMemberIdDeleteWithHttpInfo(String projectRef, String memberId,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{name}/members/{member_id}'
-      .replaceAll('{name}', name)
+    final path = r'/api/projects/{project_ref}/members/{member_id}'
+      .replaceAll('{project_ref}', projectRef)
       .replaceAll('{member_id}', memberId);
 
     // ignore: prefer_final_locals
@@ -169,11 +169,11 @@ class ProjectMembersApi {
   ///
   /// Parameters:
   ///
-  /// * [String] name (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] memberId (required):
-  Future<RemoveMemberResponse?> removeMemberByRefApiProjectsNameMembersMemberIdDelete(String name, String memberId,) async {
-    final response = await removeMemberByRefApiProjectsNameMembersMemberIdDeleteWithHttpInfo(name, memberId,);
+  Future<RemoveMemberResponse?> removeMemberByRefApiProjectsProjectRefMembersMemberIdDelete(String projectRef, String memberId,) async {
+    final response = await removeMemberByRefApiProjectsProjectRefMembersMemberIdDeleteWithHttpInfo(projectRef, memberId,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }

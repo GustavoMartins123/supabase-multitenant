@@ -34,13 +34,13 @@ RESERVED_NETWORKS = {'rede-supabase', 'supabase-storage-control', 'supabase-stor
 def archive(extra_sources: tuple[str, ...] = ()) -> bytes:
     allowed = ('servidor/generateProject/', 'servidor/volumes/db/', 'servidor/volumes/functions/',
                'servidor/volumes/pooler/', 'servidor/volumes/storage-proxy/', 'servidor/api-internal/app/',
-               'servidor/auth_template/')
+               'servidor/auth_template/', 'servidor/host-agent/hostagent/')
     exact = {'servidor/.env.example', 'servidor/docker-compose.yml', 'servidor/docker-compose-api.yml',
              'servidor/docker-compose.single-node.yml', 'servidor/docker-compose.split-node.yml',
              'servidor/key-authorizer/app.py',
              'tools/configure_api_resource_profiles.py'}
     paths = [p for p in run('git', '-C', str(ROOT), 'ls-files').splitlines()
-             if p in exact or p.startswith(allowed)]
+             if (p in exact or p.startswith(allowed)) and (ROOT / p).is_file()]
     paths += ['tests/integration/fixtures/p1_lifecycle.py', 'tests/integration/fixtures/functions_probe/index.ts',
               'servidor/generateProject/lib/vector_rekey_sql.py']
     paths.extend(extra_sources)

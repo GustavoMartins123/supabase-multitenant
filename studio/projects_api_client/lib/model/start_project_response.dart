@@ -26,6 +26,7 @@ class StartProjectResponse {
     required this.progress,
     required this.project,
     required this.projectUuid,
+    required this.publicRef,
     required this.queuePosition,
     required this.retryOf,
     required this.retryable,
@@ -62,6 +63,8 @@ class StartProjectResponse {
 
   String? projectUuid;
 
+  String? publicRef;
+
   int queuePosition;
 
   String? retryOf;
@@ -93,6 +96,7 @@ class StartProjectResponse {
     other.progress == progress &&
     other.project == project &&
     other.projectUuid == projectUuid &&
+    other.publicRef == publicRef &&
     other.queuePosition == queuePosition &&
     other.retryOf == retryOf &&
     other.retryable == retryable &&
@@ -118,6 +122,7 @@ class StartProjectResponse {
     (progress == null ? 0 : progress!.hashCode) +
     (project.hashCode) +
     (projectUuid == null ? 0 : projectUuid!.hashCode) +
+    (publicRef == null ? 0 : publicRef!.hashCode) +
     (queuePosition.hashCode) +
     (retryOf == null ? 0 : retryOf!.hashCode) +
     (retryable.hashCode) +
@@ -128,7 +133,7 @@ class StartProjectResponse {
     (updatedAt == null ? 0 : updatedAt!.hashCode);
 
   @override
-  String toString() => 'StartProjectResponse[action=$action, attempt=$attempt, createdAt=$createdAt, createdBy=$createdBy, currentStep=$currentStep, errorCode=$errorCode, finishedAt=$finishedAt, isIdempotent=$isIdempotent, jobId=$jobId, message=$message, progress=$progress, project=$project, projectUuid=$projectUuid, queuePosition=$queuePosition, retryOf=$retryOf, retryable=$retryable, startedAt=$startedAt, status=$status, tenantUuid=$tenantUuid, totalSteps=$totalSteps, updatedAt=$updatedAt]';
+  String toString() => 'StartProjectResponse[action=$action, attempt=$attempt, createdAt=$createdAt, createdBy=$createdBy, currentStep=$currentStep, errorCode=$errorCode, finishedAt=$finishedAt, isIdempotent=$isIdempotent, jobId=$jobId, message=$message, progress=$progress, project=$project, projectUuid=$projectUuid, publicRef=$publicRef, queuePosition=$queuePosition, retryOf=$retryOf, retryable=$retryable, startedAt=$startedAt, status=$status, tenantUuid=$tenantUuid, totalSteps=$totalSteps, updatedAt=$updatedAt]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -176,6 +181,11 @@ class StartProjectResponse {
       json[r'project_uuid'] = this.projectUuid;
     } else {
       json[r'project_uuid'] = null;
+    }
+    if (this.publicRef != null) {
+      json[r'public_ref'] = this.publicRef;
+    } else {
+      json[r'public_ref'] = null;
     }
       json[r'queue_position'] = this.queuePosition;
     if (this.retryOf != null) {
@@ -240,6 +250,7 @@ class StartProjectResponse {
         progress: mapValueOfType<int>(json, r'progress'),
         project: mapValueOfType<String>(json, r'project')!,
         projectUuid: mapValueOfType<String>(json, r'project_uuid'),
+        publicRef: mapValueOfType<String>(json, r'public_ref'),
         queuePosition: mapValueOfType<int>(json, r'queue_position')!,
         retryOf: mapValueOfType<String>(json, r'retry_of'),
         retryable: mapValueOfType<bool>(json, r'retryable')!,
@@ -308,6 +319,7 @@ class StartProjectResponse {
     'progress',
     'project',
     'project_uuid',
+    'public_ref',
     'queue_position',
     'retry_of',
     'retryable',

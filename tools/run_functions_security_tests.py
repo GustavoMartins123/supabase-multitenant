@@ -63,7 +63,7 @@ sys.exit(0 if result.wasSuccessful() and not result.skipped and result.testsRun 
         for index, ref in enumerate(('test_alpha', 'test_beta')):
             directory = server / 'projects' / ref
             directory.mkdir(parents=True)
-            (directory / '.env').write_text(f'PROJECT_ID={ref}\nPROJECT_UUID=11111111-1111-4111-8111-11111111111{index}\n'
+            (directory / '.env').write_text(f'PROJECT_ID={ref}\nPROJECT_UUID=11111111-1111-4111-8111-11111111111{index}\nPROJECT_PUBLIC_REF={chr(97+index)*20}\n'
                 f'ANON_KEY_PROJETO=synthetic-anon-{ref}\nSERVICE_ROLE_KEY_PROJETO=synthetic-service-{ref}\n'
                 f'JWT_SECRET_PROJETO={ref}-synthetic-jwt-secret-for-test-only\n'
                 'POSTGRES_PASSWORD=synthetic-global-secret-never-project\n', encoding='utf-8')

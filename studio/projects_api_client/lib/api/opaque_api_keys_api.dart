@@ -22,11 +22,11 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<Response> abortOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationDeleteWithHttpInfo(String projectName,) async {
+  /// * [String] projectRef (required):
+  Future<Response> abortOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationDeleteWithHttpInfo(String projectRef,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/opaque-api-keys/migration'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/opaque-api-keys/migration'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -53,9 +53,9 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<MigrationAbortResponse?> abortOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationDelete(String projectName,) async {
-    final response = await abortOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationDeleteWithHttpInfo(projectName,);
+  /// * [String] projectRef (required):
+  Future<MigrationAbortResponse?> abortOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationDelete(String projectRef,) async {
+    final response = await abortOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationDeleteWithHttpInfo(projectRef,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -75,15 +75,15 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] slotId (required):
   ///
   /// * [String] xStepUpToken:
-  Future<Response> activateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdActivationPostWithHttpInfo(String projectName, String slotId, { String? xStepUpToken, }) async {
+  Future<Response> activateApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdActivationPostWithHttpInfo(String projectRef, String slotId, { String? xStepUpToken, }) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/api-key-slots/{slot_id}/activation'
-      .replaceAll('{project_name}', projectName)
+    final path = r'/api/projects/{project_ref}/api-key-slots/{slot_id}/activation'
+      .replaceAll('{project_ref}', projectRef)
       .replaceAll('{slot_id}', slotId);
 
     // ignore: prefer_final_locals
@@ -115,13 +115,13 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] slotId (required):
   ///
   /// * [String] xStepUpToken:
-  Future<SlotActivationResponse?> activateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdActivationPost(String projectName, String slotId, { String? xStepUpToken, }) async {
-    final response = await activateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdActivationPostWithHttpInfo(projectName, slotId,  xStepUpToken: xStepUpToken, );
+  Future<SlotActivationResponse?> activateApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdActivationPost(String projectRef, String slotId, { String? xStepUpToken, }) async {
+    final response = await activateApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdActivationPostWithHttpInfo(projectRef, slotId,  xStepUpToken: xStepUpToken, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -141,13 +141,15 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] slotId (required):
-  Future<Response> cancelApiKeySlotRotationApiProjectsProjectNameApiKeySlotsSlotIdRotationDeleteWithHttpInfo(String projectName, String slotId,) async {
+  ///
+  /// * [String] xStepUpToken:
+  Future<Response> cancelApiKeySlotRotationApiProjectsProjectRefApiKeySlotsSlotIdRotationDeleteWithHttpInfo(String projectRef, String slotId, { String? xStepUpToken, }) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/api-key-slots/{slot_id}/rotation'
-      .replaceAll('{project_name}', projectName)
+    final path = r'/api/projects/{project_ref}/api-key-slots/{slot_id}/rotation'
+      .replaceAll('{project_ref}', projectRef)
       .replaceAll('{slot_id}', slotId);
 
     // ignore: prefer_final_locals
@@ -156,6 +158,10 @@ class OpaqueApiKeysApi {
     final queryParams = <QueryParam>[];
     final headerParams = <String, String>{};
     final formParams = <String, String>{};
+
+    if (xStepUpToken != null) {
+      headerParams[r'X-Step-Up-Token'] = parameterToString(xStepUpToken);
+    }
 
     const contentTypes = <String>[];
 
@@ -175,11 +181,13 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] slotId (required):
-  Future<SlotCancelResponse?> cancelApiKeySlotRotationApiProjectsProjectNameApiKeySlotsSlotIdRotationDelete(String projectName, String slotId,) async {
-    final response = await cancelApiKeySlotRotationApiProjectsProjectNameApiKeySlotsSlotIdRotationDeleteWithHttpInfo(projectName, slotId,);
+  ///
+  /// * [String] xStepUpToken:
+  Future<SlotCancelResponse?> cancelApiKeySlotRotationApiProjectsProjectRefApiKeySlotsSlotIdRotationDelete(String projectRef, String slotId, { String? xStepUpToken, }) async {
+    final response = await cancelApiKeySlotRotationApiProjectsProjectRefApiKeySlotsSlotIdRotationDeleteWithHttpInfo(projectRef, slotId,  xStepUpToken: xStepUpToken, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -199,15 +207,15 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] keyId (required):
   ///
   /// * [String] xStepUpToken:
-  Future<Response> claimApiKeyApiProjectsProjectNameApiKeyRevealsKeyIdClaimPostWithHttpInfo(String projectName, String keyId, { String? xStepUpToken, }) async {
+  Future<Response> claimApiKeyApiProjectsProjectRefApiKeyRevealsKeyIdClaimPostWithHttpInfo(String projectRef, String keyId, { String? xStepUpToken, }) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/api-key-reveals/{key_id}/claim'
-      .replaceAll('{project_name}', projectName)
+    final path = r'/api/projects/{project_ref}/api-key-reveals/{key_id}/claim'
+      .replaceAll('{project_ref}', projectRef)
       .replaceAll('{key_id}', keyId);
 
     // ignore: prefer_final_locals
@@ -239,13 +247,13 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] keyId (required):
   ///
   /// * [String] xStepUpToken:
-  Future<RevealClaimResponse?> claimApiKeyApiProjectsProjectNameApiKeyRevealsKeyIdClaimPost(String projectName, String keyId, { String? xStepUpToken, }) async {
-    final response = await claimApiKeyApiProjectsProjectNameApiKeyRevealsKeyIdClaimPostWithHttpInfo(projectName, keyId,  xStepUpToken: xStepUpToken, );
+  Future<RevealClaimResponse?> claimApiKeyApiProjectsProjectRefApiKeyRevealsKeyIdClaimPost(String projectRef, String keyId, { String? xStepUpToken, }) async {
+    final response = await claimApiKeyApiProjectsProjectRefApiKeyRevealsKeyIdClaimPostWithHttpInfo(projectRef, keyId,  xStepUpToken: xStepUpToken, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -265,15 +273,15 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] slotId (required):
   ///
   /// * [ConfirmApiKeyInstallation] confirmApiKeyInstallation (required):
-  Future<Response> confirmApiKeySlotInstallationApiProjectsProjectNameApiKeySlotsSlotIdRotationConfirmationPostWithHttpInfo(String projectName, String slotId, ConfirmApiKeyInstallation confirmApiKeyInstallation,) async {
+  Future<Response> confirmApiKeySlotInstallationApiProjectsProjectRefApiKeySlotsSlotIdRotationConfirmationPostWithHttpInfo(String projectRef, String slotId, ConfirmApiKeyInstallation confirmApiKeyInstallation,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/api-key-slots/{slot_id}/rotation-confirmation'
-      .replaceAll('{project_name}', projectName)
+    final path = r'/api/projects/{project_ref}/api-key-slots/{slot_id}/rotation-confirmation'
+      .replaceAll('{project_ref}', projectRef)
       .replaceAll('{slot_id}', slotId);
 
     // ignore: prefer_final_locals
@@ -301,13 +309,13 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] slotId (required):
   ///
   /// * [ConfirmApiKeyInstallation] confirmApiKeyInstallation (required):
-  Future<SlotConfirmResponse?> confirmApiKeySlotInstallationApiProjectsProjectNameApiKeySlotsSlotIdRotationConfirmationPost(String projectName, String slotId, ConfirmApiKeyInstallation confirmApiKeyInstallation,) async {
-    final response = await confirmApiKeySlotInstallationApiProjectsProjectNameApiKeySlotsSlotIdRotationConfirmationPostWithHttpInfo(projectName, slotId, confirmApiKeyInstallation,);
+  Future<SlotConfirmResponse?> confirmApiKeySlotInstallationApiProjectsProjectRefApiKeySlotsSlotIdRotationConfirmationPost(String projectRef, String slotId, ConfirmApiKeyInstallation confirmApiKeyInstallation,) async {
+    final response = await confirmApiKeySlotInstallationApiProjectsProjectRefApiKeySlotsSlotIdRotationConfirmationPostWithHttpInfo(projectRef, slotId, confirmApiKeyInstallation,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -327,15 +335,15 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [CreateApiKeySlot] createApiKeySlot (required):
   ///
   /// * [String] xStepUpToken:
-  Future<Response> createApiKeySlotApiProjectsProjectNameApiKeySlotsPostWithHttpInfo(String projectName, CreateApiKeySlot createApiKeySlot, { String? xStepUpToken, }) async {
+  Future<Response> createApiKeySlotApiProjectsProjectRefApiKeySlotsPostWithHttpInfo(String projectRef, CreateApiKeySlot createApiKeySlot, { String? xStepUpToken, }) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/api-key-slots'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/api-key-slots'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody = createApiKeySlot;
@@ -366,13 +374,13 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [CreateApiKeySlot] createApiKeySlot (required):
   ///
   /// * [String] xStepUpToken:
-  Future<IssuedKeyResponse?> createApiKeySlotApiProjectsProjectNameApiKeySlotsPost(String projectName, CreateApiKeySlot createApiKeySlot, { String? xStepUpToken, }) async {
-    final response = await createApiKeySlotApiProjectsProjectNameApiKeySlotsPostWithHttpInfo(projectName, createApiKeySlot,  xStepUpToken: xStepUpToken, );
+  Future<IssuedKeyResponse?> createApiKeySlotApiProjectsProjectRefApiKeySlotsPost(String projectRef, CreateApiKeySlot createApiKeySlot, { String? xStepUpToken, }) async {
+    final response = await createApiKeySlotApiProjectsProjectRefApiKeySlotsPostWithHttpInfo(projectRef, createApiKeySlot,  xStepUpToken: xStepUpToken, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -394,11 +402,11 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<Response> cutoverOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationCutoverPostWithHttpInfo(String projectName,) async {
+  /// * [String] projectRef (required):
+  Future<Response> cutoverOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationCutoverPostWithHttpInfo(String projectRef,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/opaque-api-keys/migration/cutover'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/opaque-api-keys/migration/cutover'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -427,9 +435,9 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<MigrationCutoverResponse?> cutoverOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationCutoverPost(String projectName,) async {
-    final response = await cutoverOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationCutoverPostWithHttpInfo(projectName,);
+  /// * [String] projectRef (required):
+  Future<MigrationCutoverResponse?> cutoverOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationCutoverPost(String projectRef,) async {
+    final response = await cutoverOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationCutoverPostWithHttpInfo(projectRef,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -449,11 +457,11 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<Response> getApiKeyRevealsApiProjectsProjectNameApiKeyRevealsGetWithHttpInfo(String projectName,) async {
+  /// * [String] projectRef (required):
+  Future<Response> getApiKeyRevealsApiProjectsProjectRefApiKeyRevealsGetWithHttpInfo(String projectRef,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/api-key-reveals'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/api-key-reveals'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -480,9 +488,9 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<RevealListResponse?> getApiKeyRevealsApiProjectsProjectNameApiKeyRevealsGet(String projectName,) async {
-    final response = await getApiKeyRevealsApiProjectsProjectNameApiKeyRevealsGetWithHttpInfo(projectName,);
+  /// * [String] projectRef (required):
+  Future<RevealListResponse?> getApiKeyRevealsApiProjectsProjectRefApiKeyRevealsGet(String projectRef,) async {
+    final response = await getApiKeyRevealsApiProjectsProjectRefApiKeyRevealsGetWithHttpInfo(projectRef,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -502,11 +510,11 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<Response> getApiKeySlotsApiProjectsProjectNameApiKeySlotsGetWithHttpInfo(String projectName,) async {
+  /// * [String] projectRef (required):
+  Future<Response> getApiKeySlotsApiProjectsProjectRefApiKeySlotsGetWithHttpInfo(String projectRef,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/api-key-slots'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/api-key-slots'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -533,9 +541,9 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<SlotListResponse?> getApiKeySlotsApiProjectsProjectNameApiKeySlotsGet(String projectName,) async {
-    final response = await getApiKeySlotsApiProjectsProjectNameApiKeySlotsGetWithHttpInfo(projectName,);
+  /// * [String] projectRef (required):
+  Future<SlotListResponse?> getApiKeySlotsApiProjectsProjectRefApiKeySlotsGet(String projectRef,) async {
+    final response = await getApiKeySlotsApiProjectsProjectRefApiKeySlotsGetWithHttpInfo(projectRef,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -555,11 +563,11 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<Response> getOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationGetWithHttpInfo(String projectName,) async {
+  /// * [String] projectRef (required):
+  Future<Response> getOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationGetWithHttpInfo(String projectRef,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/opaque-api-keys/migration'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/opaque-api-keys/migration'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -586,9 +594,9 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<MigrationStatusResponse?> getOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationGet(String projectName,) async {
-    final response = await getOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationGetWithHttpInfo(projectName,);
+  /// * [String] projectRef (required):
+  Future<MigrationStatusResponse?> getOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationGet(String projectRef,) async {
+    final response = await getOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationGetWithHttpInfo(projectRef,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -610,11 +618,11 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<Response> prepareOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationPreparePostWithHttpInfo(String projectName,) async {
+  /// * [String] projectRef (required):
+  Future<Response> prepareOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationPreparePostWithHttpInfo(String projectRef,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/opaque-api-keys/migration/prepare'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/opaque-api-keys/migration/prepare'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -643,9 +651,9 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<MigrationPrepareResponse?> prepareOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationPreparePost(String projectName,) async {
-    final response = await prepareOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationPreparePostWithHttpInfo(projectName,);
+  /// * [String] projectRef (required):
+  Future<MigrationPrepareResponse?> prepareOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationPreparePost(String projectRef,) async {
+    final response = await prepareOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationPreparePostWithHttpInfo(projectRef,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -665,13 +673,15 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] slotId (required):
-  Future<Response> revokeApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdDeleteWithHttpInfo(String projectName, String slotId,) async {
+  ///
+  /// * [String] xStepUpToken:
+  Future<Response> revokeApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdDeleteWithHttpInfo(String projectRef, String slotId, { String? xStepUpToken, }) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/api-key-slots/{slot_id}'
-      .replaceAll('{project_name}', projectName)
+    final path = r'/api/projects/{project_ref}/api-key-slots/{slot_id}'
+      .replaceAll('{project_ref}', projectRef)
       .replaceAll('{slot_id}', slotId);
 
     // ignore: prefer_final_locals
@@ -680,6 +690,10 @@ class OpaqueApiKeysApi {
     final queryParams = <QueryParam>[];
     final headerParams = <String, String>{};
     final formParams = <String, String>{};
+
+    if (xStepUpToken != null) {
+      headerParams[r'X-Step-Up-Token'] = parameterToString(xStepUpToken);
+    }
 
     const contentTypes = <String>[];
 
@@ -699,11 +713,13 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] slotId (required):
-  Future<SlotRevokeResponse?> revokeApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdDelete(String projectName, String slotId,) async {
-    final response = await revokeApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdDeleteWithHttpInfo(projectName, slotId,);
+  ///
+  /// * [String] xStepUpToken:
+  Future<SlotRevokeResponse?> revokeApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdDelete(String projectRef, String slotId, { String? xStepUpToken, }) async {
+    final response = await revokeApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdDeleteWithHttpInfo(projectRef, slotId,  xStepUpToken: xStepUpToken, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -723,17 +739,17 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] slotId (required):
   ///
   /// * [RotateApiKeySlot] rotateApiKeySlot (required):
   ///
   /// * [String] xStepUpToken:
-  Future<Response> rotateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdRotationPostWithHttpInfo(String projectName, String slotId, RotateApiKeySlot rotateApiKeySlot, { String? xStepUpToken, }) async {
+  Future<Response> rotateApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdRotationPostWithHttpInfo(String projectRef, String slotId, RotateApiKeySlot rotateApiKeySlot, { String? xStepUpToken, }) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/api-key-slots/{slot_id}/rotation'
-      .replaceAll('{project_name}', projectName)
+    final path = r'/api/projects/{project_ref}/api-key-slots/{slot_id}/rotation'
+      .replaceAll('{project_ref}', projectRef)
       .replaceAll('{slot_id}', slotId);
 
     // ignore: prefer_final_locals
@@ -765,15 +781,15 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] slotId (required):
   ///
   /// * [RotateApiKeySlot] rotateApiKeySlot (required):
   ///
   /// * [String] xStepUpToken:
-  Future<IssuedKeyResponse?> rotateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdRotationPost(String projectName, String slotId, RotateApiKeySlot rotateApiKeySlot, { String? xStepUpToken, }) async {
-    final response = await rotateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdRotationPostWithHttpInfo(projectName, slotId, rotateApiKeySlot,  xStepUpToken: xStepUpToken, );
+  Future<IssuedKeyResponse?> rotateApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdRotationPost(String projectRef, String slotId, RotateApiKeySlot rotateApiKeySlot, { String? xStepUpToken, }) async {
+    final response = await rotateApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdRotationPostWithHttpInfo(projectRef, slotId, rotateApiKeySlot,  xStepUpToken: xStepUpToken, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -793,15 +809,17 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] slotId (required):
   ///
   /// * [UpdateApiKeySlotPolicy] updateApiKeySlotPolicy (required):
-  Future<Response> updateApiKeySlotPolicyApiProjectsProjectNameApiKeySlotsSlotIdPatchWithHttpInfo(String projectName, String slotId, UpdateApiKeySlotPolicy updateApiKeySlotPolicy,) async {
+  ///
+  /// * [String] xStepUpToken:
+  Future<Response> updateApiKeySlotPolicyApiProjectsProjectRefApiKeySlotsSlotIdPatchWithHttpInfo(String projectRef, String slotId, UpdateApiKeySlotPolicy updateApiKeySlotPolicy, { String? xStepUpToken, }) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/api-key-slots/{slot_id}'
-      .replaceAll('{project_name}', projectName)
+    final path = r'/api/projects/{project_ref}/api-key-slots/{slot_id}'
+      .replaceAll('{project_ref}', projectRef)
       .replaceAll('{slot_id}', slotId);
 
     // ignore: prefer_final_locals
@@ -810,6 +828,10 @@ class OpaqueApiKeysApi {
     final queryParams = <QueryParam>[];
     final headerParams = <String, String>{};
     final formParams = <String, String>{};
+
+    if (xStepUpToken != null) {
+      headerParams[r'X-Step-Up-Token'] = parameterToString(xStepUpToken);
+    }
 
     const contentTypes = <String>['application/json'];
 
@@ -829,13 +851,15 @@ class OpaqueApiKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] slotId (required):
   ///
   /// * [UpdateApiKeySlotPolicy] updateApiKeySlotPolicy (required):
-  Future<SlotPolicyUpdateResponse?> updateApiKeySlotPolicyApiProjectsProjectNameApiKeySlotsSlotIdPatch(String projectName, String slotId, UpdateApiKeySlotPolicy updateApiKeySlotPolicy,) async {
-    final response = await updateApiKeySlotPolicyApiProjectsProjectNameApiKeySlotsSlotIdPatchWithHttpInfo(projectName, slotId, updateApiKeySlotPolicy,);
+  ///
+  /// * [String] xStepUpToken:
+  Future<SlotPolicyUpdateResponse?> updateApiKeySlotPolicyApiProjectsProjectRefApiKeySlotsSlotIdPatch(String projectRef, String slotId, UpdateApiKeySlotPolicy updateApiKeySlotPolicy, { String? xStepUpToken, }) async {
+    final response = await updateApiKeySlotPolicyApiProjectsProjectRefApiKeySlotsSlotIdPatchWithHttpInfo(projectRef, slotId, updateApiKeySlotPolicy,  xStepUpToken: xStepUpToken, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }

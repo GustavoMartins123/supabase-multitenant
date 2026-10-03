@@ -8,8 +8,6 @@ import 'package:projects_api_client/api.dart';
 ## Properties
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**ctx** | [**Object**](.md) |  | [optional] 
-**input** | [**Object**](.md) |  | [optional] 
 **loc** | [**List<LocationInner>**](LocationInner.md) |  | [default to const []]
 **msg** | **String** |  | 
 **type** | **String** |  | 

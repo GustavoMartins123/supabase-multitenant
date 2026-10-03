@@ -9,15 +9,15 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
-[**getProjectConfigTokenApiProjectsProjectNameConfigTokenGet**](ProjectRenameApi.md#getprojectconfigtokenapiprojectsprojectnameconfigtokenget) | **GET** /api/projects/{project_name}/config-token | Get Project Config Token
-[**getProjectQueueStatusApiProjectsProjectNameQueueStatusGet**](ProjectRenameApi.md#getprojectqueuestatusapiprojectsprojectnamequeuestatusget) | **GET** /api/projects/{project_name}/queue-status | Get Project Queue Status
-[**getProjectRenameHistoryApiProjectsProjectNameRenameHistoryGet**](ProjectRenameApi.md#getprojectrenamehistoryapiprojectsprojectnamerenamehistoryget) | **GET** /api/projects/{project_name}/rename-history | Get Project Rename History
-[**renameProjectApiProjectsProjectNameRenamePost**](ProjectRenameApi.md#renameprojectapiprojectsprojectnamerenamepost) | **POST** /api/projects/{project_name}/rename | Rename Project
-[**updateProjectDisplayNameApiProjectsProjectNameDisplayNamePatch**](ProjectRenameApi.md#updateprojectdisplaynameapiprojectsprojectnamedisplaynamepatch) | **PATCH** /api/projects/{project_name}/display-name | Update Project Display Name
+[**getProjectConfigTokenApiProjectsProjectRefConfigTokenGet**](ProjectRenameApi.md#getprojectconfigtokenapiprojectsprojectrefconfigtokenget) | **GET** /api/projects/{project_ref}/config-token | Get Project Config Token
+[**getProjectQueueStatusApiProjectsProjectRefQueueStatusGet**](ProjectRenameApi.md#getprojectqueuestatusapiprojectsprojectrefqueuestatusget) | **GET** /api/projects/{project_ref}/queue-status | Get Project Queue Status
+[**getProjectRenameHistoryApiProjectsProjectRefRenameHistoryGet**](ProjectRenameApi.md#getprojectrenamehistoryapiprojectsprojectrefrenamehistoryget) | **GET** /api/projects/{project_ref}/rename-history | Get Project Rename History
+[**renameProjectApiProjectsProjectRefRenamePost**](ProjectRenameApi.md#renameprojectapiprojectsprojectrefrenamepost) | **POST** /api/projects/{project_ref}/rename | Rename Project
+[**updateProjectDisplayNameApiProjectsProjectRefDisplayNamePatch**](ProjectRenameApi.md#updateprojectdisplaynameapiprojectsprojectrefdisplaynamepatch) | **PATCH** /api/projects/{project_ref}/display-name | Update Project Display Name
 
 
-# **getProjectConfigTokenApiProjectsProjectNameConfigTokenGet**
-> ProjectConfigTokenResponse getProjectConfigTokenApiProjectsProjectNameConfigTokenGet(projectName)
+# **getProjectConfigTokenApiProjectsProjectRefConfigTokenGet**
+> ProjectConfigTokenResponse getProjectConfigTokenApiProjectsProjectRefConfigTokenGet(projectRef)
 
 Get Project Config Token
 
@@ -28,13 +28,13 @@ Entrega o token compartilhado aos membros do projeto e registra a leitura.
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectRenameApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 
 try {
-    final result = api_instance.getProjectConfigTokenApiProjectsProjectNameConfigTokenGet(projectName);
+    final result = api_instance.getProjectConfigTokenApiProjectsProjectRefConfigTokenGet(projectRef);
     print(result);
 } catch (e) {
-    print('Exception when calling ProjectRenameApi->getProjectConfigTokenApiProjectsProjectNameConfigTokenGet: $e\n');
+    print('Exception when calling ProjectRenameApi->getProjectConfigTokenApiProjectsProjectRefConfigTokenGet: $e\n');
 }
 ```
 
@@ -42,7 +42,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
 
 ### Return type
 
@@ -59,8 +59,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **getProjectQueueStatusApiProjectsProjectNameQueueStatusGet**
-> ProjectQueueStatusResponse getProjectQueueStatusApiProjectsProjectNameQueueStatusGet(projectName)
+# **getProjectQueueStatusApiProjectsProjectRefQueueStatusGet**
+> ProjectQueueStatusResponse getProjectQueueStatusApiProjectsProjectRefQueueStatusGet(projectRef)
 
 Get Project Queue Status
 
@@ -71,13 +71,13 @@ Retorna o estado atual da fila de ações do projeto.  Inclui o job em execuçã
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectRenameApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 
 try {
-    final result = api_instance.getProjectQueueStatusApiProjectsProjectNameQueueStatusGet(projectName);
+    final result = api_instance.getProjectQueueStatusApiProjectsProjectRefQueueStatusGet(projectRef);
     print(result);
 } catch (e) {
-    print('Exception when calling ProjectRenameApi->getProjectQueueStatusApiProjectsProjectNameQueueStatusGet: $e\n');
+    print('Exception when calling ProjectRenameApi->getProjectQueueStatusApiProjectsProjectRefQueueStatusGet: $e\n');
 }
 ```
 
@@ -85,7 +85,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
 
 ### Return type
 
@@ -102,26 +102,26 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **getProjectRenameHistoryApiProjectsProjectNameRenameHistoryGet**
-> ProjectRenameHistoryResponse getProjectRenameHistoryApiProjectsProjectNameRenameHistoryGet(projectName, limit)
+# **getProjectRenameHistoryApiProjectsProjectRefRenameHistoryGet**
+> ProjectRenameHistoryResponse getProjectRenameHistoryApiProjectsProjectRefRenameHistoryGet(projectRef, limit)
 
 Get Project Rename History
 
-Retorna auditoria e historico duravel de nome/path do projeto.
+Retorna auditoria e historico duravel da referencia publica.
 
 ### Example
 ```dart
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectRenameApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final limit = 56; // int | 
 
 try {
-    final result = api_instance.getProjectRenameHistoryApiProjectsProjectNameRenameHistoryGet(projectName, limit);
+    final result = api_instance.getProjectRenameHistoryApiProjectsProjectRefRenameHistoryGet(projectRef, limit);
     print(result);
 } catch (e) {
-    print('Exception when calling ProjectRenameApi->getProjectRenameHistoryApiProjectsProjectNameRenameHistoryGet: $e\n');
+    print('Exception when calling ProjectRenameApi->getProjectRenameHistoryApiProjectsProjectRefRenameHistoryGet: $e\n');
 }
 ```
 
@@ -129,7 +129,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **limit** | **int**|  | [optional] [default to 50]
 
 ### Return type
@@ -147,26 +147,24 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **renameProjectApiProjectsProjectNameRenamePost**
-> RenameProjectResponse renameProjectApiProjectsProjectNameRenamePost(projectName, projectRenameRequest)
+# **renameProjectApiProjectsProjectRefRenamePost**
+> RenameProjectResponse renameProjectApiProjectsProjectRefRenamePost(projectRef, body)
 
 Rename Project
-
-Renomeia o slug/path do projeto (migração completa em background).  O escopo inclui: nome interno na meta DB, banco Postgres, roles por projeto, replication slots do Realtime, tenant Supavisor, diretório físico e templates (nginx, docker-compose, .env).
 
 ### Example
 ```dart
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectRenameApi();
-final projectName = projectName_example; // String | 
-final projectRenameRequest = ProjectRenameRequest(); // ProjectRenameRequest | 
+final projectRef = projectRef_example; // String |
+final body = Object(); // Object |
 
 try {
-    final result = api_instance.renameProjectApiProjectsProjectNameRenamePost(projectName, projectRenameRequest);
+    final result = api_instance.renameProjectApiProjectsProjectRefRenamePost(projectRef, body);
     print(result);
 } catch (e) {
-    print('Exception when calling ProjectRenameApi->renameProjectApiProjectsProjectNameRenamePost: $e\n');
+    print('Exception when calling ProjectRenameApi->renameProjectApiProjectsProjectRefRenamePost: $e\n');
 }
 ```
 
@@ -174,8 +172,8 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
- **projectRenameRequest** | [**ProjectRenameRequest**](ProjectRenameRequest.md)|  | 
+ **projectRef** | **String**|  |
+ **body** | **Object**|  |
 
 ### Return type
 
@@ -192,8 +190,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **updateProjectDisplayNameApiProjectsProjectNameDisplayNamePatch**
-> UpdateDisplayNameResponse updateProjectDisplayNameApiProjectsProjectNameDisplayNamePatch(projectName, projectDisplayNameUpdate)
+# **updateProjectDisplayNameApiProjectsProjectRefDisplayNamePatch**
+> UpdateDisplayNameResponse updateProjectDisplayNameApiProjectsProjectRefDisplayNamePatch(projectRef, projectDisplayNameUpdate)
 
 Update Project Display Name
 
@@ -204,14 +202,14 @@ Atualiza apenas o display_name do projeto (sem migrar infraestrutura).
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectRenameApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final projectDisplayNameUpdate = ProjectDisplayNameUpdate(); // ProjectDisplayNameUpdate | 
 
 try {
-    final result = api_instance.updateProjectDisplayNameApiProjectsProjectNameDisplayNamePatch(projectName, projectDisplayNameUpdate);
+    final result = api_instance.updateProjectDisplayNameApiProjectsProjectRefDisplayNamePatch(projectRef, projectDisplayNameUpdate);
     print(result);
 } catch (e) {
-    print('Exception when calling ProjectRenameApi->updateProjectDisplayNameApiProjectsProjectNameDisplayNamePatch: $e\n');
+    print('Exception when calling ProjectRenameApi->updateProjectDisplayNameApiProjectsProjectRefDisplayNamePatch: $e\n');
 }
 ```
 
@@ -219,7 +217,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **projectDisplayNameUpdate** | [**ProjectDisplayNameUpdate**](ProjectDisplayNameUpdate.md)|  | 
 
 ### Return type

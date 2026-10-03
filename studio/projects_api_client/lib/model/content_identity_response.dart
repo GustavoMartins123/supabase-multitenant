@@ -13,12 +13,9 @@ part of openapi.api;
 class ContentIdentityResponse {
   /// Returns a new [ContentIdentityResponse] instance.
   ContentIdentityResponse({
-    this.aliases = const [],
     required this.currentRef,
     required this.projectId,
   });
-
-  List<String> aliases;
 
   String currentRef;
 
@@ -26,23 +23,20 @@ class ContentIdentityResponse {
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is ContentIdentityResponse &&
-    _deepEquality.equals(other.aliases, aliases) &&
     other.currentRef == currentRef &&
     other.projectId == projectId;
 
   @override
   int get hashCode =>
     // ignore: unnecessary_parenthesis
-    (aliases.hashCode) +
     (currentRef.hashCode) +
     (projectId.hashCode);
 
   @override
-  String toString() => 'ContentIdentityResponse[aliases=$aliases, currentRef=$currentRef, projectId=$projectId]';
+  String toString() => 'ContentIdentityResponse[currentRef=$currentRef, projectId=$projectId]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
-      json[r'aliases'] = this.aliases;
       json[r'current_ref'] = this.currentRef;
       json[r'project_id'] = this.projectId;
     return json;
@@ -67,9 +61,6 @@ class ContentIdentityResponse {
       }());
 
       return ContentIdentityResponse(
-        aliases: json[r'aliases'] is Iterable
-            ? (json[r'aliases'] as Iterable).cast<String>().toList(growable: false)
-            : const [],
         currentRef: mapValueOfType<String>(json, r'current_ref')!,
         projectId: mapValueOfType<String>(json, r'project_id')!,
       );
@@ -119,7 +110,6 @@ class ContentIdentityResponse {
 
   /// The list of required keys that must be present in a JSON.
   static const requiredKeys = <String>{
-    'aliases',
     'current_ref',
     'project_id',
   };

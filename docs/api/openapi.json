@@ -705,13 +705,6 @@
       "ContentIdentityResponse": {
         "additionalProperties": true,
         "properties": {
-          "aliases": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Aliases",
-            "type": "array"
-          },
           "current_ref": {
             "title": "Current Ref",
             "type": "string"
@@ -723,8 +716,7 @@
         },
         "required": [
           "project_id",
-          "current_ref",
-          "aliases"
+          "current_ref"
         ],
         "title": "ContentIdentityResponse",
         "type": "object"
@@ -976,6 +968,17 @@
             ],
             "title": "Project Uuid"
           },
+          "public_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Ref"
+          },
           "queue_position": {
             "title": "Queue Position",
             "type": "integer"
@@ -1052,6 +1055,7 @@
           "job_id",
           "project",
           "project_uuid",
+          "public_ref",
           "tenant_uuid",
           "created_by",
           "action",
@@ -1224,6 +1228,17 @@
             ],
             "title": "Project Uuid"
           },
+          "public_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Ref"
+          },
           "queue_position": {
             "title": "Queue Position",
             "type": "integer"
@@ -1300,6 +1315,7 @@
           "job_id",
           "project",
           "project_uuid",
+          "public_ref",
           "tenant_uuid",
           "created_by",
           "action",
@@ -1408,6 +1424,7 @@
         "type": "object"
       },
       "DuplicateProject": {
+        "additionalProperties": false,
         "properties": {
           "copy_data": {
             "default": false,
@@ -1418,8 +1435,11 @@
             "title": "New Name",
             "type": "string"
           },
-          "original_name": {
-            "title": "Original Name",
+          "original_public_ref": {
+            "maxLength": 20,
+            "minLength": 20,
+            "pattern": "^[a-z]{20}$",
+            "title": "Original Public Ref",
             "type": "string"
           },
           "resource_profile": {
@@ -1441,7 +1461,7 @@
           }
         },
         "required": [
-          "original_name",
+          "original_public_ref",
           "new_name"
         ],
         "title": "DuplicateProject",
@@ -1804,6 +1824,17 @@
             ],
             "title": "Project Uuid"
           },
+          "public_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Ref"
+          },
           "retry_of": {
             "anyOf": [
               {
@@ -1894,6 +1925,7 @@
         "required": [
           "job_id",
           "project",
+          "public_ref",
           "action",
           "status"
         ],
@@ -2013,6 +2045,17 @@
             ],
             "title": "Project Uuid"
           },
+          "public_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Ref"
+          },
           "queue_position": {
             "default": 0,
             "title": "Queue Position",
@@ -2086,6 +2129,7 @@
         "required": [
           "job_id",
           "project",
+          "public_ref",
           "action",
           "status"
         ],
@@ -2465,8 +2509,23 @@
             "title": "File Size Limit",
             "type": "string"
           },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_caller_project_admin": {
+            "title": "Is Caller Project Admin",
+            "type": "boolean"
+          },
           "name": {
             "title": "Name",
+            "type": "string"
+          },
+          "public_ref": {
+            "maxLength": 20,
+            "minLength": 20,
+            "pattern": "^[a-z]{20}$",
+            "title": "Public Ref",
             "type": "string"
           },
           "running_containers": {
@@ -2487,7 +2546,10 @@
           }
         },
         "required": [
+          "id",
+          "is_caller_project_admin",
           "name",
+          "public_ref",
           "display_name",
           "status",
           "running_containers",
@@ -2823,14 +2885,14 @@
             "title": "Renames",
             "type": "array"
           },
-          "requested_name": {
-            "title": "Requested Name",
+          "requested_ref": {
+            "title": "Requested Ref",
             "type": "string"
           }
         },
         "required": [
           "project",
-          "requested_name",
+          "requested_ref",
           "events",
           "renames"
         ],
@@ -2838,29 +2900,8 @@
         "type": "object"
       },
       "ProjectRenameRequest": {
-        "properties": {
-          "display_name": {
-            "anyOf": [
-              {
-                "maxLength": 80,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Display Name"
-          },
-          "new_name": {
-            "maxLength": 40,
-            "minLength": 3,
-            "title": "New Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "new_name"
-        ],
+        "additionalProperties": false,
+        "properties": {},
         "title": "ProjectRenameRequest",
         "type": "object"
       },
@@ -3377,6 +3418,17 @@
             ],
             "title": "Project Uuid"
           },
+          "public_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Ref"
+          },
           "queue_position": {
             "title": "Queue Position",
             "type": "integer"
@@ -3449,6 +3501,7 @@
           "job_id",
           "project",
           "project_uuid",
+          "public_ref",
           "tenant_uuid",
           "created_by",
           "action",
@@ -3553,20 +3606,12 @@
             "title": "Job Id",
             "type": "string"
           },
-          "new_name": {
-            "title": "New Name",
+          "new_ref": {
+            "title": "New Ref",
             "type": "string"
           },
-          "new_path": {
-            "title": "New Path",
-            "type": "string"
-          },
-          "old_name": {
-            "title": "Old Name",
-            "type": "string"
-          },
-          "old_path": {
-            "title": "Old Path",
+          "old_ref": {
+            "title": "Old Ref",
             "type": "string"
           },
           "status": {
@@ -3583,10 +3628,8 @@
           "job_id",
           "actor_user_id",
           "actor_name",
-          "old_name",
-          "new_name",
-          "old_path",
-          "new_path",
+          "old_ref",
+          "new_ref",
           "status",
           "error",
           "created_at",
@@ -3760,12 +3803,12 @@
             ],
             "title": "Message"
           },
-          "new_name": {
-            "title": "New Name",
+          "new_ref": {
+            "title": "New Ref",
             "type": "string"
           },
-          "old_name": {
-            "title": "Old Name",
+          "old_ref": {
+            "title": "Old Ref",
             "type": "string"
           },
           "progress": {
@@ -3793,6 +3836,17 @@
               }
             ],
             "title": "Project Uuid"
+          },
+          "public_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Ref"
           },
           "queue_position": {
             "title": "Queue Position",
@@ -3866,6 +3920,7 @@
           "job_id",
           "project",
           "project_uuid",
+          "public_ref",
           "tenant_uuid",
           "created_by",
           "action",
@@ -3884,8 +3939,8 @@
           "created_at",
           "updated_at",
           "queue_position",
-          "old_name",
-          "new_name"
+          "old_ref",
+          "new_ref"
         ],
         "title": "RenameProjectResponse",
         "type": "object"
@@ -4001,6 +4056,17 @@
             ],
             "title": "Project Uuid"
           },
+          "public_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Ref"
+          },
           "queue_position": {
             "title": "Queue Position",
             "type": "integer"
@@ -4073,6 +4139,7 @@
           "job_id",
           "project",
           "project_uuid",
+          "public_ref",
           "tenant_uuid",
           "created_by",
           "action",
@@ -4400,6 +4467,17 @@
             ],
             "title": "Project Uuid"
           },
+          "public_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Ref"
+          },
           "queue_position": {
             "title": "Queue Position",
             "type": "integer"
@@ -4480,6 +4558,7 @@
           "job_id",
           "project",
           "project_uuid",
+          "public_ref",
           "tenant_uuid",
           "created_by",
           "action",
@@ -5331,6 +5410,17 @@
             ],
             "title": "Project Uuid"
           },
+          "public_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Ref"
+          },
           "queue_position": {
             "title": "Queue Position",
             "type": "integer"
@@ -5403,6 +5493,7 @@
           "job_id",
           "project",
           "project_uuid",
+          "public_ref",
           "tenant_uuid",
           "created_by",
           "action",
@@ -5536,6 +5627,17 @@
             ],
             "title": "Project Uuid"
           },
+          "public_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Ref"
+          },
           "queue_position": {
             "title": "Queue Position",
             "type": "integer"
@@ -5608,6 +5710,7 @@
           "job_id",
           "project",
           "project_uuid",
+          "public_ref",
           "tenant_uuid",
           "created_by",
           "action",
@@ -5661,6 +5764,9 @@
             "type": "string"
           },
           "ref": {
+            "maxLength": 20,
+            "minLength": 20,
+            "pattern": "^[a-z]{20}$",
             "title": "Ref",
             "type": "string"
           },
@@ -5674,6 +5780,10 @@
               }
             ],
             "title": "Role"
+          },
+          "technical_name": {
+            "title": "Technical Name",
+            "type": "string"
           },
           "tenant_uuid": {
             "anyOf": [
@@ -5691,6 +5801,7 @@
           "project_uuid",
           "tenant_uuid",
           "ref",
+          "technical_name",
           "display_name",
           "role",
           "anon_key",
@@ -6096,17 +6207,17 @@
         ]
       }
     },
-    "/api/admin/projects/{name}/all-users": {
+    "/api/admin/projects/{project_ref}/all-users": {
       "get": {
         "description": "Lista todos os usu\u00e1rios dispon\u00edveis para admins.\nComo a API n\u00e3o tem acesso ao cache, retorna uma estrutura\nque o Nginx pode completar ou usa proxy para Nginx.",
-        "operationId": "list_all_users_for_admin_api_admin_projects__name__all_users_get",
+        "operationId": "list_all_users_for_admin_api_admin_projects__project_ref__all_users_get",
         "parameters": [
           {
             "in": "path",
-            "name": "name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -6550,16 +6661,16 @@
         ]
       }
     },
-    "/api/projects/internal/auth-admin/{project_name}/{gotrue_path}": {
+    "/api/projects/internal/auth-admin/{project_ref}/{gotrue_path}": {
       "delete": {
         "operationId": "proxy_project_auth_admin_delete",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -6603,10 +6714,10 @@
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -6650,10 +6761,10 @@
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -6697,10 +6808,10 @@
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -6744,10 +6855,10 @@
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -6787,16 +6898,16 @@
         ]
       }
     },
-    "/api/projects/internal/auth-users/{project_name}": {
+    "/api/projects/internal/auth-users/{project_ref}": {
       "get": {
-        "operationId": "list_project_auth_users_api_projects_internal_auth_users__project_name__get",
+        "operationId": "list_project_auth_users_api_projects_internal_auth_users__project_ref__get",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -6849,17 +6960,16 @@
         ]
       }
     },
-    "/api/projects/internal/content-identity/{project_name}": {
+    "/api/projects/internal/content-identity/{project_ref}": {
       "get": {
-        "description": "Resolve o slug mut\u00e1vel para o UUID est\u00e1vel usado apenas por content.",
-        "operationId": "get_content_project_identity_api_projects_internal_content_identity__project_name__get",
+        "operationId": "get_content_project_identity_api_projects_internal_content_identity__project_ref__get",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -7100,113 +7210,16 @@
         ]
       }
     },
-    "/api/projects/{name}/members": {
-      "get": {
-        "operationId": "list_members_by_ref_api_projects__name__members_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/MemberItem"
-                  },
-                  "title": "Response List Members By Ref Api Projects  Name  Members Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Members By Ref",
-        "tags": [
-          "project-members"
-        ]
-      }
-    },
-    "/api/projects/{name}/members/{member_id}": {
+    "/api/projects/{project_ref}": {
       "delete": {
-        "operationId": "remove_member_by_ref_api_projects__name__members__member_id__delete",
+        "operationId": "delete_project_api_projects__project_ref__delete",
         "parameters": [
           {
             "in": "path",
-            "name": "name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "member_id",
-            "required": true,
-            "schema": {
-              "title": "Member Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RemoveMemberResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Remove Member By Ref",
-        "tags": [
-          "project-members"
-        ]
-      }
-    },
-    "/api/projects/{project_name}": {
-      "delete": {
-        "operationId": "delete_project_api_projects__project_name__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -7255,16 +7268,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/api-key-reveals": {
+    "/api/projects/{project_ref}/api-key-reveals": {
       "get": {
-        "operationId": "get_api_key_reveals_api_projects__project_name__api_key_reveals_get",
+        "operationId": "get_api_key_reveals_api_projects__project_ref__api_key_reveals_get",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -7297,16 +7310,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/api-key-reveals/{key_id}/claim": {
+    "/api/projects/{project_ref}/api-key-reveals/{key_id}/claim": {
       "post": {
-        "operationId": "claim_api_key_api_projects__project_name__api_key_reveals__key_id__claim_post",
+        "operationId": "claim_api_key_api_projects__project_ref__api_key_reveals__key_id__claim_post",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -7365,16 +7378,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/api-key-slots": {
+    "/api/projects/{project_ref}/api-key-slots": {
       "get": {
-        "operationId": "get_api_key_slots_api_projects__project_name__api_key_slots_get",
+        "operationId": "get_api_key_slots_api_projects__project_ref__api_key_slots_get",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -7407,14 +7420,14 @@
         ]
       },
       "post": {
-        "operationId": "create_api_key_slot_api_projects__project_name__api_key_slots_post",
+        "operationId": "create_api_key_slot_api_projects__project_ref__api_key_slots_post",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -7473,16 +7486,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/api-key-slots/{slot_id}": {
+    "/api/projects/{project_ref}/api-key-slots/{slot_id}": {
       "delete": {
-        "operationId": "revoke_api_key_slot_api_projects__project_name__api_key_slots__slot_id__delete",
+        "operationId": "revoke_api_key_slot_api_projects__project_ref__api_key_slots__slot_id__delete",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -7541,14 +7554,14 @@
         ]
       },
       "patch": {
-        "operationId": "update_api_key_slot_policy_api_projects__project_name__api_key_slots__slot_id__patch",
+        "operationId": "update_api_key_slot_policy_api_projects__project_ref__api_key_slots__slot_id__patch",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -7617,16 +7630,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/api-key-slots/{slot_id}/activation": {
+    "/api/projects/{project_ref}/api-key-slots/{slot_id}/activation": {
       "post": {
-        "operationId": "activate_api_key_slot_api_projects__project_name__api_key_slots__slot_id__activation_post",
+        "operationId": "activate_api_key_slot_api_projects__project_ref__api_key_slots__slot_id__activation_post",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -7685,16 +7698,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/api-key-slots/{slot_id}/rotation": {
+    "/api/projects/{project_ref}/api-key-slots/{slot_id}/rotation": {
       "delete": {
-        "operationId": "cancel_api_key_slot_rotation_api_projects__project_name__api_key_slots__slot_id__rotation_delete",
+        "operationId": "cancel_api_key_slot_rotation_api_projects__project_ref__api_key_slots__slot_id__rotation_delete",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -7753,14 +7766,14 @@
         ]
       },
       "post": {
-        "operationId": "rotate_api_key_slot_api_projects__project_name__api_key_slots__slot_id__rotation_post",
+        "operationId": "rotate_api_key_slot_api_projects__project_ref__api_key_slots__slot_id__rotation_post",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -7829,16 +7842,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/api-key-slots/{slot_id}/rotation-confirmation": {
+    "/api/projects/{project_ref}/api-key-slots/{slot_id}/rotation-confirmation": {
       "post": {
-        "operationId": "confirm_api_key_slot_installation_api_projects__project_name__api_key_slots__slot_id__rotation_confirmation_post",
+        "operationId": "confirm_api_key_slot_installation_api_projects__project_ref__api_key_slots__slot_id__rotation_confirmation_post",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -7891,16 +7904,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/automatic-key-rotation": {
+    "/api/projects/{project_ref}/automatic-key-rotation": {
       "put": {
-        "operationId": "update_automatic_key_rotation_api_projects__project_name__automatic_key_rotation_put",
+        "operationId": "update_automatic_key_rotation_api_projects__project_ref__automatic_key_rotation_put",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -7943,16 +7956,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/collaboration": {
+    "/api/projects/{project_ref}/collaboration": {
       "get": {
-        "operationId": "get_project_collaboration_api_projects__project_name__collaboration_get",
+        "operationId": "get_project_collaboration_api_projects__project_ref__collaboration_get",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -7985,17 +7998,17 @@
         ]
       }
     },
-    "/api/projects/{project_name}/config-token": {
+    "/api/projects/{project_ref}/config-token": {
       "get": {
         "description": "Entrega o token compartilhado aos membros do projeto e registra a leitura.",
-        "operationId": "get_project_config_token_api_projects__project_name__config_token_get",
+        "operationId": "get_project_config_token_api_projects__project_ref__config_token_get",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -8028,17 +8041,17 @@
         ]
       }
     },
-    "/api/projects/{project_name}/display-name": {
+    "/api/projects/{project_ref}/display-name": {
       "patch": {
         "description": "Atualiza apenas o display_name do projeto (sem migrar infraestrutura).",
-        "operationId": "update_project_display_name_api_projects__project_name__display_name_patch",
+        "operationId": "update_project_display_name_api_projects__project_ref__display_name_patch",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -8081,16 +8094,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/hints": {
+    "/api/projects/{project_ref}/hints": {
       "post": {
-        "operationId": "create_project_hint_api_projects__project_name__hints_post",
+        "operationId": "create_project_hint_api_projects__project_ref__hints_post",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -8133,16 +8146,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/hints/{hint_id}": {
+    "/api/projects/{project_ref}/hints/{hint_id}": {
       "put": {
-        "operationId": "update_project_hint_status_api_projects__project_name__hints__hint_id__put",
+        "operationId": "update_project_hint_status_api_projects__project_ref__hints__hint_id__put",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -8194,16 +8207,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/logs/{service}": {
+    "/api/projects/{project_ref}/logs/{service}": {
       "get": {
-        "operationId": "get_container_logs_api_projects__project_name__logs__service__get",
+        "operationId": "get_container_logs_api_projects__project_ref__logs__service__get",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -8257,16 +8270,60 @@
         ]
       }
     },
-    "/api/projects/{project_name}/members": {
-      "post": {
-        "operationId": "add_member_api_projects__project_name__members_post",
+    "/api/projects/{project_ref}/members": {
+      "get": {
+        "operationId": "list_members_by_ref_api_projects__project_ref__members_get",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MemberItem"
+                  },
+                  "title": "Response List Members By Ref Api Projects  Project Ref  Members Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Members By Ref",
+        "tags": [
+          "project-members"
+        ]
+      },
+      "post": {
+        "operationId": "add_member_api_projects__project_ref__members_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_ref",
+            "required": true,
+            "schema": {
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -8309,16 +8366,67 @@
         ]
       }
     },
-    "/api/projects/{project_name}/notes": {
-      "post": {
-        "operationId": "create_project_note_api_projects__project_name__notes_post",
+    "/api/projects/{project_ref}/members/{member_id}": {
+      "delete": {
+        "operationId": "remove_member_by_ref_api_projects__project_ref__members__member_id__delete",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "member_id",
+            "required": true,
+            "schema": {
+              "title": "Member Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoveMemberResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Member By Ref",
+        "tags": [
+          "project-members"
+        ]
+      }
+    },
+    "/api/projects/{project_ref}/notes": {
+      "post": {
+        "operationId": "create_project_note_api_projects__project_ref__notes_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_ref",
+            "required": true,
+            "schema": {
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -8361,16 +8469,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/notes/{note_id}": {
+    "/api/projects/{project_ref}/notes/{note_id}": {
       "delete": {
-        "operationId": "delete_project_note_api_projects__project_name__notes__note_id__delete",
+        "operationId": "delete_project_note_api_projects__project_ref__notes__note_id__delete",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -8412,16 +8520,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/notifications/{notification_id}": {
+    "/api/projects/{project_ref}/notifications/{notification_id}": {
       "patch": {
-        "operationId": "update_project_notification_read_state_api_projects__project_name__notifications__notification_id__patch",
+        "operationId": "update_project_notification_read_state_api_projects__project_ref__notifications__notification_id__patch",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -8473,16 +8581,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/opaque-api-keys/migration": {
+    "/api/projects/{project_ref}/opaque-api-keys/migration": {
       "delete": {
-        "operationId": "abort_opaque_api_key_migration_api_projects__project_name__opaque_api_keys_migration_delete",
+        "operationId": "abort_opaque_api_key_migration_api_projects__project_ref__opaque_api_keys_migration_delete",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -8515,14 +8623,14 @@
         ]
       },
       "get": {
-        "operationId": "get_opaque_api_key_migration_api_projects__project_name__opaque_api_keys_migration_get",
+        "operationId": "get_opaque_api_key_migration_api_projects__project_ref__opaque_api_keys_migration_get",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -8555,17 +8663,17 @@
         ]
       }
     },
-    "/api/projects/{project_name}/opaque-api-keys/migration/cutover": {
+    "/api/projects/{project_ref}/opaque-api-keys/migration/cutover": {
       "post": {
         "description": "Stop legacy ingress, activate confirmed keys, and start opaque-only.",
-        "operationId": "cutover_opaque_api_key_migration_api_projects__project_name__opaque_api_keys_migration_cutover_post",
+        "operationId": "cutover_opaque_api_key_migration_api_projects__project_ref__opaque_api_keys_migration_cutover_post",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -8598,17 +8706,17 @@
         ]
       }
     },
-    "/api/projects/{project_name}/opaque-api-keys/migration/prepare": {
+    "/api/projects/{project_ref}/opaque-api-keys/migration/prepare": {
       "post": {
         "description": "Prepare rejected opaque keys without changing the running gateway.",
-        "operationId": "prepare_opaque_api_key_migration_api_projects__project_name__opaque_api_keys_migration_prepare_post",
+        "operationId": "prepare_opaque_api_key_migration_api_projects__project_ref__opaque_api_keys_migration_prepare_post",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -8641,17 +8749,17 @@
         ]
       }
     },
-    "/api/projects/{project_name}/queue-status": {
+    "/api/projects/{project_ref}/queue-status": {
       "get": {
         "description": "Retorna o estado atual da fila de a\u00e7\u00f5es do projeto.\n\nInclui o job em execu\u00e7\u00e3o (se houver), o tamanho da fila, e os jobs\npendentes/rodando do banco para fins de UI (polling).",
-        "operationId": "get_project_queue_status_api_projects__project_name__queue_status_get",
+        "operationId": "get_project_queue_status_api_projects__project_ref__queue_status_get",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -8684,17 +8792,17 @@
         ]
       }
     },
-    "/api/projects/{project_name}/recreate-services": {
+    "/api/projects/{project_ref}/recreate-services": {
       "post": {
         "description": "Recreate specific services of a project using docker compose down + up.\nThis is needed (instead of just restart) because env vars are read at\ncontainer creation time, not on restart.",
-        "operationId": "recreate_project_services_api_projects__project_name__recreate_services_post",
+        "operationId": "recreate_project_services_api_projects__project_ref__recreate_services_post",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -8737,17 +8845,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/rename": {
+    "/api/projects/{project_ref}/rename": {
       "post": {
-        "description": "Renomeia o slug/path do projeto (migra\u00e7\u00e3o completa em background).\n\nO escopo inclui: nome interno na meta DB, banco Postgres, roles\npor projeto, replication slots do Realtime, tenant Supavisor,\ndiret\u00f3rio f\u00edsico e templates (nginx, docker-compose, .env).",
-        "operationId": "rename_project_api_projects__project_name__rename_post",
+        "operationId": "rename_project_api_projects__project_ref__rename_post",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -8790,17 +8897,17 @@
         ]
       }
     },
-    "/api/projects/{project_name}/rename-history": {
+    "/api/projects/{project_ref}/rename-history": {
       "get": {
-        "description": "Retorna auditoria e historico duravel de nome/path do projeto.",
-        "operationId": "get_project_rename_history_api_projects__project_name__rename_history_get",
+        "description": "Retorna auditoria e historico duravel da referencia publica.",
+        "operationId": "get_project_rename_history_api_projects__project_ref__rename_history_get",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -8845,17 +8952,17 @@
         ]
       }
     },
-    "/api/projects/{project_name}/restart": {
+    "/api/projects/{project_ref}/restart": {
       "post": {
         "description": "Reinicia os containers do projeto. Enfileirado por projeto.",
-        "operationId": "restart_project_api_projects__project_name__restart_post",
+        "operationId": "restart_project_api_projects__project_ref__restart_post",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -8888,16 +8995,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/restore-points": {
+    "/api/projects/{project_ref}/restore-points": {
       "get": {
-        "operationId": "list_project_restore_points_api_projects__project_name__restore_points_get",
+        "operationId": "list_project_restore_points_api_projects__project_ref__restore_points_get",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -8930,14 +9037,14 @@
         ]
       },
       "post": {
-        "operationId": "create_project_restore_point_api_projects__project_name__restore_points_post",
+        "operationId": "create_project_restore_point_api_projects__project_ref__restore_points_post",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -8980,16 +9087,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/restore-points/{point_id}": {
+    "/api/projects/{project_ref}/restore-points/{point_id}": {
       "delete": {
-        "operationId": "delete_project_restore_point_api_projects__project_name__restore_points__point_id__delete",
+        "operationId": "delete_project_restore_point_api_projects__project_ref__restore_points__point_id__delete",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -9031,16 +9138,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/restore-points/{point_id}/restore": {
+    "/api/projects/{project_ref}/restore-points/{point_id}/restore": {
       "post": {
-        "operationId": "restore_project_restore_point_api_projects__project_name__restore_points__point_id__restore_post",
+        "operationId": "restore_project_restore_point_api_projects__project_ref__restore_points__point_id__restore_post",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -9082,17 +9189,17 @@
         ]
       }
     },
-    "/api/projects/{project_name}/rotate-key": {
+    "/api/projects/{project_ref}/rotate-key": {
       "post": {
         "description": "Rotaciona anon/service_role via script. Enfileirado por projeto.",
-        "operationId": "rotate_project_key_api_projects__project_name__rotate_key_post",
+        "operationId": "rotate_project_key_api_projects__project_ref__rotate_key_post",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -9125,16 +9232,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/settings": {
+    "/api/projects/{project_ref}/settings": {
       "get": {
-        "operationId": "get_project_settings_api_projects__project_name__settings_get",
+        "operationId": "get_project_settings_api_projects__project_ref__settings_get",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -9167,14 +9274,14 @@
         ]
       },
       "put": {
-        "operationId": "update_project_settings_api_projects__project_name__settings_put",
+        "operationId": "update_project_settings_api_projects__project_ref__settings_put",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -9217,17 +9324,17 @@
         ]
       }
     },
-    "/api/projects/{project_name}/start": {
+    "/api/projects/{project_ref}/start": {
       "post": {
         "description": "Inicia os containers do projeto. Enfileirado por projeto.",
-        "operationId": "start_project_api_projects__project_name__start_post",
+        "operationId": "start_project_api_projects__project_ref__start_post",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -9260,16 +9367,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/status": {
+    "/api/projects/{project_ref}/status": {
       "get": {
-        "operationId": "get_project_docker_status_api_projects__project_name__status_get",
+        "operationId": "get_project_docker_status_api_projects__project_ref__status_get",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -9302,16 +9409,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/stop": {
+    "/api/projects/{project_ref}/stop": {
       "post": {
-        "operationId": "stop_project_api_projects__project_name__stop_post",
+        "operationId": "stop_project_api_projects__project_ref__stop_post",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -9344,17 +9451,17 @@
         ]
       }
     },
-    "/api/projects/{project_name}/storage/s3-keys": {
+    "/api/projects/{project_ref}/storage/s3-keys": {
       "get": {
-        "description": "Return the selected tenant's SigV4 pair to an authorized Studio admin.\n\nOpenResty rewrites the Studio's fixed ``/api/get-s3-keys`` endpoint to this\nproject-scoped route. The service HMAC authenticates the Studio-to-control-\nplane hop and the signed user token is checked here.",
-        "operationId": "get_project_s3_vector_keys_api_projects__project_name__storage_s3_keys_get",
+        "description": "Return the selected tenant's SigV4 pair to an authorized Studio admin.",
+        "operationId": "get_project_s3_vector_keys_api_projects__project_ref__storage_s3_keys_get",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -9387,16 +9494,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/tags": {
+    "/api/projects/{project_ref}/tags": {
       "post": {
-        "operationId": "assign_project_tag_api_projects__project_name__tags_post",
+        "operationId": "assign_project_tag_api_projects__project_ref__tags_post",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -9439,16 +9546,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/tags/{tag_id}": {
+    "/api/projects/{project_ref}/tags/{tag_id}": {
       "delete": {
-        "operationId": "unassign_project_tag_api_projects__project_name__tags__tag_id__delete",
+        "operationId": "unassign_project_tag_api_projects__project_ref__tags__tag_id__delete",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -9490,16 +9597,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/telemetry/users": {
+    "/api/projects/{project_ref}/telemetry/users": {
       "get": {
-        "operationId": "get_project_user_telemetry_api_projects__project_name__telemetry_users_get",
+        "operationId": "get_project_user_telemetry_api_projects__project_ref__telemetry_users_get",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           },
@@ -9576,16 +9683,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/thread/messages": {
+    "/api/projects/{project_ref}/thread/messages": {
       "post": {
-        "operationId": "create_project_thread_message_api_projects__project_name__thread_messages_post",
+        "operationId": "create_project_thread_message_api_projects__project_ref__thread_messages_post",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }
@@ -9628,16 +9735,16 @@
         ]
       }
     },
-    "/api/projects/{project_name}/transfer": {
+    "/api/projects/{project_ref}/transfer": {
       "post": {
-        "operationId": "transfer_project_api_projects__project_name__transfer_post",
+        "operationId": "transfer_project_api_projects__project_ref__transfer_post",
         "parameters": [
           {
             "in": "path",
-            "name": "project_name",
+            "name": "project_ref",
             "required": true,
             "schema": {
-              "title": "Project Name",
+              "title": "Project Ref",
               "type": "string"
             }
           }

@@ -9,12 +9,12 @@ import 'package:projects_api_client/api.dart';
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **activeUsers** | **int** |  | 
-**end** | **String** |  | 
+**end** | [**DateTime**](DateTime.md) |  |
 **period** | **String** |  | 
 **project** | **String** |  | 
 **sessionsAreCurrentRecords** | **bool** |  | 
 **source_** | **String** |  | 
-**start** | **String** |  | 
+**start** | [**DateTime**](DateTime.md) |  |
 **totalSessions** | **int** |  | 
 **users** | [**List<TelemetryUserItem>**](TelemetryUserItem.md) |  | [default to const []]
 

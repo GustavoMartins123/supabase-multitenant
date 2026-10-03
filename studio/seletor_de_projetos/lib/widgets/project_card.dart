@@ -17,6 +17,7 @@ class ProjectCard extends ConsumerStatefulWidget {
   const ProjectCard({
     super.key,
     required this.refKey,
+    required this.technicalName,
     required this.opaqueApiKeysStatus,
     required this.opaqueApiKeySlotCount,
     required this.onTap,
@@ -35,6 +36,7 @@ class ProjectCard extends ConsumerStatefulWidget {
   });
 
   final String refKey;
+  final String technicalName;
   final String opaqueApiKeysStatus;
   final int opaqueApiKeySlotCount;
   final String? displayName;
@@ -97,7 +99,7 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
 
   String get _projectUrl {
     if (widget.serverDomain == null || widget.serverDomain!.isEmpty) {
-      return widget.refKey;
+      throw StateError('URL do servidor indisponivel');
     }
     return '${widget.serverDomain}/${widget.refKey}';
   }
@@ -194,11 +196,11 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
                             children: [
                               Flexible(
                                 child: Tooltip(
-                                  message: widget.refKey,
+                                  message: widget.technicalName,
                                   waitDuration:
                                       const Duration(milliseconds: 500),
                                   child: Text(
-                                    widget.refKey,
+                                    widget.technicalName,
                                     style: const TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.bold,
@@ -211,7 +213,7 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
                               ),
                               if (widget.displayName != null &&
                                   widget.displayName!.isNotEmpty &&
-                                  widget.displayName != widget.refKey) ...[
+                                  widget.displayName != widget.technicalName) ...[
                                 const SizedBox(width: 8),
                                 Flexible(
                                   child: Text(
@@ -562,7 +564,7 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      widget.refKey,
+                      widget.technicalName,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -652,7 +654,7 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
       'stop' => 'PARANDO PROJETO',
       'restart' => 'REINICIANDO PROJETO',
       'recreate_services' => 'RECRIANDO SERVIÇOS',
-      'rename' => 'RENOMEANDO PROJETO',
+      'rename' => 'ATUALIZANDO URL',
       'backup' => 'CRIANDO RESTORE POINT',
       'restore' => 'RESTAURANDO PROJETO',
       'delete_restore_point' => 'EXCLUINDO RESTORE POINT',

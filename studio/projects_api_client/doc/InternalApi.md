@@ -10,7 +10,7 @@ All URIs are relative to *http://localhost*
 Method | HTTP request | Description
 ------------- | ------------- | -------------
 [**encKeyApiProjectsInternalEncKeyRefGet**](InternalApi.md#enckeyapiprojectsinternalenckeyrefget) | **GET** /api/projects/internal/enc-key/{ref} | Enc Key
-[**getContentProjectIdentityApiProjectsInternalContentIdentityProjectNameGet**](InternalApi.md#getcontentprojectidentityapiprojectsinternalcontentidentityprojectnameget) | **GET** /api/projects/internal/content-identity/{project_name} | Get Content Project Identity
+[**getContentProjectIdentityApiProjectsInternalContentIdentityProjectRefGet**](InternalApi.md#getcontentprojectidentityapiprojectsinternalcontentidentityprojectrefget) | **GET** /api/projects/internal/content-identity/{project_ref} | Get Content Project Identity
 [**getStudioProjectContextApiProjectsInternalStudioContextRefGet**](InternalApi.md#getstudioprojectcontextapiprojectsinternalstudiocontextrefget) | **GET** /api/projects/internal/studio-context/{ref} | Get Studio Project Context
 [**projectKeyVersionApiProjectsInternalKeyVersionRefGet**](InternalApi.md#projectkeyversionapiprojectsinternalkeyversionrefget) | **GET** /api/projects/internal/key-version/{ref} | Project Key Version
 [**proxyGlobalAnalyticsDelete**](InternalApi.md#proxyglobalanalyticsdelete) | **DELETE** /api/internal/analytics/{analytics_path} | Proxy Global Analytics
@@ -61,25 +61,23 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **getContentProjectIdentityApiProjectsInternalContentIdentityProjectNameGet**
-> ContentIdentityResponse getContentProjectIdentityApiProjectsInternalContentIdentityProjectNameGet(projectName)
+# **getContentProjectIdentityApiProjectsInternalContentIdentityProjectRefGet**
+> ContentIdentityResponse getContentProjectIdentityApiProjectsInternalContentIdentityProjectRefGet(projectRef)
 
 Get Content Project Identity
-
-Resolve o slug mutável para o UUID estável usado apenas por content.
 
 ### Example
 ```dart
 import 'package:projects_api_client/api.dart';
 
 final api_instance = InternalApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 
 try {
-    final result = api_instance.getContentProjectIdentityApiProjectsInternalContentIdentityProjectNameGet(projectName);
+    final result = api_instance.getContentProjectIdentityApiProjectsInternalContentIdentityProjectRefGet(projectRef);
     print(result);
 } catch (e) {
-    print('Exception when calling InternalApi->getContentProjectIdentityApiProjectsInternalContentIdentityProjectNameGet: $e\n');
+    print('Exception when calling InternalApi->getContentProjectIdentityApiProjectsInternalContentIdentityProjectRefGet: $e\n');
 }
 ```
 
@@ -87,7 +85,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
 
 ### Return type
 
@@ -353,7 +351,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **syncUserIdentityApiProjectsInternalUsersSyncPost**
-> UserSyncResponse syncUserIdentityApiProjectsInternalUsersSyncPost(userSyncPayload)
+> Object syncUserIdentityApiProjectsInternalUsersSyncPost(directorySnapshot)
 
 Sync User Identity
 
@@ -362,10 +360,10 @@ Sync User Identity
 import 'package:projects_api_client/api.dart';
 
 final api_instance = InternalApi();
-final userSyncPayload = UserSyncPayload(); // UserSyncPayload | 
+final directorySnapshot = DirectorySnapshot(); // DirectorySnapshot |
 
 try {
-    final result = api_instance.syncUserIdentityApiProjectsInternalUsersSyncPost(userSyncPayload);
+    final result = api_instance.syncUserIdentityApiProjectsInternalUsersSyncPost(directorySnapshot);
     print(result);
 } catch (e) {
     print('Exception when calling InternalApi->syncUserIdentityApiProjectsInternalUsersSyncPost: $e\n');
@@ -376,11 +374,11 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **userSyncPayload** | [**UserSyncPayload**](UserSyncPayload.md)|  | 
+ **directorySnapshot** | [**DirectorySnapshot**](DirectorySnapshot.md)|  |
 
 ### Return type
 
-[**UserSyncResponse**](UserSyncResponse.md)
+[**Object**](Object.md)
 
 ### Authorization
 

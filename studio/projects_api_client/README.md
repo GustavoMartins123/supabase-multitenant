@@ -42,14 +42,14 @@ import 'package:projects_api_client/api.dart';
 
 
 final api_instance = CollaborationApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final projectTagAssign = ProjectTagAssign(); // ProjectTagAssign | 
 
 try {
-    final result = api_instance.assignProjectTagApiProjectsProjectNameTagsPost(projectName, projectTagAssign);
+    final result = api_instance.assignProjectTagApiProjectsProjectRefTagsPost(projectRef, projectTagAssign);
     print(result);
 } catch (e) {
-    print('Exception when calling CollaborationApi->assignProjectTagApiProjectsProjectNameTagsPost: $e\n');
+    print('Exception when calling CollaborationApi->assignProjectTagApiProjectsProjectRefTagsPost: $e\n');
 }
 
 ```
@@ -60,17 +60,17 @@ All URIs are relative to *http://localhost*
 
 Class | Method | HTTP request | Description
 ------------ | ------------- | ------------- | -------------
-*CollaborationApi* | [**assignProjectTagApiProjectsProjectNameTagsPost**](doc//CollaborationApi.md#assignprojecttagapiprojectsprojectnametagspost) | **POST** /api/projects/{project_name}/tags | Assign Project Tag
-*CollaborationApi* | [**createProjectHintApiProjectsProjectNameHintsPost**](doc//CollaborationApi.md#createprojecthintapiprojectsprojectnamehintspost) | **POST** /api/projects/{project_name}/hints | Create Project Hint
-*CollaborationApi* | [**createProjectNoteApiProjectsProjectNameNotesPost**](doc//CollaborationApi.md#createprojectnoteapiprojectsprojectnamenotespost) | **POST** /api/projects/{project_name}/notes | Create Project Note
-*CollaborationApi* | [**createProjectThreadMessageApiProjectsProjectNameThreadMessagesPost**](doc//CollaborationApi.md#createprojectthreadmessageapiprojectsprojectnamethreadmessagespost) | **POST** /api/projects/{project_name}/thread/messages | Create Project Thread Message
-*CollaborationApi* | [**deleteProjectNoteApiProjectsProjectNameNotesNoteIdDelete**](doc//CollaborationApi.md#deleteprojectnoteapiprojectsprojectnamenotesnoteiddelete) | **DELETE** /api/projects/{project_name}/notes/{note_id} | Delete Project Note
-*CollaborationApi* | [**getProjectCollaborationApiProjectsProjectNameCollaborationGet**](doc//CollaborationApi.md#getprojectcollaborationapiprojectsprojectnamecollaborationget) | **GET** /api/projects/{project_name}/collaboration | Get Project Collaboration
-*CollaborationApi* | [**unassignProjectTagApiProjectsProjectNameTagsTagIdDelete**](doc//CollaborationApi.md#unassignprojecttagapiprojectsprojectnametagstagiddelete) | **DELETE** /api/projects/{project_name}/tags/{tag_id} | Unassign Project Tag
-*CollaborationApi* | [**updateProjectHintStatusApiProjectsProjectNameHintsHintIdPut**](doc//CollaborationApi.md#updateprojecthintstatusapiprojectsprojectnamehintshintidput) | **PUT** /api/projects/{project_name}/hints/{hint_id} | Update Project Hint Status
-*CollaborationApi* | [**updateProjectNotificationReadStateApiProjectsProjectNameNotificationsNotificationIdPatch**](doc//CollaborationApi.md#updateprojectnotificationreadstateapiprojectsprojectnamenotificationsnotificationidpatch) | **PATCH** /api/projects/{project_name}/notifications/{notification_id} | Update Project Notification Read State
+*CollaborationApi* | [**assignProjectTagApiProjectsProjectRefTagsPost**](doc//CollaborationApi.md#assignprojecttagapiprojectsprojectreftagspost) | **POST** /api/projects/{project_ref}/tags | Assign Project Tag
+*CollaborationApi* | [**createProjectHintApiProjectsProjectRefHintsPost**](doc//CollaborationApi.md#createprojecthintapiprojectsprojectrefhintspost) | **POST** /api/projects/{project_ref}/hints | Create Project Hint
+*CollaborationApi* | [**createProjectNoteApiProjectsProjectRefNotesPost**](doc//CollaborationApi.md#createprojectnoteapiprojectsprojectrefnotespost) | **POST** /api/projects/{project_ref}/notes | Create Project Note
+*CollaborationApi* | [**createProjectThreadMessageApiProjectsProjectRefThreadMessagesPost**](doc//CollaborationApi.md#createprojectthreadmessageapiprojectsprojectrefthreadmessagespost) | **POST** /api/projects/{project_ref}/thread/messages | Create Project Thread Message
+*CollaborationApi* | [**deleteProjectNoteApiProjectsProjectRefNotesNoteIdDelete**](doc//CollaborationApi.md#deleteprojectnoteapiprojectsprojectrefnotesnoteiddelete) | **DELETE** /api/projects/{project_ref}/notes/{note_id} | Delete Project Note
+*CollaborationApi* | [**getProjectCollaborationApiProjectsProjectRefCollaborationGet**](doc//CollaborationApi.md#getprojectcollaborationapiprojectsprojectrefcollaborationget) | **GET** /api/projects/{project_ref}/collaboration | Get Project Collaboration
+*CollaborationApi* | [**unassignProjectTagApiProjectsProjectRefTagsTagIdDelete**](doc//CollaborationApi.md#unassignprojecttagapiprojectsprojectreftagstagiddelete) | **DELETE** /api/projects/{project_ref}/tags/{tag_id} | Unassign Project Tag
+*CollaborationApi* | [**updateProjectHintStatusApiProjectsProjectRefHintsHintIdPut**](doc//CollaborationApi.md#updateprojecthintstatusapiprojectsprojectrefhintshintidput) | **PUT** /api/projects/{project_ref}/hints/{hint_id} | Update Project Hint Status
+*CollaborationApi* | [**updateProjectNotificationReadStateApiProjectsProjectRefNotificationsNotificationIdPatch**](doc//CollaborationApi.md#updateprojectnotificationreadstateapiprojectsprojectrefnotificationsnotificationidpatch) | **PATCH** /api/projects/{project_ref}/notifications/{notification_id} | Update Project Notification Read State
 *InternalApi* | [**encKeyApiProjectsInternalEncKeyRefGet**](doc//InternalApi.md#enckeyapiprojectsinternalenckeyrefget) | **GET** /api/projects/internal/enc-key/{ref} | Enc Key
-*InternalApi* | [**getContentProjectIdentityApiProjectsInternalContentIdentityProjectNameGet**](doc//InternalApi.md#getcontentprojectidentityapiprojectsinternalcontentidentityprojectnameget) | **GET** /api/projects/internal/content-identity/{project_name} | Get Content Project Identity
+*InternalApi* | [**getContentProjectIdentityApiProjectsInternalContentIdentityProjectRefGet**](doc//InternalApi.md#getcontentprojectidentityapiprojectsinternalcontentidentityprojectrefget) | **GET** /api/projects/internal/content-identity/{project_ref} | Get Content Project Identity
 *InternalApi* | [**getStudioProjectContextApiProjectsInternalStudioContextRefGet**](doc//InternalApi.md#getstudioprojectcontextapiprojectsinternalstudiocontextrefget) | **GET** /api/projects/internal/studio-context/{ref} | Get Studio Project Context
 *InternalApi* | [**projectKeyVersionApiProjectsInternalKeyVersionRefGet**](doc//InternalApi.md#projectkeyversionapiprojectsinternalkeyversionrefget) | **GET** /api/projects/internal/key-version/{ref} | Project Key Version
 *InternalApi* | [**proxyGlobalAnalyticsDelete**](doc//InternalApi.md#proxyglobalanalyticsdelete) | **DELETE** /api/internal/analytics/{analytics_path} | Proxy Global Analytics
@@ -81,40 +81,40 @@ Class | Method | HTTP request | Description
 *JobsApi* | [**listJobHistoryApiJobsGet**](doc//JobsApi.md#listjobhistoryapijobsget) | **GET** /api/jobs | List Job History
 *JobsApi* | [**projectStatusApiProjectsStatusJobIdGet**](doc//JobsApi.md#projectstatusapiprojectsstatusjobidget) | **GET** /api/projects/status/{job_id} | Project Status
 *JobsApi* | [**retryProjectJobApiJobsJobIdRetryPost**](doc//JobsApi.md#retryprojectjobapijobsjobidretrypost) | **POST** /api/jobs/{job_id}/retry | Retry Project Job
-*LifecycleApi* | [**getContainerLogsApiProjectsProjectNameLogsServiceGet**](doc//LifecycleApi.md#getcontainerlogsapiprojectsprojectnamelogsserviceget) | **GET** /api/projects/{project_name}/logs/{service} | Get Container Logs
-*LifecycleApi* | [**getProjectDockerStatusApiProjectsProjectNameStatusGet**](doc//LifecycleApi.md#getprojectdockerstatusapiprojectsprojectnamestatusget) | **GET** /api/projects/{project_name}/status | Get Project Docker Status
-*LifecycleOpsApi* | [**getProjectSettingsApiProjectsProjectNameSettingsGet**](doc//LifecycleOpsApi.md#getprojectsettingsapiprojectsprojectnamesettingsget) | **GET** /api/projects/{project_name}/settings | Get Project Settings
-*LifecycleOpsApi* | [**recreateProjectServicesApiProjectsProjectNameRecreateServicesPost**](doc//LifecycleOpsApi.md#recreateprojectservicesapiprojectsprojectnamerecreateservicespost) | **POST** /api/projects/{project_name}/recreate-services | Recreate Project Services
-*LifecycleOpsApi* | [**restartProjectApiProjectsProjectNameRestartPost**](doc//LifecycleOpsApi.md#restartprojectapiprojectsprojectnamerestartpost) | **POST** /api/projects/{project_name}/restart | Restart Project
-*LifecycleOpsApi* | [**startProjectApiProjectsProjectNameStartPost**](doc//LifecycleOpsApi.md#startprojectapiprojectsprojectnamestartpost) | **POST** /api/projects/{project_name}/start | Start Project
-*LifecycleOpsApi* | [**stopProjectApiProjectsProjectNameStopPost**](doc//LifecycleOpsApi.md#stopprojectapiprojectsprojectnamestoppost) | **POST** /api/projects/{project_name}/stop | Stop Project
-*LifecycleOpsApi* | [**updateProjectSettingsApiProjectsProjectNameSettingsPut**](doc//LifecycleOpsApi.md#updateprojectsettingsapiprojectsprojectnamesettingsput) | **PUT** /api/projects/{project_name}/settings | Update Project Settings
-*OpaqueApiKeysApi* | [**abortOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationDelete**](doc//OpaqueApiKeysApi.md#abortopaqueapikeymigrationapiprojectsprojectnameopaqueapikeysmigrationdelete) | **DELETE** /api/projects/{project_name}/opaque-api-keys/migration | Abort Opaque Api Key Migration
-*OpaqueApiKeysApi* | [**activateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdActivationPost**](doc//OpaqueApiKeysApi.md#activateapikeyslotapiprojectsprojectnameapikeyslotsslotidactivationpost) | **POST** /api/projects/{project_name}/api-key-slots/{slot_id}/activation | Activate Api Key Slot
-*OpaqueApiKeysApi* | [**cancelApiKeySlotRotationApiProjectsProjectNameApiKeySlotsSlotIdRotationDelete**](doc//OpaqueApiKeysApi.md#cancelapikeyslotrotationapiprojectsprojectnameapikeyslotsslotidrotationdelete) | **DELETE** /api/projects/{project_name}/api-key-slots/{slot_id}/rotation | Cancel Api Key Slot Rotation
-*OpaqueApiKeysApi* | [**claimApiKeyApiProjectsProjectNameApiKeyRevealsKeyIdClaimPost**](doc//OpaqueApiKeysApi.md#claimapikeyapiprojectsprojectnameapikeyrevealskeyidclaimpost) | **POST** /api/projects/{project_name}/api-key-reveals/{key_id}/claim | Claim Api Key
-*OpaqueApiKeysApi* | [**confirmApiKeySlotInstallationApiProjectsProjectNameApiKeySlotsSlotIdRotationConfirmationPost**](doc//OpaqueApiKeysApi.md#confirmapikeyslotinstallationapiprojectsprojectnameapikeyslotsslotidrotationconfirmationpost) | **POST** /api/projects/{project_name}/api-key-slots/{slot_id}/rotation-confirmation | Confirm Api Key Slot Installation
-*OpaqueApiKeysApi* | [**createApiKeySlotApiProjectsProjectNameApiKeySlotsPost**](doc//OpaqueApiKeysApi.md#createapikeyslotapiprojectsprojectnameapikeyslotspost) | **POST** /api/projects/{project_name}/api-key-slots | Create Api Key Slot
-*OpaqueApiKeysApi* | [**cutoverOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationCutoverPost**](doc//OpaqueApiKeysApi.md#cutoveropaqueapikeymigrationapiprojectsprojectnameopaqueapikeysmigrationcutoverpost) | **POST** /api/projects/{project_name}/opaque-api-keys/migration/cutover | Cutover Opaque Api Key Migration
-*OpaqueApiKeysApi* | [**getApiKeyRevealsApiProjectsProjectNameApiKeyRevealsGet**](doc//OpaqueApiKeysApi.md#getapikeyrevealsapiprojectsprojectnameapikeyrevealsget) | **GET** /api/projects/{project_name}/api-key-reveals | Get Api Key Reveals
-*OpaqueApiKeysApi* | [**getApiKeySlotsApiProjectsProjectNameApiKeySlotsGet**](doc//OpaqueApiKeysApi.md#getapikeyslotsapiprojectsprojectnameapikeyslotsget) | **GET** /api/projects/{project_name}/api-key-slots | Get Api Key Slots
-*OpaqueApiKeysApi* | [**getOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationGet**](doc//OpaqueApiKeysApi.md#getopaqueapikeymigrationapiprojectsprojectnameopaqueapikeysmigrationget) | **GET** /api/projects/{project_name}/opaque-api-keys/migration | Get Opaque Api Key Migration
-*OpaqueApiKeysApi* | [**prepareOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationPreparePost**](doc//OpaqueApiKeysApi.md#prepareopaqueapikeymigrationapiprojectsprojectnameopaqueapikeysmigrationpreparepost) | **POST** /api/projects/{project_name}/opaque-api-keys/migration/prepare | Prepare Opaque Api Key Migration
-*OpaqueApiKeysApi* | [**revokeApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdDelete**](doc//OpaqueApiKeysApi.md#revokeapikeyslotapiprojectsprojectnameapikeyslotsslotiddelete) | **DELETE** /api/projects/{project_name}/api-key-slots/{slot_id} | Revoke Api Key Slot
-*OpaqueApiKeysApi* | [**rotateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdRotationPost**](doc//OpaqueApiKeysApi.md#rotateapikeyslotapiprojectsprojectnameapikeyslotsslotidrotationpost) | **POST** /api/projects/{project_name}/api-key-slots/{slot_id}/rotation | Rotate Api Key Slot
-*OpaqueApiKeysApi* | [**updateApiKeySlotPolicyApiProjectsProjectNameApiKeySlotsSlotIdPatch**](doc//OpaqueApiKeysApi.md#updateapikeyslotpolicyapiprojectsprojectnameapikeyslotsslotidpatch) | **PATCH** /api/projects/{project_name}/api-key-slots/{slot_id} | Update Api Key Slot Policy
-*PlatformAuthApi* | [**listProjectAuthUsersApiProjectsInternalAuthUsersProjectNameGet**](doc//PlatformAuthApi.md#listprojectauthusersapiprojectsinternalauthusersprojectnameget) | **GET** /api/projects/internal/auth-users/{project_name} | List Project Auth Users
-*PlatformAuthApi* | [**proxyProjectAuthAdminDelete**](doc//PlatformAuthApi.md#proxyprojectauthadmindelete) | **DELETE** /api/projects/internal/auth-admin/{project_name}/{gotrue_path} | Proxy Project Auth Admin
-*PlatformAuthApi* | [**proxyProjectAuthAdminGet**](doc//PlatformAuthApi.md#proxyprojectauthadminget) | **GET** /api/projects/internal/auth-admin/{project_name}/{gotrue_path} | Proxy Project Auth Admin
-*PlatformAuthApi* | [**proxyProjectAuthAdminPatch**](doc//PlatformAuthApi.md#proxyprojectauthadminpatch) | **PATCH** /api/projects/internal/auth-admin/{project_name}/{gotrue_path} | Proxy Project Auth Admin
-*PlatformAuthApi* | [**proxyProjectAuthAdminPost**](doc//PlatformAuthApi.md#proxyprojectauthadminpost) | **POST** /api/projects/internal/auth-admin/{project_name}/{gotrue_path} | Proxy Project Auth Admin
-*PlatformAuthApi* | [**proxyProjectAuthAdminPut**](doc//PlatformAuthApi.md#proxyprojectauthadminput) | **PUT** /api/projects/internal/auth-admin/{project_name}/{gotrue_path} | Proxy Project Auth Admin
+*LifecycleApi* | [**getContainerLogsApiProjectsProjectRefLogsServiceGet**](doc//LifecycleApi.md#getcontainerlogsapiprojectsprojectreflogsserviceget) | **GET** /api/projects/{project_ref}/logs/{service} | Get Container Logs
+*LifecycleApi* | [**getProjectDockerStatusApiProjectsProjectRefStatusGet**](doc//LifecycleApi.md#getprojectdockerstatusapiprojectsprojectrefstatusget) | **GET** /api/projects/{project_ref}/status | Get Project Docker Status
+*LifecycleOpsApi* | [**getProjectSettingsApiProjectsProjectRefSettingsGet**](doc//LifecycleOpsApi.md#getprojectsettingsapiprojectsprojectrefsettingsget) | **GET** /api/projects/{project_ref}/settings | Get Project Settings
+*LifecycleOpsApi* | [**recreateProjectServicesApiProjectsProjectRefRecreateServicesPost**](doc//LifecycleOpsApi.md#recreateprojectservicesapiprojectsprojectrefrecreateservicespost) | **POST** /api/projects/{project_ref}/recreate-services | Recreate Project Services
+*LifecycleOpsApi* | [**restartProjectApiProjectsProjectRefRestartPost**](doc//LifecycleOpsApi.md#restartprojectapiprojectsprojectrefrestartpost) | **POST** /api/projects/{project_ref}/restart | Restart Project
+*LifecycleOpsApi* | [**startProjectApiProjectsProjectRefStartPost**](doc//LifecycleOpsApi.md#startprojectapiprojectsprojectrefstartpost) | **POST** /api/projects/{project_ref}/start | Start Project
+*LifecycleOpsApi* | [**stopProjectApiProjectsProjectRefStopPost**](doc//LifecycleOpsApi.md#stopprojectapiprojectsprojectrefstoppost) | **POST** /api/projects/{project_ref}/stop | Stop Project
+*LifecycleOpsApi* | [**updateProjectSettingsApiProjectsProjectRefSettingsPut**](doc//LifecycleOpsApi.md#updateprojectsettingsapiprojectsprojectrefsettingsput) | **PUT** /api/projects/{project_ref}/settings | Update Project Settings
+*OpaqueApiKeysApi* | [**abortOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationDelete**](doc//OpaqueApiKeysApi.md#abortopaqueapikeymigrationapiprojectsprojectrefopaqueapikeysmigrationdelete) | **DELETE** /api/projects/{project_ref}/opaque-api-keys/migration | Abort Opaque Api Key Migration
+*OpaqueApiKeysApi* | [**activateApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdActivationPost**](doc//OpaqueApiKeysApi.md#activateapikeyslotapiprojectsprojectrefapikeyslotsslotidactivationpost) | **POST** /api/projects/{project_ref}/api-key-slots/{slot_id}/activation | Activate Api Key Slot
+*OpaqueApiKeysApi* | [**cancelApiKeySlotRotationApiProjectsProjectRefApiKeySlotsSlotIdRotationDelete**](doc//OpaqueApiKeysApi.md#cancelapikeyslotrotationapiprojectsprojectrefapikeyslotsslotidrotationdelete) | **DELETE** /api/projects/{project_ref}/api-key-slots/{slot_id}/rotation | Cancel Api Key Slot Rotation
+*OpaqueApiKeysApi* | [**claimApiKeyApiProjectsProjectRefApiKeyRevealsKeyIdClaimPost**](doc//OpaqueApiKeysApi.md#claimapikeyapiprojectsprojectrefapikeyrevealskeyidclaimpost) | **POST** /api/projects/{project_ref}/api-key-reveals/{key_id}/claim | Claim Api Key
+*OpaqueApiKeysApi* | [**confirmApiKeySlotInstallationApiProjectsProjectRefApiKeySlotsSlotIdRotationConfirmationPost**](doc//OpaqueApiKeysApi.md#confirmapikeyslotinstallationapiprojectsprojectrefapikeyslotsslotidrotationconfirmationpost) | **POST** /api/projects/{project_ref}/api-key-slots/{slot_id}/rotation-confirmation | Confirm Api Key Slot Installation
+*OpaqueApiKeysApi* | [**createApiKeySlotApiProjectsProjectRefApiKeySlotsPost**](doc//OpaqueApiKeysApi.md#createapikeyslotapiprojectsprojectrefapikeyslotspost) | **POST** /api/projects/{project_ref}/api-key-slots | Create Api Key Slot
+*OpaqueApiKeysApi* | [**cutoverOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationCutoverPost**](doc//OpaqueApiKeysApi.md#cutoveropaqueapikeymigrationapiprojectsprojectrefopaqueapikeysmigrationcutoverpost) | **POST** /api/projects/{project_ref}/opaque-api-keys/migration/cutover | Cutover Opaque Api Key Migration
+*OpaqueApiKeysApi* | [**getApiKeyRevealsApiProjectsProjectRefApiKeyRevealsGet**](doc//OpaqueApiKeysApi.md#getapikeyrevealsapiprojectsprojectrefapikeyrevealsget) | **GET** /api/projects/{project_ref}/api-key-reveals | Get Api Key Reveals
+*OpaqueApiKeysApi* | [**getApiKeySlotsApiProjectsProjectRefApiKeySlotsGet**](doc//OpaqueApiKeysApi.md#getapikeyslotsapiprojectsprojectrefapikeyslotsget) | **GET** /api/projects/{project_ref}/api-key-slots | Get Api Key Slots
+*OpaqueApiKeysApi* | [**getOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationGet**](doc//OpaqueApiKeysApi.md#getopaqueapikeymigrationapiprojectsprojectrefopaqueapikeysmigrationget) | **GET** /api/projects/{project_ref}/opaque-api-keys/migration | Get Opaque Api Key Migration
+*OpaqueApiKeysApi* | [**prepareOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationPreparePost**](doc//OpaqueApiKeysApi.md#prepareopaqueapikeymigrationapiprojectsprojectrefopaqueapikeysmigrationpreparepost) | **POST** /api/projects/{project_ref}/opaque-api-keys/migration/prepare | Prepare Opaque Api Key Migration
+*OpaqueApiKeysApi* | [**revokeApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdDelete**](doc//OpaqueApiKeysApi.md#revokeapikeyslotapiprojectsprojectrefapikeyslotsslotiddelete) | **DELETE** /api/projects/{project_ref}/api-key-slots/{slot_id} | Revoke Api Key Slot
+*OpaqueApiKeysApi* | [**rotateApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdRotationPost**](doc//OpaqueApiKeysApi.md#rotateapikeyslotapiprojectsprojectrefapikeyslotsslotidrotationpost) | **POST** /api/projects/{project_ref}/api-key-slots/{slot_id}/rotation | Rotate Api Key Slot
+*OpaqueApiKeysApi* | [**updateApiKeySlotPolicyApiProjectsProjectRefApiKeySlotsSlotIdPatch**](doc//OpaqueApiKeysApi.md#updateapikeyslotpolicyapiprojectsprojectrefapikeyslotsslotidpatch) | **PATCH** /api/projects/{project_ref}/api-key-slots/{slot_id} | Update Api Key Slot Policy
+*PlatformAuthApi* | [**listProjectAuthUsersApiProjectsInternalAuthUsersProjectRefGet**](doc//PlatformAuthApi.md#listprojectauthusersapiprojectsinternalauthusersprojectrefget) | **GET** /api/projects/internal/auth-users/{project_ref} | List Project Auth Users
+*PlatformAuthApi* | [**proxyProjectAuthAdminDelete**](doc//PlatformAuthApi.md#proxyprojectauthadmindelete) | **DELETE** /api/projects/internal/auth-admin/{project_ref}/{gotrue_path} | Proxy Project Auth Admin
+*PlatformAuthApi* | [**proxyProjectAuthAdminGet**](doc//PlatformAuthApi.md#proxyprojectauthadminget) | **GET** /api/projects/internal/auth-admin/{project_ref}/{gotrue_path} | Proxy Project Auth Admin
+*PlatformAuthApi* | [**proxyProjectAuthAdminPatch**](doc//PlatformAuthApi.md#proxyprojectauthadminpatch) | **PATCH** /api/projects/internal/auth-admin/{project_ref}/{gotrue_path} | Proxy Project Auth Admin
+*PlatformAuthApi* | [**proxyProjectAuthAdminPost**](doc//PlatformAuthApi.md#proxyprojectauthadminpost) | **POST** /api/projects/internal/auth-admin/{project_ref}/{gotrue_path} | Proxy Project Auth Admin
+*PlatformAuthApi* | [**proxyProjectAuthAdminPut**](doc//PlatformAuthApi.md#proxyprojectauthadminput) | **PUT** /api/projects/internal/auth-admin/{project_ref}/{gotrue_path} | Proxy Project Auth Admin
 *ProjectInsightsApi* | [**executeProjectFunctionApiProjectsRefExecuteFunctionPost**](doc//ProjectInsightsApi.md#executeprojectfunctionapiprojectsrefexecutefunctionpost) | **POST** /api/projects/{ref}/execute-function | Execute Project Function
 *ProjectInsightsApi* | [**getProjectAiFunctionsApiProjectsRefFunctionsGet**](doc//ProjectInsightsApi.md#getprojectaifunctionsapiprojectsreffunctionsget) | **GET** /api/projects/{ref}/functions | Get Project Ai Functions
-*ProjectInsightsApi* | [**getProjectS3VectorKeysApiProjectsProjectNameStorageS3KeysGet**](doc//ProjectInsightsApi.md#getprojects3vectorkeysapiprojectsprojectnamestorages3keysget) | **GET** /api/projects/{project_name}/storage/s3-keys | Get Project S3 Vector Keys
-*ProjectInsightsApi* | [**getProjectUserTelemetryApiProjectsProjectNameTelemetryUsersGet**](doc//ProjectInsightsApi.md#getprojectusertelemetryapiprojectsprojectnametelemetryusersget) | **GET** /api/projects/{project_name}/telemetry/users | Get Project User Telemetry
+*ProjectInsightsApi* | [**getProjectS3VectorKeysApiProjectsProjectRefStorageS3KeysGet**](doc//ProjectInsightsApi.md#getprojects3vectorkeysapiprojectsprojectrefstorages3keysget) | **GET** /api/projects/{project_ref}/storage/s3-keys | Get Project S3 Vector Keys
+*ProjectInsightsApi* | [**getProjectUserTelemetryApiProjectsProjectRefTelemetryUsersGet**](doc//ProjectInsightsApi.md#getprojectusertelemetryapiprojectsprojectreftelemetryusersget) | **GET** /api/projects/{project_ref}/telemetry/users | Get Project User Telemetry
 *ProjectInsightsApi* | [**getProjectsForUserApiAdminProjectsInfoPost**](doc//ProjectInsightsApi.md#getprojectsforuserapiadminprojectsinfopost) | **POST** /api/admin/projects-info | Get Projects For User
-*ProjectInsightsApi* | [**listAllUsersForAdminApiAdminProjectsNameAllUsersGet**](doc//ProjectInsightsApi.md#listallusersforadminapiadminprojectsnameallusersget) | **GET** /api/admin/projects/{name}/all-users | List All Users For Admin
+*ProjectInsightsApi* | [**listAllUsersForAdminApiAdminProjectsProjectRefAllUsersGet**](doc//ProjectInsightsApi.md#listallusersforadminapiadminprojectsprojectrefallusersget) | **GET** /api/admin/projects/{project_ref}/all-users | List All Users For Admin
 *ProjectInsightsApi* | [**proxyProjectMetaDelete**](doc//ProjectInsightsApi.md#proxyprojectmetadelete) | **DELETE** /api/projects/{ref}/meta | Proxy Project Meta
 *ProjectInsightsApi* | [**proxyProjectMetaGet**](doc//ProjectInsightsApi.md#proxyprojectmetaget) | **GET** /api/projects/{ref}/meta | Proxy Project Meta
 *ProjectInsightsApi* | [**proxyProjectMetaPatch**](doc//ProjectInsightsApi.md#proxyprojectmetapatch) | **PATCH** /api/projects/{ref}/meta | Proxy Project Meta
@@ -123,25 +123,25 @@ Class | Method | HTTP request | Description
 *ProjectInsightsApi* | [**proxyProjectMetaPathPatch**](doc//ProjectInsightsApi.md#proxyprojectmetapathpatch) | **PATCH** /api/projects/{ref}/meta/{meta_path} | Proxy Project Meta
 *ProjectInsightsApi* | [**proxyProjectMetaPathPost**](doc//ProjectInsightsApi.md#proxyprojectmetapathpost) | **POST** /api/projects/{ref}/meta/{meta_path} | Proxy Project Meta
 *ProjectInsightsApi* | [**proxyProjectMetaPost**](doc//ProjectInsightsApi.md#proxyprojectmetapost) | **POST** /api/projects/{ref}/meta | Proxy Project Meta
-*ProjectInsightsApi* | [**transferProjectApiProjectsProjectNameTransferPost**](doc//ProjectInsightsApi.md#transferprojectapiprojectsprojectnametransferpost) | **POST** /api/projects/{project_name}/transfer | Transfer Project
-*ProjectKeysApi* | [**rotateProjectKeyApiProjectsProjectNameRotateKeyPost**](doc//ProjectKeysApi.md#rotateprojectkeyapiprojectsprojectnamerotatekeypost) | **POST** /api/projects/{project_name}/rotate-key | Rotate Project Key
-*ProjectKeysApi* | [**updateAutomaticKeyRotationApiProjectsProjectNameAutomaticKeyRotationPut**](doc//ProjectKeysApi.md#updateautomatickeyrotationapiprojectsprojectnameautomatickeyrotationput) | **PUT** /api/projects/{project_name}/automatic-key-rotation | Update Automatic Key Rotation
-*ProjectMembersApi* | [**addMemberApiProjectsProjectNameMembersPost**](doc//ProjectMembersApi.md#addmemberapiprojectsprojectnamememberspost) | **POST** /api/projects/{project_name}/members | Add Member
-*ProjectMembersApi* | [**listMembersByRefApiProjectsNameMembersGet**](doc//ProjectMembersApi.md#listmembersbyrefapiprojectsnamemembersget) | **GET** /api/projects/{name}/members | List Members By Ref
-*ProjectMembersApi* | [**removeMemberByRefApiProjectsNameMembersMemberIdDelete**](doc//ProjectMembersApi.md#removememberbyrefapiprojectsnamemembersmemberiddelete) | **DELETE** /api/projects/{name}/members/{member_id} | Remove Member By Ref
-*ProjectRenameApi* | [**getProjectConfigTokenApiProjectsProjectNameConfigTokenGet**](doc//ProjectRenameApi.md#getprojectconfigtokenapiprojectsprojectnameconfigtokenget) | **GET** /api/projects/{project_name}/config-token | Get Project Config Token
-*ProjectRenameApi* | [**getProjectQueueStatusApiProjectsProjectNameQueueStatusGet**](doc//ProjectRenameApi.md#getprojectqueuestatusapiprojectsprojectnamequeuestatusget) | **GET** /api/projects/{project_name}/queue-status | Get Project Queue Status
-*ProjectRenameApi* | [**getProjectRenameHistoryApiProjectsProjectNameRenameHistoryGet**](doc//ProjectRenameApi.md#getprojectrenamehistoryapiprojectsprojectnamerenamehistoryget) | **GET** /api/projects/{project_name}/rename-history | Get Project Rename History
-*ProjectRenameApi* | [**renameProjectApiProjectsProjectNameRenamePost**](doc//ProjectRenameApi.md#renameprojectapiprojectsprojectnamerenamepost) | **POST** /api/projects/{project_name}/rename | Rename Project
-*ProjectRenameApi* | [**updateProjectDisplayNameApiProjectsProjectNameDisplayNamePatch**](doc//ProjectRenameApi.md#updateprojectdisplaynameapiprojectsprojectnamedisplaynamepatch) | **PATCH** /api/projects/{project_name}/display-name | Update Project Display Name
+*ProjectInsightsApi* | [**transferProjectApiProjectsProjectRefTransferPost**](doc//ProjectInsightsApi.md#transferprojectapiprojectsprojectreftransferpost) | **POST** /api/projects/{project_ref}/transfer | Transfer Project
+*ProjectKeysApi* | [**rotateProjectKeyApiProjectsProjectRefRotateKeyPost**](doc//ProjectKeysApi.md#rotateprojectkeyapiprojectsprojectrefrotatekeypost) | **POST** /api/projects/{project_ref}/rotate-key | Rotate Project Key
+*ProjectKeysApi* | [**updateAutomaticKeyRotationApiProjectsProjectRefAutomaticKeyRotationPut**](doc//ProjectKeysApi.md#updateautomatickeyrotationapiprojectsprojectrefautomatickeyrotationput) | **PUT** /api/projects/{project_ref}/automatic-key-rotation | Update Automatic Key Rotation
+*ProjectMembersApi* | [**addMemberApiProjectsProjectRefMembersPost**](doc//ProjectMembersApi.md#addmemberapiprojectsprojectrefmemberspost) | **POST** /api/projects/{project_ref}/members | Add Member
+*ProjectMembersApi* | [**listMembersByRefApiProjectsProjectRefMembersGet**](doc//ProjectMembersApi.md#listmembersbyrefapiprojectsprojectrefmembersget) | **GET** /api/projects/{project_ref}/members | List Members By Ref
+*ProjectMembersApi* | [**removeMemberByRefApiProjectsProjectRefMembersMemberIdDelete**](doc//ProjectMembersApi.md#removememberbyrefapiprojectsprojectrefmembersmemberiddelete) | **DELETE** /api/projects/{project_ref}/members/{member_id} | Remove Member By Ref
+*ProjectRenameApi* | [**getProjectConfigTokenApiProjectsProjectRefConfigTokenGet**](doc//ProjectRenameApi.md#getprojectconfigtokenapiprojectsprojectrefconfigtokenget) | **GET** /api/projects/{project_ref}/config-token | Get Project Config Token
+*ProjectRenameApi* | [**getProjectQueueStatusApiProjectsProjectRefQueueStatusGet**](doc//ProjectRenameApi.md#getprojectqueuestatusapiprojectsprojectrefqueuestatusget) | **GET** /api/projects/{project_ref}/queue-status | Get Project Queue Status
+*ProjectRenameApi* | [**getProjectRenameHistoryApiProjectsProjectRefRenameHistoryGet**](doc//ProjectRenameApi.md#getprojectrenamehistoryapiprojectsprojectrefrenamehistoryget) | **GET** /api/projects/{project_ref}/rename-history | Get Project Rename History
+*ProjectRenameApi* | [**renameProjectApiProjectsProjectRefRenamePost**](doc//ProjectRenameApi.md#renameprojectapiprojectsprojectrefrenamepost) | **POST** /api/projects/{project_ref}/rename | Rename Project
+*ProjectRenameApi* | [**updateProjectDisplayNameApiProjectsProjectRefDisplayNamePatch**](doc//ProjectRenameApi.md#updateprojectdisplaynameapiprojectsprojectrefdisplaynamepatch) | **PATCH** /api/projects/{project_ref}/display-name | Update Project Display Name
 *ProjectsApi* | [**createProjectApiProjectsPost**](doc//ProjectsApi.md#createprojectapiprojectspost) | **POST** /api/projects | Create Project
-*ProjectsApi* | [**deleteProjectApiProjectsProjectNameDelete**](doc//ProjectsApi.md#deleteprojectapiprojectsprojectnamedelete) | **DELETE** /api/projects/{project_name} | Delete Project
+*ProjectsApi* | [**deleteProjectApiProjectsProjectRefDelete**](doc//ProjectsApi.md#deleteprojectapiprojectsprojectrefdelete) | **DELETE** /api/projects/{project_ref} | Delete Project
 *ProjectsApi* | [**duplicateProjectApiProjectsDuplicatePost**](doc//ProjectsApi.md#duplicateprojectapiprojectsduplicatepost) | **POST** /api/projects/duplicate | Duplicate Project
 *ProjectsApi* | [**listProjectsApiProjectsGet**](doc//ProjectsApi.md#listprojectsapiprojectsget) | **GET** /api/projects | List Projects
-*RestorePointsApi* | [**createProjectRestorePointApiProjectsProjectNameRestorePointsPost**](doc//RestorePointsApi.md#createprojectrestorepointapiprojectsprojectnamerestorepointspost) | **POST** /api/projects/{project_name}/restore-points | Create Project Restore Point
-*RestorePointsApi* | [**deleteProjectRestorePointApiProjectsProjectNameRestorePointsPointIdDelete**](doc//RestorePointsApi.md#deleteprojectrestorepointapiprojectsprojectnamerestorepointspointiddelete) | **DELETE** /api/projects/{project_name}/restore-points/{point_id} | Delete Project Restore Point
-*RestorePointsApi* | [**listProjectRestorePointsApiProjectsProjectNameRestorePointsGet**](doc//RestorePointsApi.md#listprojectrestorepointsapiprojectsprojectnamerestorepointsget) | **GET** /api/projects/{project_name}/restore-points | List Project Restore Points
-*RestorePointsApi* | [**restoreProjectRestorePointApiProjectsProjectNameRestorePointsPointIdRestorePost**](doc//RestorePointsApi.md#restoreprojectrestorepointapiprojectsprojectnamerestorepointspointidrestorepost) | **POST** /api/projects/{project_name}/restore-points/{point_id}/restore | Restore Project Restore Point
+*RestorePointsApi* | [**createProjectRestorePointApiProjectsProjectRefRestorePointsPost**](doc//RestorePointsApi.md#createprojectrestorepointapiprojectsprojectrefrestorepointspost) | **POST** /api/projects/{project_ref}/restore-points | Create Project Restore Point
+*RestorePointsApi* | [**deleteProjectRestorePointApiProjectsProjectRefRestorePointsPointIdDelete**](doc//RestorePointsApi.md#deleteprojectrestorepointapiprojectsprojectrefrestorepointspointiddelete) | **DELETE** /api/projects/{project_ref}/restore-points/{point_id} | Delete Project Restore Point
+*RestorePointsApi* | [**listProjectRestorePointsApiProjectsProjectRefRestorePointsGet**](doc//RestorePointsApi.md#listprojectrestorepointsapiprojectsprojectrefrestorepointsget) | **GET** /api/projects/{project_ref}/restore-points | List Project Restore Points
+*RestorePointsApi* | [**restoreProjectRestorePointApiProjectsProjectRefRestorePointsPointIdRestorePost**](doc//RestorePointsApi.md#restoreprojectrestorepointapiprojectsprojectrefrestorepointspointidrestorepost) | **POST** /api/projects/{project_ref}/restore-points/{point_id}/restore | Restore Project Restore Point
 
 
 ## Documentation For Models
@@ -172,6 +172,8 @@ Class | Method | HTTP request | Description
  - [CreateThreadMessageResponse](doc//CreateThreadMessageResponse.md)
  - [DeleteProjectNoteResponse](doc//DeleteProjectNoteResponse.md)
  - [DeleteRestorePointResponse](doc//DeleteRestorePointResponse.md)
+ - [DirectorySnapshot](doc//DirectorySnapshot.md)
+ - [DirectoryUser](doc//DirectoryUser.md)
  - [DuplicateProject](doc//DuplicateProject.md)
  - [EncKeyResponse](doc//EncKeyResponse.md)
  - [GetProjectCollaborationResponse](doc//GetProjectCollaborationResponse.md)
@@ -189,7 +191,6 @@ Class | Method | HTTP request | Description
  - [MigrationCutoverResponse](doc//MigrationCutoverResponse.md)
  - [MigrationPrepareResponse](doc//MigrationPrepareResponse.md)
  - [MigrationStatusResponse](doc//MigrationStatusResponse.md)
- - [ModelSource](doc//ModelSource.md)
  - [NewProject](doc//NewProject.md)
  - [ProjectAIFunctionItem](doc//ProjectAIFunctionItem.md)
  - [ProjectConfigTokenResponse](doc//ProjectConfigTokenResponse.md)
@@ -203,7 +204,6 @@ Class | Method | HTTP request | Description
  - [ProjectQueueInFlightJob](doc//ProjectQueueInFlightJob.md)
  - [ProjectQueueStatusResponse](doc//ProjectQueueStatusResponse.md)
  - [ProjectRenameHistoryResponse](doc//ProjectRenameHistoryResponse.md)
- - [ProjectRenameRequest](doc//ProjectRenameRequest.md)
  - [ProjectS3VectorKeysResponse](doc//ProjectS3VectorKeysResponse.md)
  - [ProjectStatusResponse](doc//ProjectStatusResponse.md)
  - [ProjectTagAssign](doc//ProjectTagAssign.md)
@@ -248,8 +248,6 @@ Class | Method | HTTP request | Description
  - [UpdateProjectHintResponse](doc//UpdateProjectHintResponse.md)
  - [UpdateProjectSettingsResponse](doc//UpdateProjectSettingsResponse.md)
  - [UpdateSettings](doc//UpdateSettings.md)
- - [UserSyncPayload](doc//UserSyncPayload.md)
- - [UserSyncResponse](doc//UserSyncResponse.md)
  - [ValidationError](doc//ValidationError.md)
 
 

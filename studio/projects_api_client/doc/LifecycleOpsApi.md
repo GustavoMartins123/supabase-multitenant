@@ -9,16 +9,16 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
-[**getProjectSettingsApiProjectsProjectNameSettingsGet**](LifecycleOpsApi.md#getprojectsettingsapiprojectsprojectnamesettingsget) | **GET** /api/projects/{project_name}/settings | Get Project Settings
-[**recreateProjectServicesApiProjectsProjectNameRecreateServicesPost**](LifecycleOpsApi.md#recreateprojectservicesapiprojectsprojectnamerecreateservicespost) | **POST** /api/projects/{project_name}/recreate-services | Recreate Project Services
-[**restartProjectApiProjectsProjectNameRestartPost**](LifecycleOpsApi.md#restartprojectapiprojectsprojectnamerestartpost) | **POST** /api/projects/{project_name}/restart | Restart Project
-[**startProjectApiProjectsProjectNameStartPost**](LifecycleOpsApi.md#startprojectapiprojectsprojectnamestartpost) | **POST** /api/projects/{project_name}/start | Start Project
-[**stopProjectApiProjectsProjectNameStopPost**](LifecycleOpsApi.md#stopprojectapiprojectsprojectnamestoppost) | **POST** /api/projects/{project_name}/stop | Stop Project
-[**updateProjectSettingsApiProjectsProjectNameSettingsPut**](LifecycleOpsApi.md#updateprojectsettingsapiprojectsprojectnamesettingsput) | **PUT** /api/projects/{project_name}/settings | Update Project Settings
+[**getProjectSettingsApiProjectsProjectRefSettingsGet**](LifecycleOpsApi.md#getprojectsettingsapiprojectsprojectrefsettingsget) | **GET** /api/projects/{project_ref}/settings | Get Project Settings
+[**recreateProjectServicesApiProjectsProjectRefRecreateServicesPost**](LifecycleOpsApi.md#recreateprojectservicesapiprojectsprojectrefrecreateservicespost) | **POST** /api/projects/{project_ref}/recreate-services | Recreate Project Services
+[**restartProjectApiProjectsProjectRefRestartPost**](LifecycleOpsApi.md#restartprojectapiprojectsprojectrefrestartpost) | **POST** /api/projects/{project_ref}/restart | Restart Project
+[**startProjectApiProjectsProjectRefStartPost**](LifecycleOpsApi.md#startprojectapiprojectsprojectrefstartpost) | **POST** /api/projects/{project_ref}/start | Start Project
+[**stopProjectApiProjectsProjectRefStopPost**](LifecycleOpsApi.md#stopprojectapiprojectsprojectrefstoppost) | **POST** /api/projects/{project_ref}/stop | Stop Project
+[**updateProjectSettingsApiProjectsProjectRefSettingsPut**](LifecycleOpsApi.md#updateprojectsettingsapiprojectsprojectrefsettingsput) | **PUT** /api/projects/{project_ref}/settings | Update Project Settings
 
 
-# **getProjectSettingsApiProjectsProjectNameSettingsGet**
-> GetProjectSettingsResponse getProjectSettingsApiProjectsProjectNameSettingsGet(projectName)
+# **getProjectSettingsApiProjectsProjectRefSettingsGet**
+> GetProjectSettingsResponse getProjectSettingsApiProjectsProjectRefSettingsGet(projectRef)
 
 Get Project Settings
 
@@ -27,13 +27,13 @@ Get Project Settings
 import 'package:projects_api_client/api.dart';
 
 final api_instance = LifecycleOpsApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 
 try {
-    final result = api_instance.getProjectSettingsApiProjectsProjectNameSettingsGet(projectName);
+    final result = api_instance.getProjectSettingsApiProjectsProjectRefSettingsGet(projectRef);
     print(result);
 } catch (e) {
-    print('Exception when calling LifecycleOpsApi->getProjectSettingsApiProjectsProjectNameSettingsGet: $e\n');
+    print('Exception when calling LifecycleOpsApi->getProjectSettingsApiProjectsProjectRefSettingsGet: $e\n');
 }
 ```
 
@@ -41,7 +41,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
 
 ### Return type
 
@@ -58,8 +58,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **recreateProjectServicesApiProjectsProjectNameRecreateServicesPost**
-> RecreateProjectServicesResponse recreateProjectServicesApiProjectsProjectNameRecreateServicesPost(projectName, recreateServices)
+# **recreateProjectServicesApiProjectsProjectRefRecreateServicesPost**
+> RecreateProjectServicesResponse recreateProjectServicesApiProjectsProjectRefRecreateServicesPost(projectRef, recreateServices)
 
 Recreate Project Services
 
@@ -70,14 +70,14 @@ Recreate specific services of a project using docker compose down + up. This is 
 import 'package:projects_api_client/api.dart';
 
 final api_instance = LifecycleOpsApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final recreateServices = RecreateServices(); // RecreateServices | 
 
 try {
-    final result = api_instance.recreateProjectServicesApiProjectsProjectNameRecreateServicesPost(projectName, recreateServices);
+    final result = api_instance.recreateProjectServicesApiProjectsProjectRefRecreateServicesPost(projectRef, recreateServices);
     print(result);
 } catch (e) {
-    print('Exception when calling LifecycleOpsApi->recreateProjectServicesApiProjectsProjectNameRecreateServicesPost: $e\n');
+    print('Exception when calling LifecycleOpsApi->recreateProjectServicesApiProjectsProjectRefRecreateServicesPost: $e\n');
 }
 ```
 
@@ -85,7 +85,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **recreateServices** | [**RecreateServices**](RecreateServices.md)|  | 
 
 ### Return type
@@ -103,8 +103,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **restartProjectApiProjectsProjectNameRestartPost**
-> RestartProjectResponse restartProjectApiProjectsProjectNameRestartPost(projectName)
+# **restartProjectApiProjectsProjectRefRestartPost**
+> RestartProjectResponse restartProjectApiProjectsProjectRefRestartPost(projectRef)
 
 Restart Project
 
@@ -115,13 +115,13 @@ Reinicia os containers do projeto. Enfileirado por projeto.
 import 'package:projects_api_client/api.dart';
 
 final api_instance = LifecycleOpsApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 
 try {
-    final result = api_instance.restartProjectApiProjectsProjectNameRestartPost(projectName);
+    final result = api_instance.restartProjectApiProjectsProjectRefRestartPost(projectRef);
     print(result);
 } catch (e) {
-    print('Exception when calling LifecycleOpsApi->restartProjectApiProjectsProjectNameRestartPost: $e\n');
+    print('Exception when calling LifecycleOpsApi->restartProjectApiProjectsProjectRefRestartPost: $e\n');
 }
 ```
 
@@ -129,7 +129,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
 
 ### Return type
 
@@ -146,8 +146,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **startProjectApiProjectsProjectNameStartPost**
-> StartProjectResponse startProjectApiProjectsProjectNameStartPost(projectName)
+# **startProjectApiProjectsProjectRefStartPost**
+> StartProjectResponse startProjectApiProjectsProjectRefStartPost(projectRef)
 
 Start Project
 
@@ -158,13 +158,13 @@ Inicia os containers do projeto. Enfileirado por projeto.
 import 'package:projects_api_client/api.dart';
 
 final api_instance = LifecycleOpsApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 
 try {
-    final result = api_instance.startProjectApiProjectsProjectNameStartPost(projectName);
+    final result = api_instance.startProjectApiProjectsProjectRefStartPost(projectRef);
     print(result);
 } catch (e) {
-    print('Exception when calling LifecycleOpsApi->startProjectApiProjectsProjectNameStartPost: $e\n');
+    print('Exception when calling LifecycleOpsApi->startProjectApiProjectsProjectRefStartPost: $e\n');
 }
 ```
 
@@ -172,7 +172,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
 
 ### Return type
 
@@ -189,8 +189,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **stopProjectApiProjectsProjectNameStopPost**
-> StopProjectResponse stopProjectApiProjectsProjectNameStopPost(projectName)
+# **stopProjectApiProjectsProjectRefStopPost**
+> StopProjectResponse stopProjectApiProjectsProjectRefStopPost(projectRef)
 
 Stop Project
 
@@ -199,13 +199,13 @@ Stop Project
 import 'package:projects_api_client/api.dart';
 
 final api_instance = LifecycleOpsApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 
 try {
-    final result = api_instance.stopProjectApiProjectsProjectNameStopPost(projectName);
+    final result = api_instance.stopProjectApiProjectsProjectRefStopPost(projectRef);
     print(result);
 } catch (e) {
-    print('Exception when calling LifecycleOpsApi->stopProjectApiProjectsProjectNameStopPost: $e\n');
+    print('Exception when calling LifecycleOpsApi->stopProjectApiProjectsProjectRefStopPost: $e\n');
 }
 ```
 
@@ -213,7 +213,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
 
 ### Return type
 
@@ -230,8 +230,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **updateProjectSettingsApiProjectsProjectNameSettingsPut**
-> UpdateProjectSettingsResponse updateProjectSettingsApiProjectsProjectNameSettingsPut(projectName, updateSettings)
+# **updateProjectSettingsApiProjectsProjectRefSettingsPut**
+> UpdateProjectSettingsResponse updateProjectSettingsApiProjectsProjectRefSettingsPut(projectRef, updateSettings)
 
 Update Project Settings
 
@@ -240,14 +240,14 @@ Update Project Settings
 import 'package:projects_api_client/api.dart';
 
 final api_instance = LifecycleOpsApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final updateSettings = UpdateSettings(); // UpdateSettings | 
 
 try {
-    final result = api_instance.updateProjectSettingsApiProjectsProjectNameSettingsPut(projectName, updateSettings);
+    final result = api_instance.updateProjectSettingsApiProjectsProjectRefSettingsPut(projectRef, updateSettings);
     print(result);
 } catch (e) {
-    print('Exception when calling LifecycleOpsApi->updateProjectSettingsApiProjectsProjectNameSettingsPut: $e\n');
+    print('Exception when calling LifecycleOpsApi->updateProjectSettingsApiProjectsProjectRefSettingsPut: $e\n');
 }
 ```
 
@@ -255,7 +255,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **updateSettings** | [**UpdateSettings**](UpdateSettings.md)|  | 
 
 ### Return type

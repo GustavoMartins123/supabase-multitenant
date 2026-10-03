@@ -25,7 +25,8 @@ void main() {
                 width: 380,
                 height: 280,
                 child: ProjectCard(
-                  refKey: 'meu_projeto',
+                  refKey: 'abcdefghijklmnopqrst',
+                  technicalName: 'meu_projeto',
                   opaqueApiKeysStatus: 'provisioning',
                   opaqueApiKeySlotCount: 0,
                   activeJob: job,

@@ -66,6 +66,8 @@ local function deterministic_uuid(inputs)
     }, "-")
 end
 
+require("jit").off(deterministic_uuid, true)
+
 local STUDIO_BASE_URL = "http://studio:3000"
 local respond_json
 

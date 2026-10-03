@@ -24,11 +24,11 @@ class ProjectKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<Response> rotateProjectKeyApiProjectsProjectNameRotateKeyPostWithHttpInfo(String projectName,) async {
+  /// * [String] projectRef (required):
+  Future<Response> rotateProjectKeyApiProjectsProjectRefRotateKeyPostWithHttpInfo(String projectRef,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/rotate-key'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/rotate-key'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -57,9 +57,9 @@ class ProjectKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<RotateProjectKeyResponse?> rotateProjectKeyApiProjectsProjectNameRotateKeyPost(String projectName,) async {
-    final response = await rotateProjectKeyApiProjectsProjectNameRotateKeyPostWithHttpInfo(projectName,);
+  /// * [String] projectRef (required):
+  Future<RotateProjectKeyResponse?> rotateProjectKeyApiProjectsProjectRefRotateKeyPost(String projectRef,) async {
+    final response = await rotateProjectKeyApiProjectsProjectRefRotateKeyPostWithHttpInfo(projectRef,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -79,13 +79,13 @@ class ProjectKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [AutomaticKeyRotationUpdate] automaticKeyRotationUpdate (required):
-  Future<Response> updateAutomaticKeyRotationApiProjectsProjectNameAutomaticKeyRotationPutWithHttpInfo(String projectName, AutomaticKeyRotationUpdate automaticKeyRotationUpdate,) async {
+  Future<Response> updateAutomaticKeyRotationApiProjectsProjectRefAutomaticKeyRotationPutWithHttpInfo(String projectRef, AutomaticKeyRotationUpdate automaticKeyRotationUpdate,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/automatic-key-rotation'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/automatic-key-rotation'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody = automaticKeyRotationUpdate;
@@ -112,11 +112,11 @@ class ProjectKeysApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [AutomaticKeyRotationUpdate] automaticKeyRotationUpdate (required):
-  Future<AutomaticKeyRotationResponse?> updateAutomaticKeyRotationApiProjectsProjectNameAutomaticKeyRotationPut(String projectName, AutomaticKeyRotationUpdate automaticKeyRotationUpdate,) async {
-    final response = await updateAutomaticKeyRotationApiProjectsProjectNameAutomaticKeyRotationPutWithHttpInfo(projectName, automaticKeyRotationUpdate,);
+  Future<AutomaticKeyRotationResponse?> updateAutomaticKeyRotationApiProjectsProjectRefAutomaticKeyRotationPut(String projectRef, AutomaticKeyRotationUpdate automaticKeyRotationUpdate,) async {
+    final response = await updateAutomaticKeyRotationApiProjectsProjectRefAutomaticKeyRotationPutWithHttpInfo(projectRef, automaticKeyRotationUpdate,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }

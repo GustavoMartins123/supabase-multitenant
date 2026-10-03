@@ -20,10 +20,8 @@ class RenameHistoryEntry {
     required this.error,
     required this.id,
     required this.jobId,
-    required this.newName,
-    required this.newPath,
-    required this.oldName,
-    required this.oldPath,
+    required this.newRef,
+    required this.oldRef,
     required this.status,
     required this.updatedAt,
   });
@@ -42,13 +40,9 @@ class RenameHistoryEntry {
 
   String jobId;
 
-  String newName;
+  String newRef;
 
-  String newPath;
-
-  String oldName;
-
-  String oldPath;
+  String oldRef;
 
   String status;
 
@@ -63,10 +57,8 @@ class RenameHistoryEntry {
     other.error == error &&
     other.id == id &&
     other.jobId == jobId &&
-    other.newName == newName &&
-    other.newPath == newPath &&
-    other.oldName == oldName &&
-    other.oldPath == oldPath &&
+    other.newRef == newRef &&
+    other.oldRef == oldRef &&
     other.status == status &&
     other.updatedAt == updatedAt;
 
@@ -80,15 +72,13 @@ class RenameHistoryEntry {
     (error == null ? 0 : error!.hashCode) +
     (id.hashCode) +
     (jobId.hashCode) +
-    (newName.hashCode) +
-    (newPath.hashCode) +
-    (oldName.hashCode) +
-    (oldPath.hashCode) +
+    (newRef.hashCode) +
+    (oldRef.hashCode) +
     (status.hashCode) +
     (updatedAt.hashCode);
 
   @override
-  String toString() => 'RenameHistoryEntry[actorName=$actorName, actorUserId=$actorUserId, completedAt=$completedAt, createdAt=$createdAt, error=$error, id=$id, jobId=$jobId, newName=$newName, newPath=$newPath, oldName=$oldName, oldPath=$oldPath, status=$status, updatedAt=$updatedAt]';
+  String toString() => 'RenameHistoryEntry[actorName=$actorName, actorUserId=$actorUserId, completedAt=$completedAt, createdAt=$createdAt, error=$error, id=$id, jobId=$jobId, newRef=$newRef, oldRef=$oldRef, status=$status, updatedAt=$updatedAt]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -111,10 +101,8 @@ class RenameHistoryEntry {
     }
       json[r'id'] = this.id;
       json[r'job_id'] = this.jobId;
-      json[r'new_name'] = this.newName;
-      json[r'new_path'] = this.newPath;
-      json[r'old_name'] = this.oldName;
-      json[r'old_path'] = this.oldPath;
+      json[r'new_ref'] = this.newRef;
+      json[r'old_ref'] = this.oldRef;
       json[r'status'] = this.status;
       json[r'updated_at'] = this.updatedAt;
     return json;
@@ -146,10 +134,8 @@ class RenameHistoryEntry {
         error: mapValueOfType<String>(json, r'error'),
         id: mapValueOfType<int>(json, r'id')!,
         jobId: mapValueOfType<String>(json, r'job_id')!,
-        newName: mapValueOfType<String>(json, r'new_name')!,
-        newPath: mapValueOfType<String>(json, r'new_path')!,
-        oldName: mapValueOfType<String>(json, r'old_name')!,
-        oldPath: mapValueOfType<String>(json, r'old_path')!,
+        newRef: mapValueOfType<String>(json, r'new_ref')!,
+        oldRef: mapValueOfType<String>(json, r'old_ref')!,
         status: mapValueOfType<String>(json, r'status')!,
         updatedAt: mapValueOfType<String>(json, r'updated_at')!,
       );
@@ -206,10 +192,8 @@ class RenameHistoryEntry {
     'error',
     'id',
     'job_id',
-    'new_name',
-    'new_path',
-    'old_name',
-    'old_path',
+    'new_ref',
+    'old_ref',
     'status',
     'updated_at',
   };

@@ -48,7 +48,7 @@ class RealSessionTest(unittest.TestCase):
                 self.assertEqual(json.loads(result['body'])['actor'], credentials['username'])
                 reauth = page.evaluate('''async credentials => (await fetch('/api/security/step-up', {
                     method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-                        password:credentials.password,action:'delete_project',project:'probe_project',resource:'probe_project'})})).status''', credentials)
+                        password:credentials.password,action:'delete_project',project:'abcdefghijklmnopqrst',resource:'abcdefghijklmnopqrst'})})).status''', credentials)
                 self.assertEqual(reauth, 200)
                 # A valid session must survive a short idle period without relogin.
                 page.wait_for_timeout(10000)

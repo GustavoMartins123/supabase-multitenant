@@ -21,6 +21,7 @@ Name | Type | Description | Notes
 **progress** | **int** |  | 
 **project** | **String** |  | 
 **projectUuid** | **String** |  | 
+**publicRef** | **String** |  |
 **queuePosition** | **int** |  | 
 **restorePointId** | **String** |  | 
 **retryOf** | **String** |  | 

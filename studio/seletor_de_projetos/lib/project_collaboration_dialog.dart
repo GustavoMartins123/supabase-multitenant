@@ -713,8 +713,8 @@ class _ProjectCollaborationDialogState
       separatorBuilder: (_, __) => const SizedBox(height: 10),
       itemBuilder: (_, index) {
         final notification = data.notifications[index];
-        final renameFrom = notification.payload['old_name']?.toString();
-        final renameTo = notification.payload['new_name']?.toString();
+        final renameFrom = notification.payload['old_ref']?.toString();
+        final renameTo = notification.payload['new_ref']?.toString();
         return Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(

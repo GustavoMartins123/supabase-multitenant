@@ -22,13 +22,13 @@ class RestorePointsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [RestorePointCreate] restorePointCreate (required):
-  Future<Response> createProjectRestorePointApiProjectsProjectNameRestorePointsPostWithHttpInfo(String projectName, RestorePointCreate restorePointCreate,) async {
+  Future<Response> createProjectRestorePointApiProjectsProjectRefRestorePointsPostWithHttpInfo(String projectRef, RestorePointCreate restorePointCreate,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/restore-points'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/restore-points'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody = restorePointCreate;
@@ -55,11 +55,11 @@ class RestorePointsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [RestorePointCreate] restorePointCreate (required):
-  Future<CreateRestorePointResponse?> createProjectRestorePointApiProjectsProjectNameRestorePointsPost(String projectName, RestorePointCreate restorePointCreate,) async {
-    final response = await createProjectRestorePointApiProjectsProjectNameRestorePointsPostWithHttpInfo(projectName, restorePointCreate,);
+  Future<CreateRestorePointResponse?> createProjectRestorePointApiProjectsProjectRefRestorePointsPost(String projectRef, RestorePointCreate restorePointCreate,) async {
+    final response = await createProjectRestorePointApiProjectsProjectRefRestorePointsPostWithHttpInfo(projectRef, restorePointCreate,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -79,13 +79,13 @@ class RestorePointsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] pointId (required):
-  Future<Response> deleteProjectRestorePointApiProjectsProjectNameRestorePointsPointIdDeleteWithHttpInfo(String projectName, String pointId,) async {
+  Future<Response> deleteProjectRestorePointApiProjectsProjectRefRestorePointsPointIdDeleteWithHttpInfo(String projectRef, String pointId,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/restore-points/{point_id}'
-      .replaceAll('{project_name}', projectName)
+    final path = r'/api/projects/{project_ref}/restore-points/{point_id}'
+      .replaceAll('{project_ref}', projectRef)
       .replaceAll('{point_id}', pointId);
 
     // ignore: prefer_final_locals
@@ -113,11 +113,11 @@ class RestorePointsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] pointId (required):
-  Future<DeleteRestorePointResponse?> deleteProjectRestorePointApiProjectsProjectNameRestorePointsPointIdDelete(String projectName, String pointId,) async {
-    final response = await deleteProjectRestorePointApiProjectsProjectNameRestorePointsPointIdDeleteWithHttpInfo(projectName, pointId,);
+  Future<DeleteRestorePointResponse?> deleteProjectRestorePointApiProjectsProjectRefRestorePointsPointIdDelete(String projectRef, String pointId,) async {
+    final response = await deleteProjectRestorePointApiProjectsProjectRefRestorePointsPointIdDeleteWithHttpInfo(projectRef, pointId,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -137,11 +137,11 @@ class RestorePointsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<Response> listProjectRestorePointsApiProjectsProjectNameRestorePointsGetWithHttpInfo(String projectName,) async {
+  /// * [String] projectRef (required):
+  Future<Response> listProjectRestorePointsApiProjectsProjectRefRestorePointsGetWithHttpInfo(String projectRef,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/restore-points'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/restore-points'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -168,9 +168,9 @@ class RestorePointsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<ListRestorePointsResponse?> listProjectRestorePointsApiProjectsProjectNameRestorePointsGet(String projectName,) async {
-    final response = await listProjectRestorePointsApiProjectsProjectNameRestorePointsGetWithHttpInfo(projectName,);
+  /// * [String] projectRef (required):
+  Future<ListRestorePointsResponse?> listProjectRestorePointsApiProjectsProjectRefRestorePointsGet(String projectRef,) async {
+    final response = await listProjectRestorePointsApiProjectsProjectRefRestorePointsGetWithHttpInfo(projectRef,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -190,13 +190,13 @@ class RestorePointsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] pointId (required):
-  Future<Response> restoreProjectRestorePointApiProjectsProjectNameRestorePointsPointIdRestorePostWithHttpInfo(String projectName, String pointId,) async {
+  Future<Response> restoreProjectRestorePointApiProjectsProjectRefRestorePointsPointIdRestorePostWithHttpInfo(String projectRef, String pointId,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/restore-points/{point_id}/restore'
-      .replaceAll('{project_name}', projectName)
+    final path = r'/api/projects/{project_ref}/restore-points/{point_id}/restore'
+      .replaceAll('{project_ref}', projectRef)
       .replaceAll('{point_id}', pointId);
 
     // ignore: prefer_final_locals
@@ -224,11 +224,11 @@ class RestorePointsApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] pointId (required):
-  Future<RestoreRestorePointResponse?> restoreProjectRestorePointApiProjectsProjectNameRestorePointsPointIdRestorePost(String projectName, String pointId,) async {
-    final response = await restoreProjectRestorePointApiProjectsProjectNameRestorePointsPointIdRestorePostWithHttpInfo(projectName, pointId,);
+  Future<RestoreRestorePointResponse?> restoreProjectRestorePointApiProjectsProjectRefRestorePointsPointIdRestorePost(String projectRef, String pointId,) async {
+    final response = await restoreProjectRestorePointApiProjectsProjectRefRestorePointsPointIdRestorePostWithHttpInfo(projectRef, pointId,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }

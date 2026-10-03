@@ -26,7 +26,7 @@ class ProjectUserTelemetryResponse {
 
   int activeUsers;
 
-  String end;
+  DateTime end;
 
   String period;
 
@@ -36,7 +36,7 @@ class ProjectUserTelemetryResponse {
 
   String source_;
 
-  String start;
+  DateTime start;
 
   int totalSessions;
 
@@ -73,12 +73,12 @@ class ProjectUserTelemetryResponse {
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
       json[r'active_users'] = this.activeUsers;
-      json[r'end'] = this.end;
+      json[r'end'] = this.end.toUtc().toIso8601String();
       json[r'period'] = this.period;
       json[r'project'] = this.project;
       json[r'sessions_are_current_records'] = this.sessionsAreCurrentRecords;
       json[r'source'] = this.source_;
-      json[r'start'] = this.start;
+      json[r'start'] = this.start.toUtc().toIso8601String();
       json[r'total_sessions'] = this.totalSessions;
       json[r'users'] = this.users;
     return json;
@@ -104,12 +104,12 @@ class ProjectUserTelemetryResponse {
 
       return ProjectUserTelemetryResponse(
         activeUsers: mapValueOfType<int>(json, r'active_users')!,
-        end: mapValueOfType<String>(json, r'end')!,
+        end: mapDateTime(json, r'end', r'')!,
         period: mapValueOfType<String>(json, r'period')!,
         project: mapValueOfType<String>(json, r'project')!,
         sessionsAreCurrentRecords: mapValueOfType<bool>(json, r'sessions_are_current_records')!,
         source_: mapValueOfType<String>(json, r'source')!,
-        start: mapValueOfType<String>(json, r'start')!,
+        start: mapDateTime(json, r'start', r'')!,
         totalSessions: mapValueOfType<int>(json, r'total_sessions')!,
         users: TelemetryUserItem.listFromJson(json[r'users']),
       );

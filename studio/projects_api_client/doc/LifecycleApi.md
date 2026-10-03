@@ -9,12 +9,12 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
-[**getContainerLogsApiProjectsProjectNameLogsServiceGet**](LifecycleApi.md#getcontainerlogsapiprojectsprojectnamelogsserviceget) | **GET** /api/projects/{project_name}/logs/{service} | Get Container Logs
-[**getProjectDockerStatusApiProjectsProjectNameStatusGet**](LifecycleApi.md#getprojectdockerstatusapiprojectsprojectnamestatusget) | **GET** /api/projects/{project_name}/status | Get Project Docker Status
+[**getContainerLogsApiProjectsProjectRefLogsServiceGet**](LifecycleApi.md#getcontainerlogsapiprojectsprojectreflogsserviceget) | **GET** /api/projects/{project_ref}/logs/{service} | Get Container Logs
+[**getProjectDockerStatusApiProjectsProjectRefStatusGet**](LifecycleApi.md#getprojectdockerstatusapiprojectsprojectrefstatusget) | **GET** /api/projects/{project_ref}/status | Get Project Docker Status
 
 
-# **getContainerLogsApiProjectsProjectNameLogsServiceGet**
-> ContainerLogsResponse getContainerLogsApiProjectsProjectNameLogsServiceGet(projectName, service, lines)
+# **getContainerLogsApiProjectsProjectRefLogsServiceGet**
+> ContainerLogsResponse getContainerLogsApiProjectsProjectRefLogsServiceGet(projectRef, service, lines)
 
 Get Container Logs
 
@@ -23,15 +23,15 @@ Get Container Logs
 import 'package:projects_api_client/api.dart';
 
 final api_instance = LifecycleApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final service = service_example; // String | 
 final lines = 56; // int | 
 
 try {
-    final result = api_instance.getContainerLogsApiProjectsProjectNameLogsServiceGet(projectName, service, lines);
+    final result = api_instance.getContainerLogsApiProjectsProjectRefLogsServiceGet(projectRef, service, lines);
     print(result);
 } catch (e) {
-    print('Exception when calling LifecycleApi->getContainerLogsApiProjectsProjectNameLogsServiceGet: $e\n');
+    print('Exception when calling LifecycleApi->getContainerLogsApiProjectsProjectRefLogsServiceGet: $e\n');
 }
 ```
 
@@ -39,7 +39,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **service** | **String**|  | 
  **lines** | **int**|  | [optional] [default to 100]
 
@@ -58,8 +58,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **getProjectDockerStatusApiProjectsProjectNameStatusGet**
-> ProjectStatusResponse getProjectDockerStatusApiProjectsProjectNameStatusGet(projectName)
+# **getProjectDockerStatusApiProjectsProjectRefStatusGet**
+> ProjectStatusResponse getProjectDockerStatusApiProjectsProjectRefStatusGet(projectRef)
 
 Get Project Docker Status
 
@@ -68,13 +68,13 @@ Get Project Docker Status
 import 'package:projects_api_client/api.dart';
 
 final api_instance = LifecycleApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 
 try {
-    final result = api_instance.getProjectDockerStatusApiProjectsProjectNameStatusGet(projectName);
+    final result = api_instance.getProjectDockerStatusApiProjectsProjectRefStatusGet(projectRef);
     print(result);
 } catch (e) {
-    print('Exception when calling LifecycleApi->getProjectDockerStatusApiProjectsProjectNameStatusGet: $e\n');
+    print('Exception when calling LifecycleApi->getProjectDockerStatusApiProjectsProjectRefStatusGet: $e\n');
 }
 ```
 
@@ -82,7 +82,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
 
 ### Return type
 

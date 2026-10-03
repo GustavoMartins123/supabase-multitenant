@@ -8,7 +8,6 @@ import 'package:projects_api_client/api.dart';
 ## Properties
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**aliases** | **List<String>** |  | [default to const []]
 **currentRef** | **String** |  | 
 **projectId** | **String** |  | 
 

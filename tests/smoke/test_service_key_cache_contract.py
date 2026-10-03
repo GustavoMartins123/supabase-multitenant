@@ -58,8 +58,7 @@ class ServiceKeyCacheContractTest(unittest.TestCase):
 
     def test_projects_api_to_studio_calls_use_service_hmac_not_shared_token(self):
         cache_client = (APP / "service_key_cache.py").read_text(encoding="utf-8")
-        snippet_client = (APP / "snippets_migration.py").read_text(encoding="utf-8")
-        for source in (cache_client, snippet_client):
+        for source in (cache_client,):
             self.assertIn("PROJECTS_API_HMAC_SECRET", source)
             self.assertIn("build_internal_hmac_headers", source)
             self.assertIn('service="projects-api"', source)
@@ -68,10 +67,7 @@ class ServiceKeyCacheContractTest(unittest.TestCase):
         cache_handler = (LUA / "cache" / "invalidate_service_key.lua").read_text(
             encoding="utf-8"
         )
-        snippet_handler = (LUA / "admin_api" / "snippets_rename.lua").read_text(
-            encoding="utf-8"
-        )
-        for source in (cache_handler, snippet_handler):
+        for source in (cache_handler,):
             self.assertIn("PROJECTS_API_HMAC_SECRET", source)
             self.assertIn("verify_current_request", source)
             self.assertIn('"projects-api"', source)

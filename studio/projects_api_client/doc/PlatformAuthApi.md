@@ -9,16 +9,16 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
-[**listProjectAuthUsersApiProjectsInternalAuthUsersProjectNameGet**](PlatformAuthApi.md#listprojectauthusersapiprojectsinternalauthusersprojectnameget) | **GET** /api/projects/internal/auth-users/{project_name} | List Project Auth Users
-[**proxyProjectAuthAdminDelete**](PlatformAuthApi.md#proxyprojectauthadmindelete) | **DELETE** /api/projects/internal/auth-admin/{project_name}/{gotrue_path} | Proxy Project Auth Admin
-[**proxyProjectAuthAdminGet**](PlatformAuthApi.md#proxyprojectauthadminget) | **GET** /api/projects/internal/auth-admin/{project_name}/{gotrue_path} | Proxy Project Auth Admin
-[**proxyProjectAuthAdminPatch**](PlatformAuthApi.md#proxyprojectauthadminpatch) | **PATCH** /api/projects/internal/auth-admin/{project_name}/{gotrue_path} | Proxy Project Auth Admin
-[**proxyProjectAuthAdminPost**](PlatformAuthApi.md#proxyprojectauthadminpost) | **POST** /api/projects/internal/auth-admin/{project_name}/{gotrue_path} | Proxy Project Auth Admin
-[**proxyProjectAuthAdminPut**](PlatformAuthApi.md#proxyprojectauthadminput) | **PUT** /api/projects/internal/auth-admin/{project_name}/{gotrue_path} | Proxy Project Auth Admin
+[**listProjectAuthUsersApiProjectsInternalAuthUsersProjectRefGet**](PlatformAuthApi.md#listprojectauthusersapiprojectsinternalauthusersprojectrefget) | **GET** /api/projects/internal/auth-users/{project_ref} | List Project Auth Users
+[**proxyProjectAuthAdminDelete**](PlatformAuthApi.md#proxyprojectauthadmindelete) | **DELETE** /api/projects/internal/auth-admin/{project_ref}/{gotrue_path} | Proxy Project Auth Admin
+[**proxyProjectAuthAdminGet**](PlatformAuthApi.md#proxyprojectauthadminget) | **GET** /api/projects/internal/auth-admin/{project_ref}/{gotrue_path} | Proxy Project Auth Admin
+[**proxyProjectAuthAdminPatch**](PlatformAuthApi.md#proxyprojectauthadminpatch) | **PATCH** /api/projects/internal/auth-admin/{project_ref}/{gotrue_path} | Proxy Project Auth Admin
+[**proxyProjectAuthAdminPost**](PlatformAuthApi.md#proxyprojectauthadminpost) | **POST** /api/projects/internal/auth-admin/{project_ref}/{gotrue_path} | Proxy Project Auth Admin
+[**proxyProjectAuthAdminPut**](PlatformAuthApi.md#proxyprojectauthadminput) | **PUT** /api/projects/internal/auth-admin/{project_ref}/{gotrue_path} | Proxy Project Auth Admin
 
 
-# **listProjectAuthUsersApiProjectsInternalAuthUsersProjectNameGet**
-> AuthUsersResponse listProjectAuthUsersApiProjectsInternalAuthUsersProjectNameGet(projectName, page, perPage)
+# **listProjectAuthUsersApiProjectsInternalAuthUsersProjectRefGet**
+> AuthUsersResponse listProjectAuthUsersApiProjectsInternalAuthUsersProjectRefGet(projectRef, page, perPage)
 
 List Project Auth Users
 
@@ -27,15 +27,15 @@ List Project Auth Users
 import 'package:projects_api_client/api.dart';
 
 final api_instance = PlatformAuthApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final page = 56; // int | 
 final perPage = 56; // int | 
 
 try {
-    final result = api_instance.listProjectAuthUsersApiProjectsInternalAuthUsersProjectNameGet(projectName, page, perPage);
+    final result = api_instance.listProjectAuthUsersApiProjectsInternalAuthUsersProjectRefGet(projectRef, page, perPage);
     print(result);
 } catch (e) {
-    print('Exception when calling PlatformAuthApi->listProjectAuthUsersApiProjectsInternalAuthUsersProjectNameGet: $e\n');
+    print('Exception when calling PlatformAuthApi->listProjectAuthUsersApiProjectsInternalAuthUsersProjectRefGet: $e\n');
 }
 ```
 
@@ -43,7 +43,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **page** | **int**|  | [optional] [default to 1]
  **perPage** | **int**|  | [optional] [default to 50]
 
@@ -63,7 +63,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **proxyProjectAuthAdminDelete**
-> Object proxyProjectAuthAdminDelete(projectName, gotruePath)
+> Object proxyProjectAuthAdminDelete(projectRef, gotruePath)
 
 Proxy Project Auth Admin
 
@@ -72,11 +72,11 @@ Proxy Project Auth Admin
 import 'package:projects_api_client/api.dart';
 
 final api_instance = PlatformAuthApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final gotruePath = gotruePath_example; // String | 
 
 try {
-    final result = api_instance.proxyProjectAuthAdminDelete(projectName, gotruePath);
+    final result = api_instance.proxyProjectAuthAdminDelete(projectRef, gotruePath);
     print(result);
 } catch (e) {
     print('Exception when calling PlatformAuthApi->proxyProjectAuthAdminDelete: $e\n');
@@ -87,7 +87,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **gotruePath** | **String**|  | 
 
 ### Return type
@@ -106,7 +106,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **proxyProjectAuthAdminGet**
-> Object proxyProjectAuthAdminGet(projectName, gotruePath)
+> Object proxyProjectAuthAdminGet(projectRef, gotruePath)
 
 Proxy Project Auth Admin
 
@@ -115,11 +115,11 @@ Proxy Project Auth Admin
 import 'package:projects_api_client/api.dart';
 
 final api_instance = PlatformAuthApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final gotruePath = gotruePath_example; // String | 
 
 try {
-    final result = api_instance.proxyProjectAuthAdminGet(projectName, gotruePath);
+    final result = api_instance.proxyProjectAuthAdminGet(projectRef, gotruePath);
     print(result);
 } catch (e) {
     print('Exception when calling PlatformAuthApi->proxyProjectAuthAdminGet: $e\n');
@@ -130,7 +130,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **gotruePath** | **String**|  | 
 
 ### Return type
@@ -149,7 +149,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **proxyProjectAuthAdminPatch**
-> Object proxyProjectAuthAdminPatch(projectName, gotruePath)
+> Object proxyProjectAuthAdminPatch(projectRef, gotruePath)
 
 Proxy Project Auth Admin
 
@@ -158,11 +158,11 @@ Proxy Project Auth Admin
 import 'package:projects_api_client/api.dart';
 
 final api_instance = PlatformAuthApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final gotruePath = gotruePath_example; // String | 
 
 try {
-    final result = api_instance.proxyProjectAuthAdminPatch(projectName, gotruePath);
+    final result = api_instance.proxyProjectAuthAdminPatch(projectRef, gotruePath);
     print(result);
 } catch (e) {
     print('Exception when calling PlatformAuthApi->proxyProjectAuthAdminPatch: $e\n');
@@ -173,7 +173,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **gotruePath** | **String**|  | 
 
 ### Return type
@@ -192,7 +192,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **proxyProjectAuthAdminPost**
-> Object proxyProjectAuthAdminPost(projectName, gotruePath)
+> Object proxyProjectAuthAdminPost(projectRef, gotruePath)
 
 Proxy Project Auth Admin
 
@@ -201,11 +201,11 @@ Proxy Project Auth Admin
 import 'package:projects_api_client/api.dart';
 
 final api_instance = PlatformAuthApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final gotruePath = gotruePath_example; // String | 
 
 try {
-    final result = api_instance.proxyProjectAuthAdminPost(projectName, gotruePath);
+    final result = api_instance.proxyProjectAuthAdminPost(projectRef, gotruePath);
     print(result);
 } catch (e) {
     print('Exception when calling PlatformAuthApi->proxyProjectAuthAdminPost: $e\n');
@@ -216,7 +216,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **gotruePath** | **String**|  | 
 
 ### Return type
@@ -235,7 +235,7 @@ No authorization required
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **proxyProjectAuthAdminPut**
-> Object proxyProjectAuthAdminPut(projectName, gotruePath)
+> Object proxyProjectAuthAdminPut(projectRef, gotruePath)
 
 Proxy Project Auth Admin
 
@@ -244,11 +244,11 @@ Proxy Project Auth Admin
 import 'package:projects_api_client/api.dart';
 
 final api_instance = PlatformAuthApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final gotruePath = gotruePath_example; // String | 
 
 try {
-    final result = api_instance.proxyProjectAuthAdminPut(projectName, gotruePath);
+    final result = api_instance.proxyProjectAuthAdminPut(projectRef, gotruePath);
     print(result);
 } catch (e) {
     print('Exception when calling PlatformAuthApi->proxyProjectAuthAdminPut: $e\n');
@@ -259,7 +259,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **gotruePath** | **String**|  | 
 
 ### Return type

@@ -41,6 +41,8 @@ def fixture_archive() -> bytes:
     payload = io.BytesIO()
     with tarfile.open(fileobj=payload, mode='w') as archive:
         for name in paths:
+            if not (ROOT / name).is_file():
+                continue
             value = (ROOT / name).read_bytes()
             item = tarfile.TarInfo(name)
             item.size = len(value)

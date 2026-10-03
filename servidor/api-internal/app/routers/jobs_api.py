@@ -36,6 +36,7 @@ class JobResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
     job_id: str
     project: str
+    public_ref: str | None
     project_uuid: str | None = None
     tenant_uuid: str | None = None
     created_by: str | None = None
@@ -70,6 +71,7 @@ class JobRetryResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
     job_id: str
     project: str
+    public_ref: str | None
     project_uuid: str | None = None
     tenant_uuid: str | None = None
     created_by: str | None = None

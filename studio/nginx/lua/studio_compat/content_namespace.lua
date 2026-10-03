@@ -1,11 +1,8 @@
 local cjson = require("cjson")
 local client = require("studio_compat.content_studio_client")
 local content_project_identity = require("studio_compat.content_project_identity")
-local content_namespace_migration = require("studio_compat.content_namespace_migration")
 
 local _M = {}
-
-local id_map_cache = ngx.shared.service_keys
 
 local simple_hash = client.simple_hash
 local deterministic_uuid = client.deterministic_uuid
@@ -50,138 +47,6 @@ end
 
 local function virtual_folder_id(user_id, project_scope, visible_name)
     return deterministic_uuid({ build_folder_name(user_id, project_scope), visible_name })
-end
-
-local function snippet_map_key(project_ref, user_id, request_id)
-    return table.concat({
-        "snippet-id-map",
-        project_ref or "",
-        user_id or "",
-        request_id or "",
-    }, ":")
-end
-
-local function actual_map_key(project_ref, user_id, actual_id)
-    return table.concat({
-        "snippet-actual-map",
-        project_ref or "",
-        user_id or "",
-        actual_id or "",
-    }, ":")
-end
-
-local function folder_map_key(project_ref, user_id, request_id)
-    return table.concat({
-        "folder-id-map",
-        project_ref or "",
-        user_id or "",
-        request_id or "",
-    }, ":")
-end
-
-local function folder_actual_map_key(project_ref, user_id, actual_id)
-    return table.concat({
-        "folder-actual-map",
-        project_ref or "",
-        user_id or "",
-        actual_id or "",
-    }, ":")
-end
-
-local function get_mapped_actual_id(project_ref, user_id, request_id)
-    if not id_map_cache or not project_ref or not user_id or not request_id or request_id == "" then
-        return nil
-    end
-
-    return id_map_cache:get(snippet_map_key(project_ref, user_id, request_id))
-end
-
-local function get_preferred_virtual_id(project_ref, user_id, actual_id)
-    if not id_map_cache or not project_ref or not user_id or not actual_id or actual_id == "" then
-        return nil
-    end
-
-    return id_map_cache:get(actual_map_key(project_ref, user_id, actual_id))
-end
-
-local function get_mapped_actual_folder_id(project_ref, user_id, request_id)
-    if not id_map_cache or not project_ref or not user_id or not request_id or request_id == "" then
-        return nil
-    end
-
-    return id_map_cache:get(folder_map_key(project_ref, user_id, request_id))
-end
-
-local function get_preferred_virtual_folder_id(project_ref, user_id, actual_id)
-    if not id_map_cache or not project_ref or not user_id or not actual_id or actual_id == "" then
-        return nil
-    end
-
-    return id_map_cache:get(folder_actual_map_key(project_ref, user_id, actual_id))
-end
-
-local function set_mapped_actual_id(project_ref, user_id, request_id, actual_id, remember_as_preferred)
-    if not id_map_cache or not project_ref or not user_id or not request_id or request_id == "" then
-        return
-    end
-    if not actual_id or actual_id == "" then
-        return
-    end
-
-    id_map_cache:set(snippet_map_key(project_ref, user_id, request_id), actual_id, 86400)
-
-    if remember_as_preferred then
-        id_map_cache:set(actual_map_key(project_ref, user_id, actual_id), request_id, 86400)
-    end
-end
-
-local function set_mapped_actual_folder_id(project_ref, user_id, request_id, actual_id, remember_as_preferred)
-    if not id_map_cache or not project_ref or not user_id or not request_id or request_id == "" then
-        return
-    end
-    if not actual_id or actual_id == "" then
-        return
-    end
-
-    id_map_cache:set(folder_map_key(project_ref, user_id, request_id), actual_id, 86400)
-
-    if remember_as_preferred then
-        id_map_cache:set(folder_actual_map_key(project_ref, user_id, actual_id), request_id, 86400)
-    end
-end
-
-local function append_unique(items, seen, value)
-    if not value or value == "" or seen[value] then
-        return
-    end
-
-    seen[value] = true
-    table.insert(items, value)
-end
-
-local function build_folder_aliases(user_id, project_scope, folder, visible_name)
-    local aliases = {}
-    local seen = {}
-
-    append_unique(aliases, seen, virtual_folder_id(user_id, project_scope, visible_name))
-
-    local selected_ref = client.get_selected_project_ref()
-    local identity = selected_ref and content_project_identity.resolve(selected_ref) or nil
-    for _, legacy_scope in ipairs((identity and identity.aliases) or {}) do
-        if legacy_scope ~= project_scope then
-            append_unique(aliases, seen, virtual_folder_id(user_id, legacy_scope, visible_name))
-        end
-    end
-
-    append_unique(aliases, seen, virtual_folder_id(user_id, "default", visible_name))
-    append_unique(aliases, seen, deterministic_uuid({ visible_name }))
-
-    if type(folder) == "table" then
-        append_unique(aliases, seen, folder.id)
-        append_unique(aliases, seen, deterministic_uuid({ folder.name }))
-    end
-
-    return aliases
 end
 
 local function clone_table(value)
@@ -244,21 +109,10 @@ local function load_namespace_state(project_ref, user_id, project_scope)
                     visible_name = safe_visible_name
                 end
 
-                local preferred_virtual_id = get_preferred_virtual_folder_id(project_scope, user_id, folder.id)
-                local aliases = build_folder_aliases(user_id, project_scope, folder, visible_name)
-                local canonical_virtual_id = aliases[1]
-                local resolved_virtual_id = preferred_virtual_id
-                if not resolved_virtual_id or resolved_virtual_id == "" then
-                    resolved_virtual_id = canonical_virtual_id
-                end
-
-                set_mapped_actual_folder_id(project_scope, user_id, canonical_virtual_id, folder.id, false)
-                if resolved_virtual_id ~= canonical_virtual_id then
-                    set_mapped_actual_folder_id(project_scope, user_id, resolved_virtual_id, folder.id, true)
-                end
+                local canonical_virtual_id = virtual_folder_id(user_id, project_scope, visible_name)
 
                 local virtual = {
-                    id = resolved_virtual_id,
+                    id = canonical_virtual_id,
                     name = visible_name,
                     owner_id = folder.owner_id or 1,
                     parent_id = cjson.null,
@@ -268,14 +122,10 @@ local function load_namespace_state(project_ref, user_id, project_scope)
                     actual = folder,
                     virtual = virtual,
                     canonical_virtual_id = canonical_virtual_id,
-                    aliases = aliases,
                 }
                 table.insert(state.child_folders, entry)
                 state.child_by_actual_id[folder.id] = entry
                 state.child_by_virtual_id[virtual.id] = entry
-                for _, alias in ipairs(aliases) do
-                    state.child_by_virtual_id[alias] = entry
-                end
                 state.child_by_visible_name[visible_name] = entry
             end
         end
@@ -293,11 +143,6 @@ local function resolve_namespace_root_folder(project_ref, user_id, project_scope
     local identity, identity_err = content_project_identity.resolve(selected_ref)
     if not identity or identity.project_id ~= project_scope then
         return nil, nil, identity_err or "stable project identity mismatch"
-    end
-
-    local migrated, migration_err = content_namespace_migration.ensure(user_id, identity)
-    if not migrated then
-        return nil, nil, "legacy namespace migration failed: " .. (migration_err or "unknown error")
     end
 
     local state, state_err = load_namespace_state(project_ref, user_id, project_scope)
@@ -467,18 +312,6 @@ _M.actual_child_folder_name = actual_child_folder_name
 _M.actual_folder_id = actual_folder_id
 _M.actual_snippet_id = actual_snippet_id
 _M.virtual_folder_id = virtual_folder_id
-_M.snippet_map_key = snippet_map_key
-_M.actual_map_key = actual_map_key
-_M.folder_map_key = folder_map_key
-_M.folder_actual_map_key = folder_actual_map_key
-_M.get_mapped_actual_id = get_mapped_actual_id
-_M.get_preferred_virtual_id = get_preferred_virtual_id
-_M.get_mapped_actual_folder_id = get_mapped_actual_folder_id
-_M.get_preferred_virtual_folder_id = get_preferred_virtual_folder_id
-_M.set_mapped_actual_id = set_mapped_actual_id
-_M.set_mapped_actual_folder_id = set_mapped_actual_folder_id
-_M.append_unique = append_unique
-_M.build_folder_aliases = build_folder_aliases
 _M.clone_table = clone_table
 _M.list_all_folders = list_all_folders
 _M.load_namespace_state = load_namespace_state

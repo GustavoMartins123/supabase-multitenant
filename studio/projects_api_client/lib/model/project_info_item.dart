@@ -15,7 +15,10 @@ class ProjectInfoItem {
   ProjectInfoItem({
     required this.displayName,
     required this.fileSizeLimit,
+    required this.id,
+    required this.isCallerProjectAdmin,
     required this.name,
+    required this.publicRef,
     required this.runningContainers,
     required this.status,
     required this.storageLimitToken,
@@ -26,7 +29,13 @@ class ProjectInfoItem {
 
   String fileSizeLimit;
 
+  String id;
+
+  bool isCallerProjectAdmin;
+
   String name;
+
+  String publicRef;
 
   int runningContainers;
 
@@ -40,7 +49,10 @@ class ProjectInfoItem {
   bool operator ==(Object other) => identical(this, other) || other is ProjectInfoItem &&
     other.displayName == displayName &&
     other.fileSizeLimit == fileSizeLimit &&
+    other.id == id &&
+    other.isCallerProjectAdmin == isCallerProjectAdmin &&
     other.name == name &&
+    other.publicRef == publicRef &&
     other.runningContainers == runningContainers &&
     other.status == status &&
     other.storageLimitToken == storageLimitToken &&
@@ -51,14 +63,17 @@ class ProjectInfoItem {
     // ignore: unnecessary_parenthesis
     (displayName == null ? 0 : displayName!.hashCode) +
     (fileSizeLimit.hashCode) +
+    (id.hashCode) +
+    (isCallerProjectAdmin.hashCode) +
     (name.hashCode) +
+    (publicRef.hashCode) +
     (runningContainers.hashCode) +
     (status.hashCode) +
     (storageLimitToken.hashCode) +
     (totalContainers.hashCode);
 
   @override
-  String toString() => 'ProjectInfoItem[displayName=$displayName, fileSizeLimit=$fileSizeLimit, name=$name, runningContainers=$runningContainers, status=$status, storageLimitToken=$storageLimitToken, totalContainers=$totalContainers]';
+  String toString() => 'ProjectInfoItem[displayName=$displayName, fileSizeLimit=$fileSizeLimit, id=$id, isCallerProjectAdmin=$isCallerProjectAdmin, name=$name, publicRef=$publicRef, runningContainers=$runningContainers, status=$status, storageLimitToken=$storageLimitToken, totalContainers=$totalContainers]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -68,7 +83,10 @@ class ProjectInfoItem {
       json[r'display_name'] = null;
     }
       json[r'file_size_limit'] = this.fileSizeLimit;
+      json[r'id'] = this.id;
+      json[r'is_caller_project_admin'] = this.isCallerProjectAdmin;
       json[r'name'] = this.name;
+      json[r'public_ref'] = this.publicRef;
       json[r'running_containers'] = this.runningContainers;
       json[r'status'] = this.status;
       json[r'storage_limit_token'] = this.storageLimitToken;
@@ -97,7 +115,10 @@ class ProjectInfoItem {
       return ProjectInfoItem(
         displayName: mapValueOfType<String>(json, r'display_name'),
         fileSizeLimit: mapValueOfType<String>(json, r'file_size_limit')!,
+        id: mapValueOfType<String>(json, r'id')!,
+        isCallerProjectAdmin: mapValueOfType<bool>(json, r'is_caller_project_admin')!,
         name: mapValueOfType<String>(json, r'name')!,
+        publicRef: mapValueOfType<String>(json, r'public_ref')!,
         runningContainers: mapValueOfType<int>(json, r'running_containers')!,
         status: mapValueOfType<String>(json, r'status')!,
         storageLimitToken: mapValueOfType<String>(json, r'storage_limit_token')!,
@@ -151,7 +172,10 @@ class ProjectInfoItem {
   static const requiredKeys = <String>{
     'display_name',
     'file_size_limit',
+    'id',
+    'is_caller_project_admin',
     'name',
+    'public_ref',
     'running_containers',
     'status',
     'storage_limit_token',

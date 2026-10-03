@@ -26,6 +26,8 @@ router = APIRouter(tags=["project-insights"])
 
 class ProjectInfoItem(BaseModel):
     model_config = ConfigDict(extra="allow")
+    id: str
+    is_caller_project_admin: bool
     name: str
     public_ref: str = Field(pattern=r"^[a-z]{20}$", min_length=20, max_length=20)
     display_name: str | None
@@ -115,7 +117,7 @@ async def get_projects_for_user(
 
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT DISTINCT p.name, p.display_name, p.public_ref
+            SELECT DISTINCT p.id, p.name, p.display_name, p.public_ref
             FROM projects p
             JOIN project_members m ON p.id = m.project_id
             WHERE m.user_id = $1
@@ -126,6 +128,8 @@ async def get_projects_for_user(
         for r in rows:
             project_status = await get_project_status(r["name"])
             projects.append({
+                "id": str(r["id"]),
+                "is_caller_project_admin": True,
                 "name": r["name"],
                 "public_ref": r["public_ref"],
                 "display_name": r["display_name"],

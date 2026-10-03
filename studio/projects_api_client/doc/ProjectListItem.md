@@ -24,6 +24,7 @@ Name | Type | Description | Notes
 **opaqueApiKeySlotCount** | **int** |  | 
 **opaqueApiKeysStatus** | **String** |  | 
 **projectUuid** | **String** |  | 
+**publicRef** | **String** |  |
 **storageLimitToken** | **String** |  | 
 **tenantUuid** | **String** |  | 
 

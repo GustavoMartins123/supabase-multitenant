@@ -9,13 +9,13 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
-[**addMemberApiProjectsProjectNameMembersPost**](ProjectMembersApi.md#addmemberapiprojectsprojectnamememberspost) | **POST** /api/projects/{project_name}/members | Add Member
-[**listMembersByRefApiProjectsNameMembersGet**](ProjectMembersApi.md#listmembersbyrefapiprojectsnamemembersget) | **GET** /api/projects/{name}/members | List Members By Ref
-[**removeMemberByRefApiProjectsNameMembersMemberIdDelete**](ProjectMembersApi.md#removememberbyrefapiprojectsnamemembersmemberiddelete) | **DELETE** /api/projects/{name}/members/{member_id} | Remove Member By Ref
+[**addMemberApiProjectsProjectRefMembersPost**](ProjectMembersApi.md#addmemberapiprojectsprojectrefmemberspost) | **POST** /api/projects/{project_ref}/members | Add Member
+[**listMembersByRefApiProjectsProjectRefMembersGet**](ProjectMembersApi.md#listmembersbyrefapiprojectsprojectrefmembersget) | **GET** /api/projects/{project_ref}/members | List Members By Ref
+[**removeMemberByRefApiProjectsProjectRefMembersMemberIdDelete**](ProjectMembersApi.md#removememberbyrefapiprojectsprojectrefmembersmemberiddelete) | **DELETE** /api/projects/{project_ref}/members/{member_id} | Remove Member By Ref
 
 
-# **addMemberApiProjectsProjectNameMembersPost**
-> AddMemberResponse addMemberApiProjectsProjectNameMembersPost(projectName, addMember)
+# **addMemberApiProjectsProjectRefMembersPost**
+> AddMemberResponse addMemberApiProjectsProjectRefMembersPost(projectRef, addMember)
 
 Add Member
 
@@ -24,14 +24,14 @@ Add Member
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectMembersApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final addMember = AddMember(); // AddMember | 
 
 try {
-    final result = api_instance.addMemberApiProjectsProjectNameMembersPost(projectName, addMember);
+    final result = api_instance.addMemberApiProjectsProjectRefMembersPost(projectRef, addMember);
     print(result);
 } catch (e) {
-    print('Exception when calling ProjectMembersApi->addMemberApiProjectsProjectNameMembersPost: $e\n');
+    print('Exception when calling ProjectMembersApi->addMemberApiProjectsProjectRefMembersPost: $e\n');
 }
 ```
 
@@ -39,7 +39,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **addMember** | [**AddMember**](AddMember.md)|  | 
 
 ### Return type
@@ -57,8 +57,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **listMembersByRefApiProjectsNameMembersGet**
-> List<MemberItem> listMembersByRefApiProjectsNameMembersGet(name)
+# **listMembersByRefApiProjectsProjectRefMembersGet**
+> List<MemberItem> listMembersByRefApiProjectsProjectRefMembersGet(projectRef)
 
 List Members By Ref
 
@@ -67,13 +67,13 @@ List Members By Ref
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectMembersApi();
-final name = name_example; // String | 
+final projectRef = projectRef_example; // String |
 
 try {
-    final result = api_instance.listMembersByRefApiProjectsNameMembersGet(name);
+    final result = api_instance.listMembersByRefApiProjectsProjectRefMembersGet(projectRef);
     print(result);
 } catch (e) {
-    print('Exception when calling ProjectMembersApi->listMembersByRefApiProjectsNameMembersGet: $e\n');
+    print('Exception when calling ProjectMembersApi->listMembersByRefApiProjectsProjectRefMembersGet: $e\n');
 }
 ```
 
@@ -81,7 +81,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **name** | **String**|  | 
+ **projectRef** | **String**|  |
 
 ### Return type
 
@@ -98,8 +98,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **removeMemberByRefApiProjectsNameMembersMemberIdDelete**
-> RemoveMemberResponse removeMemberByRefApiProjectsNameMembersMemberIdDelete(name, memberId)
+# **removeMemberByRefApiProjectsProjectRefMembersMemberIdDelete**
+> RemoveMemberResponse removeMemberByRefApiProjectsProjectRefMembersMemberIdDelete(projectRef, memberId)
 
 Remove Member By Ref
 
@@ -108,14 +108,14 @@ Remove Member By Ref
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectMembersApi();
-final name = name_example; // String | 
+final projectRef = projectRef_example; // String |
 final memberId = memberId_example; // String | 
 
 try {
-    final result = api_instance.removeMemberByRefApiProjectsNameMembersMemberIdDelete(name, memberId);
+    final result = api_instance.removeMemberByRefApiProjectsProjectRefMembersMemberIdDelete(projectRef, memberId);
     print(result);
 } catch (e) {
-    print('Exception when calling ProjectMembersApi->removeMemberByRefApiProjectsNameMembersMemberIdDelete: $e\n');
+    print('Exception when calling ProjectMembersApi->removeMemberByRefApiProjectsProjectRefMembersMemberIdDelete: $e\n');
 }
 ```
 
@@ -123,7 +123,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **name** | **String**|  | 
+ **projectRef** | **String**|  |
  **memberId** | **String**|  | 
 
 ### Return type

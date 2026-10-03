@@ -10,7 +10,7 @@ All URIs are relative to *http://localhost*
 Method | HTTP request | Description
 ------------- | ------------- | -------------
 [**createProjectApiProjectsPost**](ProjectsApi.md#createprojectapiprojectspost) | **POST** /api/projects | Create Project
-[**deleteProjectApiProjectsProjectNameDelete**](ProjectsApi.md#deleteprojectapiprojectsprojectnamedelete) | **DELETE** /api/projects/{project_name} | Delete Project
+[**deleteProjectApiProjectsProjectRefDelete**](ProjectsApi.md#deleteprojectapiprojectsprojectrefdelete) | **DELETE** /api/projects/{project_ref} | Delete Project
 [**duplicateProjectApiProjectsDuplicatePost**](ProjectsApi.md#duplicateprojectapiprojectsduplicatepost) | **POST** /api/projects/duplicate | Duplicate Project
 [**listProjectsApiProjectsGet**](ProjectsApi.md#listprojectsapiprojectsget) | **GET** /api/projects | List Projects
 
@@ -56,8 +56,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **deleteProjectApiProjectsProjectNameDelete**
-> QueuedJobResponse deleteProjectApiProjectsProjectNameDelete(projectName, xStepUpToken)
+# **deleteProjectApiProjectsProjectRefDelete**
+> QueuedJobResponse deleteProjectApiProjectsProjectRefDelete(projectRef, xStepUpToken)
 
 Delete Project
 
@@ -66,14 +66,14 @@ Delete Project
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectsApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final xStepUpToken = xStepUpToken_example; // String | 
 
 try {
-    final result = api_instance.deleteProjectApiProjectsProjectNameDelete(projectName, xStepUpToken);
+    final result = api_instance.deleteProjectApiProjectsProjectRefDelete(projectRef, xStepUpToken);
     print(result);
 } catch (e) {
-    print('Exception when calling ProjectsApi->deleteProjectApiProjectsProjectNameDelete: $e\n');
+    print('Exception when calling ProjectsApi->deleteProjectApiProjectsProjectRefDelete: $e\n');
 }
 ```
 
@@ -81,7 +81,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **xStepUpToken** | **String**|  | [optional] 
 
 ### Return type

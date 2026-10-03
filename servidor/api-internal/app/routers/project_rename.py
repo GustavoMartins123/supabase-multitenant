@@ -51,6 +51,7 @@ class RenameProjectResponse(BaseModel):
     job_id: str
     project: str
     project_uuid: str | None
+    public_ref: str | None
     tenant_uuid: str | None
     created_by: str | None
     action: str
@@ -252,7 +253,7 @@ async def rename_project(
             job_id,
             position,
             "Rotacao da URL enfileirada; dados e nomes internos permanecem iguais.",
-            extra={"project": project_ref, "old_ref": project_ref, "new_ref": new_ref},
+            extra={"old_ref": project_ref, "new_ref": new_ref},
         ),
     )
 

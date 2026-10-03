@@ -10,6 +10,8 @@ Cada projeto recebe seu próprio database PostgreSQL, JWT secret, tenant do Real
 
 Cada projeto possui múltiplos slots de API keys opacas `publishable`/`secret`. A expiração é opcional por chave; slots com expiração podem rotacionar automaticamente antes do vencimento, enquanto os JWTs internos anon/service role permanecem somente no servidor. Um administrador pode desativar a automação no projeto ou no slot, e falhas ficam bloqueadas e visíveis até uma retomada explícita.
 
+A URL usa uma referencia aleatoria independente de 20 letras: `https://<servidor>/<public_ref>` e `/project/<public_ref>` no Studio. O nome tecnico nao determina a URL. **Gerar nova URL** troca somente a referencia; a URL anterior deixa de funcionar, sem alias ou redirecionamento. A migracao de instalacoes existentes esta descrita em [Project lifecycle](docs/architecture/project-lifecycle.md).
+
 > Este é um projeto não oficial e ainda está em desenvolvimento ativo.
 
 ---
@@ -102,7 +104,7 @@ O `host-agent` também é um componente global da plataforma, mas roda como serv
 - Nginx;
 - GoTrue;
 - PostgREST;
-- database `_supabase_<project_ref>`;
+- database `_supabase_<technical_name>`;
 - diretório de configuração do projeto.
 
 Storage e ImgProxy não são mais criados por projeto. Os objetos do Storage são namespaced pelo UUID imutável do tenant, e o Nginx de cada projeto injeta a identidade confiável do tenant antes de o tráfego chegar ao data plane compartilhado do Storage.

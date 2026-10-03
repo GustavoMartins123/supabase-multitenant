@@ -21,6 +21,7 @@ Name | Type | Description | Notes
 **progress** | **int** |  | [optional] 
 **project** | **String** |  | 
 **projectUuid** | **String** |  | [optional] 
+**publicRef** | **String** |  |
 **queuePosition** | **int** |  | [optional] [default to 0]
 **retryOf** | **String** |  | [optional] 
 **retryable** | **bool** |  | [optional] [default to false]

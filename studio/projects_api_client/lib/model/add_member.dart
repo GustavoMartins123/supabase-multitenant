@@ -61,7 +61,7 @@ class AddMember {
       }());
 
       return AddMember(
-        role: AddMemberRoleEnum.fromJson(json[r'role']) ?? const AddMemberRoleEnum._('member'),
+        role: json[r'role'] == null ? const AddMemberRoleEnum._('member') : (AddMemberRoleEnum.fromJson(json[r'role']) ?? (throw const FormatException('Invalid AddMemberRoleEnum'))),
         userId: mapValueOfType<String>(json, r'user_id')!,
       );
     }

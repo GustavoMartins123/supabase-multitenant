@@ -137,15 +137,14 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     final result = await showDialog<RenameProjectResult>(
       context: context,
       builder: (_) => RenameProjectDialog(
-        projectName: widget.ref,
-        currentDisplayName: _currentDisplayName,
+        projectRef: widget.ref,
       ),
     );
     if (result == null) return;
     if (!mounted) return;
     await ref.read(projectListProvider.notifier).refresh();
     if (!mounted) return;
-    Navigator.of(context).pop(result.newName);
+    Navigator.of(context).pop(result.newRef);
   }
 
   void _openHistoryDialog() {
@@ -625,8 +624,8 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
                     if (isAdmin) ...[
                       const SizedBox(width: 8),
                       SecondaryButton(
-                        label: 'Renomear',
-                        icon: Icons.drive_file_rename_outline_rounded,
+                        label: 'Gerar nova URL',
+                        icon: Icons.link_rounded,
                         onPressed: _savingDisplayName || projectBusy
                             ? null
                             : _openRenameDialog,

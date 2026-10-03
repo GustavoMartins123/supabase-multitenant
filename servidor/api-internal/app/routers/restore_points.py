@@ -86,6 +86,7 @@ class CreateRestorePointResponse(BaseModel):
     job_id: str
     project: str
     project_uuid: str | None
+    public_ref: str | None
     tenant_uuid: str | None
     created_by: str | None
     action: str
@@ -113,6 +114,7 @@ class RestoreRestorePointResponse(BaseModel):
     job_id: str
     project: str
     project_uuid: str | None
+    public_ref: str | None
     tenant_uuid: str | None
     created_by: str | None
     action: str
@@ -141,6 +143,7 @@ class DeleteRestorePointResponse(BaseModel):
     job_id: str
     project: str
     project_uuid: str | None
+    public_ref: str | None
     tenant_uuid: str | None
     created_by: str | None
     action: str

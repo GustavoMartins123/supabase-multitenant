@@ -9,24 +9,24 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
-[**abortOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationDelete**](OpaqueApiKeysApi.md#abortopaqueapikeymigrationapiprojectsprojectnameopaqueapikeysmigrationdelete) | **DELETE** /api/projects/{project_name}/opaque-api-keys/migration | Abort Opaque Api Key Migration
-[**activateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdActivationPost**](OpaqueApiKeysApi.md#activateapikeyslotapiprojectsprojectnameapikeyslotsslotidactivationpost) | **POST** /api/projects/{project_name}/api-key-slots/{slot_id}/activation | Activate Api Key Slot
-[**cancelApiKeySlotRotationApiProjectsProjectNameApiKeySlotsSlotIdRotationDelete**](OpaqueApiKeysApi.md#cancelapikeyslotrotationapiprojectsprojectnameapikeyslotsslotidrotationdelete) | **DELETE** /api/projects/{project_name}/api-key-slots/{slot_id}/rotation | Cancel Api Key Slot Rotation
-[**claimApiKeyApiProjectsProjectNameApiKeyRevealsKeyIdClaimPost**](OpaqueApiKeysApi.md#claimapikeyapiprojectsprojectnameapikeyrevealskeyidclaimpost) | **POST** /api/projects/{project_name}/api-key-reveals/{key_id}/claim | Claim Api Key
-[**confirmApiKeySlotInstallationApiProjectsProjectNameApiKeySlotsSlotIdRotationConfirmationPost**](OpaqueApiKeysApi.md#confirmapikeyslotinstallationapiprojectsprojectnameapikeyslotsslotidrotationconfirmationpost) | **POST** /api/projects/{project_name}/api-key-slots/{slot_id}/rotation-confirmation | Confirm Api Key Slot Installation
-[**createApiKeySlotApiProjectsProjectNameApiKeySlotsPost**](OpaqueApiKeysApi.md#createapikeyslotapiprojectsprojectnameapikeyslotspost) | **POST** /api/projects/{project_name}/api-key-slots | Create Api Key Slot
-[**cutoverOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationCutoverPost**](OpaqueApiKeysApi.md#cutoveropaqueapikeymigrationapiprojectsprojectnameopaqueapikeysmigrationcutoverpost) | **POST** /api/projects/{project_name}/opaque-api-keys/migration/cutover | Cutover Opaque Api Key Migration
-[**getApiKeyRevealsApiProjectsProjectNameApiKeyRevealsGet**](OpaqueApiKeysApi.md#getapikeyrevealsapiprojectsprojectnameapikeyrevealsget) | **GET** /api/projects/{project_name}/api-key-reveals | Get Api Key Reveals
-[**getApiKeySlotsApiProjectsProjectNameApiKeySlotsGet**](OpaqueApiKeysApi.md#getapikeyslotsapiprojectsprojectnameapikeyslotsget) | **GET** /api/projects/{project_name}/api-key-slots | Get Api Key Slots
-[**getOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationGet**](OpaqueApiKeysApi.md#getopaqueapikeymigrationapiprojectsprojectnameopaqueapikeysmigrationget) | **GET** /api/projects/{project_name}/opaque-api-keys/migration | Get Opaque Api Key Migration
-[**prepareOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationPreparePost**](OpaqueApiKeysApi.md#prepareopaqueapikeymigrationapiprojectsprojectnameopaqueapikeysmigrationpreparepost) | **POST** /api/projects/{project_name}/opaque-api-keys/migration/prepare | Prepare Opaque Api Key Migration
-[**revokeApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdDelete**](OpaqueApiKeysApi.md#revokeapikeyslotapiprojectsprojectnameapikeyslotsslotiddelete) | **DELETE** /api/projects/{project_name}/api-key-slots/{slot_id} | Revoke Api Key Slot
-[**rotateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdRotationPost**](OpaqueApiKeysApi.md#rotateapikeyslotapiprojectsprojectnameapikeyslotsslotidrotationpost) | **POST** /api/projects/{project_name}/api-key-slots/{slot_id}/rotation | Rotate Api Key Slot
-[**updateApiKeySlotPolicyApiProjectsProjectNameApiKeySlotsSlotIdPatch**](OpaqueApiKeysApi.md#updateapikeyslotpolicyapiprojectsprojectnameapikeyslotsslotidpatch) | **PATCH** /api/projects/{project_name}/api-key-slots/{slot_id} | Update Api Key Slot Policy
+[**abortOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationDelete**](OpaqueApiKeysApi.md#abortopaqueapikeymigrationapiprojectsprojectrefopaqueapikeysmigrationdelete) | **DELETE** /api/projects/{project_ref}/opaque-api-keys/migration | Abort Opaque Api Key Migration
+[**activateApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdActivationPost**](OpaqueApiKeysApi.md#activateapikeyslotapiprojectsprojectrefapikeyslotsslotidactivationpost) | **POST** /api/projects/{project_ref}/api-key-slots/{slot_id}/activation | Activate Api Key Slot
+[**cancelApiKeySlotRotationApiProjectsProjectRefApiKeySlotsSlotIdRotationDelete**](OpaqueApiKeysApi.md#cancelapikeyslotrotationapiprojectsprojectrefapikeyslotsslotidrotationdelete) | **DELETE** /api/projects/{project_ref}/api-key-slots/{slot_id}/rotation | Cancel Api Key Slot Rotation
+[**claimApiKeyApiProjectsProjectRefApiKeyRevealsKeyIdClaimPost**](OpaqueApiKeysApi.md#claimapikeyapiprojectsprojectrefapikeyrevealskeyidclaimpost) | **POST** /api/projects/{project_ref}/api-key-reveals/{key_id}/claim | Claim Api Key
+[**confirmApiKeySlotInstallationApiProjectsProjectRefApiKeySlotsSlotIdRotationConfirmationPost**](OpaqueApiKeysApi.md#confirmapikeyslotinstallationapiprojectsprojectrefapikeyslotsslotidrotationconfirmationpost) | **POST** /api/projects/{project_ref}/api-key-slots/{slot_id}/rotation-confirmation | Confirm Api Key Slot Installation
+[**createApiKeySlotApiProjectsProjectRefApiKeySlotsPost**](OpaqueApiKeysApi.md#createapikeyslotapiprojectsprojectrefapikeyslotspost) | **POST** /api/projects/{project_ref}/api-key-slots | Create Api Key Slot
+[**cutoverOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationCutoverPost**](OpaqueApiKeysApi.md#cutoveropaqueapikeymigrationapiprojectsprojectrefopaqueapikeysmigrationcutoverpost) | **POST** /api/projects/{project_ref}/opaque-api-keys/migration/cutover | Cutover Opaque Api Key Migration
+[**getApiKeyRevealsApiProjectsProjectRefApiKeyRevealsGet**](OpaqueApiKeysApi.md#getapikeyrevealsapiprojectsprojectrefapikeyrevealsget) | **GET** /api/projects/{project_ref}/api-key-reveals | Get Api Key Reveals
+[**getApiKeySlotsApiProjectsProjectRefApiKeySlotsGet**](OpaqueApiKeysApi.md#getapikeyslotsapiprojectsprojectrefapikeyslotsget) | **GET** /api/projects/{project_ref}/api-key-slots | Get Api Key Slots
+[**getOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationGet**](OpaqueApiKeysApi.md#getopaqueapikeymigrationapiprojectsprojectrefopaqueapikeysmigrationget) | **GET** /api/projects/{project_ref}/opaque-api-keys/migration | Get Opaque Api Key Migration
+[**prepareOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationPreparePost**](OpaqueApiKeysApi.md#prepareopaqueapikeymigrationapiprojectsprojectrefopaqueapikeysmigrationpreparepost) | **POST** /api/projects/{project_ref}/opaque-api-keys/migration/prepare | Prepare Opaque Api Key Migration
+[**revokeApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdDelete**](OpaqueApiKeysApi.md#revokeapikeyslotapiprojectsprojectrefapikeyslotsslotiddelete) | **DELETE** /api/projects/{project_ref}/api-key-slots/{slot_id} | Revoke Api Key Slot
+[**rotateApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdRotationPost**](OpaqueApiKeysApi.md#rotateapikeyslotapiprojectsprojectrefapikeyslotsslotidrotationpost) | **POST** /api/projects/{project_ref}/api-key-slots/{slot_id}/rotation | Rotate Api Key Slot
+[**updateApiKeySlotPolicyApiProjectsProjectRefApiKeySlotsSlotIdPatch**](OpaqueApiKeysApi.md#updateapikeyslotpolicyapiprojectsprojectrefapikeyslotsslotidpatch) | **PATCH** /api/projects/{project_ref}/api-key-slots/{slot_id} | Update Api Key Slot Policy
 
 
-# **abortOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationDelete**
-> MigrationAbortResponse abortOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationDelete(projectName)
+# **abortOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationDelete**
+> MigrationAbortResponse abortOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationDelete(projectRef)
 
 Abort Opaque Api Key Migration
 
@@ -35,13 +35,13 @@ Abort Opaque Api Key Migration
 import 'package:projects_api_client/api.dart';
 
 final api_instance = OpaqueApiKeysApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 
 try {
-    final result = api_instance.abortOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationDelete(projectName);
+    final result = api_instance.abortOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationDelete(projectRef);
     print(result);
 } catch (e) {
-    print('Exception when calling OpaqueApiKeysApi->abortOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationDelete: $e\n');
+    print('Exception when calling OpaqueApiKeysApi->abortOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationDelete: $e\n');
 }
 ```
 
@@ -49,7 +49,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
 
 ### Return type
 
@@ -66,8 +66,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **activateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdActivationPost**
-> SlotActivationResponse activateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdActivationPost(projectName, slotId, xStepUpToken)
+# **activateApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdActivationPost**
+> SlotActivationResponse activateApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdActivationPost(projectRef, slotId, xStepUpToken)
 
 Activate Api Key Slot
 
@@ -76,15 +76,15 @@ Activate Api Key Slot
 import 'package:projects_api_client/api.dart';
 
 final api_instance = OpaqueApiKeysApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final slotId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | 
 final xStepUpToken = xStepUpToken_example; // String | 
 
 try {
-    final result = api_instance.activateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdActivationPost(projectName, slotId, xStepUpToken);
+    final result = api_instance.activateApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdActivationPost(projectRef, slotId, xStepUpToken);
     print(result);
 } catch (e) {
-    print('Exception when calling OpaqueApiKeysApi->activateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdActivationPost: $e\n');
+    print('Exception when calling OpaqueApiKeysApi->activateApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdActivationPost: $e\n');
 }
 ```
 
@@ -92,7 +92,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **slotId** | **String**|  | 
  **xStepUpToken** | **String**|  | [optional] 
 
@@ -111,8 +111,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **cancelApiKeySlotRotationApiProjectsProjectNameApiKeySlotsSlotIdRotationDelete**
-> SlotCancelResponse cancelApiKeySlotRotationApiProjectsProjectNameApiKeySlotsSlotIdRotationDelete(projectName, slotId)
+# **cancelApiKeySlotRotationApiProjectsProjectRefApiKeySlotsSlotIdRotationDelete**
+> SlotCancelResponse cancelApiKeySlotRotationApiProjectsProjectRefApiKeySlotsSlotIdRotationDelete(projectRef, slotId, xStepUpToken)
 
 Cancel Api Key Slot Rotation
 
@@ -121,14 +121,15 @@ Cancel Api Key Slot Rotation
 import 'package:projects_api_client/api.dart';
 
 final api_instance = OpaqueApiKeysApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final slotId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | 
+final xStepUpToken = xStepUpToken_example; // String |
 
 try {
-    final result = api_instance.cancelApiKeySlotRotationApiProjectsProjectNameApiKeySlotsSlotIdRotationDelete(projectName, slotId);
+    final result = api_instance.cancelApiKeySlotRotationApiProjectsProjectRefApiKeySlotsSlotIdRotationDelete(projectRef, slotId, xStepUpToken);
     print(result);
 } catch (e) {
-    print('Exception when calling OpaqueApiKeysApi->cancelApiKeySlotRotationApiProjectsProjectNameApiKeySlotsSlotIdRotationDelete: $e\n');
+    print('Exception when calling OpaqueApiKeysApi->cancelApiKeySlotRotationApiProjectsProjectRefApiKeySlotsSlotIdRotationDelete: $e\n');
 }
 ```
 
@@ -136,8 +137,9 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **slotId** | **String**|  | 
+ **xStepUpToken** | **String**|  | [optional]
 
 ### Return type
 
@@ -154,8 +156,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **claimApiKeyApiProjectsProjectNameApiKeyRevealsKeyIdClaimPost**
-> RevealClaimResponse claimApiKeyApiProjectsProjectNameApiKeyRevealsKeyIdClaimPost(projectName, keyId, xStepUpToken)
+# **claimApiKeyApiProjectsProjectRefApiKeyRevealsKeyIdClaimPost**
+> RevealClaimResponse claimApiKeyApiProjectsProjectRefApiKeyRevealsKeyIdClaimPost(projectRef, keyId, xStepUpToken)
 
 Claim Api Key
 
@@ -164,15 +166,15 @@ Claim Api Key
 import 'package:projects_api_client/api.dart';
 
 final api_instance = OpaqueApiKeysApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final keyId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | 
 final xStepUpToken = xStepUpToken_example; // String | 
 
 try {
-    final result = api_instance.claimApiKeyApiProjectsProjectNameApiKeyRevealsKeyIdClaimPost(projectName, keyId, xStepUpToken);
+    final result = api_instance.claimApiKeyApiProjectsProjectRefApiKeyRevealsKeyIdClaimPost(projectRef, keyId, xStepUpToken);
     print(result);
 } catch (e) {
-    print('Exception when calling OpaqueApiKeysApi->claimApiKeyApiProjectsProjectNameApiKeyRevealsKeyIdClaimPost: $e\n');
+    print('Exception when calling OpaqueApiKeysApi->claimApiKeyApiProjectsProjectRefApiKeyRevealsKeyIdClaimPost: $e\n');
 }
 ```
 
@@ -180,7 +182,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **keyId** | **String**|  | 
  **xStepUpToken** | **String**|  | [optional] 
 
@@ -199,8 +201,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **confirmApiKeySlotInstallationApiProjectsProjectNameApiKeySlotsSlotIdRotationConfirmationPost**
-> SlotConfirmResponse confirmApiKeySlotInstallationApiProjectsProjectNameApiKeySlotsSlotIdRotationConfirmationPost(projectName, slotId, confirmApiKeyInstallation)
+# **confirmApiKeySlotInstallationApiProjectsProjectRefApiKeySlotsSlotIdRotationConfirmationPost**
+> SlotConfirmResponse confirmApiKeySlotInstallationApiProjectsProjectRefApiKeySlotsSlotIdRotationConfirmationPost(projectRef, slotId, confirmApiKeyInstallation)
 
 Confirm Api Key Slot Installation
 
@@ -209,15 +211,15 @@ Confirm Api Key Slot Installation
 import 'package:projects_api_client/api.dart';
 
 final api_instance = OpaqueApiKeysApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final slotId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | 
 final confirmApiKeyInstallation = ConfirmApiKeyInstallation(); // ConfirmApiKeyInstallation | 
 
 try {
-    final result = api_instance.confirmApiKeySlotInstallationApiProjectsProjectNameApiKeySlotsSlotIdRotationConfirmationPost(projectName, slotId, confirmApiKeyInstallation);
+    final result = api_instance.confirmApiKeySlotInstallationApiProjectsProjectRefApiKeySlotsSlotIdRotationConfirmationPost(projectRef, slotId, confirmApiKeyInstallation);
     print(result);
 } catch (e) {
-    print('Exception when calling OpaqueApiKeysApi->confirmApiKeySlotInstallationApiProjectsProjectNameApiKeySlotsSlotIdRotationConfirmationPost: $e\n');
+    print('Exception when calling OpaqueApiKeysApi->confirmApiKeySlotInstallationApiProjectsProjectRefApiKeySlotsSlotIdRotationConfirmationPost: $e\n');
 }
 ```
 
@@ -225,7 +227,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **slotId** | **String**|  | 
  **confirmApiKeyInstallation** | [**ConfirmApiKeyInstallation**](ConfirmApiKeyInstallation.md)|  | 
 
@@ -244,8 +246,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **createApiKeySlotApiProjectsProjectNameApiKeySlotsPost**
-> IssuedKeyResponse createApiKeySlotApiProjectsProjectNameApiKeySlotsPost(projectName, createApiKeySlot, xStepUpToken)
+# **createApiKeySlotApiProjectsProjectRefApiKeySlotsPost**
+> IssuedKeyResponse createApiKeySlotApiProjectsProjectRefApiKeySlotsPost(projectRef, createApiKeySlot, xStepUpToken)
 
 Create Api Key Slot
 
@@ -254,15 +256,15 @@ Create Api Key Slot
 import 'package:projects_api_client/api.dart';
 
 final api_instance = OpaqueApiKeysApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final createApiKeySlot = CreateApiKeySlot(); // CreateApiKeySlot | 
 final xStepUpToken = xStepUpToken_example; // String | 
 
 try {
-    final result = api_instance.createApiKeySlotApiProjectsProjectNameApiKeySlotsPost(projectName, createApiKeySlot, xStepUpToken);
+    final result = api_instance.createApiKeySlotApiProjectsProjectRefApiKeySlotsPost(projectRef, createApiKeySlot, xStepUpToken);
     print(result);
 } catch (e) {
-    print('Exception when calling OpaqueApiKeysApi->createApiKeySlotApiProjectsProjectNameApiKeySlotsPost: $e\n');
+    print('Exception when calling OpaqueApiKeysApi->createApiKeySlotApiProjectsProjectRefApiKeySlotsPost: $e\n');
 }
 ```
 
@@ -270,7 +272,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **createApiKeySlot** | [**CreateApiKeySlot**](CreateApiKeySlot.md)|  | 
  **xStepUpToken** | **String**|  | [optional] 
 
@@ -289,8 +291,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **cutoverOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationCutoverPost**
-> MigrationCutoverResponse cutoverOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationCutoverPost(projectName)
+# **cutoverOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationCutoverPost**
+> MigrationCutoverResponse cutoverOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationCutoverPost(projectRef)
 
 Cutover Opaque Api Key Migration
 
@@ -301,13 +303,13 @@ Stop legacy ingress, activate confirmed keys, and start opaque-only.
 import 'package:projects_api_client/api.dart';
 
 final api_instance = OpaqueApiKeysApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 
 try {
-    final result = api_instance.cutoverOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationCutoverPost(projectName);
+    final result = api_instance.cutoverOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationCutoverPost(projectRef);
     print(result);
 } catch (e) {
-    print('Exception when calling OpaqueApiKeysApi->cutoverOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationCutoverPost: $e\n');
+    print('Exception when calling OpaqueApiKeysApi->cutoverOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationCutoverPost: $e\n');
 }
 ```
 
@@ -315,7 +317,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
 
 ### Return type
 
@@ -332,8 +334,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **getApiKeyRevealsApiProjectsProjectNameApiKeyRevealsGet**
-> RevealListResponse getApiKeyRevealsApiProjectsProjectNameApiKeyRevealsGet(projectName)
+# **getApiKeyRevealsApiProjectsProjectRefApiKeyRevealsGet**
+> RevealListResponse getApiKeyRevealsApiProjectsProjectRefApiKeyRevealsGet(projectRef)
 
 Get Api Key Reveals
 
@@ -342,13 +344,13 @@ Get Api Key Reveals
 import 'package:projects_api_client/api.dart';
 
 final api_instance = OpaqueApiKeysApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 
 try {
-    final result = api_instance.getApiKeyRevealsApiProjectsProjectNameApiKeyRevealsGet(projectName);
+    final result = api_instance.getApiKeyRevealsApiProjectsProjectRefApiKeyRevealsGet(projectRef);
     print(result);
 } catch (e) {
-    print('Exception when calling OpaqueApiKeysApi->getApiKeyRevealsApiProjectsProjectNameApiKeyRevealsGet: $e\n');
+    print('Exception when calling OpaqueApiKeysApi->getApiKeyRevealsApiProjectsProjectRefApiKeyRevealsGet: $e\n');
 }
 ```
 
@@ -356,7 +358,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
 
 ### Return type
 
@@ -373,8 +375,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **getApiKeySlotsApiProjectsProjectNameApiKeySlotsGet**
-> SlotListResponse getApiKeySlotsApiProjectsProjectNameApiKeySlotsGet(projectName)
+# **getApiKeySlotsApiProjectsProjectRefApiKeySlotsGet**
+> SlotListResponse getApiKeySlotsApiProjectsProjectRefApiKeySlotsGet(projectRef)
 
 Get Api Key Slots
 
@@ -383,13 +385,13 @@ Get Api Key Slots
 import 'package:projects_api_client/api.dart';
 
 final api_instance = OpaqueApiKeysApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 
 try {
-    final result = api_instance.getApiKeySlotsApiProjectsProjectNameApiKeySlotsGet(projectName);
+    final result = api_instance.getApiKeySlotsApiProjectsProjectRefApiKeySlotsGet(projectRef);
     print(result);
 } catch (e) {
-    print('Exception when calling OpaqueApiKeysApi->getApiKeySlotsApiProjectsProjectNameApiKeySlotsGet: $e\n');
+    print('Exception when calling OpaqueApiKeysApi->getApiKeySlotsApiProjectsProjectRefApiKeySlotsGet: $e\n');
 }
 ```
 
@@ -397,7 +399,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
 
 ### Return type
 
@@ -414,8 +416,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **getOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationGet**
-> MigrationStatusResponse getOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationGet(projectName)
+# **getOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationGet**
+> MigrationStatusResponse getOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationGet(projectRef)
 
 Get Opaque Api Key Migration
 
@@ -424,13 +426,13 @@ Get Opaque Api Key Migration
 import 'package:projects_api_client/api.dart';
 
 final api_instance = OpaqueApiKeysApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 
 try {
-    final result = api_instance.getOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationGet(projectName);
+    final result = api_instance.getOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationGet(projectRef);
     print(result);
 } catch (e) {
-    print('Exception when calling OpaqueApiKeysApi->getOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationGet: $e\n');
+    print('Exception when calling OpaqueApiKeysApi->getOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationGet: $e\n');
 }
 ```
 
@@ -438,7 +440,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
 
 ### Return type
 
@@ -455,8 +457,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **prepareOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationPreparePost**
-> MigrationPrepareResponse prepareOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationPreparePost(projectName)
+# **prepareOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationPreparePost**
+> MigrationPrepareResponse prepareOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationPreparePost(projectRef)
 
 Prepare Opaque Api Key Migration
 
@@ -467,13 +469,13 @@ Prepare rejected opaque keys without changing the running gateway.
 import 'package:projects_api_client/api.dart';
 
 final api_instance = OpaqueApiKeysApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 
 try {
-    final result = api_instance.prepareOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationPreparePost(projectName);
+    final result = api_instance.prepareOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationPreparePost(projectRef);
     print(result);
 } catch (e) {
-    print('Exception when calling OpaqueApiKeysApi->prepareOpaqueApiKeyMigrationApiProjectsProjectNameOpaqueApiKeysMigrationPreparePost: $e\n');
+    print('Exception when calling OpaqueApiKeysApi->prepareOpaqueApiKeyMigrationApiProjectsProjectRefOpaqueApiKeysMigrationPreparePost: $e\n');
 }
 ```
 
@@ -481,7 +483,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
 
 ### Return type
 
@@ -498,8 +500,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **revokeApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdDelete**
-> SlotRevokeResponse revokeApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdDelete(projectName, slotId)
+# **revokeApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdDelete**
+> SlotRevokeResponse revokeApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdDelete(projectRef, slotId, xStepUpToken)
 
 Revoke Api Key Slot
 
@@ -508,14 +510,15 @@ Revoke Api Key Slot
 import 'package:projects_api_client/api.dart';
 
 final api_instance = OpaqueApiKeysApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final slotId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | 
+final xStepUpToken = xStepUpToken_example; // String |
 
 try {
-    final result = api_instance.revokeApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdDelete(projectName, slotId);
+    final result = api_instance.revokeApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdDelete(projectRef, slotId, xStepUpToken);
     print(result);
 } catch (e) {
-    print('Exception when calling OpaqueApiKeysApi->revokeApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdDelete: $e\n');
+    print('Exception when calling OpaqueApiKeysApi->revokeApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdDelete: $e\n');
 }
 ```
 
@@ -523,8 +526,9 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **slotId** | **String**|  | 
+ **xStepUpToken** | **String**|  | [optional]
 
 ### Return type
 
@@ -541,8 +545,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **rotateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdRotationPost**
-> IssuedKeyResponse rotateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdRotationPost(projectName, slotId, rotateApiKeySlot, xStepUpToken)
+# **rotateApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdRotationPost**
+> IssuedKeyResponse rotateApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdRotationPost(projectRef, slotId, rotateApiKeySlot, xStepUpToken)
 
 Rotate Api Key Slot
 
@@ -551,16 +555,16 @@ Rotate Api Key Slot
 import 'package:projects_api_client/api.dart';
 
 final api_instance = OpaqueApiKeysApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final slotId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | 
 final rotateApiKeySlot = RotateApiKeySlot(); // RotateApiKeySlot | 
 final xStepUpToken = xStepUpToken_example; // String | 
 
 try {
-    final result = api_instance.rotateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdRotationPost(projectName, slotId, rotateApiKeySlot, xStepUpToken);
+    final result = api_instance.rotateApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdRotationPost(projectRef, slotId, rotateApiKeySlot, xStepUpToken);
     print(result);
 } catch (e) {
-    print('Exception when calling OpaqueApiKeysApi->rotateApiKeySlotApiProjectsProjectNameApiKeySlotsSlotIdRotationPost: $e\n');
+    print('Exception when calling OpaqueApiKeysApi->rotateApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdRotationPost: $e\n');
 }
 ```
 
@@ -568,7 +572,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **slotId** | **String**|  | 
  **rotateApiKeySlot** | [**RotateApiKeySlot**](RotateApiKeySlot.md)|  | 
  **xStepUpToken** | **String**|  | [optional] 
@@ -588,8 +592,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **updateApiKeySlotPolicyApiProjectsProjectNameApiKeySlotsSlotIdPatch**
-> SlotPolicyUpdateResponse updateApiKeySlotPolicyApiProjectsProjectNameApiKeySlotsSlotIdPatch(projectName, slotId, updateApiKeySlotPolicy)
+# **updateApiKeySlotPolicyApiProjectsProjectRefApiKeySlotsSlotIdPatch**
+> SlotPolicyUpdateResponse updateApiKeySlotPolicyApiProjectsProjectRefApiKeySlotsSlotIdPatch(projectRef, slotId, updateApiKeySlotPolicy, xStepUpToken)
 
 Update Api Key Slot Policy
 
@@ -598,15 +602,16 @@ Update Api Key Slot Policy
 import 'package:projects_api_client/api.dart';
 
 final api_instance = OpaqueApiKeysApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final slotId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | 
 final updateApiKeySlotPolicy = UpdateApiKeySlotPolicy(); // UpdateApiKeySlotPolicy | 
+final xStepUpToken = xStepUpToken_example; // String |
 
 try {
-    final result = api_instance.updateApiKeySlotPolicyApiProjectsProjectNameApiKeySlotsSlotIdPatch(projectName, slotId, updateApiKeySlotPolicy);
+    final result = api_instance.updateApiKeySlotPolicyApiProjectsProjectRefApiKeySlotsSlotIdPatch(projectRef, slotId, updateApiKeySlotPolicy, xStepUpToken);
     print(result);
 } catch (e) {
-    print('Exception when calling OpaqueApiKeysApi->updateApiKeySlotPolicyApiProjectsProjectNameApiKeySlotsSlotIdPatch: $e\n');
+    print('Exception when calling OpaqueApiKeysApi->updateApiKeySlotPolicyApiProjectsProjectRefApiKeySlotsSlotIdPatch: $e\n');
 }
 ```
 
@@ -614,9 +619,10 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **slotId** | **String**|  | 
  **updateApiKeySlotPolicy** | [**UpdateApiKeySlotPolicy**](UpdateApiKeySlotPolicy.md)|  | 
+ **xStepUpToken** | **String**|  | [optional]
 
 ### Return type
 

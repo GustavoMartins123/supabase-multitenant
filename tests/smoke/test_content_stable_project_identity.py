@@ -7,48 +7,28 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class ContentStableProjectIdentityTests(unittest.TestCase):
-    def test_internal_identity_route_returns_project_id_and_history(self) -> None:
-        source = (
-            ROOT / "servidor/api-internal/app/routers/internal.py"
-        ).read_text(encoding="utf-8")
-        start = source.index(
-            '"/api/projects/internal/content-identity/{project_name}"'
-        )
-        end = source.index(
-            '"/api/projects/internal/studio-context/{ref}"',
-            start,
-        )
-        route = source[start:end]
-
-        self.assertIn("_require_studio_nginx(request)", route)
-        # A identidade tem de vir do middleware HMAC (request.state), nunca do
-        # header cru enviado pelo caller.
-        self.assertIn(
-            'getattr(request.state, "internal_service", None) != "studio-nginx"',
-            source,
-        )
-        self.assertNotIn('request.headers.get("X-Internal-Service")', source)
-        self.assertIn('"SELECT id, name FROM projects WHERE name = $1"', route)
-        self.assertIn("FROM project_name_history", route)
-        self.assertIn('"project_id": str(project["id"])', route)
-        self.assertIn('headers={"Cache-Control": "no-store"}', route)
-
-    def test_content_proxy_uses_stable_identity_only_for_content(self) -> None:
+    def test_runtime_requires_verified_canonical_identity(self):
         lua = ROOT / "studio/nginx/lua/studio_compat"
-        client = (lua / "content_studio_client.lua").read_text(encoding="utf-8")
-        namespace = (lua / "content_namespace.lua").read_text(encoding="utf-8")
-        virt = (lua / "content_virtualization.lua").read_text(encoding="utf-8")
+        identity = (lua / "content_project_identity.lua").read_text()
+        namespace = (lua / "content_namespace.lua").read_text()
+        virtualization = (lua / "content_virtualization.lua").read_text()
+        self.assertIn("ngx.ctx.studio_project_context", identity)
+        self.assertIn("context.ref ~= project_ref", identity)
+        self.assertNotIn("request_uri", identity)
+        self.assertNotIn("content_namespace_migration", namespace)
+        self.assertNotIn("legacy_id", virtualization)
+        self.assertFalse((lua / "content_namespace_migration.lua").exists())
 
-        self.assertIn('content_project_identity.resolve(selected_ref)', client)
-        self.assertIn('return identity.project_id', client)
-        self.assertIn(
-            'content_namespace_migration.ensure(user_id, identity)', namespace
-        )
-        self.assertIn('id_namespace = namespace_state.root_folder.id', virt)
-        self.assertIn(
-            'local legacy_id = virtual_snippet_id(snippet.name, virtual_folder)',
-            virt,
-        )
+    def test_internal_identity_is_ref_only_without_history(self):
+        source = (ROOT / "servidor/api-internal/app/routers/internal.py").read_text()
+        start = source.index('"/api/projects/internal/content-identity/{project_ref}"')
+        end = source.index('"/api/projects/internal/studio-context/{ref}"', start)
+        route = source[start:end]
+        self.assertIn("_require_studio_nginx(request)", route)
+        self.assertIn("get_public_project_row(conn, project_ref)", route)
+        self.assertNotIn("project_name_history", route)
+        self.assertNotIn("aliases", route)
+        self.assertIn('"project_id": str(project["id"])', route)
 
     def test_read_routes_do_not_create_namespace_directories(self) -> None:
         source = (
@@ -81,25 +61,10 @@ class ContentStableProjectIdentityTests(unittest.TestCase):
             count,
         )
 
-    def test_legacy_migration_preserves_conflicting_sql(self) -> None:
-        source = (
-            ROOT / "studio/nginx/lua/studio_compat/content_namespace_migration.lua"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("cache:add(key, token, exptime_seconds)", source)
-        self.assertIn('"__legacy_" .. safe_label(label)', source)
-        self.assertIn("files_equal(source_path, target_path)", source)
-        self.assertIn("stats.conflicts_preserved", source)
-        self.assertIn("identity.aliases", source)
-
-    def test_rename_endpoint_no_longer_moves_slug_directories(self) -> None:
-        source = (
-            ROOT / "studio/nginx/lua/admin_api/snippets_rename.lua"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("deprecated = true", source)
-        self.assertNotIn("os.rename", source)
-        self.assertNotIn("lfs.dir", source)
+    def test_no_runtime_migration_or_legacy_endpoint(self):
+        nginx = (ROOT / "studio/nginx/nginx.conf").read_text()
+        self.assertNotIn("/internal/snippets/rename", nginx)
+        self.assertFalse((ROOT / "servidor/api-internal/app/snippets_migration.py").exists())
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 class AdminProjectInfo {
   final String id; // Project's database ID
   final String name;
+  final String publicRef;
   final String dockerStatus;
   final int containersRunning;
   final int containersTotal;
@@ -10,6 +11,7 @@ class AdminProjectInfo {
   AdminProjectInfo({
     required this.id,
     required this.name,
+    required this.publicRef,
     required this.dockerStatus,
     required this.containersRunning,
     required this.containersTotal,
@@ -20,9 +22,10 @@ class AdminProjectInfo {
     return AdminProjectInfo(
       id: json['id'] as String,
       name: json['name'] as String,
-      dockerStatus: json['docker_status'] as String,
-      containersRunning: json['containers_running'] as int,
-      containersTotal: json['containers_total'] as int,
+      publicRef: json['public_ref'] as String,
+      dockerStatus: json['status'] as String,
+      containersRunning: json['running_containers'] as int,
+      containersTotal: json['total_containers'] as int,
       isCallerProjectAdmin: json['is_caller_project_admin'] as bool,
     );
   }

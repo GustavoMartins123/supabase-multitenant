@@ -62,7 +62,7 @@ class NewProject {
 
       return NewProject(
         name: mapValueOfType<String>(json, r'name')!,
-        resourceProfile: NewProjectResourceProfileEnum.fromJson(json[r'resource_profile']) ?? const NewProjectResourceProfileEnum._('medium'),
+        resourceProfile: json[r'resource_profile'] == null ? const NewProjectResourceProfileEnum._('medium') : (NewProjectResourceProfileEnum.fromJson(json[r'resource_profile']) ?? (throw const FormatException('Invalid NewProjectResourceProfileEnum'))),
       );
     }
     return null;

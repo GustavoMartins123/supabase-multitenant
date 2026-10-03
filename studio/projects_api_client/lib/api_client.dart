@@ -234,6 +234,10 @@ class ApiClient {
           return DeleteProjectNoteResponse.fromJson(value);
         case 'DeleteRestorePointResponse':
           return DeleteRestorePointResponse.fromJson(value);
+        case 'DirectorySnapshot':
+          return DirectorySnapshot.fromJson(value);
+        case 'DirectoryUser':
+          return DirectoryUser.fromJson(value);
         case 'DuplicateProject':
           return DuplicateProject.fromJson(value);
         case 'EncKeyResponse':
@@ -268,8 +272,6 @@ class ApiClient {
           return MigrationPrepareResponse.fromJson(value);
         case 'MigrationStatusResponse':
           return MigrationStatusResponse.fromJson(value);
-        case 'ModelSource':
-          return ModelSource.fromJson(value);
         case 'NewProject':
           return NewProject.fromJson(value);
         case 'ProjectAIFunctionItem':
@@ -296,8 +298,6 @@ class ApiClient {
           return ProjectQueueStatusResponse.fromJson(value);
         case 'ProjectRenameHistoryResponse':
           return ProjectRenameHistoryResponse.fromJson(value);
-        case 'ProjectRenameRequest':
-          return ProjectRenameRequest.fromJson(value);
         case 'ProjectS3VectorKeysResponse':
           return ProjectS3VectorKeysResponse.fromJson(value);
         case 'ProjectStatusResponse':
@@ -386,10 +386,6 @@ class ApiClient {
           return UpdateProjectSettingsResponse.fromJson(value);
         case 'UpdateSettings':
           return UpdateSettings.fromJson(value);
-        case 'UserSyncPayload':
-          return UserSyncPayload.fromJson(value);
-        case 'UserSyncResponse':
-          return UserSyncResponse.fromJson(value);
         case 'ValidationError':
           return ValidationError.fromJson(value);
         default:

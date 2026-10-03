@@ -491,9 +491,9 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
     String? serverDomain,
   ) {
     final favProjects =
-        projects.where((p) => favorites.contains(p['name'])).toList();
+        projects.where((p) => favorites.contains(p['id'])).toList();
     final otherProjects =
-        projects.where((p) => !favorites.contains(p['name'])).toList();
+        projects.where((p) => !favorites.contains(p['id'])).toList();
 
     return Padding(
       padding: const EdgeInsets.all(24),
@@ -578,7 +578,8 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
     String? serverDomain,
   ) {
     return ProjectCard(
-      refKey: project['name'] as String,
+      refKey: project['public_ref'] as String,
+      technicalName: project['name'] as String,
       opaqueApiKeysStatus: project['opaque_api_keys_status'] as String,
       opaqueApiKeySlotCount: project['opaque_api_key_slot_count'] as int,
       isLoading: project['is_loading'] == true,
@@ -596,15 +597,15 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
           project['automatic_key_rotation_lead_days'] as int,
       onTap: project['is_loading'] == true || project['active_job'] != null
           ? () {}
-          : () => _openProject(project['name']),
-      onDuplicate: () => _showDuplicateDialog(project['name']),
+          : () => _openProject(project['public_ref']),
+      onDuplicate: () => _showDuplicateDialog(project['public_ref']),
       onToggleFavorite: () =>
-          ref.read(favoritesProvider.notifier).toggleFavorite(project['name']),
+          ref.read(favoritesProvider.notifier).toggleFavorite(project['id']),
       onDeleted: () {
         ref
             .read(projectListProvider.notifier)
-            .removeProjectLocal(project['name']);
-        ref.read(favoritesProvider.notifier).removeFavorite(project['name']);
+            .removeProjectLocal(project['public_ref']);
+        ref.read(favoritesProvider.notifier).removeFavorite(project['id']);
       },
     );
   }

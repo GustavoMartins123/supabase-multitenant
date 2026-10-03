@@ -40,9 +40,6 @@ DART_DIALOG_IMPORTS = {
     "studio/seletor_de_projetos/lib/duplicate_project_dialog.dart": (
         "import 'package:seletor_de_projetos/utils/project_name_validator.dart';"
     ),
-    "studio/seletor_de_projetos/lib/dialogs/rename_project_dialog.dart": (
-        "import '../utils/project_name_validator.dart';"
-    ),
 }
 
 

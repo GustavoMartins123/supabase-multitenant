@@ -11,7 +11,7 @@ Name | Type | Description | Notes
 **events** | [**List<RenameHistoryEvent>**](RenameHistoryEvent.md) |  | [default to const []]
 **project** | **String** |  | 
 **renames** | [**List<RenameHistoryEntry>**](RenameHistoryEntry.md) |  | [default to const []]
-**requestedName** | **String** |  | 
+**requestedRef** | **String** |  |
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

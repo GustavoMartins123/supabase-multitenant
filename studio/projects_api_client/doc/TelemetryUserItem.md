@@ -9,7 +9,7 @@ import 'package:projects_api_client/api.dart';
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **email** | **String** |  | 
-**lastLoginAt** | **String** |  | 
+**lastLoginAt** | [**DateTime**](DateTime.md) |  |
 **phone** | **String** |  | 
 **sessionCount** | **int** |  | 
 **userId** | **String** |  | 

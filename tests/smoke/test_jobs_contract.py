@@ -39,6 +39,7 @@ class JobsContractTest(unittest.TestCase):
         row = {
             "job_id": job_id,
             "project": "example",
+            "public_ref": "a" * 20,
             "project_uuid": project_id,
             "payload": {"tenant_uuid": str(project_id)},
             "created_by": actor_id,
@@ -65,6 +66,7 @@ class JobsContractTest(unittest.TestCase):
 
         self.assertEqual(result["job_id"], str(job_id))
         self.assertEqual(result["project_uuid"], str(project_id))
+        self.assertEqual(result["public_ref"], "a" * 20)
         self.assertEqual(result["tenant_uuid"], str(project_id))
         self.assertEqual(result["created_by"], str(actor_id))
         self.assertEqual(result["progress"], 50)

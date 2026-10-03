@@ -22,15 +22,15 @@ class LifecycleApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] service (required):
   ///
   /// * [int] lines:
-  Future<Response> getContainerLogsApiProjectsProjectNameLogsServiceGetWithHttpInfo(String projectName, String service, { int? lines, }) async {
+  Future<Response> getContainerLogsApiProjectsProjectRefLogsServiceGetWithHttpInfo(String projectRef, String service, { int? lines, }) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/logs/{service}'
-      .replaceAll('{project_name}', projectName)
+    final path = r'/api/projects/{project_ref}/logs/{service}'
+      .replaceAll('{project_ref}', projectRef)
       .replaceAll('{service}', service);
 
     // ignore: prefer_final_locals
@@ -62,13 +62,13 @@ class LifecycleApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] service (required):
   ///
   /// * [int] lines:
-  Future<ContainerLogsResponse?> getContainerLogsApiProjectsProjectNameLogsServiceGet(String projectName, String service, { int? lines, }) async {
-    final response = await getContainerLogsApiProjectsProjectNameLogsServiceGetWithHttpInfo(projectName, service,  lines: lines, );
+  Future<ContainerLogsResponse?> getContainerLogsApiProjectsProjectRefLogsServiceGet(String projectRef, String service, { int? lines, }) async {
+    final response = await getContainerLogsApiProjectsProjectRefLogsServiceGetWithHttpInfo(projectRef, service,  lines: lines, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -88,11 +88,11 @@ class LifecycleApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<Response> getProjectDockerStatusApiProjectsProjectNameStatusGetWithHttpInfo(String projectName,) async {
+  /// * [String] projectRef (required):
+  Future<Response> getProjectDockerStatusApiProjectsProjectRefStatusGetWithHttpInfo(String projectRef,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/status'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/status'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -119,9 +119,9 @@ class LifecycleApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<ProjectStatusResponse?> getProjectDockerStatusApiProjectsProjectNameStatusGet(String projectName,) async {
-    final response = await getProjectDockerStatusApiProjectsProjectNameStatusGetWithHttpInfo(projectName,);
+  /// * [String] projectRef (required):
+  Future<ProjectStatusResponse?> getProjectDockerStatusApiProjectsProjectRefStatusGet(String projectRef,) async {
+    final response = await getProjectDockerStatusApiProjectsProjectRefStatusGetWithHttpInfo(projectRef,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }

@@ -11,13 +11,13 @@
 import 'package:projects_api_client/api.dart';
 import 'package:test/test.dart';
 
-// tests for UserSyncResponse
+// tests for DirectoryUser
 void main() {
-  // final instance = UserSyncResponse();
+  // final instance = DirectoryUser();
 
-  group('test UserSyncResponse', () {
-    // String email
-    test('to test the property `email`', () async {
+  group('test DirectoryUser', () {
+    // String displayName
+    test('to test the property `displayName`', () async {
       // TODO
     });
 
@@ -36,23 +36,8 @@ void main() {
       // TODO
     });
 
-    // String pictureUrl
-    test('to test the property `pictureUrl`', () async {
-      // TODO
-    });
-
-    // Map<String, Object> profile (default value: const {})
-    test('to test the property `profile`', () async {
-      // TODO
-    });
-
-    // String profileUpdatedAt
-    test('to test the property `profileUpdatedAt`', () async {
-      // TODO
-    });
-
-    // int profileVersion
-    test('to test the property `profileVersion`', () async {
+    // Map<String, Object> source_ (default value: const {})
+    test('to test the property `source_`', () async {
       // TODO
     });
 

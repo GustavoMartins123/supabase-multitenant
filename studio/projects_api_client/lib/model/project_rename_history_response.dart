@@ -16,7 +16,7 @@ class ProjectRenameHistoryResponse {
     this.events = const [],
     required this.project,
     this.renames = const [],
-    required this.requestedName,
+    required this.requestedRef,
   });
 
   List<RenameHistoryEvent> events;
@@ -25,14 +25,14 @@ class ProjectRenameHistoryResponse {
 
   List<RenameHistoryEntry> renames;
 
-  String requestedName;
+  String requestedRef;
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is ProjectRenameHistoryResponse &&
     _deepEquality.equals(other.events, events) &&
     other.project == project &&
     _deepEquality.equals(other.renames, renames) &&
-    other.requestedName == requestedName;
+    other.requestedRef == requestedRef;
 
   @override
   int get hashCode =>
@@ -40,17 +40,17 @@ class ProjectRenameHistoryResponse {
     (events.hashCode) +
     (project.hashCode) +
     (renames.hashCode) +
-    (requestedName.hashCode);
+    (requestedRef.hashCode);
 
   @override
-  String toString() => 'ProjectRenameHistoryResponse[events=$events, project=$project, renames=$renames, requestedName=$requestedName]';
+  String toString() => 'ProjectRenameHistoryResponse[events=$events, project=$project, renames=$renames, requestedRef=$requestedRef]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
       json[r'events'] = this.events;
       json[r'project'] = this.project;
       json[r'renames'] = this.renames;
-      json[r'requested_name'] = this.requestedName;
+      json[r'requested_ref'] = this.requestedRef;
     return json;
   }
 
@@ -76,7 +76,7 @@ class ProjectRenameHistoryResponse {
         events: RenameHistoryEvent.listFromJson(json[r'events']),
         project: mapValueOfType<String>(json, r'project')!,
         renames: RenameHistoryEntry.listFromJson(json[r'renames']),
-        requestedName: mapValueOfType<String>(json, r'requested_name')!,
+        requestedRef: mapValueOfType<String>(json, r'requested_ref')!,
       );
     }
     return null;
@@ -127,7 +127,7 @@ class ProjectRenameHistoryResponse {
     'events',
     'project',
     'renames',
-    'requested_name',
+    'requested_ref',
   };
 }
 

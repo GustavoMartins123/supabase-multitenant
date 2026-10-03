@@ -22,15 +22,15 @@ class PlatformAuthApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [int] page:
   ///
   /// * [int] perPage:
-  Future<Response> listProjectAuthUsersApiProjectsInternalAuthUsersProjectNameGetWithHttpInfo(String projectName, { int? page, int? perPage, }) async {
+  Future<Response> listProjectAuthUsersApiProjectsInternalAuthUsersProjectRefGetWithHttpInfo(String projectRef, { int? page, int? perPage, }) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/internal/auth-users/{project_name}'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/internal/auth-users/{project_ref}'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -64,13 +64,13 @@ class PlatformAuthApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [int] page:
   ///
   /// * [int] perPage:
-  Future<AuthUsersResponse?> listProjectAuthUsersApiProjectsInternalAuthUsersProjectNameGet(String projectName, { int? page, int? perPage, }) async {
-    final response = await listProjectAuthUsersApiProjectsInternalAuthUsersProjectNameGetWithHttpInfo(projectName,  page: page, perPage: perPage, );
+  Future<AuthUsersResponse?> listProjectAuthUsersApiProjectsInternalAuthUsersProjectRefGet(String projectRef, { int? page, int? perPage, }) async {
+    final response = await listProjectAuthUsersApiProjectsInternalAuthUsersProjectRefGetWithHttpInfo(projectRef,  page: page, perPage: perPage, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -90,13 +90,13 @@ class PlatformAuthApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] gotruePath (required):
-  Future<Response> proxyProjectAuthAdminDeleteWithHttpInfo(String projectName, String gotruePath,) async {
+  Future<Response> proxyProjectAuthAdminDeleteWithHttpInfo(String projectRef, String gotruePath,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/internal/auth-admin/{project_name}/{gotrue_path}'
-      .replaceAll('{project_name}', projectName)
+    final path = r'/api/projects/internal/auth-admin/{project_ref}/{gotrue_path}'
+      .replaceAll('{project_ref}', projectRef)
       .replaceAll('{gotrue_path}', gotruePath);
 
     // ignore: prefer_final_locals
@@ -124,11 +124,11 @@ class PlatformAuthApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] gotruePath (required):
-  Future<Object?> proxyProjectAuthAdminDelete(String projectName, String gotruePath,) async {
-    final response = await proxyProjectAuthAdminDeleteWithHttpInfo(projectName, gotruePath,);
+  Future<Object?> proxyProjectAuthAdminDelete(String projectRef, String gotruePath,) async {
+    final response = await proxyProjectAuthAdminDeleteWithHttpInfo(projectRef, gotruePath,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -148,13 +148,13 @@ class PlatformAuthApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] gotruePath (required):
-  Future<Response> proxyProjectAuthAdminGetWithHttpInfo(String projectName, String gotruePath,) async {
+  Future<Response> proxyProjectAuthAdminGetWithHttpInfo(String projectRef, String gotruePath,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/internal/auth-admin/{project_name}/{gotrue_path}'
-      .replaceAll('{project_name}', projectName)
+    final path = r'/api/projects/internal/auth-admin/{project_ref}/{gotrue_path}'
+      .replaceAll('{project_ref}', projectRef)
       .replaceAll('{gotrue_path}', gotruePath);
 
     // ignore: prefer_final_locals
@@ -182,11 +182,11 @@ class PlatformAuthApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] gotruePath (required):
-  Future<Object?> proxyProjectAuthAdminGet(String projectName, String gotruePath,) async {
-    final response = await proxyProjectAuthAdminGetWithHttpInfo(projectName, gotruePath,);
+  Future<Object?> proxyProjectAuthAdminGet(String projectRef, String gotruePath,) async {
+    final response = await proxyProjectAuthAdminGetWithHttpInfo(projectRef, gotruePath,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -206,13 +206,13 @@ class PlatformAuthApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] gotruePath (required):
-  Future<Response> proxyProjectAuthAdminPatchWithHttpInfo(String projectName, String gotruePath,) async {
+  Future<Response> proxyProjectAuthAdminPatchWithHttpInfo(String projectRef, String gotruePath,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/internal/auth-admin/{project_name}/{gotrue_path}'
-      .replaceAll('{project_name}', projectName)
+    final path = r'/api/projects/internal/auth-admin/{project_ref}/{gotrue_path}'
+      .replaceAll('{project_ref}', projectRef)
       .replaceAll('{gotrue_path}', gotruePath);
 
     // ignore: prefer_final_locals
@@ -240,11 +240,11 @@ class PlatformAuthApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] gotruePath (required):
-  Future<Object?> proxyProjectAuthAdminPatch(String projectName, String gotruePath,) async {
-    final response = await proxyProjectAuthAdminPatchWithHttpInfo(projectName, gotruePath,);
+  Future<Object?> proxyProjectAuthAdminPatch(String projectRef, String gotruePath,) async {
+    final response = await proxyProjectAuthAdminPatchWithHttpInfo(projectRef, gotruePath,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -264,13 +264,13 @@ class PlatformAuthApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] gotruePath (required):
-  Future<Response> proxyProjectAuthAdminPostWithHttpInfo(String projectName, String gotruePath,) async {
+  Future<Response> proxyProjectAuthAdminPostWithHttpInfo(String projectRef, String gotruePath,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/internal/auth-admin/{project_name}/{gotrue_path}'
-      .replaceAll('{project_name}', projectName)
+    final path = r'/api/projects/internal/auth-admin/{project_ref}/{gotrue_path}'
+      .replaceAll('{project_ref}', projectRef)
       .replaceAll('{gotrue_path}', gotruePath);
 
     // ignore: prefer_final_locals
@@ -298,11 +298,11 @@ class PlatformAuthApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] gotruePath (required):
-  Future<Object?> proxyProjectAuthAdminPost(String projectName, String gotruePath,) async {
-    final response = await proxyProjectAuthAdminPostWithHttpInfo(projectName, gotruePath,);
+  Future<Object?> proxyProjectAuthAdminPost(String projectRef, String gotruePath,) async {
+    final response = await proxyProjectAuthAdminPostWithHttpInfo(projectRef, gotruePath,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -322,13 +322,13 @@ class PlatformAuthApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] gotruePath (required):
-  Future<Response> proxyProjectAuthAdminPutWithHttpInfo(String projectName, String gotruePath,) async {
+  Future<Response> proxyProjectAuthAdminPutWithHttpInfo(String projectRef, String gotruePath,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/internal/auth-admin/{project_name}/{gotrue_path}'
-      .replaceAll('{project_name}', projectName)
+    final path = r'/api/projects/internal/auth-admin/{project_ref}/{gotrue_path}'
+      .replaceAll('{project_ref}', projectRef)
       .replaceAll('{gotrue_path}', gotruePath);
 
     // ignore: prefer_final_locals
@@ -356,11 +356,11 @@ class PlatformAuthApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [String] gotruePath (required):
-  Future<Object?> proxyProjectAuthAdminPut(String projectName, String gotruePath,) async {
-    final response = await proxyProjectAuthAdminPutWithHttpInfo(projectName, gotruePath,);
+  Future<Object?> proxyProjectAuthAdminPut(String projectRef, String gotruePath,) async {
+    final response = await proxyProjectAuthAdminPutWithHttpInfo(projectRef, gotruePath,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }

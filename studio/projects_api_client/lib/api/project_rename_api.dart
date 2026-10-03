@@ -24,11 +24,11 @@ class ProjectRenameApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<Response> getProjectConfigTokenApiProjectsProjectNameConfigTokenGetWithHttpInfo(String projectName,) async {
+  /// * [String] projectRef (required):
+  Future<Response> getProjectConfigTokenApiProjectsProjectRefConfigTokenGetWithHttpInfo(String projectRef,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/config-token'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/config-token'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -57,9 +57,9 @@ class ProjectRenameApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<ProjectConfigTokenResponse?> getProjectConfigTokenApiProjectsProjectNameConfigTokenGet(String projectName,) async {
-    final response = await getProjectConfigTokenApiProjectsProjectNameConfigTokenGetWithHttpInfo(projectName,);
+  /// * [String] projectRef (required):
+  Future<ProjectConfigTokenResponse?> getProjectConfigTokenApiProjectsProjectRefConfigTokenGet(String projectRef,) async {
+    final response = await getProjectConfigTokenApiProjectsProjectRefConfigTokenGetWithHttpInfo(projectRef,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -81,11 +81,11 @@ class ProjectRenameApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<Response> getProjectQueueStatusApiProjectsProjectNameQueueStatusGetWithHttpInfo(String projectName,) async {
+  /// * [String] projectRef (required):
+  Future<Response> getProjectQueueStatusApiProjectsProjectRefQueueStatusGetWithHttpInfo(String projectRef,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/queue-status'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/queue-status'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -114,9 +114,9 @@ class ProjectRenameApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
-  Future<ProjectQueueStatusResponse?> getProjectQueueStatusApiProjectsProjectNameQueueStatusGet(String projectName,) async {
-    final response = await getProjectQueueStatusApiProjectsProjectNameQueueStatusGetWithHttpInfo(projectName,);
+  /// * [String] projectRef (required):
+  Future<ProjectQueueStatusResponse?> getProjectQueueStatusApiProjectsProjectRefQueueStatusGet(String projectRef,) async {
+    final response = await getProjectQueueStatusApiProjectsProjectRefQueueStatusGetWithHttpInfo(projectRef,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -132,19 +132,19 @@ class ProjectRenameApi {
 
   /// Get Project Rename History
   ///
-  /// Retorna auditoria e historico duravel de nome/path do projeto.
+  /// Retorna auditoria e historico duravel da referencia publica.
   ///
   /// Note: This method returns the HTTP [Response].
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [int] limit:
-  Future<Response> getProjectRenameHistoryApiProjectsProjectNameRenameHistoryGetWithHttpInfo(String projectName, { int? limit, }) async {
+  Future<Response> getProjectRenameHistoryApiProjectsProjectRefRenameHistoryGetWithHttpInfo(String projectRef, { int? limit, }) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/rename-history'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/rename-history'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody;
@@ -173,15 +173,15 @@ class ProjectRenameApi {
 
   /// Get Project Rename History
   ///
-  /// Retorna auditoria e historico duravel de nome/path do projeto.
+  /// Retorna auditoria e historico duravel da referencia publica.
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [int] limit:
-  Future<ProjectRenameHistoryResponse?> getProjectRenameHistoryApiProjectsProjectNameRenameHistoryGet(String projectName, { int? limit, }) async {
-    final response = await getProjectRenameHistoryApiProjectsProjectNameRenameHistoryGetWithHttpInfo(projectName,  limit: limit, );
+  Future<ProjectRenameHistoryResponse?> getProjectRenameHistoryApiProjectsProjectRefRenameHistoryGet(String projectRef, { int? limit, }) async {
+    final response = await getProjectRenameHistoryApiProjectsProjectRefRenameHistoryGetWithHttpInfo(projectRef,  limit: limit, );
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -197,22 +197,20 @@ class ProjectRenameApi {
 
   /// Rename Project
   ///
-  /// Renomeia o slug/path do projeto (migração completa em background).  O escopo inclui: nome interno na meta DB, banco Postgres, roles por projeto, replication slots do Realtime, tenant Supavisor, diretório físico e templates (nginx, docker-compose, .env).
-  ///
   /// Note: This method returns the HTTP [Response].
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
-  /// * [ProjectRenameRequest] projectRenameRequest (required):
-  Future<Response> renameProjectApiProjectsProjectNameRenamePostWithHttpInfo(String projectName, ProjectRenameRequest projectRenameRequest,) async {
+  /// * [Object] body (required):
+  Future<Response> renameProjectApiProjectsProjectRefRenamePostWithHttpInfo(String projectRef, Object body,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/rename'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/rename'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
-    Object? postBody = projectRenameRequest;
+    Object? postBody = body;
 
     final queryParams = <QueryParam>[];
     final headerParams = <String, String>{};
@@ -234,15 +232,13 @@ class ProjectRenameApi {
 
   /// Rename Project
   ///
-  /// Renomeia o slug/path do projeto (migração completa em background).  O escopo inclui: nome interno na meta DB, banco Postgres, roles por projeto, replication slots do Realtime, tenant Supavisor, diretório físico e templates (nginx, docker-compose, .env).
-  ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
-  /// * [ProjectRenameRequest] projectRenameRequest (required):
-  Future<RenameProjectResponse?> renameProjectApiProjectsProjectNameRenamePost(String projectName, ProjectRenameRequest projectRenameRequest,) async {
-    final response = await renameProjectApiProjectsProjectNameRenamePostWithHttpInfo(projectName, projectRenameRequest,);
+  /// * [Object] body (required):
+  Future<RenameProjectResponse?> renameProjectApiProjectsProjectRefRenamePost(String projectRef, Object body,) async {
+    final response = await renameProjectApiProjectsProjectRefRenamePostWithHttpInfo(projectRef, body,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }
@@ -264,13 +260,13 @@ class ProjectRenameApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [ProjectDisplayNameUpdate] projectDisplayNameUpdate (required):
-  Future<Response> updateProjectDisplayNameApiProjectsProjectNameDisplayNamePatchWithHttpInfo(String projectName, ProjectDisplayNameUpdate projectDisplayNameUpdate,) async {
+  Future<Response> updateProjectDisplayNameApiProjectsProjectRefDisplayNamePatchWithHttpInfo(String projectRef, ProjectDisplayNameUpdate projectDisplayNameUpdate,) async {
     // ignore: prefer_const_declarations
-    final path = r'/api/projects/{project_name}/display-name'
-      .replaceAll('{project_name}', projectName);
+    final path = r'/api/projects/{project_ref}/display-name'
+      .replaceAll('{project_ref}', projectRef);
 
     // ignore: prefer_final_locals
     Object? postBody = projectDisplayNameUpdate;
@@ -299,11 +295,11 @@ class ProjectRenameApi {
   ///
   /// Parameters:
   ///
-  /// * [String] projectName (required):
+  /// * [String] projectRef (required):
   ///
   /// * [ProjectDisplayNameUpdate] projectDisplayNameUpdate (required):
-  Future<UpdateDisplayNameResponse?> updateProjectDisplayNameApiProjectsProjectNameDisplayNamePatch(String projectName, ProjectDisplayNameUpdate projectDisplayNameUpdate,) async {
-    final response = await updateProjectDisplayNameApiProjectsProjectNameDisplayNamePatchWithHttpInfo(projectName, projectDisplayNameUpdate,);
+  Future<UpdateDisplayNameResponse?> updateProjectDisplayNameApiProjectsProjectRefDisplayNamePatch(String projectRef, ProjectDisplayNameUpdate projectDisplayNameUpdate,) async {
+    final response = await updateProjectDisplayNameApiProjectsProjectRefDisplayNamePatchWithHttpInfo(projectRef, projectDisplayNameUpdate,);
     if (response.statusCode >= HttpStatus.badRequest) {
       throw ApiException(response.statusCode, await _decodeBodyBytes(response));
     }

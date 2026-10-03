@@ -36,7 +36,7 @@ class FunctionsProjectionLifecycleTest(unittest.TestCase):
     def seed(self, ref, generation='one', identity='11111111-1111-4111-8111-111111111111'):
         directory = self.root / 'projects' / ref
         directory.mkdir(exist_ok=True)
-        (directory / '.env').write_text(f'PROJECT_ID={ref}\nPROJECT_UUID={identity}\n'
+        (directory / '.env').write_text(f'PROJECT_ID={ref}\nPROJECT_UUID={identity}\nPROJECT_PUBLIC_REF={"a"*20 if ref == "test_alpha" else "b"*20}\n'
             f'ANON_KEY_PROJETO={ref}-anon-{generation}\nSERVICE_ROLE_KEY_PROJETO={ref}-service-{generation}\n'
             f'JWT_SECRET_PROJETO={ref}-jwt-{generation}\nPOSTGRES_PASSWORD=cluster-secret-never-project\n'
             'S3_PROTOCOL_ACCESS_KEY_SECRET=storage-secret-never-project\n', encoding='utf-8')
@@ -51,7 +51,7 @@ class FunctionsProjectionLifecycleTest(unittest.TestCase):
     def test_exact_projection_and_private_permissions(self):
         module.sync(self.root)
         data = self.read('test_alpha')
-        self.assertEqual(set(data), {'project_ref', 'project_uuid', 'anon_key', 'service_role_key', 'jwt_secret'})
+        self.assertEqual(set(data), {'project_ref', 'technical_name', 'project_uuid', 'anon_key', 'service_role_key', 'jwt_secret'})
         self.assertNotIn('cluster-secret', json.dumps(data))
         self.assertNotIn('storage-secret', json.dumps(data))
         self.assertEqual((self.root / '.functions-tenants/test_alpha.json').stat().st_mode & 0o777, 0o600)
@@ -60,7 +60,7 @@ class FunctionsProjectionLifecycleTest(unittest.TestCase):
     def test_project_compose_root_cannot_redirect_held_lifecycle_lock(self):
         self.shell('functions_config_lock test_alpha; PROJECT_ROOT=/nonexistent-compose-bind-root; '
                    'functions_config_withdraw test_alpha; functions_config_publish test_alpha')
-        self.assertEqual(self.read('test_alpha')['project_ref'], 'test_alpha')
+        self.assertEqual(self.read('test_alpha')['technical_name'], 'test_alpha')
         for name in ('backup_project_impl.sh', 'restore_project_impl.sh'):
             script = (ROOT / 'servidor/generateProject/lib' / name).read_text(encoding='utf-8')
             loaded = script.index('source "$PROJECT_DIR/.env"')
@@ -71,7 +71,7 @@ class FunctionsProjectionLifecycleTest(unittest.TestCase):
         self.shell('functions_config_lock test_alpha; functions_config_withdraw test_alpha; functions_config_publish test_alpha')
         self.assertEqual(self.read('test_alpha')['anon_key'], 'test_alpha-anon-one')
         self.shell('functions_config_lock test_alpha test_beta; functions_config_withdraw test_beta; functions_config_publish test_beta')
-        self.assertEqual(self.read('test_beta')['project_ref'], 'test_beta')
+        self.assertEqual(self.read('test_beta')['technical_name'], 'test_beta')
         self.shell('functions_config_lock test_alpha; functions_config_withdraw test_alpha')
         self.assertFalse((self.root / '.functions-tenants/test_alpha.json').exists())
         self.seed('test_alpha', 'rotated')
@@ -79,15 +79,15 @@ class FunctionsProjectionLifecycleTest(unittest.TestCase):
         self.assertEqual(self.read('test_alpha')['anon_key'], 'test_alpha-anon-rotated')
         self.shell('functions_config_lock test_alpha; functions_config_withdraw test_alpha; functions_config_publish test_alpha')
         self.assertEqual(self.read('test_alpha')['anon_key'], 'test_alpha-anon-rotated')
-        self.shell('functions_config_lock test_alpha test_renamed; functions_config_withdraw test_alpha; functions_config_withdraw test_renamed')
-        (self.root / 'projects/test_alpha').rename(self.root / 'projects/test_renamed')
-        self.seed('test_renamed', 'renamed')
-        self.shell('functions_config_lock test_renamed; functions_config_publish test_renamed')
-        self.assertFalse((self.root / '.functions-tenants/test_alpha.json').exists())
-        self.shell('functions_config_lock test_renamed; functions_config_withdraw test_renamed')
-        shutil.rmtree(self.root / 'projects/test_renamed')
+        env = self.root / 'projects/test_alpha/.env'
+        env.write_text(env.read_text().replace('PROJECT_PUBLIC_REF=' + 'a'*20, 'PROJECT_PUBLIC_REF=' + 'c'*20))
+        self.shell('functions_config_lock test_alpha; functions_config_withdraw test_alpha; functions_config_publish test_alpha')
+        self.assertEqual(self.read('test_alpha')['project_ref'], 'c'*20)
+        self.assertEqual(self.read('test_alpha')['technical_name'], 'test_alpha')
+        self.shell('functions_config_lock test_alpha; functions_config_withdraw test_alpha')
+        shutil.rmtree(self.root / 'projects/test_alpha')
         module.sync(self.root)
-        self.assertEqual({p.name for p in (self.root / '.functions-tenants').iterdir()}, {'test_beta.json'})
+        self.assertFalse((self.root / '.functions-tenants/test_alpha.json').exists())
 
     def test_restart_refuses_unfinished_lifecycle_and_explicit_rollback_can_republish(self):
         module.sync(self.root)

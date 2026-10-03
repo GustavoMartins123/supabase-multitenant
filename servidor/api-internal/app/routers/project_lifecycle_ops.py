@@ -98,6 +98,7 @@ class StopProjectResponse(BaseModel):
     job_id: str
     project: str
     project_uuid: str | None
+    public_ref: str | None
     tenant_uuid: str | None
     created_by: str | None
     action: str
@@ -123,6 +124,7 @@ class StartProjectResponse(BaseModel):
     job_id: str
     project: str
     project_uuid: str | None
+    public_ref: str | None
     tenant_uuid: str | None
     created_by: str | None
     action: str
@@ -148,6 +150,7 @@ class RestartProjectResponse(BaseModel):
     job_id: str
     project: str
     project_uuid: str | None
+    public_ref: str | None
     tenant_uuid: str | None
     created_by: str | None
     action: str
@@ -190,6 +193,7 @@ class RecreateProjectServicesResponse(BaseModel):
     job_id: str
     project: str
     project_uuid: str | None
+    public_ref: str | None
     tenant_uuid: str | None
     created_by: str | None
     action: str

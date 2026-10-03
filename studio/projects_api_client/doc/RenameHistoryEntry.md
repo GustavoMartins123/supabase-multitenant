@@ -15,10 +15,8 @@ Name | Type | Description | Notes
 **error** | **String** |  | 
 **id** | **int** |  | 
 **jobId** | **String** |  | 
-**newName** | **String** |  | 
-**newPath** | **String** |  | 
-**oldName** | **String** |  | 
-**oldPath** | **String** |  | 
+**newRef** | **String** |  |
+**oldRef** | **String** |  |
 **status** | **String** |  | 
 **updatedAt** | **String** |  | 
 

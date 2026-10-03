@@ -89,7 +89,7 @@ class RenameHistoryDialog extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Histórico de identidade',
+                  'Histórico de URLs e exibição',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,

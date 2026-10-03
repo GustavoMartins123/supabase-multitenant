@@ -11,10 +11,10 @@ Method | HTTP request | Description
 ------------- | ------------- | -------------
 [**executeProjectFunctionApiProjectsRefExecuteFunctionPost**](ProjectInsightsApi.md#executeprojectfunctionapiprojectsrefexecutefunctionpost) | **POST** /api/projects/{ref}/execute-function | Execute Project Function
 [**getProjectAiFunctionsApiProjectsRefFunctionsGet**](ProjectInsightsApi.md#getprojectaifunctionsapiprojectsreffunctionsget) | **GET** /api/projects/{ref}/functions | Get Project Ai Functions
-[**getProjectS3VectorKeysApiProjectsProjectNameStorageS3KeysGet**](ProjectInsightsApi.md#getprojects3vectorkeysapiprojectsprojectnamestorages3keysget) | **GET** /api/projects/{project_name}/storage/s3-keys | Get Project S3 Vector Keys
-[**getProjectUserTelemetryApiProjectsProjectNameTelemetryUsersGet**](ProjectInsightsApi.md#getprojectusertelemetryapiprojectsprojectnametelemetryusersget) | **GET** /api/projects/{project_name}/telemetry/users | Get Project User Telemetry
+[**getProjectS3VectorKeysApiProjectsProjectRefStorageS3KeysGet**](ProjectInsightsApi.md#getprojects3vectorkeysapiprojectsprojectrefstorages3keysget) | **GET** /api/projects/{project_ref}/storage/s3-keys | Get Project S3 Vector Keys
+[**getProjectUserTelemetryApiProjectsProjectRefTelemetryUsersGet**](ProjectInsightsApi.md#getprojectusertelemetryapiprojectsprojectreftelemetryusersget) | **GET** /api/projects/{project_ref}/telemetry/users | Get Project User Telemetry
 [**getProjectsForUserApiAdminProjectsInfoPost**](ProjectInsightsApi.md#getprojectsforuserapiadminprojectsinfopost) | **POST** /api/admin/projects-info | Get Projects For User
-[**listAllUsersForAdminApiAdminProjectsNameAllUsersGet**](ProjectInsightsApi.md#listallusersforadminapiadminprojectsnameallusersget) | **GET** /api/admin/projects/{name}/all-users | List All Users For Admin
+[**listAllUsersForAdminApiAdminProjectsProjectRefAllUsersGet**](ProjectInsightsApi.md#listallusersforadminapiadminprojectsprojectrefallusersget) | **GET** /api/admin/projects/{project_ref}/all-users | List All Users For Admin
 [**proxyProjectMetaDelete**](ProjectInsightsApi.md#proxyprojectmetadelete) | **DELETE** /api/projects/{ref}/meta | Proxy Project Meta
 [**proxyProjectMetaGet**](ProjectInsightsApi.md#proxyprojectmetaget) | **GET** /api/projects/{ref}/meta | Proxy Project Meta
 [**proxyProjectMetaPatch**](ProjectInsightsApi.md#proxyprojectmetapatch) | **PATCH** /api/projects/{ref}/meta | Proxy Project Meta
@@ -23,7 +23,7 @@ Method | HTTP request | Description
 [**proxyProjectMetaPathPatch**](ProjectInsightsApi.md#proxyprojectmetapathpatch) | **PATCH** /api/projects/{ref}/meta/{meta_path} | Proxy Project Meta
 [**proxyProjectMetaPathPost**](ProjectInsightsApi.md#proxyprojectmetapathpost) | **POST** /api/projects/{ref}/meta/{meta_path} | Proxy Project Meta
 [**proxyProjectMetaPost**](ProjectInsightsApi.md#proxyprojectmetapost) | **POST** /api/projects/{ref}/meta | Proxy Project Meta
-[**transferProjectApiProjectsProjectNameTransferPost**](ProjectInsightsApi.md#transferprojectapiprojectsprojectnametransferpost) | **POST** /api/projects/{project_name}/transfer | Transfer Project
+[**transferProjectApiProjectsProjectRefTransferPost**](ProjectInsightsApi.md#transferprojectapiprojectsprojectreftransferpost) | **POST** /api/projects/{project_ref}/transfer | Transfer Project
 
 
 # **executeProjectFunctionApiProjectsRefExecuteFunctionPost**
@@ -110,25 +110,25 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **getProjectS3VectorKeysApiProjectsProjectNameStorageS3KeysGet**
-> ProjectS3VectorKeysResponse getProjectS3VectorKeysApiProjectsProjectNameStorageS3KeysGet(projectName)
+# **getProjectS3VectorKeysApiProjectsProjectRefStorageS3KeysGet**
+> ProjectS3VectorKeysResponse getProjectS3VectorKeysApiProjectsProjectRefStorageS3KeysGet(projectRef)
 
 Get Project S3 Vector Keys
 
-Return the selected tenant's SigV4 pair to an authorized Studio admin.  OpenResty rewrites the Studio's fixed ``/api/get-s3-keys`` endpoint to this project-scoped route. The service HMAC authenticates the Studio-to-control- plane hop and the signed user token is checked here.
+Return the selected tenant's SigV4 pair to an authorized Studio admin.
 
 ### Example
 ```dart
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectInsightsApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 
 try {
-    final result = api_instance.getProjectS3VectorKeysApiProjectsProjectNameStorageS3KeysGet(projectName);
+    final result = api_instance.getProjectS3VectorKeysApiProjectsProjectRefStorageS3KeysGet(projectRef);
     print(result);
 } catch (e) {
-    print('Exception when calling ProjectInsightsApi->getProjectS3VectorKeysApiProjectsProjectNameStorageS3KeysGet: $e\n');
+    print('Exception when calling ProjectInsightsApi->getProjectS3VectorKeysApiProjectsProjectRefStorageS3KeysGet: $e\n');
 }
 ```
 
@@ -136,7 +136,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
 
 ### Return type
 
@@ -153,8 +153,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **getProjectUserTelemetryApiProjectsProjectNameTelemetryUsersGet**
-> ProjectUserTelemetryResponse getProjectUserTelemetryApiProjectsProjectNameTelemetryUsersGet(projectName, period, start, end)
+# **getProjectUserTelemetryApiProjectsProjectRefTelemetryUsersGet**
+> ProjectUserTelemetryResponse getProjectUserTelemetryApiProjectsProjectRefTelemetryUsersGet(projectRef, period, start, end)
 
 Get Project User Telemetry
 
@@ -163,16 +163,16 @@ Get Project User Telemetry
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectInsightsApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final period = period_example; // String | 
 final start = 2013-10-20T19:20:30+01:00; // DateTime | 
 final end = 2013-10-20T19:20:30+01:00; // DateTime | 
 
 try {
-    final result = api_instance.getProjectUserTelemetryApiProjectsProjectNameTelemetryUsersGet(projectName, period, start, end);
+    final result = api_instance.getProjectUserTelemetryApiProjectsProjectRefTelemetryUsersGet(projectRef, period, start, end);
     print(result);
 } catch (e) {
-    print('Exception when calling ProjectInsightsApi->getProjectUserTelemetryApiProjectsProjectNameTelemetryUsersGet: $e\n');
+    print('Exception when calling ProjectInsightsApi->getProjectUserTelemetryApiProjectsProjectRefTelemetryUsersGet: $e\n');
 }
 ```
 
@@ -180,7 +180,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **period** | **String**|  | [optional] [default to '24h']
  **start** | **DateTime**|  | [optional] 
  **end** | **DateTime**|  | [optional] 
@@ -241,8 +241,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **listAllUsersForAdminApiAdminProjectsNameAllUsersGet**
-> AllUsersResponse listAllUsersForAdminApiAdminProjectsNameAllUsersGet(name)
+# **listAllUsersForAdminApiAdminProjectsProjectRefAllUsersGet**
+> AllUsersResponse listAllUsersForAdminApiAdminProjectsProjectRefAllUsersGet(projectRef)
 
 List All Users For Admin
 
@@ -253,13 +253,13 @@ Lista todos os usuários disponíveis para admins. Como a API não tem acesso ao
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectInsightsApi();
-final name = name_example; // String | 
+final projectRef = projectRef_example; // String |
 
 try {
-    final result = api_instance.listAllUsersForAdminApiAdminProjectsNameAllUsersGet(name);
+    final result = api_instance.listAllUsersForAdminApiAdminProjectsProjectRefAllUsersGet(projectRef);
     print(result);
 } catch (e) {
-    print('Exception when calling ProjectInsightsApi->listAllUsersForAdminApiAdminProjectsNameAllUsersGet: $e\n');
+    print('Exception when calling ProjectInsightsApi->listAllUsersForAdminApiAdminProjectsProjectRefAllUsersGet: $e\n');
 }
 ```
 
@@ -267,7 +267,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **name** | **String**|  | 
+ **projectRef** | **String**|  |
 
 ### Return type
 
@@ -628,8 +628,8 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **transferProjectApiProjectsProjectNameTransferPost**
-> TransferResponse transferProjectApiProjectsProjectNameTransferPost(projectName, transferBody)
+# **transferProjectApiProjectsProjectRefTransferPost**
+> TransferResponse transferProjectApiProjectsProjectRefTransferPost(projectRef, transferBody)
 
 Transfer Project
 
@@ -638,14 +638,14 @@ Transfer Project
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectInsightsApi();
-final projectName = projectName_example; // String | 
+final projectRef = projectRef_example; // String |
 final transferBody = TransferBody(); // TransferBody | 
 
 try {
-    final result = api_instance.transferProjectApiProjectsProjectNameTransferPost(projectName, transferBody);
+    final result = api_instance.transferProjectApiProjectsProjectRefTransferPost(projectRef, transferBody);
     print(result);
 } catch (e) {
-    print('Exception when calling ProjectInsightsApi->transferProjectApiProjectsProjectNameTransferPost: $e\n');
+    print('Exception when calling ProjectInsightsApi->transferProjectApiProjectsProjectRefTransferPost: $e\n');
 }
 ```
 
@@ -653,7 +653,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectName** | **String**|  | 
+ **projectRef** | **String**|  |
  **transferBody** | [**TransferBody**](TransferBody.md)|  | 
 
 ### Return type

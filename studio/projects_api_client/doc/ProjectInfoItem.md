@@ -10,7 +10,10 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **displayName** | **String** |  | 
 **fileSizeLimit** | **String** |  | 
+**id** | **String** |  |
+**isCallerProjectAdmin** | **bool** |  |
 **name** | **String** |  | 
+**publicRef** | **String** |  |
 **runningContainers** | **int** |  | 
 **status** | **String** |  | 
 **storageLimitToken** | **String** |  | 

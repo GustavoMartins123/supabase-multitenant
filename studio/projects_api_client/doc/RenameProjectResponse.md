@@ -18,11 +18,12 @@ Name | Type | Description | Notes
 **isIdempotent** | **bool** |  | 
 **jobId** | **String** |  | 
 **message** | **String** |  | 
-**newName** | **String** |  | 
-**oldName** | **String** |  | 
+**newRef** | **String** |  |
+**oldRef** | **String** |  |
 **progress** | **int** |  | 
 **project** | **String** |  | 
 **projectUuid** | **String** |  | 
+**publicRef** | **String** |  |
 **queuePosition** | **int** |  | 
 **retryOf** | **String** |  | 
 **retryable** | **bool** |  | 

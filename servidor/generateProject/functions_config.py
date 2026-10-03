@@ -11,7 +11,7 @@ import tempfile
 import uuid
 
 REF = re.compile(r"[a-z_][a-z0-9_]{2,39}\Z")
-FIELDS = ("PROJECT_ID", "PROJECT_UUID", "ANON_KEY_PROJETO", "SERVICE_ROLE_KEY_PROJETO", "JWT_SECRET_PROJETO")
+FIELDS = ("PROJECT_ID", "PROJECT_UUID", "PROJECT_PUBLIC_REF", "ANON_KEY_PROJETO", "SERVICE_ROLE_KEY_PROJETO", "JWT_SECRET_PROJETO")
 
 
 def canonical_ref(ref: str) -> str:
@@ -52,7 +52,9 @@ def projection(root: Path, ref: str) -> dict[str, str]:
         raise ValueError("incomplete or divergent project identity")
     if str(uuid.UUID(values["PROJECT_UUID"])) != values["PROJECT_UUID"]:
         raise ValueError("noncanonical project UUID")
-    return {"project_ref": ref, "project_uuid": values["PROJECT_UUID"],
+    if not re.fullmatch(r"[a-z]{20}", values["PROJECT_PUBLIC_REF"]):
+        raise ValueError("noncanonical public project reference")
+    return {"project_ref": values["PROJECT_PUBLIC_REF"], "technical_name": ref, "project_uuid": values["PROJECT_UUID"],
             "anon_key": values["ANON_KEY_PROJETO"], "service_role_key": values["SERVICE_ROLE_KEY_PROJETO"],
             "jwt_secret": values["JWT_SECRET_PROJETO"]}
 
