@@ -30,6 +30,7 @@ local function sync_profile(profile)
 end
 
 local function read_json_body()
+    require("security.csrf").require_json()
     ngx.req.read_body()
     local body = ngx.req.get_body_data()
     if not body then

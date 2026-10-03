@@ -18,6 +18,8 @@ studio/authelia/db.sqlite3-journal
 studio/authelia/configuration.runtime.yml
 studio/authelia/ssl/
 studio/secrets/
+studio/authelia/.studio-origin
+studio/authelia/.studio-bootstrap-consumed
 servidor/.env
 servidor/.analytics.env
 servidor/.storage.env

@@ -1,14 +1,7 @@
 local cjson = require("cjson.safe")
 
 require("security.forged_identity").strip()
-
--- Compatibilidade do Studio: /object/sign e um alias local do endpoint real
--- do Storage. A antiga diretiva nginx usava $1 sem capture group; corrigimos
--- antes da selecao de location para cair diretamente em /storage/v1.
-if (ngx.var.uri or "") == "/object/sign" then
-    ngx.req.set_uri("/storage/v1/object/sign", true)
-    return
-end
+require("security.csrf").enforce()
 
 local method = ngx.req.get_method()
 local uri = ngx.var.uri or ""

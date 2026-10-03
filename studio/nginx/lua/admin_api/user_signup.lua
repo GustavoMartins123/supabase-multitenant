@@ -4,6 +4,7 @@ if ngx.var.request_method ~= "POST" then
     return ngx.exit(ngx.HTTP_METHOD_NOT_ALLOWED)
 end
 
+require("security.csrf").require_json()
 ngx.req.read_body()
 local body = ngx.req.get_body_data()
 if not body then

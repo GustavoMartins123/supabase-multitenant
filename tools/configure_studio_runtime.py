@@ -51,13 +51,17 @@ class RuntimeConfigError(RuntimeError):
 
 def parse_origin(origin: str) -> tuple[str, str]:
     parsed = urlsplit(origin)
-    if parsed.scheme != "https" or not parsed.hostname or parsed.path not in {"", "/"}:
+    if parsed.scheme != "https" or not parsed.hostname or parsed.path not in {"", "/"} or parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise RuntimeConfigError("--studio-origin deve usar https://host[:porta]")
     try:
         parsed.port
     except ValueError as exc:
         raise RuntimeConfigError("porta invalida em --studio-origin") from exc
-    return origin.rstrip("/"), parsed.hostname
+    host = parsed.hostname.lower()
+    authority = f"[{host}]" if ":" in host else host
+    if parsed.port is not None and parsed.port != 443:
+        authority += f":{parsed.port}"
+    return "https://" + authority, host
 
 
 def render_configuration(template: str, *, origin: str, host: str) -> str:
@@ -428,6 +432,7 @@ def configure_runtime(
     # process and the OpenResty worker need to read it from the shared bind
     # mount; secrets remain in the dedicated mode-0600 files below.
     atomic_write(target, rendered, mode=0o644, replace=force)
+    atomic_write(target.parent / ".studio-origin", origin, mode=0o644, replace=True)
 
     print(f"Authelia renderizado para {host}; valores de segredo omitidos")
     print(f"Configuracao: {target}")

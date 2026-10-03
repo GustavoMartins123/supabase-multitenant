@@ -33,17 +33,15 @@ class StoragePlatformRouterTests(unittest.TestCase):
         self.assertIn('/storage/v1/vector/CreateVectorBucket', router)
         self.assertNotIn('vector-buckets', nginx)
 
-    def test_object_sign_alias_is_normalized_before_legacy_nginx_rewrite(self) -> None:
+    def test_object_sign_alias_is_rejected_not_normalized(self) -> None:
         nginx = NGINX.read_text(encoding="utf-8")
         guard = UPLOAD_GUARD.read_text(encoding="utf-8")
 
         self.assertIn("server_rewrite_by_lua_file", nginx)
-        self.assertIn('== "/object/sign"', guard)
-        self.assertIn('ngx.req.set_uri("/storage/v1/object/sign", true)', guard)
-        self.assertLess(
-            guard.index('== "/object/sign"'),
-            guard.index("looks_like_file_upload"),
-        )
+        self.assertNotIn('ngx.req.set_uri("/storage/v1/object/sign", true)', guard)
+        location = nginx.split('location /object/sign {', 1)[1].split('}', 1)[0]
+        self.assertIn('return 410;', location)
+        self.assertNotIn('proxy_pass', location)
 
     def test_get_is_adapted_to_the_storage_vector_post_contract(self) -> None:
         router = ROUTER.read_text(encoding="utf-8")
