@@ -203,17 +203,12 @@ class SharedStorageLifecycleContractTest(unittest.TestCase):
         self.assertIn("additional_project_ids = (original_id,)", jobs)
         self.assertIn("for project_id in action.lock_project_ids", jobs)
 
-    def test_rename_keeps_immutable_tenant_and_only_repoints_database(self) -> None:
-        self.assertIn(
-            'storage_patch_tenant_connection "$PROJECT_UUID" "$NEW_NAME"',
-            self.rename,
-        )
-        self.assertIn(
-            'storage_assert_project_gateway "$PROJECT_UUID" "$NEW_NAME"',
-            self.rename,
-        )
-        self.assertNotIn("storage_clone_tenant_namespace", self.rename)
-        self.assertNotIn("storage_remove_tenant_namespace", self.rename)
+    def test_rename_preserves_database_storage_tenant_and_vector_wrappers(self) -> None:
+        self.assertIn('rotate_project_reference.py', self.rename)
+        rotation = read(SCRIPTS / "rotate_project_reference.py")
+        self.assertIn("AND tenant_uuid=", rotation)
+        for mutation in ("storage_patch_tenant_connection", "storage_clone_tenant_namespace", "storage_remove_tenant_namespace", "ALTER DATABASE", "vector_sync_project_wrappers"):
+            self.assertNotIn(mutation, rotation)
 
     def test_delete_registry_precedes_namespace_and_project_database(self) -> None:
         self.assertLess(
@@ -233,7 +228,7 @@ class SharedStorageLifecycleContractTest(unittest.TestCase):
         self.assertIn("storage_validate_namespace_archive", self.restore)
 
     def test_mutating_lifecycles_quiesce_only_the_selected_tenant(self) -> None:
-        lifecycles = (self.backup_impl, self.restore, self.rename, self.duplicate)
+        lifecycles = (self.backup_impl, self.restore, self.duplicate)
         for lifecycle in lifecycles:
             self.assertIn("storage_quiesce_tenant", lifecycle)
             self.assertLess(lifecycle.index("_QUIESCED=1"), lifecycle.index("storage_quiesce_tenant"))
@@ -247,7 +242,6 @@ class SharedStorageLifecycleContractTest(unittest.TestCase):
         guarded = (
             self.backup_impl,
             self.restore,
-            self.rename,
             self.duplicate,
             self.delete,
             read(SCRIPTS / "apply_storage_settings.sh"),

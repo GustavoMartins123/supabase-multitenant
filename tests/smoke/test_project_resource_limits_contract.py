@@ -23,7 +23,6 @@ MIGRATOR = ROOT / "tools" / "migrate_project_resource_limits.py"
 HOOKED_SCRIPTS = (
     ROOT / "servidor" / "generateProject" / "lib" / "generate_project_impl.sh",
     ROOT / "servidor" / "generateProject" / "lib" / "duplicate_project_impl.sh",
-    ROOT / "servidor" / "generateProject" / "lib" / "rename_project_impl.sh",
     ROOT / "servidor" / "generateProject" / "rotate_key.sh",
 )
 

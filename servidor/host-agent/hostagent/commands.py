@@ -213,6 +213,7 @@ class CommandContext:
     state: RunningCommandState
     timeout_seconds: int
     command: str
+    project_uuid: str | None = None
 
 
 @dataclass
@@ -924,24 +925,22 @@ async def handle_rotate_keys(ctx: CommandContext, project: str, args: dict[str, 
 
 
 async def handle_rename_project(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
-    new_name = str(args["new_name"])
-    resolve_project_dir(ctx.config.projects_root, project)
-    resolve_project_dir(ctx.config.projects_root, new_name)
-    ctx.state.report(progress=5, step="migrate_infrastructure", message=f"Renomeando {project} -> {new_name}...")
-    env = os.environ.copy()
-    resource_profile = args.get("resource_profile")
-    if resource_profile:
-        env["PROJECT_RESOURCE_PROFILE_OVERRIDE"] = str(resource_profile)
+    if not is_valid_uuid(ctx.project_uuid):
+        raise ValueError("Canonical project UUID is required for reference rotation")
+    resolve_project_dir(ctx.config.projects_root, project, must_exist=True)
+    ctx.state.report(progress=5, step="rotate_public_reference", message="Atualizando referencia publica...")
     outcome, process = await _run_lifecycle_script(
         ctx,
         "rename_project.sh",
-        [project, new_name],
-        env=env,
+        [project, ctx.project_uuid, args["tenant_uuid"], args["old_ref"], args["new_ref"]],
         error_code="rename_failed",
-        markers=("ROLLBACK_COMPLETE",),
+        markers=("ROLLBACK_COMPLETE", "REFERENCE_ROTATED"),
     )
     rolled_back = "ROLLBACK_COMPLETE" in process.markers_seen
-    outcome.result = {**(outcome.result or {}), "rolled_back": rolled_back}
+    outcome.result = {"rolled_back": rolled_back, "old_ref": args["old_ref"], "new_ref": args["new_ref"]}
+    if outcome.status == "done" and "REFERENCE_ROTATED" not in process.markers_seen:
+        outcome.status = "failed"
+        outcome.error_code = "rotation_completion_unconfirmed"
     if outcome.status == "failed" and outcome.error_code == "rename_failed" and rolled_back:
         outcome.error_code = "rename_rolled_back"
     return outcome

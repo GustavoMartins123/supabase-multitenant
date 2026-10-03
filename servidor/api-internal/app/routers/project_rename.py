@@ -1,3 +1,4 @@
+import json
 import uuid
 from typing import Any
 
@@ -12,34 +13,36 @@ from app.jobs import (
     action_queue,
     create_project_job as _create_project_job,
     enqueue_project_action as _enqueue_project_action,
-    set_job_status as _set_job_status,
 )
-from app.host_agent import (
-    command_result,
-    run_command_for_job as run_host_agent_command_for_job,
-)
-from app.validation import validate_project_id
+from app.validation import validate_project_ref
+from app.project_public_ref import generate_public_ref
 from app.control_plane_service import (
     audit_studio_action,
-    create_studio_notification,
 )
-from app.snippets_migration import rename_project_snippets
 from app.database import get_pool
 from app.dependencies import (
     ensure_project_admin_access,
     ensure_project_member_access,
-    get_project_row,
+    get_public_project_row,
     resolve_authenticated_user,
 )
 from app.main import _RENAME_HISTORY_ACTIONS
 from app.project_backgrounds import (
-    _job_progress_mirror,
     _rename_project_background,
     _serialize_queued_job,
     _update_rename_history,
 )
 
 router = APIRouter(tags=["project-rename"])
+
+
+def _audit_object(value: str | None) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    decoded = json.loads(value)
+    if not isinstance(decoded, dict):
+        raise RuntimeError("Audit value must be a JSON object")
+    return decoded
 
 
 class RenameProjectResponse(BaseModel):
@@ -66,8 +69,8 @@ class RenameProjectResponse(BaseModel):
     created_at: str | None
     updated_at: str | None
     queue_position: int
-    old_name: str
-    new_name: str
+    old_ref: str
+    new_ref: str
 
 
 class UpdateDisplayNameResponse(BaseModel):
@@ -129,10 +132,8 @@ class RenameHistoryEntry(BaseModel):
     job_id: str
     actor_user_id: str | None
     actor_name: str
-    old_name: str
-    new_name: str
-    old_path: str
-    new_path: str
+    old_ref: str
+    new_ref: str
     status: str
     error: str | None
     created_at: str
@@ -144,245 +145,127 @@ class ProjectRenameHistoryResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     project: str
-    requested_name: str
+    requested_ref: str
     events: list[RenameHistoryEvent]
     renames: list[RenameHistoryEntry]
 
 
-def _validate_rename_target(raw: str) -> str:
-    return validate_project_id(raw)
-
-
-@router.post("/api/projects/{project_name}/rename", status_code=202, response_model=RenameProjectResponse)
+@router.post(
+    "/api/projects/{project_ref}/rename", status_code=202, response_model=RenameProjectResponse
+)
 async def rename_project(
-    project_name: str,
+    project_ref: str,
     body: ProjectRenameRequest,
     request: Request,
     pool=Depends(get_pool),
 ):
-    """Renomeia o slug/path do projeto (migração completa em background).
-
-    O escopo inclui: nome interno na meta DB, banco Postgres, roles
-    por projeto, replication slots do Realtime, tenant Supavisor,
-    diretório físico e templates (nginx, docker-compose, .env).
-    """
-    project_name = validate_project_id(project_name)
-    new_name = _validate_rename_target(body.new_name)
-    if new_name == project_name:
-        raise HTTPException(400, "O novo nome deve ser diferente do atual")
-    display_name_raw = (
-        body.display_name.strip() if body.display_name is not None else None
-    )
-
+    project_ref = validate_project_ref(project_ref)
     auth_user = await resolve_authenticated_user(request, pool)
-
-    display_name_changed = False
-    previous_display: str | None = None
-
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            project_row = await get_project_row(conn, project_name)
-            project_id = project_row["id"]
-            await conn.execute(
-                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-                str(project_id),
-            )
-            await conn.execute(
-                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-                f"project-name:{new_name}",
-            )
-            await ensure_project_admin_access(
-                conn,
-                project_id=project_id,
-                auth_user=auth_user,
-                message="Apenas admin do projeto ou admin global pode renomear",
-            )
-
-            collision = await conn.fetchval(
-                "SELECT 1 FROM projects WHERE name = $1",
-                new_name,
-            )
-            if collision:
-                raise HTTPException(409, f"Já existe um projeto com nome '{new_name}'")
-
-            reserved_destination = await conn.fetchval(
-                """
-                SELECT 1
-                FROM project_name_history
-                WHERE new_name = $1
-                  AND status IN ('queued', 'running')
-                LIMIT 1
-                """,
-                new_name,
-            )
-            if reserved_destination:
-                raise HTTPException(
-                    409, f"Ja existe uma renomeacao ativa para o nome '{new_name}'"
+    new_ref = generate_public_ref()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                project = await get_public_project_row(conn, project_ref)
+                await ensure_project_admin_access(
+                    conn, project_id=project["id"], auth_user=auth_user
                 )
-
-            active_rename = await conn.fetchval(
-                """
-                SELECT 1
-                FROM project_name_history
-                WHERE project_id = $1
-                  AND status IN ('queued', 'running')
-                LIMIT 1
-                """,
-                project_id,
-            )
-            if active_rename:
-                raise HTTPException(409, "Ja existe uma renomeacao ativa para este projeto")
-
-            job_id = await _create_project_job(
-                pool,
-                project_name,
-                auth_user["db_user_id"],
-                message=f"Rename iniciado: {project_name} -> {new_name}",
-                action="rename",
-                payload={
-                    "old_name": project_name,
-                    "new_name": new_name,
-                    "actor_user_id": str(auth_user["db_user_id"]),
-                },
-                total_steps=9,
-                project_uuid=project_id,
-                connection=conn,
-            )
-            history_id = await conn.fetchval(
-                """
-                INSERT INTO project_name_history(
-                    project_id, job_id, actor_user_id,
-                    old_name, new_name, old_path, new_path
+                if not project["tenant_uuid"]:
+                    raise HTTPException(409, "Canonical tenant UUID is required")
+                await conn.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", str(project["id"])
                 )
-                VALUES($1, $2, $3, $4, $5, $6, $7)
-                RETURNING id
-                """,
-                project_id,
-                job_id,
-                auth_user["db_user_id"],
-                project_name,
-                new_name,
-                f"/{project_name}",
-                f"/{new_name}",
-            )
-
-            await audit_studio_action(
-                conn,
-                project_id=project_id,
-                actor_user_id=auth_user["db_user_id"],
-                action="project_rename_started",
-                target_type="project",
-                target_id=project_name,
-                old_value={"name": project_name, "path": f"/{project_name}"},
-                new_value={"name": new_name, "path": f"/{new_name}"},
-            )
-
-            if display_name_raw:
-                current_display = project_row["display_name"]
-                if current_display != display_name_raw:
-                    previous_display = current_display
-                    await conn.execute(
-                        "UPDATE projects SET display_name = $1 WHERE id = $2",
-                        display_name_raw,
-                        project_id,
-                    )
-                    await audit_studio_action(
-                        conn,
-                        project_id=project_id,
-                        actor_user_id=auth_user["db_user_id"],
-                        action="project_display_name_changed",
-                        target_type="project",
-                        target_id=project_name,
-                        old_value={"display_name": current_display},
-                        new_value={"display_name": display_name_raw},
-                    )
-                    display_name_changed = True
-
+                expected_id = project["id"]
+                project = await get_public_project_row(conn, project_ref, for_update=True)
+                if project["id"] != expected_id:
+                    raise HTTPException(409, "Canonical project identity changed")
+                await conn.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    "project-ref:" + new_ref,
+                )
+                if new_ref == project_ref or await conn.fetchval(
+                    "SELECT 1 FROM projects WHERE public_ref=$1", new_ref
+                ):
+                    raise HTTPException(409, "Generated public reference collision")
+                if await conn.fetchval(
+                    "SELECT 1 FROM project_reference_history WHERE project_id=$1 AND status IN ('queued','running')",
+                    project["id"],
+                ):
+                    raise HTTPException(409, "A public reference rotation is already active")
+                job_id = await _create_project_job(
+                    pool,
+                    project["name"],
+                    auth_user["db_user_id"],
+                    action="rename",
+                    message="Rotacao da referencia publica enfileirada.",
+                    total_steps=4,
+                    project_uuid=project["id"],
+                    connection=conn,
+                    payload={
+                        "old_ref": project_ref,
+                        "new_ref": new_ref,
+                        "actor_user_id": str(auth_user["db_user_id"]),
+                    },
+                )
+                history_id = await conn.fetchval(
+                    "INSERT INTO project_reference_history(project_id,job_id,actor_user_id,old_ref,new_ref) VALUES($1,$2,$3,$4,$5) RETURNING id",
+                    project["id"],
+                    uuid.UUID(str(job_id)),
+                    auth_user["db_user_id"],
+                    project_ref,
+                    new_ref,
+                )
+                await audit_studio_action(
+                    conn,
+                    project_id=project["id"],
+                    actor_user_id=auth_user["db_user_id"],
+                    action="project_rename_started",
+                    target_type="project",
+                    target_id=project_ref,
+                    old_value={"ref": project_ref, "path": "/" + project_ref},
+                    new_value={"ref": new_ref, "path": "/" + new_ref},
+                )
+    except asyncpg.UniqueViolationError as exc:
+        raise HTTPException(409, "Public reference reservation conflicted") from exc
     try:
         position = await _enqueue_project_action(
-            project_name,
+            project["name"],
             job_id,
             lambda: _rename_project_background(
-                job_id,
-                project_id,
-                history_id,
-                project_name,
-                new_name,
-                auth_user["db_user_id"],
+                job_id, project["id"], history_id, project_ref, new_ref, auth_user["db_user_id"]
             ),
         )
     except Exception as exc:
         async with pool.acquire() as conn:
             async with conn.transaction():
                 await conn.execute(
-                    """
-                    UPDATE jobs
-                    SET status = 'failed',
-                        message = $1,
-                        current_step = 'enqueue_failed',
-                        error_code = 'queue_submit_failed',
-                        finished_at = now(),
-                        updated_at = now()
-                    WHERE job_id = $2
-                    """,
-                    "Falha interna ao enfileirar a renomeação.",
-                    job_id,
+                    "UPDATE jobs SET status='failed', error_code='queue_submit_failed', finished_at=now(), updated_at=now() WHERE job_id=$1",
+                    uuid.UUID(str(job_id)),
                 )
                 await _update_rename_history(
-                    conn,
-                    history_id,
-                    "failed",
-                    error="queue_submit_failed",
+                    conn, history_id, "failed", error="queue_submit_failed"
                 )
-                if display_name_changed:
-                    await conn.execute(
-                        """
-                        UPDATE projects SET display_name = $1
-                        WHERE id = $2 AND display_name = $3
-                        """,
-                        previous_display,
-                        project_id,
-                        display_name_raw,
-                    )
-                    await audit_studio_action(
-                        conn,
-                        project_id=project_id,
-                        actor_user_id=auth_user["db_user_id"],
-                        action="project_display_name_changed",
-                        target_type="project",
-                        target_id=project_name,
-                        old_value={"display_name": display_name_raw},
-                        new_value={"display_name": previous_display},
-                    )
-        raise HTTPException(503, "Nao foi possivel enfileirar a renomeacao") from exc
-
-    message = (
-        "Renomeação enfileirada. O projeto ficará indisponível durante a migração."
-        if position == 0
-        else f"Renomeação enfileirada. Existem {position} ações na fila para "
-        f"{project_name}; este job é o próximo."
-    )
+        raise HTTPException(503, "Could not enqueue public reference rotation") from exc
     return JSONResponse(
         status_code=202,
         content=await _serialize_queued_job(
             pool,
             job_id,
             position,
-            message,
-            extra={"old_name": project_name, "new_name": new_name},
+            "Rotacao da URL enfileirada; dados e nomes internos permanecem iguais.",
+            extra={"project": project_ref, "old_ref": project_ref, "new_ref": new_ref},
         ),
     )
 
 
-@router.patch("/api/projects/{project_name}/display-name", response_model=UpdateDisplayNameResponse)
+@router.patch("/api/projects/{project_ref}/display-name", response_model=UpdateDisplayNameResponse)
 async def update_project_display_name(
-    project_name: str,
+    project_ref: str,
     body: ProjectDisplayNameUpdate,
     request: Request,
     pool=Depends(get_pool),
 ):
     """Atualiza apenas o display_name do projeto (sem migrar infraestrutura)."""
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     new_display = body.display_name.strip()
     if not new_display:
         raise HTTPException(400, "display_name não pode ser vazio")
@@ -391,7 +274,7 @@ async def update_project_display_name(
 
     async with pool.acquire() as conn:
         async with conn.transaction():
-            project_row = await get_project_row(conn, project_name)
+            project_row = await get_public_project_row(conn, project_ref, for_update=True)
             project_id = project_row["id"]
             await ensure_project_admin_access(
                 conn,
@@ -405,7 +288,7 @@ async def update_project_display_name(
             )
             if current_display == new_display:
                 return {
-                    "project": project_name,
+                    "project": project_ref,
                     "display_name": new_display,
                     "status": "noop",
                 }
@@ -420,31 +303,31 @@ async def update_project_display_name(
                 actor_user_id=auth_user["db_user_id"],
                 action="project_display_name_changed",
                 target_type="project",
-                target_id=project_name,
+                target_id=project_ref,
                 old_value={"display_name": current_display},
                 new_value={"display_name": new_display},
             )
 
     return {
-        "project": project_name,
+        "project": project_ref,
         "display_name": new_display,
         "status": "updated",
     }
 
 
-@router.get("/api/projects/{project_name}/config-token", response_model=ProjectConfigTokenResponse)
+@router.get("/api/projects/{project_ref}/config-token", response_model=ProjectConfigTokenResponse)
 async def get_project_config_token(
-    project_name: str,
+    project_ref: str,
     request: Request,
     pool=Depends(get_pool),
 ):
     """Entrega o token compartilhado aos membros do projeto e registra a leitura."""
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     auth_user = await resolve_authenticated_user(request, pool)
 
     async with pool.acquire() as conn:
         async with conn.transaction():
-            project = await get_project_row(conn, project_name)
+            project = await get_public_project_row(conn, project_ref)
             await ensure_project_member_access(
                 conn,
                 project_id=project["id"],
@@ -469,18 +352,18 @@ async def get_project_config_token(
                 actor_user_id=auth_user["db_user_id"],
                 action="project_config_token_read",
                 target_type="project_secret",
-                target_id=project_name,
+                target_id=project_ref,
             )
 
     return JSONResponse(
-        content={"project": project_name, "config_token": token},
+        content={"project": project_ref, "config_token": token},
         headers={"Cache-Control": "no-store"},
     )
 
 
-@router.get("/api/projects/{project_name}/queue-status", response_model=ProjectQueueStatusResponse)
+@router.get("/api/projects/{project_ref}/queue-status", response_model=ProjectQueueStatusResponse)
 async def get_project_queue_status(
-    project_name: str,
+    project_ref: str,
     request: Request,
     pool=Depends(get_pool),
 ):
@@ -489,11 +372,11 @@ async def get_project_queue_status(
     Inclui o job em execução (se houver), o tamanho da fila, e os jobs
     pendentes/rodando do banco para fins de UI (polling).
     """
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     auth_user = await resolve_authenticated_user(request, pool)
 
     async with pool.acquire() as conn:
-        project_row = await get_project_row(conn, project_name)
+        project_row = await get_public_project_row(conn, project_ref)
         project_id = project_row["id"]
         await ensure_project_member_access(
             conn,
@@ -513,14 +396,14 @@ async def get_project_queue_status(
                 total_steps,
                 updated_at
             FROM jobs
-            WHERE project = $1
+            WHERE project_uuid = $1
               AND status IN ('queued', 'running')
             ORDER BY updated_at ASC
             """,
-            project_name,
+            project_id,
         )
 
-    queue_state = action_queue.status(project_name)
+    queue_state = action_queue.status(project_row["name"])
     in_flight = [
         {
             "job_id": str(r["job_id"]),
@@ -536,7 +419,7 @@ async def get_project_queue_status(
     ]
 
     return {
-        "project": project_name,
+        "project": project_ref,
         "is_busy": queue_state["is_busy"],
         "current_job_id": queue_state["current_job_id"],
         "queued": queue_state["queued"],
@@ -553,36 +436,21 @@ async def get_project_queue_status(
     }
 
 
-@router.get("/api/projects/{project_name}/rename-history", response_model=ProjectRenameHistoryResponse)
+@router.get(
+    "/api/projects/{project_ref}/rename-history", response_model=ProjectRenameHistoryResponse
+)
 async def get_project_rename_history(
-    project_name: str,
+    project_ref: str,
     request: Request,
     pool=Depends(get_pool),
     limit: int = Query(50, ge=1, le=500),
 ):
-    """Retorna auditoria e historico duravel de nome/path do projeto."""
-    project_name = validate_project_id(project_name)
+    """Retorna auditoria e historico duravel da referencia publica."""
+    project_ref = validate_project_ref(project_ref)
 
     auth_user = await resolve_authenticated_user(request, pool)
     async with pool.acquire() as conn:
-        project_row = await conn.fetchrow(
-            "SELECT id, name FROM projects WHERE name = $1",
-            project_name,
-        )
-        if not project_row:
-            project_row = await conn.fetchrow(
-                """
-                SELECT p.id, p.name
-                FROM project_name_history h
-                JOIN projects p ON p.id = h.project_id
-                WHERE h.old_name = $1 OR h.new_name = $1
-                ORDER BY h.created_at DESC
-                LIMIT 1
-                """,
-                project_name,
-            )
-        if not project_row:
-            raise HTTPException(404, "Project not found")
+        project_row = await get_public_project_row(conn, project_ref)
         project_id = project_row["id"]
         await ensure_project_member_access(
             conn,
@@ -596,8 +464,8 @@ async def get_project_rename_history(
                 a.id,
                 a.action,
                 a.target_id,
-                a.old_value,
-                a.new_value,
+                a.old_value::text AS old_value,
+                a.new_value::text AS new_value,
                 a.created_at,
                 a.actor_user_id,
                 COALESCE(u.display_name, u.authelia_username, 'Sistema') AS actor_name
@@ -617,10 +485,8 @@ async def get_project_rename_history(
             SELECT
                 h.id,
                 h.job_id,
-                h.old_name,
-                h.new_name,
-                h.old_path,
-                h.new_path,
+                h.old_ref,
+                h.new_ref,
                 h.status,
                 h.error,
                 h.created_at,
@@ -628,7 +494,7 @@ async def get_project_rename_history(
                 h.completed_at,
                 h.actor_user_id,
                 COALESCE(u.display_name, u.authelia_username, 'Sistema') AS actor_name
-            FROM project_name_history h
+            FROM project_reference_history h
             LEFT JOIN users u ON u.id = h.actor_user_id
             WHERE h.project_id = $1
             ORDER BY h.created_at DESC
@@ -639,19 +505,17 @@ async def get_project_rename_history(
         )
 
     return {
-        "project": project_row["name"],
-        "requested_name": project_name,
+        "project": project_row["public_ref"],
+        "requested_ref": project_ref,
         "events": [
             {
                 "id": str(r["id"]),
                 "action": r["action"],
-                "actor_user_id": (
-                    str(r["actor_user_id"]) if r["actor_user_id"] else None
-                ),
+                "actor_user_id": (str(r["actor_user_id"]) if r["actor_user_id"] else None),
                 "actor_name": r["actor_name"],
                 "target_id": r["target_id"],
-                "old_value": r["old_value"],
-                "new_value": r["new_value"],
+                "old_value": _audit_object(r["old_value"]),
+                "new_value": _audit_object(r["new_value"]),
                 "created_at": r["created_at"].isoformat(),
             }
             for r in rows
@@ -660,21 +524,15 @@ async def get_project_rename_history(
             {
                 "id": str(r["id"]),
                 "job_id": str(r["job_id"]),
-                "actor_user_id": (
-                    str(r["actor_user_id"]) if r["actor_user_id"] else None
-                ),
+                "actor_user_id": (str(r["actor_user_id"]) if r["actor_user_id"] else None),
                 "actor_name": r["actor_name"],
-                "old_name": r["old_name"],
-                "new_name": r["new_name"],
-                "old_path": r["old_path"],
-                "new_path": r["new_path"],
+                "old_ref": r["old_ref"],
+                "new_ref": r["new_ref"],
                 "status": r["status"],
                 "error": r["error"],
                 "created_at": r["created_at"].isoformat(),
                 "updated_at": r["updated_at"].isoformat(),
-                "completed_at": (
-                    r["completed_at"].isoformat() if r["completed_at"] else None
-                ),
+                "completed_at": (r["completed_at"].isoformat() if r["completed_at"] else None),
             }
             for r in history_rows
         ],

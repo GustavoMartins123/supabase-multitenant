@@ -70,7 +70,6 @@ class ReservedRouteNamesContractTest(unittest.TestCase):
         for relative in (
             "servidor/generateProject/lib/generate_project_impl.sh",
             "servidor/generateProject/lib/duplicate_project_impl.sh",
-            "servidor/generateProject/lib/rename_project_impl.sh",
         ):
             text = (ROOT / relative).read_text(encoding="utf-8")
             got = (

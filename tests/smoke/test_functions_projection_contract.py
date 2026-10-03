@@ -23,11 +23,15 @@ class FunctionsProjectionContractTest(unittest.TestCase):
         self.assertIn('parsed.project_ref !== ref', source)
 
     def test_all_lifecycle_implementations_hold_locks_and_publish_after_success(self):
-        for name in ('generate', 'duplicate', 'rename', 'restore'):
+        for name in ('generate', 'duplicate', 'restore'):
             source = (ROOT / f'servidor/generateProject/lib/{name}_project_impl.sh').read_text(encoding='utf-8')
             self.assertIn('functions_config_lock ', source, name)
             self.assertIn('functions_config_withdraw ', source, name)
             self.assertIn('functions_config_publish ', source, name)
+        rotation = (ROOT / 'servidor/generateProject/rotate_project_reference.py').read_text(encoding='utf-8')
+        self.assertIn('self.functions("withdraw")', rotation)
+        self.assertIn('self.functions("publish")', rotation)
+        self.assertIn('functions_config_lock ', (ROOT / 'servidor/generateProject/lib/rename_project_impl.sh').read_text(encoding='utf-8'))
         for name in ('delete_project', 'delete_storage_tenant', 'rotate_key'):
             source = (ROOT / f'servidor/generateProject/{name}.sh').read_text(encoding='utf-8')
             self.assertIn('functions_config_lock ', source, name)

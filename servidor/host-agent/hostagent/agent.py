@@ -279,6 +279,7 @@ class HostAgent:
             state=state,
             timeout_seconds=timeout_seconds,
             command=command,
+            project_uuid=str(record["project_uuid"]) if record["project_uuid"] else None,
         )
         heartbeat = asyncio.create_task(self._command_heartbeat_loop(command_id, state))
         try:
@@ -451,12 +452,14 @@ class HostAgent:
         if record["project_uuid"] is not None and auth["project_id"] is not None:
             project_uuid_matches = auth["project_id"] == record["project_uuid"]
         intent_tenant_uuid = args.get("tenant_uuid")
+        if command == "rename_project" and args["old_ref"] != auth["public_ref"]:
+            return ("authorization_denied:public_ref_mismatch", "Referencia publica da rotacao mudou.")
         if command in {"create_project", "duplicate_project"} and args["public_ref"] != auth["public_ref"]:
             return (
                 "authorization_denied:public_ref_mismatch",
                 "Referencia publica da intencao diverge do control plane.",
             )
-        if command in {"recreate_services", "rotate_keys", "restore_project"}:
+        if command in {"recreate_services", "rotate_keys", "restore_project", "rename_project"}:
             try:
                 directory = resolve_project_dir(self.config.projects_root, project, must_exist=True)
                 physical_ref = read_canonical_env_value(directory / ".env", "PROJECT_PUBLIC_REF")

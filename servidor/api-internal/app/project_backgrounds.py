@@ -18,7 +18,7 @@ from app.opaque_key_service import bootstrap_project_opaque_keys
 from app.control_plane_service import audit_studio_action, create_studio_notification
 from app.project_env_secrets import PROJECTS_ROOT, read_project_secret_keys as _read_project_secret_keys
 from app.service_key_cache import invalidate_service_key_cache
-from app.snippets_migration import rename_project_snippets
+from app.project_reference_jobs import rename_project_background as _rename_project_background
 from app.key_rotation import KeyRotationMetadataError, project_key_schedule
 from app.automatic_key_rotation import block_automatic_key_rotation
 from app.project_deletion import ProjectDeletionError, build_global_delete_token, build_realtime_delete_token, delete_realtime_tenant, delete_supavisor_tenant, drain_database_connections, drop_database_force, drop_supabase_replication_slots, global_admin_connection, load_project_environment, terminate_supavisor_pools
@@ -1088,7 +1088,7 @@ async def _update_rename_history(
 ) -> None:
     await conn.execute(
         """
-        UPDATE project_name_history
+        UPDATE project_reference_history
         SET status = $1,
             error = $2,
             updated_at = now(),
@@ -1102,201 +1102,6 @@ async def _update_rename_history(
         error,
         history_id,
     )
-
-
-async def _rename_project_background(
-    job_id: str,
-    project_id: uuid.UUID,
-    history_id: int,
-    old_name: str,
-    new_name: str,
-    actor_user_id: uuid.UUID,
-) -> None:
-    """Delegar o rename ao host-agent e finalizar o control plane.
-
-    Em caso de shutdown da API o comando segue executando no host-agent;
-    o recovery do startup religa neste job e finaliza o rename (ou o
-    rollback) com o resultado persistido pelo agent.
-    """
-    pool = await get_pool()
-    try:
-        async with pool.acquire() as conn:
-            await _update_rename_history(conn, history_id, "running")
-        await _set_job_status(
-            job_id,
-            "running",
-            message=f"Renomeando {old_name} -> {new_name}...",
-            progress=5,
-            current_step="migrate_infrastructure",
-            total_steps=9,
-        )
-
-        record = await run_host_agent_command_for_job(
-            pool,
-            job_id=job_id,
-            command="rename_project",
-            project=old_name,
-            project_uuid=project_id,
-            requested_by=actor_user_id,
-            args={"new_name": new_name},
-            reuse_terminal=True,
-            on_progress=_job_progress_mirror(job_id),
-        )
-
-        if record["status"] != "done":
-            output = (record["stdout_tail"] or record["message"] or "").strip()
-            rolled_back = (
-                bool(command_result(record).get("rolled_back"))
-                or "ROLLBACK_COMPLETE" in output
-            )
-            history_status = "rolled_back" if rolled_back else "failed"
-            audit_action = (
-                "project_rename_rolled_back"
-                if rolled_back
-                else "project_rename_failed"
-            )
-            async with pool.acquire() as conn:
-                await _update_rename_history(
-                    conn,
-                    history_id,
-                    history_status,
-                    error=output[-4000:],
-                )
-                await audit_studio_action(
-                    conn,
-                    project_id=project_id,
-                    actor_user_id=actor_user_id,
-                    action=audit_action,
-                    target_type="project",
-                    target_id=old_name,
-                    old_value={"name": old_name, "path": f"/{old_name}"},
-                    new_value={
-                        "name": new_name,
-                        "path": f"/{new_name}",
-                        "new_name": new_name,
-                        "returncode": record["exit_code"],
-                        "error_code": record["error_code"],
-                        "error_excerpt": output[-2000:],
-                    },
-                )
-            await _set_job_status(
-                job_id,
-                "failed",
-                message=(
-                    "Falha no rename. Projeto pode estar em estado parcial."
-                    f"\n\n{output[-2000:]}"
-                ),
-                current_step=(
-                    "rollback_completed" if rolled_back else "rollback_unconfirmed"
-                ),
-                error_code=(
-                    "rename_rolled_back" if rolled_back else "rename_failed"
-                ),
-                stdout_tail=record["stdout_tail"],
-                stderr_tail=record["stderr_tail"],
-            )
-            return
-
-        # Migra as pastas de snippets SQL do usuario no Studio para o novo slug.
-        # Best-effort: o rename ja commitou; se falhar, os snippets ficam orfaos
-        # ate um retry manual, mas o projeto renomeado continua valido.
-        snippet_note = ""
-        try:
-            await rename_project_snippets(old_name, new_name)
-        except Exception as exc:  # noqa: BLE001
-            snippet_note = (
-                "\n\n⚠️ Snippets do Studio não migraram automaticamente "
-                "por uma falha interna."
-            )
-            print(f"[rename_project] snippets {old_name} -> {new_name}: {exc}")
-
-        await _set_job_status(
-            job_id,
-            "running",
-            message="Finalizando histórico e notificações do rename...",
-            progress=92,
-            current_step="finalize_control_plane",
-        )
-        async with pool.acquire() as conn:
-            await _update_rename_history(conn, history_id, "succeeded")
-            await conn.execute(
-                "UPDATE jobs SET project = $1 WHERE job_id = $2",
-                new_name,
-                job_id,
-            )
-            await audit_studio_action(
-                conn,
-                project_id=project_id,
-                actor_user_id=actor_user_id,
-                action="project_rename_succeeded",
-                target_type="project",
-                target_id=old_name,
-                old_value={"name": old_name, "path": f"/{old_name}"},
-                new_value={"name": new_name, "path": f"/{new_name}"},
-            )
-            notification_targets = await conn.fetch(
-                """
-                SELECT user_id FROM project_members
-                WHERE project_id = $1 AND user_id <> $2
-                """,
-                project_id,
-                actor_user_id,
-            )
-            for target in notification_targets:
-                await create_studio_notification(
-                    conn,
-                    project_id=project_id,
-                    target_user_id=target["user_id"],
-                    actor_user_id=actor_user_id,
-                    kind="project_renamed",
-                    target_type="project",
-                    target_id=str(project_id),
-                    payload={
-                        "old_name": old_name,
-                        "new_name": new_name,
-                        "old_path": f"/{old_name}",
-                        "new_path": f"/{new_name}",
-                    },
-                )
-
-        await _set_job_status(
-            job_id,
-            "done",
-            message=f"Projeto renomeado: {old_name} -> {new_name}{snippet_note}",
-            current_step="completed",
-        )
-    except Exception as exc:
-        await _set_job_status(
-            job_id,
-            "failed",
-            message="Falha interna inesperada ao renomear o projeto.",
-            error_code="unexpected_rename_error",
-        )
-        try:
-            async with pool.acquire() as conn:
-                await _update_rename_history(
-                    conn,
-                    history_id,
-                    "failed",
-                    error="Falha interna inesperada ao renomear o projeto.",
-                )
-                await audit_studio_action(
-                    conn,
-                    project_id=project_id,
-                    actor_user_id=actor_user_id,
-                    action="project_rename_failed",
-                    target_type="project",
-                    target_id=old_name,
-                    old_value={"name": old_name, "path": f"/{old_name}"},
-                    new_value={
-                        "name": new_name,
-                        "path": f"/{new_name}",
-                        "error_code": "unexpected_rename_error",
-                    },
-                )
-        except Exception:
-            pass
-        print(f"[rename_project] {old_name} -> {new_name}: {exc}")
 
 
 async def _create_restore_point_background(

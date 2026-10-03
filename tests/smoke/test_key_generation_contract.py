@@ -148,7 +148,6 @@ class KeyGenerationContractTest(unittest.TestCase):
             "lib/generate_project_impl.sh",
             "lib/duplicate_project_impl.sh",
             "rotate_key.sh",
-            "lib/rename_project_impl.sh",
         }:
             source = (GENERATE / script_name).read_text(encoding="utf-8")
             self.assertRegex(source, r'chmod 600 "[^\n]*\.env"', script_name)
@@ -168,7 +167,7 @@ class KeyGenerationContractTest(unittest.TestCase):
 
         self.assertNotIn('RECOVER_STALE="${3:-false}"', generate)
         self.assertNotIn('COPY_MODE="${3:-schema-only}"', duplicate)
-        for source in (generate, duplicate, rename):
+        for source in (generate, duplicate):
             self.assertNotIn('${MAX_CONCURRENT_USERS:-200}', source)
             self.assertIn(
                 '[[ "$MAX_CONCURRENT_USERS" =~ ^[1-9][0-9]*$ ]]', source

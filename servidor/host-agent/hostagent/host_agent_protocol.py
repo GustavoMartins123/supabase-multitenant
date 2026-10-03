@@ -235,10 +235,14 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
             errors.append("invalid_gateway_token")
         validate_resource_profile()
     elif command == "rename_project":
-        reject_unknown({"new_name", "resource_profile"})
-        require_project_field("new_name")
-        if args.get("new_name") == project:
-            errors.append("new_name_equals_project")
+        reject_unknown({"old_ref", "new_ref", "tenant_uuid"})
+        for field in ("old_ref", "new_ref"):
+            if not isinstance(args.get(field), str) or not re.fullmatch(r"[a-z]{20}", args[field]):
+                errors.append(f"invalid_{field}")
+        if args.get("old_ref") == args.get("new_ref"):
+            errors.append("public_reference_unchanged")
+        if not is_valid_uuid(args.get("tenant_uuid")):
+            errors.append("invalid_tenant_uuid")
         validate_resource_profile()
     elif command == "backup_project":
         reject_unknown({"backup_id", "tenant_uuid"})

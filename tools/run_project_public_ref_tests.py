@@ -21,6 +21,13 @@ STUDIO_CONTRACT_TESTS = (
     "test_s3_meta_identity", "test_storage_vector_lifecycle_integration",
     "test_studio_slug_context_contract", "test_internal_hmac_migration",
     "test_lua_security_hardening", "test_hmac_contracts",
+    "test_project_reference_rotation", "test_rename_destination_guard", "test_host_agent_contract",
+)
+ISOLATED_CONTRACT_TESTS = (
+    "test_resource_profile_contract", "test_key_generation_contract",
+    "test_project_resource_limits_contract", "test_reserved_route_names_contract",
+    "test_functions_projection_contract", "test_shared_storage_architecture_contract",
+    "test_project_telemetry", "test_jobs_contract",
 )
 
 
@@ -174,6 +181,11 @@ def execute(executor_image: str, postgres_image: str) -> None:
             *common, "--entrypoint", "python", executor_image,
             "-m", "unittest", *(f"tests.smoke.{name}" for name in STUDIO_CONTRACT_TESTS),
         ))
+        for name in ISOLATED_CONTRACT_TESTS:
+            print(docker(
+                *common, "--entrypoint", "python", executor_image,
+                "-m", "unittest", f"tests.smoke.{name}",
+            ))
         print(docker(
             *common, "--entrypoint", "python", executor_image,
             "-m", "unittest", "discover", "-s", "tests/smoke",

@@ -357,13 +357,12 @@ class ProtocolAndAgentContract(unittest.TestCase):
 
     def test_handlers_inject_override_env(self) -> None:
         commands = (ROOT / "servidor/host-agent/hostagent/commands.py").read_text(encoding="utf-8")
-        self.assertEqual(commands.count("PROJECT_RESOURCE_PROFILE_OVERRIDE"), 3)
+        self.assertEqual(commands.count("PROJECT_RESOURCE_PROFILE_OVERRIDE"), 2)
 
     def test_scripts_forward_override_to_helper(self) -> None:
         for name in (
             "generate_project_impl.sh",
             "duplicate_project_impl.sh",
-            "rename_project_impl.sh",
         ):
             path = ROOT / "servidor/generateProject/lib" / name
             with self.subTest(script=name):

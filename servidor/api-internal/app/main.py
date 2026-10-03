@@ -74,7 +74,6 @@ from app.project_env_secrets import (
     read_project_secret_keys as _read_project_secret_keys,
 )
 from app.service_key_cache import invalidate_service_key_cache
-from app.snippets_migration import rename_project_snippets
 from app.key_rotation import KeyRotationMetadataError, project_key_schedule
 from app.automatic_key_rotation import (
     block_automatic_key_rotation,
@@ -220,21 +219,29 @@ async def _build_recovery_runner(row: asyncpg.Record):
         async with pool.acquire() as conn:
             history = await conn.fetchrow(
                 """
-                SELECT id, project_id, actor_user_id, old_name, new_name
-                FROM project_name_history
+                SELECT id, project_id, actor_user_id, old_ref, new_ref
+                FROM project_reference_history
                 WHERE job_id = $1
                 """,
                 row["job_id"],
             )
-        if not history:
+        if (
+            not history
+            or not history["actor_user_id"]
+            or row["project_uuid"] != history["project_id"]
+            or row["created_by"] != history["actor_user_id"]
+            or payload.get("actor_user_id") != str(history["actor_user_id"])
+            or payload.get("old_ref") != history["old_ref"]
+            or payload.get("new_ref") != history["new_ref"]
+        ):
             return None
-        actor_user_id = history["actor_user_id"] or owner_id
+        actor_user_id = history["actor_user_id"]
         return lambda: _rename_project_background(
             job_id,
             history["project_id"],
             history["id"],
-            history["old_name"],
-            history["new_name"],
+            history["old_ref"],
+            history["new_ref"],
             actor_user_id,
         )
     if action == "backup":
@@ -396,7 +403,7 @@ async def _recover_pending_jobs() -> None:
             async with pool.acquire() as conn:
                 await conn.execute(
                     """
-                    UPDATE project_name_history
+                    UPDATE project_reference_history
                     SET status = 'failed',
                         error = $1,
                         updated_at = now(),

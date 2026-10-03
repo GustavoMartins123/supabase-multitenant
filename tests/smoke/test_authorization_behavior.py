@@ -155,6 +155,7 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
                 "users",
                 "internal_hmac_nonces",
                 "host_agent_commands",
+                "jobs",
                 "studio_directory_state",
             ):
                 await conn.execute(f"TRUNCATE {table} CASCADE")
@@ -428,6 +429,154 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
         response = await self.request("GET", "/api/projects/internal/studio-context/abcdefghijklmnopqrst?access=admin", actor=self.ex_member)
         self.assertEqual(response.status_code, 403, response.text)
         self.assertEqual(await self.pool.fetchval("SELECT count(*) FROM project_studio_keys"), 0)
+
+    async def reserve_reference_rotation(self):
+        with mock.patch("app.routers.project_rename._enqueue_project_action", new_callable=mock.AsyncMock, return_value=0):
+            response = await self.request("POST", "/api/projects/abcdefghijklmnopqrst/rename", actor=self.owner, body=b"{}")
+        self.assertEqual(response.status_code, 202, response.text)
+        history = await self.pool.fetchrow("SELECT * FROM project_reference_history WHERE project_id=$1", self.project_a)
+        return response.json(), history
+
+    async def test_rename_generates_reference_and_preserves_physical_identity_until_execution(self):
+        before = dict(await self.pool.fetchrow("SELECT * FROM projects WHERE id=$1", self.project_a))
+        data, history = await self.reserve_reference_rotation()
+        self.assertRegex(data["new_ref"], r"^[a-z]{20}$")
+        self.assertNotEqual(data["old_ref"], data["new_ref"])
+        self.assertEqual(data["project"], "abcdefghijklmnopqrst")
+        self.assertEqual(history["new_ref"], data["new_ref"])
+        self.assertEqual(dict(await self.pool.fetchrow("SELECT * FROM projects WHERE id=$1", self.project_a)), before)
+        job = await self.pool.fetchrow("SELECT * FROM jobs WHERE job_id=$1", history["job_id"])
+        self.assertEqual(job["project"], "projeto_a")
+        self.assertEqual(job["project_uuid"], self.project_a)
+        self.assertEqual(json.loads(job["payload"])["new_ref"], data["new_ref"])
+
+    async def test_physical_reference_rotation_executes_real_reservation_and_cas(self):
+        from tests.smoke.test_project_reference_rotation import RotationTest, NAME, TENANT, NEW
+
+        await self.pool.execute("UPDATE projects SET name=$1, tenant_uuid=$2 WHERE id=$3", NAME, uuid.UUID(TENANT), self.project_a)
+        snapshot = dict(await self.pool.fetchrow("SELECT * FROM projects WHERE id=$1", self.project_a))
+        with mock.patch("app.routers.project_rename.generate_public_ref", return_value=NEW):
+            await self.reserve_reference_rotation()
+        fixture = RotationTest()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        rotation = fixture.rotation
+        rotation.project_id = str(self.project_a)
+        loop = asyncio.get_running_loop()
+
+        async def execute_sql(query):
+            async with self.pool.acquire() as conn:
+                if query.startswith("BEGIN; "):
+                    statements = query.split(";")
+                    async with conn.transaction():
+                        return await conn.fetchval(statements[1]) or ""
+                return str(await conn.fetchval(query))
+
+        def sql(query):
+            return asyncio.run_coroutine_threadsafe(execute_sql(query), loop).result(timeout=15)
+
+        with mock.patch.object(rotation, "sql", side_effect=sql):
+            async with self.pool.acquire() as queue_connection:
+                await queue_connection.execute("SELECT pg_advisory_lock(hashtextextended($1,0))", str(self.project_a))
+                try:
+                    await asyncio.wait_for(asyncio.to_thread(rotation.rotate), timeout=20)
+                finally:
+                    await queue_connection.execute("SELECT pg_advisory_unlock(hashtextextended($1,0))", str(self.project_a))
+            changed = dict(await self.pool.fetchrow("SELECT * FROM projects WHERE id=$1", self.project_a))
+            self.assertEqual(changed, {**snapshot, "public_ref": NEW})
+            with self.assertRaisesRegex(RuntimeError, "compare-and-swap"):
+                await asyncio.to_thread(rotation.swap, rotation.old_ref, NEW)
+            await asyncio.to_thread(rotation.swap, NEW, rotation.old_ref)
+            self.assertEqual(dict(await self.pool.fetchrow("SELECT * FROM projects WHERE id=$1", self.project_a)), snapshot)
+            for relative, content in fixture.before.items():
+                (fixture.project / relative).write_bytes(content)
+            for mutation in ("created_by=NULL", "project_uuid=NULL", "payload=payload-'actor_user_id'", "status='failed'"):
+                await self.pool.execute(f"UPDATE jobs SET {mutation} WHERE project=$1", NAME)
+                try:
+                    with self.assertRaisesRegex(RuntimeError, "reservation"):
+                        await asyncio.to_thread(rotation.preflight)
+                finally:
+                    await self.pool.execute("UPDATE jobs SET created_by=$1,project_uuid=$2,status='queued',payload=jsonb_set(payload,'{actor_user_id}',to_jsonb($3::text)) WHERE project=$4", self.owner, self.project_a, str(self.owner), NAME)
+
+    async def test_rename_requires_admin_and_rejects_client_selected_reference_or_name(self):
+        path = "/api/projects/abcdefghijklmnopqrst/rename"
+        for actor, status in ((self.ex_member, 403), (self.outsider, 403), (None, 401)):
+            response = await self.request("POST", path, actor=actor, body=b"{}")
+            self.assertEqual(response.status_code, status, response.text)
+        for payload in ({"new_name": "demo"}, {"new_ref": "bcdefghijklmnopqrstu"}, {"display_name": "Different"}):
+            response = await self.request("POST", path, actor=self.owner, body=json.dumps(payload).encode())
+            self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(await self.pool.fetchval("SELECT count(*) FROM project_reference_history"), 0)
+
+    async def test_concurrent_rename_reserves_only_one_job(self):
+        with mock.patch("app.routers.project_rename._enqueue_project_action", new_callable=mock.AsyncMock, return_value=0):
+            results = await asyncio.gather(*[self.request("POST", "/api/projects/abcdefghijklmnopqrst/rename", actor=self.owner, body=b"{}") for _ in range(2)])
+        self.assertEqual(sorted(r.status_code for r in results), [202, 409])
+        self.assertEqual(await self.pool.fetchval("SELECT count(*) FROM project_reference_history"), 1)
+        self.assertEqual(await self.pool.fetchval("SELECT count(*) FROM jobs WHERE project_uuid=$1", self.project_a), 1)
+
+    async def test_rename_collision_does_not_regenerate_or_mutate(self):
+        with mock.patch("app.routers.project_rename.generate_public_ref", return_value="abcdefghijklmnopqrst") as generate:
+            response = await self.request("POST", "/api/projects/abcdefghijklmnopqrst/rename", actor=self.owner, body=b"{}")
+        self.assertEqual(response.status_code, 409, response.text)
+        generate.assert_called_once()
+        self.assertEqual(await self.pool.fetchval("SELECT count(*) FROM jobs WHERE project_uuid=$1", self.project_a), 0)
+
+    async def test_rename_enqueue_failure_preserves_reference_and_display_name(self):
+        with mock.patch("app.routers.project_rename._enqueue_project_action", side_effect=RuntimeError("queue down")):
+            response = await self.request("POST", "/api/projects/abcdefghijklmnopqrst/rename", actor=self.owner, body=b"{}")
+        self.assertEqual(response.status_code, 503, response.text)
+        self.assertEqual(await self.pool.fetchval("SELECT public_ref FROM projects WHERE id=$1", self.project_a), "abcdefghijklmnopqrst")
+        self.assertEqual(await self.pool.fetchval("SELECT status FROM project_reference_history WHERE project_id=$1", self.project_a), "failed")
+
+    async def test_reference_worker_finalizes_once_and_recovery_keeps_technical_name(self):
+        from app.project_reference_jobs import rename_project_background
+        from app.main import _build_recovery_runner
+        tenant = uuid.uuid4()
+        await self.pool.execute("UPDATE projects SET tenant_uuid=$1 WHERE id=$2", tenant, self.project_a)
+        data, history = await self.reserve_reference_rotation()
+        before = dict(await self.pool.fetchrow("SELECT * FROM projects WHERE id=$1", self.project_a))
+        async def host(*args, **kwargs):
+            self.assertEqual(kwargs["project"], "projeto_a")
+            self.assertEqual(kwargs["args"], {"old_ref": data["old_ref"], "new_ref": data["new_ref"], "tenant_uuid": str(tenant)})
+            await self.pool.execute("UPDATE projects SET public_ref=$1 WHERE id=$2", data["new_ref"], self.project_a)
+            return {"status": "done", "progress": 100, "error_code": None, "result": {"old_ref": data["old_ref"], "new_ref": data["new_ref"], "rolled_back": False}}
+        job = await self.pool.fetchrow("SELECT * FROM jobs WHERE job_id=$1", history["job_id"])
+        runner = await _build_recovery_runner(job)
+        self.assertIsNotNone(runner)
+        with mock.patch("app.project_reference_jobs.run_command_for_job", side_effect=host) as command:
+            await runner()
+            await rename_project_background(str(history["job_id"]), self.project_a, history["id"], data["old_ref"], data["new_ref"], self.owner)
+        command.assert_awaited_once()
+        after = dict(await self.pool.fetchrow("SELECT * FROM projects WHERE id=$1", self.project_a))
+        self.assertEqual({k:v for k,v in before.items() if k != "public_ref"}, {k:v for k,v in after.items() if k != "public_ref"})
+        self.assertEqual(await self.pool.fetchval("SELECT status FROM jobs WHERE job_id=$1", history["job_id"]), "done")
+        self.assertEqual(await self.pool.fetchval("SELECT count(*) FROM studio_audit_log WHERE project_id=$1 AND action='project_rename_succeeded'", self.project_a), 1)
+        self.assertEqual(await self.pool.fetchval("SELECT project FROM jobs WHERE job_id=$1", history["job_id"]), "projeto_a")
+        for ref, status in ((data["old_ref"],404), (data["new_ref"],200), ("projeto_a",400)):
+            response = await self.request("GET", f"/api/projects/{ref}/rename-history", actor=self.owner)
+            self.assertEqual(response.status_code, status, response.text)
+
+    async def test_worker_does_not_accept_success_without_canonical_reference_change(self):
+        from app.project_reference_jobs import rename_project_background
+        data, history = await self.reserve_reference_rotation()
+        with mock.patch("app.project_reference_jobs.run_command_for_job", return_value={"status":"done", "progress":100, "error_code":None, "result":{"old_ref":data["old_ref"],"new_ref":data["new_ref"]}}):
+            await rename_project_background(str(history["job_id"]), self.project_a, history["id"], data["old_ref"], data["new_ref"], self.owner)
+        self.assertEqual(await self.pool.fetchval("SELECT status FROM jobs WHERE job_id=$1", history["job_id"]), "failed")
+        self.assertEqual(await self.pool.fetchval("SELECT public_ref FROM projects WHERE id=$1", self.project_a), data["old_ref"])
+
+    async def test_display_name_and_queue_routes_use_public_ref_without_mutating_infrastructure(self):
+        path = "/api/projects/abcdefghijklmnopqrst"
+        response = await self.request("PATCH", path + "/display-name", actor=self.owner, body=b'{"display_name":"Friendly label"}')
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["project"], "abcdefghijklmnopqrst")
+        project = await self.pool.fetchrow("SELECT name,public_ref FROM projects WHERE id=$1", self.project_a)
+        self.assertEqual(dict(project), {"name":"projeto_a", "public_ref":"abcdefghijklmnopqrst"})
+        response = await self.request("GET", path + "/queue-status", actor=self.ex_member)
+        self.assertEqual(response.status_code, 200, response.text)
+        for suffix in ("queue-status", "config-token", "rename-history"):
+            response = await self.request("GET", f"/api/projects/projeto_a/{suffix}", actor=self.owner)
+            self.assertEqual(response.status_code, 400, response.text)
 
     async def test_public_context_keeps_all_three_identities_separate(self):
         from app.project_secret_service import encrypt_project_secret
@@ -767,7 +916,7 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
         agent, record, args = await self.duplicate_intent()
         from hostagent import db as agent_db
         await self.pool.execute("INSERT INTO host_agent_commands(id,project,command,args,issued_at,signature,timeout_seconds) VALUES($1,'copy_dest','duplicate_project',$2,0,'test',600)", record["id"], json.dumps(args))
-        await self.pool.execute("INSERT INTO host_agent_commands(id,project,command,args,issued_at,signature,timeout_seconds) VALUES($1,'projeto_a','rename_project',$2,0,'test',600)", uuid.uuid4(), json.dumps({"new_name":"new_source"}))
+        await self.pool.execute("INSERT INTO host_agent_commands(id,project,command,args,issued_at,signature,timeout_seconds) VALUES($1,'projeto_a','rename_project',$2,0,'test',600)", uuid.uuid4(), json.dumps({"old_ref":"abcdefghijklmnopqrst", "new_ref":"bcdefghijklmnopqrstu", "tenant_uuid":str(self.project_a)}))
         leases = await asyncio.gather(agent_db.lease_next_command(self.pool,"agent1",60,set()), agent_db.lease_next_command(self.pool,"agent2",60,set()))
         self.assertEqual(sum(row is not None for row in leases), 1)
 

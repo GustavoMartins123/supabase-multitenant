@@ -49,8 +49,9 @@ async def main() -> None:
         if await conn.fetchval("SELECT count(*) FROM pg_tables WHERE schemaname = 'public'"):
             raise RuntimeError("Empty disposable control-plane database required")
         catalog = discover_migrations()
-        assert catalog[-1].name == "project_public_ref"
-        await apply_migrations(conn, migrations=catalog[:-1])
+        ref_index = next(i for i, m in enumerate(catalog) if m.name == "project_public_ref")
+        reference_migration = catalog[ref_index]
+        await apply_migrations(conn, migrations=catalog[:ref_index])
         user_id = uuid.uuid4()
         await conn.execute(
             "INSERT INTO users(id, authelia_username) VALUES($1, 'fixture_admin')", user_id
@@ -70,13 +71,13 @@ async def main() -> None:
             )
         before = await conn.fetch("SELECT * FROM projects ORDER BY id")
         collision_migration = replace(
-            catalog[-1],
-            sql=catalog[-1].sql.replace(
+            reference_migration,
+            sql=reference_migration.sql.replace(
                 "byte_value := get_byte(entropy, position);", "byte_value := 0;"
             ),
         )
         try:
-            await apply_migrations(conn, migrations=(*catalog[:-1], collision_migration))
+            await apply_migrations(conn, migrations=(*catalog[:ref_index], collision_migration))
         except SchemaMigrationError:
             pass
         else:
@@ -88,7 +89,7 @@ async def main() -> None:
         assert before == await conn.fetch("SELECT * FROM projects ORDER BY id")
         print("PASS: colliding backfill fails closed and rolls back schema, identity and migration ledger")
         applied = await apply_migrations(conn)
-        assert [m.version for m in applied] == [catalog[-1].version]
+        assert [m.version for m in applied] == [m.version for m in catalog[ref_index:]]
         after = await conn.fetch("SELECT * FROM projects ORDER BY id")
         for original, migrated in zip(before, after):
             assert dict(original) == {k: v for k, v in migrated.items() if k != "public_ref"}

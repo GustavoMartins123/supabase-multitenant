@@ -57,8 +57,7 @@ class ProjectThreadMessageCreate(BaseModel):
     body: str
 
 class ProjectRenameRequest(BaseModel):
-    new_name: str = Field(min_length=3, max_length=40)
-    display_name: Optional[str] = Field(default=None, max_length=80)
+    model_config = ConfigDict(extra="forbid")
 
 class ProjectDisplayNameUpdate(BaseModel):
     display_name: str = Field(min_length=1, max_length=80)

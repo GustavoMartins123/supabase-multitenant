@@ -43,10 +43,11 @@ class StorageVectorLifecycleIntegrationTests(unittest.TestCase):
         self.assertIn("vector_validate_storage_api", create)
         self.assertIn("vector_strip_copied_wrappers", duplicate)
         self.assertIn("vector_sync_project_wrappers", duplicate)
-        self.assertIn("vector_sync_project_wrappers", rename)
+        self.assertIn("rotate_project_reference.py", rename)
+        self.assertNotIn("vector_sync_project_wrappers", rename)
         self.assertIn("S3_PROTOCOL_ACCESS_KEY_ID", create)
         self.assertIn("S3_PROTOCOL_ACCESS_KEY_ID", duplicate)
-        self.assertIn("S3_PROTOCOL_ACCESS_KEY_ID", rename)
+        self.assertNotIn("S3_PROTOCOL_ACCESS_KEY_ID", rename)
 
     def test_manual_bootstrap_scripts_were_not_left_at_the_root(self) -> None:
         self.assertFalse((GENERATOR / "enable_vector_storage.sh").exists())

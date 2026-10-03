@@ -1,10 +1,4 @@
-"""Guarda de destino do rename (LOG-15).
-
-Dois renames para o mesmo destino precisam serializar no lock do nome e
-na reserva duravel em project_name_history (queued/running): o segundo
-recebe 409 sem enfileirar. Se o enqueue falha depois do commit,
-display_name volta ao valor anterior de forma guardada.
-"""
+"""Public reference reservation fails closed before enqueue."""
 
 from __future__ import annotations
 
@@ -65,10 +59,10 @@ class FakeConn:
         return "UPDATE 1"
 
     async def fetchval(self, query: str, *args: object) -> object:
-        if "FROM projects WHERE name" in query:
+        if "FROM projects WHERE public_ref" in query:
             return None
-        if "FROM project_name_history" in query:
-            if "new_name" in query:
+        if "FROM project_reference_history" in query:
+            if "project_id" in query:
                 return 1 if self.pool.destination_reserved else None
             return None
         if "RETURNING id" in query:
@@ -120,6 +114,8 @@ class RenameDestinationGuardTest(unittest.IsolatedAsyncioTestCase):
                 "id": self.project_id,
                 "name": "demo",
                 "display_name": "Old",
+                "tenant_uuid": self.project_id,
+                "public_ref": "abcdefghijklmnopqrst",
             }
 
         async def _admin(*args: object, **kwargs: object) -> None:
@@ -138,7 +134,7 @@ class RenameDestinationGuardTest(unittest.IsolatedAsyncioTestCase):
 
         patches = [
             mock.patch.object(router, "resolve_authenticated_user", _auth),
-            mock.patch.object(router, "get_project_row", _row),
+            mock.patch.object(router, "get_public_project_row", _row),
             mock.patch.object(router, "ensure_project_admin_access", _admin),
             mock.patch.object(router, "audit_studio_action", _audit),
             mock.patch.object(router, "_enqueue_project_action", _enqueue),
@@ -152,8 +148,8 @@ class RenameDestinationGuardTest(unittest.IsolatedAsyncioTestCase):
         self.pool.destination_reserved = True
         with self.assertRaises(HTTPException) as ctx:
             await router.rename_project(
-                "demo",
-                ProjectRenameRequest(new_name="zed"),
+                "abcdefghijklmnopqrst",
+                ProjectRenameRequest(),
                 object(),
                 self.pool,
             )
@@ -162,8 +158,8 @@ class RenameDestinationGuardTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_free_destination_proceeds(self) -> None:
         body = await router.rename_project(
-            "demo",
-            ProjectRenameRequest(new_name="zed"),
+            "abcdefghijklmnopqrst",
+            ProjectRenameRequest(),
             object(),
             self.pool,
         )
@@ -172,32 +168,15 @@ class RenameDestinationGuardTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_destination_lock_is_taken(self) -> None:
         source = Path(router.__file__).read_text(encoding="utf-8")
-        self.assertIn('f"project-name:{new_name}"', source)
+        self.assertIn('"project-ref:" + new_ref', source)
 
-    async def test_display_name_is_reverted_when_enqueue_fails(self) -> None:
-        with mock.patch.object(
-            router, "_enqueue_project_action",
-            side_effect=RuntimeError("queue down"),
-        ):
+    async def test_enqueue_failure_marks_reservation_failed_without_changing_display_name(self) -> None:
+        with mock.patch.object(router, "_enqueue_project_action", side_effect=RuntimeError("queue down")):
             with self.assertRaises(HTTPException) as ctx:
-                await router.rename_project(
-                    "demo",
-                    ProjectRenameRequest(new_name="zed", display_name="New"),
-                    object(),
-                    self.pool,
-                )
+                await router.rename_project("abcdefghijklmnopqrst", ProjectRenameRequest(), object(), self.pool)
         self.assertEqual(ctx.exception.status_code, 503)
-        reverts = [
-            (query, args)
-            for query, args in self.pool.executes
-            if "SET display_name = $1" in query
-            and "AND display_name = $3" in query
-        ]
-        self.assertEqual(len(reverts), 1)
-        self.assertEqual(
-            reverts[0][1], ("Old", self.project_id, "New")
-        )
+        self.assertTrue(any("UPDATE project_reference_history" in query for query, _ in self.pool.executes))
+        self.assertFalse(any("SET display_name" in query for query, _ in self.pool.executes))
 
 
-if __name__ == "__main__":
-    unittest.main()
+if __name__ == "__main__": unittest.main()

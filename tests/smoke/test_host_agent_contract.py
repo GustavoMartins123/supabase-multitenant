@@ -568,7 +568,7 @@ class ClosedCommandSetTest(unittest.TestCase):
                 "copy_mode": "schema-only",
                 "tenant_uuid": tenant_uuid,
             }),
-            ("rename_project", "meuprojeto", {"new_name": "novo_nome"}),
+            ("rename_project", "meuprojeto", {"old_ref": "abcdefghijklmnopqrst", "new_ref": "bcdefghijklmnopqrstu", "tenant_uuid": "9c8ce9f0-3b4e-4bcb-a739-2c1e8ad0e9aa"}),
             ("container_logs", "meuprojeto", {"service": "auth", "lines": 100}),
             ("backup_project", "meuprojeto", {
                 "backup_id": tenant_uuid,
@@ -591,6 +591,38 @@ class ClosedCommandSetTest(unittest.TestCase):
                 self.assertEqual(
                     protocol.validate_command_args(command, project, args), []
                 )
+
+
+class ReferenceRotationHandlerTest(unittest.IsolatedAsyncioTestCase):
+    async def test_completion_requires_marker_and_preserves_signed_identities(self):
+        from hostagent import commands
+
+        with tempfile.TemporaryDirectory() as root:
+            directory = pathlib.Path(root) / "technical_project"
+            directory.mkdir()
+            internal = "11111111-1111-4111-8111-111111111111"
+            args = {"old_ref": "abcdefghijklmnopqrst", "new_ref": "bcdefghijklmnopqrstu", "tenant_uuid": "22222222-2222-4222-8222-222222222222"}
+            ctx = commands.CommandContext(types.SimpleNamespace(projects_root=pathlib.Path(root)), commands.RunningCommandState(), 600, "rename_project", internal)
+            cases = (
+                ("done", None, {"REFERENCE_ROTATED"}, "done", None, False),
+                ("done", None, set(), "failed", "rotation_completion_unconfirmed", False),
+                ("failed", "rename_failed", {"ROLLBACK_COMPLETE"}, "failed", "rename_rolled_back", True),
+                ("failed", "timeout", set(), "failed", "timeout", False),
+            )
+            for status, error, markers, expected_status, expected_error, rolled_back in cases:
+                with self.subTest(status=status, markers=markers):
+                    result = (commands.CommandOutcome(status, error_code=error), commands.ProcessResult(0 if status == "done" else 1, False, markers))
+                    with mock.patch.object(commands, "_run_lifecycle_script", new_callable=mock.AsyncMock, return_value=result) as script:
+                        outcome = await commands.handle_rename_project(ctx, "technical_project", args)
+                    self.assertEqual(script.call_args.args[2], ["technical_project", internal, args["tenant_uuid"], args["old_ref"], args["new_ref"]])
+                    self.assertEqual(outcome.status, expected_status)
+                    self.assertEqual(outcome.error_code, expected_error)
+                    self.assertEqual(outcome.result, {"old_ref": args["old_ref"], "new_ref": args["new_ref"], "rolled_back": rolled_back})
+            ctx.project_uuid = None
+            with mock.patch.object(commands, "_run_lifecycle_script", new_callable=mock.AsyncMock) as script:
+                with self.assertRaisesRegex(ValueError, "Canonical project UUID"):
+                    await commands.handle_rename_project(ctx, "technical_project", args)
+                script.assert_not_called()
 
 
 class LeaseSqlTypingTest(unittest.TestCase):

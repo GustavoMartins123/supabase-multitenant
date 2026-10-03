@@ -177,10 +177,10 @@ class ProjectTelemetryTest(unittest.TestCase):
             encoding="utf-8"
         )
         route_start = rename_source.index(
-            '@router.get("/api/projects/{project_name}/config-token"'
+            '@router.get("/api/projects/{project_ref}/config-token"'
         )
         route_end = rename_source.index(
-            '\n@router.get("/api/projects/{project_name}/queue-status"',
+            '\n@router.get("/api/projects/{project_ref}/queue-status"',
             route_start,
         )
         route_source = rename_source[route_start:route_end]

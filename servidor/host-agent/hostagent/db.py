@@ -162,10 +162,10 @@ async def lease_next_command(
                 SELECT id, project, args
                 FROM host_agent_commands c
                 WHERE c.status = 'queued'
-                  AND NOT (ARRAY[c.project, c.args->>'original_name', c.args->>'new_name'] && $1::text[])
+                  AND NOT (ARRAY[c.project, c.args->>'original_name'] && $1::text[])
                   AND NOT EXISTS (
                       SELECT 1 FROM host_agent_commands r
-                      WHERE ARRAY[r.project, r.args->>'original_name', r.args->>'new_name'] && ARRAY[c.project, c.args->>'original_name', c.args->>'new_name']
+                      WHERE ARRAY[r.project, r.args->>'original_name'] && ARRAY[c.project, c.args->>'original_name']
                         AND r.status = 'running'
                   )
                 ORDER BY c.created_at
@@ -179,7 +179,7 @@ async def lease_next_command(
             args = row["args"]
             if isinstance(args, str):
                 args = json.loads(args)
-            resources = sorted({row["project"], *[args[name] for name in ("original_name", "new_name") if isinstance(args.get(name), str)]})
+            resources = sorted({row["project"], *[args[name] for name in ("original_name",) if isinstance(args.get(name), str)]})
             for resource in resources:
                 await conn.execute(
                     "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
@@ -188,7 +188,7 @@ async def lease_next_command(
             still_running = await conn.fetchval(
                 """
                 SELECT 1 FROM host_agent_commands
-                WHERE ARRAY[project, args->>'original_name', args->>'new_name'] && $1::text[] AND status = 'running'
+                WHERE ARRAY[project, args->>'original_name'] && $1::text[] AND status = 'running'
                 LIMIT 1
                 """,
                 resources,
