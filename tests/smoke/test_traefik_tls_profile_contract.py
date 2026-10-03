@@ -105,6 +105,24 @@ class RendererTlsBehaviorTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.renderer.render(self.env, self.projects)
 
+    def test_literal_ip_uses_its_configured_certificate_without_requiring_dns_sni(self) -> None:
+        certs = self.tmp / "certs"
+        certs.mkdir()
+        for name in ("tls.crt", "tls.key"):
+            (certs / name).write_text("fixture", encoding="utf-8")
+        self.write_env(
+            "PROJECTS_API_PORT=18000\nSERVER_URL=192.0.2.10\nSERVER_PROTO=https\n"
+            "TRAEFIK_ENABLE_TLS=true\nTRAEFIK_TLS_MODE=file\n"
+        )
+        model = yaml.safe_load(self.renderer.render(self.env, self.projects, cert_dir=certs))
+        self.assertFalse(model["tls"]["options"]["default"]["sniStrict"])
+        self.assertEqual(model["tls"]["stores"]["default"]["defaultCertificate"], {
+            "certFile": "/certs/traefik/tls.crt", "keyFile": "/certs/traefik/tls.key",
+        })
+        (certs / "tls.crt").unlink()
+        with self.assertRaises(ValueError):
+            self.renderer.render(self.env, self.projects, cert_dir=certs)
+
     def test_acme_mode_with_valid_email_uses_resolver(self) -> None:
         self.write_env(
             "PROJECTS_API_PORT=18000\nTRAEFIK_ENABLE_TLS=true\nTRAEFIK_TLS_MODE=acme\n"

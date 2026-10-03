@@ -158,6 +158,8 @@ Para instalar tudo em uma única máquina, `single-node` usa o IP local detectad
 
 Com Docker Desktop e WSL, informe o endereço do Windows publicado pelo Docker: `bash setup.sh single-node <ip-do-windows>`. O setup emite certificados do Studio e Traefik com a mesma CA privada e habilita HTTPS. Instale `studio/authelia/ssl/ca.pem` como CA confiável na máquina do navegador; não desative a verificação de certificados.
 
+Para um endpoint por IP literal, o Traefik serve o certificado desse IP explicitamente configurado mesmo quando o cliente não envia SNI DNS. Instalações com domínio mantêm SNI estrito. Certificados ausentes interrompem a configuração; os clientes devem verificar tanto a CA privada quanto a identidade do destino no certificado.
+
 Para uma instalação nova no Docker Desktop/WSL, use `SETUP_DOCKER_DESKTOP_WSL_HOST=<ip-da-interface-wsl-do-windows> bash setup.sh single-node <ip-do-windows>`. Isso seleciona um volume Linux do Docker para PostgreSQL e publica sua porta somente na interface privada do WSL para o host-agent. Não use o endereço Wi-Fi/LAN nessa variável. Bancos existentes exigem backup/restore explícito no novo volume antes de selecionar esse perfil; o setup não migra dados.
 
 Esse perfil usa `servidor/host-agent/.docker` tanto na inicialização quanto nos builds não interativos do host-agent, sem modificar as credenciais Docker do operador. A configuração gerada baixa imagens públicas anonimamente. Para registros privados, autentique explicitamente com `docker --config servidor/host-agent/.docker login <registro>`; o serviço Linux não usa o helper de credenciais do Windows.

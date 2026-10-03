@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import os
 import pathlib
 import re
@@ -270,6 +271,11 @@ def render(
             ]
         )
     if enable_tls and tls["mode"] == "file":
+        try:
+            ipaddress.ip_address(settings.get("SERVER_URL", ""))
+            literal_ip = True
+        except ValueError:
+            literal_ip = False
         lines.extend([
             "tls:",
             "  certificates:",
@@ -277,8 +283,16 @@ def render(
             f"      keyFile: {yaml_quote(f'{CONTAINER_CERT_DIR}/{TLS_KEY_NAME}')}",
             "  options:",
             "    default:",
-            "      sniStrict: true",
+            f"      sniStrict: {'false' if literal_ip else 'true'}",
         ])
+        if literal_ip:
+            lines.extend([
+                "  stores:",
+                "    default:",
+                "      defaultCertificate:",
+                f"        certFile: {yaml_quote(f'{CONTAINER_CERT_DIR}/{TLS_CERT_NAME}')}",
+                f"        keyFile: {yaml_quote(f'{CONTAINER_CERT_DIR}/{TLS_KEY_NAME}')}",
+            ])
     return "\n".join(lines) + "\n"
 
 
