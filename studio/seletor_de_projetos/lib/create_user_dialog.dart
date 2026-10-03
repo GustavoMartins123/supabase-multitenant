@@ -197,11 +197,13 @@ class _CreateUserDialogState extends State<CreateUserDialog>
                         enableSuggestions: false,
                         decoration: const InputDecoration(
                           labelText: 'Prova de instalação',
-                          helperText: 'Arquivo local secrets/authelia/STUDIO_BOOTSTRAP_TOKEN',
+                          helperText:
+                              'Arquivo local secrets/authelia/STUDIO_BOOTSTRAP_TOKEN',
                         ),
-                        validator: (value) => value == null || value.trim().length < 43
-                            ? 'Informe a prova gerada pelo setup'
-                            : null,
+                        validator: (value) =>
+                            value == null || value.trim().length < 43
+                                ? 'Informe a prova gerada pelo setup'
+                                : null,
                       ),
                       const SizedBox(height: 16),
                     ],
