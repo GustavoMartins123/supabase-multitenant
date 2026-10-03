@@ -4,7 +4,6 @@
 Description=Supabase multitenant host-agent (comandos fechados de lifecycle)
 After=network-online.target docker.service
 Wants=network-online.target
-Requires=docker.service
 
 [Service]
 Type=exec

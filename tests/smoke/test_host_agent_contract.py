@@ -63,6 +63,12 @@ class ProtocolCopiesAreIdenticalTest(unittest.TestCase):
 
 @unittest.skipIf(sys.platform == "win32", "requires POSIX bash (Linux-only)")
 class SystemdInstallerContractTest(unittest.TestCase):
+    def test_external_docker_daemon_does_not_require_a_local_systemd_unit(self) -> None:
+        template = (AGENT_ROOT / "supabase-host-agent.service").read_text(encoding="utf-8")
+        self.assertNotIn("Requires=docker.service", template)
+        installer = (AGENT_ROOT / "install.sh").read_text(encoding="utf-8")
+        self.assertIn("run_as_service_user docker info", installer)
+
     def test_unit_quotes_paths_that_may_contain_spaces(self) -> None:
         template = (
             AGENT_ROOT / "supabase-host-agent.service"
