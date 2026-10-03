@@ -19,18 +19,25 @@ _REQUIRED_PROJECT_SECRET_KEYS = (
 )
 
 
-def read_project_secret_keys(project_name: str) -> dict[str, str]:
-    """Read exact, unquoted and unique project secret entries or fail closed."""
-
+def read_canonical_project_fields(
+    projects_root: pathlib.Path, project_name: str, required_keys: tuple[str, ...]
+) -> dict[str, str]:
     if not isinstance(project_name, str) or not PROJECT_NAME_RE.fullmatch(
         project_name
     ):
         raise RuntimeError("Invalid project name for secret lookup")
-    env_path = PROJECTS_ROOT / project_name / ".env"
+    project_dir = projects_root.resolve() / project_name
+    env_path = project_dir / ".env"
+    if project_dir.is_symlink() or env_path.is_symlink():
+        raise RuntimeError("Project environment must not use symbolic links")
     env_values: dict[str, str] = {}
     if not env_path.is_file():
         raise RuntimeError(f"Project .env is missing: {project_name}")
-    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError) as exc:
+        raise RuntimeError("Project environment could not be read") from exc
+    for raw_line in lines:
         stripped = raw_line.strip()
         if not stripped or stripped.startswith("#"):
             continue
@@ -39,7 +46,7 @@ def read_project_secret_keys(project_name: str) -> dict[str, str]:
             candidate = candidate[len("export "):].lstrip()
         key, separator, value = candidate.partition("=")
         normalized_key = key.strip()
-        if normalized_key not in _REQUIRED_PROJECT_SECRET_KEYS:
+        if normalized_key not in required_keys:
             continue
         if (
             not separator
@@ -62,12 +69,17 @@ def read_project_secret_keys(project_name: str) -> dict[str, str]:
             )
         env_values[normalized_key] = value
     missing = [
-        key for key in _REQUIRED_PROJECT_SECRET_KEYS if key not in env_values
+        key for key in required_keys if key not in env_values
     ]
     if missing:
         raise RuntimeError(
             "Missing required project .env entries: " + ", ".join(missing)
         )
+    return env_values
+
+
+def read_project_secret_keys(project_name: str) -> dict[str, str]:
+    env_values = read_canonical_project_fields(PROJECTS_ROOT, project_name, _REQUIRED_PROJECT_SECRET_KEYS)
     return {
         "tenant_uuid": env_values["PROJECT_UUID"],
         "public_ref": validate_public_ref(env_values["PROJECT_PUBLIC_REF"]),

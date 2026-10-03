@@ -13,10 +13,8 @@ local path_patterns = {
 
 local function valid_ref(ref)
     return type(ref) == "string"
-        and ref ~= "default"
-        and #ref >= 3
-        and #ref <= 40
-        and ref:match("^[a-z_][a-z0-9_]*$") ~= nil
+        and #ref == 20
+        and ref:match("^[a-z]+$") ~= nil
 end
 
 local function request_path()

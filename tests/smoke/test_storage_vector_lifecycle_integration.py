@@ -82,7 +82,7 @@ class StorageVectorLifecycleIntegrationTests(unittest.TestCase):
         )
 
         self.assertIn(
-            '@app.get("/api/projects/{project_name}/storage/s3-keys"', asgi
+            '@app.get("/api/projects/{project_ref}/storage/s3-keys"', asgi
         )
         self.assertIn("ensure_project_admin_access", asgi)
         self.assertIn('content={"accessKey": access_key, "secretKey": secret_key}', asgi)
@@ -98,7 +98,7 @@ class StorageVectorLifecycleIntegrationTests(unittest.TestCase):
         self.assertIn("s3_vectors_fdw_validator", pg_meta)
         self.assertIn("endpoint_url", pg_meta)
         self.assertIn(
-            '"http://supabase-nginx-" .. project_ref .. ":8080/vector"',
+            '"http://supabase-nginx-" .. technical_name .. ":8080/vector"',
             pg_meta,
         )
         self.assertNotIn("supabase-storage-", pg_meta)
@@ -114,8 +114,9 @@ class StorageVectorLifecycleIntegrationTests(unittest.TestCase):
 
         self.assertNotIn("{2,39}", resolver)
         self.assertNotIn("{2,39}", pg_meta)
-        self.assertIn('ref:match("^[a-z_][a-z0-9_]*$")', resolver)
-        self.assertIn('project_ref:match("^[a-z_][a-z0-9_]*$")', pg_meta)
+        self.assertIn('ref:match("^[a-z]+$")', resolver)
+        self.assertIn("#ref == 20", resolver)
+        self.assertIn("ref_resolver.valid_ref(context.ref)", pg_meta)
 
     def test_project_ref_resolver_accepts_explicit_path_and_rejects_mismatch(self) -> None:
         container = os.environ.get("STUDIO_LUA_TEST_CONTAINER")
@@ -128,16 +129,16 @@ class StorageVectorLifecycleIntegrationTests(unittest.TestCase):
 package.path = "{lua_root}/?.lua;{lua_root}/?/init.lua;" .. package.path
 _G.ngx = {{
     var = {{
-        request_uri = "/project/meu_projeto/editor?x=1",
-        http_x_studio_project_ref = "meu_projeto",
+        request_uri = "/project/abcdefghijklmnopqrst/editor?x=1",
+        http_x_studio_project_ref = "abcdefghijklmnopqrst",
     }},
 }}
 local resolver = require("project_context.project_ref_resolver")
 local ref, err = resolver.resolve()
-assert(ref == "meu_projeto", "esperava meu_projeto, obteve " .. tostring(ref))
+assert(ref == "abcdefghijklmnopqrst", "esperava abcdefghijklmnopqrst, obteve " .. tostring(ref))
 assert(err == nil, "erro inesperado: " .. tostring(err))
 
-ngx.var.http_x_studio_project_ref = "outro_projeto"
+ngx.var.http_x_studio_project_ref = "bcdefghijklmnopqrstu"
 local mismatch, mismatch_err = resolver.resolve()
 assert(mismatch == nil)
 assert(mismatch_err == "project_ref_mismatch")

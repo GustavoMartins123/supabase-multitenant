@@ -82,7 +82,7 @@ class StepUpAuthenticationContractTest(unittest.IsolatedAsyncioTestCase):
             subject=self.user_id,
             login_session=self.session,
             action="reveal_secret_key",
-            project="demo_project",
+            project="abcdefghijklmnopqrst",
             resource=self.key_id,
             issued_at=self.now,
         )
@@ -122,7 +122,7 @@ class StepUpAuthenticationContractTest(unittest.IsolatedAsyncioTestCase):
             auth_user=self.auth_user,
             action="reveal_secret_key",
             project_id=self.project_id,
-            project_ref="demo_project",
+            project_ref="abcdefghijklmnopqrst",
             resource_id=self.key_id,
         )
         self.assertEqual(len(conn.calls), 1)
@@ -139,7 +139,7 @@ class StepUpAuthenticationContractTest(unittest.IsolatedAsyncioTestCase):
                 auth_user=self.auth_user,
                 action="reveal_secret_key",
                 project_id=self.project_id,
-                project_ref="demo_project",
+                project_ref="abcdefghijklmnopqrst",
                 resource_id=self.key_id,
             )
         self.assertEqual(replay.exception.status_code, 403)
@@ -159,7 +159,7 @@ class StepUpAuthenticationContractTest(unittest.IsolatedAsyncioTestCase):
                     auth_user=auth_user,
                     action=action,
                     project_id=self.project_id,
-                    project_ref="demo_project",
+                    project_ref="abcdefghijklmnopqrst",
                     resource_id=self.key_id,
                 )
             self.assertEqual(rejected.exception.status_code, 403)
@@ -171,8 +171,8 @@ class StepUpAuthenticationContractTest(unittest.IsolatedAsyncioTestCase):
                 subject=self.user_id,
                 login_session=self.session,
                 action="delete_project",
-                project="demo_project",
-                resource="demo_project",
+                project="abcdefghijklmnopqrst",
+                resource="abcdefghijklmnopqrst",
                 issued_at=self.now - 301,
                 expires_at=self.now,
             ),
@@ -180,8 +180,8 @@ class StepUpAuthenticationContractTest(unittest.IsolatedAsyncioTestCase):
                 subject=self.user_id,
                 login_session=self.session,
                 action="delete_project",
-                project="demo_project",
-                resource="demo_project",
+                project="abcdefghijklmnopqrst",
+                resource="abcdefghijklmnopqrst",
                 issued_at=self.now,
                 expires_at=self.now + 301,
             ),

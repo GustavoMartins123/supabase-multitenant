@@ -1000,7 +1000,7 @@ async def _rotate_project_key_background(
         async with pool.acquire() as conn:
             async with conn.transaction():
                 project_row = await conn.fetchrow(
-                    "SELECT id FROM projects WHERE name = $1 FOR UPDATE",
+                    "SELECT id, public_ref FROM projects WHERE name = $1 FOR UPDATE",
                     project_name,
                 )
                 if project_row is None:
@@ -1047,7 +1047,7 @@ async def _rotate_project_key_background(
             current_step="invalidate_service_key_cache",
         )
         try:
-            await invalidate_service_key_cache(project_name, key_version)
+            await invalidate_service_key_cache(project_row["public_ref"], key_version)
         except Exception as cache_exc:
             await fail_rotation(
                 message="Chaves rotacionadas, mas a invalidacao obrigatoria do cache falhou.",

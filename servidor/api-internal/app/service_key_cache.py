@@ -6,6 +6,7 @@ import json
 import httpx
 
 from app.internal_hmac import build_internal_hmac_headers
+from app.project_public_ref import validate_public_ref
 from app.runtime_config import (
     PROJECTS_API_HMAC_SECRET,
     STUDIO_CACHE_INVALIDATION_URL,
@@ -14,6 +15,7 @@ from app.runtime_config import (
 
 
 async def invalidate_service_key_cache(project_ref: str, version: int) -> None:
+    project_ref = validate_public_ref(project_ref)
     url = f"{STUDIO_CACHE_INVALIDATION_URL}/internal/cache/service-key/{project_ref}"
     body = json.dumps(
         {"project_key_version": version},

@@ -43,13 +43,17 @@ from app.meta_connections import (  # noqa: E402
     get_project_reader_connection_string,
 )
 
-PROJECT_UUID = "11111111-1111-4111-8111-111111111111"
+PROJECT_UUID = "abcdefab-1111-4111-8111-111111111111"
+INTERNAL_UUID = "22222222-2222-4222-8222-222222222222"
+PUBLIC_REF = "abcdefghijklmnopqrst"
 ACCESS_KEY = "a" * 32
 SECRET_KEY = "b" * 64
 
 
 def write_env(path: Path, project_uuid: str | None) -> None:
     lines = [
+        "PROJECT_ID=demo",
+        f"PROJECT_PUBLIC_REF={PUBLIC_REF}",
         f"S3_PROTOCOL_ACCESS_KEY_ID={ACCESS_KEY}",
         f"S3_PROTOCOL_ACCESS_KEY_SECRET={SECRET_KEY}",
     ]
@@ -74,17 +78,51 @@ class S3KeysIdentityTest(unittest.TestCase):
         write_env(project_dir / ".env", project_uuid)
         return asgi._read_project_s3_vector_keys(
             "demo",
-            project_id=PROJECT_UUID,
             tenant_uuid=PROJECT_UUID,
+            public_ref=PUBLIC_REF,
         )
 
     def test_matching_identity_returns_keys(self) -> None:
         self.assertEqual(self.read(PROJECT_UUID), (ACCESS_KEY, SECRET_KEY))
 
-    def test_matching_identity_is_case_insensitive(self) -> None:
-        self.assertEqual(
-            self.read(PROJECT_UUID.upper()), (ACCESS_KEY, SECRET_KEY)
-        )
+    def test_noncanonical_uuid_is_rejected(self) -> None:
+        with self.assertRaises(HTTPException) as ctx:
+            self.read(PROJECT_UUID.upper())
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_internal_uuid_is_not_the_storage_tenant(self) -> None:
+        with self.assertRaises(HTTPException) as ctx:
+            self.read(INTERNAL_UUID)
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_environment_fields_must_be_canonical(self) -> None:
+        for field, replacement in (
+            ("PROJECT_ID=demo", "PROJECT_ID=other"),
+            (f"PROJECT_PUBLIC_REF={PUBLIC_REF}", "PROJECT_PUBLIC_REF=bcdefghijklmnopqrstu"),
+            (f"PROJECT_PUBLIC_REF={PUBLIC_REF}", f'PROJECT_PUBLIC_REF="{PUBLIC_REF}"'),
+            (f"PROJECT_PUBLIC_REF={PUBLIC_REF}", f"PROJECT_PUBLIC_REF={PUBLIC_REF}\nPROJECT_PUBLIC_REF={PUBLIC_REF}"),
+        ):
+            with self.subTest(replacement=replacement):
+                self.read(PROJECT_UUID)
+                env = Path(self.tmp.name) / "demo" / ".env"
+                env.write_text(env.read_text().replace(field, replacement))
+                with self.assertRaises(HTTPException) as ctx:
+                    asgi._read_project_s3_vector_keys(
+                        "demo", tenant_uuid=PROJECT_UUID, public_ref=PUBLIC_REF,
+                    )
+                self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_symlink_environment_is_rejected(self) -> None:
+        self.read(PROJECT_UUID)
+        env = Path(self.tmp.name) / "demo" / ".env"
+        target = Path(self.tmp.name) / "other.env"
+        env.rename(target)
+        env.symlink_to(target)
+        with self.assertRaises(HTTPException) as ctx:
+            asgi._read_project_s3_vector_keys(
+                "demo", tenant_uuid=PROJECT_UUID, public_ref=PUBLIC_REF,
+            )
+        self.assertEqual(ctx.exception.status_code, 409)
 
     def test_foreign_uuid_is_rejected(self) -> None:
         with self.assertRaises(HTTPException) as ctx:

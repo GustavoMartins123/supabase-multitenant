@@ -1,6 +1,7 @@
 local cjson = require("cjson.safe")
 local internal_hmac = require("security.internal_hmac")
 local service_key_version = require("cache.service_key_version")
+local ref_resolver = require("project_context.project_ref_resolver")
 
 if ngx.req.get_method() ~= "POST" then
     return ngx.exit(ngx.HTTP_METHOD_NOT_ALLOWED)
@@ -23,10 +24,17 @@ if not verified then
 end
 
 local project_ref = ngx.var.cache_ref
-ngx.req.read_body()
-local body = cjson.decode(ngx.req.get_body_data() or "{}") or {}
+local raw_body, read_err = internal_hmac.read_current_body()
+if raw_body == nil then
+    ngx.log(ngx.ERR, "Invalid cache invalidation body: ", read_err)
+    return ngx.exit(ngx.HTTP_BAD_REQUEST)
+end
+local body = cjson.decode(raw_body)
+if type(body) ~= "table" or not raw_body:match("^%s*{") then
+    return ngx.exit(ngx.HTTP_BAD_REQUEST)
+end
 local version = tonumber(body.project_key_version)
-if not project_ref or project_ref == "" or not version or version < 1 then
+if not ref_resolver.valid_ref(project_ref) or not version or version < 1 or version % 1 ~= 0 then
     return ngx.exit(ngx.HTTP_BAD_REQUEST)
 end
 

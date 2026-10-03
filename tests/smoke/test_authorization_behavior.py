@@ -425,9 +425,156 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
         ), 1)
 
     async def test_member_cannot_obtain_studio_administrative_credential(self):
-        response = await self.request("GET", "/api/projects/internal/studio-context/projeto_a?access=admin", actor=self.ex_member)
+        response = await self.request("GET", "/api/projects/internal/studio-context/abcdefghijklmnopqrst?access=admin", actor=self.ex_member)
         self.assertEqual(response.status_code, 403, response.text)
         self.assertEqual(await self.pool.fetchval("SELECT count(*) FROM project_studio_keys"), 0)
+
+    async def test_public_context_keeps_all_three_identities_separate(self):
+        from app.project_secret_service import encrypt_project_secret
+        tenant = uuid.uuid4()
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                ciphertext = await encrypt_project_secret(
+                    conn, project_id=self.project_a, column="anon_key", plaintext="test-anon",
+                )
+                await conn.execute(
+                    "UPDATE projects SET tenant_uuid=$1, anon_key=$2 WHERE id=$3",
+                    tenant, ciphertext, self.project_a,
+                )
+        with mock.patch("app.routers.internal.get_project_file_size_limit", return_value=5000) as read_limit:
+            response = await self.request(
+                "GET", "/api/projects/internal/studio-context/abcdefghijklmnopqrst", actor=self.ex_member,
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()
+        self.assertEqual(data["ref"], "abcdefghijklmnopqrst")
+        self.assertEqual(data["technical_name"], "projeto_a")
+        self.assertEqual(data["project_uuid"], str(self.project_a))
+        self.assertEqual(data["tenant_uuid"], str(tenant))
+        self.assertEqual(data["anon_key"], "test-anon")
+        self.assertIsNone(data["enc_admin_key"])
+        read_limit.assert_called_once_with("projeto_a")
+
+    async def test_context_and_key_routes_reject_names_uuid_and_unknown_refs(self):
+        for route in ("studio-context", "enc-key", "key-version"):
+            for ref, expected in (
+                ("projeto_a", 400), (str(self.project_a), 400),
+                ("abcdefghijklmnopqrs", 400), ("abcdefghijklmnopqrstu", 400),
+                ("bcdefghijklmnopqrstu", 404),
+            ):
+                with self.subTest(route=route, ref=ref):
+                    response = await self.request(
+                        "GET", f"/api/projects/internal/{route}/{ref}",
+                        actor=self.owner if route == "studio-context" else None,
+                    )
+                    self.assertEqual(response.status_code, expected, response.text)
+
+    async def test_removed_ref_stops_resolving_in_context_and_key_routes(self):
+        await self.pool.execute(
+            "UPDATE projects SET public_ref='bcdefghijklmnopqrstu' WHERE id=$1", self.project_a,
+        )
+        for route in ("studio-context", "enc-key", "key-version"):
+            response = await self.request(
+                "GET", f"/api/projects/internal/{route}/abcdefghijklmnopqrst",
+                actor=self.owner if route == "studio-context" else None,
+            )
+            self.assertEqual(response.status_code, 404, response.text)
+        current = await self.request("GET", "/api/projects/internal/key-version/bcdefghijklmnopqrstu")
+        self.assertEqual(current.status_code, 200, current.text)
+
+    async def test_service_key_transport_resolves_only_current_public_ref(self):
+        from app.project_secret_service import encrypt_project_secret
+        from app.runtime_config import service_key_transport_fernet
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                ciphertext = await encrypt_project_secret(
+                    conn, project_id=self.project_a, column="service_role", plaintext="fixture-service-role",
+                )
+                await conn.execute("UPDATE projects SET service_role=$1, project_key_version=7 WHERE id=$2", ciphertext, self.project_a)
+        response = await self.request("GET", "/api/projects/internal/enc-key/abcdefghijklmnopqrst")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["project_key_version"], 7)
+        self.assertEqual(
+            service_key_transport_fernet.decrypt(response.json()["enc_service_key"].encode()),
+            b"fixture-service-role",
+        )
+        self.assertNotIn("fixture-service-role", response.text)
+        response = await self.request("GET", "/api/projects/internal/key-version/abcdefghijklmnopqrst")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {"project_key_version": 7})
+        for route in ("enc-key", "key-version"):
+            for actor in (self.owner, self.ex_member, self.outsider):
+                denied = await self.request("GET", f"/api/projects/internal/{route}/abcdefghijklmnopqrst", actor=actor)
+                self.assertEqual(denied.status_code, 403, denied.text)
+
+    async def test_secret_slot_creation_requires_admin_and_step_up_at_public_ref(self):
+        payload = json.dumps({"name": "server", "kind": "secret", "allowed_services": ["rest"]}).encode()
+        for actor in (self.owner, self.ex_member, self.outsider):
+            response = await self.request(
+                "POST", "/api/projects/abcdefghijklmnopqrst/api-key-slots", actor=actor, body=payload,
+            )
+            self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(await self.pool.fetchval("SELECT count(*) FROM project_api_key_slots"), 0)
+
+    async def test_opaque_preparation_binds_public_request_to_physical_identity(self):
+        path = "/api/projects/abcdefghijklmnopqrst/opaque-api-keys/migration/prepare"
+        physical = {"tenant_uuid": str(self.project_a), "public_ref": "abcdefghijklmnopqrst", "gateway_token": "a" * 64}
+        with mock.patch("app.routers.opaque_keys.run_host_agent_command", new_callable=mock.AsyncMock, return_value={"status": "done"}) as command:
+            for field, value in (("tenant_uuid", str(uuid.uuid4())), ("public_ref", "bcdefghijklmnopqrstu")):
+                with self.subTest(field=field), mock.patch("app.routers.opaque_keys.read_project_secret_keys", return_value={**physical, field: value}) as read:
+                    response = await self.request("POST", path, actor=self.owner)
+                    self.assertEqual(response.status_code, 409, response.text)
+                    read.assert_called_once_with("projeto_a")
+                    self.assertEqual(await self.pool.fetchval("SELECT count(*) FROM project_api_key_slots"), 0)
+            command.reset_mock()
+            with mock.patch("app.routers.opaque_keys.read_project_secret_keys", return_value=physical) as read:
+                response = await self.request("POST", path, actor=self.owner)
+            self.assertEqual(response.status_code, 201, response.text)
+            self.assertEqual(response.json()["project"], "abcdefghijklmnopqrst")
+            self.assertEqual(command.await_args.kwargs["project"], "projeto_a")
+            self.assertEqual(command.await_args.kwargs["project_uuid"], self.project_a)
+            read.assert_called_once_with("projeto_a")
+
+    async def test_opaque_slots_are_public_ref_scoped_and_permission_filtered(self):
+        from app.opaque_key_service import create_slot_with_active_key
+        await self.pool.execute(
+            "UPDATE projects SET opaque_keys_activated_at=now(), opaque_gateway_ready_at=now() WHERE id=$1",
+            self.project_a,
+        )
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for name, kind in (("client", "publishable"), ("server", "secret")):
+                    await create_slot_with_active_key(
+                        conn, project_id=self.project_a, name=name, kind=kind,
+                        allowed_services=["rest"], created_by=self.owner,
+                        automatic_rotation_enabled=False, rotation_interval_days=None,
+                    )
+        path = "/api/projects/abcdefghijklmnopqrst/api-key-slots"
+        for actor, kinds in ((self.owner, ["publishable", "secret"]), (self.ex_member, ["publishable"])):
+            response = await self.request("GET", path, actor=actor)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["project"], "abcdefghijklmnopqrst")
+            self.assertEqual(sorted(slot["kind"] for slot in response.json()["slots"]), kinds)
+        outsider = await self.request("GET", path, actor=self.outsider)
+        self.assertEqual(outsider.status_code, 403, outsider.text)
+        for ref, expected in (("projeto_a", 400), (str(self.project_a), 400), ("bcdefghijklmnopqrstu", 404)):
+            response = await self.request("GET", f"/api/projects/{ref}/api-key-slots", actor=self.owner)
+            self.assertEqual(response.status_code, expected, response.text)
+
+    async def test_s3_keys_use_public_ref_for_access_and_technical_name_for_disk(self):
+        tenant = uuid.uuid4()
+        await self.pool.execute("UPDATE projects SET tenant_uuid=$1 WHERE id=$2", tenant, self.project_a)
+        path = "/api/projects/abcdefghijklmnopqrst/storage/s3-keys"
+        with mock.patch("app.asgi._read_project_s3_vector_keys", return_value=("a" * 32, "b" * 64)) as read:
+            response = await self.request("GET", path, actor=self.owner)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertIn("no-store", response.headers["cache-control"])
+            read.assert_called_once_with("projeto_a", tenant_uuid=tenant, public_ref="abcdefghijklmnopqrst")
+            read.reset_mock()
+            for actor in (self.ex_member, self.outsider, None):
+                denied = await self.request("GET", path, actor=actor)
+                self.assertEqual(denied.status_code, 401 if actor is None else 403, denied.text)
+            read.assert_not_called()
 
     async def test_studio_credential_is_stable_private_and_revocable(self):
         from app.project_secret_service import encrypt_project_secret
@@ -437,7 +584,7 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
             async with conn.transaction():
                 ciphertext = await encrypt_project_secret(conn, project_id=self.project_a, column="anon_key", plaintext="test-anon-key")
                 await conn.execute("UPDATE projects SET anon_key=$1 WHERE id=$2", ciphertext, self.project_a)
-        path = "/api/projects/internal/studio-context/projeto_a?access=admin"
+        path = "/api/projects/internal/studio-context/abcdefghijklmnopqrst?access=admin"
         with patch("app.routers.internal.get_project_file_size_limit", return_value=5000):
             first = await self.request("GET", path, actor=self.admin2)
             second = await self.request("GET", path, actor=self.owner)
@@ -455,7 +602,7 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_revoked_project_admin_is_denied_on_next_context_request(self):
         await self.pool.execute("UPDATE project_members SET role='member' WHERE project_id=$1 AND user_id=$2", self.project_a, self.admin2)
-        response = await self.request("GET", "/api/projects/internal/studio-context/projeto_a?access=admin", actor=self.admin2)
+        response = await self.request("GET", "/api/projects/internal/studio-context/abcdefghijklmnopqrst?access=admin", actor=self.admin2)
         self.assertEqual(response.status_code, 403, response.text)
 
     async def test_authorizer_accepts_only_scoped_active_studio_key_not_raw_jwt(self):
@@ -659,7 +806,7 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_service_route_rejects_a_browser_originated_request(self):
         response = await self.request(
-            "GET", "/api/projects/internal/enc-key/projeto_a", actor=self.owner
+            "GET", "/api/projects/internal/enc-key/abcdefghijklmnopqrst", actor=self.owner
         )
         self.assertEqual(response.status_code, 403, response.text)
 

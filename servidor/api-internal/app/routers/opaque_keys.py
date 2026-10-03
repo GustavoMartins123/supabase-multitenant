@@ -17,7 +17,7 @@ from app.dependencies import (
     ensure_project_admin_access,
     ensure_project_member_access,
     get_project_role,
-    get_project_row,
+    get_public_project_row,
     resolve_authenticated_user,
 )
 from app.host_agent import run_command as run_host_agent_command
@@ -48,7 +48,7 @@ from app.runtime_config import (
     USER_TOKEN_MAX_CLOCK_SKEW_SECONDS,
 )
 from app.step_up_auth import consume_step_up_grant
-from app.validation import validate_project_id
+from app.validation import validate_project_ref
 
 
 router = APIRouter(prefix="/api/projects", tags=["opaque-api-keys"])
@@ -258,17 +258,17 @@ def _raise_host_command_failure(
 
 
 @router.get(
-    "/{project_name}/opaque-api-keys/migration",
+    "/{project_ref}/opaque-api-keys/migration",
     response_model=MigrationStatusResponse,
 )
 async def get_opaque_api_key_migration(
-    project_name: str,
+    project_ref: str,
     request: Request,
     pool: asyncpg.Pool = Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     _, project, can_manage = await _authorize_project_access(
-        request, pool, project_name
+        request, pool, project_ref
     )
     async with pool.acquire() as conn:
         state = await conn.fetchrow(
@@ -317,7 +317,7 @@ async def get_opaque_api_key_migration(
     else:
         status = "legacy"
     return {
-        "project": project_name,
+        "project": project_ref,
         "status": status,
         "prepared_at": (
             state["opaque_keys_prepared_at"].isoformat()
@@ -346,23 +346,23 @@ async def get_opaque_api_key_migration(
 
 
 @router.delete(
-    "/{project_name}/opaque-api-keys/migration",
+    "/{project_ref}/opaque-api-keys/migration",
     response_model=MigrationAbortResponse,
 )
 async def abort_opaque_api_key_migration(
-    project_name: str,
+    project_ref: str,
     request: Request,
     pool: asyncpg.Pool = Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     auth_user, project = await _authorize_project_admin(
-        request, pool, project_name
+        request, pool, project_ref
     )
     conn = await pool.acquire()
     owns_lock = False
     project = None
     try:
-        project = await get_project_row(conn, project_name)
+        project = await get_public_project_row(conn, project_ref)
         await ensure_project_admin_access(
             conn,
             project_id=project["id"],
@@ -380,7 +380,7 @@ async def abort_opaque_api_key_migration(
             )
         try:
             async with conn.transaction():
-                project = await get_project_row(conn, project_name)
+                project = await get_public_project_row(conn, project_ref)
                 await ensure_project_admin_access(
                     conn,
                     project_id=project["id"],
@@ -396,13 +396,13 @@ async def abort_opaque_api_key_migration(
                     actor_user_id=auth_user["db_user_id"],
                     action="opaque_api_key_migration_aborted",
                     target_type="project",
-                    target_id=project_name,
+                    target_id=project_ref,
                     new_value={"api_keyset_version": version},
                 )
         except OpaqueKeyLifecycleError as exc:
             raise HTTPException(409, str(exc)) from exc
         return {
-            "project": project_name,
+            "project": project_ref,
             "status": "legacy",
             "api_keyset_version": version,
         }
@@ -446,11 +446,11 @@ class ConfirmApiKeyInstallation(OpaqueKeyRequest):
 async def _authorize_project_admin(
     request: Request,
     pool: asyncpg.Pool,
-    project_name: str,
+    project_ref: str,
 ) -> tuple[dict, asyncpg.Record]:
     auth_user = await resolve_authenticated_user(request, pool)
     async with pool.acquire() as conn:
-        project = await get_project_row(conn, project_name)
+        project = await get_public_project_row(conn, project_ref)
         await ensure_project_admin_access(
             conn,
             project_id=project["id"],
@@ -463,11 +463,11 @@ async def _authorize_project_admin(
 async def _authorize_project_access(
     request: Request,
     pool: asyncpg.Pool,
-    project_name: str,
+    project_ref: str,
 ) -> tuple[dict, asyncpg.Record, bool]:
     auth_user = await resolve_authenticated_user(request, pool)
     async with pool.acquire() as conn:
-        project = await get_project_row(conn, project_name)
+        project = await get_public_project_row(conn, project_ref)
         await ensure_project_member_access(
             conn,
             project_id=project["id"],
@@ -488,24 +488,24 @@ def _migration_lock_name(project_id: uuid.UUID) -> str:
 
 
 @router.post(
-    "/{project_name}/opaque-api-keys/migration/prepare",
+    "/{project_ref}/opaque-api-keys/migration/prepare",
     status_code=201,
     response_model=MigrationPrepareResponse,
 )
 async def prepare_opaque_api_key_migration(
-    project_name: str,
+    project_ref: str,
     request: Request,
     pool: asyncpg.Pool = Depends(get_pool),
 ):
     """Prepare rejected opaque keys without changing the running gateway."""
 
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     auth_user = await resolve_authenticated_user(request, pool)
     conn = await pool.acquire()
     owns_lock = False
     project = None
     try:
-        project = await get_project_row(conn, project_name)
+        project = await get_public_project_row(conn, project_ref)
         await ensure_project_admin_access(
             conn,
             project_id=project["id"],
@@ -534,7 +534,7 @@ async def prepare_opaque_api_key_migration(
         command = await run_host_agent_command(
             pool,
             command="ensure_opaque_gateway_token",
-            project=project_name,
+            project=project["name"],
             project_uuid=project["id"],
             requested_by=auth_user["db_user_id"],
             args={},
@@ -544,11 +544,18 @@ async def prepare_opaque_api_key_migration(
                 command,
                 operation="Prepare project gateway token",
             )
-        gateway_token = read_project_secret_keys(project_name)["gateway_token"]
+        try:
+            physical_keys = read_project_secret_keys(project["name"])
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(409, "Project environment is not canonical") from exc
+        if (physical_keys["tenant_uuid"] != str(project["tenant_uuid"])
+                or physical_keys["public_ref"] != project["public_ref"]):
+            raise HTTPException(409, "Project environment identity does not match this project")
+        gateway_token = physical_keys["gateway_token"]
 
         try:
             async with conn.transaction():
-                current_project = await get_project_row(conn, project_name)
+                current_project = await get_public_project_row(conn, project_ref)
                 await ensure_project_admin_access(
                     conn,
                     project_id=current_project["id"],
@@ -567,7 +574,7 @@ async def prepare_opaque_api_key_migration(
                     actor_user_id=auth_user["db_user_id"],
                     action="opaque_api_key_migration_prepared",
                     target_type="project",
-                    target_id=project_name,
+                    target_id=project_ref,
                     new_value={
                         "key_ids": [
                             str(publishable.key_id),
@@ -582,7 +589,7 @@ async def prepare_opaque_api_key_migration(
         except OpaqueKeyLifecycleError as exc:
             raise HTTPException(409, str(exc)) from exc
         return {
-            "project": project_name,
+            "project": project_ref,
             "status": "prepared",
             "key_ids": [str(publishable.key_id), str(secret.key_id)],
             "next": (
@@ -601,23 +608,23 @@ async def prepare_opaque_api_key_migration(
 
 
 @router.post(
-    "/{project_name}/opaque-api-keys/migration/cutover",
+    "/{project_ref}/opaque-api-keys/migration/cutover",
     response_model=MigrationCutoverResponse,
 )
 async def cutover_opaque_api_key_migration(
-    project_name: str,
+    project_ref: str,
     request: Request,
     pool: asyncpg.Pool = Depends(get_pool),
 ):
     """Stop legacy ingress, activate confirmed keys, and start opaque-only."""
 
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     auth_user = await resolve_authenticated_user(request, pool)
     conn = await pool.acquire()
     owns_lock = False
     project = None
     try:
-        project = await get_project_row(conn, project_name)
+        project = await get_public_project_row(conn, project_ref)
         await ensure_project_admin_access(
             conn,
             project_id=project["id"],
@@ -648,7 +655,7 @@ async def cutover_opaque_api_key_migration(
         needs_activation = state["opaque_keys_activated_at"] is None
         try:
             async with conn.transaction():
-                current_project = await get_project_row(conn, project_name)
+                current_project = await get_public_project_row(conn, project_ref)
                 await ensure_project_admin_access(
                     conn,
                     project_id=current_project["id"],
@@ -681,7 +688,7 @@ async def cutover_opaque_api_key_migration(
         staged = await run_host_agent_command(
             pool,
             command="stage_opaque_gateway",
-            project=project_name,
+            project=project["name"],
             project_uuid=project["id"],
             requested_by=auth_user["db_user_id"],
             args={},
@@ -695,7 +702,7 @@ async def cutover_opaque_api_key_migration(
         version = int(state["api_keyset_version"])
         if needs_activation:
             async with conn.transaction():
-                current_project = await get_project_row(conn, project_name)
+                current_project = await get_public_project_row(conn, project_ref)
                 await ensure_project_admin_access(
                     conn,
                     project_id=current_project["id"],
@@ -711,14 +718,14 @@ async def cutover_opaque_api_key_migration(
                     actor_user_id=auth_user["db_user_id"],
                     action="opaque_api_key_migration_activated",
                     target_type="project",
-                    target_id=project_name,
+                    target_id=project_ref,
                     new_value={"api_keyset_version": version},
                 )
 
         started = await run_host_agent_command(
             pool,
             command="recreate_services",
-            project=project_name,
+            project=project["name"],
             project_uuid=project["id"],
             requested_by=auth_user["db_user_id"],
             args={"services": ["nginx"]},
@@ -751,11 +758,11 @@ async def cutover_opaque_api_key_migration(
                 actor_user_id=auth_user["db_user_id"],
                 action="opaque_api_key_migration_completed",
                 target_type="project",
-                target_id=project_name,
+                target_id=project_ref,
                 new_value={"api_keyset_version": version},
             )
         return {
-            "project": project_name,
+            "project": project_ref,
             "status": "active",
             "gateway_mode": "opaque-only",
             "api_keyset_version": version,
@@ -794,16 +801,16 @@ def _issued_response(issued, keyset_version: int, *, status_code: int) -> JSONRe
 
 
 @router.get(
-    "/{project_name}/api-key-slots", response_model=SlotListResponse
+    "/{project_ref}/api-key-slots", response_model=SlotListResponse
 )
 async def get_api_key_slots(
-    project_name: str,
+    project_ref: str,
     request: Request,
     pool: asyncpg.Pool = Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     _, project, can_manage = await _authorize_project_access(
-        request, pool, project_name
+        request, pool, project_ref
     )
     async with pool.acquire() as conn:
         slots = await list_slots(conn, project_id=project["id"])
@@ -816,30 +823,30 @@ async def get_api_key_slots(
         else [slot for slot in slots if slot["kind"] == "publishable"]
     )
     return {
-        "project": project_name,
+        "project": project_ref,
         "api_keyset_version": int(keyset_version),
         "slots": visible_slots,
     }
 
 
 @router.post(
-    "/{project_name}/api-key-slots",
+    "/{project_ref}/api-key-slots",
     status_code=201,
     response_model=IssuedKeyResponse,
 )
 async def create_api_key_slot(
-    project_name: str,
+    project_ref: str,
     body: CreateApiKeySlot,
     request: Request,
     x_step_up_token: str | None = Header(None, alias="X-Step-Up-Token"),
     pool: asyncpg.Pool = Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
-    auth_user, project = await _authorize_project_admin(request, pool, project_name)
+    project_ref = validate_project_ref(project_ref)
+    auth_user, project = await _authorize_project_admin(request, pool, project_ref)
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
-                project = await get_project_row(conn, project_name)
+                project = await get_public_project_row(conn, project_ref)
                 await ensure_project_admin_access(
                     conn,
                     project_id=project["id"],
@@ -857,7 +864,7 @@ async def create_api_key_slot(
                         auth_user=auth_user,
                         action="create_secret_key",
                         project_id=project["id"],
-                        project_ref=project_name,
+                        project_ref=project_ref,
                         resource_id=body.name,
                     )
                 issued, version = await create_slot_with_active_key(
@@ -915,23 +922,23 @@ async def create_api_key_slot(
 
 
 @router.post(
-    "/{project_name}/api-key-slots/{slot_id}/rotation",
+    "/{project_ref}/api-key-slots/{slot_id}/rotation",
     response_model=IssuedKeyResponse,
 )
 async def rotate_api_key_slot(
-    project_name: str,
+    project_ref: str,
     slot_id: uuid.UUID,
     body: RotateApiKeySlot,
     request: Request,
     x_step_up_token: str | None = Header(None, alias="X-Step-Up-Token"),
     pool: asyncpg.Pool = Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
-    auth_user, project = await _authorize_project_admin(request, pool, project_name)
+    project_ref = validate_project_ref(project_ref)
+    auth_user, project = await _authorize_project_admin(request, pool, project_ref)
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
-                project = await get_project_row(conn, project_name)
+                project = await get_public_project_row(conn, project_ref)
                 await ensure_project_admin_access(
                     conn,
                     project_id=project["id"],
@@ -963,7 +970,7 @@ async def rotate_api_key_slot(
                         auth_user=auth_user,
                         action="rotate_secret_key",
                         project_id=project["id"],
-                        project_ref=project_name,
+                        project_ref=project_ref,
                         resource_id=str(slot_id),
                     )
                 if body.activate_at is None:
@@ -1005,19 +1012,19 @@ async def rotate_api_key_slot(
 
 
 @router.patch(
-    "/{project_name}/api-key-slots/{slot_id}",
+    "/{project_ref}/api-key-slots/{slot_id}",
     response_model=SlotPolicyUpdateResponse,
 )
 async def update_api_key_slot_policy(
-    project_name: str,
+    project_ref: str,
     slot_id: uuid.UUID,
     body: UpdateApiKeySlotPolicy,
     request: Request,
     x_step_up_token: str | None = Header(None, alias="X-Step-Up-Token"),
     pool: asyncpg.Pool = Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
-    auth_user, project = await _authorize_project_admin(request, pool, project_name)
+    project_ref = validate_project_ref(project_ref)
+    auth_user, project = await _authorize_project_admin(request, pool, project_ref)
     changed_fields = body.model_fields_set
     rotation_interval_days_provided = (
         "rotation_interval_days" in changed_fields
@@ -1025,7 +1032,7 @@ async def update_api_key_slot_policy(
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
-                project = await get_project_row(conn, project_name)
+                project = await get_public_project_row(conn, project_ref)
                 await ensure_project_admin_access(
                     conn,
                     project_id=project["id"],
@@ -1057,7 +1064,7 @@ async def update_api_key_slot_policy(
                         auth_user=auth_user,
                         action="update_secret_key_policy",
                         project_id=project["id"],
-                        project_ref=project_name,
+                        project_ref=project_ref,
                         resource_id=str(slot_id),
                     )
                 version = await update_slot_policy(
@@ -1115,22 +1122,22 @@ async def update_api_key_slot_policy(
 
 
 @router.post(
-    "/{project_name}/api-key-slots/{slot_id}/activation",
+    "/{project_ref}/api-key-slots/{slot_id}/activation",
     response_model=SlotActivationResponse,
 )
 async def activate_api_key_slot(
-    project_name: str,
+    project_ref: str,
     slot_id: uuid.UUID,
     request: Request,
     x_step_up_token: str | None = Header(None, alias="X-Step-Up-Token"),
     pool: asyncpg.Pool = Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
-    auth_user, project = await _authorize_project_admin(request, pool, project_name)
+    project_ref = validate_project_ref(project_ref)
+    auth_user, project = await _authorize_project_admin(request, pool, project_ref)
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
-                project = await get_project_row(conn, project_name)
+                project = await get_public_project_row(conn, project_ref)
                 await ensure_project_admin_access(
                     conn,
                     project_id=project["id"],
@@ -1162,7 +1169,7 @@ async def activate_api_key_slot(
                         auth_user=auth_user,
                         action="activate_secret_key",
                         project_id=project["id"],
-                        project_ref=project_name,
+                        project_ref=project_ref,
                         resource_id=str(slot_id),
                     )
                 key_id, version = await activate_pending_key(
@@ -1191,22 +1198,22 @@ async def activate_api_key_slot(
 
 
 @router.post(
-    "/{project_name}/api-key-slots/{slot_id}/rotation-confirmation",
+    "/{project_ref}/api-key-slots/{slot_id}/rotation-confirmation",
     response_model=SlotConfirmResponse,
 )
 async def confirm_api_key_slot_installation(
-    project_name: str,
+    project_ref: str,
     slot_id: uuid.UUID,
     body: ConfirmApiKeyInstallation,
     request: Request,
     pool: asyncpg.Pool = Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
-    auth_user, project = await _authorize_project_admin(request, pool, project_name)
+    project_ref = validate_project_ref(project_ref)
+    auth_user, project = await _authorize_project_admin(request, pool, project_ref)
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
-                project = await get_project_row(conn, project_name)
+                project = await get_public_project_row(conn, project_ref)
                 await ensure_project_admin_access(
                     conn,
                     project_id=project["id"],
@@ -1242,22 +1249,22 @@ async def confirm_api_key_slot_installation(
 
 
 @router.delete(
-    "/{project_name}/api-key-slots/{slot_id}/rotation",
+    "/{project_ref}/api-key-slots/{slot_id}/rotation",
     response_model=SlotCancelResponse,
 )
 async def cancel_api_key_slot_rotation(
-    project_name: str,
+    project_ref: str,
     slot_id: uuid.UUID,
     request: Request,
     x_step_up_token: str | None = Header(None, alias="X-Step-Up-Token"),
     pool: asyncpg.Pool = Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
-    auth_user, project = await _authorize_project_admin(request, pool, project_name)
+    project_ref = validate_project_ref(project_ref)
+    auth_user, project = await _authorize_project_admin(request, pool, project_ref)
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
-                project = await get_project_row(conn, project_name)
+                project = await get_public_project_row(conn, project_ref)
                 await ensure_project_admin_access(
                     conn,
                     project_id=project["id"],
@@ -1289,7 +1296,7 @@ async def cancel_api_key_slot_rotation(
                         auth_user=auth_user,
                         action="cancel_secret_key_rotation",
                         project_id=project["id"],
-                        project_ref=project_name,
+                        project_ref=project_ref,
                         resource_id=str(slot_id),
                     )
                 key_id, version = await cancel_pending_key(
@@ -1320,22 +1327,22 @@ async def cancel_api_key_slot_rotation(
 
 
 @router.delete(
-    "/{project_name}/api-key-slots/{slot_id}",
+    "/{project_ref}/api-key-slots/{slot_id}",
     response_model=SlotRevokeResponse,
 )
 async def revoke_api_key_slot(
-    project_name: str,
+    project_ref: str,
     slot_id: uuid.UUID,
     request: Request,
     x_step_up_token: str | None = Header(None, alias="X-Step-Up-Token"),
     pool: asyncpg.Pool = Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
-    auth_user, project = await _authorize_project_admin(request, pool, project_name)
+    project_ref = validate_project_ref(project_ref)
+    auth_user, project = await _authorize_project_admin(request, pool, project_ref)
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
-                project = await get_project_row(conn, project_name)
+                project = await get_public_project_row(conn, project_ref)
                 await ensure_project_admin_access(
                     conn,
                     project_id=project["id"],
@@ -1367,7 +1374,7 @@ async def revoke_api_key_slot(
                         auth_user=auth_user,
                         action="revoke_secret_key",
                         project_id=project["id"],
-                        project_ref=project_name,
+                        project_ref=project_ref,
                         resource_id=str(slot_id),
                     )
                 version = await disable_slot(
@@ -1392,16 +1399,16 @@ async def revoke_api_key_slot(
 
 
 @router.get(
-    "/{project_name}/api-key-reveals", response_model=RevealListResponse
+    "/{project_ref}/api-key-reveals", response_model=RevealListResponse
 )
 async def get_api_key_reveals(
-    project_name: str,
+    project_ref: str,
     request: Request,
     pool: asyncpg.Pool = Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     _, project, can_manage = await _authorize_project_access(
-        request, pool, project_name
+        request, pool, project_ref
     )
     async with pool.acquire() as conn:
         reveals = await list_reveals(conn, project_id=project["id"])
@@ -1414,28 +1421,28 @@ async def get_api_key_reveals(
             if reveal["kind"] == "publishable"
         ]
     )
-    return {"project": project_name, "reveals": visible_reveals}
+    return {"project": project_ref, "reveals": visible_reveals}
 
 
 @router.post(
-    "/{project_name}/api-key-reveals/{key_id}/claim",
+    "/{project_ref}/api-key-reveals/{key_id}/claim",
     response_model=RevealClaimResponse,
 )
 async def claim_api_key(
-    project_name: str,
+    project_ref: str,
     key_id: uuid.UUID,
     request: Request,
     x_step_up_token: str | None = Header(None, alias="X-Step-Up-Token"),
     pool: asyncpg.Pool = Depends(get_pool),
 ):
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     auth_user, project, _ = await _authorize_project_access(
-        request, pool, project_name
+        request, pool, project_ref
     )
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
-                project = await get_project_row(conn, project_name)
+                project = await get_public_project_row(conn, project_ref)
                 await ensure_project_member_access(
                     conn,
                     project_id=project["id"],
@@ -1479,7 +1486,7 @@ async def claim_api_key(
                         auth_user=auth_user,
                         action="reveal_secret_key",
                         project_id=project["id"],
-                        project_ref=project_name,
+                        project_ref=project_ref,
                         resource_id=str(key_id),
                     )
                 token = await claim_key_reveal(

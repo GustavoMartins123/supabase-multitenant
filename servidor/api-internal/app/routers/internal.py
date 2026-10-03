@@ -6,7 +6,7 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.control_plane_service import sync_user_record
 from app.directory_service import DirectorySnapshot, reconcile_directory
@@ -15,6 +15,7 @@ from app.dependencies import (
     ensure_project_admin_access,
     ensure_project_member_access,
     get_project_role,
+    get_public_project_row,
     resolve_authenticated_user,
 )
 from app.project_settings import get_project_file_size_limit
@@ -25,7 +26,7 @@ from app.runtime_config import (
     service_key_transport_fernet,
 )
 from app.schemas import UserSyncPayload
-from app.validation import validate_project_id
+from app.validation import validate_project_id, validate_project_ref
 from app.studio_administrative_keys import get_studio_administrative_key
 
 
@@ -59,7 +60,8 @@ class StudioContextResponse(BaseModel):
 
     project_uuid: str
     tenant_uuid: str | None
-    ref: str
+    ref: str = Field(pattern=r"^[a-z]{20}$", min_length=20, max_length=20)
+    technical_name: str
     display_name: str
     role: str | None
     anon_key: str
@@ -288,7 +290,7 @@ async def get_studio_project_context(
     pool=Depends(get_pool),
 ):
     """Resolve and authorize the project carried by the Studio URL."""
-    ref = validate_project_id(ref)
+    ref = validate_project_ref(ref)
     _require_studio_nginx(request)
     auth_user = await resolve_authenticated_user(request, pool)
     access = request.query_params.get("access", "member")
@@ -298,17 +300,7 @@ async def get_studio_project_context(
 
     async with pool.acquire() as conn:
         async with conn.transaction():
-            project = await conn.fetchrow(
-                """
-                SELECT id, tenant_uuid, name, display_name,
-                anon_key, project_key_version
-                FROM projects
-                WHERE name = $1
-                """ + (" FOR UPDATE" if access == "admin" else ""),
-                ref,
-            )
-            if not project:
-                raise HTTPException(404, "Project not found")
+            project = await get_public_project_row(conn, ref, for_update=access == "admin")
 
             await ensure_project_member_access(
                 conn,
@@ -327,13 +319,17 @@ async def get_studio_project_context(
             if role is None and auth_user["is_global_admin"]:
                 role = "admin"
 
-            if not project["anon_key"]:
+            keys = await conn.fetchrow(
+                "SELECT anon_key, project_key_version FROM projects WHERE id = $1",
+                project["id"],
+            )
+            if not keys or not keys["anon_key"]:
                 raise HTTPException(409, "Project API key is not ready")
             anon_key = await decrypt_project_secret(
                 conn,
                 project_id=project["id"],
                 column="anon_key",
-                ciphertext=project["anon_key"],
+                ciphertext=keys["anon_key"],
             )
 
     return JSONResponse(
@@ -342,12 +338,13 @@ async def get_studio_project_context(
             "tenant_uuid": (
                 str(project["tenant_uuid"]) if project["tenant_uuid"] else None
             ),
-            "ref": project["name"],
+            "ref": project["public_ref"],
+            "technical_name": project["name"],
             "display_name": project["display_name"] or project["name"],
             "role": role,
             "anon_key": anon_key,
             "file_size_limit": int(get_project_file_size_limit(project["name"])),
-            "project_key_version": project["project_key_version"],
+            "project_key_version": keys["project_key_version"],
             "enc_admin_key": enc_admin_key,
         },
         headers={"Cache-Control": "no-store"},
@@ -360,18 +357,19 @@ async def enc_key(
     request: Request,
     pool=Depends(get_pool)
 ):
-    ref = validate_project_id(ref)
+    ref = validate_project_ref(ref)
     _require_studio_nginx(request)
     _reject_end_user_context(request)
 
     async with pool.acquire() as conn:
         async with conn.transaction():
+            project = await get_public_project_row(conn, ref)
             row = await conn.fetchrow(
                 """
                 SELECT id, service_role, project_key_version
-                FROM projects WHERE name=$1
+                FROM projects WHERE id=$1
                 """,
-                ref,
+                project["id"],
             )
             if not row or not row["service_role"]:
                 raise HTTPException(status_code=404, detail="Project not found")
@@ -399,13 +397,15 @@ async def project_key_version(
     request: Request,
     pool=Depends(get_pool),
 ):
-    ref = validate_project_id(ref)
+    ref = validate_project_ref(ref)
     _require_studio_nginx(request)
     _reject_end_user_context(request)
-    version = await pool.fetchval(
-        "SELECT project_key_version FROM projects WHERE name = $1",
-        ref,
-    )
+    async with pool.acquire() as conn:
+        project = await get_public_project_row(conn, ref)
+        version = await conn.fetchval(
+            "SELECT project_key_version FROM projects WHERE id = $1",
+            project["id"],
+        )
     if version is None:
         raise HTTPException(404, "Project not found")
     return {"project_key_version": version}

@@ -14,6 +14,14 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 LABEL = "multitenant.public-ref-test"
+STUDIO_CONTRACT_TESTS = (
+    "test_step_up_authentication", "test_step_up_secret_management",
+    "test_service_key_cache_contract", "test_opaque_api_keys",
+    "test_opaque_api_key_optional_expiration", "test_opaque_api_key_step_up_permissions",
+    "test_s3_meta_identity", "test_storage_vector_lifecycle_integration",
+    "test_studio_slug_context_contract", "test_internal_hmac_migration",
+    "test_lua_security_hardening", "test_hmac_contracts",
+)
 
 
 def docker(*args: str) -> str:
@@ -105,6 +113,21 @@ def validate_routing(executor_image: str, nginx_image: str, traefik_image: str) 
         remove_owned_resources(resources, token)
 
 
+def validate_studio(studio_nginx_image: str) -> None:
+    if docker("image", "inspect", studio_nginx_image, "--format", "{{.Os}}") != "linux":
+        raise RuntimeError("Existing Linux Studio gateway image required")
+    print(docker(
+        "run", "--rm", "--read-only", "--pull=never", "--network", "none",
+        "--label", f"{LABEL}={uuid.uuid4().hex}", "--tmpfs", "/tmp:rw,exec,size=128m",
+        "--mount", f"type=bind,source={ROOT},target=/workspace,readonly",
+        "-e", "SERVER_DOMAIN=http://127.0.0.1:19842",
+        "-e", "STUDIO_GATEWAY_HMAC_SECRET=fixture-hmac-secret-not-an-installation-key",
+        "-e", "PROJECTS_API_HMAC_SECRET=fixture-projects-secret-not-an-installation-key",
+        "--entrypoint", "resty", studio_nginx_image,
+        "/workspace/tests/integration/fixtures/studio_public_ref.lua",
+    ))
+
+
 def execute(executor_image: str, postgres_image: str) -> None:
     for image in (executor_image, postgres_image):
         if docker("image", "inspect", image, "--format", "{{.Os}}") != "linux":
@@ -149,6 +172,10 @@ def execute(executor_image: str, postgres_image: str) -> None:
         ))
         print(docker(
             *common, "--entrypoint", "python", executor_image,
+            "-m", "unittest", *(f"tests.smoke.{name}" for name in STUDIO_CONTRACT_TESTS),
+        ))
+        print(docker(
+            *common, "--entrypoint", "python", executor_image,
             "-m", "unittest", "discover", "-s", "tests/smoke",
             "-p", "test_control_plane_migrations.py", "-v",
         ))
@@ -179,8 +206,11 @@ if __name__ == "__main__":
     parser.add_argument("--routing", action="store_true")
     parser.add_argument("--nginx-image")
     parser.add_argument("--traefik-image")
+    parser.add_argument("--studio-nginx-image")
     args = parser.parse_args()
     execute(args.executor_image, args.postgres_image)
+    if args.studio_nginx_image:
+        validate_studio(args.studio_nginx_image)
     if args.routing:
         if not args.nginx_image or not args.traefik_image:
             parser.error("--routing requires --nginx-image and --traefik-image")

@@ -2,6 +2,7 @@ local cjson = require("cjson.safe")
 local http = require("resty.http")
 local internal_hmac = require("security.internal_hmac")
 local outbound_tls = require("utils.outbound_tls")
+local ref_resolver = require("project_context.project_ref_resolver")
 
 local _M = {}
 
@@ -13,6 +14,15 @@ local function validate_context(context, ref)
     if type(context) ~= "table" or context.ref ~= ref then
         return nil, "invalid Studio context response"
     end
+    if not ref_resolver.valid_ref(context.ref) then
+        return nil, "Studio context has an invalid public reference"
+    end
+    local name = context.technical_name
+    if type(name) ~= "string" or #name < 3 or #name > 40
+        or not name:match("^[a-z_][a-z0-9_]*$")
+    then
+        return nil, "Studio context has no canonical technical name"
+    end
     if type(context.anon_key) ~= "string" or context.anon_key == "" then
         return nil, "Studio context has no anon key"
     end
@@ -23,6 +33,9 @@ local function validate_context(context, ref)
 end
 
 function _M.load(ref, administrative)
+    if not ref_resolver.valid_ref(ref) then
+        return nil, "invalid public project reference", ngx.HTTP_BAD_REQUEST
+    end
     local user_id = ngx.var.auth_user_id or ""
     local user_token = ngx.var.auth_user_token or ""
     if user_id == "" or user_token == "" then

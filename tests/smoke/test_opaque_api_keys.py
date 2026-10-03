@@ -194,10 +194,10 @@ class OpaqueKeyContractTest(unittest.TestCase):
         self.assertIn("secret_hash BYTEA NOT NULL UNIQUE", self.baseline)
 
     def test_management_routes_are_canonical_and_no_store(self) -> None:
-        self.assertIn('/{project_name}/api-key-slots"', self.router)
-        self.assertIn('/{project_name}/api-key-slots/{slot_id}/rotation"', self.router)
-        self.assertIn('/{project_name}/api-key-slots/{slot_id}/activation"', self.router)
-        self.assertIn('/{project_name}/api-key-reveals/{key_id}/claim"', self.router)
+        self.assertIn('/{project_ref}/api-key-slots"', self.router)
+        self.assertIn('/{project_ref}/api-key-slots/{slot_id}/rotation"', self.router)
+        self.assertIn('/{project_ref}/api-key-slots/{slot_id}/activation"', self.router)
+        self.assertIn('/{project_ref}/api-key-reveals/{key_id}/claim"', self.router)
         self.assertIn('"Cache-Control": "no-store, max-age=0"', self.router)
         self.assertIn('extra="forbid"', self.router)
         self.assertIn("host-agent omitted error_code", self.router)

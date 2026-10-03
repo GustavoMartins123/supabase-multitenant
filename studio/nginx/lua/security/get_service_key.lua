@@ -4,9 +4,10 @@ local http = require("resty.http")
 local internal_hmac = require("security.internal_hmac")
 local service_key_version = require("cache.service_key_version")
 local outbound_tls = require("utils.outbound_tls")
+local ref_resolver = require("project_context.project_ref_resolver")
 
 local server_domain = (os.getenv("SERVER_DOMAIN") or ""):gsub("/+$", "")
-local hostname = string.match(server_domain or "", "//([^/:]+)") or "localhost"
+local hostname = string.match(server_domain, "^https?://([^/:]+)")
 local hmac_secret = os.getenv("STUDIO_GATEWAY_HMAC_SECRET")
 local encryption_key = os.getenv("STUDIO_SERVICE_KEY_ENCRYPTION_KEY")
 local cache_ttl = tonumber(os.getenv("SERVICE_KEY_CACHE_TTL_SECONDS")) or 60
@@ -117,10 +118,11 @@ local function fetch_service_key(project_ref)
 end
 
 local function get_service_key(project_ref)
-    if not project_ref or project_ref == "" or project_ref == "default" then
+    if not ref_resolver.valid_ref(project_ref) then
+        ngx.log(ngx.ERR, "Invalid public reference for service key lookup")
         return ""
     end
-    if server_domain == ""
+    if not hostname
         or not hmac_secret or hmac_secret == ""
         or not encryption_key or encryption_key == ""
     then

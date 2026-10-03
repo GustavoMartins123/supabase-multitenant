@@ -1,11 +1,11 @@
 local cjson = require("cjson.safe")
 local login_session = require("security.login_session")
 local step_up_token = require("security.step_up_token")
+local ref_resolver = require("project_context.project_ref_resolver")
 
 local MAX_BODY_BYTES = 4096
 local HTTP_UNSUPPORTED_MEDIA_TYPE = 415
 local UUID_PATTERN = "^[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]%-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]%-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]%-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]%-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]$"
-local PROJECT_PATTERN = "^[a-z_][a-z0-9_][a-z0-9_][a-z0-9_]*$"
 local SLOT_PATTERN = "^[a-z][a-z0-9_-][a-z0-9_-][a-z0-9_-]*$"
 local ACTIONS = {
     delete_project = true,
@@ -80,9 +80,7 @@ end
 if type(action) ~= "string" or not ACTIONS[action] then
     return respond(ngx.HTTP_BAD_REQUEST, "Invalid step-up action")
 end
-if type(project) ~= "string" or #project < 3 or #project > 40
-    or not project:match(PROJECT_PATTERN)
-then
+if not ref_resolver.valid_ref(project) then
     return respond(ngx.HTTP_BAD_REQUEST, "Invalid project reference")
 end
 if type(resource) ~= "string" or resource == "" then

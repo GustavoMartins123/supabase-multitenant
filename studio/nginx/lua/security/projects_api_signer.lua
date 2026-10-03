@@ -1,4 +1,5 @@
 local internal_hmac = require("security.internal_hmac")
+local ref_resolver = require("project_context.project_ref_resolver")
 
 local SECRET = os.getenv("STUDIO_GATEWAY_HMAC_SECRET") or ""
 local SERVICE = "studio-nginx"
@@ -40,19 +41,14 @@ local function resolve_target(uri)
         return append_query("/api/projects/" .. admin_slug)
     end
 
-    local meta_slug, meta_resource = uri:match(
-        "^/api/platform/pg%-meta/([a-z_][a-z0-9_]*)(/.*)$"
-    )
-    if not meta_slug then
-        meta_slug = uri:match(
-            "^/api/platform/pg%-meta/([a-z_][a-z0-9_]*)/?$"
-        )
-        meta_resource = ""
-    end
-    if meta_slug then
+    if uri:find("^/api/platform/pg%-meta/") then
+        local meta_slug = uri:match("^/api/platform/pg%-meta/([^/]+)")
         local res = ngx.var.resource
-        if not res or res == "" then
-            res = meta_resource or ""
+        if not ref_resolver.valid_ref(meta_slug)
+            or meta_slug ~= ngx.ctx.studio_request_project_ref
+            or type(res) ~= "string"
+        then
+            return nil, "Canonical pg-meta target is unavailable"
         end
         return append_query(
             "/api/projects/" .. meta_slug .. "/meta" .. res
@@ -82,7 +78,8 @@ local function target_for_request(uri)
         return nil
     end
 
-    local target = resolve_target(uri)
+    local target, target_err = resolve_target(uri)
+    if target_err then return nil, target_err end
     if target and is_internal_namespace((target:gsub("%?.*$", ""))) then
         return nil
     end
@@ -105,7 +102,8 @@ function M.maybe_sign()
     local uri = ngx.var.uri or ""
     clear_untrusted_internal_headers()
 
-    local target = target_for_request(uri)
+    local target, target_err = target_for_request(uri)
+    if target_err then return nil, target_err end
     if not target then
         return true
     end

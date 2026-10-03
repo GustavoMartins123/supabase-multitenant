@@ -165,7 +165,7 @@ class StepUpSecretManagementGrantTest(unittest.IsolatedAsyncioTestCase):
             subject=self.user_id,
             login_session=self.session,
             action=action,
-            project="demo_project",
+            project="abcdefghijklmnopqrst",
             resource=self.slot_id,
             issued_at=self.now,
             jti=jti,
@@ -180,7 +180,7 @@ class StepUpSecretManagementGrantTest(unittest.IsolatedAsyncioTestCase):
             auth_user=self.auth_user,
             action=action,
             project_id=self.project_id,
-            project_ref="demo_project",
+            project_ref="abcdefghijklmnopqrst",
             resource_id=self.slot_id,
         )
 

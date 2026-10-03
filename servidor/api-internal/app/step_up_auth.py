@@ -14,6 +14,7 @@ import uuid
 from typing import TYPE_CHECKING, Any, NoReturn
 
 from fastapi import HTTPException
+from app.project_public_ref import PUBLIC_REF_PATTERN
 
 if TYPE_CHECKING:
     import asyncpg
@@ -35,7 +36,7 @@ STEP_UP_ACTIONS = frozenset(
     }
 )
 
-_PROJECT_REF_PATTERN = re.compile(r"^[a-z_][a-z0-9_]{2,39}$")
+_PROJECT_REF_PATTERN = PUBLIC_REF_PATTERN
 _SLOT_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{2,39}$")
 _SESSION_PATTERN = re.compile(r"^[A-Za-z0-9_-]{43}$")
 _JTI_PATTERN = re.compile(r"^[A-Za-z0-9_-]{22}$")

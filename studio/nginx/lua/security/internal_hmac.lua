@@ -19,9 +19,10 @@ function M.read_current_body()
     if not body_file then return "" end
     local file, err = io.open(body_file, "rb")
     if not file then return nil, err or "failed to open temporary request body" end
-    local data = file:read("*a")
+    local data, read_err = file:read("*a")
     file:close()
-    return data or ""
+    if data == nil then return nil, read_err or "failed to read temporary request body" end
+    return data
 end
 
 function M.sha256_hex(value)

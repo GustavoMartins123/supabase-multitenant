@@ -188,11 +188,11 @@ class StudioSlugContextContractTest(unittest.TestCase):
         nginx = (ROOT / "studio/nginx/nginx.conf").read_text(encoding="utf-8")
 
         detail = nginx.index(
-            'location ~ "^/api/platform/projects/[a-z_][a-z0-9_]{2,39}/?$"'
+            'location ~ "^/api/platform/projects/[a-z]{20}/?$"'
         )
         generic_platform = nginx.index("location ~* ^/api/platform/projects/ {")
         api_keys = nginx.index(
-            'location ~ "^/api/v1/projects/[a-z_][a-z0-9_]{2,39}/api-keys'
+            'location ~ "^/api/v1/projects/[a-z]{20}/api-keys'
         )
         generic_v1 = nginx.index("location ~ ^/api/v1/projects/ {")
         self.assertLess(detail, generic_platform)
@@ -210,7 +210,7 @@ class StudioSlugContextContractTest(unittest.TestCase):
         self.assertIn("studio_project_access.lua", mcp)
         self.assertIn("mcp_disabled.lua", mcp)
 
-        project_start = nginx.index('location ~ "^/project/[a-z_][a-z0-9_]')
+        project_start = nginx.index('location ~ "^/project/[a-z]{20}')
         project_end = nginx.index("\n        }", project_start)
         project_route = nginx[project_start:project_end]
         self.assertIn("studio_project_access.lua", project_route)
