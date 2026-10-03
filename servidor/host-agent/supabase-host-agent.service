@@ -9,6 +9,7 @@ Wants=network-online.target
 Type=exec
 User=__HOST_AGENT_USER__
 Environment="HOST_AGENT_ROOT=__SERVIDOR_DIR__"
+__DOCKER_CONFIG_ENV__
 ExecStartPre="__AGENT_DIR__/.venv/bin/python" -m hostagent --root "__SERVIDOR_DIR__" --wait-for-schema
 ExecStart="__AGENT_DIR__/.venv/bin/python" -m hostagent --root "__SERVIDOR_DIR__"
 WorkingDirectory=__AGENT_DIR__

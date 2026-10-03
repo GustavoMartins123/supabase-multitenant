@@ -563,6 +563,30 @@ main() {
     safe_sed "s|META_ADMIN_DB_PASSWORD=pass|META_ADMIN_DB_PASSWORD=$META_ADMIN_DB_PASSWORD|g" servidor/.env
     HOST_AGENT_DB_PASSWORD=$(env_secret servidor/.env HOST_AGENT_DB_PASSWORD generate_key_authorizer_password)
     safe_sed "s|HOST_AGENT_DB_PASSWORD=pass|HOST_AGENT_DB_PASSWORD=$HOST_AGENT_DB_PASSWORD|g" servidor/.env
+    if [[ -n "${SETUP_DOCKER_DESKTOP_WSL_HOST:-}" ]]; then
+        validate_ip "$SETUP_DOCKER_DESKTOP_WSL_HOST" || { print_error "Interface WSL invalida"; return 1; }
+        python3 - "$SETUP_DOCKER_DESKTOP_WSL_HOST" <<'PYEOF'
+import ipaddress
+import sys
+address = ipaddress.ip_address(sys.argv[1])
+networks = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+if not any(address in ipaddress.ip_network(network) for network in networks):
+    sys.exit("A interface WSL deve ser um endereco privado RFC1918")
+PYEOF
+        python3 - servidor/.env "$SETUP_DOCKER_DESKTOP_WSL_HOST" <<'PYEOF'
+from pathlib import Path
+import sys
+from tools.configure_studio_runtime import _read_env_value, _set_env_value, atomic_write
+path = Path(sys.argv[1])
+content = path.read_text(encoding="utf-8")
+password = _read_env_value(content, "HOST_AGENT_DB_PASSWORD")
+port = _read_env_value(content, "POSTGRES_PORT")
+database = _read_env_value(content, "POSTGRES_DB")
+content = _set_env_value(content, "DOCKER_DESKTOP_WSL_HOST", sys.argv[2])
+content = _set_env_value(content, "HOST_AGENT_DB_DSN", f"postgresql://host_agent_rw:{password}@{sys.argv[2]}:{port}/{database}")
+atomic_write(path, content, mode=0o600, replace=True)
+PYEOF
+    fi
     safe_sed "s|DB_ENC_KEY=pass|DB_ENC_KEY=$DB_ENC_KEY|g" servidor/.env
     safe_sed "s|VAULT_ENC_KEY=pass|VAULT_ENC_KEY=$VAULT_ENC_KEY|g" servidor/.env
     safe_sed "s|SECRET_KEY_BASE=pass|SECRET_KEY_BASE=$SECRET_KEY_BASE|g" servidor/.env
@@ -704,6 +728,21 @@ main() {
     print_success "Studio e Authelia configurados para $LOCAL_IP."
     print_status "Configurando update_geoip.sh com o caminho real..."
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [[ -n "${SETUP_DOCKER_DESKTOP_WSL_HOST:-}" ]]; then
+        python3 - servidor/.env "$SCRIPT_DIR/servidor/host-agent/.docker" <<'PYEOF'
+from pathlib import Path
+import sys
+from tools.configure_studio_runtime import _set_env_value, atomic_write
+env_path = Path(sys.argv[1])
+config_root = Path(sys.argv[2])
+config_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+config = config_root / "config.json"
+if not config.exists():
+    atomic_write(config, "{}\n", mode=0o600, replace=False)
+content = _set_env_value(env_path.read_text(encoding="utf-8"), "HOST_AGENT_DOCKER_CONFIG", str(config_root))
+atomic_write(env_path, content, mode=0o600, replace=True)
+PYEOF
+    fi
     backup_file "servidor/traefik/update_geoip.sh"
     safe_sed "s|^MMDB_PATH=.*|MMDB_PATH=\"$SCRIPT_DIR/servidor/traefik/geoip/GeoLite2-Country.mmdb\"|" servidor/traefik/update_geoip.sh
     safe_sed "s|^BACKUP_DIR=.*|BACKUP_DIR=\"$SCRIPT_DIR/servidor/traefik/logs_backup/geo\"|" servidor/traefik/update_geoip.sh

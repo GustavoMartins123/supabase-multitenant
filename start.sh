@@ -60,6 +60,11 @@ case "$DEPLOYMENT_PROFILE" in
 esac
 
 require_host_agent_installation
+agent_docker_config="$(sed -n 's/^HOST_AGENT_DOCKER_CONFIG=//p' "$ROOT_DIR/servidor/.env")"
+if [ -n "$agent_docker_config" ]; then
+    [ -f "$agent_docker_config/config.json" ] || die "configuracao Docker do host-agent ausente."
+    export DOCKER_CONFIG="$agent_docker_config"
+fi
 python3 "$ROOT_DIR/tools/configure_api_resource_profiles.py" \
     --source "$ROOT_DIR/servidor/.env" \
     --output "$ROOT_DIR/servidor/.resource-profiles.env" \
@@ -120,7 +125,16 @@ if [ -n "${PLATFORM_CAP_DEGRADED:-}" ]; then
 fi
 echo "  referencia desta maquina: $PLATFORM_CAP_PROJECTS projetos no perfil $PLATFORM_CAP_PROFILE (apenas informativo; perfis sao tetos por projeto, nao reservas)"
 
-docker compose -f docker-compose.yml -f "$CAPACITY_SERVIDOR" --env-file .env up --build -d
+SERVER_COMPOSE=(docker compose -f docker-compose.yml -f "$CAPACITY_SERVIDOR")
+desktop_wsl_host="$(sed -n 's/^DOCKER_DESKTOP_WSL_HOST=//p' .env)"
+if [ -n "$desktop_wsl_host" ]; then
+    [ ! -f "$ROOT_DIR/servidor/volumes/db/data/PG_VERSION" ] \
+        || die "banco no bind mount existente; migre os dados explicitamente antes de selecionar Docker Desktop/WSL."
+    [ -n "$(sed -n 's/^HOST_AGENT_DB_DSN=//p' .env)" ] \
+        || die "DOCKER_DESKTOP_WSL_HOST exige HOST_AGENT_DB_DSN configurado pelo setup."
+    SERVER_COMPOSE+=(-f docker-compose.desktop-wsl.yml)
+fi
+"${SERVER_COMPOSE[@]}" --env-file .env up --build -d
 
 echo "Aguardando o banco de dados ficar pronto..."
 counter=0

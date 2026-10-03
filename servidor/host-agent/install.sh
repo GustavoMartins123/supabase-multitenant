@@ -28,6 +28,13 @@ render_unit() {
   local servidor_value agent_value service_user_replacement
   local servidor_replacement agent_replacement
   local service_home_value service_home_replacement
+  local docker_env="" docker_env_replacement
+  if [[ -n "${HOST_AGENT_DOCKER_CONFIG:-}" ]]; then
+    [[ "$HOST_AGENT_DOCKER_CONFIG" == /* && -f "$HOST_AGENT_DOCKER_CONFIG/config.json" ]] \
+      || die "HOST_AGENT_DOCKER_CONFIG exige caminho absoluto e config.json existente."
+    docker_env="Environment=\"DOCKER_CONFIG=$(escape_systemd_value "$HOST_AGENT_DOCKER_CONFIG")\""
+  fi
+  docker_env_replacement="$(escape_sed_replacement "$docker_env")"
 
   [[ "$servidor_dir" != *$'\n'* && "$servidor_dir" != *$'\r'* ]] \
     || die "Caminho do servidor contem quebra de linha."
@@ -52,6 +59,7 @@ render_unit() {
     -e "s|__AGENT_DIR__|$agent_replacement|g" \
     -e "s|__HOST_AGENT_USER__|$service_user_replacement|g" \
     -e "s|__SERVICE_HOME__|$service_home_replacement|g" \
+    -e "s|__DOCKER_CONFIG_ENV__|$docker_env_replacement|g" \
     "$AGENT_DIR/supabase-host-agent.service" > "$destination"
 }
 
@@ -148,6 +156,10 @@ main() {
   fi
 
   SERVICE_USER="$(resolve_service_user)"
+  HOST_AGENT_DOCKER_CONFIG="$(sed -n 's/^HOST_AGENT_DOCKER_CONFIG=//p' "$SERVIDOR_DIR/.env")"
+  if [[ -n "$HOST_AGENT_DOCKER_CONFIG" ]]; then
+    export DOCKER_CONFIG="$HOST_AGENT_DOCKER_CONFIG"
+  fi
   SERVICE_GROUP="$(id -gn "$SERVICE_USER")"
   run_as_service_user test -r "$SERVIDOR_DIR/.env" \
     || die "O usuario $SERVICE_USER nao consegue ler servidor/.env. Rode o setup como esse usuario."

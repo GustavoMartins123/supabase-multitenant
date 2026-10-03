@@ -37,6 +37,7 @@ tarefas.md
 __pycache__/
 *.py[cod]
 servidor/host-agent/.venv/
+servidor/host-agent/.docker/
 
 # Local runtime logs
 *.log

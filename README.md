@@ -158,6 +158,10 @@ For a one-machine installation, `single-node` makes the detected local IP the ad
 
 With Docker Desktop and WSL, specify the Windows address published by Docker: `bash setup.sh single-node <windows-ip>`. Setup issues Studio and Traefik certificates using the same private CA and enables HTTPS. Trust `studio/authelia/ssl/ca.pem` on the browser machine; do not bypass certificate verification.
 
+For a fresh Docker Desktop/WSL installation, use `SETUP_DOCKER_DESKTOP_WSL_HOST=<windows-wsl-interface-ip> bash setup.sh single-node <windows-ip>`. This selects a Linux Docker volume for PostgreSQL and publishes its port only on the private WSL interface for the host-agent. Do not use the Wi-Fi/LAN address for this variable. Existing databases require an explicit backup/restore into the new volume before selecting this profile; setup does not migrate data.
+
+This profile uses `servidor/host-agent/.docker` for both startup and unattended host-agent builds, without modifying the operator's Docker credentials. The generated configuration pulls public images anonymously. For private registries, authenticate explicitly with `docker --config servidor/host-agent/.docker login <registry>`; the Windows credential helper is not used by the Linux service.
+
 For two machines, use `bash setup.sh split-node <server-ip-or-domain>`. Running `bash setup.sh` without a profile keeps the legacy interactive flow.
 
 The script also detects the IP of the current machine, used by the local Studio, Authelia, the self-signed certificate and internal integrations.
