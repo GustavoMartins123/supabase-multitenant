@@ -79,7 +79,6 @@ KNOWN_OPTIONAL = {
     "PLATFORM_LOAD_ANON_KEY": "ferramenta manual (platform_load_probe.py)",
     "PLATFORM_LOAD_SERVICE_KEY": "ferramenta manual (platform_load_probe.py)",
     "REALTIME_INTERNAL_URL": "default em runtime_config.py",
-    "SERVER_ENV_PATH": "default em project_settings.py",
     "STUDIO_CACHE_INVALIDATION_URL": "default em runtime_config.py",
     "SUPAVISOR_INTERNAL_URL": "default em runtime_config.py",
 }

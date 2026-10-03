@@ -60,6 +60,10 @@ case "$DEPLOYMENT_PROFILE" in
 esac
 
 require_host_agent_installation
+python3 "$ROOT_DIR/tools/configure_api_resource_profiles.py" \
+    --source "$ROOT_DIR/servidor/.env" \
+    --output "$ROOT_DIR/servidor/.resource-profiles.env" \
+    || die "falha ao gerar configuracao delimitada de perfis da Projects API."
 
 [ -f "$ROOT_DIR/servidor/.storage.env" ] \
     || die "servidor/.storage.env ausente; execute setup.sh ou a migracao do Storage compartilhado."

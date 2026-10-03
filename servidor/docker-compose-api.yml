@@ -108,7 +108,12 @@ services:
     volumes:
       - ./projects:/docker/projects:rw        # bind-mount relativo  :contentReference[oaicite:0]{index=0}
       - ./certs:/docker/push-certs:ro
-      - ./.env:/docker/.env:ro
+      - type: bind
+        source: ./.resource-profiles.env
+        target: /docker/resource-profiles.env
+        read_only: true
+        bind:
+          create_host_path: false
   postgres-meta-global:
     container_name: postgres-meta-global
     image: supabase/postgres-meta:v0.96.1

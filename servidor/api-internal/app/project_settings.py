@@ -151,30 +151,38 @@ SETTING_TO_SERVICES: dict[str, list[str]] = {
     "PROJECT_RESOURCE_PROFILE": ["auth", "rest", "nginx"],
 }
 
-DEFAULT_SERVER_ENV = pathlib.Path(os.getenv("SERVER_ENV_PATH", "/docker/.env"))
+DEFAULT_RESOURCE_PROFILES_ENV = pathlib.Path("/docker/resource-profiles.env")
 
 
 def resolve_resource_limits(
     profile: str,
     *,
-    server_env: pathlib.Path = DEFAULT_SERVER_ENV,
+    profiles_env: pathlib.Path = DEFAULT_RESOURCE_PROFILES_ENV,
 ) -> dict[str, str]:
-    """Resolve o trio do .env raiz para o perfil informado."""
+    """Resolve exclusivamente a configuracao sem segredos dos perfis."""
 
     if profile not in RESOURCE_PROFILES:
         raise HTTPException(
             400, "PROJECT_RESOURCE_PROFILE: use small, medium, large ou custom"
         )
     try:
-        content = server_env.read_text(encoding="utf-8")
+        content = profiles_env.read_text(encoding="utf-8")
     except OSError as exc:
-        raise HTTPException(409, ".env do servidor indisponivel") from exc
+        raise HTTPException(503, "Configuracao de perfis indisponivel") from exc
+    allowed = {key for keys in PROFILE_RESOLVED_FROM_ROOT.values() for key in keys.values()}
+    parsed = {}
+    for line in content.splitlines():
+        key, separator, value = line.partition("=")
+        if not separator or key not in allowed or key in parsed or value != value.strip() or not value:
+            raise HTTPException(503, "Configuracao de perfis invalida")
+        parsed[key] = value
+    if set(parsed) != allowed:
+        raise HTTPException(503, "Configuracao de perfis incompleta")
     totals: dict[str, str] = {}
     for suffix, key in PROFILE_RESOLVED_FROM_ROOT[profile].items():
-        match = re.search(rf"(?m)^{key}=(.*)$", content)
-        raw = match.group(1).strip().strip('"').strip("'") if match else ""
+        raw = parsed[key]
         if not raw or raw == "pass":
-            raise HTTPException(409, f"{key} ausente no .env do servidor")
+            raise HTTPException(503, f"{key} invalido na configuracao de perfis")
         totals[suffix] = raw
 
     values = {
