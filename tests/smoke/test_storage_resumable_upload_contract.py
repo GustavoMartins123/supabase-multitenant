@@ -121,8 +121,8 @@ class ProjectGatewayPublishesUsableTusUrlsTest(unittest.TestCase):
         template = read(PROJECT_NGINX)
 
         self.assertIn(
-            "proxy_redirect ~^https?://[^/]+/{{project_id}}/storage/v1/upload/resumable/(.*)$"
-            " $real_scheme://$http_host/{{project_id}}/storage/v1/upload/resumable/$1;",
+            "proxy_redirect ~^https?://[^/]+/{{project_public_ref}}/storage/v1/upload/resumable/(.*)$"
+            " $real_scheme://$http_host/{{project_public_ref}}/storage/v1/upload/resumable/$1;",
             template,
         )
         self.assertIn("proxy_request_buffering off;", template)

@@ -158,7 +158,8 @@ path.write_text(text)
         studio = 'studio-session-ui-' + suffix
         # The actual Studio avoids replacing its upstream with a mock.
         run('docker', 'create', '--name', studio, '--pull=never', '--network', network,
-            '--network-alias', 'studio', '-e', 'HOSTNAME=0.0.0.0',
+            '--network-alias', 'studio', '--network-alias', 'studio-assistant',
+            '-e', 'HOSTNAME=0.0.0.0',
             args.ui_image)
         containers.append(studio)
         run('docker', 'start', studio)
@@ -168,12 +169,18 @@ path.write_text(text)
                'SERVER_DOMAIN': 'https://studio.p1.test', 'SERVICE_KEY_VERIFY_TLS': 'true',
                'AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE': '/var/run/authelia-cli-secrets/JWT_SECRET',
                'AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE': '/var/run/authelia-cli-secrets/STORAGE_ENCRYPTION_KEY',
-               'STUDIO_BOOTSTRAP_TOKEN_FILE': '/run/secrets/STUDIO_BOOTSTRAP_TOKEN'}
+               'STUDIO_BOOTSTRAP_TOKEN_FILE': '/run/secrets/STUDIO_BOOTSTRAP_TOKEN',
+               'ASSISTANT_GATEWAY_KEY_FILE': '/var/run/assistant-gateway-key'}
         env_args = [part for key, value in env.items() for part in ('-e', key + '=' + value)]
         mounts = ['-v', config + ':/config', '-v', config_path + '/studio/nginx/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro',
                   '-v', config_path + '/studio/nginx/docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro']
         for name in ('JWT_SECRET', 'STORAGE_ENCRYPTION_KEY', 'STUDIO_BOOTSTRAP_TOKEN'):
             mounts += ['-v', f'{secrets_path}/{name}:/run/secrets/{name}:ro']
+        # The production entrypoint refuses to start without the assistant
+        # gateway secret; configure_studio_runtime.py seeded it next to the
+        # Authelia secrets in the disposable fixture volume.
+        assistant_key = config_path + '/studio/secrets/assistant/GATEWAY_KEY'
+        mounts += ['-v', assistant_key + ':/run/secrets/ASSISTANT_GATEWAY_KEY:ro']
         run('docker', 'create', '--name', nginx, '--pull=never', '--network', network,
             '--network-alias', 'studio.p1.test', '--network-alias', 'nginx', *env_args, *mounts, args.studio_image)
         containers.append(nginx)

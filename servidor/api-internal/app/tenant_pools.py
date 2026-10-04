@@ -63,10 +63,10 @@ class TenantPoolManager:
             if self._closed:
                 raise TenantPoolUnavailable("Tenant pools are shutting down")
             now = time.monotonic()
-            for key, entry in list(self._tenants.items()):
-                if entry.users == 0 and now - entry.touched >= self.idle_seconds:
+            for key, expired in list(self._tenants.items()):
+                if expired.users == 0 and now - expired.touched >= self.idle_seconds:
                     del self._tenants[key]
-                    await self._close(entry)
+                    await self._close(expired)
             entry = self._tenants.get(identity)
             if entry and entry.dsns != dsns:
                 if entry.users:

@@ -13,7 +13,7 @@ class StudioRuntimeContractTests(unittest.TestCase):
         nginx_start = compose.index("  nginx:\n")
         studio_start = compose.index("\n  studio:\n", nginx_start) + 1
         cls.nginx = compose[nginx_start:studio_start]
-        studio_end = compose.index("  # postgres:", studio_start)
+        studio_end = compose.index("\nvolumes:", studio_start) + 1
         cls.studio = compose[studio_start:studio_end]
 
     def test_studio_listens_on_the_docker_interface(self) -> None:

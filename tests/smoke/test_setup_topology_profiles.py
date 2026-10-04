@@ -53,7 +53,7 @@ class SetupTopologyProfileContractTests(unittest.TestCase):
             else:
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(len(calls), 3)
-                self.assertTrue(calls[1].endswith("build nginx"))
+                self.assertTrue(calls[1].endswith("build nginx studio-assistant"))
                 self.assertTrue(calls[2].endswith("up --no-build --pull never -d"))
 
     def test_single_node_uses_the_detected_local_ip_without_a_prompt(self) -> None:

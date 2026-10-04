@@ -124,6 +124,7 @@ def make_job(
     return {
         "job_id": job_id,
         "project": project,
+        "public_ref": "abcdefghijklmnopqrst",
         "project_uuid": str(uuid.uuid4()),
         "created_by": str(uuid.uuid4()),
         "action": action,

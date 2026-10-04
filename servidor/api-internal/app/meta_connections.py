@@ -67,4 +67,7 @@ def get_project_assistant_reader_connection_string(project_ref: str, tenant_uuid
     master_uri = urllib.parse.urlparse(os.environ["META_ADMIN_DSN"])
     role, password = tenant_assistant_reader_credentials(tenant_uuid, master_uri.password or "")
     uri = urllib.parse.urlparse(meta_uri)
-    return urllib.parse.urlunparse(uri._replace(netloc=f"{role}:{password}@{_format_host(uri.hostname)}:{uri.port}"))
+    if not uri.hostname:
+        raise RuntimeError("Conexao de metadados invalida para o leitor do assistente")
+    netloc = f"{role}:{password}@{_format_host(uri.hostname)}:{uri.port or 5432}"
+    return urllib.parse.urlunparse(uri._replace(netloc=netloc))

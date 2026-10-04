@@ -90,6 +90,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r servidor/api-internal/requirements.txt
+          python -m pip install pytest==9.1.0
       - name: Cadeia de migrations em Postgres real
         env:
           RUN_MIGRATIONS_INTEGRATION: "1"

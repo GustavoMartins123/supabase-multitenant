@@ -87,6 +87,7 @@ KNOWN_OPTIONAL = {
     "REALTIME_INTERNAL_URL": "default em runtime_config.py",
     "STUDIO_CACHE_INVALIDATION_URL": "default em runtime_config.py",
     "SUPAVISOR_INTERNAL_URL": "default em runtime_config.py",
+    "DOCKER_HOST": "endpoint do daemon Docker descartavel do harness run_isolated_lifecycle_tests.py, nunca runtime",
 }
 
 REAL_FILE_PASS_ALLOWLIST = {

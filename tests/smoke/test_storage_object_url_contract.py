@@ -91,7 +91,7 @@ class BrowserLoadsObjectsFromTheStudioOriginTest(unittest.TestCase):
         nginx = read(STUDIO_NGINX)
         for location in (
             "location /api/platform/storage {",
-            'location ~ "^/storage/v1/[a-z_][a-z0-9_]{2,39}/object/(?:public|sign)/" {',
+            'location ~ "^/storage/v1/[a-z]{20}/object/(?:public|sign)/" {',
             "location /storage/v1 {",
         ):
             block = nginx.split(location, 1)[1].split("\n        }", 1)[0]
@@ -113,11 +113,11 @@ class BrowserLoadsObjectsFromTheStudioOriginTest(unittest.TestCase):
         resolver = read(RESOLVER)
 
         self.assertIn(
-            'location ~ "^/storage/v1/[a-z_][a-z0-9_]{2,39}/object/(?:public|sign)/" {',
+            'location ~ "^/storage/v1/[a-z]{20}/object/(?:public|sign)/" {',
             nginx,
         )
         self.assertIn(
-            'rewrite "^/storage/v1/[a-z_][a-z0-9_]{2,39}/(object/(?:public|sign)/.+)$"'
+            'rewrite "^/storage/v1/[a-z]{20}/(object/(?:public|sign)/.+)$"'
             " /storage/v1/$1 break;",
             nginx,
         )

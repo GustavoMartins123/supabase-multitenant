@@ -227,10 +227,10 @@ class ProjectIdentitySourceContractTest(unittest.TestCase):
         # duplicacao usa INSERT ... SELECT para herdar o resource_profile
         # do original na mesma transacao.
         same_uuid_inserts = self.projects.count(
-            "VALUES($1, $1, $2, $3"
-        ) + self.projects.count("SELECT $1, $1, $2, $3")
+            "VALUES($1, $1, $2, $2, $3"
+        ) + self.projects.count("SELECT $1, $1, $2, $2, $3")
         self.assertGreaterEqual(same_uuid_inserts, 2)
-        self.assertIn("owner_id, resource_profile)", self.projects)
+        self.assertIn("owner_id, resource_profile, public_ref)", self.projects)
         self.assertGreaterEqual(
             self.projects.count('"tenant_uuid": str(project_id)'),
             2,

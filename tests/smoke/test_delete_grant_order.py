@@ -63,6 +63,7 @@ class FakeConn:
         assert "FROM projects" in query, query
         return {
             "id": self.pool.project_id,
+            "name": "demo",
             "tenant_uuid": self.pool.tenant_uuid,
         }
 
@@ -137,7 +138,7 @@ class DeleteGrantOrderTest(unittest.IsolatedAsyncioTestCase):
     async def test_missing_tenant_uuid_keeps_grant(self) -> None:
         pool = FakePool(tenant_uuid=None)
         with self.assertRaises(HTTPException) as ctx:
-            await router.delete_project("demo", object(), None, pool)
+            await router.delete_project("a" * 20, object(), None, pool)
         self.assertEqual(ctx.exception.status_code, 409)
         self.assertEqual(self.consumed, [])
         self.assertEqual(self.created_jobs, [])
@@ -145,7 +146,7 @@ class DeleteGrantOrderTest(unittest.IsolatedAsyncioTestCase):
     async def test_valid_project_consumes_once_and_creates_job(self) -> None:
         tenant = uuid.uuid4()
         pool = FakePool(tenant_uuid=tenant)
-        body = await router.delete_project("demo", object(), None, pool)
+        body = await router.delete_project("a" * 20, object(), None, pool)
         self.assertEqual(len(self.consumed), 1)
         self.assertEqual(len(self.created_jobs), 1)
         self.assertIn("job_id", json.loads(body.body))

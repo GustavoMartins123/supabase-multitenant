@@ -925,14 +925,15 @@ async def handle_rotate_keys(ctx: CommandContext, project: str, args: dict[str, 
 
 
 async def handle_rename_project(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
-    if not is_valid_uuid(ctx.project_uuid):
+    project_uuid = ctx.project_uuid
+    if project_uuid is None or not is_valid_uuid(project_uuid):
         raise ValueError("Canonical project UUID is required for reference rotation")
     resolve_project_dir(ctx.config.projects_root, project, must_exist=True)
     ctx.state.report(progress=5, step="rotate_public_reference", message="Atualizando referencia publica...")
     outcome, process = await _run_lifecycle_script(
         ctx,
         "rename_project.sh",
-        [project, ctx.project_uuid, args["tenant_uuid"], args["old_ref"], args["new_ref"]],
+        [project, project_uuid, args["tenant_uuid"], args["old_ref"], args["new_ref"]],
         error_code="rename_failed",
         markers=("ROLLBACK_COMPLETE", "REFERENCE_ROTATED"),
     )

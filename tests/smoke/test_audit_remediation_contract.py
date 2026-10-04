@@ -177,11 +177,14 @@ class F06SlotNaming(unittest.TestCase):
         for rel in (
             "servidor/generateProject/lib/generate_project_impl.sh",
             "servidor/generateProject/lib/duplicate_project_impl.sh",
-            "servidor/generateProject/lib/rename_project_impl.sh",
             "servidor/generateProject/lib/restore_project_impl.sh",
         ):
             with self.subTest(script=rel):
                 self.assertIn("realtime_slots.sh", (ROOT / rel).read_text(encoding="utf-8"))
+        # Renames rotate the public reference through the canonical locked
+        # Python runner instead of recreating project infrastructure.
+        rename = (ROOT / "servidor/generateProject/lib/rename_project_impl.sh").read_text(encoding="utf-8")
+        self.assertIn("rotate_project_reference.py", rename)
 
 
 class F07NextStaticSplit(unittest.TestCase):
@@ -304,14 +307,15 @@ class F14ExtractTokenValidation(unittest.TestCase):
 
 class F15AdminModeGate(unittest.TestCase):
     def test_admin_listing_requires_a_platform_admin(self) -> None:
-        lua = (
-            ROOT / "studio/nginx/lua/admin_api/available_users.lua"
+        # The available-users listing moved from Lua to the API-driven
+        # endpoint; the admin-mode gate must reject non platform admins
+        # before any directory row is read.
+        source = (
+            ROOT / "servidor/api-internal/app/routers/project_members.py"
         ).read_text(encoding="utf-8")
-        gate_at = lua.index('admin_groups.is_admin(ngx.ctx.canonical_groups or "")')
-        downgrade_at = lua.index('mode = "owner"')
-        branch_at = lua.index('if mode == "admin" then')
-        self.assertLess(gate_at, branch_at)
-        self.assertLess(downgrade_at, branch_at)
+        gate_at = source.index('if mode == "admin" and not auth_user["is_global_admin"]')
+        listing_at = source.index("LEFT JOIN project_members m", gate_at)
+        self.assertLess(gate_at, listing_at)
 
 
 class P3DocsAndDeadCode(unittest.TestCase):

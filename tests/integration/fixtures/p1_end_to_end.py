@@ -114,7 +114,7 @@ def validate(root: Path, suffix: str, topology: str, values: dict[str, str], ben
            command=('authelia', '--config=/config/configuration.runtime.yml'))
     run('docker', 'network', 'connect', '--alias', 'authelia', front, 'p1-authelia-' + suffix)
     create('p1-ui-' + suffix, 'ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v11', front,
-           '--network-alias', 'studio', '-e', 'HOSTNAME=0.0.0.0')
+           '--network-alias', 'studio', '--network-alias', 'studio-assistant', '-e', 'HOSTNAME=0.0.0.0')
     nginx_config = root / 'studio/nginx/nginx.conf'
     text = nginx_config.read_text(encoding='utf-8').replace('worker_processes auto;', 'worker_processes 2;')
     text = text.replace('error_log /var/log/studio_error.log debug;', 'error_log /dev/stderr notice;')
@@ -130,11 +130,15 @@ def validate(root: Path, suffix: str, topology: str, values: dict[str, str], ben
     studio_env.update(SERVER_DOMAIN='https://server.p1.test', SERVICE_KEY_VERIFY_TLS='true',
                       STUDIO_ANALYTICS_HMAC_SECRET=secrets.token_hex(32),
                       STUDIO_BOOTSTRAP_TOKEN_FILE='/run/secrets/STUDIO_BOOTSTRAP_TOKEN',
+                      ASSISTANT_GATEWAY_KEY_FILE='/var/run/assistant-gateway-key',
                       AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE='/var/run/authelia-cli-secrets/JWT_SECRET',
                       AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE='/var/run/authelia-cli-secrets/STORAGE_ENCRYPTION_KEY')
     args = [part for key, value in studio_env.items() for part in ('-e', key + '=' + value)]
     for name in ('JWT_SECRET', 'STORAGE_ENCRYPTION_KEY', 'STUDIO_BOOTSTRAP_TOKEN'):
         args += ['-v', f'{secret_dir}/{name}:/run/secrets/{name}:ro']
+    # Production entrypoint hard requirement; configure_studio_runtime.py
+    # seeded the assistant gateway key beside the Authelia secrets.
+    args += ['-v', str(secret_dir.parent / 'assistant' / 'GATEWAY_KEY') + ':/run/secrets/ASSISTANT_GATEWAY_KEY:ro']
     nginx = 'p1-nginx-' + suffix
     run('docker', 'create', '--name', nginx, '--pull=never', '--label', 'codex.p1.run=' + suffix,
         '--network', front, '--network-alias', 'studio.p1.test', '-v', str(config) + ':/config',
@@ -263,6 +267,12 @@ def validate(root: Path, suffix: str, topology: str, values: dict[str, str], ben
 
     print('REAL END-TO-END TOPOLOGY:', topology, flush=True)
     alpha, beta, renamed = 'e2e_a_' + suffix, 'e2e_b_' + suffix, 'e2e_r_' + suffix
+
+    def ref_of(name: str) -> str:
+        # The canonical public reference is generated server-side; re-read it
+        # so calls after a rename/rotation use the current identity.
+        return environment(server / 'projects' / name / '.env')['PROJECT_PUBLIC_REF']
+
     expect('anonymous', 'GET', '/api/projects', 401)
     basic = base64.b64encode(('p1_owner:' + credentials['owner']['password']).encode()).decode()
     expect('anonymous', 'GET', '/api/projects', 401, headers={'Authorization': 'Basic ' + basic})
@@ -272,11 +282,14 @@ def validate(root: Path, suffix: str, topology: str, values: dict[str, str], ben
         env = environment(server / 'projects' / ref / '.env')
         path = server / '.functions-tenants' / (ref + '.json')
         record = json.loads(path.read_text(encoding='utf-8'))
-        assert record == {'project_ref': ref, 'project_uuid': env['PROJECT_UUID'],
+        assert record == {'project_ref': env['PROJECT_PUBLIC_REF'], 'technical_name': ref,
+                          'project_uuid': env['PROJECT_UUID'],
                           'anon_key': env['ANON_KEY_PROJETO'], 'service_role_key': env['SERVICE_ROLE_KEY_PROJETO'],
                           'jwt_secret': env['JWT_SECRET_PROJETO']}
         assert path.stat().st_mode & 0o777 == 0o600
-        worker = json.loads(run('curl', '--fail', '--silent', '--show-error', '-H', 'X-Project-Ref: ' + ref,
+        worker = json.loads(run('curl', '--fail', '--silent', '--show-error',
+                              '-H', 'X-Project-Ref: ' + env['PROJECT_PUBLIC_REF'],
+                              '-H', 'X-Project-Name: ' + ref,
                               '-H', 'Authorization: Bearer ' + record['service_role_key'],
                               'http://supabase-edge-functions:9000/p1_probe'))['env']
         assert worker['SUPABASE_SERVICE_ROLE_KEY'] == record['service_role_key']
@@ -299,7 +312,8 @@ if(!response.ok){console.error(response.status+': '+await response.text());proce
         run('docker', 'exec', '-i', 'supabase-storage-global', 'node', '-e', script, env['PROJECT_UUID'], method, path,
             data=env['SERVICE_ROLE_KEY_PROJETO'] + '\n' + json.dumps(body))
 
-    def private_object(ref):
+    def private_object(name):
+        ref = ref_of(name)
         signed = expect('owner', 'POST', '/api/platform/storage/' + ref + '/buckets/p1-files/objects/sign-multi',
                         200, {'paths': ['original.json'], 'expiresIn': 60})
         assert len(signed) == 1 and signed[0]['path'] == 'original.json', signed
@@ -309,13 +323,13 @@ if(!response.ok){console.error(response.status+': '+await response.text());proce
 
     initial = projection(alpha)
     step = expect('owner', 'POST', '/api/security/step-up', 200,
-                  {'action': 'create_secret_key', 'project': alpha, 'resource': 'p1-external'}, step_up=True)['step_up_token']
-    external = expect('owner', 'POST', '/api/projects/' + alpha + '/api-key-slots', 201,
+                  {'action': 'create_secret_key', 'project': ref_of(alpha), 'resource': 'p1-external'}, step_up=True)['step_up_token']
+    external = expect('owner', 'POST', '/api/projects/' + ref_of(alpha) + '/api-key-slots', 201,
                       {'name': 'p1-external', 'kind': 'secret', 'allowed_services': ['rest', 'graphql', 'storage']},
                       headers={'X-Step-Up-Token': step})
     assert external['api_key'].startswith('sb_secret_')
-    def external_request(ref, key, status):
-        target = 'https://server.p1.test/' + ref + '/rest/v1/lifecycle_marker?select=id,value'
+    def external_request(name, key, status):
+        target = 'https://server.p1.test/' + ref_of(name) + '/rest/v1/lifecycle_marker?select=id,value'
         raw = urllib.request.Request(target, headers={'apikey': key, 'Authorization': 'Bearer ' + key,
                        'X-Forwarded-Host': initial['project_uuid'] + '.storage.internal'})
         try:
@@ -323,21 +337,21 @@ if(!response.ok){console.error(response.status+': '+await response.text());proce
                 actual = response.status
         except urllib.error.HTTPError as error:
             actual = error.code
-        assert actual == status, ('external opaque/JWT status', ref, actual, status)
+        assert actual == status, ('external opaque/JWT status', name, actual, status)
     ids = {actor: sql("SELECT id FROM users WHERE authelia_username='p1_" + actor + "';") for actor in actors}
     assert all(ids.values())
     for actor, role in [('admin', 'admin'), ('member', 'member'), ('exmember', 'admin'), ('disabled', 'admin')]:
-        expect('owner', 'POST', '/api/projects/' + alpha + '/members', 200, {'user_id': ids[actor], 'role': role})
+        expect('owner', 'POST', '/api/projects/' + ref_of(alpha) + '/members', 200, {'user_id': ids[actor], 'role': role})
     sql("CREATE TABLE public.lifecycle_marker(id int primary key,value text); "
         "INSERT INTO public.lifecycle_marker VALUES(1,'original'); GRANT ALL ON public.lifecycle_marker TO service_role; "
         "NOTIFY pgrst,'reload schema';", '_supabase_' + alpha)
     time.sleep(2)  # PostgREST schema notification propagation, not authorization cache.
     external_request(alpha, external['api_key'], 200)
     external_request(alpha, initial['service_role_key'], 403)
-    rest = '/api/platform/projects/' + alpha + '/api/rest/lifecycle_marker?select=id,value'
-    graphql = '/api/platform/projects/' + alpha + '/api/graphql'
-    buckets = '/api/platform/storage/' + alpha + '/buckets'
-    vectors = '/api/platform/storage/' + alpha + '/vector-buckets'
+    rest = '/api/platform/projects/' + ref_of(alpha) + '/api/rest/lifecycle_marker?select=id,value'
+    graphql = '/api/platform/projects/' + ref_of(alpha) + '/api/graphql'
+    buckets = '/api/platform/storage/' + ref_of(alpha) + '/buckets'
+    vectors = '/api/platform/storage/' + ref_of(alpha) + '/vector-buckets'
     # Repeated authorization validation, not a performance measurement/report.
     expect('owner', 'GET', rest, 200)
     expect('owner', 'GET', rest, 200, headers={'Authorization': 'Bearer invalid-caller-credential'})
@@ -357,13 +371,15 @@ if(!response.ok){console.error(response.status+': '+await response.text());proce
         for method, path, body in [('GET', rest, None), ('POST', graphql, {'query': '{ __typename }'}),
                                    ('GET', buckets, None), ('GET', vectors, None)]:
             expect(actor, method, path, 404, body)
-    expect('member', 'POST', '/api/projects/' + alpha + '/members', 403, {'user_id': ids['outsider'], 'role': 'admin'})
-    expect('admin', 'POST', '/api/projects/' + alpha + '/members', 403, {'user_id': ids['exmember'], 'role': 'member'})
-    expect('admin', 'POST', '/api/projects/' + alpha + '/members', 409, {'user_id': ids['owner'], 'role': 'member'})
-    expect('member', 'POST', '/api/projects/' + alpha + '/rotate-key', 403)
-    expect('owner', 'DELETE', '/api/projects/' + alpha, 403)
-    expect('global', 'DELETE', '/api/projects/' + alpha, 403)  # No step-up grant.
-    expect('owner', 'GET', rest, 409, headers={'X-Studio-Project-Ref': beta})
+    expect('member', 'POST', '/api/projects/' + ref_of(alpha) + '/members', 403, {'user_id': ids['outsider'], 'role': 'admin'})
+    expect('admin', 'POST', '/api/projects/' + ref_of(alpha) + '/members', 403, {'user_id': ids['exmember'], 'role': 'member'})
+    expect('admin', 'POST', '/api/projects/' + ref_of(alpha) + '/members', 409, {'user_id': ids['owner'], 'role': 'member'})
+    expect('member', 'POST', '/api/projects/' + ref_of(alpha) + '/rotate-key', 403)
+    expect('owner', 'DELETE', '/api/projects/' + ref_of(alpha), 403)
+    expect('global', 'DELETE', '/api/projects/' + ref_of(alpha), 403)  # No step-up grant.
+    # A syntactically valid but different tab reference must conflict (409),
+    # not silently fall back to the path reference.
+    expect('owner', 'GET', rest, 409, headers={'X-Studio-Project-Ref': 'z' * 20})
     expect('owner', 'POST', buckets, 200, {'id': 'p1-files', 'public': False})
     expect('owner', 'POST', vectors, 200, {'bucketName': 'p1-vectors'})
     expect('admin', 'POST', vectors + '/p1-vectors/indexes', 200,
@@ -375,7 +391,7 @@ if(!response.ok){console.error(response.status+': '+await response.text());proce
                  'vectors': [{'key': 'original', 'data': {'float32': [1, 0, 0]}}]})
     assert expect('owner', 'POST', buckets + '/p1-files/objects/list', 200, {'path': ''})[0]['name'] == 'original.json'
     private_object(alpha)
-    expect('owner', 'DELETE', '/api/projects/' + alpha + '/members/' + ids['exmember'], 200)
+    expect('owner', 'DELETE', '/api/projects/' + ref_of(alpha) + '/members/' + ids['exmember'], 200)
     for method, path, body in [('GET', rest, None), ('POST', graphql, {'query': '{ __typename }'}),
                                ('GET', buckets, None), ('GET', vectors, None)]:
         expect('exmember', method, path, 404, body)  # Same already-issued real cookie, no delay.
@@ -387,9 +403,9 @@ if(!response.ok){console.error(response.status+': '+await response.text());proce
 
     # A legitimately queued command must be reauthorized against the live
     # directory by the agent, not merely trust the API's earlier decision.
-    expect('owner', 'POST', '/api/projects/' + alpha + '/members', 200, {'user_id': ids['exmember'], 'role': 'admin'})
+    expect('owner', 'POST', '/api/projects/' + ref_of(alpha) + '/members', 200, {'user_id': ids['exmember'], 'role': 'admin'})
     run('docker', 'pause', agent)
-    denied = expect('exmember', 'POST', '/api/projects/' + alpha + '/rotate-key', 202)
+    denied = expect('exmember', 'POST', '/api/projects/' + ref_of(alpha) + '/rotate-key', 202)
     deadline = time.monotonic() + 30
     while sql("SELECT count(*) FROM host_agent_commands WHERE job_id='" + denied['job_id'] + "' AND status='queued';") != '1':
         assert time.monotonic() < deadline
@@ -411,7 +427,7 @@ if(!response.ok){console.error(response.status+': '+await response.text());proce
     callback_ca.write_bytes(trusted_ca)
     expect('owner', 'GET', rest, 200)
     run('docker', 'pause', agent)
-    denied = expect('owner', 'POST', '/api/projects/' + alpha + '/rotate-key', 202)
+    denied = expect('owner', 'POST', '/api/projects/' + ref_of(alpha) + '/rotate-key', 202)
     deadline = time.monotonic() + 30
     while sql("SELECT count(*) FROM host_agent_commands WHERE job_id='" + denied['job_id'] + "' AND status='queued';") != '1':
         assert time.monotonic() < deadline
@@ -428,31 +444,32 @@ if(!response.ok){console.error(response.status+': '+await response.text());proce
     assert projection(alpha) == initial
     print('PASS API and agent callback reject wrong CA without stale grants or physical mutation', flush=True)
 
-    job('owner', 'POST', '/api/projects/duplicate', {'original_name': alpha, 'new_name': beta, 'copy_data': True})
+    job('owner', 'POST', '/api/projects/duplicate',
+        {'original_public_ref': ref_of(alpha), 'new_name': beta, 'copy_data': True})
     projection(beta)
     external_request(beta, external['api_key'], 403)
     private_object(beta)
-    assert 'data' in expect('owner', 'POST', '/api/platform/projects/' + beta + '/api/graphql', 200, {'query': '{ __typename }'})
+    assert 'data' in expect('owner', 'POST', '/api/platform/projects/' + ref_of(beta) + '/api/graphql', 200, {'query': '{ __typename }'})
     assert sql('SELECT value FROM public.lifecycle_marker WHERE id=1;', '_supabase_' + beta) == 'original'
-    assert expect('owner', 'GET', '/api/platform/storage/' + beta + '/vector-buckets/p1-vectors/indexes', 200)['indexes'][0]['dimension'] == 3
-    expect('admin', 'GET', '/api/platform/storage/' + beta + '/buckets', 404)  # Membership isn't copied.
-    job('admin', 'POST', '/api/projects/' + alpha + '/rename', {'new_name': renamed})
+    assert expect('owner', 'GET', '/api/platform/storage/' + ref_of(beta) + '/vector-buckets/p1-vectors/indexes', 200)['indexes'][0]['dimension'] == 3
+    expect('admin', 'GET', '/api/platform/storage/' + ref_of(beta) + '/buckets', 404)  # Membership isn't copied.
+    job('admin', 'POST', '/api/projects/' + ref_of(alpha) + '/rename', {'new_name': renamed})
     assert not (server / '.functions-tenants' / (alpha + '.json')).exists()
     projection(renamed)
-    job('admin', 'POST', '/api/projects/' + renamed + '/rotate-key')
+    job('admin', 'POST', '/api/projects/' + ref_of(renamed) + '/rotate-key')
     rotated = projection(renamed)
     assert rotated['service_role_key'] != initial['service_role_key'] and rotated['jwt_secret'] == initial['jwt_secret']
-    backup = job('admin', 'POST', '/api/projects/' + renamed + '/restore-points', {'title': 'P1 verified point'})
+    backup = job('admin', 'POST', '/api/projects/' + ref_of(renamed) + '/restore-points', {'title': 'P1 verified point'})
     sql("UPDATE public.lifecycle_marker SET value='changed';", '_supabase_' + renamed)
     storage_seed(renamed, 'PUT', '/object/p1-files/original.json', {'value': 'changed'})
-    restore_path = '/api/projects/' + renamed + '/restore-points/' + backup['restore_point_id'] + '/restore'
+    restore_path = '/api/projects/' + ref_of(renamed) + '/restore-points/' + backup['restore_point_id'] + '/restore'
     expect('admin', 'POST', restore_path, 403)
     job('owner', 'POST', restore_path)
     projection(renamed)
     assert sql('SELECT value FROM public.lifecycle_marker WHERE id=1;', '_supabase_' + renamed) == 'original'
     private_object(renamed)
-    assert 'data' in expect('owner', 'POST', '/api/platform/projects/' + renamed + '/api/graphql', 200, {'query': '{ __typename }'})
-    restored_rest = '/api/platform/projects/' + renamed + '/api/rest/lifecycle_marker?select=id,value'
+    assert 'data' in expect('owner', 'POST', '/api/platform/projects/' + ref_of(renamed) + '/api/graphql', 200, {'query': '{ __typename }'})
+    restored_rest = '/api/platform/projects/' + ref_of(renamed) + '/api/rest/lifecycle_marker?select=id,value'
     assert expect('owner', 'GET', restored_rest, 200) == [{'id': 1, 'value': 'original'}]
     print('PASS API + signed agent duplicate / rename / JWT renewal / backup / restore', flush=True)
 
@@ -505,9 +522,10 @@ asyncio.run(main())'''
     run('docker', 'exec', 'projects-api', 'python', '-c', scope_check, renamed, beta, foreign_slot)
     assert sql("SELECT count(*) FROM pg_replication_slots WHERE slot_name='" + foreign_slot + "';") == '1'
     sql("SELECT pg_drop_replication_slot('" + foreign_slot + "');")
+    delete_target = ref_of(renamed)
     token = expect('global', 'POST', '/api/security/step-up', 200,
-                   {'action': 'delete_project', 'project': renamed, 'resource': renamed}, step_up=True)['step_up_token']
-    job('global', 'DELETE', '/api/projects/' + renamed, headers={'X-Step-Up-Token': token})
+                   {'action': 'delete_project', 'project': delete_target, 'resource': delete_target}, step_up=True)['step_up_token']
+    job('global', 'DELETE', '/api/projects/' + delete_target, headers={'X-Step-Up-Token': token})
     assert not (server / 'projects' / renamed).exists()
     assert not (server / '.functions-tenants' / (renamed + '.json')).exists()
     assert sql("SELECT count(*) FROM pg_database WHERE datname='_supabase_" + renamed + "';") == '0'
@@ -518,9 +536,9 @@ asyncio.run(main())'''
     assert sql("SELECT count(*) FROM pg_replication_slots WHERE database='_supabase_" + renamed + "';") == '0'
     expect('owner', 'GET', restored_rest, 404)
     projection(beta)
-    assert expect('owner', 'GET', '/api/platform/projects/' + beta + '/api/rest/lifecycle_marker?select=id,value', 200)[0]['value'] == 'original'
+    assert expect('owner', 'GET', '/api/platform/projects/' + ref_of(beta) + '/api/rest/lifecycle_marker?select=id,value', 200)[0]['value'] == 'original'
     print('PASS step-up protected full API/agent delete; surviving tenant still works', flush=True)
-    session_path = '/api/platform/projects/' + beta + '/api/rest/lifecycle_marker?select=id,value'
+    session_path = '/api/platform/projects/' + ref_of(beta) + '/api/rest/lifecycle_marker?select=id,value'
     run('docker', 'stop', redis)
     denial = request('owner', 'GET', session_path)
     assert denial['status'] == 401 and json.loads(denial['body'])['error'] == 'authentication required'

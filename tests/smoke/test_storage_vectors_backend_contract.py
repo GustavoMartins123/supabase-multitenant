@@ -71,7 +71,7 @@ class StorageVectorsBackendContractTests(unittest.TestCase):
         storage_library = STORAGE_LIBRARY.read_text(encoding="utf-8")
         generate = GENERATE_IMPL.read_text(encoding="utf-8")
         duplicate = DUPLICATE_IMPL.read_text(encoding="utf-8")
-        rename = RENAME_IMPL.read_text(encoding="utf-8")
+        rotation = (ROOT / "servidor/generateProject/rotate_project_reference.py").read_text(encoding="utf-8")
 
         self.assertIn("storage_create_s3_credentials", storage_library)
         self.assertIn('POST "/s3/$tenant_id/credentials"', storage_library)
@@ -90,74 +90,36 @@ class StorageVectorsBackendContractTests(unittest.TestCase):
         self.assertIn("vector_sync_project_wrappers", duplicate)
         self.assertNotIn("ALTER DATABASE current_database()", duplicate)
 
-        self.assertIn("vector_validate_s3_credentials", rename)
-        self.assertNotIn("vector_ensure_s3_credentials", rename)
-        self.assertIn("vector_validate_database", rename)
-        self.assertIn("vector_sync_project_wrappers", rename)
+        # Renames only rotate the public reference: the tenant UUID (and
+        # therefore every vector/S3 identity keyed by it) is verified
+        # unchanged and never rewritten by the rotation.
+        self.assertIn('updates = {"PROJECT_PUBLIC_REF": self.new_ref', rotation)
+        self.assertIn('("PROJECT_UUID", self.tenant_uuid)', rotation)
+        self.assertNotIn("vector_rekey_physical_tables", rotation)
 
     def test_rename_uses_canonical_env_and_rolls_back_dependencies_in_order(self) -> None:
         rename = RENAME_IMPL.read_text(encoding="utf-8")
+        rotation = (ROOT / "servidor/generateProject/rotate_project_reference.py").read_text(encoding="utf-8")
 
-        rollback_start = rename.index("rollback_on_error()")
-        rollback_end = rename.index("trap rollback_on_error ERR")
-        rollback = rename[rollback_start:rollback_end]
+        # The shell wrapper is a thin locked entrypoint; the runner owns the
+        # env handling, the journal and the rollback ordering.
+        self.assertIn("rotate_project_reference.py", rename)
+        self.assertIn("functions_config_lock", rename)
+        self.assertNotIn("source \"$OLD_DIR/.env\"", rename)
+        self.assertNotIn("source \"$NEW_DIR/.env\"", rename)
 
-        stop_new_pool = rollback.index(
-            'GET "/api/tenants/$NEW_NAME/terminate"'
-        )
-        delete_new_tenant = rollback.index(
-            "DELETE FROM _supavisor.users WHERE tenant_external_id = '$NEW_NAME'"
-        )
-        restore_database = rollback.index(
-            r'ALTER DATABASE \"$NEW_DB\" RENAME TO \"$OLD_DB\"'
-        )
-        restore_old_tenant = rollback.index(
-            'PUT "/api/tenants/$OLD_NAME"'
-        )
-        start_old_stack = rollback.index("compose_old up -d")
-
-        self.assertNotIn('source "$OLD_DIR/.env"', rename)
-        self.assertNotIn('source "$NEW_DIR/.env"', rename)
-        for key in {
-            "JWT_SECRET_PROJETO",
-            "PROJECT_UUID",
-            "ANON_KEY_PROJETO",
-            "SERVICE_ROLE_KEY_PROJETO",
-            "API_GATEWAY_TOKEN_PROJETO",
-            "S3_PROTOCOL_ACCESS_KEY_ID",
-            "S3_PROTOCOL_ACCESS_KEY_SECRET",
-        }:
-            self.assertIn(
-                f'read_canonical_env_value "$OLD_DIR/.env" {key}', rename
-            )
-        self.assertLess(stop_new_pool, delete_new_tenant)
-        self.assertLess(delete_new_tenant, restore_database)
-        self.assertLess(restore_database, restore_old_tenant)
-        self.assertLess(restore_old_tenant, start_old_stack)
-
-        generated_env_validated = rename.index(
-            'grep -qx "PROJECT_ID=$NEW_NAME" "$NEW_DIR/.env"'
-        )
-        start_new_stack = rename.index(
-            "compose_new up --build -d", generated_env_validated
-        )
-
-        self.assertLess(generated_env_validated, start_new_stack)
-
-        forward_start = rename.index('say "Parando stack antiga..."')
-        mark_realtime_mutation = rename.index("REALTIME_UPDATED=1", forward_start)
-        update_realtime = rename.index(
-            'PUT "/api/tenants/$PROJECT_UUID"', mark_realtime_mutation
-        )
-        mark_supavisor_mutation = rename.index(
-            "SUPAVISOR_UPDATED=1", forward_start
-        )
-        update_supavisor = rename.index(
-            'PUT "/api/tenants/$NEW_NAME"', mark_supavisor_mutation
-        )
-
-        self.assertLess(mark_realtime_mutation, update_realtime)
-        self.assertLess(mark_supavisor_mutation, update_supavisor)
+        self.assertIn("read_canonical_env_value", rotation)
+        rollback_start = rotation.index("def rollback(self) -> None:")
+        rollback = rotation[rollback_start:]
+        withdraw_functions = rollback.index('self.functions("withdraw")')
+        stop_gateway = rollback.index('self.compose("stop", "nginx", "auth")')
+        swap_ref = rollback.index("self.swap(self.new_ref, self.old_ref)")
+        publish_functions = rollback.index('self.functions("publish")')
+        self.assertLess(withdraw_functions, stop_gateway)
+        self.assertLess(stop_gateway, swap_ref)
+        self.assertLess(swap_ref, publish_functions)
+        self.assertIn("Rollback cannot prove the canonical reference", rotation)
+        self.assertIn("Rotation journal identity does not match the requested rollback", rotation)
 
     def test_public_entrypoints_delegate_to_organized_implementations(self) -> None:
         expectations = {

@@ -116,7 +116,8 @@ def inspect_sql(sql: str) -> SqlPlan:
     if statement not in STATEMENTS:
         raise SqlPolicyError("This SQL operation is not available to the assistant")
     relations, creates = set(), set()
-    row_events, validates = {}, set()
+    row_events: dict[str, int] = {}
+    validates = set()
     identity_functions = set()
     destructive = False
     writes = False

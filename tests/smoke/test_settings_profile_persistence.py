@@ -116,7 +116,7 @@ class SettingsProfilePersistenceTest(unittest.IsolatedAsyncioTestCase):
 
         patches = [
             mock.patch.object(ops, "resolve_authenticated_user", _auth),
-            mock.patch.object(ops, "get_project_row", _row),
+            mock.patch.object(ops, "get_public_project_row", _row),
             mock.patch.object(ops, "ensure_project_admin_access", _admin),
             mock.patch.object(
                 ops, "_get_project_env_path", lambda name: self.env_path
@@ -148,7 +148,7 @@ class SettingsProfilePersistenceTest(unittest.IsolatedAsyncioTestCase):
             self.addCleanup(entered.stop)
             entered.start()
         return await ops.update_project_settings(
-            "demo", UpdateSettings(settings=settings), object(), self.pool
+            "a" * 20, UpdateSettings(settings=settings), object(), self.pool
         )
 
     async def test_named_profile_change_persists_in_database(self) -> None:
@@ -163,7 +163,7 @@ class SettingsProfilePersistenceTest(unittest.IsolatedAsyncioTestCase):
         )
         updates = self.pool.profile_updates()
         self.assertEqual(len(updates), 1)
-        self.assertEqual(updates[0][1], ("large", "demo"))
+        self.assertEqual(updates[0][1], ("large", self.project_id))
         self.assertEqual(body["affected_services"], ["auth", "nginx", "rest"])
         self.assertIn("PROJECT_RESOURCE_PROFILE", body["updated_keys"])
         env = self.env_path.read_text(encoding="utf-8")
@@ -180,7 +180,7 @@ class SettingsProfilePersistenceTest(unittest.IsolatedAsyncioTestCase):
         )
         updates = self.pool.profile_updates()
         self.assertEqual(len(updates), 1)
-        self.assertEqual(updates[0][1], ("custom", "demo"))
+        self.assertEqual(updates[0][1], ("custom", self.project_id))
         self.assertEqual(body["affected_services"], ["auth", "nginx", "rest"])
         env = self.env_path.read_text(encoding="utf-8")
         self.assertIn("PROJECT_RESOURCE_PROFILE=custom", env)

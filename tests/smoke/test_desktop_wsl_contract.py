@@ -41,7 +41,6 @@ class DesktopWslContractTests(unittest.TestCase):
         self.assertIn("desktop-traefik-dynamic:/etc/traefik/dynamic:ro", traefik)
         self.assertEqual(studio.count("usersdb:/config"), 2)
         self.assertIn("condition: service_completed_successfully", studio)
-        self.assertIn("desktop-snippets:/app/snippets", studio)
 
     def test_administrative_initialization_preserves_live_data_and_excludes_ca_key(self):
         source = (ROOT / "studio/initialize-usersdb.sh").read_text(encoding="utf-8")

@@ -72,13 +72,14 @@ class FakeConn:
         raise AssertionError(f"unexpected fetchval: {query}")
 
     async def fetchrow(self, query: str, *args: object) -> dict | None:
-        if "FROM projects WHERE name" in query:
+        if "FROM projects WHERE public_ref" in query:
             return {
                 "id": self.pool.project_id,
                 "tenant_uuid": uuid.uuid4(),
                 "name": "demo",
                 "display_name": "Demo",
                 "owner_id": uuid.uuid4(),
+                "public_ref": str(args[0]),
                 "automatic_key_rotation_enabled": True,
                 "automatic_key_rotation_blocked_at": None,
                 "automatic_key_rotation_last_error": None,
@@ -186,7 +187,7 @@ class MigrationMutualExclusionTest(unittest.IsolatedAsyncioTestCase):
         pool.locks.add(f"opaque-api-key-migration:{pool.project_id}")
         with self.assertRaises(HTTPException) as ctx:
             await router.abort_opaque_api_key_migration(
-                "demo", object(), pool
+                "aaaaaaaaaaaaaaaaaaaa", object(), pool
             )
         self.assertEqual(ctx.exception.status_code, 409)
         self.assertEqual(self.aborted, [])
@@ -194,7 +195,7 @@ class MigrationMutualExclusionTest(unittest.IsolatedAsyncioTestCase):
     async def test_free_abort_runs_and_releases_the_lock(self) -> None:
         pool = FakePool()
         body = await router.abort_opaque_api_key_migration(
-            "demo", object(), pool
+            "aaaaaaaaaaaaaaaaaaaa", object(), pool
         )
         self.assertEqual(body["status"], "legacy")
         self.assertEqual(len(self.aborted), 1)
@@ -208,7 +209,7 @@ class MigrationMutualExclusionTest(unittest.IsolatedAsyncioTestCase):
         pool.locks.add(f"opaque-api-key-migration:{pool.project_id}")
         with self.assertRaises(HTTPException) as ctx:
             await router.cutover_opaque_api_key_migration(
-                "demo", object(), pool
+                "aaaaaaaaaaaaaaaaaaaa", object(), pool
             )
         self.assertEqual(ctx.exception.status_code, 409)
         self.assertEqual(self.host_calls, [])
@@ -216,7 +217,7 @@ class MigrationMutualExclusionTest(unittest.IsolatedAsyncioTestCase):
     async def test_retry_after_failure_proceeds_to_stage(self) -> None:
         pool = FakePool(dict(READY_STATE))
         body = await router.cutover_opaque_api_key_migration(
-            "demo", object(), pool
+            "aaaaaaaaaaaaaaaaaaaa", object(), pool
         )
         self.assertEqual(body["status"], "active")
         stages = [

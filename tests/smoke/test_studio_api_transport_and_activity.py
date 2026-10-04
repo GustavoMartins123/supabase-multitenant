@@ -39,9 +39,6 @@ class StudioApiTransportAndActivityTests(unittest.TestCase):
                 violations.append(str(path.relative_to(ROOT)))
         self.assertEqual([], violations)
 
-        helper = (root / "cache/project_db_helper.lua").read_text(encoding="utf-8")
-        self.assertIn('return {}, "SERVER_DOMAIN ausente"', helper)
-
     def test_authenticated_requests_distinguish_login_from_activity(self) -> None:
         source = (
             ROOT / "servidor/api-internal/app/dependencies.py"

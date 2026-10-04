@@ -58,7 +58,7 @@ class InternalNamespaceIsolationTest(unittest.TestCase):
         self.assertIn("is_internal_namespace", lua)
         self.assertIn('uri:find("^/api/projects/internal/")', lua)
         # O alvo derivado tambem passa pela checagem, nao so a URI de entrada.
-        self.assertIn("local target = resolve_target(uri)", lua)
+        self.assertIn("local target, target_err = resolve_target(uri)", lua)
         self.assertIn("if target and is_internal_namespace(", lua)
 
     def test_signer_clears_client_supplied_internal_headers_unconditionally(self):
@@ -77,7 +77,7 @@ class InternalNamespaceIsolationTest(unittest.TestCase):
             '"/api/projects/internal/users/sync"',
             '"/api/projects/internal/enc-key/{ref}"',
             '"/api/projects/internal/key-version/{ref}"',
-            '"/api/projects/internal/content-identity/{project_name}"',
+            '"/api/projects/internal/content-identity/{project_ref}"',
         ):
             with self.subTest(route=route):
                 start = internal.index(route)

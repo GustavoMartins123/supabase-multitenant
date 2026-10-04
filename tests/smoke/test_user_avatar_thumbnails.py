@@ -241,7 +241,7 @@ assert(exit_calls == 0)
     def test_user_lists_expose_picture_url(self) -> None:
         for relative in (
             "studio/nginx/lua/admin_api/users_list.lua",
-            "studio/nginx/lua/admin_api/available_users.lua",
+            "servidor/api-internal/app/routers/project_members.py",
             "studio/nginx/lua/admin_api/project_members.lua",
         ):
             source = (ROOT / relative).read_text(encoding="utf-8")
