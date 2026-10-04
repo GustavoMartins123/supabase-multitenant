@@ -83,14 +83,11 @@ for project_env in "$SERVER_DIR"/projects/*/.env; do
   project_dir="$(dirname "$project_env")"
   project_name="$(basename "$project_dir")"
   for key in PROJECT_UUID ANON_KEY_PROJETO SERVICE_ROLE_KEY_PROJETO \
-    CONFIG_TOKEN_PROJETO JWT_SECRET_PROJETO API_GATEWAY_TOKEN_PROJETO; do
+    JWT_SECRET_PROJETO API_GATEWAY_TOKEN_PROJETO; do
     [[ -n "$(env_value "$project_env" "$key")" ]] \
       || fail "$project_name: $key ausente"
   done
 
-  config_token="$(env_value "$project_env" CONFIG_TOKEN_PROJETO)"
-  [[ "$config_token" =~ ^[0-9a-f]{64}$ ]] \
-    || fail "$project_name: CONFIG_TOKEN_PROJETO fora do formato esperado"
   gateway_token="$(env_value "$project_env" API_GATEWAY_TOKEN_PROJETO)"
   [[ "$gateway_token" =~ ^[0-9a-f]{64}$ ]] \
     || fail "$project_name: API_GATEWAY_TOKEN_PROJETO fora do formato esperado"
@@ -110,16 +107,13 @@ for project_env in "$SERVER_DIR"/projects/*/.env; do
 
   nginx_config="$project_dir/nginx/nginx_${project_name}.conf"
   [[ -f "$nginx_config" ]] || fail "$project_name: configuração Nginx ausente"
-  grep -Fq '${CONFIG_TOKEN_PROJETO}' "$nginx_config" \
-    || fail "$project_name: placeholder runtime do config token ausente no Nginx"
   grep -Fq '${SERVICE_ROLE_KEY_PROJETO}' "$nginx_config" \
     || fail "$project_name: placeholder runtime da service role ausente no Nginx"
   grep -Fq '${ANON_KEY_PROJETO}' "$nginx_config" \
     || fail "$project_name: placeholder runtime da anon key ausente no Nginx"
   grep -Fq '${API_GATEWAY_TOKEN_PROJETO}' "$nginx_config" \
     || fail "$project_name: placeholder runtime do token do gateway ausente no Nginx"
-  if grep -Fq "$config_token" "$nginx_config" \
-    || grep -Fq "$service_key" "$nginx_config" \
+  if grep -Fq "$service_key" "$nginx_config" \
     || grep -Fq "$anon_key" "$nginx_config" \
     || grep -Fq "$gateway_token" "$nginx_config"; then
     fail "$project_name: chave secreta foi incorporada na configuração Nginx"

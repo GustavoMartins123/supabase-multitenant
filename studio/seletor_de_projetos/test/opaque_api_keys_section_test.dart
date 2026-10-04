@@ -51,6 +51,8 @@ void main() {
     expect(find.text('Migracao preparada; JWT legado ainda esta ativo'),
         findsOneWidget);
     expect(find.text('default-publishable · publishable'), findsOneWidget);
+    expect(find.byKey(const ValueKey('client-config-url-slot-1')), findsOneWidget);
+    expect(find.text('Copiar URL de configuracao'), findsOneWidget);
 
     await tester.tap(find.text('Ver e copiar'));
     await tester.pump();
@@ -403,6 +405,7 @@ final class _ControlledOpaqueApiKeysApi {
         'id': 'slot-1',
         'name': 'default-publishable',
         'kind': 'publishable',
+        'application_ref': 'abcdefghijklmnopqrst',
         'role': 'anon',
         'allowed_services': ['rest'],
         'automatic_rotation_enabled': true,
@@ -476,6 +479,7 @@ final class _SecretOpaqueApiKeysApi {
               'id': slotId,
               'name': 'backend-worker',
               'kind': 'secret',
+              'application_ref': null,
               'role': 'service_role',
               'allowed_services': ['rest'],
               'automatic_rotation_enabled': false,
@@ -589,6 +593,7 @@ final class _PendingOpaqueApiKeysApi {
               'id': slotId,
               'name': 'backend-worker',
               'kind': 'secret',
+              'application_ref': null,
               'role': 'service_role',
               'allowed_services': ['rest'],
               'automatic_rotation_enabled': true,

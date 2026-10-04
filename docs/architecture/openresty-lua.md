@@ -220,7 +220,7 @@ The required version is monotonic across workers. An `enc-key` response with a
 version older than the current invalidation is discarded instead of putting the
 old key back into the cache.
 
-### Credentials and config token
+### Administrative credentials and public configuration
 
 `service_role` is the tenant's administrative credential. It is generated from
 `JWT_SECRET_PROJETO`, stored encrypted in the control plane, and must never be
@@ -228,10 +228,7 @@ delivered to the browser. The gateway obtains it through the internal
 `enc-key` endpoint, decrypts it with `STUDIO_SERVICE_KEY_ENCRYPTION_KEY`, and
 injects `apikey` only after user authentication and authorization.
 
-`CONFIG_TOKEN_PROJETO` has a different scope: it is a secret shared among
-project members to query the tenant Nginx `/config`. It must not be accepted
-as `apikey`, `Authorization`, or a replacement for `service_role`.
-Anon/service-role rotation preserves this token.
+Public application discovery uses `/config/{application_ref}` on the Studio gateway. Each stable reference identifies one publishable slot, independently of the project URL. The gateway signs the internal request; Python resolves the effective key from the registry. No user session or shared configuration secret is required. Secret slots are never exposed.
 
 If PG Meta responds with `apikey administrativa ausente`, verify the
 installation without printing secrets:

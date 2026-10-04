@@ -357,7 +357,6 @@ template_to_file() {
     -e "s|{{project_id}}|$(escape_sed_replacement "$PROJECT_ID")|g" \
     -e "s|{{project_uuid}}|$(escape_sed_replacement "$PROJECT_UUID")|g" \
     -e "s|{{project_public_ref}}|$PROJECT_PUBLIC_REF|g" \
-    -e "s|{{config_token}}|$(escape_sed_replacement "$CONFIG_TOKEN_PROJETO")|g" \
     -e "s|{{jwt_secret}}|$(escape_sed_replacement "$JWT_SECRET_PROJETO")|g" \
     -e "s|{{api_gateway_token}}|$(escape_sed_replacement "$API_GATEWAY_TOKEN_PROJETO")|g" \
     -e "s|{{server_url}}|$(escape_sed_replacement "$SERVER_URL")|g" \
@@ -420,7 +419,6 @@ exp=$((now_epoch + (3 * 30 * 24 * 3600)))
 ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now_epoch,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
 SERVICE_TOKEN=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now_epoch,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
 GLOBAL_ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now_epoch,\"exp\":$exp}" "$JWT_SECRET")
-CONFIG_TOKEN_PROJETO=$(openssl rand -hex 32 | tr -d '\n\r')
 
 FILE_SIZE_LIMIT="$(read_canonical_env_value "$SCRIPT_DIR/.envtemplate" FILE_SIZE_LIMIT)"
 ENABLE_IMAGE_TRANSFORMATION="$(read_canonical_env_value "$SCRIPT_DIR/.envtemplate" ENABLE_IMAGE_TRANSFORMATION)"

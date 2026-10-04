@@ -189,7 +189,7 @@ A versão requerida é monotônica entre workers. Uma resposta `enc-key` com
 versão anterior à invalidação corrente é descartada, em vez de recolocar a
 chave antiga no cache.
 
-### Credenciais e config token
+### Credenciais administrativas e configuração pública
 
 `service_role` é a credencial administrativa do tenant. Ela é gerada a partir
 de `JWT_SECRET_PROJETO`, armazenada criptografada no control plane e nunca deve
@@ -197,10 +197,7 @@ ser entregue ao navegador. O gateway a obtém pelo endpoint interno `enc-key`,
 descriptografa com `STUDIO_SERVICE_KEY_ENCRYPTION_KEY` e injeta `apikey` apenas
 depois da autenticação e da autorização do usuário.
 
-`CONFIG_TOKEN_PROJETO` tem outro escopo: é um segredo compartilhado entre os
-membros do projeto para consultar o `/config` do Nginx do tenant. Ele não pode
-ser aceito como `apikey`, `Authorization` ou substituto da `service_role`.
-Rotação de anon/service role preserva esse token.
+A descoberta pública do aplicativo usa `/config/{application_ref}` no gateway do Studio. Cada referência estável identifica um slot publishable, independentemente da URL do projeto. O gateway assina a chamada interna; Python consulta a chave vigente no registro canônico. Não exige sessão de usuário nem segredo compartilhado de configuração. Slots secret não são expostos.
 
 Se PG Meta responder `apikey administrativa ausente`, valide a instalação sem
 imprimir segredos:

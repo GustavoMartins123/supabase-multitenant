@@ -73,7 +73,6 @@ def _build_replacements(root: Path, project_dir: Path, project: str) -> dict[str
     required_project_keys = (
         "ANON_KEY_PROJETO",
         "SERVICE_ROLE_KEY_PROJETO",
-        "CONFIG_TOKEN_PROJETO",
         "JWT_SECRET_PROJETO",
         "API_GATEWAY_TOKEN_PROJETO",
         "PROJECT_UUID",
@@ -100,8 +99,6 @@ def _build_replacements(root: Path, project_dir: Path, project: str) -> dict[str
         project_env["PROJECT_UUID"],
     ):
         raise RuntimeError("PROJECT_UUID invalido no .env do projeto")
-    if not re.fullmatch(r"[a-f0-9]{64}", project_env["CONFIG_TOKEN_PROJETO"]):
-        raise RuntimeError("CONFIG_TOKEN_PROJETO invalido no .env do projeto")
     if not re.fullmatch(
         r"[a-f0-9]{64}", project_env["API_GATEWAY_TOKEN_PROJETO"]
     ):
@@ -128,7 +125,6 @@ def _build_replacements(root: Path, project_dir: Path, project: str) -> dict[str
         "project_id": project,
         "project_uuid": project_env["PROJECT_UUID"],
         "project_public_ref": public_ref,
-        "config_token": project_env["CONFIG_TOKEN_PROJETO"],
         "jwt_secret": project_env["JWT_SECRET_PROJETO"],
         "api_gateway_token": project_env["API_GATEWAY_TOKEN_PROJETO"],
         "server_url": server_url,

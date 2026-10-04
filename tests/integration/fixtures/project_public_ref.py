@@ -70,6 +70,12 @@ async def main() -> None:
                 project_id, user_id,
             )
         unnamed_id = identities[1][0]
+        for kind in ('publishable', 'secret'):
+            for project_id, _, _ in identities:
+                await conn.execute('''INSERT INTO project_api_key_slots
+                    (id,project_id,name,kind,allowed_services,created_by,automatic_rotation_enabled,rotation_interval_days)
+                    VALUES($1,$2,$3,$3,ARRAY['rest'],$4,false,NULL)''',
+                    uuid.uuid4(), project_id, kind, user_id)
         await conn.execute("UPDATE projects SET display_name=NULL WHERE id=$1", unnamed_id)
         before = await conn.fetch("SELECT * FROM projects ORDER BY id")
         collision_migration = replace(
@@ -95,6 +101,7 @@ async def main() -> None:
         after = await conn.fetch("SELECT * FROM projects ORDER BY id")
         for original, migrated in zip(before, after):
             expected = dict(original)
+            expected.pop("config_token")
             if original["id"] == unnamed_id:
                 expected["display_name"] = original["name"]
             assert expected == {k: v for k, v in migrated.items() if k != "public_ref"}
@@ -102,6 +109,11 @@ async def main() -> None:
             assert migrated["public_ref"].isascii() and migrated["public_ref"].islower()
             assert (await resolve_public_project(conn, migrated["public_ref"]))["id"] == migrated["id"]
         assert len({r["public_ref"] for r in after}) == len(after)
+        refs = await conn.fetch('SELECT kind, application_ref FROM project_api_key_slots')
+        publishable_refs = [row['application_ref'] for row in refs if row['kind'] == 'publishable']
+        assert len(set(publishable_refs)) == 2
+        assert all(len(value) == 20 and value.isascii() and value.islower() for value in publishable_refs)
+        assert all(row['application_ref'] is None for row in refs if row['kind'] == 'secret')
         assert await conn.fetchval("SELECT count(*) FROM project_members") == 2
         assert await apply_migrations(conn) == []
         assert after == await conn.fetch("SELECT * FROM projects ORDER BY id")

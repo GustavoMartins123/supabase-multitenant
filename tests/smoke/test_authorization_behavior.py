@@ -581,7 +581,7 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json()["project"], "abcdefghijklmnopqrst")
         response = await self.request("GET", path + "/queue-status", actor=self.ex_member)
         self.assertEqual(response.status_code, 200, response.text)
-        for suffix in ("queue-status", "config-token", "rename-history"):
+        for suffix in ("queue-status", "rename-history"):
             response = await self.request("GET", f"/api/projects/projeto_a/{suffix}", actor=self.owner)
             self.assertEqual(response.status_code, 400, response.text)
 

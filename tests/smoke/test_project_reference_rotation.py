@@ -47,7 +47,7 @@ class RotationTest(unittest.TestCase):
         )
         self.env = (
             f"PROJECT_ID={NAME}\nPROJECT_UUID={TENANT}\nPROJECT_PUBLIC_REF={OLD}\n"
-            f"CONFIG_TOKEN_PROJETO={'a' * 64}\nAPI_GATEWAY_TOKEN_PROJETO={'b' * 64}\n"
+            f"API_GATEWAY_TOKEN_PROJETO={'b' * 64}\n"
             f"JWT_SECRET_PROJETO={'c' * 43}\nANON_KEY_PROJETO=header.payload.sig\nSERVICE_ROLE_KEY_PROJETO=header.payload.sig\n"
             f"API_EXTERNAL_URL=https://api.example.test/{OLD}/auth/v1\n"
             f"SITE_URL=https://api.example.test/{OLD}/verify-success.html\n"

@@ -2,11 +2,36 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:seletor_de_projetos/models/opaque_api_key.dart';
 
 void main() {
+  Map<String, dynamic> slotJson() => {
+    'id': '11111111-1111-4111-8111-111111111111', 'name': 'web_client',
+    'kind': 'publishable', 'role': 'anon', 'application_ref': 'abcdefghijklmnopqrst',
+    'allowed_services': ['rest'], 'automatic_rotation_enabled': false,
+    'rotation_interval_days': null, 'status': 'active',
+    'created_at': '2026-08-12T12:00:00Z', 'keys': [],
+  };
+
+  test('publishable configuration reference is explicit and canonical', () {
+    expect(OpaqueApiKeySlot.fromJson(slotJson()).applicationRef, 'abcdefghijklmnopqrst');
+    for (final value in [null, '', 'a' * 19, 'a' * 20 + '\n', 'A' * 20, 123]) {
+      expect(() => OpaqueApiKeySlot.fromJson({...slotJson(), 'application_ref': value}),
+          throwsFormatException);
+    }
+    expect(() => OpaqueApiKeySlot.fromJson(slotJson()..remove('application_ref')),
+        throwsFormatException);
+  });
+
+  test('secret slot cannot expose an application configuration reference', () {
+    final secret = {...slotJson(), 'kind': 'secret', 'role': 'service_role'};
+    expect(() => OpaqueApiKeySlot.fromJson(secret), throwsFormatException);
+    expect(OpaqueApiKeySlot.fromJson({...secret, 'application_ref': null}).applicationRef,
+        isNull);
+  });
   test('serializa slot e chave sem expiração temporal', () {
     final slot = OpaqueApiKeySlot.fromJson({
       'id': '11111111-1111-4111-8111-111111111111',
       'name': 'web-production',
       'kind': 'publishable',
+      'application_ref': 'abcdefghijklmnopqrst',
       'role': 'anon',
       'allowed_services': ['auth', 'rest'],
       'automatic_rotation_enabled': false,

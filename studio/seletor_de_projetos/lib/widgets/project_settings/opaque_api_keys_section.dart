@@ -751,6 +751,28 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
                   style: const TextStyle(color: SupabaseColors.brand)),
             ],
           ),
+          if (slot.applicationRef != null) ...[
+            const SizedBox(height: 8),
+            const Text('CONFIGURACAO DO APLICATIVO', style: _titleStyle),
+            SelectableText(Uri.base.resolve('/config/${slot.applicationRef}').toString(),
+                key: ValueKey('client-config-url-${slot.id}'),
+                style: const TextStyle(fontSize: 11, fontFamily: 'monospace')),
+            const SizedBox(height: 6),
+            const Text('Endereco publico e estavel. Retorna somente a chave publishable vigente; '
+                'nao autentica usuarios nem substitui RLS.',
+                style: TextStyle(color: SupabaseColors.textMuted, fontSize: 11)),
+            const SizedBox(height: 6),
+            SecondaryButton(label: 'Copiar URL de configuracao', icon: Icons.copy_rounded,
+                onPressed: () async {
+                  try {
+                    await Clipboard.setData(ClipboardData(
+                        text: Uri.base.resolve('/config/${slot.applicationRef}').toString()));
+                    _snack('URL copiada.', SupabaseColors.success);
+                  } catch (error) {
+                    _showError(error);
+                  }
+                }),
+          ],
           if (busy) ...[
             const SizedBox(height: 8),
             LinearProgressIndicator(

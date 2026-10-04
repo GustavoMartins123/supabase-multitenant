@@ -17,15 +17,6 @@ void main() {
   // final instance = ProjectRenameApi();
 
   group('tests for ProjectRenameApi', () {
-    // Get Project Config Token
-    //
-    // Entrega o token compartilhado aos membros do projeto e registra a leitura.
-    //
-    //Future<ProjectConfigTokenResponse> getProjectConfigTokenApiProjectsProjectNameConfigTokenGet(String projectName) async
-    test('test getProjectConfigTokenApiProjectsProjectNameConfigTokenGet', () async {
-      // TODO
-    });
-
     // Get Project Queue Status
     //
     // Retorna o estado atual da fila de ações do projeto.  Inclui o job em execução (se houver), o tamanho da fila, e os jobs pendentes/rodando do banco para fins de UI (polling).

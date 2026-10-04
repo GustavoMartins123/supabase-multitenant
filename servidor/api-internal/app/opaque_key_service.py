@@ -15,6 +15,7 @@ from app.opaque_keys import (
     ALLOWED_SERVICES,
     GeneratedOpaqueKey,
     OpaqueKeyKind,
+    generate_application_ref,
     generate_opaque_key,
     normalize_slot_name,
     validate_allowed_services,
@@ -253,9 +254,9 @@ async def create_slot_with_active_key(
         """
         INSERT INTO project_api_key_slots(
             id, project_id, name, kind, allowed_services,
-            automatic_rotation_enabled, rotation_interval_days, created_by
+            automatic_rotation_enabled, rotation_interval_days, created_by, application_ref
         )
-        VALUES($1, $2, $3, $4, $5::text[], $6, $7, $8)
+        VALUES($1, $2, $3, $4, $5::text[], $6, $7, $8, $9)
         """,
         slot_id,
         project_id,
@@ -265,6 +266,7 @@ async def create_slot_with_active_key(
         auto_rotation,
         interval,
         created_by,
+        generate_application_ref() if kind == 'publishable' else None,
     )
     now = await _database_now(conn)
     issued = await _insert_key(
@@ -411,9 +413,9 @@ async def prepare_project_opaque_key_migration(
             """
             INSERT INTO project_api_key_slots(
                 id, project_id, name, kind, allowed_services,
-                automatic_rotation_enabled, rotation_interval_days, created_by
+                automatic_rotation_enabled, rotation_interval_days, created_by, application_ref
             )
-            VALUES($1, $2, $3, $4, $5::text[], $6, $7, $8)
+            VALUES($1, $2, $3, $4, $5::text[], $6, $7, $8, $9)
             """,
             slot_id,
             project_id,
@@ -423,6 +425,7 @@ async def prepare_project_opaque_key_migration(
             bool(project["automatic_key_rotation_enabled"]),
             DEFAULT_ROTATION_INTERVAL_DAYS,
             created_by,
+            generate_application_ref() if kind == 'publishable' else None,
         )
         issued_key = await _insert_key(
             conn,
@@ -1322,6 +1325,7 @@ async def list_slots(
             s.id AS slot_id,
             s.name,
             s.kind,
+            s.application_ref,
             s.allowed_services,
             s.automatic_rotation_enabled,
             s.rotation_interval_days,
@@ -1376,6 +1380,7 @@ async def list_slots(
                 "id": str(slot_id),
                 "name": row["name"],
                 "kind": row["kind"],
+                "application_ref": row["application_ref"],
                 "role": "anon" if row["kind"] == "publishable" else "service_role",
                 "allowed_services": list(row["allowed_services"]),
                 "automatic_rotation_enabled": row["automatic_rotation_enabled"],

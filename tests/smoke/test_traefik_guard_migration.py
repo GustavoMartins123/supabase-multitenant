@@ -96,6 +96,10 @@ class FileProviderRendererTests(unittest.TestCase):
         self.assertIn("PathPrefix(`/api/jobs`)", result)
         self.assertIn("PathPrefix(`/api/admin`)", result)
         self.assertIn("PathPrefix(`/api/internal/analytics`)", result)
+        self.assertIn("PathPrefix(`/config/`)", result)
+        api_router = result.split("    projects-api:", 1)[1].split("    project-meu_projeto:", 1)[0]
+        self.assertIn("projects-api-allowlist", api_router)
+        self.assertIn("api-security-chain", api_router)
         self.assertNotIn("X-Shared-Token", result)
 
 

@@ -150,6 +150,42 @@ Also verify login, an RLS-protected REST query, GraphQL, a Realtime connection,
 a Storage operation, and a Function. A legacy JWT used as `apikey` must
 receive 403.
 
+## Client configuration discovery
+
+The publishable slot card exposes its public configuration URL:
+`https://STUDIO_HOST/config/APPLICATION_REF`. Store that stable URL in the
+consuming application, rather than a shared configuration credential.
+
+Fetch it without cookies before creating the Supabase client. The JSON contract
+has exactly `supabase_url`, `publishable_key`, `key_id`, and `expires_at` (which
+may be null). Revalidate when the application returns to the foreground;
+long-running clients need a bounded revalidation interval. When `key_id`
+changes, recreate the client and reconnect Realtime. Do not automatically replay
+writes or reuse a stored key when canonical discovery fails.
+
+Discovery does not reveal future/unconfirmed versions or confirm their
+installation. Scheduled rotation still requires its explicit administrative
+confirmation. A disabled or expired slot returns 410; an unknown reference
+returns 404; unverifiable configuration returns 503. No default slot is selected.
+
+The reference remains stable across key rotation and project rename. A project
+URL regeneration changes `supabase_url` in the response, not discovery's URL.
+Secret slots have no discovery address and remain backend-only credentials.
+Publishable discovery is not application authentication: anyone who knows its
+address can retrieve the current key. Use user sessions, RLS and service policies
+for authorization, not the secrecy of this address.
+
+For an installed control plane, stop Projects API, host-agent and project
+gateways, then apply the schema migration during a maintenance window and run
+`python3 tools/migrate_client_configuration.py SERVER_ROOT --backup-dir PRIVATE_BACKUP --apply`.
+The tool validates persisted identities, backs up generated files, removes the
+obsolete environment credential and regenerates the gateway projection. Rebuild
+the project gateway images before restarting them. It does not change other
+credentials, project UUIDs or public references. Historical migration checksums
+are preserved; new installations apply the same migration sequence through setup.
+Recreate the Traefik configuration watcher to load the canonical configuration
+route through the same API IP allowlist and security chain.
+
 ## Create additional slots
 
 Choose names tied to the consumer, for example:

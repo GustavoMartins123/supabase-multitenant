@@ -104,6 +104,25 @@ O `key-authorizer` autentica cada Nginx por um token exclusivo cujo hash fica em
 
 As rotas ficam sob `/api/projects/{project_ref}/api-key-*` e `/opaque-api-keys/migration`. Membros recebem somente metadados/reveals `publishable`; mutações continuam limitadas a admin do projeto ou admin global. Plaintext de `secret` acrescenta step-up, e todas as operações revalidam o estado persistido, usam transações e nunca listam plaintext. Veja [o runbook](../12-chaves-api-opacas.md).
 
+### Configuração pública por aplicativo
+
+Cada slot publishable possui uma `application_ref` opaca e estável; slots secret
+não possuem referência. O gateway expõe `GET /config/{application_ref}` sem sessão
+de usuário e assina sua chamada à API Python com o HMAC interno existente.
+O contrato contém somente `supabase_url`, `publishable_key`, `key_id` e
+`expires_at`, obrigatório e anulável.
+
+A API lê um snapshot transacional do registro, aplica o mesmo corte efetivo do
+key-authorizer e verifica o material criptografado. Não publica versões futuras
+ou sem confirmação. Revogação, expiração, identidade divergente, SQL indisponível
+ou material ausente resultam em erro explícito, sem slot padrão ou chave antiga.
+
+Renomear o projeto não altera a descoberta. Regenerar sua referência pública
+altera a URL devolvida, não o endereço de configuração do aplicativo.
+As respostas usam `no-store`; o gateway limita requisições e permite leitura
+cross-origin sem cookies. A referência é pública e não autentica o consumidor:
+sessões, RLS e políticas dos serviços continuam responsáveis pela autorização.
+
 ### Jobs
 
 A tabela `jobs` persiste:
@@ -168,7 +187,7 @@ O recovery não deve presumir que repetir qualquer script é seguro.
 
 ### Persistência
 
-`anon_key`, `service_role` e `config_token` são armazenados com envelope encryption.
+`anon_key` e `service_role` são armazenados com envelope encryption.
 
 Cada projeto possui um DEK. O DEK é envelopado pela `PROJECT_SECRETS_MASTER_KEY`. Os segredos usam AES-256-GCM com AAD contendo o projeto e a finalidade do valor.
 

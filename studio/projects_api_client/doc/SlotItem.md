@@ -9,6 +9,7 @@ import 'package:projects_api_client/api.dart';
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **allowedServices** | **List<String>** |  | [default to const []]
+**applicationRef** | **String** |  |
 **automaticRotationBlockedAt** | **String** |  |
 **automaticRotationEnabled** | **bool** |  |
 **automaticRotationLastError** | **String** |  |

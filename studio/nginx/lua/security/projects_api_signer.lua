@@ -20,6 +20,10 @@ local function is_internal_namespace(uri)
 end
 
 local function resolve_target(uri)
+    local application_ref = uri:match('^/config/([a-z]+)$')
+    if application_ref and #application_ref == 20 then
+        return uri
+    end
     if uri == "/api/projects" or uri:find("^/api/projects/") then
         return append_query(uri)
     end

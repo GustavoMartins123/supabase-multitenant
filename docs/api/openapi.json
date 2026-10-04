@@ -348,6 +348,42 @@
         "title": "AvailableProjectUser",
         "type": "object"
       },
+      "ClientConfigurationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "key_id": {
+            "title": "Key Id",
+            "type": "string"
+          },
+          "publishable_key": {
+            "title": "Publishable Key",
+            "type": "string"
+          },
+          "supabase_url": {
+            "title": "Supabase Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "supabase_url",
+          "publishable_key",
+          "key_id",
+          "expires_at"
+        ],
+        "title": "ClientConfigurationResponse",
+        "type": "object"
+      },
       "CollaborationHintItem": {
         "additionalProperties": true,
         "properties": {
@@ -2536,25 +2572,6 @@
           "schema"
         ],
         "title": "ProjectAIFunctionItem",
-        "type": "object"
-      },
-      "ProjectConfigTokenResponse": {
-        "additionalProperties": true,
-        "properties": {
-          "config_token": {
-            "title": "Config Token",
-            "type": "string"
-          },
-          "project": {
-            "title": "Project",
-            "type": "string"
-          }
-        },
-        "required": [
-          "project",
-          "config_token"
-        ],
-        "title": "ProjectConfigTokenResponse",
         "type": "object"
       },
       "ProjectDisplayNameUpdate": {
@@ -5161,6 +5178,17 @@
             "title": "Allowed Services",
             "type": "array"
           },
+          "application_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Ref"
+          },
           "automatic_rotation_blocked_at": {
             "anyOf": [
               {
@@ -5234,6 +5262,7 @@
           "id",
           "name",
           "kind",
+          "application_ref",
           "role",
           "allowed_services",
           "automatic_rotation_enabled",
@@ -8298,49 +8327,6 @@
         ]
       }
     },
-    "/api/projects/{project_ref}/config-token": {
-      "get": {
-        "description": "Entrega o token compartilhado aos membros do projeto e registra a leitura.",
-        "operationId": "get_project_config_token_api_projects__project_ref__config_token_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "project_ref",
-            "required": true,
-            "schema": {
-              "title": "Project Ref",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectConfigTokenResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Project Config Token",
-        "tags": [
-          "project-rename"
-        ]
-      }
-    },
     "/api/projects/{project_ref}/display-name": {
       "patch": {
         "description": "Atualiza apenas o display_name do projeto (sem migrar infraestrutura).",
@@ -10573,6 +10559,48 @@
         "summary": "Proxy Project Meta",
         "tags": [
           "project-insights"
+        ]
+      }
+    },
+    "/config/{application_ref}": {
+      "get": {
+        "operationId": "get_client_configuration_config__application_ref__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_ref",
+            "required": true,
+            "schema": {
+              "title": "Application Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientConfigurationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Client Configuration",
+        "tags": [
+          "client-configuration"
         ]
       }
     }

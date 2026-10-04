@@ -171,7 +171,8 @@ def render(
         "    projects-api:",
         "      rule: " + yaml_quote(
             "PathPrefix(`/api/projects`) || PathPrefix(`/api/jobs`) || "
-            "PathPrefix(`/api/admin`) || PathPrefix(`/api/internal/analytics`)"
+            "PathPrefix(`/api/admin`) || PathPrefix(`/api/internal/analytics`) || "
+            "PathPrefix(`/config/`)"
         ),
         "      entryPoints:",
     ]

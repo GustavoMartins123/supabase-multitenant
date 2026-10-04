@@ -88,6 +88,7 @@ final class _OpaqueApiKeysApi {
         'id': 'slot-1',
         'name': 'default-publishable',
         'kind': 'publishable',
+        'application_ref': 'abcdefghijklmnopqrst',
         'role': 'anon',
         'allowed_services': ['rest'],
         'automatic_rotation_enabled': true,

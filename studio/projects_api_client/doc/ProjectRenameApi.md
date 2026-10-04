@@ -9,55 +9,11 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
-[**getProjectConfigTokenApiProjectsProjectRefConfigTokenGet**](ProjectRenameApi.md#getprojectconfigtokenapiprojectsprojectrefconfigtokenget) | **GET** /api/projects/{project_ref}/config-token | Get Project Config Token
 [**getProjectQueueStatusApiProjectsProjectRefQueueStatusGet**](ProjectRenameApi.md#getprojectqueuestatusapiprojectsprojectrefqueuestatusget) | **GET** /api/projects/{project_ref}/queue-status | Get Project Queue Status
 [**getProjectRenameHistoryApiProjectsProjectRefRenameHistoryGet**](ProjectRenameApi.md#getprojectrenamehistoryapiprojectsprojectrefrenamehistoryget) | **GET** /api/projects/{project_ref}/rename-history | Get Project Rename History
 [**renameProjectApiProjectsProjectRefRenamePost**](ProjectRenameApi.md#renameprojectapiprojectsprojectrefrenamepost) | **POST** /api/projects/{project_ref}/rename | Rename Project
 [**updateProjectDisplayNameApiProjectsProjectRefDisplayNamePatch**](ProjectRenameApi.md#updateprojectdisplaynameapiprojectsprojectrefdisplaynamepatch) | **PATCH** /api/projects/{project_ref}/display-name | Update Project Display Name
 
-
-# **getProjectConfigTokenApiProjectsProjectRefConfigTokenGet**
-> ProjectConfigTokenResponse getProjectConfigTokenApiProjectsProjectRefConfigTokenGet(projectRef)
-
-Get Project Config Token
-
-Entrega o token compartilhado aos membros do projeto e registra a leitura.
-
-### Example
-```dart
-import 'package:projects_api_client/api.dart';
-
-final api_instance = ProjectRenameApi();
-final projectRef = projectRef_example; // String |
-
-try {
-    final result = api_instance.getProjectConfigTokenApiProjectsProjectRefConfigTokenGet(projectRef);
-    print(result);
-} catch (e) {
-    print('Exception when calling ProjectRenameApi->getProjectConfigTokenApiProjectsProjectRefConfigTokenGet: $e\n');
-}
-```
-
-### Parameters
-
-Name | Type | Description  | Notes
-------------- | ------------- | ------------- | -------------
- **projectRef** | **String**|  |
-
-### Return type
-
-[**ProjectConfigTokenResponse**](ProjectConfigTokenResponse.md)
-
-### Authorization
-
-No authorization required
-
-### HTTP request headers
-
- - **Content-Type**: Not defined
- - **Accept**: application/json
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **getProjectQueueStatusApiProjectsProjectRefQueueStatusGet**
 > ProjectQueueStatusResponse getProjectQueueStatusApiProjectsProjectRefQueueStatusGet(projectRef)

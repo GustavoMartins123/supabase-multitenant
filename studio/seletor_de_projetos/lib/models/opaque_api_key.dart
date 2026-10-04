@@ -54,6 +54,7 @@ class OpaqueApiKeySlot {
     required this.name,
     required this.kind,
     required this.role,
+    required this.applicationRef,
     required this.allowedServices,
     required this.automaticRotationEnabled,
     required this.rotationIntervalDays,
@@ -68,6 +69,7 @@ class OpaqueApiKeySlot {
   final String name;
   final String kind;
   final String role;
+  final String? applicationRef;
   final List<String> allowedServices;
   final bool automaticRotationEnabled;
   final int? rotationIntervalDays;
@@ -78,6 +80,15 @@ class OpaqueApiKeySlot {
   final List<OpaqueApiKeyVersion> keys;
 
   factory OpaqueApiKeySlot.fromJson(Map<String, dynamic> json) {
+    final applicationRef = json['application_ref'];
+    if (!json.containsKey('application_ref') ||
+        (json['kind'] != 'publishable' && json['kind'] != 'secret') ||
+        (json['kind'] == 'publishable' &&
+            (applicationRef is! String || applicationRef.length != 20 ||
+                !RegExp(r'^[a-z]{20}$').hasMatch(applicationRef))) ||
+        (json['kind'] == 'secret' && applicationRef != null)) {
+      throw const FormatException('Referencia de configuracao do aplicativo invalida');
+    }
     final rawServices = json['allowed_services'];
     final rawKeys = json['keys'];
     if (rawServices is! List || rawKeys is! List) {
@@ -88,6 +99,7 @@ class OpaqueApiKeySlot {
       name: _requiredString(json, 'name'),
       kind: _requiredString(json, 'kind'),
       role: _requiredString(json, 'role'),
+      applicationRef: applicationRef as String?,
       allowedServices: rawServices.map((item) => item.toString()).toList(),
       automaticRotationEnabled:
           _requiredBool(json, 'automatic_rotation_enabled'),

@@ -25,6 +25,7 @@ STUDIO_CONTRACT_TESTS = (
     "test_project_reference_rotation", "test_rename_destination_guard", "test_host_agent_contract",
 )
 ISOLATED_CONTRACT_TESTS = (
+    "test_client_configuration",
     "test_resource_profile_contract", "test_key_generation_contract",
     "test_project_resource_limits_contract", "test_reserved_route_names_contract",
     "test_functions_projection_contract", "test_shared_storage_architecture_contract",
@@ -95,10 +96,10 @@ def validate_routing(executor_image: str, nginx_image: str, traefik_image: str) 
             *base, "--network-alias", "supabase-nginx-technical_project",
             "-e", "FILE_SIZE_LIMIT=52428800", "-e", "SUPABASE_NETWORK_SUBNET=127.0.0.0/8",
             "-e", "ANON_KEY_PROJETO=header.payload.sig", "-e", "SERVICE_ROLE_KEY_PROJETO=header.payload.sig",
-            "-e", "CONFIG_TOKEN_PROJETO=" + "a" * 64, "-e", "API_GATEWAY_TOKEN_PROJETO=" + "b" * 64,
+            "-e", "API_GATEWAY_TOKEN_PROJETO=" + "b" * 64,
             "--entrypoint", "/bin/sh", nginx_image, "-c",
             "envsubst '$FILE_SIZE_LIMIT $SUPABASE_NETWORK_SUBNET $ANON_KEY_PROJETO $SERVICE_ROLE_KEY_PROJETO "
-            "$CONFIG_TOKEN_PROJETO $API_GATEWAY_TOKEN_PROJETO' < /test/projects/technical_project/nginx/"
+            "$API_GATEWAY_TOKEN_PROJETO' < /test/projects/technical_project/nginx/"
             "nginx_technical_project.conf > /tmp/nginx.conf && exec nginx -g 'daemon off;' -c /tmp/nginx.conf",
         ))
         containers.append(docker(
@@ -201,6 +202,11 @@ def execute(executor_image: str, postgres_image: str) -> None:
             *common, "-e", f"DB_DSN=postgresql://postgres:{password}@db:5432/postgres",
             "--entrypoint", "python", executor_image,
             "tests/integration/fixtures/job_watch.py",
+        ))
+        print(docker(
+            *common, "-e", f"DB_DSN=postgresql://postgres:{password}@db:5432/postgres",
+            "--entrypoint", "python", executor_image,
+            "tests/integration/fixtures/client_configuration.py",
         ))
         print(docker(
             *common, "-e", f"CONTROL_PLANE_TEST_DSN=postgresql://postgres:{password}@db:5432/postgres",

@@ -80,7 +80,7 @@ WHERE name = '<project_ref>';
 "
 ```
 
-Do not write `anon_key`, `service_role`, or `config_token` manually. Persisted values use envelope encryption and must be saved through the API flow.
+Do not write `anon_key` or `service_role` manually. Persisted values use envelope encryption and must be saved through the API flow.
 
 ## 3. Job remains `queued` or `running`
 

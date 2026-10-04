@@ -28,6 +28,13 @@ ROLE_BY_KIND: dict[OpaqueKeyKind, str] = {
 ALLOWED_SERVICES = frozenset(
     {"auth", "rest", "graphql", "realtime", "storage", "functions"}
 )
+APPLICATION_REF_PATTERN = re.compile(r'[a-z]{20}\Z', re.ASCII)
+
+
+def generate_application_ref() -> str:
+    return ''.join(secrets.choice('abcdefghijklmnopqrstuvwxyz') for _ in range(20))
+
+
 TOKEN_RE = re.compile(
     rf"^(?P<prefix>sb_publishable_|sb_secret_)"
     rf"(?P<random>[A-Za-z0-9_-]{{{RANDOM_TEXT_LENGTH}}})_"

@@ -349,7 +349,7 @@ class HostAgentRoleContractTest(unittest.TestCase):
             agent_db,
             "referencia de linha inteira exige SELECT na tabela toda",
         )
-        for secret in ("anon_key", "service_role", "config_token"):
+        for secret in ("anon_key", "service_role"):
             self.assertNotIn(secret, granted["projects"])
 
     def test_migrations_require_and_provision_the_role(self) -> None:

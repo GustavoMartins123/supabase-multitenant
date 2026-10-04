@@ -101,28 +101,17 @@ class KeyGenerationContractTest(unittest.TestCase):
         ]
         self.assertEqual(sorted(missing), [])
 
-    def test_config_token_is_shared_but_not_used_as_admin_apikey(self):
-        rename = (ROOT / "servidor" / "api-internal" / "app" / "routers" / "project_rename.py").read_text(
-            encoding="utf-8"
-        )
-        insights = (ROOT / "servidor" / "api-internal" / "app" / "routers" / "project_insights.py").read_text(
-            encoding="utf-8"
-        )
-        config_endpoint = rename[
-            rename.index("async def get_project_config_token") : rename.index(
-                "async def get_project_queue_status"
-            )
-        ]
-        meta_proxy = insights[insights.index("async def proxy_project_meta") :]
-        self.assertIn("ensure_project_member_access", config_endpoint)
-        self.assertIn('column="service_role"', meta_proxy)
-        self.assertNotIn('column="config_token"', meta_proxy)
+    def test_config_token_is_removed_from_generation_and_runtime(self):
+        for path in (GENERATE / ".envtemplate", GENERATE / "nginxtemplate",
+                     GENERATE / "dockercomposetemplate", GENERATE / "rotate_key.sh"):
+            self.assertNotIn("CONFIG_TOKEN", path.read_text(encoding="utf-8"))
+        rename = (ROOT / "servidor/api-internal/app/routers/project_rename.py").read_text(encoding="utf-8")
+        self.assertNotIn("config-token", rename)
 
-    def test_rotation_preserves_config_token(self):
+    def test_rotation_preserves_only_canonical_internal_credentials(self):
         rotation = (GENERATE / "rotate_key.sh").read_text(encoding="utf-8")
-        self.assertIn('get_env_value "CONFIG_TOKEN_PROJETO"', rotation)
         self.assertIn('get_env_value "API_GATEWAY_TOKEN_PROJETO"', rotation)
-        self.assertNotRegex(rotation, r"CONFIG_TOKEN(_PROJETO)?=.*openssl rand")
+        self.assertNotIn("CONFIG_TOKEN_PROJETO", rotation)
 
     def test_rotation_fails_closed_and_never_prints_generated_keys(self):
         rotation = (GENERATE / "rotate_key.sh").read_text(encoding="utf-8")
@@ -180,7 +169,7 @@ class KeyGenerationContractTest(unittest.TestCase):
         self.assertIn("ENTRYPOINT", dockerfile)
         self.assertIn(
             "envsubst '$FILE_SIZE_LIMIT $SUPABASE_NETWORK_SUBNET "
-            "$ANON_KEY_PROJETO $SERVICE_ROLE_KEY_PROJETO $CONFIG_TOKEN_PROJETO "
+            "$ANON_KEY_PROJETO $SERVICE_ROLE_KEY_PROJETO "
             "$API_GATEWAY_TOKEN_PROJETO'",
             dockerfile,
         )
@@ -196,7 +185,6 @@ class KeyGenerationContractTest(unittest.TestCase):
         for key in {
             "ANON_KEY_PROJETO",
             "SERVICE_ROLE_KEY_PROJETO",
-            "CONFIG_TOKEN_PROJETO",
             "API_GATEWAY_TOKEN_PROJETO",
         }:
             self.assertIn(f"${{{key}}}", nginx_template)

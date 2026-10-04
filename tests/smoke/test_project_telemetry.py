@@ -172,21 +172,9 @@ class ProjectTelemetryTest(unittest.TestCase):
         self.assertLess(resolve_index, first_use_index)
         self.assertIn("except TelemetryValidationError as exc", route_source)
 
-    def test_config_token_route_has_no_telemetry_period_logic(self) -> None:
-        rename_source = (APP_ROOT / "app" / "routers" / "project_rename.py").read_text(
-            encoding="utf-8"
-        )
-        route_start = rename_source.index(
-            '@router.get("/api/projects/{project_ref}/config-token"'
-        )
-        route_end = rename_source.index(
-            '\n@router.get("/api/projects/{project_ref}/queue-status"',
-            route_start,
-        )
-        route_source = rename_source[route_start:route_end]
-
-        self.assertNotIn("resolve_telemetry_period", route_source)
-        self.assertNotIn("telemetry_period", route_source)
+    def test_removed_config_token_route_is_not_registered(self) -> None:
+        source = (APP_ROOT / "app" / "routers" / "project_rename.py").read_text(encoding="utf-8")
+        self.assertNotIn("/config-token", source)
 
 
 if __name__ == "__main__":

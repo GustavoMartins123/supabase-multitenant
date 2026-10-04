@@ -277,7 +277,7 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
         if not all(
             keys[name]
             for name in (
-                "anon_key", "service_role", "config_token", "gateway_token"
+                "anon_key", "service_role", "gateway_token"
             )
         ):
             await _set_job_status(
@@ -323,7 +323,6 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
                     project_id=project_id,
                     anon_key=keys["anon_key"],
                     service_role=keys["service_role"],
-                    config_token=keys["config_token"],
                 )
                 await conn.execute(
                     "UPDATE projects SET key_expires_at = $2 WHERE id = $1",
@@ -497,7 +496,7 @@ async def _duplicate_and_store_keys(
         if not all(
             keys[name]
             for name in (
-                "anon_key", "service_role", "config_token", "gateway_token"
+                "anon_key", "service_role", "gateway_token"
             )
         ):
             await _set_job_status(
@@ -543,7 +542,6 @@ async def _duplicate_and_store_keys(
                     project_id=project_id,
                     anon_key=keys["anon_key"],
                     service_role=keys["service_role"],
-                    config_token=keys["config_token"],
                 )
                 await conn.execute(
                     "UPDATE projects SET key_expires_at = $2 WHERE id = $1",

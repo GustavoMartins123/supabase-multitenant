@@ -80,7 +80,7 @@ WHERE name = '<project_ref>';
 "
 ```
 
-Não grave `anon_key`, `service_role` ou `config_token` manualmente. Os valores persistidos usam envelope encryption e precisam ser salvos pelo fluxo da API.
+Não grave `anon_key` ou `service_role` manualmente. Os valores persistidos usam envelope encryption e precisam ser salvos pelo fluxo da API.
 
 ## 3. Job ficou em `queued` ou `running`
 

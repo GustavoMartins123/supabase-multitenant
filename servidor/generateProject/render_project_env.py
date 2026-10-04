@@ -38,6 +38,8 @@ OBSOLETE_STORAGE_KEYS = {
     "IMGPROXY_ENABLE_WEBP_DETECTION",
 }
 
+REMOVED_KEYS = {"CONFIG_TOKEN_PROJETO"}
+
 PROTECTED_KEYS = {
     "PROJECT_ID",
     "PROJECT_UUID",
@@ -49,7 +51,6 @@ PROTECTED_KEYS = {
     "PROJECT_ROOT",
     "ANON_KEY_PROJETO",
     "SERVICE_ROLE_KEY_PROJETO",
-    "CONFIG_TOKEN_PROJETO",
     "JWT_SECRET_PROJETO",
     "API_GATEWAY_TOKEN_PROJETO",
     "S3_PROTOCOL_CREDENTIAL_ID",
@@ -139,7 +140,7 @@ def main() -> int:
     preserved = [
         key
         for key in current_order
-        if key not in template_keys and key not in PROTECTED_KEYS
+        if key not in template_keys and key not in PROTECTED_KEYS and key not in REMOVED_KEYS
     ]
     if preserved:
         rendered.extend(["", "# Configuracoes adicionais preservadas"])

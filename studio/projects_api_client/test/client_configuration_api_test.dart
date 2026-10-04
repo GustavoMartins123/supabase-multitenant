@@ -11,22 +11,18 @@
 import 'package:projects_api_client/api.dart';
 import 'package:test/test.dart';
 
-// tests for ProjectConfigTokenResponse
+
+/// tests for ClientConfigurationApi
 void main() {
-  // final instance = ProjectConfigTokenResponse();
+  // final instance = ClientConfigurationApi();
 
-  group('test ProjectConfigTokenResponse', () {
-    // String configToken
-    test('to test the property `configToken`', () async {
+  group('tests for ClientConfigurationApi', () {
+    // Get Client Configuration
+    //
+    //Future<ClientConfigurationResponse> getClientConfigurationConfigApplicationRefGet(String applicationRef) async
+    test('test getClientConfigurationConfigApplicationRefGet', () async {
       // TODO
     });
-
-    // String project
-    test('to test the property `project`', () async {
-      // TODO
-    });
-
 
   });
-
 }

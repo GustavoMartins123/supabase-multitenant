@@ -43,7 +43,7 @@ class PublicRefRenderingTest(unittest.TestCase):
         )
         self.env_text = (
             f"PROJECT_ID={NAME}\nPROJECT_UUID={TENANT}\nPROJECT_PUBLIC_REF={REF}\n"
-            f"CONFIG_TOKEN_PROJETO={'a' * 64}\nAPI_GATEWAY_TOKEN_PROJETO={'b' * 64}\n"
+            f"API_GATEWAY_TOKEN_PROJETO={'b' * 64}\n"
             f"JWT_SECRET_PROJETO={'c' * 43}\nANON_KEY_PROJETO=header.payload.sig\n"
             "SERVICE_ROLE_KEY_PROJETO=header.payload.sig\n"
         )
@@ -55,7 +55,7 @@ class PublicRefRenderingTest(unittest.TestCase):
         )
         nginx = (self.project / "nginx" / f"nginx_{NAME}.conf").read_text(encoding="utf-8")
         compose = (self.project / "docker-compose.yml").read_text(encoding="utf-8")
-        self.assertIn(f"https://api.example.test/{REF}", nginx)
+        self.assertNotIn('location = /config', nginx)
         self.assertIn(f'X-Forwarded-Prefix "/{REF}/storage/v1"', nginx)
         self.assertIn(f"X-Original-URI /{REF}$request_uri", nginx)
         self.assertIn(f"/{REF}/storage/v1/upload/resumable/", nginx)

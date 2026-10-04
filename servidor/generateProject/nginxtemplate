@@ -83,11 +83,6 @@ http {
         default "apikey=$opaque_internal_jwt&$opaque_realtime_args_without_apikey";
     }
 
-    map $http_x_config_token $is_valid_config_token {
-        default 0;
-        "${CONFIG_TOKEN_PROJETO}" 1;
-    }
-
     map $http_x_forwarded_proto $real_scheme {
         default $scheme;
         "~.+"   $http_x_forwarded_proto;
@@ -515,16 +510,6 @@ http {
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version' always;
         }
 
-        location = /config {
-            if ($is_valid_config_token = 0) {
-                return 401;
-            }
-            
-            set $config_url "{{project_public_url}}";
-            
-            default_type application/json;
-            add_header Cache-Control "no-store";
-            return 200 '{"supabase_url":"$config_url"}';
-        }
+
     }
 }

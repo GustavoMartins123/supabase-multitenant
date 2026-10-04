@@ -102,7 +102,7 @@ class ServerCutoverTests(unittest.TestCase):
         (self.root / ".env").write_text("SERVER_URL=api.example.test\nSERVER_PROTO=https\nHOST_PROJECT_ROOT=/srv/example\n")
         (self.directory / ".env").write_text(
             f"PROJECT_ID=technical_project\nPROJECT_UUID={TENANT}\n"
-            f"CONFIG_TOKEN_PROJETO={'a' * 64}\nAPI_GATEWAY_TOKEN_PROJETO={'b' * 64}\n"
+            f"API_GATEWAY_TOKEN_PROJETO={'b' * 64}\n"
             f"JWT_SECRET_PROJETO={'c' * 43}\nANON_KEY_PROJETO=header.payload.sig\n"
             "SERVICE_ROLE_KEY_PROJETO=header.payload.sig\nPRIVATE_SECRET=unchanged\n"
             "API_EXTERNAL_URL=https://api.example.test/technical_project/auth/v1\n"

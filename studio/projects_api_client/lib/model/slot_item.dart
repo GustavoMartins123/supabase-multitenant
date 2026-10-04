@@ -14,6 +14,7 @@ class SlotItem {
   /// Returns a new [SlotItem] instance.
   SlotItem({
     this.allowedServices = const [],
+    required this.applicationRef,
     required this.automaticRotationBlockedAt,
     required this.automaticRotationEnabled,
     required this.automaticRotationLastError,
@@ -28,6 +29,8 @@ class SlotItem {
   });
 
   List<String> allowedServices;
+
+  String? applicationRef;
 
   String? automaticRotationBlockedAt;
 
@@ -54,6 +57,7 @@ class SlotItem {
   @override
   bool operator ==(Object other) => identical(this, other) || other is SlotItem &&
     _deepEquality.equals(other.allowedServices, allowedServices) &&
+    other.applicationRef == applicationRef &&
     other.automaticRotationBlockedAt == automaticRotationBlockedAt &&
     other.automaticRotationEnabled == automaticRotationEnabled &&
     other.automaticRotationLastError == automaticRotationLastError &&
@@ -70,6 +74,7 @@ class SlotItem {
   int get hashCode =>
     // ignore: unnecessary_parenthesis
     (allowedServices.hashCode) +
+    (applicationRef == null ? 0 : applicationRef!.hashCode) +
     (automaticRotationBlockedAt == null ? 0 : automaticRotationBlockedAt!.hashCode) +
     (automaticRotationEnabled.hashCode) +
     (automaticRotationLastError == null ? 0 : automaticRotationLastError!.hashCode) +
@@ -83,11 +88,16 @@ class SlotItem {
     (status.hashCode);
 
   @override
-  String toString() => 'SlotItem[allowedServices=$allowedServices, automaticRotationBlockedAt=$automaticRotationBlockedAt, automaticRotationEnabled=$automaticRotationEnabled, automaticRotationLastError=$automaticRotationLastError, createdAt=$createdAt, id=$id, keys=$keys, kind=$kind, name=$name, role=$role, rotationIntervalDays=$rotationIntervalDays, status=$status]';
+  String toString() => 'SlotItem[allowedServices=$allowedServices, applicationRef=$applicationRef, automaticRotationBlockedAt=$automaticRotationBlockedAt, automaticRotationEnabled=$automaticRotationEnabled, automaticRotationLastError=$automaticRotationLastError, createdAt=$createdAt, id=$id, keys=$keys, kind=$kind, name=$name, role=$role, rotationIntervalDays=$rotationIntervalDays, status=$status]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
       json[r'allowed_services'] = this.allowedServices;
+    if (this.applicationRef != null) {
+      json[r'application_ref'] = this.applicationRef;
+    } else {
+      json[r'application_ref'] = null;
+    }
     if (this.automaticRotationBlockedAt != null) {
       json[r'automatic_rotation_blocked_at'] = this.automaticRotationBlockedAt;
     } else {
@@ -121,7 +131,7 @@ class SlotItem {
     if (value is Map) {
       final json = value.cast<String, dynamic>();
 
-      const nullableKeys = <String>{r'automatic_rotation_blocked_at', r'automatic_rotation_last_error', r'rotation_interval_days'};
+      const nullableKeys = <String>{r'application_ref', r'automatic_rotation_blocked_at', r'automatic_rotation_last_error', r'rotation_interval_days'};
       for (final key in requiredKeys) {
         if (!json.containsKey(key) || (json[key] == null && !nullableKeys.contains(key))) {
           throw FormatException('Invalid required field: $key');
@@ -132,6 +142,7 @@ class SlotItem {
         allowedServices: json[r'allowed_services'] is Iterable
             ? (json[r'allowed_services'] as Iterable).cast<String>().toList(growable: false)
             : const [],
+        applicationRef: mapValueOfType<String>(json, r'application_ref'),
         automaticRotationBlockedAt: mapValueOfType<String>(json, r'automatic_rotation_blocked_at'),
         automaticRotationEnabled: mapValueOfType<bool>(json, r'automatic_rotation_enabled')!,
         automaticRotationLastError: mapValueOfType<String>(json, r'automatic_rotation_last_error'),
@@ -191,6 +202,7 @@ class SlotItem {
   /// The list of required keys that must be present in a JSON.
   static const requiredKeys = <String>{
     'allowed_services',
+    'application_ref',
     'automatic_rotation_blocked_at',
     'automatic_rotation_enabled',
     'automatic_rotation_last_error',

@@ -11,7 +11,7 @@ There are three independent key domains:
 | `PG_META_CRYPTO_KEY` | `x-connection-encrypted` header for `postgres-meta-global` | `projects-api` and Postgres-Meta |
 
 Each project receives a random DEK, recorded in `project_key_envelopes`.
-`anon_key`, `service_role`, and `config_token` use AES-256-GCM with the
+`anon_key` and `service_role` use AES-256-GCM with the
 project DEK and AAD containing the project ID and column name. Moving a
 ciphertext between tenants or purposes fails authentication.
 
@@ -129,11 +129,10 @@ installation, provide the old key only when running the manual utility:
    SELECT count(*) AS legacy_values
    FROM projects
    WHERE (anon_key IS NOT NULL AND anon_key NOT LIKE 'v2.%')
-      OR (service_role IS NOT NULL AND service_role NOT LIKE 'v2.%')
-      OR (config_token IS NOT NULL AND config_token NOT LIKE 'v2.%');
+      OR (service_role IS NOT NULL AND service_role NOT LIKE 'v2.%');
    ```
 
-6. Run smoke tests for project listing, config-token access, PG metadata, and
+6. Run smoke tests for project listing, public application configuration, PG metadata, and
 Studio login. The runtime no longer accepts legacy values after migration.
 
 The manual process is resumable and does not print secrets.

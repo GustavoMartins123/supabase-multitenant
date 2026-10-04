@@ -123,7 +123,6 @@ class StorageVectorsBackendContractTests(unittest.TestCase):
             "PROJECT_UUID",
             "ANON_KEY_PROJETO",
             "SERVICE_ROLE_KEY_PROJETO",
-            "CONFIG_TOKEN_PROJETO",
             "API_GATEWAY_TOKEN_PROJETO",
             "S3_PROTOCOL_ACCESS_KEY_ID",
             "S3_PROTOCOL_ACCESS_KEY_SECRET",

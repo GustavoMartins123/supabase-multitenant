@@ -142,7 +142,6 @@ replace_env_value() {
   sed -i "s|^${key}=.*|${key}=${escaped_value}|" "$file"
 }
 
-CONFIG_TOKEN=$(get_env_value "CONFIG_TOKEN_PROJETO" "$PROJECT_DIR/.env")
 JWT_SECRET_PROJETO=$(get_env_value "JWT_SECRET_PROJETO" "$PROJECT_DIR/.env")
 PROJECT_UUID=$(get_env_value "PROJECT_UUID" "$PROJECT_DIR/.env")
 PROJECT_PUBLIC_REF="$(project_public_ref_read "$PROJECT_DIR/.env")" \
@@ -159,8 +158,6 @@ PROJECT_UUID="$(tr '[:upper:]' '[:lower:]' <<<"$PROJECT_UUID")"
 project_public_ref_assert "$PROJECT_ID" "$PROJECT_UUID" "$PROJECT_PUBLIC_REF" \
   || die "Referencia publica diverge do control plane"
 
-[[ "$CONFIG_TOKEN" =~ ^[a-f0-9]{64}$ ]] \
-  || die "CONFIG_TOKEN_PROJETO invalido"
 [[ "$JWT_SECRET_PROJETO" =~ ^[A-Za-z0-9_-]{43}=?$ ]] \
   || die "JWT_SECRET_PROJETO invalido"
 [[ "$PROJECT_UUID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] \
@@ -225,14 +222,13 @@ PROJECT_AUTH_EXTERNAL_URL="$PROJECT_PUBLIC_URL/auth/v1"
 
 template_to_file() {
   local template="$1" outfile="$2"
-  local anon_key service_role_key project_id project_uuid config_token jwt_secret
+  local anon_key service_role_key project_id project_uuid jwt_secret
   local server_url public_base_url project_public_url project_auth_external_url project_root
 
   anon_key="$(escape_sed_replacement "$NEW_ANON")"
   service_role_key="$(escape_sed_replacement "$NEW_SERVICE")"
   project_id="$(escape_sed_replacement "$PROJECT_ID")"
   project_uuid="$(escape_sed_replacement "$PROJECT_UUID")"
-  config_token="$(escape_sed_replacement "$CONFIG_TOKEN")"
   jwt_secret="$(escape_sed_replacement "$JWT_SECRET_PROJETO")"
   server_url="$(escape_sed_replacement "$SERVER_URL")"
   public_base_url="$(escape_sed_replacement "$PUBLIC_BASE_URL")"
@@ -246,7 +242,6 @@ template_to_file() {
     -e "s|{{project_id}}|$project_id|g" \
     -e "s|{{project_uuid}}|$project_uuid|g" \
     -e "s|{{project_public_ref}}|$PROJECT_PUBLIC_REF|g" \
-    -e "s|{{config_token}}|$config_token|g" \
     -e "s|{{jwt_secret}}|$jwt_secret|g" \
     -e "s|{{api_gateway_token}}|$(escape_sed_replacement "$API_GATEWAY_TOKEN_PROJETO")|g" \
     -e "s|{{server_url}}|$server_url|g" \

@@ -26,7 +26,7 @@ from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from app.project_secrets import ProjectKeyEnvelope, ProjectSecretManager
 
 
-SECRET_COLUMNS = ("anon_key", "service_role", "config_token")
+SECRET_COLUMNS = ("anon_key", "service_role")
 
 
 def _previous_keys() -> tuple[str, ...]:
@@ -146,10 +146,10 @@ async def migrate(
                 await assert_schema(conn)
                 rows = await conn.fetch(
                     """
-                    SELECT id, name, anon_key, service_role, config_token
+                    SELECT id, name, anon_key, service_role
                     FROM projects
                     WHERE ($1::text IS NULL OR name = $1)
-                      AND (anon_key IS NOT NULL OR service_role IS NOT NULL OR config_token IS NOT NULL)
+                      AND (anon_key IS NOT NULL OR service_role IS NOT NULL)
                     ORDER BY name
                     """,
                     project_name,

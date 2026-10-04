@@ -697,20 +697,6 @@ class ProjectRepository {
     );
   }
 
-  Future<String> fetchProjectConfigToken(String ref) async {
-    final resp =
-        await _client.get(Uri.parse('/api/projects/$ref/config-token'));
-    _ensureCommandSucceeded(resp);
-    final data = decodeJsonObject(resp, context: 'Token do projeto');
-    final token = data['config_token']?.toString() ?? '';
-    if (token.isEmpty) {
-      throw const ApiException(
-        ApiFailureKind.invalidResponse,
-        'Resposta sem config token',
-      );
-    }
-    return token;
-  }
 
   Future<ProjectUserTelemetry> fetchProjectUserTelemetry(
     String ref, {

@@ -8,7 +8,6 @@ from pydantic import BaseModel, ConfigDict
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from app.schemas import ProjectRenameRequest, ProjectDisplayNameUpdate
-from app.project_secret_service import decrypt_project_secret
 from app.jobs import (
     action_queue,
     create_project_job as _create_project_job,
@@ -80,13 +79,6 @@ class UpdateDisplayNameResponse(BaseModel):
     project: str
     display_name: str
     status: str
-
-
-class ProjectConfigTokenResponse(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    project: str
-    config_token: str
 
 
 class ProjectQueueInFlightJob(BaseModel):
@@ -314,52 +306,6 @@ async def update_project_display_name(
         "display_name": new_display,
         "status": "updated",
     }
-
-
-@router.get("/api/projects/{project_ref}/config-token", response_model=ProjectConfigTokenResponse)
-async def get_project_config_token(
-    project_ref: str,
-    request: Request,
-    pool=Depends(get_pool),
-):
-    """Entrega o token compartilhado aos membros do projeto e registra a leitura."""
-    project_ref = validate_project_ref(project_ref)
-    auth_user = await resolve_authenticated_user(request, pool)
-
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            project = await get_public_project_row(conn, project_ref)
-            await ensure_project_member_access(
-                conn,
-                project_id=project["id"],
-                auth_user=auth_user,
-                message="Apenas membros podem acessar o config token",
-            )
-            encrypted_token = await conn.fetchval(
-                "SELECT config_token FROM projects WHERE id = $1",
-                project["id"],
-            )
-            if not encrypted_token:
-                raise HTTPException(404, "Config token não disponível")
-            token = await decrypt_project_secret(
-                conn,
-                project_id=project["id"],
-                column="config_token",
-                ciphertext=encrypted_token,
-            )
-            await audit_studio_action(
-                conn,
-                project_id=project["id"],
-                actor_user_id=auth_user["db_user_id"],
-                action="project_config_token_read",
-                target_type="project_secret",
-                target_id=project_ref,
-            )
-
-    return JSONResponse(
-        content={"project": project_ref, "config_token": token},
-        headers={"Cache-Control": "no-store"},
-    )
 
 
 @router.get("/api/projects/{project_ref}/queue-status", response_model=ProjectQueueStatusResponse)

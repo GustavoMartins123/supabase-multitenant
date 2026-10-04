@@ -64,7 +64,6 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
   late Animation<double> _fadeAnimation;
   late TabController _tabController;
 
-  late String _currentConfigToken;
   late String _currentDisplayName;
   late final TextEditingController _displayNameController;
   late bool _automaticKeyRotationEnabled;
@@ -72,7 +71,6 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
   String? _automaticKeyRotationLastError;
   bool _updatingAutomaticKeyRotation = false;
   bool _savingDisplayName = false;
-  bool _loadingConfigToken = false;
 
   @override
   void initState() {
@@ -91,7 +89,6 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     _automaticKeyRotationEnabled = widget.automaticKeyRotationEnabled;
     _automaticKeyRotationBlocked = widget.automaticKeyRotationBlocked;
     _automaticKeyRotationLastError = widget.automaticKeyRotationLastError;
-    _currentConfigToken = '';
     _currentDisplayName = widget.displayName;
     _displayNameController = TextEditingController(
       text: widget.displayName,
@@ -200,24 +197,6 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
       if (mounted) {
         setState(() => _updatingAutomaticKeyRotation = false);
       }
-    }
-  }
-
-  Future<void> _loadConfigToken() async {
-    setState(() => _loadingConfigToken = true);
-    try {
-      final token = await ref
-          .read(projectRepositoryProvider)
-          .fetchProjectConfigToken(widget.ref);
-      if (!mounted) return;
-      setState(() => _currentConfigToken = token);
-    } catch (e) {
-      _showSnack(
-        'Erro ao carregar token: ${e.toString().replaceFirst('Exception: ', '')}',
-        SupabaseColors.error,
-      );
-    } finally {
-      if (mounted) setState(() => _loadingConfigToken = false);
     }
   }
 
@@ -379,7 +358,6 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
       _buildAutomaticKeyRotationSection(myRole, projectBusy),
       if (isAdmin) ...[
         const SizedBox(height: 20),
-        _buildConfigTokenSection(),
       ],
     ]);
   }
@@ -693,76 +671,6 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
                 color: SupabaseColors.error,
                 fontSize: 11,
               ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildConfigTokenSection() {
-    final hasToken = _currentConfigToken.isNotEmpty;
-    return SectionWidget(
-      title: 'TOKEN DE CONFIGURAÇÃO',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: SupabaseColors.bg300,
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: SupabaseColors.border),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: SelectableText(
-                    hasToken ? _currentConfigToken : 'Não disponível',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontFamily: 'monospace',
-                      color: SupabaseColors.textSecondary,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButtonWidget(
-                  icon:
-                      hasToken ? Icons.copy_rounded : Icons.visibility_outlined,
-                  tooltip: hasToken ? 'Copiar' : 'Carregar token',
-                  onPressed: hasToken
-                      ? () {
-                          Clipboard.setData(
-                            ClipboardData(text: _currentConfigToken),
-                          );
-                          _showSnack('Token copiado!', SupabaseColors.success);
-                        }
-                      : (_loadingConfigToken ? null : _loadConfigToken),
-                ),
-              ],
-            ),
-          ),
-          if (hasToken) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                const Icon(
-                  Icons.info_outline,
-                  size: 14,
-                  color: SupabaseColors.textMuted,
-                ),
-                const SizedBox(width: 6),
-                const Expanded(
-                  child: Text(
-                    'Use este token no header X-Config-Token para acessar o endpoint /config',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: SupabaseColors.textMuted,
-                    ),
-                  ),
-                ),
-              ],
             ),
           ],
         ],

@@ -98,6 +98,7 @@ class SlotItem(BaseModel):
     id: str
     name: str
     kind: str
+    application_ref: str | None
     role: str
     allowed_services: list[str]
     automatic_rotation_enabled: bool

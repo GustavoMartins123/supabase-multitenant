@@ -14,7 +14,6 @@ _REQUIRED_PROJECT_SECRET_KEYS = (
     "PROJECT_PUBLIC_REF",
     "ANON_KEY_PROJETO",
     "SERVICE_ROLE_KEY_PROJETO",
-    "CONFIG_TOKEN_PROJETO",
     "API_GATEWAY_TOKEN_PROJETO",
 )
 
@@ -85,6 +84,5 @@ def read_project_secret_keys(project_name: str) -> dict[str, str]:
         "public_ref": validate_public_ref(env_values["PROJECT_PUBLIC_REF"]),
         "anon_key": env_values["ANON_KEY_PROJETO"],
         "service_role": env_values["SERVICE_ROLE_KEY_PROJETO"],
-        "config_token": env_values["CONFIG_TOKEN_PROJETO"],
         "gateway_token": env_values["API_GATEWAY_TOKEN_PROJETO"],
     }
