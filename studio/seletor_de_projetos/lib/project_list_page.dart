@@ -621,7 +621,6 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
         );
         if (!mounted) return;
         await ref.read(projectListProvider.notifier).refresh();
-        await ref.read(projectJobsProvider.notifier).refresh();
       },
       backgroundColor: SupabaseColors.surface300,
       foregroundColor: SupabaseColors.textPrimary,

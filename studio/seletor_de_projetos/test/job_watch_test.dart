@@ -17,9 +17,10 @@ const terminal = Job('00000000-0000-4000-8000-000000000001',
     action: 'start', status: 'done', progress: 100);
 
 class Pending {
-  Pending(this.ids, this.cancellation);
+  Pending(this.ids, this.cancellation, this.cursor);
   final Set<String> ids;
   final RequestCancellation? cancellation;
+  final String? cursor;
   final response = Completer<JobSnapshot>();
 }
 
@@ -31,7 +32,7 @@ class ControlledWatch extends JobRepository {
   @override
   Future<JobSnapshot> watch({String? cursor, Set<String> watchedIds = const {},
       RequestCancellation? cancellation}) async {
-    final pending = Pending(Set.of(watchedIds), cancellation);
+    final pending = Pending(Set.of(watchedIds), cancellation, cursor);
     calls.add(pending);
     active++;
     if (active > peak) peak = active;
@@ -95,10 +96,28 @@ void main() {
     expect(repository.calls.last.ids, isEmpty);
   });
 
-  test('hidden tab cancels; visible tab resumes one watch', () async {
+  test('visible focus changes preserve the cursor and pending watch', () async {
     await load();
+    final pending = repository.calls.last;
+    for (var i = 0; i < 3; i++) {
+      binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    }
+    expect(pending.cancellation!.isCancelled, isFalse);
+    expect(repository.calls.length, 2);
+    pending.response.complete(JobSnapshot(const [], 'a' * 64));
+    await pumpEventQueue(times: 5);
+    expect(repository.calls.last.cursor, 'a' * 64);
+    expect(repository.peak, 1);
+  });
+
+  test('hidden tab finishes pending watch then pauses; resume keeps cursor', () async {
+    await load();
+    final pending = repository.calls.last;
     binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    expect(pending.cancellation!.isCancelled, isFalse);
+    pending.response.complete(JobSnapshot(const [], 'b' * 64));
     await pumpEventQueue(times: 5);
     expect(repository.active, 0);
     final pausedCount = repository.calls.length;
@@ -109,7 +128,67 @@ void main() {
     await pumpEventQueue(times: 5);
     expect(repository.active, 1);
     expect(repository.calls.length, pausedCount + 1);
+    expect(repository.calls.last.cursor, 'b' * 64);
     expect(repository.peak, 1);
+  });
+
+  test('quick tab switch does not cancel or duplicate the pending watch', () async {
+    await load();
+    final pending = repository.calls.last;
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await pumpEventQueue(times: 5);
+    expect(pending.cancellation!.isCancelled, isFalse);
+    expect(repository.calls.length, 2);
+    expect(repository.active, 1);
+    expect(repository.peak, 1);
+  });
+
+  test('hiding during initial load does not fail initialization', () async {
+    container.read(projectJobsProvider);
+    final initial = repository.calls.single;
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    expect(initial.cancellation!.isCancelled, isFalse);
+    await pumpEventQueue(times: 5);
+    initial.response.complete(JobSnapshot(const [], 'a' * 64));
+    await container.read(projectJobsProvider.future);
+    await pumpEventQueue(times: 5);
+    expect(repository.calls.length, 1);
+    expect(container.read(projectJobsProvider).hasError, isFalse);
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await pumpEventQueue(times: 5);
+    expect(repository.calls.last.cursor, 'a' * 64);
+    expect(repository.peak, 1);
+  });
+
+  test('initially hidden tab loads once and waits until visible', () async {
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    container.read(projectJobsProvider);
+    repository.calls.single.response.complete(JobSnapshot(const [], 'a' * 64));
+    await container.read(projectJobsProvider.future);
+    await pumpEventQueue(times: 5);
+    expect(repository.calls.length, 1);
+    expect(repository.active, 0);
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await pumpEventQueue(times: 5);
+    expect(repository.calls.length, 2);
+    expect(repository.calls.last.cursor, 'a' * 64);
+  });
+
+  test('unexpected cancellation fails closed instead of retrying', () async {
+    await load();
+    repository.calls.last.response.completeError(
+        const ApiException(ApiFailureKind.cancelled, 'Unexpected interruption'));
+    await pumpEventQueue(times: 5);
+    expect(container.read(projectJobsProvider).hasError, isTrue);
+    expect(repository.calls.length, 2);
+    expect(repository.active, 0);
   });
 
   test('authorization failure stops watching and fails the waiter', () async {

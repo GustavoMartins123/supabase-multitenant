@@ -81,6 +81,16 @@ void main() {
     );
   });
 
+  test('interrupcao sem cancelamento solicitado e falha de transporte', () async {
+    final client = ApiClient(client: MockClient((request) async {
+      throw http.RequestAbortedException(request.url);
+    }));
+    addTearDown(client.close);
+    await expectLater(client.get(Uri.parse('https://studio.test/api/jobs/watch')),
+      throwsA(isA<ApiException>().having((error) => error.kind,
+        'kind', ApiFailureKind.transport)));
+  });
+
   test('detecta quando o navegador seguiu a API ate a pagina de login',
       () async {
     var redirects = 0;

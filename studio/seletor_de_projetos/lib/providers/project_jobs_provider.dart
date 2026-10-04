@@ -28,7 +28,7 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
   bool _disposed = false;
   bool _watching = false;
   bool _initializing = true;
-  bool _visible = true;
+  bool _visible = false;
   bool _failed = false;
   String? _cursor;
   final Map<String, Job> _trackedJobs = {};
@@ -43,13 +43,11 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
       _failWaiters(const ApiException(ApiFailureKind.cancelled,
           'Acompanhamento de jobs encerrado'), StackTrace.current);
     });
+    _visible = _isVisible(WidgetsBinding.instance.lifecycleState);
     _lifecycle = AppLifecycleListener(onStateChange: (state) {
-      _visible = state != AppLifecycleState.hidden &&
-          state != AppLifecycleState.paused && state != AppLifecycleState.detached;
-      if (!_visible) {
-        _request?.cancel();
-      } else if (!_failed) {
-        _cursor = null;
+      final wasVisible = _visible;
+      _visible = _isVisible(state);
+      if (_visible && !wasVisible && !_failed) {
         _startWatching();
       }
     });
@@ -68,6 +66,9 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
     Timer.run(_startWatching);
     return jobs;
   }
+
+  static bool _isVisible(AppLifecycleState? state) =>
+      state == AppLifecycleState.resumed || state == AppLifecycleState.inactive;
 
   Set<String> get _watchedIds => {
     ..._trackedJobs.keys, ..._waiters.keys,
@@ -91,7 +92,8 @@ class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
           _cursor = snapshot.cursor;
           state = AsyncData(_accept(snapshot.jobs));
         } catch (error, stack) {
-          if (error is ApiException && error.kind == ApiFailureKind.cancelled) {
+          if (error is ApiException && error.kind == ApiFailureKind.cancelled &&
+              request.isCancelled) {
             continue;
           }
           _failed = true;
