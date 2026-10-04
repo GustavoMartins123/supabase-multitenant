@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto'
 import { z } from 'zod'
 
-export const levels = ['none', 'schema', 'read', 'write']
+export const levels = ['none', 'schema', 'read', 'write', 'full']
 export const settingsSchema = z.object({
   provider: z.enum(['openai', 'openrouter']),
   model: z.string().trim().min(1).max(200).regex(/^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/),
@@ -11,7 +11,9 @@ export const settingsSchema = z.object({
 }).strict()
 const uuid = z.string().uuid()
 const aad = (scope, purpose) => Buffer.from(JSON.stringify(['assistant-v1', scope.userId, scope.projectId, purpose]))
-export const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
+const canonical = value => Array.isArray(value) ? value.map(canonical)
+  : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value
+export const digest = value => createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex')
 
 function seal(key, text, context) {
   const nonce = randomBytes(12)
@@ -112,20 +114,22 @@ export class AssistantStore {
     this.db.prepare('DELETE FROM approvals WHERE expires_at < ?').run(Date.now())
     const query = this.db.prepare('INSERT OR IGNORE INTO approvals VALUES (?, ?, ?, ?, ?, ?, 0, ?)')
     for (const part of message.parts) {
-      if (part.type === 'tool-execute_function' && part.state === 'approval-requested') {
-        query.run(...this.scope(scope), chatId, part.toolCallId, part.approval.id, digest(part.input), Date.now() + 300_000)
+      if (['tool-execute_function', 'tool-execute_sql', 'tool-execute_destructive_sql'].includes(part.type) && part.state === 'approval-requested') {
+        query.run(...this.scope(scope), chatId, part.toolCallId, part.approval.id, digest({ tool: part.type, input: part.input }), Date.now() + 300_000)
       }
     }
   }
 
-  claimApproval(scope, chatId, callId, input, messages) {
+  claimApproval(scope, chatId, callId, input, messages, toolName) {
+    if (!['execute_function', 'execute_sql', 'execute_destructive_sql'].includes(toolName)) throw new Error('Unknown approval tool')
     const parts = messages.flatMap(message => message.parts ?? [])
-    const matching = parts.filter(part => part.type === 'tool-execute_function' && part.toolCallId === callId)
+    const matching = parts.filter(part => part.type === `tool-${toolName}` && part.toolCallId === callId)
     if (matching.length !== 1 || matching[0].approval?.approved !== true) throw new Error('Explicit approval is required')
     const changed = this.db.prepare(`UPDATE approvals SET used=1 WHERE user_id=? AND project_id=? AND chat_id=?
       AND call_id=? AND approval_id=? AND input_hash=? AND used=0 AND expires_at>?`)
-      .run(...this.scope(scope), chatId, callId, matching[0].approval.id, digest(input), Date.now()).changes
+      .run(...this.scope(scope), chatId, callId, matching[0].approval.id, digest({ tool: `tool-${toolName}`, input }), Date.now()).changes
     if (changed !== 1) throw new Error('Approval is missing, changed, expired or already consumed')
+    return { chat_id: chatId, call_id: callId, approval_id: matching[0].approval.id, tool: toolName }
   }
 
   claimNonce(nonce, expiry) {

@@ -306,6 +306,41 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
         headers["X-User-Token"] = self.user_token(self.owner)
         self.assertEqual((await self.request("GET", path, headers=headers)).status_code, 403)
 
+    async def test_assistant_sql_cannot_bypass_approval_through_normal_studio_gateway(self):
+        from app.routers import assistant
+        path = "/api/projects/abcdefghijklmnopqrst/assistant/sql"
+        sql = "DELETE FROM public.example"
+        body = json.dumps({"sql": sql, "label": "Synthetic query", "permission": "full", "approval": {
+            "chat_id": str(uuid.uuid4()), "call_id": "call", "approval_id": "approval",
+            "tool": "execute_destructive_sql", "sql_hash": hashlib.sha256(sql.encode()).hexdigest(),
+        }}).encode()
+        with mock.patch.object(assistant.asyncpg, "connect") as connection:
+            for actor in (self.owner, self.admin2, self.ex_member, self.outsider):
+                response = await self.request("POST", path, actor=actor, body=body)
+                self.assertEqual(response.status_code, 403, response.text)
+            headers = self.signed_headers("POST", path, self.owner, body)
+            headers["X-Assistant-Execution-Proof"] = "0" * 64
+            response = await self.request("POST", path, headers=headers, body=body)
+            self.assertEqual(response.status_code, 403, response.text)
+            connection.assert_not_called()
+
+    async def test_assistant_sql_approval_gateway_still_rechecks_actor_and_project_membership(self):
+        from app.routers import assistant
+        path = "/api/projects/abcdefghijklmnopqrst/assistant/sql"
+        sql = "CREATE TABLE public.example(id integer)"
+        body = json.dumps({"sql": sql, "label": "Synthetic query", "permission": "full", "approval": {
+            "chat_id": str(uuid.uuid4()), "call_id": "call", "approval_id": "approval",
+            "tool": "execute_sql", "sql_hash": hashlib.sha256(sql.encode()).hexdigest(),
+        }}).encode()
+        with mock.patch.object(assistant.asyncpg, "connect") as connection:
+            for actor in (self.ex_member, self.outsider):
+                headers = self.signed_headers("POST", path, actor, body)
+                proof = f"assistant-sql-approval-v1\n{headers['X-Internal-Signature']}\n{headers['X-User-Token']}"
+                headers["X-Assistant-Execution-Proof"] = hmac.new(GATEWAY_SECRET.encode(), proof.encode(), hashlib.sha256).hexdigest()
+                response = await self.request("POST", path, headers=headers, body=body)
+                self.assertEqual(response.status_code, 403, response.text)
+            connection.assert_not_called()
+
     async def test_public_reference_does_not_grant_administrative_access(self):
         for suffix in ("status", "logs/nginx", "settings", "collaboration", "restore-points", "telemetry/users", "functions"):
             with self.subTest(endpoint=suffix):

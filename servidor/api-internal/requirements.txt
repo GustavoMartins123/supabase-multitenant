@@ -5,3 +5,4 @@ python-dotenv==1.2.2
 cryptography==50.0.0
 websockets==12.0
 httpx==0.27.2
+pglast==7.20

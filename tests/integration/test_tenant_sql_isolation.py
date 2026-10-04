@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import secrets
 import sys
 import unittest
@@ -136,3 +137,85 @@ class TenantSqlIsolationTest(unittest.IsolatedAsyncioTestCase):
             await self.admin.execute(f'DROP DATABASE "{old_name}"')
         finally:
             await self.admin.execute(f'ALTER DATABASE "{new_name}" RENAME TO "{old_name}"')
+
+    def approved_sql(self, sql, *, destructive=False):
+        from app.assistant_sql_execution import ExecuteSqlBody
+        return ExecuteSqlBody(sql=sql, label="Synthetic SQL", permission="full", approval={
+            "chat_id": uuid.uuid4(), "call_id": "synthetic-call", "approval_id": "synthetic-approval",
+            "sql_hash": hashlib.sha256(sql.encode()).hexdigest(),
+            "tool": "execute_destructive_sql" if destructive else "execute_sql",
+        })
+
+    async def test_assistant_full_creates_inserts_updates_but_never_deletes_on_regular_approval(self):
+        from app.assistant_sql_execution import execute_approved_sql
+        from fastapi import HTTPException
+        for sql in ("CREATE TABLE public.items(id integer PRIMARY KEY, title text)",
+                    "INSERT INTO public.items VALUES (1,'one')", "UPDATE public.items SET title='two' WHERE id=1"):
+            await execute_approved_sql(self.tenant, self.approved_sql(sql))
+        self.assertEqual(await self.tenant.fetchval("SELECT title FROM public.items WHERE id=1"), "two")
+        for sql in ("DELETE FROM public.items WHERE id=1", "DELETE FROM public.items WHERE false",
+                    "WITH gone AS (DELETE FROM public.items RETURNING id) SELECT 1",
+                    "TRUNCATE public.items", "DROP TABLE public.items", "ALTER TABLE public.items DROP COLUMN title"):
+            with self.subTest(sql=sql):
+                with self.assertRaises(HTTPException) as error:
+                    await execute_approved_sql(self.tenant, self.approved_sql(sql))
+                self.assertEqual(error.exception.status_code, 409)
+                self.assertEqual(await self.tenant.fetchval("SELECT count(*) FROM public.items"), 1)
+        await execute_approved_sql(self.tenant, self.approved_sql("DELETE FROM public.items WHERE id=1", destructive=True))
+        self.assertEqual(await self.tenant.fetchval("SELECT count(*) FROM public.items"), 0)
+
+    async def test_assistant_sql_rolls_back_errors_oversized_results_and_rejects_changed_approval(self):
+        from app.assistant_sql_execution import execute_approved_sql
+        from fastapi import HTTPException
+        await self.tenant.execute("CREATE TABLE public.items(id integer PRIMARY KEY)")
+        for sql in ("INSERT INTO public.items SELECT * FROM generate_series(1,60) RETURNING *",
+                    "UPDATE public.items SET id=1; DELETE FROM public.items"):
+            with self.assertRaises(HTTPException):
+                await execute_approved_sql(self.tenant, self.approved_sql(sql))
+            self.assertEqual(await self.tenant.fetchval("SELECT count(*) FROM public.items"), 0)
+        body = self.approved_sql("INSERT INTO public.items VALUES (1)")
+        body.sql = "DELETE FROM public.items"
+        with self.assertRaises(HTTPException) as error:
+            await execute_approved_sql(self.tenant, body)
+        self.assertEqual(error.exception.status_code, 403)
+        with self.assertRaises(self.asyncpg.UniqueViolationError):
+            await execute_approved_sql(self.tenant, self.approved_sql("INSERT INTO public.items VALUES (1),(1)"))
+        self.assertEqual(await self.tenant.fetchval("SELECT count(*) FROM public.items"), 0)
+
+    async def test_assistant_blocks_views_auth_cluster_commands_and_indirect_deletion(self):
+        from app.assistant_sql_execution import execute_approved_sql
+        from fastapi import HTTPException
+        await self.tenant.execute("""CREATE TABLE public.items(id integer PRIMARY KEY);
+            INSERT INTO public.items VALUES (1);
+            CREATE VIEW public.items_view AS SELECT * FROM public.items;
+            CREATE FUNCTION public.erase_on_update() RETURNS trigger LANGUAGE plpgsql AS
+                $$ BEGIN DELETE FROM public.items; RETURN NULL; END $$;
+            CREATE TRIGGER erase AFTER UPDATE ON public.items FOR EACH STATEMENT EXECUTE FUNCTION public.erase_on_update();""")
+        for sql in ("SELECT * FROM public.items_view", "DELETE FROM auth.users",
+                    "CREATE ROLE stolen", "SELECT public.erase_on_update()"):
+            with self.subTest(sql=sql):
+                with self.assertRaises(HTTPException):
+                    await execute_approved_sql(self.tenant, self.approved_sql(sql, destructive=True))
+        with self.assertRaises(HTTPException) as error:
+            await execute_approved_sql(self.tenant, self.approved_sql("UPDATE public.items SET id=2"))
+        self.assertEqual(error.exception.status_code, 409)
+        self.assertEqual(await self.tenant.fetchval("SELECT count(*) FROM public.items"), 1)
+        await execute_approved_sql(self.tenant, self.approved_sql("UPDATE public.items SET id=2", destructive=True))
+        self.assertEqual(await self.tenant.fetchval("SELECT count(*) FROM public.items"), 0)
+
+    async def test_assistant_requires_explicit_deletion_for_default_and_check_side_effects(self):
+        from app.assistant_sql_execution import execute_approved_sql
+        from fastapi import HTTPException
+        await self.tenant.execute("""CREATE TABLE public.guard(id integer);
+            CREATE FUNCTION public.erase_guard() RETURNS integer LANGUAGE plpgsql AS
+                $$ BEGIN DELETE FROM public.guard; RETURN 1; END $$;
+            CREATE TABLE public.defaulted(id integer DEFAULT public.erase_guard());
+            CREATE TABLE public.checked(id integer CHECK (public.erase_guard()=1));""")
+        for sql in ("INSERT INTO public.defaulted DEFAULT VALUES", "INSERT INTO public.checked VALUES(1)"):
+            await self.tenant.execute("INSERT INTO public.guard VALUES(1)")
+            with self.assertRaises(HTTPException) as error:
+                await execute_approved_sql(self.tenant, self.approved_sql(sql))
+            self.assertEqual(error.exception.status_code, 409)
+            self.assertEqual(await self.tenant.fetchval("SELECT count(*) FROM public.guard"), 1)
+            await execute_approved_sql(self.tenant, self.approved_sql(sql, destructive=True))
+            self.assertEqual(await self.tenant.fetchval("SELECT count(*) FROM public.guard"), 0)

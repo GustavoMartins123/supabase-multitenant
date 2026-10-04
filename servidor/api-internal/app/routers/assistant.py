@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import asyncpg
+import hashlib
+import hmac
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.control_plane_service import audit_studio_action
+from app.assistant_sql_execution import ExecuteSqlBody, execute_approved_sql
 from app.database import get_pool
 from app.dependencies import (
     ensure_project_admin_access, ensure_project_member_access,
     get_project_role, get_public_project_row, resolve_authenticated_user,
 )
-from app.meta_connections import get_project_assistant_reader_connection_string
+from app.meta_connections import get_project_assistant_reader_connection_string, get_project_meta_connection_string
 from app.routers.project_insights import execute_project_function, get_project_ai_functions
 from app.validation import validate_project_ref
 
@@ -127,3 +132,38 @@ async def assistant_functions(ref: str, request: Request, pool=Depends(get_pool)
 async def assistant_execute(ref: str, body: dict, request: Request, pool=Depends(get_pool)):
     await _context(ref, request, pool, database=True)
     return await execute_project_function(ref, body, request, pool)
+
+
+@router.post("/api/projects/{ref}/assistant/sql")
+async def assistant_sql(ref: str, body: ExecuteSqlBody, request: Request, pool=Depends(get_pool)):
+    signature = request.headers.get("X-Internal-Signature", "")
+    user_token = request.headers.get("X-User-Token", "")
+    proof = request.headers.get("X-Assistant-Execution-Proof", "")
+    expected = hmac.new(os.environ["STUDIO_GATEWAY_HMAC_SECRET"].encode(),
+                        f"assistant-sql-approval-v1\n{signature}\n{user_token}".encode(), hashlib.sha256).hexdigest()
+    if not signature or not user_token or not hmac.compare_digest(expected, proof):
+        raise HTTPException(403, "SQL requires a verified assistant approval gateway")
+    project, user, _ = await _context(ref, request, pool, database=True)
+    try:
+        connection = await asyncpg.connect(
+            get_project_meta_connection_string(project["name"], project["tenant_uuid"]),
+            timeout=5, command_timeout=15,
+        )
+    except Exception as exc:
+        raise HTTPException(503, "Assistant project database unavailable") from exc
+    try:
+        async with pool.acquire() as audit_connection:
+            await audit_studio_action(
+                audit_connection, project_id=project["id"], actor_user_id=user["db_user_id"],
+                action="assistant_sql_approved", target_type="database_query", target_id=body.approval.sql_hash,
+                new_value={"tool": body.approval.tool, "chat_id": str(body.approval.chat_id),
+                           "call_id": body.approval.call_id, "approval_id": body.approval.approval_id},
+            )
+        _, result = await execute_approved_sql(connection, body)
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, "Assistant SQL failed; the transaction was rolled back") from exc
+    finally:
+        await connection.close()

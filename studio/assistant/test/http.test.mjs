@@ -89,5 +89,37 @@ test('native approval round trip is recorded, exact and single-use before execut
   const next = await request('/api/ai/sql/generate-v4','POST',{projectRef:actor.ref,chatId,messages:[user,assistant]})
   const nextOutput = await next.text()
   assert.equal(calls.filter(action=>action==='execute').length,1,nextOutput)
-  assert.throws(()=>store.claimApproval(actor,chatId,'call-write',input,[assistant]))
+  assert.throws(()=>store.claimApproval(actor,chatId,'call-write',input,[assistant],'execute_function'))
 })
+
+for (const name of ['execute_sql', 'execute_destructive_sql']) {
+  test(`${name} streams an approval before executing and cannot run after permission downgrade`, async t => {
+    const input = { sql: name === 'execute_sql' ? 'CREATE TABLE public.synthetic(id integer)' : 'DELETE FROM public.synthetic WHERE id=1', label: 'Synthetic operation' }
+    let turn = 0
+    const model = new MockLanguageModelV3({ doStream: async () => ({ stream: simulateReadableStream({ chunks: ++turn === 1
+      ? [{ type: 'stream-start', warnings: [] }, { type: 'tool-call', toolCallId: 'call-sql', toolName: name, input: JSON.stringify(input) }, { ...finish, finishReason: { unified: 'tool-calls', raw: 'tool_calls' } }]
+      : textChunks() }) }) })
+    const { store, request, calls } = await harness(t, model)
+    const configuration = { provider: 'openai', model: 'explicit-model', permission: 'full', apiKey: 'synthetic-provider-key-only' }
+    store.save(actor, configuration)
+    const chatId = randomUUID(); const user = { id: randomUUID(), role: 'user', parts: [{ type: 'text', text: 'Synthetic database request' }] }
+    const first = await request('/api/ai/sql/generate-v4', 'POST', { projectRef: actor.ref, chatId, messages: [user] })
+    const events = (await first.text()).split('\n').filter(line => line.startsWith('data: {')).map(line => JSON.parse(line.slice(6)))
+    const approval = events.find(event => event.type === 'tool-approval-request')
+    assert.ok(approval)
+    assert.equal(calls.includes('sql'), false)
+    assert.equal((await (await request('/api/ai/settings')).json()).maxPermission, 'full')
+    const approved = { id: randomUUID(), role: 'assistant', parts: [{ type: `tool-${name}`, state: 'approval-responded', toolCallId: 'call-sql', input, approval: { id: approval.approvalId, approved: true } }] }
+    store.save(actor, { ...configuration, permission: 'read' })
+    const downgraded = await request('/api/ai/sql/generate-v4', 'POST', { projectRef: actor.ref, chatId, messages: [user, approved] })
+    await downgraded.text()
+    assert.equal(calls.includes('sql'), false)
+    store.save(actor, configuration)
+    const next = await request('/api/ai/sql/generate-v4', 'POST', { projectRef: actor.ref, chatId, messages: [user, approved] })
+    await next.text()
+    assert.equal(calls.filter(action => action === 'sql').length, 1)
+    const replay = await request('/api/ai/sql/generate-v4', 'POST', { projectRef: actor.ref, chatId, messages: [user, approved] })
+    await replay.text()
+    assert.equal(calls.filter(action => action === 'sql').length, 1)
+  })
+}

@@ -3,7 +3,7 @@ import https from 'node:https'
 
 export function gateway(secret, ca) {
   return async (scope, action, payload, signal) => {
-    if (!['context', 'schema', 'rows', 'functions', 'execute'].includes(action)) throw new Error('Unknown assistant tool')
+    if (!['context', 'schema', 'rows', 'functions', 'execute', 'sql'].includes(action)) throw new Error('Unknown assistant tool')
     const target = `/_internal/assistant/${scope.ref}/${action}`
     const method = payload === undefined ? 'GET' : 'POST'
     const body = payload === undefined ? '' : JSON.stringify(payload)
@@ -22,7 +22,9 @@ export function gateway(secret, ca) {
         response.on('data', chunk => { size += chunk.length; if (size > 1_000_000) response.destroy(new Error('Assistant tool response exceeds limit')); else chunks.push(chunk) })
         response.on('error', () => reject(new Error('Assistant tool response interrupted')))
         response.on('end', () => {
-          if (response.statusCode !== 200) return reject(new Error(`Assistant tool refused (HTTP ${response.statusCode})`))
+          if (response.statusCode !== 200) return reject(new Error(action === 'sql' && response.statusCode === 409
+            ? 'SQL requires explicit destructive approval. Use execute_destructive_sql and wait for a new user confirmation.'
+            : `Assistant tool refused (HTTP ${response.statusCode})`))
           try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))) } catch { reject(new Error('Invalid assistant tool response')) }
         })
       })

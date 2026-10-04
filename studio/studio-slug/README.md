@@ -19,7 +19,10 @@ O contrato do patch é intencionalmente estrito:
 - o assistente possui configuração de provedor, modelo e chave pessoal por projeto;
 - a interface nunca recebe uma chave de provedor salva, somente o estado configurado;
 - histórico e configuração usam o serviço `studio-assistant`, com identidade canônica e TLS;
-- a execução de funções `[AI]` apresenta os argumentos e exige aprovação individual.
+- a execução de funções `[AI]` apresenta os argumentos e exige aprovação individual;
+- o acesso total oferece SQL para tabelas públicas com aprovação do comando exato;
+- exclusões e operações destrutivas exigem confirmação explícita separada, mesmo com acesso total;
+- a execução do assistente não utiliza o botão de execução direta do editor SQL.
 
 O Dockerfile verifica o patch contra o SHA fixado antes de aplicá-lo. Se o
 upstream mudar, o build falha em vez de produzir uma imagem parcialmente

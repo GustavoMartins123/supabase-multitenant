@@ -194,37 +194,33 @@ index c9ddbe78..3645214c 100644
  
              <div className="flex gap-3 items-center pointer-events-auto">
 diff --git a/apps/studio/components/ui/AIAssistantPanel/Message.Parts.tsx b/apps/studio/components/ui/AIAssistantPanel/Message.Parts.tsx
-index 047b51b6..167ef633 100644
+index 047b51b6..91381d15 100644
 --- a/apps/studio/components/ui/AIAssistantPanel/Message.Parts.tsx
 +++ b/apps/studio/components/ui/AIAssistantPanel/Message.Parts.tsx
-@@ -1,7 +1,7 @@
- import { UIMessage as VercelMessage } from '@ai-sdk/react'
+@@ -2,10 +2,12 @@ import { UIMessage as VercelMessage } from '@ai-sdk/react'
  import { type DynamicToolUIPart, type ReasoningUIPart, type TextUIPart, type ToolUIPart } from 'ai'
  import { BrainIcon, CheckIcon, Loader2 } from 'lucide-react'
--import { cn } from 'ui'
-+import { Button, cn } from 'ui'
+ import { cn } from 'ui'
++import { IS_PLATFORM } from '@/lib/constants'
  
  import { DisplayBlockRenderer } from './DisplayBlockRenderer'
  import { EdgeFunctionRenderer } from './EdgeFunctionRenderer'
-@@ -60,6 +60,17 @@ function MessagePartDynamicTool({ toolPart }: { toolPart: DynamicToolUIPart }) {
+ import { Tool } from './elements/Tool'
++import { SelfHostedExecution } from './SelfHostedExecution'
+ import { useMessageActionsContext, useMessageInfoContext } from './Message.Context'
+ import {
+   deployEdgeFunctionInputSchema,
+@@ -60,6 +62,9 @@ function MessagePartDynamicTool({ toolPart }: { toolPart: DynamicToolUIPart }) {
  }
  
  function MessagePartTool({ toolPart }: { toolPart: ToolUIPart }) {
-+  const { addToolApprovalResponse } = useMessageActionsContext()
-+  if (toolPart.state === 'approval-requested') return (
-+    <div className="my-4 space-y-3 rounded-md border p-3">
-+      <p>Review this function call before approving. It may change your database.</p>
-+      <pre className="overflow-x-auto text-xs">{JSON.stringify(toolPart.input, null, 2)}</pre>
-+      <div className="flex gap-2">
-+        <Button onClick={() => addToolApprovalResponse?.({ id: toolPart.approval.id, approved: true })}>Approve execution</Button>
-+        <Button variant="default" onClick={() => addToolApprovalResponse?.({ id: toolPart.approval.id, approved: false })}>Deny</Button>
-+      </div>
-+    </div>
-+  )
++  if (!IS_PLATFORM && ['tool-execute_function', 'tool-execute_sql', 'tool-execute_destructive_sql'].includes(toolPart.type)) {
++    return <SelfHostedExecution toolPart={toolPart} />
++  }
    return (
      <Tool
        icon={
-@@ -253,6 +264,10 @@ export function MessagePartSwitcher({
+@@ -253,6 +258,11 @@ export function MessagePartSwitcher({
        return <MessagePart.Dynamic toolPart={part} />
      }
      case 'tool-list_policies':
@@ -232,9 +228,18 @@ index 047b51b6..167ef633 100644
 +    case 'tool-read_rows':
 +    case 'tool-list_functions':
 +    case 'tool-execute_function':
++    case 'tool-execute_destructive_sql':
      case 'tool-search_docs':
      case 'tool-get_active_incidents':
      case 'tool-load_knowledge': {
+@@ -264,6 +274,7 @@ export function MessagePartSwitcher({
+       return <MessagePart.Text textPart={part} />
+ 
+     case 'tool-execute_sql': {
++      if (!IS_PLATFORM) return <SelfHostedExecution toolPart={part} />
+       return <MessagePart.ExecuteSql toolPart={part} isLastPart={isLastPart} />
+     }
+     case 'tool-deploy_edge_function': {
 diff --git a/apps/studio/components/ui/AIEditor/index.tsx b/apps/studio/components/ui/AIEditor/index.tsx
 index ce8c6865..2b6f71f9 100644
 --- a/apps/studio/components/ui/AIEditor/index.tsx
@@ -999,8 +1004,8 @@ new file mode 100644
 +  hasKey: boolean
 +  provider?: 'openai' | 'openrouter'
 +  model?: string
-+  permission?: 'none' | 'schema' | 'read' | 'write'
-+  maxPermission: 'none' | 'write'
++  permission?: 'none' | 'schema' | 'read' | 'write' | 'full'
++  maxPermission: 'none' | 'full'
 +}
 +
 +export function SelfHostedAssistantSettings() {
@@ -1010,7 +1015,7 @@ new file mode 100644
 +  const [status, setStatus] = useState<SettingsState>()
 +  const [provider, setProvider] = useState<'openai' | 'openrouter'>('openai')
 +  const [model, setModel] = useState('')
-+  const [permission, setPermission] = useState<'none' | 'schema' | 'read' | 'write'>('none')
++  const [permission, setPermission] = useState<'none' | 'schema' | 'read' | 'write' | 'full'>('none')
 +  const [apiKey, setApiKey] = useState('')
 +  const [changingKey, setChangingKey] = useState(false)
 +  const [saving, setSaving] = useState(false)
@@ -1070,9 +1075,9 @@ new file mode 100644
 +              <label className="block space-y-1"><span>{status.hasKey ? 'New provider key' : 'Provider key'}</span><input className={field} type="password" value={apiKey} autoComplete="new-password" spellCheck={false} disabled={saving} maxLength={1024} onChange={event => setApiKey(event.target.value)} /></label>}
 +            <label className="block space-y-1"><span>Database access</span><select className={field} value={permission} disabled={saving} onChange={event => setPermission(event.target.value as typeof permission)}>
 +              <option value="none">No database access</option>
-+              {status.maxPermission === 'write' && <><option value="schema">Public schema only</option><option value="read">Read public table rows</option><option value="write">Read and execute approved [AI] functions</option></>}
++              {status.maxPermission === 'full' && <><option value="schema">Public schema only</option><option value="read">Read public table rows</option><option value="write">Read and execute approved [AI] functions</option><option value="full">Full public-table SQL access</option></>}
 +            </select></label>
-+            <p className="text-sm text-foreground-light">Schema and row results are sent to your provider. Database tools require project administration. Function execution requires separate approval for each operation. No unrestricted SQL or external URLs are enabled.</p>
++            <p className="text-sm text-foreground-light">Schema and row results are sent to your provider. Database tools require project administration. Full access enables supported public-table SQL, including CREATE, INSERT and UPDATE, after individual approval. DELETE and other destructive operations always require explicit deletion confirmation. Full SQL uses tenant administration and can bypass row-level security; read-only tools respect RLS. Cluster administration and external URLs are not enabled.</p>
 +            <Button block loading={saving} disabled={!model.trim() || ((changingKey || !status.hasKey) && !apiKey) || window.location.protocol !== 'https:'} onClick={save}>Save settings</Button>
 +          </>}
 +        </div>
@@ -1080,3 +1085,110 @@ new file mode 100644
 +    </Dialog>
 +  </>
 +}
+diff --git a/apps/studio/components/ui/AIAssistantPanel/SelfHostedExecution.tsx b/apps/studio/components/ui/AIAssistantPanel/SelfHostedExecution.tsx
+new file mode 100644
+--- /dev/null
++++ b/apps/studio/components/ui/AIAssistantPanel/SelfHostedExecution.tsx
+@@ -0,0 +1,36 @@
++import type { ToolUIPart } from 'ai'
++import { useState } from 'react'
++import { Button } from 'ui'
++
++import { useMessageActionsContext, useMessageInfoContext } from './Message.Context'
++
++export function SelfHostedExecution({ toolPart }: { toolPart: ToolUIPart }) {
++  const { addToolApprovalResponse } = useMessageActionsContext()
++  const { readOnly, isLoading } = useMessageInfoContext()
++  const [confirmedCall, setConfirmedCall] = useState<string>()
++  const destructive = toolPart.type === 'tool-execute_destructive_sql' || toolPart.type === 'tool-execute_function'
++  const input = toolPart.input as { sql?: string; label?: string } | undefined
++  const confirmed = confirmedCall === toolPart.toolCallId
++  return <div className="my-4 space-y-3 rounded-md border p-3">
++    <p className="font-medium">{input?.label ?? 'Database operation'}</p>
++    {destructive && <p className="text-sm text-danger">This operation may permanently delete data or have indirect side effects. Full access does not authorize deletion automatically.</p>}
++    <pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs">{input?.sql ?? JSON.stringify(toolPart.input, null, 2)}</pre>
++    {toolPart.state === 'approval-requested' && <>
++      <p className="text-sm">Review the exact operation before authorizing it. Approval applies only to this call.</p>
++      {destructive && <label className="flex items-start gap-2 text-sm">
++        <input type="checkbox" checked={confirmed} disabled={readOnly || isLoading} onChange={event => setConfirmedCall(event.target.checked ? toolPart.toolCallId : undefined)} />
++        <span>I explicitly authorize deletion and the side effects of this exact operation.</span>
++      </label>}
++      <div className="flex gap-2">
++        <Button disabled={readOnly || isLoading || !addToolApprovalResponse || (destructive && !confirmed)} onClick={() => addToolApprovalResponse?.({ id: toolPart.approval.id, approved: true })}>
++          {destructive ? 'Authorize deletion and execute' : 'Approve execution'}
++        </Button>
++        <Button variant="default" disabled={readOnly || isLoading || !addToolApprovalResponse} onClick={() => addToolApprovalResponse?.({ id: toolPart.approval.id, approved: false })}>Deny</Button>
++      </div>
++    </>}
++    {toolPart.state === 'approval-responded' && <p className="text-sm">{toolPart.approval.approved ? 'Approved; waiting for execution.' : 'Denied; nothing was executed.'}</p>}
++    {toolPart.state === 'output-denied' && <p className="text-sm">Denied; nothing was executed.</p>}
++    {toolPart.state === 'output-error' && <p className="text-sm text-danger">{toolPart.errorText}</p>}
++    {toolPart.state === 'output-available' && <pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(toolPart.output, null, 2)}</pre>}
++  </div>
++}
+diff --git a/apps/studio/components/ui/AIAssistantPanel/SelfHostedExecution.test.tsx b/apps/studio/components/ui/AIAssistantPanel/SelfHostedExecution.test.tsx
+new file mode 100644
+--- /dev/null
++++ b/apps/studio/components/ui/AIAssistantPanel/SelfHostedExecution.test.tsx
+@@ -0,0 +1,61 @@
++import { fireEvent, render, screen } from '@testing-library/react'
++import type { ToolUIPart } from 'ai'
++import { describe, expect, it, vi } from 'vitest'
++
++import { MessageProvider, type AddToolApprovalResponse } from './Message.Context'
++import { SelfHostedExecution } from './SelfHostedExecution'
++
++const part = (type: ToolUIPart['type'] = 'tool-execute_destructive_sql'): Extract<ToolUIPart, { state: 'approval-requested' }> => ({
++  type, state: 'approval-requested', toolCallId: 'call-one',
++  input: { sql: 'DELETE FROM public.items WHERE id=1', label: 'Delete item' }, approval: { id: 'approval-one' },
++})
++const view = (toolPart: ToolUIPart, respond: AddToolApprovalResponse, readOnly = false, isLoading = false) => (
++  <MessageProvider messageInfo={{ id: 'message', state: 'idle', readOnly, isLoading }}
++    messageActions={{ addToolApprovalResponse: respond, onDelete: vi.fn(), onEdit: vi.fn(), onCancelEdit: vi.fn() }}>
++    <SelfHostedExecution toolPart={toolPart} />
++  </MessageProvider>
++)
++
++describe('Self-hosted database execution', () => {
++  it('requires dedicated explicit deletion confirmation before approving', () => {
++    const respond = vi.fn()
++    render(view(part(), respond))
++    const approve = screen.getByRole('button', { name: 'Authorize deletion and execute' })
++    expect(approve).toBeDisabled()
++    fireEvent.click(approve)
++    expect(respond).not.toHaveBeenCalled()
++    expect(screen.getByText('DELETE FROM public.items WHERE id=1')).toBeInTheDocument()
++    fireEvent.click(screen.getByRole('checkbox'))
++    fireEvent.click(approve)
++    expect(respond).toHaveBeenCalledExactlyOnceWith({ id: 'approval-one', approved: true })
++  })
++
++  it('allows denial without deletion confirmation and never reuses confirmation for another call', () => {
++    const respond = vi.fn()
++    const { rerender } = render(view(part(), respond))
++    fireEvent.click(screen.getByRole('button', { name: 'Deny' }))
++    expect(respond).toHaveBeenCalledExactlyOnceWith({ id: 'approval-one', approved: false })
++    fireEvent.click(screen.getByRole('checkbox'))
++    rerender(view({ ...part(), toolCallId: 'call-two', approval: { id: 'approval-two' } }, respond))
++    expect(screen.getByRole('checkbox')).not.toBeChecked()
++    expect(screen.getByRole('button', { name: 'Authorize deletion and execute' })).toBeDisabled()
++  })
++
++  it('shows ordinary SQL approval without granting destructive approval', () => {
++    const respond = vi.fn()
++    render(view({ ...part('tool-execute_sql'), input: { sql: 'UPDATE public.items SET id=2', label: 'Update item' } }, respond))
++    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
++    fireEvent.click(screen.getByRole('button', { name: 'Approve execution' }))
++    expect(respond).toHaveBeenCalledExactlyOnceWith({ id: 'approval-one', approved: true })
++  })
++
++  it('cannot approve from read-only history or while a response is still streaming', () => {
++    const respond = vi.fn()
++    const { rerender } = render(view(part(), respond, true))
++    expect(screen.getByRole('checkbox')).toBeDisabled()
++    expect(screen.getByRole('button', { name: 'Authorize deletion and execute' })).toBeDisabled()
++    rerender(view(part(), respond, false, true))
++    expect(screen.getByRole('checkbox')).toBeDisabled()
++    expect(respond).not.toHaveBeenCalled()
++  })
++})
