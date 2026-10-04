@@ -231,7 +231,7 @@ class GitleaksRoleKeyRulesTest(unittest.TestCase):
                 with self.subTest(rule=rule_id, fixture=fixture[:40]):
                     self.assertIsNone(pattern.search(fixture), fixture)
 
-    def test_synthetic_fixture_needs_no_extra_allowlist(self) -> None:
+    def test_custom_rules_ignore_the_synthetic_fixture(self) -> None:
         for rule_id in JWT_RULE_IDS:
             with self.subTest(rule=rule_id):
                 self.assertIsNone(

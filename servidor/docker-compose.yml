@@ -170,6 +170,10 @@ services:
     logging: *vector-logging
     networks:
       - rede-supabase
+    ulimits:
+      nofile:
+        soft: ${REALTIME_RLIMIT_NOFILE}
+        hard: ${REALTIME_RLIMIT_NOFILE}
     depends_on:
       db:
         # Disable this if you are using an external Postgres database

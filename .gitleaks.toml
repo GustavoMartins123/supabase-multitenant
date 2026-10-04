@@ -50,3 +50,8 @@ paths = ['''\.venv/''', '''site-packages/''']
 description = "synthetic unsigned JWT fixture for sanitize_output tests"
 paths = ['''tests/smoke/test_host_agent_contract\.py''']
 fingerprint = "tests/smoke/test_host_agent_contract.py:jwt:658"
+
+[[allowlists]]
+description = "synthetic unsigned JWT fixture pinned by the gitleaks rules contract test (decodes to {\"role\":\"anon\"} with literal signature \"signature\")"
+paths = ['''tests/smoke/test_gitleaks_config\.py''']
+regexes = ['''eyJhbGciOiJIUzI1NiJ9\.eyJyb2xlIjoiYW5vbiJ9\.c2lnbmF0dXJl''']
