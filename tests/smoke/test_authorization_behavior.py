@@ -342,6 +342,25 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(response.status_code, 403, response.text)
             connection.assert_not_called()
 
+    async def test_assistant_privileges_require_dedicated_proof_and_current_administration(self):
+        from app.routers import assistant
+        path = "/api/projects/abcdefghijklmnopqrst/assistant/privileges"
+        body = json.dumps({"operation":"grant", "tables":["example"], "role":"authenticated", "privileges":["SELECT"],
+                           "label":"Application access", "permission":"full", "execution":{
+                               "chat_id":str(uuid.uuid4()), "call_id":"call", "approval_id":"approval",
+                               "tool":"manage_table_privileges", "sql_hash":"a"*64}}).encode()
+        with mock.patch.object(assistant, "tenant_connection") as connection:
+            for actor in (self.owner, self.admin2, self.ex_member, self.outsider):
+                response = await self.request("POST", path, actor=actor, body=body)
+                self.assertEqual(response.status_code, 403, response.text)
+            for actor, contract in ((self.owner,"sql"),(self.ex_member,"privileges"),(self.outsider,"privileges")):
+                headers = self.signed_headers("POST", path, actor, body)
+                proof = f"assistant-{contract}-execution-v1\n{headers['X-Internal-Signature']}\n{headers['X-User-Token']}"
+                headers["X-Assistant-Execution-Proof"] = hmac.new(GATEWAY_SECRET.encode(), proof.encode(), hashlib.sha256).hexdigest()
+                response = await self.request("POST", path, headers=headers, body=body)
+                self.assertEqual(response.status_code, 403, response.text)
+            connection.assert_not_called()
+
     async def test_public_reference_does_not_grant_administrative_access(self):
         for suffix in ("status", "logs/nginx", "settings", "collaboration", "restore-points", "telemetry/users", "functions"):
             with self.subTest(endpoint=suffix):

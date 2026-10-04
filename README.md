@@ -24,6 +24,8 @@ Assistant database tools share bounded UUID-scoped tenant pools: two reader and 
 
 Full access also supports `CREATE POLICY` on ordinary public tables with explicit `TO anon` or `TO authenticated`, and enabling/forcing RLS. Policy changes/removal and disabling/unforcing RLS require explicit confirmation. The assistant's `inspect_security` tool reads actual RLS flags, policies and effective application-role grants without arbitrary catalog SQL. Policies do not grant table privileges; enabled RLS without a policy denies ordinary application access by default. Ownership rules must come from your application, not an automatically generated `USING (true)` policy.
 
+Table privileges use a dedicated assistant tool: granting or revoking SELECT, INSERT, UPDATE or DELETE on public tables for `anon` or `authenticated` requires explicit confirmation; it does not change RLS or policies.
+
 ---
 
 ## Table of Contents

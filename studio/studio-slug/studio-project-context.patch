@@ -194,7 +194,7 @@ index c9ddbe78..3645214c 100644
  
              <div className="flex gap-3 items-center pointer-events-auto">
 diff --git a/apps/studio/components/ui/AIAssistantPanel/Message.Parts.tsx b/apps/studio/components/ui/AIAssistantPanel/Message.Parts.tsx
-index 047b51b6..28e37f35 100644
+index 047b51b6..5c8efa58 100644
 --- a/apps/studio/components/ui/AIAssistantPanel/Message.Parts.tsx
 +++ b/apps/studio/components/ui/AIAssistantPanel/Message.Parts.tsx
 @@ -2,10 +2,12 @@ import { UIMessage as VercelMessage } from '@ai-sdk/react'
@@ -214,13 +214,13 @@ index 047b51b6..28e37f35 100644
  }
  
  function MessagePartTool({ toolPart }: { toolPart: ToolUIPart }) {
-+  if (!IS_PLATFORM && ['tool-execute_function', 'tool-execute_sql', 'tool-execute_destructive_sql'].includes(toolPart.type)) {
++  if (!IS_PLATFORM && ['tool-execute_function', 'tool-execute_sql', 'tool-execute_destructive_sql', 'tool-manage_table_privileges'].includes(toolPart.type)) {
 +    return <SelfHostedExecution toolPart={toolPart} />
 +  }
    return (
      <Tool
        icon={
-@@ -253,6 +258,12 @@ export function MessagePartSwitcher({
+@@ -253,6 +258,13 @@ export function MessagePartSwitcher({
        return <MessagePart.Dynamic toolPart={part} />
      }
      case 'tool-list_policies':
@@ -230,10 +230,11 @@ index 047b51b6..28e37f35 100644
 +    case 'tool-list_functions':
 +    case 'tool-execute_function':
 +    case 'tool-execute_destructive_sql':
++    case 'tool-manage_table_privileges':
      case 'tool-search_docs':
      case 'tool-get_active_incidents':
      case 'tool-load_knowledge': {
-@@ -264,6 +275,7 @@ export function MessagePartSwitcher({
+@@ -264,6 +276,7 @@ export function MessagePartSwitcher({
        return <MessagePart.Text textPart={part} />
  
      case 'tool-execute_sql': {
@@ -1078,7 +1079,7 @@ new file mode 100644
 +              <option value="none">No database access</option>
 +              {status.maxPermission === 'full' && <><option value="schema">Public schema only</option><option value="read">Read public table rows</option><option value="write">Read and execute approved [AI] functions</option><option value="full">Full public-table SQL access</option></>}
 +            </select></label>
-+            <p className="text-sm text-foreground-light">Schema and row results are sent to your provider. Database tools require project administration. Full access enables supported public-table SQL, including CREATE TABLE, CREATE INDEX, INSERT and UPDATE, without individual approval. Policy creation and enabling RLS are supported. DELETE, existing-policy changes and removal of RLS protection require explicit confirmation. Full SQL uses tenant administration and can bypass row-level security; read-only tools respect RLS. Cluster administration and external URLs are not enabled.</p>
++            <p className="text-sm text-foreground-light">Schema and row results are sent to your provider. Database tools require project administration. Full access enables supported public-table SQL, including CREATE TABLE, CREATE INDEX, INSERT and UPDATE, without individual approval. Policy creation and enabling RLS are supported. Table privilege changes for anon/authenticated require explicit confirmation. DELETE, existing-policy changes and removal of RLS protection require explicit confirmation. Full SQL uses tenant administration and can bypass row-level security; read-only tools respect RLS. Cluster administration and external URLs are not enabled.</p>
 +            <Button block loading={saving} disabled={!model.trim() || ((changingKey || !status.hasKey) && !apiKey) || window.location.protocol !== 'https:'} onClick={save}>Save settings</Button>
 +          </>}
 +        </div>
@@ -1090,7 +1091,7 @@ diff --git a/apps/studio/components/ui/AIAssistantPanel/SelfHostedExecution.tsx 
 new file mode 100644
 --- /dev/null
 +++ b/apps/studio/components/ui/AIAssistantPanel/SelfHostedExecution.tsx
-@@ -0,0 +1,36 @@
+@@ -0,0 +1,37 @@
 +import type { ToolUIPart } from 'ai'
 +import { useState } from 'react'
 +import { Button } from 'ui'
@@ -1101,22 +1102,23 @@ new file mode 100644
 +  const { addToolApprovalResponse } = useMessageActionsContext()
 +  const { readOnly, isLoading } = useMessageInfoContext()
 +  const [confirmedCall, setConfirmedCall] = useState<string>()
-+  const destructive = toolPart.type === 'tool-execute_destructive_sql' || toolPart.type === 'tool-execute_function'
++  const privilegeChange = toolPart.type === 'tool-manage_table_privileges'
++  const destructive = toolPart.type === 'tool-execute_destructive_sql' || toolPart.type === 'tool-execute_function' || toolPart.type === 'tool-manage_table_privileges'
 +  const input = toolPart.input as { sql?: string; label?: string } | undefined
 +  const confirmed = confirmedCall === toolPart.toolCallId
 +  return <div className="my-4 space-y-3 rounded-md border p-3">
 +    <p className="font-medium">{input?.label ?? 'Database operation'}</p>
-+    {destructive && <p className="text-sm text-danger">This operation may permanently delete data, change existing access policies, remove RLS protection or have indirect side effects. Full access does not authorize deletion automatically.</p>}
++    {destructive && <p className="text-sm text-danger">{privilegeChange ? 'This changes which application roles can access these tables. RLS and policies remain unchanged.' : 'This operation may permanently delete data, change existing access policies, remove RLS protection or have indirect side effects. Full access does not authorize deletion automatically.'}</p>}
 +    <pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs">{input?.sql ?? JSON.stringify(toolPart.input, null, 2)}</pre>
 +    {toolPart.state === 'approval-requested' && <>
 +      <p className="text-sm">Review the exact operation before authorizing it. Approval applies only to this call.</p>
 +      {destructive && <label className="flex items-start gap-2 text-sm">
 +        <input type="checkbox" checked={confirmed} disabled={readOnly || isLoading} onChange={event => setConfirmedCall(event.target.checked ? toolPart.toolCallId : undefined)} />
-+        <span>I explicitly authorize deletion, security changes and the side effects of this exact operation.</span>
++        <span>{privilegeChange ? 'I explicitly authorize this exact table privilege change.' : 'I explicitly authorize deletion, security changes and the side effects of this exact operation.'}</span>
 +      </label>}
 +      <div className="flex gap-2">
 +        <Button disabled={readOnly || isLoading || !addToolApprovalResponse || (destructive && !confirmed)} onClick={() => addToolApprovalResponse?.({ id: toolPart.approval.id, approved: true })}>
-+          {destructive ? 'Authorize destructive or security changes' : 'Approve execution'}
++          {privilegeChange ? 'Authorize privilege change' : destructive ? 'Authorize destructive or security changes' : 'Approve execution'}
 +        </Button>
 +        <Button variant="default" disabled={readOnly || isLoading || !addToolApprovalResponse} onClick={() => addToolApprovalResponse?.({ id: toolPart.approval.id, approved: false })}>Deny</Button>
 +      </div>
@@ -1131,7 +1133,7 @@ diff --git a/apps/studio/components/ui/AIAssistantPanel/SelfHostedExecution.test
 new file mode 100644
 --- /dev/null
 +++ b/apps/studio/components/ui/AIAssistantPanel/SelfHostedExecution.test.tsx
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,77 @@
 +import { fireEvent, render, screen } from '@testing-library/react'
 +import type { ToolUIPart } from 'ai'
 +import { describe, expect, it, vi } from 'vitest'
@@ -1151,6 +1153,22 @@ new file mode 100644
 +)
 +
 +describe('Self-hosted database execution', () => {
++  for (const operation of ['grant', 'revoke']) {
++    it(`${operation} table privileges requires explicit confirmation of the exact targets`, () => {
++      const respond = vi.fn()
++      const toolPart = { ...part('tool-manage_table_privileges'), input: { operation, tables: ['clientes', 'pedidos'], role: 'authenticated', privileges: ['SELECT'], label: 'Table privileges' } }
++      render(view(toolPart, respond))
++      expect(screen.getByText(/RLS and policies remain unchanged/)).toBeInTheDocument()
++      expect(screen.getByText(/"authenticated"/)).toBeInTheDocument()
++      const approve = screen.getByRole('button', { name: 'Authorize privilege change' })
++      expect(approve).toBeDisabled()
++      fireEvent.click(approve)
++      expect(respond).not.toHaveBeenCalled()
++      fireEvent.click(screen.getByRole('checkbox'))
++      fireEvent.click(approve)
++      expect(respond).toHaveBeenCalledWith({ id: 'approval-one', approved: true })
++    })
++  }
 +  it('requires dedicated explicit deletion confirmation before approving', () => {
 +    const respond = vi.fn()
 +    render(view(part(), respond))

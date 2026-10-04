@@ -22,6 +22,8 @@ As ferramentas de banco exigem administração do projeto. Escolha sem acesso ao
 
 O acesso total também permite `CREATE POLICY` em tabelas públicas comuns com `TO anon` ou `TO authenticated` explícito, além de habilitar e forçar RLS. Alterar/remover policies ou desabilitar/deixar de forçar RLS exige confirmação explícita. A ferramenta `inspect_security` consulta o estado real de RLS, policies e privilégios efetivos dos papéis de aplicação, sem SQL arbitrário de catálogo. Policies não concedem privilégios de tabela; RLS habilitado sem policy nega acesso por padrão aos papéis comuns. A regra de propriedade deve vir da aplicação, não de uma policy automática com `USING (true)`.
 
+Os privilégios de tabela usam uma ferramenta específica do assistente: conceder ou revogar SELECT, INSERT, UPDATE ou DELETE em tabelas públicas para `anon` ou `authenticated` exige confirmação explícita; isso não altera RLS nem policies.
+
 ---
 
 ## Sumário

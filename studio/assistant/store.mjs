@@ -117,14 +117,14 @@ export class AssistantStore {
     this.db.prepare('DELETE FROM approvals WHERE expires_at < ?').run(Date.now())
     const query = this.db.prepare('INSERT OR IGNORE INTO approvals VALUES (?, ?, ?, ?, ?, ?, 0, ?)')
     for (const part of message.parts) {
-      if (['tool-execute_function', 'tool-execute_destructive_sql'].includes(part.type) && part.state === 'approval-requested') {
+      if (['tool-execute_function', 'tool-execute_destructive_sql', 'tool-manage_table_privileges'].includes(part.type) && part.state === 'approval-requested') {
         query.run(...this.scope(scope), chatId, part.toolCallId, part.approval.id, digest({ tool: part.type, input: part.input }), Date.now() + 300_000)
       }
     }
   }
 
   claimApproval(scope, chatId, callId, input, messages, toolName) {
-    if (!['execute_function', 'execute_destructive_sql'].includes(toolName)) throw new Error('Unknown approval tool')
+    if (!['execute_function', 'execute_destructive_sql', 'manage_table_privileges'].includes(toolName)) throw new Error('Unknown approval tool')
     const parts = messages.flatMap(message => message.parts ?? [])
     const matching = parts.filter(part => part.type === `tool-${toolName}` && part.toolCallId === callId)
     if (matching.length !== 1 || matching[0].approval?.approved !== true) throw new Error('Explicit approval is required')
@@ -143,7 +143,7 @@ export class AssistantStore {
   claimExecution(scope, chatId, callId, input, toolName) {
     uuid.parse(chatId)
     z.string().min(1).max(200).parse(callId)
-    z.enum(['execute_sql', 'execute_destructive_sql']).parse(toolName)
+    z.enum(['execute_sql', 'execute_destructive_sql', 'manage_table_privileges']).parse(toolName)
     const inserted = this.db.prepare('INSERT OR IGNORE INTO executions VALUES (?, ?, ?, ?, ?)')
       .run(...this.scope(scope), chatId, callId, digest({tool: toolName, input})).changes
     if (inserted !== 1) throw new Error('SQL tool call already consumed; no retry is allowed')

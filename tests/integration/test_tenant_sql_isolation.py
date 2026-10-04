@@ -229,6 +229,90 @@ class TenantSqlIsolationTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.tenant.fetchval("SELECT relrowsecurity FROM pg_class WHERE oid='public.orders'::regclass"))
         self.assertEqual(await self.tenant.fetchval("SELECT 1"), 1)
 
+    def privilege_change(self, operation="grant", tables=None, privileges=None, role="authenticated"):
+        from app.assistant_privileges import PrivilegeChange, PrivilegeChangeBody, privilege_sql
+        change = PrivilegeChange(operation=operation, tables=tables if tables is not None else ["orders"],
+                                 role=role, privileges=privileges if privileges is not None else ["SELECT"], label="Application privileges")
+        return PrivilegeChangeBody(**change.model_dump(), permission="full", execution={
+            "chat_id": uuid.uuid4(), "call_id": str(uuid.uuid4()), "approval_id": str(uuid.uuid4()),
+            "tool": "manage_table_privileges", "sql_hash": hashlib.sha256(privilege_sql(change).encode()).hexdigest(),
+        })
+
+    async def test_confirmed_grants_enable_real_rls_reads_and_revoke_preserves_policies(self):
+        from app.assistant_privileges import execute_privilege_change
+        from app.assistant_sql_execution import execute_assistant_sql
+        client = await self.rls_fixture()
+        owner_a, owner_b = uuid.uuid4(), uuid.uuid4()
+        await self.tenant.execute("CREATE TABLE public.orders(id integer,user_id uuid); ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY")
+        await execute_assistant_sql(self.tenant, self.sql_execution("CREATE POLICY own ON public.orders TO authenticated USING(user_id=auth.uid()) WITH CHECK(user_id=auth.uid())"))
+        await self.tenant.execute("INSERT INTO public.orders VALUES(1,$1),(2,$2)", owner_a, owner_b)
+        result = await execute_privilege_change(self.tenant, self.privilege_change())
+        self.assertTrue(result["effective_privileges"][0]["privileges"]["select"])
+        self.assertTrue(result["effective_privileges"][0]["rls_enabled"])
+        self.assertFalse(await client.fetchval("SELECT has_table_privilege('authenticated','public.orders','INSERT')"))
+        self.assertFalse(await client.fetchval("SELECT has_table_privilege('anon','public.orders','SELECT')"))
+        await client.execute("SET ROLE authenticated")
+        await client.fetchval("SELECT set_config('request.jwt.claims',$1,false)", json.dumps({"sub":str(owner_a)}))
+        self.assertEqual(await client.fetchval("SELECT array_agg(id) FROM public.orders"), [1])
+        await client.execute("RESET ROLE")
+        result = await execute_privilege_change(self.tenant, self.privilege_change(operation="revoke"))
+        self.assertFalse(result["effective_privileges"][0]["privileges"]["select"])
+        self.assertTrue(result["effective_privileges"][0]["rls_enabled"])
+        self.assertEqual(await client.fetchval("SELECT count(*) FROM pg_policies WHERE tablename='orders'"), 1)
+        await client.execute("SET ROLE authenticated")
+        with self.assertRaises(self.asyncpg.InsufficientPrivilegeError):
+            await client.fetchval("SELECT count(*) FROM public.orders")
+        await client.execute("RESET ROLE")
+
+    async def test_privilege_changes_reject_tampering_foreign_ownership_and_non_tables_atomically(self):
+        from app.assistant_privileges import execute_privilege_change
+        from fastapi import HTTPException
+        client = await self.rls_fixture()
+        await self.tenant.execute("CREATE TABLE public.orders(id integer); CREATE VIEW public.orders_view AS SELECT 1 AS id")
+        await client.execute("CREATE TABLE public.foreign_owned(id integer)")
+        body = self.privilege_change(); body.execution.sql_hash = "0" * 64
+        with self.assertRaises(HTTPException) as failure:
+            await execute_privilege_change(self.tenant, body)
+        self.assertEqual(failure.exception.status_code, 403)
+        for other in ("missing", "foreign_owned", "orders_view"):
+            with self.assertRaises(HTTPException):
+                await execute_privilege_change(self.tenant, self.privilege_change(tables=["orders", other]))
+            self.assertFalse(await client.fetchval("SELECT has_table_privilege('authenticated','public.orders','SELECT')"))
+
+    async def test_revocation_reports_remaining_column_or_public_access_without_claiming_denial(self):
+        from app.assistant_privileges import execute_privilege_change
+        client = await self.rls_fixture()
+        await self.tenant.execute("CREATE TABLE public.orders(id integer); GRANT SELECT(id) ON public.orders TO authenticated")
+        result = await execute_privilege_change(self.tenant, self.privilege_change(operation="revoke"))
+        self.assertFalse(result["effective_privileges"][0]["privileges"]["select"])
+        self.assertFalse(result["effective_privileges"][0]["privileges"]["column_select"])
+        await self.tenant.execute("GRANT SELECT(id) ON public.orders TO PUBLIC")
+        result = await execute_privilege_change(self.tenant, self.privilege_change(operation="revoke"))
+        self.assertFalse(result["effective_privileges"][0]["privileges"]["select"])
+        self.assertTrue(result["effective_privileges"][0]["privileges"]["column_select"])
+        await self.tenant.execute("GRANT SELECT ON public.orders TO PUBLIC")
+        result = await execute_privilege_change(self.tenant, self.privilege_change(operation="revoke"))
+        self.assertTrue(result["effective_privileges"][0]["privileges"]["select"])
+
+    async def test_privilege_deadline_rolls_back_and_releases_the_connection(self):
+        import asyncio
+        from app import assistant_privileges
+        from unittest import mock
+        client = await self.rls_fixture()
+        await self.tenant.execute("CREATE TABLE public.orders(id integer)")
+        lock = client.transaction()
+        await lock.start()
+        try:
+            await client.execute("LOCK TABLE public.orders IN ACCESS EXCLUSIVE MODE")
+            original_timeout = asyncio.timeout
+            with mock.patch.object(assistant_privileges.asyncio, "timeout", side_effect=lambda _: original_timeout(0.05)):
+                with self.assertRaises(TimeoutError):
+                    await assistant_privileges.execute_privilege_change(self.tenant, self.privilege_change())
+        finally:
+            await lock.rollback()
+        self.assertFalse(self.tenant.is_in_transaction())
+        self.assertFalse(await self.tenant.fetchval("SELECT has_table_privilege('authenticated','public.orders','SELECT')"))
+
     async def test_real_tenant_pools_reuse_reset_and_bound_database_sessions(self):
         import asyncio
         from app.tenant_pools import TenantPoolManager, TenantPoolUnavailable

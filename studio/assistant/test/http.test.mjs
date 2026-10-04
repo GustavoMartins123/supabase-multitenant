@@ -199,6 +199,33 @@ test('SQL diagnostics require matching code, status and SQLSTATE and never forwa
   assert.equal(new AssistantToolError(409,{code:'sql_object_exists',sqlstate:'42710'}).message.includes('destructive approval'),false)
 })
 
+for(const operation of ['grant','revoke']) {
+  test(`${operation} table privileges uses native approval before dispatch and cannot replay`,async t=>{
+    const input={operation,tables:['orders'],role:'authenticated',privileges:['SELECT'],label:'Table privileges'}
+    let turn=0
+    const model=new MockLanguageModelV3({doStream:async()=>({stream:simulateReadableStream({chunks:++turn===1
+      ? [{type:'stream-start',warnings:[]},{type:'tool-call',toolCallId:'privilege-call',toolName:'manage_table_privileges',input:JSON.stringify(input)},{...finish,finishReason:{unified:'tool-calls',raw:'tool_calls'}}]
+      : textChunks()})})})
+    const {store,request,calls}=await harness(t,model)
+    store.save(actor,{provider:'openai',model:'explicit-model',permission:'full',apiKey:'synthetic-provider-key-only'})
+    const chatId=randomUUID(),user={id:randomUUID(),role:'user',parts:[{type:'text',text:'Manage table access'}]}
+    const first=await request('/api/ai/sql/generate-v4','POST',{projectRef:actor.ref,chatId,messages:[user]})
+    const events=(await first.text()).split('\n').filter(line=>line.startsWith('data: {')).map(line=>JSON.parse(line.slice(6)))
+    const approval=events.find(event=>event.type==='tool-approval-request')
+    assert.ok(approval)
+    assert.equal(calls.includes('privileges'),false)
+    const assistant={id:randomUUID(),role:'assistant',parts:[{type:'tool-manage_table_privileges',state:'approval-responded',toolCallId:'privilege-call',input,approval:{id:approval.approvalId,approved:true}}]}
+    const next=await request('/api/ai/sql/generate-v4','POST',{projectRef:actor.ref,chatId,messages:[user,assistant]})
+    const output=await next.text()
+    assert.match(output,/tool-output-available/)
+    assert.equal(output.includes('"type":"error"'),false)
+    assert.equal(calls.filter(action=>action==='privileges').length,1)
+    const replay=await request('/api/ai/sql/generate-v4','POST',{projectRef:actor.ref,chatId,messages:[user,assistant]})
+    await replay.text()
+    assert.equal(calls.filter(action=>action==='privileges').length,1)
+  })
+}
+
 test('provider failure is sanitized and is not retried', async t => {
   const privateMessage = 'synthetic-provider-key-only'
   const model = new MockLanguageModelV3({ doStream:async () => { throw new Error(privateMessage) } })

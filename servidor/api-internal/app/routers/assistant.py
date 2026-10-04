@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.control_plane_service import audit_studio_action
 from app.assistant_sql_execution import ExecuteSqlBody, execute_assistant_sql
 from app.assistant_sql_errors import assistant_sql_failure
+from app.assistant_privileges import PrivilegeChangeBody, execute_privilege_change
 from app.assistant_security import SecurityBody, inspect_table_security
 from app.database import get_pool
 from app.dependencies import (
@@ -142,15 +143,43 @@ async def assistant_execute(ref: str, body: dict, request: Request, pool=Depends
     return await execute_project_function(ref, body, request, pool)
 
 
-@router.post("/api/projects/{ref}/assistant/sql")
-async def assistant_sql(ref: str, body: ExecuteSqlBody, request: Request, pool=Depends(get_pool)):
+def _require_execution_proof(request: Request, action: str):
     signature = request.headers.get("X-Internal-Signature", "")
     user_token = request.headers.get("X-User-Token", "")
     proof = request.headers.get("X-Assistant-Execution-Proof", "")
     expected = hmac.new(os.environ["STUDIO_GATEWAY_HMAC_SECRET"].encode(),
-                        f"assistant-sql-execution-v1\n{signature}\n{user_token}".encode(), hashlib.sha256).hexdigest()
+                        f"assistant-{action}-execution-v1\n{signature}\n{user_token}".encode(), hashlib.sha256).hexdigest()
     if not signature or not user_token or not hmac.compare_digest(expected, proof):
-        raise HTTPException(403, "SQL requires a verified assistant execution gateway")
+        raise HTTPException(403, "Operation requires a verified assistant execution gateway")
+
+
+@router.post("/api/projects/{ref}/assistant/privileges")
+async def assistant_privileges(ref: str, body: PrivilegeChangeBody, request: Request, pool=Depends(get_pool)):
+    _require_execution_proof(request, "privileges")
+    project, user, _ = await _context(ref, request, pool, database=True)
+    try:
+        async with pool.acquire() as audit_connection:
+            await audit_studio_action(
+                audit_connection, project_id=project["id"], actor_user_id=user["db_user_id"],
+                action="assistant_privileges_authorized", target_type="database_privileges", target_id=body.execution.sql_hash,
+                new_value={"operation": body.operation, "tables": body.tables, "role": body.role, "privileges": body.privileges,
+                           "chat_id": str(body.execution.chat_id), "call_id": body.execution.call_id, "approval_id": body.execution.approval_id},
+            )
+        async with tenant_connection(project, "admin") as connection:
+            return await execute_privilege_change(connection, body)
+    except HTTPException:
+        raise
+    except TimeoutError as exc:
+        raise HTTPException(504, "Privilege change timed out; the transaction was rolled back. No retry was attempted.") from exc
+    except asyncpg.PostgresError as exc:
+        raise assistant_sql_failure(exc) from exc
+    except Exception as exc:
+        raise HTTPException(502, "Privilege-change outcome could not be confirmed. Inspect security before continuing. No retry was attempted.") from exc
+
+
+@router.post("/api/projects/{ref}/assistant/sql")
+async def assistant_sql(ref: str, body: ExecuteSqlBody, request: Request, pool=Depends(get_pool)):
+    _require_execution_proof(request, "sql")
     project, user, _ = await _context(ref, request, pool, database=True)
     try:
         async with pool.acquire() as audit_connection:

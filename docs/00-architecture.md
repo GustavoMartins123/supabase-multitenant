@@ -134,7 +134,7 @@ Database tools travel from `studio-assistant` through OpenResty and Traefik to P
 
 Projects API maintains separate reader and administration connection pools keyed by tenant UUID. Schema, row and RLS metadata inspection use `tenant_ai_reader_<tenant_uuid_without_hyphens>` in read-only transactions. Full SQL uses `tenant_meta_<tenant_uuid_without_hyphens>` for tenant administration. These connections are separate from the Supavisor pools used by project applications.
 
-The selected access level determines which tools the Node service offers. Approved `[AI]` function calls and destructive SQL carry an explicit confirmation from the Studio interface, bound to the user, project, conversation and exact operation. Projects API validates SQL and executes it transactionally. Policy creation and RLS management use the same tool path; `inspect_security` reads policies and application-role privileges through the reader connection.
+The selected access level determines which tools the Node service offers. Approved `[AI]` function calls and destructive SQL carry an explicit confirmation from the Studio interface, bound to the user, project, conversation and exact operation. Projects API validates SQL and executes it transactionally. Table privilege changes carry the selected tables, application role and privileges through this same approval and execution path. Policy creation and RLS management use the same tool path; `inspect_security` reads policies and application-role privileges through the reader connection.
 
 External applications continue to use the public data plane. They do not access `studio-assistant` or share its provider credentials.
 

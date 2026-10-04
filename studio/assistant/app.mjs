@@ -7,6 +7,7 @@ import { levels, settingsSchema } from './store.mjs'
 import { assistantPrompt } from './prompts.mjs'
 import { assistantErrorMessage } from './errors.mjs'
 import { boundedAssistantStream } from './stream.mjs'
+import { privilegeSchema, privilegeSql } from './privileges.mjs'
 
 const chatSchema = z.object({ messages: z.array(z.any()).min(1).max(200), chatId: z.string().uuid(), projectRef: z.string() })
 const savedChat = z.object({ id: z.string().uuid(), name: z.string().max(200), messages: z.array(z.any()).max(200), createdAt: z.string(), updatedAt: z.string() })
@@ -46,6 +47,19 @@ export function makeTools(scope, configuration, call, store, chatId, messages, s
       } })
   }
   if (configuration.permission === 'full') {
+    tools.manage_table_privileges = tool({
+      description: 'Grant or revoke SELECT, INSERT, UPDATE or DELETE on explicitly named tenant-owned ordinary public tables, only for anon or authenticated. Every change requires exact human confirmation. This tool does not change RLS, policies, schema privileges, roles or grant options. Inspect security first, explain exposure, and inspect the result. Access may remain through other grantors, role inheritance or PUBLIC; inspect effective table and column privileges.',
+      inputSchema: privilegeSchema, needsApproval: true,
+      execute: async (input, { toolCallId }) => {
+        if (store.configuration(scope).permission !== 'full') throw new Error('Full privilege-management access is no longer authorized')
+        const sql = privilegeSql(input)
+        const approval = store.claimApproval(scope, chatId, toolCallId, input, messages, 'manage_table_privileges')
+        const execution = store.claimExecution(scope, chatId, toolCallId, input, 'manage_table_privileges')
+        execution.approval_id = approval.approval_id
+        execution.sql_hash = createHash('sha256').update(sql).digest('hex')
+        return call(scope, 'privileges', { ...input, permission: 'full', execution }, signal)
+      },
+    })
     for (const name of ['execute_sql', 'execute_destructive_sql']) {
       tools[name] = tool({ description: name === 'execute_sql'
         ? 'Execute one supported non-destructive public-table SQL statement directly with full access, without individual approval. CREATE TABLE, CREATE INDEX, INSERT, UPDATE, SELECT, CREATE POLICY and enabling/forcing RLS are supported. Policies must explicitly target anon/authenticated; auth.uid() and auth.jwt() are supported only inside policy expressions. ALTER/DROP POLICY, disabling RLS, DELETE and destructive changes are forbidden through this tool.'
@@ -142,7 +156,7 @@ export function createHandler({ store, secret, call, modelFactory = providerMode
         && ['approval-requested', 'approval-responded'].includes(part.state)))) {
         return send(res, 409, {message: 'Non-destructive SQL no longer uses approval requests. Start a new chat to execute with the current permission.'})
       }
-      const permittedParts = new Set(['text', 'reasoning', 'step-start', 'tool-inspect_schema', 'tool-inspect_security', 'tool-read_rows', 'tool-list_functions', 'tool-execute_function', 'tool-execute_sql', 'tool-execute_destructive_sql'])
+      const permittedParts = new Set(['text', 'reasoning', 'step-start', 'tool-inspect_schema', 'tool-inspect_security', 'tool-read_rows', 'tool-list_functions', 'tool-execute_function', 'tool-execute_sql', 'tool-execute_destructive_sql', 'tool-manage_table_privileges'])
       if (messages.some(message => !['user', 'assistant'].includes(message.role) || message.parts.some(part => !permittedParts.has(part.type)))) throw new Error('Unsupported assistant message content')
       phase = 'context'
       const context = await call(scope, 'context', undefined, abort.signal)
