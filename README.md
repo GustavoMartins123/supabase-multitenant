@@ -20,6 +20,8 @@ In the assistant panel, open **Assistant settings** to configure your provider (
 
 Database tools require project administration. Choose no database access, public schema only, bounded public-table reads, approved `[AI]` functions, or full public-table SQL access. Full access supports table creation, inserts and updates after individual approval of the exact SQL. Every `DELETE`, `DROP`, `TRUNCATE` and destructive alteration requires dedicated explicit deletion confirmation, even with full access. Read-only tools respect PostgreSQL RLS; full SQL uses tenant administration and can bypass RLS. Requests use Studio HTTPS, verified internal TLS and the administrative gateway; external applications still connect through Traefik and cannot access this service. See [Studio assistant](docs/00-architecture.md#studio-assistant) for storage, permissions and backup boundaries.
 
+Assistant database tools share bounded UUID-scoped tenant pools: two reader and two administration connections per tenant. Saturation returns an explicit error; it never opens overflow connections. Provider authentication errors identify HTTP 401 and direct you to **Assistant settings** to check or replace the saved key, without exposing provider responses or retrying.
+
 ---
 
 ## Table of Contents

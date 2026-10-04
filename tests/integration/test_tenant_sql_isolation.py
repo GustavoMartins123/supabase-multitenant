@@ -121,6 +121,59 @@ class TenantSqlIsolationTest(unittest.IsolatedAsyncioTestCase):
         await self.tenant.execute("CREATE TABLE public.future_table(id integer)")
         self.assertEqual(await reader.fetchval("SELECT count(*) FROM public.future_table"), 0)
 
+    async def test_real_tenant_pools_reuse_reset_and_bound_database_sessions(self):
+        import asyncio
+        from app.tenant_pools import TenantPoolManager, TenantPoolUnavailable
+
+        manager = TenantPoolManager(size_per_role=1, acquire_timeout=.1, idle_seconds=.2)
+        reader, reader_password = tenant_assistant_reader_credentials(self.ids[0], self.master)
+        admin, admin_password = tenant_meta_credentials(self.ids[0], self.master)
+        database = "_supabase_" + self.refs[0]
+        dsns = {"reader": self.dsn(database, reader, reader_password),
+                "admin": self.dsn(database, admin, admin_password)}
+        try:
+            async with manager.connection(self.ids[0], dsns, "reader") as first:
+                reader_pid = first.get_server_pid()
+                self.assertEqual(await first.fetchval("SELECT current_user"), reader)
+                await first.execute("SET search_path=pg_catalog; SET default_transaction_read_only=off")
+                with self.assertRaises(TenantPoolUnavailable):
+                    async with manager.connection(self.ids[0], dsns, "reader"):
+                        self.fail("Reader connection overflow")
+                async with manager.connection(self.ids[0], dsns, "admin") as second:
+                    self.assertNotEqual(second.get_server_pid(), reader_pid)
+                    self.assertEqual(await second.fetchval("SELECT current_user"), admin)
+            async with manager.connection(self.ids[0], dsns, "reader") as reused:
+                self.assertEqual(reused.get_server_pid(), reader_pid)
+                self.assertEqual(await reused.fetchval("SHOW default_transaction_read_only"), "on")
+                self.assertEqual(await reused.fetchval("SHOW search_path"), '"$user", public')
+                for query in ("INSERT INTO public.existing VALUES (1)", "SELECT * FROM auth.users", f'SET ROLE "{admin}"'):
+                    with self.assertRaises(self.asyncpg.PostgresError):
+                        await reused.execute(query)
+            async with manager.connection(self.ids[0], dsns, "admin") as connection:
+                await connection.execute("BEGIN; CREATE TABLE public.pool_rollback(id integer)")
+            async with manager.connection(self.ids[0], dsns, "admin") as connection:
+                self.assertFalse(connection.is_in_transaction())
+                self.assertIsNone(await connection.fetchval("SELECT to_regclass('public.pool_rollback')"))
+            started = asyncio.Event()
+
+            async def cancelled_query():
+                async with manager.connection(self.ids[0], dsns, "reader") as connection:
+                    started.set()
+                    await connection.execute("SELECT pg_sleep(10)")
+
+            task = asyncio.create_task(cancelled_query())
+            await started.wait()
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            async with manager.connection(self.ids[0], dsns, "reader") as connection:
+                self.assertEqual(await connection.fetchval("SELECT 1"), 1)
+            await asyncio.sleep(.3)
+            async with manager.connection(self.ids[0], dsns, "reader") as after_idle:
+                self.assertNotEqual(after_idle.get_server_pid(), reader_pid)
+        finally:
+            await manager.close()
+
     async def test_uuid_identity_survives_rename_and_does_not_follow_slug_reuse(self):
         _, password = tenant_meta_credentials(self.ids[0], self.master)
         await self.tenant.close()

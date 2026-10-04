@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto'
 import { authenticate } from './auth.mjs'
 import { levels, settingsSchema } from './store.mjs'
 import { assistantPrompt } from './prompts.mjs'
+import { assistantErrorMessage } from './errors.mjs'
 
 const chatSchema = z.object({ messages: z.array(z.any()).min(1).max(200), chatId: z.string().uuid(), projectRef: z.string() })
 const savedChat = z.object({ id: z.string().uuid(), name: z.string().max(200), messages: z.array(z.any()).max(200), createdAt: z.string(), updatedAt: z.string() })
@@ -112,12 +113,12 @@ export function createHandler({ store, secret, call, modelFactory = providerMode
       if (active.has(candidateKey) || active.size >= 16) return send(res, 429, { message: 'Assistant already running; stop it before starting another request' })
       activeKey = candidateKey
       active.add(activeKey)
-      phase = 'provider'
       timer = setTimeout(() => abort.abort(), 120_000)
       const model = modelFactory(config)
       config.apiKey = undefined
       if (req.url === '/api/ai/code/complete') {
         const data = z.object({ projectRef: z.literal(scope.ref), completionMetadata: z.object({ textBeforeCursor: z.string().max(20000).optional(), textAfterCursor: z.string().max(20000).optional() }).passthrough(), prompt: z.string().max(20000).optional() }).parse(body)
+        phase = 'provider'
         const result = await generateText({ model, maxRetries: 0, abortSignal: abort.signal, maxOutputTokens: 4096,
           system: 'Complete the requested SQL. Return only the completion, without markdown or explanations. Do not execute anything.',
           prompt: JSON.stringify(data) })
@@ -130,9 +131,11 @@ export function createHandler({ store, secret, call, modelFactory = providerMode
       const messages = validation.data
       const permittedParts = new Set(['text', 'reasoning', 'step-start', 'tool-inspect_schema', 'tool-read_rows', 'tool-list_functions', 'tool-execute_function', 'tool-execute_sql', 'tool-execute_destructive_sql'])
       if (messages.some(message => !['user', 'assistant'].includes(message.role) || message.parts.some(part => !permittedParts.has(part.type)))) throw new Error('Unsupported assistant message content')
+      phase = 'context'
       const context = await call(scope, 'context', undefined, abort.signal)
       if (context.project_id !== scope.projectId || context.user_id !== scope.userId || (config.permission !== 'none' && context.role !== 'admin')) throw new Error('Assistant authorization changed')
       const tools = makeTools(scope, config, call, store, data.chatId, messages, abort.signal)
+      phase = 'provider'
       const result = streamText({ model, tools, messages: await convertToModelMessages(messages, { tools }), maxRetries: 0,
         onError: () => undefined,
         abortSignal: abort.signal, stopWhen: stepCountIs(5), maxOutputTokens: 4096,
@@ -142,14 +145,14 @@ export function createHandler({ store, secret, call, modelFactory = providerMode
         res.once('finish', resolve)
         res.once('close', resolve)
         result.pipeUIMessageStreamToResponse(res, { originalMessages: messages,
-          onError: () => 'Assistant provider or tool failed. No retry was attempted.',
+          onError: assistantErrorMessage,
           onFinish: ({ responseMessage, isAborted }) => {
             if (!isAborted) store.rememberApprovals(scope, data.chatId, responseMessage)
           } })
       })
-    } catch {
+    } catch (error) {
       if (!res.headersSent) send(res, phase === 'authentication' ? 401 : phase === 'validation' ? 400 : 502,
-        { message: phase === 'authentication' ? 'Assistant authentication failed' : phase === 'validation' ? 'Invalid assistant configuration or request' : 'Assistant provider or tool failed. No retry was attempted.' })
+        { message: phase === 'authentication' ? 'Assistant authentication failed' : phase === 'validation' ? 'Invalid assistant configuration or request' : phase === 'context' ? 'Assistant project authorization could not be verified.' : assistantErrorMessage(error) })
       else if (!res.writableEnded) res.end()
     } finally {
       clearTimeout(timer)

@@ -287,6 +287,8 @@ PLATFORM_PG_CONTROL_ROLES=(
 )
 PLATFORM_PG_SYSTEM_CONNECTIONS=20
 PLATFORM_PG_POOL_PER_PROJECT=40
+PLATFORM_PG_TENANT_TOOLS_PER_PROJECT=4
+PLATFORM_PG_TENANT_TOOLS_MAX_TENANTS=16
 
 platform_service_cpu_centi() {
     local service="$1" shared_cpu_centi="$2" entry weight=0 total=0 floor=0
@@ -358,12 +360,15 @@ platform_role_connection_limit() {
 }
 
 platform_control_connections() {
-    local projects="$1" entry total=0 minimum per_project
+    local projects="$1" entry total=0 minimum per_project tool_tenants="$1"
     for entry in "${PLATFORM_PG_CONTROL_ROLES[@]}"; do
         minimum="$(printf '%s' "$entry" | cut -d: -f2)"
         per_project="$(printf '%s' "$entry" | cut -d: -f3)"
         total=$(( total + minimum + per_project * projects ))
     done
+    [ "$tool_tenants" -le "$PLATFORM_PG_TENANT_TOOLS_MAX_TENANTS" ] \
+        || tool_tenants="$PLATFORM_PG_TENANT_TOOLS_MAX_TENANTS"
+    total=$(( total + tool_tenants * PLATFORM_PG_TENANT_TOOLS_PER_PROJECT ))
     printf '%s' "$total"
 }
 

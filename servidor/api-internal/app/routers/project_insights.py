@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 from app.control_plane_service import audit_studio_action
+from app.tenant_pools import tenant_connection
 from app.database import get_pool
 from app.identity_schemas import ProjectIdentity, JobIdentity
 from app.dependencies import audit_project_member_change, ensure_project_admin_access, ensure_project_member_access, get_project_role, get_public_project_row, require_synced_user_record, resolve_authenticated_user, upsert_project_member
@@ -482,28 +483,27 @@ async def get_project_ai_functions(
         project_row = await get_public_project_row(conn, ref)
         await ensure_project_member_access(conn, project_id=project_row["id"], auth_user=auth_user)
 
-    proj_conn = None
     try:
-        proj_conn = await asyncpg.connect(get_project_meta_connection_string(project_row["name"], project_row["tenant_uuid"]), timeout=5, command_timeout=30)
-        rows = await proj_conn.fetch("""
-            SELECT
-                p.proname AS name,
-                pg_get_function_identity_arguments(p.oid) AS argument_types,
-                pg_get_function_result(p.oid) AS return_type,
-                obj_description(p.oid, 'pg_proc') AS comment
-            FROM pg_proc p
-            JOIN pg_namespace n ON n.oid = p.pronamespace
-            WHERE n.nspname = 'public'
-              AND p.prokind = 'f'
-              AND p.proargmodes IS NULL
-              AND obj_description(p.oid, 'pg_proc') ILIKE '%[AI]%'
-            ORDER BY p.proname, p.oid
-        """)
+        async with tenant_connection(project_row, "admin") as proj_conn:
+            rows = await proj_conn.fetch("""
+                SELECT
+                    p.proname AS name,
+                    pg_get_function_identity_arguments(p.oid) AS argument_types,
+                    pg_get_function_result(p.oid) AS return_type,
+                    obj_description(p.oid, 'pg_proc') AS comment
+                FROM pg_proc p
+                JOIN pg_namespace n ON n.oid = p.pronamespace
+                WHERE n.nspname = 'public'
+                  AND p.prokind = 'f'
+                  AND p.proargmodes IS NULL
+                  AND obj_description(p.oid, 'pg_proc') ILIKE '%[AI]%'
+                ORDER BY p.proname, p.oid
+            """)
+
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(503, "Cannot connect to project database") from exc
-    finally:
-        if proj_conn:
-            await proj_conn.close()
 
     functions = []
     for r in rows:
@@ -551,92 +551,90 @@ async def execute_project_function(
         )
         project_id = project_row["id"]
 
-    proj_conn = None
     try:
-        proj_conn = await asyncpg.connect(get_project_meta_connection_string(project_row["name"], project_row["tenant_uuid"]), timeout=5, command_timeout=30)
+        async with tenant_connection(project_row, "admin") as proj_conn:
+            candidates = await proj_conn.fetch("""
+                SELECT
+                    p.oid,
+                    p.proname AS name,
+                    p.proargnames AS argument_names,
+                    p.pronargs AS argument_count,
+                    p.pronargdefaults AS default_count
+                FROM pg_proc p
+                JOIN pg_namespace n ON p.pronamespace = n.oid
+                WHERE n.nspname = 'public'
+                  AND p.prokind = 'f'
+                  AND p.proargmodes IS NULL
+                AND p.proname = $1
+                  AND obj_description(p.oid, 'pg_proc') ILIKE '%[AI]%'
+                ORDER BY p.oid
+            """, function_name)
 
-        candidates = await proj_conn.fetch("""
-            SELECT
-                p.oid,
-                p.proname AS name,
-                p.proargnames AS argument_names,
-                p.pronargs AS argument_count,
-                p.pronargdefaults AS default_count
-            FROM pg_proc p
-            JOIN pg_namespace n ON p.pronamespace = n.oid
-            WHERE n.nspname = 'public'
-              AND p.prokind = 'f'
-              AND p.proargmodes IS NULL
-            AND p.proname = $1
-              AND obj_description(p.oid, 'pg_proc') ILIKE '%[AI]%'
-            ORDER BY p.oid
-        """, function_name)
+            if not candidates:
+                raise HTTPException(404, f"Function '{function_name}' not found in public schema")
+            if len(candidates) > 1:
+                raise HTTPException(
+                    409,
+                    "AI tool com overload ambíguo; mantenha uma única assinatura por nome",
+                )
 
-        if not candidates:
-            raise HTTPException(404, f"Function '{function_name}' not found in public schema")
-        if len(candidates) > 1:
-            raise HTTPException(
-                409,
-                "AI tool com overload ambíguo; mantenha uma única assinatura por nome",
+            function = candidates[0]
+            argument_count = int(function["argument_count"] or 0)
+            default_count = int(function["default_count"] or 0)
+            argument_names = list(function["argument_names"] or [])[:argument_count]
+            if len(argument_names) != argument_count or any(
+                not name or not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", name)
+                for name in argument_names
+            ):
+                raise HTTPException(409, "AI tools exigem nomes em todos os argumentos")
+
+            unknown_arguments = set(arguments) - set(argument_names)
+            if unknown_arguments:
+                raise HTTPException(
+                    400,
+                    f"Unexpected parameters: {', '.join(sorted(unknown_arguments))}",
+                )
+            required_count = argument_count - default_count
+            missing = [name for name in argument_names[:required_count] if name not in arguments]
+            if missing:
+                raise HTTPException(400, f"Missing required parameter: {missing[0]}")
+
+            values: list[Any] = []
+            named_placeholders: list[str] = []
+            for name in argument_names:
+                if name not in arguments:
+                    continue
+                values.append(arguments[name])
+                named_placeholders.append(f'"{name}" => ${len(values)}')
+
+            query = (
+                f'SELECT public."{function_name}"('
+                + ", ".join(named_placeholders)
+                + f") AS result LIMIT {AI_TOOL_MAX_ROWS}"
             )
+            async with proj_conn.transaction():
+                await proj_conn.fetchval(
+                    "SELECT set_config('statement_timeout', $1, true)",
+                    str(AI_TOOL_TIMEOUT_MS),
+                )
+                rows = await proj_conn.fetch(query, *values)
 
-        function = candidates[0]
-        argument_count = int(function["argument_count"] or 0)
-        default_count = int(function["default_count"] or 0)
-        argument_names = list(function["argument_names"] or [])[:argument_count]
-        if len(argument_names) != argument_count or any(
-            not name or not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]*", name)
-            for name in argument_names
-        ):
-            raise HTTPException(409, "AI tools exigem nomes em todos os argumentos")
+            async with pool.acquire() as conn:
+                await audit_studio_action(
+                    conn,
+                    project_id=project_id,
+                    actor_user_id=auth_user["db_user_id"],
+                    action="project_ai_tool_executed",
+                    target_type="database_function",
+                    target_id=f"public.{function_name}",
+                    new_value={
+                        "argument_names": sorted(arguments.keys()),
+                        "returned_rows": len(rows),
+                        "row_limit": AI_TOOL_MAX_ROWS,
+                    },
+                )
 
-        unknown_arguments = set(arguments) - set(argument_names)
-        if unknown_arguments:
-            raise HTTPException(
-                400,
-                f"Unexpected parameters: {', '.join(sorted(unknown_arguments))}",
-            )
-        required_count = argument_count - default_count
-        missing = [name for name in argument_names[:required_count] if name not in arguments]
-        if missing:
-            raise HTTPException(400, f"Missing required parameter: {missing[0]}")
-
-        values: list[Any] = []
-        named_placeholders: list[str] = []
-        for name in argument_names:
-            if name not in arguments:
-                continue
-            values.append(arguments[name])
-            named_placeholders.append(f'"{name}" => ${len(values)}')
-
-        query = (
-            f'SELECT public."{function_name}"('
-            + ", ".join(named_placeholders)
-            + f") AS result LIMIT {AI_TOOL_MAX_ROWS}"
-        )
-        async with proj_conn.transaction():
-            await proj_conn.fetchval(
-                "SELECT set_config('statement_timeout', $1, true)",
-                str(AI_TOOL_TIMEOUT_MS),
-            )
-            rows = await proj_conn.fetch(query, *values)
-
-        async with pool.acquire() as conn:
-            await audit_studio_action(
-                conn,
-                project_id=project_id,
-                actor_user_id=auth_user["db_user_id"],
-                action="project_ai_tool_executed",
-                target_type="database_function",
-                target_id=f"public.{function_name}",
-                new_value={
-                    "argument_names": sorted(arguments.keys()),
-                    "returned_rows": len(rows),
-                    "row_limit": AI_TOOL_MAX_ROWS,
-                },
-            )
-
-        return [dict(row) for row in rows]
+            return [dict(row) for row in rows]
 
     except HTTPException:
         raise
@@ -644,6 +642,3 @@ async def execute_project_function(
         raise HTTPException(504, "AI tool execution timed out") from exc
     except Exception as exc:
         raise HTTPException(400, "Function execution failed") from exc
-    finally:
-        if proj_conn:
-            await proj_conn.close()

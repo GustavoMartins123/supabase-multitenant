@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncpg
 import hashlib
 import hmac
 import os
@@ -15,7 +14,7 @@ from app.dependencies import (
     ensure_project_admin_access, ensure_project_member_access,
     get_project_role, get_public_project_row, resolve_authenticated_user,
 )
-from app.meta_connections import get_project_assistant_reader_connection_string, get_project_meta_connection_string
+from app.tenant_pools import tenant_connection
 from app.routers.project_insights import execute_project_function, get_project_ai_functions
 from app.validation import validate_project_ref
 
@@ -45,14 +44,8 @@ async def _context(ref: str, request: Request, pool, *, database: bool = False):
     return project, user, role
 
 
-async def _connect(project):
-    try:
-        return await asyncpg.connect(
-            get_project_assistant_reader_connection_string(project["name"], project["tenant_uuid"]),
-            timeout=5, command_timeout=15,
-        )
-    except Exception as exc:
-        raise HTTPException(503, "Assistant project database unavailable") from exc
+def _connect(project):
+    return tenant_connection(project, "reader")
 
 
 async def _audit(pool, project, user, action, target, count):
@@ -73,53 +66,49 @@ async def assistant_context(ref: str, request: Request, pool=Depends(get_pool)):
 @router.get("/api/projects/{ref}/assistant/schema")
 async def assistant_schema(ref: str, request: Request, pool=Depends(get_pool)):
     project, user, _ = await _context(ref, request, pool, database=True)
-    connection = await _connect(project)
     try:
-        async with connection.transaction(readonly=True):
-            await connection.execute("SET LOCAL statement_timeout = '10s'")
-            rows = await connection.fetch("""
-                SELECT c.relname AS table_name, a.attname AS column_name,
-                       format_type(a.atttypid, a.atttypmod) AS data_type
-                FROM pg_catalog.pg_class c
-                JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
-                JOIN pg_catalog.pg_attribute a ON a.attrelid=c.oid
-                WHERE n.nspname='public' AND c.relkind='r'
-                  AND a.attnum > 0 AND NOT a.attisdropped
-                ORDER BY c.relname, a.attnum LIMIT 1000
-            """)
+        async with _connect(project) as connection:
+            async with connection.transaction(readonly=True):
+                await connection.execute("SET LOCAL statement_timeout = '10s'")
+                rows = await connection.fetch("""
+                    SELECT c.relname AS table_name, a.attname AS column_name,
+                           format_type(a.atttypid, a.atttypmod) AS data_type
+                    FROM pg_catalog.pg_class c
+                    JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+                    JOIN pg_catalog.pg_attribute a ON a.attrelid=c.oid
+                    WHERE n.nspname='public' AND c.relkind='r'
+                      AND a.attnum > 0 AND NOT a.attisdropped
+                    ORDER BY c.relname, a.attnum LIMIT 1000
+                """)
         await _audit(pool, project, user, "assistant_schema_read", "public", len(rows))
         return [dict(row) for row in rows]
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(502, "Assistant schema query failed") from exc
-    finally:
-        await connection.close()
 
 
 @router.post("/api/projects/{ref}/assistant/rows")
 async def assistant_rows(ref: str, body: ReadRowsBody, request: Request, pool=Depends(get_pool)):
     project, user, _ = await _context(ref, request, pool, database=True)
-    connection = await _connect(project)
     try:
-        async with connection.transaction(readonly=True):
-            await connection.execute("SET LOCAL statement_timeout = '10s'")
-            ordinary = await connection.fetchval("""
-                SELECT c.oid FROM pg_catalog.pg_class c
-                JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
-                WHERE n.nspname='public' AND c.relname=$1 AND c.relkind='r'
-            """, body.table)
-            if not ordinary:
-                raise HTTPException(404, "Assistant reads only ordinary public tables")
-            rows = await connection.fetch(f'SELECT * FROM public."{body.table}" LIMIT $1', body.limit)
+        async with _connect(project) as connection:
+            async with connection.transaction(readonly=True):
+                await connection.execute("SET LOCAL statement_timeout = '10s'")
+                ordinary = await connection.fetchval("""
+                    SELECT c.oid FROM pg_catalog.pg_class c
+                    JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+                    WHERE n.nspname='public' AND c.relname=$1 AND c.relkind='r'
+                """, body.table)
+                if not ordinary:
+                    raise HTTPException(404, "Assistant reads only ordinary public tables")
+                rows = await connection.fetch(f'SELECT * FROM public."{body.table}" LIMIT $1', body.limit)
         await _audit(pool, project, user, "assistant_rows_read", f"public.{body.table}", len(rows))
         return [dict(row) for row in rows]
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(502, "Assistant row query failed") from exc
-    finally:
-        await connection.close()
 
 
 @router.get("/api/projects/{ref}/assistant/functions")
@@ -145,13 +134,6 @@ async def assistant_sql(ref: str, body: ExecuteSqlBody, request: Request, pool=D
         raise HTTPException(403, "SQL requires a verified assistant approval gateway")
     project, user, _ = await _context(ref, request, pool, database=True)
     try:
-        connection = await asyncpg.connect(
-            get_project_meta_connection_string(project["name"], project["tenant_uuid"]),
-            timeout=5, command_timeout=15,
-        )
-    except Exception as exc:
-        raise HTTPException(503, "Assistant project database unavailable") from exc
-    try:
         async with pool.acquire() as audit_connection:
             await audit_studio_action(
                 audit_connection, project_id=project["id"], actor_user_id=user["db_user_id"],
@@ -159,11 +141,10 @@ async def assistant_sql(ref: str, body: ExecuteSqlBody, request: Request, pool=D
                 new_value={"tool": body.approval.tool, "chat_id": str(body.approval.chat_id),
                            "call_id": body.approval.call_id, "approval_id": body.approval.approval_id},
             )
-        _, result = await execute_approved_sql(connection, body)
+        async with tenant_connection(project, "admin") as connection:
+            _, result = await execute_approved_sql(connection, body)
         return result
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(502, "Assistant SQL failed; the transaction was rolled back") from exc
-    finally:
-        await connection.close()

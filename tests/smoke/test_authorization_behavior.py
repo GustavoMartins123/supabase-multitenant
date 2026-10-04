@@ -314,7 +314,7 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
             "chat_id": str(uuid.uuid4()), "call_id": "call", "approval_id": "approval",
             "tool": "execute_destructive_sql", "sql_hash": hashlib.sha256(sql.encode()).hexdigest(),
         }}).encode()
-        with mock.patch.object(assistant.asyncpg, "connect") as connection:
+        with mock.patch.object(assistant, "tenant_connection") as connection:
             for actor in (self.owner, self.admin2, self.ex_member, self.outsider):
                 response = await self.request("POST", path, actor=actor, body=body)
                 self.assertEqual(response.status_code, 403, response.text)
@@ -332,7 +332,7 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
             "chat_id": str(uuid.uuid4()), "call_id": "call", "approval_id": "approval",
             "tool": "execute_sql", "sql_hash": hashlib.sha256(sql.encode()).hexdigest(),
         }}).encode()
-        with mock.patch.object(assistant.asyncpg, "connect") as connection:
+        with mock.patch.object(assistant, "tenant_connection") as connection:
             for actor in (self.ex_member, self.outsider):
                 headers = self.signed_headers("POST", path, actor, body)
                 proof = f"assistant-sql-approval-v1\n{headers['X-Internal-Signature']}\n{headers['X-User-Token']}"

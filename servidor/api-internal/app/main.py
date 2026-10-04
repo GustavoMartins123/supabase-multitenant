@@ -112,6 +112,7 @@ from app.project_identity import (
     reconcile_project_tenant_uuids,
 )
 from app.database import close_pool, get_pool, initialize_pool
+from app.tenant_pools import tenant_pools
 from app.schema_migrations import verify_control_plane_schema
 from app.job_watch import job_change_hub
 from app.dependencies import (
@@ -533,6 +534,7 @@ async def shutdown():
     await stop_automatic_key_rotation()
     await action_queue.shutdown()
     await job_change_hub.close()
+    await tenant_pools.close()
     await close_pool()
     print("✅ Database pool closed")
 

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto'
 import { MockLanguageModelV3, simulateReadableStream } from 'ai/test'
+import { APICallError } from 'ai'
 import { createHandler } from '../app.mjs'
 import { AssistantStore } from '../store.mjs'
 
@@ -90,6 +91,34 @@ test('native approval round trip is recorded, exact and single-use before execut
   const nextOutput = await next.text()
   assert.equal(calls.filter(action=>action==='execute').length,1,nextOutput)
   assert.throws(()=>store.claimApproval(actor,chatId,'call-write',input,[assistant],'execute_function'))
+})
+
+for (const statusCode of [400, 401, 402, 403, 404, 429]) {
+  test(`provider HTTP ${statusCode} is explicit without exposing private errors`, async t => {
+    const secretText = 'synthetic-secret-provider-body'
+    const model = new MockLanguageModelV3({ doStream: async () => {
+      throw new APICallError({ message: secretText, url: 'https://provider.invalid',
+        requestBodyValues: { apiKey: secretText }, statusCode, responseBody: secretText })
+    } })
+    const { store, request } = await harness(t, model)
+    store.save(actor, {provider:'openrouter',model:'explicit-model',permission:'none',apiKey:'synthetic-provider-key-only'})
+    const response = await request('/api/ai/sql/generate-v4','POST',{
+      projectRef:actor.ref,chatId:randomUUID(),messages:[{id:randomUUID(),role:'user',parts:[{type:'text',text:'Hello'}]}]})
+    const output = await response.text()
+    assert.match(output, new RegExp(`HTTP ${statusCode}`))
+    assert.match(output, /No retry/)
+    assert.equal(output.includes(secretText), false)
+    assert.equal(model.doStreamCalls.length, 1)
+  })
+}
+
+test('invalid messages are refused before contacting provider', async t => {
+  const model = new MockLanguageModelV3({ doStream: {stream:simulateReadableStream({chunks:textChunks()})} })
+  const { store, request } = await harness(t, model)
+  store.save(actor,{provider:'openai',model:'explicit-model',permission:'none',apiKey:'synthetic-provider-key-only'})
+  const response = await request('/api/ai/sql/generate-v4','POST',{projectRef:actor.ref,chatId:randomUUID(),messages:[{role:'system',parts:[]}]})
+  assert.equal(response.status, 400)
+  assert.equal(model.doStreamCalls.length, 0)
 })
 
 for (const name of ['execute_sql', 'execute_destructive_sql']) {
