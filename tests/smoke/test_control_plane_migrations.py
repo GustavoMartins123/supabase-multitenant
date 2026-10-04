@@ -245,7 +245,8 @@ class StartupDoesNotMigrateTest(unittest.TestCase):
             "ensure_key_authorizer_role",
             "ensure_host_agent_rw_role",
             "ensure_platform_app_role",
-            "ensure_platform_meta_admin_role",
+              "ensure_platform_meta_admin_role",
+              "ensure_client_configuration_reader_role",
         ):
             self.assertIn(role, roles)
         self.assertIn(
@@ -254,7 +255,8 @@ class StartupDoesNotMigrateTest(unittest.TestCase):
             "        ensure_key_authorizer_role,\n"
             "        ensure_platform_app_role,\n"
             "        ensure_platform_meta_admin_role,\n"
-            "        ensure_tenant_meta_roles,\n"
+              "        ensure_tenant_meta_roles,\n"
+              "        ensure_client_configuration_reader_role,\n"
             "    )",
             (APP / "schema_migrations.py").read_text(encoding="utf-8"),
         )
@@ -344,7 +346,7 @@ class DeployWiringTest(unittest.TestCase):
     def test_migrations_run_in_a_dedicated_one_shot_service(self) -> None:
         migrator = self._service("control-plane-migrations")
         self.assertIn(
-            '["python", "-m", "app.schema_migrations", "apply"]', migrator
+            'python -m app.schema_migrations apply && python -m app.migrate_client_configuration_material', migrator
         )
         self.assertIn('restart: "no"', migrator)
         self.assertIn("KEY_AUTHORIZER_DB_PASSWORD", migrator)
@@ -353,7 +355,7 @@ class DeployWiringTest(unittest.TestCase):
         self.assertIn("no-new-privileges:true", migrator)
 
     def test_runtime_services_start_only_after_a_successful_migration(self) -> None:
-        for service in ("projects-api", "key-authorizer"):
+        for service in ("projects-api", "key-authorizer", "client-configuration"):
             with self.subTest(service=service):
                 block = self._service(service)
                 self.assertIn("depends_on:", block)

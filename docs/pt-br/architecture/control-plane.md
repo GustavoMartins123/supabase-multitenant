@@ -106,22 +106,30 @@ As rotas ficam sob `/api/projects/{project_ref}/api-key-*` e `/opaque-api-keys/m
 
 ### Configuração pública por aplicativo
 
-Cada slot publishable possui uma `application_ref` opaca e estável; slots secret
-não possuem referência. O gateway expõe `GET /config/{application_ref}` sem sessão
-de usuário e assina sua chamada à API Python com o HMAC interno existente.
-O contrato contém somente `supabase_url`, `publishable_key`, `key_id` e
-`expires_at`, obrigatório e anulável.
+A descoberta pertence ao plano de dados. O Traefik público encaminha
+`GET /config/{application_ref}` diretamente para `client-configuration:18011`.
+O Studio e a API administrativa `:18000` não participam dessas consultas.
 
-A API lê um snapshot transacional do registro, aplica o mesmo corte efetivo do
-key-authorizer e verifica o material criptografado. Não publica versões futuras
-ou sem confirmação. Revogação, expiração, identidade divergente, SQL indisponível
-ou material ausente resultam em erro explícito, sem slot padrão ou chave antiga.
+Cada slot publishable tem uma referência opaca estável; slots secret não têm
+descoberta. O contrato devolve somente `supabase_url`, `publishable_key`, `key_id`
+e `expires_at`, obrigatório e anulável. A identidade SQL dedicada só pode ler a
+view `public_client_configurations`, não usuários, segredos, reveals criptografados
+ou as tabelas subjacentes. O serviço não recebe master key, HMAC administrativo
+ou envs de projetos, e sua rede Docker só conecta Traefik e PostgreSQL.
 
-Renomear o projeto não altera a descoberta. Regenerar sua referência pública
-altera a URL devolvida, não o endereço de configuração do aplicativo.
-As respostas usam `no-store`; o gateway limita requisições e permite leitura
-cross-origin sem cookies. A referência é pública e não autentica o consumidor:
-sessões, RLS e políticas dos serviços continuam responsáveis pela autorização.
+O control plane grava o material público na mesma transação que emite a chave.
+Um trigger rejeita material secret ou hash divergente. A implantação preenche
+as versões publishable existentes de forma offline; consultas públicas nunca
+descriptografam segredos. A view aplica o mesmo corte efetivo do key-authorizer:
+pending confirmado e vencido para ativação suprime o predecessor, mesmo expirado.
+Não entrega versões futuras ou sem confirmação; ausência, revogação, expiração
+ou SQL indisponível resultam em erro explícito, sem outra chave ou slot.
+
+Renomear não altera a descoberta; regenerar a URL muda apenas `supabase_url` na
+resposta. Respostas usam `no-store` e CORS sem cookies; Traefik limita requisições.
+O aplicativo recria seu cliente ao mudar `key_id`, sem repetir escritas.
+A descoberta é pública: sessões, RLS e políticas continuam responsáveis pela
+autorização.
 
 ### Jobs
 

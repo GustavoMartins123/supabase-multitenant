@@ -98,31 +98,36 @@ Routes live under `/api/projects/{project_ref}/api-key-*` and `/opaque-api-keys/
 
 ### Public application configuration
 
+Public discovery is a data-plane service, not a route in the Projects API.
+Traefik routes `GET /config/{application_ref}` on the public Supabase origin
+directly to `client-configuration:18011`. Neither Studio nor the administrative
+API `:18000` participates in these requests.
+
 Each publishable slot has a unique, stable `application_ref`; secret slots have
-no reference. `GET /config/{application_ref}` is public on the Studio gateway,
-which authenticates its Python request with the existing internal HMAC protocol.
-The response contains only `supabase_url`, `publishable_key`, `key_id` and the
-required nullable `expires_at`. It never exposes internal JWTs or secret keys.
+no reference. The service returns only `supabase_url`, `publishable_key`, `key_id`
+and the required nullable `expires_at`. Its dedicated database identity can only
+read `public_client_configurations`, a security-barrier view. It cannot access
+users, project secrets, encrypted reveals or the underlying key tables, and has
+no master key, administrative HMAC or project environment mounts. Its Docker
+network connects it only to Traefik and PostgreSQL, not the administrative API.
 
-The lookup selects the same effective key state as the key-authorizer: a
-confirmed, due pending version suppresses its predecessor even if the pending
-version has expired. Future and unconfirmed versions are not delivered.
-Revoked/disabled slots, missing plaintext, invalid identity or unavailable SQL
-fail explicitly; there is no cached-key or default-slot recovery path.
+The control plane writes public publishable material in the same transaction
+that issues a key. A database trigger rejects secret material or a hash mismatch.
+Offline deployment populates existing publishable versions; no public request
+decrypts project secrets. The view applies the key-authorizer's effective cutover:
+a confirmed, due pending version suppresses its predecessor even when expired.
+Future and unconfirmed versions are never returned. Missing material, revocation,
+expiry or unavailable SQL fail closed without another slot or a cached key.
 
-The public URL is derived from the generated project's canonical Auth URL after
-verifying its persisted tenant UUID and public reference. Renaming the project
-does not change discovery. Regenerating its public reference changes the returned
-URL, not the application's discovery address.
+The returned project URL uses the canonical server origin and current public
+reference. Renaming or regenerating a project's URL does not change its discovery
+address. Clients fetch configuration before creating their Supabase client and
+revalidate on return to the foreground; a changed `key_id` requires recreating
+the client and reconnecting Realtime, never replaying writes automatically.
 
-Clients fetch configuration before constructing their Supabase client and
-revalidate on return to the foreground. A changed `key_id` requires rebuilding
-the client and reconnecting Realtime; writes must not be replayed automatically.
-Responses are `no-store`, allow cross-origin reads without cookies, and are
-rate-limited at the gateway. The application reference is public, not a consumer
-identity or access-control boundary. Rotating a discoverable publishable key
-does not exclude a caller who can fetch the replacement; sessions and RLS
-remain responsible for authorization.
+Responses are `no-store`, support cross-origin reads without cookies, and are
+rate-limited by Traefik. Discovery is public, not consumer authentication: user
+sessions, RLS and service policies remain responsible for authorization.
 
 ### Jobs
 

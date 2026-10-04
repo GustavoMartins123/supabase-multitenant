@@ -1,0 +1,134 @@
+{
+  "components": {
+    "schemas": {
+      "ClientConfigurationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "key_id": {
+            "title": "Key Id",
+            "type": "string"
+          },
+          "publishable_key": {
+            "title": "Publishable Key",
+            "type": "string"
+          },
+          "supabase_url": {
+            "title": "Supabase Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "supabase_url",
+          "publishable_key",
+          "key_id",
+          "expires_at"
+        ],
+        "title": "ClientConfigurationResponse",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "FastAPI",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/config/{application_ref}": {
+      "get": {
+        "operationId": "get_client_configuration_config__application_ref__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_ref",
+            "required": true,
+            "schema": {
+              "title": "Application Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientConfigurationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Client Configuration"
+      }
+    }
+  }
+}

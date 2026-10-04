@@ -167,27 +167,13 @@ async def decrypt_project_material(
     project_id: uuid.UUID,
     purpose: str,
     ciphertext: str,
-    readonly: bool = False,
 ) -> str:
     """Decrypt explicitly supported transient project material."""
 
     purpose = _project_material_purpose(purpose)
     if not project_secret_manager.is_v2(ciphertext):
         raise ProjectSecretError("project material is not a v2 envelope")
-    if readonly:
-        row = await conn.fetchrow(
-            """
-            SELECT key_id, wrapped_dek, wrapping_key_id, algorithm
-            FROM project_key_envelopes WHERE project_id = $1
-            """,
-            project_id,
-        )
-        if row is None:
-            raise ProjectSecretError("project key envelope is unavailable")
-        envelope = _record_to_envelope(row)
-        dek = project_secret_manager.unwrap_dek(envelope)
-    else:
-        envelope, dek = await _get_project_key_envelope(conn, project_id)
+    envelope, dek = await _get_project_key_envelope(conn, project_id)
     return project_secret_manager.decrypt(
         project_id=project_id,
         purpose=purpose,

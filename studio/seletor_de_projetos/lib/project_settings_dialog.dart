@@ -274,7 +274,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
                   controller: _tabController,
                   children: [
                     _buildGeneralTab(projectUrl, myRole, projectBusy),
-                    _buildKeysTab(myRole, projectBusy, isAdmin),
+                    _buildKeysTab(myRole, projectBusy, isAdmin, serverDomain as String),
                     _buildEnvironmentTab(isAdmin),
                     _buildAccessTab(isAdmin),
                   ],
@@ -347,10 +347,11 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     ]);
   }
 
-  Widget _buildKeysTab(String? myRole, bool projectBusy, bool isAdmin) {
+  Widget _buildKeysTab(String? myRole, bool projectBusy, bool isAdmin, String publicBaseUrl) {
     return _buildTabBody([
       OpaqueApiKeysSection(
         projectRef: widget.ref,
+        publicBaseUrl: publicBaseUrl,
         canManage: isAdmin,
         projectBusy: projectBusy,
       ),

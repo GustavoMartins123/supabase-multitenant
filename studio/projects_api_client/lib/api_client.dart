@@ -202,8 +202,6 @@ class ApiClient {
           return AutomaticKeyRotationUpdate.fromJson(value);
         case 'AvailableProjectUser':
           return AvailableProjectUser.fromJson(value);
-        case 'ClientConfigurationResponse':
-          return ClientConfigurationResponse.fromJson(value);
         case 'CollaborationHintItem':
           return CollaborationHintItem.fromJson(value);
         case 'CollaborationMemberItem':

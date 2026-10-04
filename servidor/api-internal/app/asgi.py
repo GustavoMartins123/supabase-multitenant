@@ -23,7 +23,6 @@ from app.main import (
     resolve_authenticated_user,
 )
 from app.routers.jobs_api import router as jobs_router
-from app.routers.client_configuration import router as client_configuration_router
 from app.routers.project_insights import router as project_insights_router
 from app.routers.project_keys import router as project_keys_router
 from app.routers.project_lifecycle_ops import router as project_lifecycle_ops_router
@@ -115,7 +114,6 @@ async def get_project_s3_vector_keys(
 
 
 app.include_router(jobs_router)
-app.include_router(client_configuration_router)
 app.include_router(projects_router)
 app.include_router(project_rename_router)
 app.include_router(restore_points_router)

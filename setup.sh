@@ -545,6 +545,7 @@ main() {
     POSTGRES_PASSWORD=$(env_secret servidor/.env POSTGRES_PASSWORD generate_postgres_password)
     META_GUEST_PASSWORD=$(env_secret servidor/.env META_GUEST_PASSWORD generate_postgres_password)
     KEY_AUTHORIZER_DB_PASSWORD=$(env_secret servidor/.env KEY_AUTHORIZER_DB_PASSWORD generate_key_authorizer_password)
+    CLIENT_CONFIGURATION_DB_PASSWORD=$(env_secret servidor/.env CLIENT_CONFIGURATION_DB_PASSWORD generate_key_authorizer_password)
     STORAGE_ADMIN_API_KEY=$(env_secret servidor/.storage.env SERVER_ADMIN_API_KEYS generate_storage_admin_key)
     STORAGE_AUTH_ENCRYPTION_KEY=$(env_secret servidor/.storage.env AUTH_ENCRYPTION_KEY generate_storage_encryption_key)
 
@@ -555,6 +556,18 @@ main() {
     safe_sed "s|POSTGRES_PASSWORD=pass|POSTGRES_PASSWORD=$POSTGRES_PASSWORD|g" servidor/.env
     safe_sed "s|META_GUEST_PASSWORD=pass|META_GUEST_PASSWORD=$META_GUEST_PASSWORD|g" servidor/.env
     safe_sed "s|KEY_AUTHORIZER_DB_PASSWORD=pass|KEY_AUTHORIZER_DB_PASSWORD=$KEY_AUTHORIZER_DB_PASSWORD|g" servidor/.env
+    CLIENT_CONFIGURATION_DB_PASSWORD="$CLIENT_CONFIGURATION_DB_PASSWORD" python3 - <<'PYEOF'
+import os
+from pathlib import Path
+from tools.configure_studio_runtime import _set_env_value, atomic_write
+path = Path('servidor/.env')
+content = path.read_text(encoding='utf-8')
+key = 'CLIENT_CONFIGURATION_DB_PASSWORD'
+if sum(line.startswith(key + '=') for line in content.splitlines()) > 1:
+    raise RuntimeError('Duplicate CLIENT_CONFIGURATION_DB_PASSWORD entry')
+content = _set_env_value(content, key, os.environ[key])
+atomic_write(path, content, mode=0o600, replace=True)
+PYEOF
     PLATFORM_READER_DB_PASSWORD=$(env_secret servidor/.env PLATFORM_READER_DB_PASSWORD generate_key_authorizer_password)
     safe_sed "s|PLATFORM_READER_DB_PASSWORD=pass|PLATFORM_READER_DB_PASSWORD=$PLATFORM_READER_DB_PASSWORD|g" servidor/.env
     PLATFORM_APP_DB_PASSWORD=$(env_secret servidor/.env PLATFORM_APP_DB_PASSWORD generate_key_authorizer_password)

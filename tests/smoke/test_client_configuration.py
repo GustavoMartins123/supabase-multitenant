@@ -59,20 +59,23 @@ class ApplicationReferenceTest(unittest.TestCase):
                     tool.migrate(root, [project], backup_dir=Path(temporary)/'private-backup', apply=True)
             self.assertEqual({file:file.read_bytes() for file in files}, original)
 
-    def test_gateway_requires_anonymous_read_only_canonical_target(self):
-        source = (ROOT / 'studio/nginx/lua/security/client_config_access.lua').read_text()
-        self.assertIn("ngx.var.request_uri ~= '/config/' .. ref", source)
-        self.assertIn("method ~= 'GET'", source)
-        self.assertIn("method == 'OPTIONS'", source)
-        self.assertIn("require('security.projects_api_signer').enforce()", source)
+    def test_public_discovery_never_proxies_the_control_plane(self):
+        source = (ROOT / 'servidor/client-configuration/app.py').read_text()
+        self.assertIn("request.method != 'GET'", source)
+        self.assertIn("request.method == 'OPTIONS'", source)
+        self.assertIn('client_configuration_reader', source)
+        self.assertNotIn('PROJECT_SECRETS_MASTER_KEY', source)
+        self.assertNotIn('internal_hmac', source)
+        self.assertNotIn('client_configuration_router', (ROOT/'servidor/api-internal/app/asgi.py').read_text())
         nginx = (ROOT / 'studio/nginx/nginx.conf').read_text()
-        section = nginx[nginx.index('location ^~ /config/'):nginx.index('location @client_config_unavailable')]
-        for header in ('Cookie', 'Authorization', 'X-User-Token', 'X-User-Groups'):
-            self.assertIn(f'proxy_set_header {header} ""', section)
-        self.assertIn('auth_request off', section)
-        self.assertIn('limit_req zone=client_config', section)
-        self.assertIn('Access-Control-Allow-Origin "*"', section)
-        self.assertNotIn('Access-Control-Allow-Credentials', section)
+        section = nginx[nginx.index('location ^~ /config/'):nginx.index('location = /api/security/step-up')]
+        self.assertIn('return 404', section)
+        self.assertNotIn('proxy_pass', section)
+        compose = (ROOT/'servidor/docker-compose-api.yml').read_text()
+        section = compose[compose.index('  client-configuration:'):compose.index('  key-authorizer:')]
+        self.assertIn('networks: [client-configuration-data]', section)
+        self.assertNotIn('PROJECT_SECRETS_MASTER_KEY', section)
+        self.assertNotIn('volumes:', section)
 
 
 if __name__ == '__main__':

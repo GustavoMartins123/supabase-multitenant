@@ -38,6 +38,7 @@ void main() {
             body: SingleChildScrollView(
               child: OpaqueApiKeysSection(
                 projectRef: 'project-ref',
+                publicBaseUrl: 'https://api.example.test:8443',
                 canManage: true,
                 projectBusy: false,
               ),
@@ -114,6 +115,7 @@ void main() {
             body: SingleChildScrollView(
               child: OpaqueApiKeysSection(
                 projectRef: 'project-ref',
+                publicBaseUrl: 'https://api.example.test:8443',
                 canManage: false,
                 projectBusy: false,
               ),
@@ -175,6 +177,7 @@ void main() {
             body: SingleChildScrollView(
               child: OpaqueApiKeysSection(
                 projectRef: 'project-ref',
+                publicBaseUrl: 'https://api.example.test:8443',
                 canManage: true,
                 projectBusy: false,
               ),
@@ -245,6 +248,7 @@ void main() {
             body: SingleChildScrollView(
               child: OpaqueApiKeysSection(
                 projectRef: 'project-ref',
+                publicBaseUrl: 'https://api.example.test:8443',
                 canManage: true,
                 projectBusy: false,
               ),
@@ -316,6 +320,7 @@ void main() {
             body: SingleChildScrollView(
               child: OpaqueApiKeysSection(
                 projectRef: 'project-ref',
+                publicBaseUrl: 'https://api.example.test:8443',
                 canManage: true,
                 projectBusy: false,
               ),

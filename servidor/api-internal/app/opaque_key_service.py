@@ -179,6 +179,11 @@ async def _insert_key(
         key_id,
         ciphertext,
     )
+    if kind == 'publishable':
+        await conn.execute(
+            'INSERT INTO public_client_configuration_keys(key_id, publishable_key) VALUES($1, $2)',
+            key_id, generated.token,
+        )
     return IssuedOpaqueKey(
         slot_id=slot_id,
         key_id=key_id,

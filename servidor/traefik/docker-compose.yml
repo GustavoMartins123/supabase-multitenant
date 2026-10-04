@@ -70,6 +70,7 @@ services:
       - ./plugins-storage:/plugins-storage
     networks:
       - rede-supabase
+      - client-configuration-data
     restart: unless-stopped
     logging: *vector-logging
 
@@ -102,5 +103,7 @@ services:
     logging: *vector-logging
 
 networks:
+  client-configuration-data:
+    external: true
   rede-supabase:
     external: true

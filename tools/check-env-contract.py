@@ -44,6 +44,7 @@ PYTHON_SCAN_DIRS = [
     "servidor/api-internal/app",
     "servidor/host-agent/hostagent",
     "servidor/traefik",
+    "servidor/client-configuration",
     "tools",
 ]
 

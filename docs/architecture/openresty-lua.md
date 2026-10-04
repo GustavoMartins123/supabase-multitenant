@@ -228,7 +228,10 @@ delivered to the browser. The gateway obtains it through the internal
 `enc-key` endpoint, decrypts it with `STUDIO_SERVICE_KEY_ENCRYPTION_KEY`, and
 injects `apikey` only after user authentication and authorization.
 
-Public application discovery uses `/config/{application_ref}` on the Studio gateway. Each stable reference identifies one publishable slot, independently of the project URL. The gateway signs the internal request; Python resolves the effective key from the registry. No user session or shared configuration secret is required. Secret slots are never exposed.
+Public application discovery is served directly by Traefik and the isolated
+`client-configuration` data-plane service. Studio only displays and copies its
+URL on the public Supabase origin. It does not proxy discovery requests or send
+them to the administrative Projects API. Secret slots have no discovery URL.
 
 If PG Meta responds with `apikey administrativa ausente`, verify the
 installation without printing secrets:

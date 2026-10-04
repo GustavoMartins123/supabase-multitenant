@@ -28,7 +28,6 @@ part 'auth/oauth.dart';
 part 'auth/http_basic_auth.dart';
 part 'auth/http_bearer_auth.dart';
 
-part 'api/client_configuration_api.dart';
 part 'api/collaboration_api.dart';
 part 'api/internal_api.dart';
 part 'api/jobs_api.dart';
@@ -53,7 +52,6 @@ part 'model/auth_users_response.dart';
 part 'model/automatic_key_rotation_response.dart';
 part 'model/automatic_key_rotation_update.dart';
 part 'model/available_project_user.dart';
-part 'model/client_configuration_response.dart';
 part 'model/collaboration_hint_item.dart';
 part 'model/collaboration_member_item.dart';
 part 'model/collaboration_note_item.dart';

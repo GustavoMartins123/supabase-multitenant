@@ -97,9 +97,14 @@ class FileProviderRendererTests(unittest.TestCase):
         self.assertIn("PathPrefix(`/api/admin`)", result)
         self.assertIn("PathPrefix(`/api/internal/analytics`)", result)
         self.assertIn("PathPrefix(`/config/`)", result)
-        api_router = result.split("    projects-api:", 1)[1].split("    project-meu_projeto:", 1)[0]
+        api_router = result.split("    projects-api:", 1)[1].split("    client-configuration:", 1)[0]
         self.assertIn("projects-api-allowlist", api_router)
         self.assertIn("api-security-chain", api_router)
+        self.assertNotIn('/config', api_router)
+        public_router = result.split('    client-configuration:', 1)[1].split('    project-meu_projeto:', 1)[0]
+        self.assertIn('service: client-configuration', public_router)
+        self.assertNotIn('projects-api', public_router)
+        self.assertIn('http://client-configuration:18011', result)
         self.assertNotIn("X-Shared-Token", result)
 
 

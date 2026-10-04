@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../models/opaque_api_key.dart';
+import '../../models/client_configuration.dart';
 import '../../providers/opaque_api_keys_provider.dart';
 import '../../services/step_up_authentication_service.dart';
 import '../../supabase_colors.dart';
@@ -21,11 +22,13 @@ class OpaqueApiKeysSection extends ConsumerStatefulWidget {
   const OpaqueApiKeysSection({
     super.key,
     required this.projectRef,
+    required this.publicBaseUrl,
     required this.canManage,
     required this.projectBusy,
   });
 
   final String projectRef;
+  final String publicBaseUrl;
   final bool canManage;
   final bool projectBusy;
 
@@ -754,7 +757,7 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           if (slot.applicationRef != null) ...[
             const SizedBox(height: 8),
             const Text('CONFIGURACAO DO APLICATIVO', style: _titleStyle),
-            SelectableText(Uri.base.resolve('/config/${slot.applicationRef}').toString(),
+            SelectableText(clientConfigurationUrl(widget.publicBaseUrl, slot.applicationRef!),
                 key: ValueKey('client-config-url-${slot.id}'),
                 style: const TextStyle(fontSize: 11, fontFamily: 'monospace')),
             const SizedBox(height: 6),
@@ -766,7 +769,7 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
                 onPressed: () async {
                   try {
                     await Clipboard.setData(ClipboardData(
-                        text: Uri.base.resolve('/config/${slot.applicationRef}').toString()));
+                        text: clientConfigurationUrl(widget.publicBaseUrl, slot.applicationRef!)));
                     _snack('URL copiada.', SupabaseColors.success);
                   } catch (error) {
                     _showError(error);

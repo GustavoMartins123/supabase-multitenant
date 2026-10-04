@@ -171,8 +171,7 @@ def render(
         "    projects-api:",
         "      rule: " + yaml_quote(
             "PathPrefix(`/api/projects`) || PathPrefix(`/api/jobs`) || "
-            "PathPrefix(`/api/admin`) || PathPrefix(`/api/internal/analytics`) || "
-            "PathPrefix(`/config/`)"
+            "PathPrefix(`/api/admin`) || PathPrefix(`/api/internal/analytics`)"
         ),
         "      entryPoints:",
     ]
@@ -186,8 +185,21 @@ def render(
             "        - projects-api-allowlist",
             "        - api-security-chain",
             "      service: projects-api",
+            "    client-configuration:",
+            '      rule: "Path(`/config`) || PathPrefix(`/config/`)"',
+            "      entryPoints:",
         ]
     )
+    lines.extend(f"        - {item}" for item in entry_points)
+    if enable_tls:
+        lines.extend(tls_block)
+    lines.extend([
+        "      priority: 1000",
+        "      middlewares:",
+        "        - client-configuration-limit",
+        "        - security-headers",
+        "      service: client-configuration",
+    ])
     for project_id, _, public_ref in projects:
         lines.extend(
             [
@@ -231,6 +243,11 @@ def render(
     lines.extend(
         [
             "  middlewares:",
+            "    client-configuration-limit:",
+            "      rateLimit:",
+            "        average: 10",
+            "        burst: 20",
+            '        period: "1s"',
             "    projects-api-allowlist:",
             "      ipAllowList:",
             "        sourceRange:",
@@ -278,6 +295,10 @@ def render(
             "      loadBalancer:",
             "        servers:",
             f"          - url: \"http://projects-api:{api_port}\"",
+            "    client-configuration:",
+            "      loadBalancer:",
+            "        servers:",
+            '          - url: "http://client-configuration:18011"',
         ]
     )
     for project_id, _, _ in projects:

@@ -197,7 +197,10 @@ ser entregue ao navegador. O gateway a obtém pelo endpoint interno `enc-key`,
 descriptografa com `STUDIO_SERVICE_KEY_ENCRYPTION_KEY` e injeta `apikey` apenas
 depois da autenticação e da autorização do usuário.
 
-A descoberta pública do aplicativo usa `/config/{application_ref}` no gateway do Studio. Cada referência estável identifica um slot publishable, independentemente da URL do projeto. O gateway assina a chamada interna; Python consulta a chave vigente no registro canônico. Não exige sessão de usuário nem segredo compartilhado de configuração. Slots secret não são expostos.
+A descoberta pública é servida diretamente pelo Traefik e pelo serviço isolado
+`client-configuration` do plano de dados. O Studio apenas mostra e copia a URL
+na origem pública do Supabase; não encaminha essas consultas à API administrativa.
+Slots secret não possuem URL de descoberta.
 
 Se PG Meta responder `apikey administrativa ausente`, valide a instalação sem
 imprimir segredos:

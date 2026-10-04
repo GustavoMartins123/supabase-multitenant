@@ -153,7 +153,7 @@ receive 403.
 ## Client configuration discovery
 
 The publishable slot card exposes its public configuration URL:
-`https://STUDIO_HOST/config/APPLICATION_REF`. Store that stable URL in the
+`https://PUBLIC_SUPABASE_HOST/config/APPLICATION_REF`. Store that stable URL in the
 consuming application, rather than a shared configuration credential.
 
 Fetch it without cookies before creating the Supabase client. The JSON contract
@@ -175,16 +175,18 @@ Publishable discovery is not application authentication: anyone who knows its
 address can retrieve the current key. Use user sessions, RLS and service policies
 for authorization, not the secrecy of this address.
 
-For an installed control plane, stop Projects API, host-agent and project
-gateways, then apply the schema migration during a maintenance window and run
-`python3 tools/migrate_client_configuration.py SERVER_ROOT --backup-dir PRIVATE_BACKUP --apply`.
-The tool validates persisted identities, backs up generated files, removes the
-obsolete environment credential and regenerates the gateway projection. Rebuild
-the project gateway images before restarting them. It does not change other
-credentials, project UUIDs or public references. Historical migration checksums
-are preserved; new installations apply the same migration sequence through setup.
-Recreate the Traefik configuration watcher to load the canonical configuration
-route through the same API IP allowlist and security chain.
+Discovery is routed by Traefik directly to the isolated `client-configuration`
+service. It never reaches the Studio gateway or Projects API. The public contract
+is exported separately in `docs/api/client-configuration.openapi.json`.
+
+For deployment, generate `CLIENT_CONFIGURATION_DB_PASSWORD` through setup,
+back up PostgreSQL and stop lifecycle writers during migration. Run the
+`control-plane-migrations` Compose service: it applies the schema, provisions the
+read-only discovery identity and populates existing publishable versions offline.
+Deploy the API and discovery images, recreate the Traefik configuration watcher,
+and update Flutter so it copies the public Supabase origin rather than Studio's.
+No public discovery credential, master key or administrative HMAC is sent to
+the discovery container. Validate rotation, revocation, SQL permissions and CORS.
 
 ## Create additional slots
 

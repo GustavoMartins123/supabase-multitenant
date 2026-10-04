@@ -13,12 +13,16 @@ from __future__ import annotations
 import pathlib
 import re
 import unittest
+import os
+import subprocess
+import sys
+import tempfile
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 IDENTITY_PASSWORD_RE = re.compile(
-    r"^(KEY_AUTHORIZER|HOST_AGENT|PLATFORM_READER|PLATFORM_APP|META_ADMIN)"
+    r"^(KEY_AUTHORIZER|HOST_AGENT|PLATFORM_READER|PLATFORM_APP|META_ADMIN|CLIENT_CONFIGURATION)"
     r"_DB_PASSWORD=(pass)$"
 )
 
@@ -48,7 +52,25 @@ class SetupSecretGenerationContract(unittest.TestCase):
                         self.setup,
                     )
                 )
-                self.assertIn(f'safe_sed "s|{key}=pass|{key}=${key}|g"', self.setup)
+                if key == 'CLIENT_CONFIGURATION_DB_PASSWORD':
+                    self.assertIn("content = _set_env_value(content, key, os.environ[key])", self.setup)
+                else:
+                    self.assertIn(f'safe_sed "s|{key}=pass|{key}=${key}|g"', self.setup)
+
+    def test_discovery_identity_is_added_to_existing_env_without_touching_other_secrets(self):
+        marker = 'CLIENT_CONFIGURATION_DB_PASSWORD="$CLIENT_CONFIGURATION_DB_PASSWORD" python3 - <<\'PYEOF\'\n'
+        code = self.setup.split(marker, 1)[1].split('\nPYEOF', 1)[0]
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = pathlib.Path(temporary) / 'servidor'
+            directory.mkdir()
+            env_file = directory / '.env'
+            values = {**os.environ, 'PYTHONPATH': str(ROOT), 'CLIENT_CONFIGURATION_DB_PASSWORD': 'a'*64}
+            for original in ('OTHER_SECRET=preserved\n', 'OTHER_SECRET=preserved\nCLIENT_CONFIGURATION_DB_PASSWORD=pass\n'):
+                env_file.write_text(original, encoding='utf-8')
+                subprocess.run([sys.executable, '-c', code], cwd=temporary, env=values, check=True, capture_output=True)
+                self.assertEqual(env_file.read_text(), 'OTHER_SECRET=preserved\nCLIENT_CONFIGURATION_DB_PASSWORD='+'a'*64+'\n')
+            env_file.write_text('CLIENT_CONFIGURATION_DB_PASSWORD=pass\nCLIENT_CONFIGURATION_DB_PASSWORD=pass\n', encoding='utf-8')
+            self.assertNotEqual(subprocess.run([sys.executable, '-c', code], cwd=temporary, env=values, capture_output=True).returncode, 0)
 
     def test_generated_values_match_the_format_validators(self) -> None:
         # generate_key_authorizer_password produz hex de 64 caracteres,

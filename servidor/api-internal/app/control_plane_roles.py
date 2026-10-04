@@ -31,7 +31,7 @@ async def ensure_tenant_meta_roles(pool: asyncpg.Pool, *, admin_dsn: str, passwo
                 revoke = await conn.fetchval("SELECT format('REVOKE CONNECT, TEMPORARY ON DATABASE %I FROM PUBLIC', $1::text)", name)
                 await conn.execute(revoke)
                 if name == control_database:
-                    for role in ("platform_app", "key_authorizer", "host_agent_rw", "platform_meta_admin", "platform_reader", "pgbouncer"):
+                    for role in ("platform_app", "key_authorizer", "host_agent_rw", "platform_meta_admin", "platform_reader", "pgbouncer", "client_configuration_reader"):
                         if role in roles:
                             grant = await conn.fetchval("SELECT format('GRANT CONNECT ON DATABASE %I TO %I', $1::text, $2::text)", name, role)
                             await conn.execute(grant)
@@ -55,6 +55,35 @@ async def ensure_tenant_meta_roles(pool: asyncpg.Pool, *, admin_dsn: str, passwo
 
 KEY_AUTHORIZER_ROLE = "key_authorizer"
 KEY_AUTHORIZER_PASSWORD_RE = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
+
+
+async def ensure_client_configuration_reader_role(pool: asyncpg.Pool, *, password: str) -> None:
+    if not KEY_AUTHORIZER_PASSWORD_RE.fullmatch(password):
+        raise RuntimeError('CLIENT_CONFIGURATION_DB_PASSWORD must contain 32-128 URL-safe characters')
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute('''
+                DO $$ BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='client_configuration_reader') THEN
+                        CREATE ROLE client_configuration_reader;
+                    END IF;
+                END $$;
+                ALTER ROLE client_configuration_reader WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
+                    NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 12;
+                ALTER ROLE client_configuration_reader SET search_path = public, pg_catalog;
+                ALTER ROLE client_configuration_reader SET default_transaction_read_only = on;
+                ALTER ROLE client_configuration_reader SET statement_timeout = '3s';
+                ALTER ROLE client_configuration_reader SET lock_timeout = '1s';
+                REVOKE ALL ON ALL TABLES IN SCHEMA public FROM client_configuration_reader;
+                REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM client_configuration_reader;
+                REVOKE CREATE ON SCHEMA public FROM client_configuration_reader;
+                GRANT USAGE ON SCHEMA public TO client_configuration_reader;
+                GRANT SELECT ON public_client_configurations TO client_configuration_reader;
+            ''')
+            statement = await conn.fetchval("SELECT format('ALTER ROLE client_configuration_reader PASSWORD %L',$1::text)", password)
+            await conn.execute(statement)
+            statement = await conn.fetchval("SELECT format('GRANT CONNECT ON DATABASE %I TO client_configuration_reader',current_database())")
+            await conn.execute(statement)
 
 HOST_AGENT_ROLE = "host_agent_rw"
 HOST_AGENT_PASSWORD_RE = KEY_AUTHORIZER_PASSWORD_RE

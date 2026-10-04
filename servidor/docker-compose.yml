@@ -28,6 +28,7 @@ services:
         ipv4_address: ${POSTGRES_HOST}
       analytics-internal:
       storage-control:
+      client-configuration-data:
     volumes:
       - ./volumes/db/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql:Z
       # Must be superuser to create event trigger
@@ -474,6 +475,9 @@ services:
       retries: 3
 
 networks:
+  client-configuration-data:
+    name: client-configuration-data
+    internal: true
   rede-supabase:
     name: rede-supabase
     driver: bridge

@@ -297,6 +297,7 @@ async def _command_apply(*, wait_timeout: float, skip_roles: bool) -> int:
         ensure_platform_app_role,
         ensure_platform_meta_admin_role,
         ensure_tenant_meta_roles,
+        ensure_client_configuration_reader_role,
     )
 
     key_authorizer_password = (
@@ -319,6 +320,9 @@ async def _command_apply(*, wait_timeout: float, skip_roles: bool) -> int:
     ).strip()
     if not skip_roles and not meta_admin_password:
         raise SchemaMigrationError("META_ADMIN_DB_PASSWORD e obrigatorio")
+    client_configuration_password = (os.getenv('CLIENT_CONFIGURATION_DB_PASSWORD') or '').strip()
+    if not skip_roles and not client_configuration_password:
+        raise SchemaMigrationError('CLIENT_CONFIGURATION_DB_PASSWORD e obrigatorio')
 
     catalog = discover_migrations()
     pool = await _connect_pool(_require_dsn(), wait_timeout=wait_timeout)
@@ -347,6 +351,8 @@ async def _command_apply(*, wait_timeout: float, skip_roles: bool) -> int:
                 pool, password=platform_app_password
             )
             print("[migrations] identidade platform_app provisionada")
+            await ensure_client_configuration_reader_role(pool, password=client_configuration_password)
+            print('[migrations] identidade client_configuration_reader provisionada')
             await ensure_platform_meta_admin_role(
                 pool, password=meta_admin_password
             )

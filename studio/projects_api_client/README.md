@@ -41,14 +41,15 @@ Please follow the [installation procedure](#installation--usage) and then run th
 import 'package:projects_api_client/api.dart';
 
 
-final api_instance = ClientConfigurationApi();
-final applicationRef = applicationRef_example; // String |
+final api_instance = CollaborationApi();
+final projectRef = projectRef_example; // String |
+final projectTagAssign = ProjectTagAssign(); // ProjectTagAssign |
 
 try {
-    final result = api_instance.getClientConfigurationConfigApplicationRefGet(applicationRef);
+    final result = api_instance.assignProjectTagApiProjectsProjectRefTagsPost(projectRef, projectTagAssign);
     print(result);
 } catch (e) {
-    print('Exception when calling ClientConfigurationApi->getClientConfigurationConfigApplicationRefGet: $e\n');
+    print('Exception when calling CollaborationApi->assignProjectTagApiProjectsProjectRefTagsPost: $e\n');
 }
 
 ```
@@ -59,7 +60,6 @@ All URIs are relative to *http://localhost*
 
 Class | Method | HTTP request | Description
 ------------ | ------------- | ------------- | -------------
-*ClientConfigurationApi* | [**getClientConfigurationConfigApplicationRefGet**](doc//ClientConfigurationApi.md#getclientconfigurationconfigapplicationrefget) | **GET** /config/{application_ref} | Get Client Configuration
 *CollaborationApi* | [**assignProjectTagApiProjectsProjectRefTagsPost**](doc//CollaborationApi.md#assignprojecttagapiprojectsprojectreftagspost) | **POST** /api/projects/{project_ref}/tags | Assign Project Tag
 *CollaborationApi* | [**createProjectHintApiProjectsProjectRefHintsPost**](doc//CollaborationApi.md#createprojecthintapiprojectsprojectrefhintspost) | **POST** /api/projects/{project_ref}/hints | Create Project Hint
 *CollaborationApi* | [**createProjectNoteApiProjectsProjectRefNotesPost**](doc//CollaborationApi.md#createprojectnoteapiprojectsprojectrefnotespost) | **POST** /api/projects/{project_ref}/notes | Create Project Note
@@ -157,7 +157,6 @@ Class | Method | HTTP request | Description
  - [AutomaticKeyRotationResponse](doc//AutomaticKeyRotationResponse.md)
  - [AutomaticKeyRotationUpdate](doc//AutomaticKeyRotationUpdate.md)
  - [AvailableProjectUser](doc//AvailableProjectUser.md)
- - [ClientConfigurationResponse](doc//ClientConfigurationResponse.md)
  - [CollaborationHintItem](doc//CollaborationHintItem.md)
  - [CollaborationMemberItem](doc//CollaborationMemberItem.md)
  - [CollaborationNoteItem](doc//CollaborationNoteItem.md)

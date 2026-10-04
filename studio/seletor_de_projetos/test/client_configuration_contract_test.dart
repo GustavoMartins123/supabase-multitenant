@@ -1,27 +1,19 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:projects_api_client/api.dart';
+import 'package:seletor_de_projetos/models/client_configuration.dart';
 
 void main() {
-  Map<String, dynamic> configuration() => {
-    'supabase_url': 'https://api.example.test/abcdefghijklmnopqrst',
-    'publishable_key': 'sb_publishable_test',
-    'key_id': '11111111-1111-4111-8111-111111111111',
-    'expires_at': null,
-  };
-
-  test('generated discovery contract accepts explicit null expiration', () {
-    final json = configuration();
-    final parsed = ClientConfigurationResponse.fromJson(json)!;
-    expect(parsed.expiresAt, isNull);
-    expect(parsed.toJson(), json);
+  test('discovery uses public data-plane origin, never the Studio origin', () {
+    expect(clientConfigurationUrl('https://api.example.test:8443', 'abcdefghijklmnopqrst'),
+        'https://api.example.test:8443/config/abcdefghijklmnopqrst');
   });
 
-  test('generated discovery contract rejects missing required fields', () {
-    for (final field in configuration().keys) {
-      expect(
-        () => ClientConfigurationResponse.fromJson(configuration()..remove(field)),
-        throwsFormatException,
-      );
+  test('discovery rejects invalid origin or application reference', () {
+    for (final base in ['', 'api.example.test', 'https://api.example.test/project',
+      'https://user@api.example.test', 'https://api.example.test?query=1', 'https://api.example.test#fragment']) {
+      expect(() => clientConfigurationUrl(base, 'abcdefghijklmnopqrst'), throwsFormatException);
+    }
+    for (final ref in ['', 'a' * 19, 'a' * 20 + '\n', 'A' * 20]) {
+      expect(() => clientConfigurationUrl('https://api.example.test', ref), throwsFormatException);
     }
   });
 }
