@@ -14,15 +14,18 @@ The primary isolation boundaries are the PostgreSQL database, JWT secret, tenant
 
 ```mermaid
 flowchart TB
-    User[User] --> StudioGateway[Studio OpenResty\nHTTPS :9091]
+    StudioUser[Studio user] --> StudioGateway[Studio OpenResty\nHTTPS :9091]
     StudioGateway --> Authelia[Authelia]
     Authelia --> Sessions[Redis sessions - Studio node only]
     StudioGateway --> Selector[Flutter]
     StudioGateway --> Studio[Supabase Studio]
 
-    StudioGateway --> Traefik[Traefik]
-    Traefik --> ProjectsAPI[Projects API\nFastAPI]
-    Traefik --> ProjectNginx[Project Nginx]
+    StudioGateway -->|authenticated administrative transport| Traefik[Traefik]
+    ExternalApp[External application] -->|public HTTPS| Traefik
+    Traefik -->|restricted administrative routes| ProjectsAPI[Projects API\nFastAPI]
+    Traefik -->|/config/application_ref| ClientConfiguration[client-configuration\ninternal :18011]
+    ClientConfiguration -->|read-only public configuration view| PostgreSQL
+    Traefik -->|/public_ref/...| ProjectNginx[Project Nginx]
 
     ProjectsAPI --> PostgreSQL[(PostgreSQL)]
     ProjectNginx --> KeyAuthorizer[key-authorizer]
@@ -92,21 +95,28 @@ Details: [Control plane](architecture/control-plane.md) and [Host-agent](archite
 Responsible for serving project applications:
 
 - Traefik receives public routes;
+- `client-configuration` serves publishable slot discovery directly behind Traefik, independently of Studio and Projects API;
 - the project Nginx delegates opaque-key validation to `key-authorizer`, translates the role into an internal JWT, and forwards each route;
 - GoTrue, PostgREST, and Nginx run per project;
 - Storage, imgproxy, Realtime, Supavisor, and Edge Functions are shared;
 - Storage uses its own internal data plane to prevent access to the administrative port and pin the tenant identity;
-- data lives in the `_supabase_<project_ref>` database and the Storage namespace for `tenant_uuid`.
+- data lives in the `_supabase_<technical_name>` database and the Storage namespace for `tenant_uuid`.
 
 External traffic does not need to pass through Studio. Applications access:
 
 ```text
-https://<servidor>/<project_ref>/auth/v1
-https://<servidor>/<project_ref>/rest/v1
-https://<servidor>/<project_ref>/storage/v1
-https://<servidor>/<project_ref>/functions/v1
-https://<servidor>/<project_ref>/realtime/v1
+https://<public-server>/config/<application_ref>
+https://<public-server>/<public_ref>/auth/v1
+https://<public-server>/<public_ref>/rest/v1
+https://<public-server>/<public_ref>/storage/v1
+https://<public-server>/<public_ref>/functions/v1
+https://<public-server>/<public_ref>/realtime/v1
 ```
+
+`https://<studio-host>:9091` is administrative. External applications connect to
+the public server's Traefik origin, including when Studio runs on another
+machine. Discovery does not route to the administrative API `:18000`; the
+dedicated service's `:18011` port is internal and not published on the host.
 
 ## Project identity
 
@@ -116,12 +126,16 @@ The system does not use a single identifier for every purpose.
 | --- | --- | --- |
 | Canonical UUID (`projects.id`) | `0df3...` | unchanged during rename |
 | Tenant UUID (`projects.tenant_uuid`) | `0df3...` | immutable identity for Realtime, Storage, and backups |
-| project ref | `cliente_a` | slug used in URLs and files |
-| database | `_supabase_cliente_a` | follows the project ref |
+| Technical name (`projects.name`, `PROJECT_ID`) | `cliente_a` | stable name for files, containers, databases and internal DNS; not a public path |
+| Display name (`projects.display_name`) | `Customer application` | editable title; rename does not change URLs or resources |
+| Public reference (`projects.public_ref`) | `abcdefghijklmnopqrst` | 20 random lowercase letters for project API paths and `/project/<public_ref>` in Studio; changes only through URL regeneration |
+| Application reference (`project_api_key_slots.application_ref`) | `bcdefghijklmnopqrstu` | separate 20-letter reference for a publishable slot's `/config/<application_ref>`; stable across rotation and project URL regeneration; absent for secret slots |
+| Key version (`project_api_keys.id`, discovery `key_id`) | UUID | identifies one issued key version; changes when another version becomes effective; not a project or slot reference |
+| Database | `_supabase_cliente_a` | follows the stable technical name |
 | Realtime `external_id` | tenant UUID | used to resolve the tenant JWT secret |
 | Storage tenant ID | tenant UUID | immutable namespace and configuration |
-| Supavisor `external_id` | project ref | used in the pooler user suffix |
-| main CDC slot | suffixed by project ref | follows the physical database |
+| Supavisor `external_id` | technical name | used in the pooler user suffix |
+| main CDC slot | suffixed by technical name | follows the physical database |
 | temporary broadcast slot | UUID-derived hash | remains stable during rename |
 
 The project Nginx injects the UUID into the `Host` header of Realtime WebSocket connections:
@@ -130,7 +144,12 @@ The project Nginx injects the UUID into the `Host` header of Realtime WebSocket 
 Host: <tenant_uuid>.localhost
 ```
 
-The `tenant_uuid` identifies Realtime and Storage tenants. The project ref continues to identify resources that must be renamed, such as the database, directory, containers, Supavisor tenant, and main slot. Storage objects do not change namespace during a rename.
+The `tenant_uuid` identifies Realtime and Storage tenants. The technical name
+identifies the database, directory, containers, Supavisor tenant and main slot.
+Renaming changes only the display name. Regenerating the URL changes only the
+public reference and derived service URLs; the old public path stops working
+without an alias or redirect. Neither operation changes the technical name,
+tenant UUID, keys or Storage namespace.
 
 The control plane persists the external binding in `projects.tenant_uuid`. For new projects, `tenant_uuid = projects.id`; legacy projects preserve the `PROJECT_UUID` already used by Realtime, JWTs, and backups until an explicit migration. The UUID is never regenerated inside a worker or retry.
 
@@ -143,7 +162,7 @@ One cluster hosts:
 - the control-plane `postgres` database;
 - the `_supabase_template` database;
 - the `_supabase_storage` database, the encrypted multi-tenant Storage registry;
-- one `_supabase_<project_ref>` database per project;
+- one `_supabase_<technical_name>` database per project;
 - internal Realtime and Supavisor schemas;
 - the `_supabase` database, with the `_analytics` schema, for the minimal Logflare backend;
 - the Postgres-Meta `meta_trap` fallback.
@@ -155,10 +174,10 @@ Service roles are global to the PostgreSQL cluster. Isolation does not depend on
 Supavisor identifies the tenant by the username suffix:
 
 ```text
-<db_user>.<project_ref>
+<db_user>.<technical_name>
 ```
 
-The Supavisor tenant points to `_supabase_<project_ref>`.
+The Supavisor tenant points to `_supabase_<technical_name>`.
 
 ### Realtime
 
@@ -201,7 +220,7 @@ Details:
 
 ### Supabase Analytics and Vector
 
-The global Logflare/Supabase Analytics service persists in the `_analytics` schema of the `_supabase` database. Vector classifies events by the suffix of dedicated containers or by the `_supabase_<project_ref>` database in shared PostgreSQL. Lua passes the selected ref to Studio, and Logflare queries return only events classified for that project. The Analytics interface and endpoints are restricted to global admins.
+The global Logflare/Supabase Analytics service persists in the `_analytics` schema of the `_supabase` database. Vector classifies events by the suffix of dedicated containers or by the `_supabase_<technical_name>` database in shared PostgreSQL. Lua passes the selected ref to Studio, and Logflare queries return only events classified for that project. The Analytics interface and endpoints are restricted to global admins.
 
 Details: [Per-project Supabase Analytics](architecture/supabase-analytics.md).
 
@@ -209,17 +228,17 @@ Details: [Per-project Supabase Analytics](architecture/supabase-analytics.md).
 
 Each project has only the services that still depend on dedicated configuration/processes:
 
-- `supabase-nginx-<project_ref>`;
-- `supabase-auth-<project_ref>`;
-- `supabase-rest-<project_ref>`;
-- directory `servidor/projects/<project_ref>`;
-- database `_supabase_<project_ref>`.
+- `supabase-nginx-<technical_name>`;
+- `supabase-auth-<technical_name>`;
+- `supabase-rest-<technical_name>`;
+- directory `servidor/projects/<technical_name>`;
+- database `_supabase_<technical_name>`.
 
 Storage, imgproxy, Realtime, Supavisor, Edge Functions, and Postgres-Meta are not recreated per project.
 
 The project Nginx is the internal gateway. It:
 
-- validates opaque API keys through `auth_request` or a config token depending on the route;
+- validates opaque API keys through `auth_request`; public configuration discovery is served separately by Traefik, without a config token;
 - preserves session JWTs and injects only internal anon/service-role JWTs;
 - handles CORS;
 - rewrites the paths expected by Supabase;
@@ -279,7 +298,7 @@ Persisted values use envelope encryption:
 
 - one DEK per project;
 - AES-256-GCM for secrets;
-- master key only in the Projects API;
+- master key in the Projects API and the privileged offline migration container, never in public discovery;
 - a separate key to transport `service_role` to Studio;
 - a separate key for the Postgres-Meta header.
 
@@ -287,7 +306,35 @@ Details: [Secret and connection rotation](11-project-secret-and-connection-rotat
 
 ### Opaque API keys
 
-Each consumer has a `publishable` or `secret` slot with independent service scope, optional expiration, rotation, and revocation. `expires_at = NULL` means the key does not expire over time; it remains revocable and rotatable. The database stores only the API-key hash. A separate service with a restricted PostgreSQL role authenticates the gateway-exclusive token and performs the temporal lookup fail-closed.
+Each consumer has a `publishable` or `secret` slot with independent service scope, optional expiration, rotation, and revocation. `expires_at = NULL` means the key does not expire over time; it remains revocable and rotatable. The authorization registry stores the API-key hash. Public publishable material is projected separately for discovery; secret material never enters that projection. The `key-authorizer`, with a restricted PostgreSQL role, authenticates the gateway-exclusive token and performs the temporal lookup fail-closed.
+
+### Public application configuration
+
+`GET /config/{application_ref}` returns exactly `supabase_url`,
+`publishable_key`, `key_id` and nullable `expires_at`. The service uses
+`client_configuration_reader`, which can only read the security-barrier view
+`public_client_configurations`, not users, secrets, encrypted reveals or base
+tables. It has no master key or administrative HMAC and shares an isolated
+internal Docker network only with Traefik and PostgreSQL.
+
+The control plane writes publishable material transactionally with key issuance.
+The view selects the same effective version as key-authorizer: future and
+unconfirmed pending keys are not exposed, and an expired due confirmed version
+never restores its predecessor. Unknown references return 404, slots without a
+valid effective key return 410 and unverifiable material or SQL failure returns
+503. Responses are `no-store`, allow cross-origin GET without cookies and are
+rate-limited at Traefik. There is no configuration token or default-slot lookup.
+
+Applications store the slot's stable discovery URL, fetch it before creating
+their Supabase client and revalidate when returning to the foreground. A changed
+`key_id` means a different key version; a changed `supabase_url` means the
+project's public URL changed. Either change requires recreating the client and
+reconnecting Realtime. Do not reuse cached keys on discovery failure or replay
+writes automatically. Discovery does not authenticate users or confirm key
+installation; Auth sessions, RLS and service policies remain authoritative.
+
+Details: [Public application configuration](architecture/control-plane.md#public-application-configuration)
+and the [separate public contract](api/client-configuration.openapi.json).
 
 The `anon` and `service_role` JWTs remain on the server. Their expiration and Auth-session expiration are separate cycles from external API keys.
 
@@ -309,11 +356,21 @@ User
   -> Supabase service
 ```
 
+### Application configuration discovery
+
+```text
+External application (no Studio session)
+  -> public Traefik GET /config/<application_ref>
+  -> client-configuration :18011 (internal)
+  -> public_client_configurations (read-only)
+  -> supabase_url, publishable_key, key_id, expires_at
+```
+
 ### Application access
 
 ```text
 Application
-  -> Traefik /<project_ref>/...
+  -> public Traefik /<public_ref>/... using publishable_key
   -> project Nginx
   -> key-authorizer
   -> translation to an internal JWT or session preservation

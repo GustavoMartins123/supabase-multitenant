@@ -78,6 +78,7 @@ privilegio, e nao apenas o `key_authorizer`:
 | Role | Consumidor | Escopo |
 | --- | --- | --- |
 | `key_authorizer` | servico key-authorizer | `SELECT` por coluna em `projects`, `project_api_key_slots`, `project_api_keys`; `UPDATE (last_used_at)` |
+| `client_configuration_reader` | serviço client-configuration | `SELECT` somente leitura em `public_client_configurations`; sem tabelas base, usuários, segredos ou escritas |
 | `host_agent_rw` | worker do host-agent | `SELECT/INSERT/UPDATE` em `host_agent_workers` e `host_agent_commands`; `SELECT/INSERT/UPDATE/DELETE` em `project_container_state`; `SELECT` somente leitura por coluna em `projects` (`id`, `name`, `owner_id`, `tenant_uuid`, `automatic_key_rotation_enabled`), `users` (`id`, `is_active`), `user_groups` (`user_id`, `group_name`) e `project_members` (`project_id`, `user_id`, `role`), para o agent reautorizar cada comando contra o banco em vez de confiar na Projects API. Nenhum segredo de projeto, nenhuma escrita fora das tabelas do agent, nenhum database de tenant |
 | `platform_reader` | telemetria da Projects API | por database de tenant: `CONNECT` + `SELECT` em `auth.users` e `auth.sessions`; exigida no startup da API — nao existe fallback para credencial global |
 | `platform_app` | pool do control plane na Projects API | DML completo nas tabelas do control plane (schema public); sem administracao de cluster nem databases de tenant. O `DB_DSN` da API e essa identidade |
@@ -117,6 +118,22 @@ view `public_client_configurations`, não usuários, segredos, reveals criptogra
 ou as tabelas subjacentes. O serviço não recebe master key, HMAC administrativo
 ou envs de projetos, e sua rede Docker só conecta Traefik e PostgreSQL.
 
+Os identificadores têm finalidades separadas:
+
+| Identificador | Finalidade | Mudança |
+| --- | --- | --- |
+| `projects.id` / `tenant_uuid` | Identidade interna do projeto e tenant | Imutável |
+| `public_ref` | Path base das APIs e seleção do projeto no Studio | Regeneração explícita da URL do projeto |
+| `application_ref` | Path de descoberta de um slot publishable | Estável após rotação de chave, rename e regeneração da URL |
+| `key_id` | UUID da versão efetiva em `project_api_keys` | Quando outra versão passa a valer; não é URL ou credencial de autenticação |
+
+Aplicações externas usam `https://<servidor-publico>/config/<application_ref>`,
+não `https://<host-do-studio>:9091/config/...`. `SERVER_URL` e `SERVER_PROTO`
+configuram a origem pública. A porta `18011` não é publicada no host;
+aplicações nunca chamam diretamente esse serviço ou a API administrativa em
+`18000`. O cartão único de cada slot no Studio reúne reveal, versões e controles
+de rotação; somente slots publishable expõem uma URL de configuração.
+
 O control plane grava o material público na mesma transação que emite a chave.
 Um trigger rejeita material secret ou hash divergente. A implantação preenche
 as versões publishable existentes de forma offline; consultas públicas nunca
@@ -127,7 +144,7 @@ ou SQL indisponível resultam em erro explícito, sem outra chave ou slot.
 
 Renomear não altera a descoberta; regenerar a URL muda apenas `supabase_url` na
 resposta. Respostas usam `no-store` e CORS sem cookies; Traefik limita requisições.
-O aplicativo recria seu cliente ao mudar `key_id`, sem repetir escritas.
+O aplicativo recria seu cliente ao mudar `key_id` ou `supabase_url`, sem repetir escritas.
 A descoberta é pública: sessões, RLS e políticas continuam responsáveis pela
 autorização.
 

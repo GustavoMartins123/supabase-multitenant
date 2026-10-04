@@ -61,6 +61,7 @@ The schema belongs to versioned migrations in `servidor/api-internal/app/migrati
 | Role | Consumer | Scope |
 | --- | --- | --- |
 | `key_authorizer` | key-authorizer service | column-scoped `SELECT` on `projects`, `project_api_key_slots`, `project_api_keys`; `UPDATE (last_used_at)` |
+| `client_configuration_reader` | client-configuration service | read-only `SELECT` on `public_client_configurations`; no base tables, users, secrets or writes |
 | `host_agent_rw` | host-agent worker | `SELECT/INSERT/UPDATE` on `host_agent_workers` and `host_agent_commands`; `SELECT/INSERT/UPDATE/DELETE` on `project_container_state`; column-scoped read-only `SELECT` on `projects` (`id`, `name`, `owner_id`, `tenant_uuid`, `automatic_key_rotation_enabled`), `users` (`id`, `is_active`), `user_groups` (`user_id`, `group_name`) and `project_members` (`project_id`, `user_id`, `role`) so the agent re-authorizes every command against the database instead of trusting the Projects API. No project secret, no write outside the agent tables, no tenant database. |
 | `platform_reader` | Projects API telemetry | per-tenant database: `CONNECT` plus `SELECT` on `auth.users` and `auth.sessions`, provisioned by the lifecycle scripts. Required at API startup; there is no global-credential fallback. |
 | `platform_app` | Projects API control-plane pool | full DML on control-plane tables in schema `public`; no cluster administration, no tenant databases. The API's `DB_DSN` is this identity. |
@@ -111,6 +112,22 @@ users, project secrets, encrypted reveals or the underlying key tables, and has
 no master key, administrative HMAC or project environment mounts. Its Docker
 network connects it only to Traefik and PostgreSQL, not the administrative API.
 
+The identifiers have separate purposes:
+
+| Identifier | Purpose | Changes |
+| --- | --- | --- |
+| `projects.id` / `tenant_uuid` | Internal project and tenant identity | Immutable |
+| `public_ref` | Project API base path and Studio project selection | Explicit project URL regeneration |
+| `application_ref` | Discovery path for one publishable slot | Stable across key rotation, project rename and URL regeneration |
+| `key_id` | UUID of the effective `project_api_keys` version | When another version becomes effective; not a URL or authentication credential |
+
+External applications use `https://<public-server>/config/<application_ref>`,
+not `https://<studio-host>:9091/config/...`. The public origin is configured by
+`SERVER_URL` and `SERVER_PROTO`. Port `18011` has no host publication; applications
+never call the service directly or access the administrative API on `18000`.
+The Studio's unified slot card groups reveal, versions and rotation controls;
+only publishable slots expose a configuration URL.
+
 The control plane writes public publishable material in the same transaction
 that issues a key. A database trigger rejects secret material or a hash mismatch.
 Offline deployment populates existing publishable versions; no public request
@@ -122,7 +139,7 @@ expiry or unavailable SQL fail closed without another slot or a cached key.
 The returned project URL uses the canonical server origin and current public
 reference. Renaming or regenerating a project's URL does not change its discovery
 address. Clients fetch configuration before creating their Supabase client and
-revalidate on return to the foreground; a changed `key_id` requires recreating
+revalidate on return to the foreground; a changed `key_id` or `supabase_url` requires recreating
 the client and reconnecting Realtime, never replaying writes automatically.
 
 Responses are `no-store`, support cross-origin reads without cookies, and are

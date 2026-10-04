@@ -156,10 +156,17 @@ The publishable slot card exposes its public configuration URL:
 `https://PUBLIC_SUPABASE_HOST/config/APPLICATION_REF`. Store that stable URL in the
 consuming application, rather than a shared configuration credential.
 
+This is the public server's Traefik origin, not Studio's `:9091` origin.
+The unified slot card groups key versions, **View and copy**, expiration and
+rotation controls. The discovery reference is `application_ref`, a separate
+20-letter slot identifier. `key_id` is the UUID of the effective issued key
+version; it changes when another version becomes effective and is not the
+project UUID, slot reference or an authentication token.
+
 Fetch it without cookies before creating the Supabase client. The JSON contract
 has exactly `supabase_url`, `publishable_key`, `key_id`, and `expires_at` (which
 may be null). Revalidate when the application returns to the foreground;
-long-running clients need a bounded revalidation interval. When `key_id`
+long-running clients need a bounded revalidation interval. When `key_id` or `supabase_url`
 changes, recreate the client and reconnect Realtime. Do not automatically replay
 writes or reuse a stored key when canonical discovery fails.
 
@@ -169,7 +176,10 @@ confirmation. A disabled or expired slot returns 410; an unknown reference
 returns 404; unverifiable configuration returns 503. No default slot is selected.
 
 The reference remains stable across key rotation and project rename. A project
-URL regeneration changes `supabase_url` in the response, not discovery's URL.
+URL regeneration changes the project's `public_ref` and therefore the returned
+`supabase_url`, not discovery's URL. The project API base URL is
+`https://<public-server>/<public_ref>`; `/config/<application_ref>` is separate
+and lives at the public origin's root.
 Secret slots have no discovery address and remain backend-only credentials.
 Publishable discovery is not application authentication: anyone who knows its
 address can retrieve the current key. Use user sessions, RLS and service policies

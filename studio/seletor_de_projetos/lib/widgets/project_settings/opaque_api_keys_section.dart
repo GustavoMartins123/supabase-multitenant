@@ -174,8 +174,7 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           action: StepUpAction.revealSecretKey,
           resourceId: reveal.keyId,
           title: 'Reautenticar para revelar secret key',
-          description:
-              'A chave possui privilegios de service_role.',
+          description: 'A chave possui privilegios de service_role.',
         );
         if (stepUpToken == null || !mounted) return;
       }
@@ -447,8 +446,7 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           action: StepUpAction.createSecretKey,
           resourceId: draft.name,
           title: 'Reautenticar para criar secret key',
-          description:
-              'A nova secret key tera privilegios de service_role.',
+          description: 'A nova secret key tera privilegios de service_role.',
         );
         if (stepUpToken == null || !mounted) return;
       }
@@ -590,12 +588,6 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
             onPressed: disabled ? null : _abortMigration,
           ),
         ],
-        if (state.reveals.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          const Text('CHAVES DISPONIVEIS', style: _captionStyle),
-          const SizedBox(height: 8),
-          ...state.reveals.map((reveal) => _revealCard(state, reveal)),
-        ],
         if (state.slots.isNotEmpty) ...[
           const SizedBox(height: 16),
           ...state.slots.map((slot) => _slotCard(state, slot)),
@@ -693,44 +685,60 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
     );
   }
 
-  Widget _revealCard(
+  Widget _keyDetails(
     OpaqueApiKeysState state,
-    OpaqueApiKeyReveal reveal,
+    OpaqueApiKeySlot slot,
+    OpaqueApiKeyVersion key,
   ) {
-    final busy = state.isRevealBusy(reveal.keyId);
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(10),
-      decoration: _boxDecoration,
+    final reveals = state.reveals.where((reveal) =>
+        reveal.slotId == slot.id &&
+        reveal.keyId == key.id &&
+        reveal.kind == slot.kind);
+    final reveal = reveals.isEmpty ? null : reveals.single;
+    final busy = state.isRevealBusy(key.id);
+    return Padding(
+      key: ValueKey('opaque-key-details-${key.id}'),
+      padding: const EdgeInsets.only(bottom: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('${reveal.slotName} · ${reveal.kind}', style: _titleStyle),
           Text(
-            reveal.revealedAt == null
-                ? 'Chave ${reveal.keyStatus}'
-                : 'Chave ${reveal.keyStatus} · revelada em '
-                    '${_date(reveal.revealedAt!)}',
-            style:
-                const TextStyle(color: SupabaseColors.textMuted, fontSize: 11),
+            '${key.tokenHint} · ${key.status} · '
+            '${key.expiresAt == null ? 'Não expira' : 'expira ${_date(key.expiresAt!)}'}'
+            '${key.lastUsedAt == null ? '' : ' · uso ${_date(key.lastUsedAt!)}'}',
+            style: TextStyle(
+              color: key.currentlyAccepted
+                  ? SupabaseColors.success
+                  : SupabaseColors.textSecondary,
+              fontSize: 11,
+              fontFamily: 'monospace',
+            ),
           ),
+          if (reveal?.revealedAt != null)
+            Text(
+              'Revelada em ${_date(reveal!.revealedAt!)}',
+              style: const TextStyle(
+                  color: SupabaseColors.textMuted, fontSize: 11),
+            ),
           if (busy) ...[
             const SizedBox(height: 8),
             LinearProgressIndicator(
-              key: ValueKey('opaque-reveal-progress-${reveal.keyId}'),
+              key: ValueKey('opaque-reveal-progress-${key.id}'),
               minHeight: 2,
             ),
           ],
-          const SizedBox(height: 8),
-          SecondaryButton(
-            label: busy ? 'Revelando...' : 'Ver e copiar',
-            icon: Icons.copy_rounded,
-            onPressed: _interactionDisabled(state) ||
-                    (!widget.canManage && reveal.kind != 'publishable')
-                ? null
-                : () => _claim(reveal),
-          ),
+          if (reveal != null) ...[
+            const SizedBox(height: 8),
+            SecondaryButton(
+              key: ValueKey('opaque-key-reveal-${key.id}'),
+              label: busy ? 'Revelando...' : 'Ver e copiar',
+              icon: Icons.copy_rounded,
+              onPressed: _interactionDisabled(state) ||
+                      (!widget.canManage && reveal.kind != 'publishable')
+                  ? null
+                  : () => _claim(reveal),
+            ),
+          ],
         ],
       ),
     );
@@ -740,6 +748,7 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
     final pending = slot.keys.where((key) => key.status == 'pending').toList();
     final busy = state.isSlotBusy(slot.id);
     return Container(
+      key: ValueKey('opaque-slot-card-${slot.id}'),
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
@@ -757,19 +766,26 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           if (slot.applicationRef != null) ...[
             const SizedBox(height: 8),
             const Text('CONFIGURACAO DO APLICATIVO', style: _titleStyle),
-            SelectableText(clientConfigurationUrl(widget.publicBaseUrl, slot.applicationRef!),
+            SelectableText(
+                clientConfigurationUrl(
+                    widget.publicBaseUrl, slot.applicationRef!),
                 key: ValueKey('client-config-url-${slot.id}'),
                 style: const TextStyle(fontSize: 11, fontFamily: 'monospace')),
             const SizedBox(height: 6),
-            const Text('Endereco publico e estavel. Retorna somente a chave publishable vigente; '
+            const Text(
+                'Endereco publico e estavel. Retorna somente a chave publishable vigente; '
                 'nao autentica usuarios nem substitui RLS.',
-                style: TextStyle(color: SupabaseColors.textMuted, fontSize: 11)),
+                style:
+                    TextStyle(color: SupabaseColors.textMuted, fontSize: 11)),
             const SizedBox(height: 6),
-            SecondaryButton(label: 'Copiar URL de configuracao', icon: Icons.copy_rounded,
+            SecondaryButton(
+                label: 'Copiar URL de configuracao',
+                icon: Icons.copy_rounded,
                 onPressed: () async {
                   try {
                     await Clipboard.setData(ClipboardData(
-                        text: clientConfigurationUrl(widget.publicBaseUrl, slot.applicationRef!)));
+                        text: clientConfigurationUrl(
+                            widget.publicBaseUrl, slot.applicationRef!)));
                     _snack('URL copiada.', SupabaseColors.success);
                   } catch (error) {
                     _showError(error);
@@ -799,21 +815,7 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
           ],
           const SizedBox(height: 8),
           ...slot.keys.where((key) => key.status != 'revoked').map(
-                (key) => Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Text(
-                    '${key.tokenHint} · ${key.status} · '
-                    '${key.expiresAt == null ? 'Não expira' : 'expira ${_date(key.expiresAt!)}'}'
-                    '${key.lastUsedAt == null ? '' : ' · uso ${_date(key.lastUsedAt!)}'}',
-                    style: TextStyle(
-                      color: key.currentlyAccepted
-                          ? SupabaseColors.success
-                          : SupabaseColors.textSecondary,
-                      fontSize: 11,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ),
+                (key) => _keyDetails(state, slot, key),
               ),
           if (widget.canManage) ...[
             for (final key in pending)
@@ -900,11 +902,6 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
   String _date(DateTime value) =>
       DateFormat('dd/MM/yyyy HH:mm').format(value.toLocal());
 
-  static const _captionStyle = TextStyle(
-    color: SupabaseColors.textMuted,
-    fontSize: 10,
-    fontWeight: FontWeight.w600,
-  );
   static const _titleStyle = TextStyle(
     color: SupabaseColors.textPrimary,
     fontSize: 13,

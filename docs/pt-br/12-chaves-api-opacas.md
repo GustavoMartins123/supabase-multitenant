@@ -147,6 +147,54 @@ Também confirme login, uma consulta REST sujeita a RLS, GraphQL, conexão
 Realtime, operação de Storage e uma Function. Um JWT legado usado como
 `apikey` deve receber 403.
 
+## Descoberta de configuração do cliente
+
+O cartão único de cada slot reúne versões, **Ver e copiar**, expiração e
+controles de rotação. Slots publishable também expõem sua URL pública de
+configuração: `https://<servidor-publico>/config/<application_ref>`.
+É a origem pública do Traefik, não a origem do Studio em `:9091`.
+Guarde essa URL estável na aplicação, não uma credencial compartilhada de
+configuração. Slots secret não têm descoberta pública e ficam somente em
+backends confiáveis.
+
+Consulte a URL sem cookies antes de criar o cliente Supabase. O JSON contém
+exatamente `supabase_url`, `publishable_key`, `key_id` e `expires_at` anulável.
+`application_ref` é uma referência separada de 20 letras para um slot;
+`key_id` é o UUID da versão efetiva da chave emitida, não o UUID do projeto,
+a referência do slot ou um token de autenticação.
+
+A URL de descoberta permanece estável após rotação e rename. Regenerar a URL
+do projeto muda seu `public_ref` e, portanto, o `supabase_url` retornado, não o
+endereço da descoberta. A URL base das APIs é `https://<servidor-publico>/<public_ref>`;
+`/config/<application_ref>` é separado e fica na raiz da origem pública.
+Revalide ao voltar ao primeiro plano; clientes de longa duração precisam de um
+intervalo limitado de revalidação. Se `key_id` ou `supabase_url` mudar, recrie o
+cliente e reconecte o Realtime. Não repita escritas automaticamente nem reutilize
+uma chave armazenada quando a consulta canônica falhar.
+
+A descoberta não entrega versões futuras ou sem confirmação nem confirma a
+instalação delas. Rotações programadas ainda exigem confirmação administrativa
+explícita. Slot sem chave efetiva válida retorna 410; referência desconhecida
+retorna 404; configuração não verificável retorna 503. Não há slot padrão.
+Qualquer pessoa com o endereço pode consultar a chave publishable vigente:
+sessões, RLS e políticas dos serviços controlam a autorização, não o sigilo da
+URL de descoberta.
+
+O Traefik encaminha diretamente ao serviço isolado `client-configuration` em
+`:18011`, porta interna não publicada no host. Não passa pelo gateway do Studio
+ou pela Projects API em `:18000`. Respostas usam `no-store`, CORS sem cookies e
+limite de requisições no Traefik. O contrato público fica separado em
+`docs/api/client-configuration.openapi.json`.
+
+Na implantação, o setup gera `CLIENT_CONFIGURATION_DB_PASSWORD`, uma credencial
+SQL interna, não um token público. Faça backup do PostgreSQL e pare escritores
+do lifecycle durante a migration. `control-plane-migrations` aplica o schema,
+provisiona a identidade somente leitura e preenche material publishable existente
+offline. Implante as imagens da API e descoberta, recrie o watcher de
+configuração do Traefik e atualize o Flutter. Nenhuma credencial pública de
+configuração, master key ou HMAC administrativo entra no container de descoberta.
+Valide rotação, revogação, permissões SQL e CORS.
+
 ## Criar slots adicionais
 
 Escolha nomes ligados ao consumidor, por exemplo:

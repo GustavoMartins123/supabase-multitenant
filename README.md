@@ -40,14 +40,17 @@ Simplify the creation and management of multiple isolated Supabase projects on i
 
 ```mermaid
 flowchart LR
-    User[User] --> StudioGateway[Studio Gateway\nNginx/OpenResty :9091]
+    StudioUser[Studio user] --> StudioGateway[Studio Gateway\nNginx/OpenResty :9091]
     StudioGateway --> Authelia[Authelia]
     StudioGateway --> Flutter[Flutter selector]
     StudioGateway --> Studio[Supabase Studio]
 
-    StudioGateway --> Traefik[Traefik]
-    Traefik --> ProjectsAPI[Projects API\nFastAPI]
-    Traefik --> TenantGateway[Project Nginx]
+    StudioGateway -->|authenticated administrative transport| Traefik[Traefik]
+    ExternalApp[External application] -->|public HTTPS| Traefik
+    Traefik -->|restricted administrative routes| ProjectsAPI[Projects API\nFastAPI]
+    Traefik -->|/config/application_ref| ClientConfiguration[client-configuration\ninternal :18011]
+    ClientConfiguration -->|read-only public configuration view| PostgreSQL
+    Traefik -->|/public_ref/...| TenantGateway[Project Nginx]
 
     ProjectsAPI --> PostgreSQL[(PostgreSQL)]
     ProjectsAPI -->|signed lifecycle intents| PostgreSQL
@@ -82,6 +85,69 @@ The platform supports two deployment layouts:
 
 Applications access the project routes through Traefik. The Studio gateway is an administrative interface and does not need to be exposed as part of the public data path.
 
+### External application access
+
+An application uses the main server's public HTTPS origin, not the administrative
+Studio origin on `:9091`. In a two-machine deployment, it connects to the main
+server, not the Studio machine. The same separation applies on one machine.
+
+Application users authenticate through the project's Auth API; they do not need
+an Authelia account or a Studio session. Trusted external backends also use
+Traefik project routes with their own secret slot; secret keys must never be
+distributed to public applications.
+
+| Purpose | Address | Access |
+| --- | --- | --- |
+| Administration | `https://<studio-host>:9091` | Authelia session and administrative authorization |
+| Publishable slot discovery | `https://<public-server>/config/<application_ref>` | Public GET through Traefik; no cookie or configuration token |
+| Project API base URL | `https://<public-server>/<public_ref>` | Opaque API key and, where applicable, the application's user session |
+
+Service paths are appended to the project base URL: `/auth/v1`, `/rest/v1`,
+`/storage/v1`, `/functions/v1` and `/realtime/v1`. They are not routes at the
+public server's root. Only discovery uses the root `/config/<application_ref>`.
+
+For HTTP project requests, send the opaque key in `apikey`. An authenticated
+application user's JWT goes in `Authorization: Bearer <access_token>`; it is
+not a replacement for the API key. The project gateway validates the opaque key
+and preserves the user session for the upstream Supabase service.
+
+In the project's **Keys** settings, each slot has one card with its key versions,
+reveal action and rotation controls. Publishable slots also expose **Copy
+configuration URL**. Store that URL in the application and fetch it before
+creating the Supabase client. The response contains:
+
+| Field | Meaning |
+| --- | --- |
+| `supabase_url` | Current project base URL: `https://<public-server>/<public_ref>` |
+| `publishable_key` | Effective publishable key for this slot; never a secret key |
+| `key_id` | UUID of this key version, not the project UUID or the discovery reference; changes when a different version becomes effective |
+| `expires_at` | Expiration timestamp, or `null` when the key does not expire over time |
+
+`application_ref` is a separate random 20-letter reference for a publishable
+slot. Its discovery URL stays stable across key rotation, project rename and
+project URL regeneration. Rename changes only the display name; URL regeneration
+changes `public_ref` and the returned `supabase_url`, not `application_ref`.
+Secret slots have no public discovery URL and belong only in trusted backends.
+
+Revalidate configuration when the application returns to the foreground. If
+`key_id` or `supabase_url` changes, recreate the Supabase client and reconnect
+Realtime. Discovery does not confirm scheduled key installation and never
+returns future or unconfirmed key versions. Do not reuse an old key when
+discovery fails or replay writes automatically.
+
+Traefik sends discovery directly to the isolated `client-configuration` service.
+Neither Studio nor the administrative Projects API on `:18000` handles it;
+`:18011` is internal and is not published on the host. Responses use `no-store`
+and CORS without cookies. Unknown references return 404; slots without a valid
+effective key return 410; unverifiable configuration returns 503. Discovery is
+public, not user authentication: Auth sessions, RLS and service policies still
+control access to application data.
+
+For a deployment using the setup's private CA, the application machine must
+trust that CA and verify the public server's certificate. Do not bypass TLS
+verification. See [Opaque API keys](docs/12-opaque-api-key-operations.md) and
+[Control plane](docs/architecture/control-plane.md) for the complete contracts.
+
 ### Shared services
 
 - PostgreSQL;
@@ -93,6 +159,7 @@ Applications access the project routes through Traefik. The Studio gateway is an
 - Edge Functions;
 - Postgres Meta;
 - key-authorizer;
+- client-configuration;
 - Projects API;
 - Traefik;
 - Supabase Analytics/Logflare and Vector.
@@ -216,7 +283,7 @@ docker compose -f docker-compose.yml --env-file .env up --build -d
 docker compose -f docker-compose-api.yml -f docker-compose.single-node.yml --env-file .env up --build -d
 ```
 
-The second command runs the one-shot `control-plane-migrations` service first. It applies the versioned schema migrations and provisions the restricted database identities; `key-authorizer` and `projects-api` start only after it succeeds. See [Migrations do control plane](docs/architecture/control-plane-migrations.md).
+The second command runs the one-shot `control-plane-migrations` service first. It applies the versioned schema migrations, provisions the restricted database identities and populates existing public publishable material; `key-authorizer`, `client-configuration` and `projects-api` start only after it succeeds. See [Control-plane migrations](docs/architecture/control-plane-migrations.md).
 
 Start Traefik:
 
@@ -268,9 +335,14 @@ On the first access, create the initial administrator account in the browser. Af
 Important Studio details:
 
 - each browser tab keeps its project from the URL (`/project/<ref>`);
-- `9091` is the single public endpoint for Studio and Authelia;
+- `9091` is the single administrative endpoint for Studio and Authelia, not an application API endpoint;
 - plain HTTP requests to `:9091` are redirected to HTTPS on the same port;
 - server-to-server integrations that target the Studio gateway must also use port `9091`.
+
+External applications use the public Traefik addresses described in
+[External application access](#external-application-access), without a Studio
+or Authelia session. Verify both the slot's `/config/<application_ref>` response
+and the project routes using the returned `supabase_url` and `publishable_key`.
 
 ---
 

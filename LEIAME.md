@@ -10,7 +10,7 @@ Cada projeto recebe seu próprio database PostgreSQL, JWT secret, tenant do Real
 
 Cada projeto possui múltiplos slots de API keys opacas `publishable`/`secret`. A expiração é opcional por chave; slots com expiração podem rotacionar automaticamente antes do vencimento, enquanto os JWTs internos anon/service role permanecem somente no servidor. Um administrador pode desativar a automação no projeto ou no slot, e falhas ficam bloqueadas e visíveis até uma retomada explícita.
 
-A URL usa uma referencia aleatoria independente de 20 letras: `https://<servidor>/<public_ref>` e `/project/<public_ref>` no Studio. O nome tecnico nao determina a URL. **Gerar nova URL** troca somente a referencia; a URL anterior deixa de funcionar, sem alias ou redirecionamento. A migracao de instalacoes existentes esta descrita em [Project lifecycle](docs/architecture/project-lifecycle.md).
+A URL usa uma referência aleatória independente de 20 letras: `https://<servidor>/<public_ref>` e `/project/<public_ref>` no Studio. O nome técnico não determina a URL. **Gerar nova URL** troca somente a referência; a URL anterior deixa de funcionar, sem alias ou redirecionamento. A migração de instalações existentes está descrita em [Lifecycle dos projetos](docs/pt-br/architecture/project-lifecycle.md).
 
 > Este é um projeto não oficial e ainda está em desenvolvimento ativo.
 
@@ -40,14 +40,17 @@ Simplificar a criação e a gestão de múltiplos projetos Supabase isolados em 
 
 ```mermaid
 flowchart LR
-    User[Usuário] --> StudioGateway[Studio Gateway\nNginx/OpenResty :9091]
+    StudioUser[Usuário do Studio] --> StudioGateway[Studio Gateway\nNginx/OpenResty :9091]
     StudioGateway --> Authelia[Authelia]
     StudioGateway --> Flutter[Seletor Flutter]
     StudioGateway --> Studio[Supabase Studio]
 
-    StudioGateway --> Traefik[Traefik]
-    Traefik --> ProjectsAPI[Projects API\nFastAPI]
-    Traefik --> TenantGateway[Nginx do projeto]
+    StudioGateway -->|transporte administrativo autenticado| Traefik[Traefik]
+    ExternalApp[Aplicação externa] -->|HTTPS público| Traefik
+    Traefik -->|rotas administrativas restritas| ProjectsAPI[Projects API\nFastAPI]
+    Traefik -->|/config/application_ref| ClientConfiguration[client-configuration\ninterno :18011]
+    ClientConfiguration -->|view pública de configuração somente leitura| PostgreSQL
+    Traefik -->|/public_ref/...| TenantGateway[Nginx do projeto]
 
     ProjectsAPI --> PostgreSQL[(PostgreSQL)]
     ProjectsAPI -->|intenções assinadas de lifecycle| PostgreSQL
@@ -82,6 +85,71 @@ A plataforma suporta duas topologias:
 
 As aplicações acessam as rotas dos projetos pelo Traefik. O gateway do Studio é uma interface administrativa e não precisa fazer parte do caminho público dos dados.
 
+### Acesso de aplicações externas
+
+Uma aplicação usa a origem HTTPS pública do servidor principal, não a origem
+administrativa do Studio em `:9091`. Com duas máquinas, ela conecta ao servidor
+principal, não à máquina do Studio. A mesma separação vale em uma única máquina.
+
+Usuários das aplicações autenticam pela API de Auth do projeto; não precisam
+de conta no Authelia ou sessão do Studio. Backends externos confiáveis também
+usam as rotas do projeto pelo Traefik, com seu próprio slot secret; secret keys
+nunca devem ser distribuídas a aplicações públicas.
+
+| Finalidade | Endereço | Acesso |
+| --- | --- | --- |
+| Administração | `https://<host-do-studio>:9091` | Sessão do Authelia e autorização administrativa |
+| Descoberta do slot publishable | `https://<servidor-publico>/config/<application_ref>` | GET público pelo Traefik; sem cookie ou token de configuração |
+| URL base das APIs do projeto | `https://<servidor-publico>/<public_ref>` | API key opaca e, quando aplicável, sessão do usuário da aplicação |
+
+Os paths dos serviços são acrescentados à URL base do projeto: `/auth/v1`,
+`/rest/v1`, `/storage/v1`, `/functions/v1` e `/realtime/v1`. Não são rotas na
+raiz do servidor público. Somente a descoberta usa `/config/<application_ref>`
+na raiz.
+
+Nas requisições HTTP ao projeto, envie a chave opaca em `apikey`. O JWT do
+usuário autenticado da aplicação vai em `Authorization: Bearer <access_token>`;
+não substitui a API key. O gateway do projeto valida a chave opaca e preserva
+a sessão do usuário para o serviço Supabase de destino.
+
+Na aba **Chaves** das configurações do projeto, cada slot tem um único cartão
+com suas versões, a ação de revelar e os controles de rotação. Slots publishable
+também oferecem **Copiar URL de configuração**. Guarde essa URL na aplicação e
+consulte-a antes de criar o cliente Supabase. A resposta contém:
+
+| Campo | Significado |
+| --- | --- |
+| `supabase_url` | URL base atual do projeto: `https://<servidor-publico>/<public_ref>` |
+| `publishable_key` | Chave publishable efetiva desse slot; nunca uma secret key |
+| `key_id` | UUID da versão da chave, não o UUID do projeto nem a referência de descoberta; muda quando outra versão passa a valer |
+| `expires_at` | Data de expiração, ou `null` quando a chave não expira pelo tempo |
+
+`application_ref` é uma referência aleatória separada de 20 letras para um slot
+publishable. Sua URL de descoberta permanece estável após rotação de chave,
+rename e regeneração da URL do projeto. Rename muda somente o nome de exibição;
+regenerar a URL muda `public_ref` e o `supabase_url` retornado, não
+`application_ref`. Slots secret não têm descoberta pública e pertencem somente
+a backends confiáveis.
+
+Consulte novamente a configuração quando a aplicação voltar ao primeiro plano.
+Se `key_id` ou `supabase_url` mudar, recrie o cliente Supabase e reconecte o
+Realtime. A descoberta não confirma a instalação de uma chave programada nem
+entrega versões futuras ou sem confirmação. Não reutilize uma chave antiga
+quando a descoberta falhar nem repita escritas automaticamente.
+
+O Traefik encaminha a descoberta diretamente ao serviço isolado
+`client-configuration`. Nem o Studio nem a Projects API administrativa em
+`:18000` participam; `:18011` é interno e não é publicado no host. Respostas usam
+`no-store` e CORS sem cookies. Referências desconhecidas retornam 404; slots sem
+chave efetiva válida retornam 410; configuração não verificável retorna 503.
+A descoberta é pública, não autenticação de usuário: sessões do Auth, RLS e
+políticas dos serviços continuam controlando o acesso aos dados da aplicação.
+
+Em uma instalação com a CA privada do setup, a máquina da aplicação precisa
+confiar nessa CA e verificar o certificado do servidor público. Não desative a
+verificação TLS. Veja [Chaves de API opacas](docs/pt-br/12-chaves-api-opacas.md)
+e [Control plane](docs/pt-br/architecture/control-plane.md) para os contratos.
+
 ### Serviços compartilhados
 
 - PostgreSQL;
@@ -93,6 +161,7 @@ As aplicações acessam as rotas dos projetos pelo Traefik. O gateway do Studio 
 - Edge Functions;
 - Postgres Meta;
 - key-authorizer;
+- client-configuration;
 - Projects API;
 - Traefik;
 - Supabase Analytics/Logflare e Vector.
@@ -218,7 +287,7 @@ docker compose -f docker-compose.yml --env-file .env up --build -d
 docker compose -f docker-compose-api.yml -f docker-compose.single-node.yml --env-file .env up --build -d
 ```
 
-O segundo comando executa antes o serviço efêmero `control-plane-migrations`, que aplica as migrations versionadas do schema e provisiona as identidades restritas de banco; `key-authorizer` e `projects-api` só sobem depois que ele termina com sucesso. Veja [Migrations do control plane](docs/architecture/control-plane-migrations.md).
+O segundo comando executa antes o serviço efêmero `control-plane-migrations`, que aplica as migrations versionadas do schema, provisiona as identidades restritas de banco e preenche o material público publishable existente; `key-authorizer`, `client-configuration` e `projects-api` só sobem depois que ele termina com sucesso. Veja [Migrations do control plane](docs/pt-br/architecture/control-plane-migrations.md).
 
 Inicie o Traefik:
 
@@ -270,9 +339,15 @@ No primeiro acesso, crie o administrador inicial pelo navegador. Depois do boots
 Detalhes importantes do Studio:
 
 - cada aba do navegador mantém seu projeto pela URL (`/project/<ref>`);
-- `9091` é o único endpoint público do Studio e do Authelia;
+- `9091` é o único endpoint administrativo do Studio e do Authelia, não um endpoint das APIs de aplicações;
 - requisições HTTP simples em `:9091` são redirecionadas para HTTPS na mesma porta;
 - integrações entre servidores que acessam o gateway do Studio também devem usar a porta `9091`.
+
+Aplicações externas usam os endereços públicos do Traefik descritos em
+[Acesso de aplicações externas](#acesso-de-aplicações-externas), sem sessão do
+Studio ou do Authelia. Verifique tanto a resposta de `/config/<application_ref>`
+do slot quanto as rotas do projeto usando `supabase_url` e `publishable_key`
+retornados.
 
 ---
 

@@ -51,9 +51,18 @@ void main() {
 
     expect(find.text('Migracao preparada; JWT legado ainda esta ativo'),
         findsOneWidget);
-    expect(find.text('default-publishable · publishable'), findsOneWidget);
-    expect(find.byKey(const ValueKey('client-config-url-slot-1')), findsOneWidget);
+    expect(find.text('default-publishable'), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey('client-config-url-slot-1')), findsOneWidget);
     expect(find.text('Copiar URL de configuracao'), findsOneWidget);
+    expect(find.text('CHAVES DISPONIVEIS'), findsNothing);
+    final slotCard = find.byKey(const ValueKey('opaque-slot-card-slot-1'));
+    expect(slotCard, findsOneWidget);
+    expect(find.descendant(of: slotCard, matching: find.text('Ver e copiar')),
+        findsOneWidget);
+    expect(
+        find.descendant(of: slotCard, matching: find.text('Rotacionar agora')),
+        findsOneWidget);
 
     await tester.tap(find.text('Ver e copiar'));
     await tester.pump();
@@ -66,7 +75,7 @@ void main() {
     );
     expect(find.text('Migracao preparada; JWT legado ainda esta ativo'),
         findsOneWidget);
-    expect(find.text('default-publishable · publishable'), findsOneWidget);
+    expect(find.text('default-publishable'), findsOneWidget);
 
     api.completeClaim();
     await tester.pumpAndSettle();
@@ -126,7 +135,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('default-publishable · publishable'), findsOneWidget);
+    expect(find.text('default-publishable'), findsOneWidget);
     expect(find.text('Ver e copiar'), findsOneWidget);
     expect(find.text('Rotacionar agora'), findsNothing);
     expect(find.text('Revogar slot'), findsNothing);
@@ -361,6 +370,135 @@ void main() {
       findsNothing,
     );
   });
+
+  testWidgets('each slot groups its versions and reveals by key identity',
+      (tester) async {
+    final api = _MultipleVersionsApi();
+    final repository = ProjectRepository(
+      client: ApiClient(client: MockClient(api.handle)),
+    );
+    addTearDown(repository.close);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (_) async => null);
+    addTearDown(() => TestDefaultBinaryMessengerBinding
+        .instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, null));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [projectRepositoryProvider.overrideWithValue(repository)],
+        child: const MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: OpaqueApiKeysSection(
+                projectRef: 'project-ref',
+                publicBaseUrl: 'https://api.example.test',
+                canManage: true,
+                projectBusy: false,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('default-publishable'), findsOneWidget);
+    expect(find.text('mobile-app'), findsOneWidget);
+    expect(find.text('CHAVES DISPONIVEIS'), findsNothing);
+    for (final keyId in ['key-1', 'key-2', 'key-3']) {
+      final slotId = keyId == 'key-3' ? 'slot-2' : 'slot-1';
+      final button = find.byKey(ValueKey('opaque-key-reveal-$keyId'));
+      expect(
+        find.descendant(
+          of: find.byKey(ValueKey('opaque-slot-card-$slotId')),
+          matching: button,
+        ),
+        findsOneWidget,
+      );
+      await tester.ensureVisible(button);
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      expect(api.claimedKeyIds.last, keyId);
+      expect(find.text('sb_publishable_test_$keyId'), findsOneWidget);
+      await tester.tap(find.text('Fechar'));
+      await tester.pumpAndSettle();
+      expect(find.text('sb_publishable_test_$keyId'), findsNothing);
+    }
+    expect(
+        find.byKey(const ValueKey('opaque-key-details-key-4')), findsOneWidget);
+    expect(find.byKey(const ValueKey('opaque-key-reveal-key-4')), findsNothing);
+    expect(
+        find.byKey(const ValueKey('opaque-key-details-key-5')), findsNothing);
+    expect(api.claimedKeyIds, ['key-1', 'key-2', 'key-3']);
+    expect(tester.takeException(), isNull);
+  });
+}
+
+final class _MultipleVersionsApi {
+  final List<String> claimedKeyIds = [];
+
+  Future<http.Response> handle(http.Request request) async {
+    final first = _ControlledOpaqueApiKeysApi._slotJson(revealed: true);
+    final pending = Map<String, dynamic>.from((first['keys'] as List).single);
+    Map<String, dynamic> version(String id, String status) => {
+          ...pending,
+          'id': id,
+          'token_hint': 'sb_publishable_hint_$id',
+          'status': status,
+          'currently_accepted': status == 'active',
+        };
+    first['keys'] = [
+      version('key-2', 'active'),
+      pending,
+      version('key-6', 'revoked'),
+    ];
+    final second = {
+      ...first,
+      'id': 'slot-2',
+      'name': 'mobile-app',
+      'application_ref': 'bcdefghijklmnopqrstu',
+      'keys': [
+        version('key-3', 'active'),
+        version('key-4', 'pending'),
+        version('key-5', 'revoked'),
+      ],
+    };
+    Map<String, dynamic> reveal(String keyId, String slotId, String status) => {
+          ..._ControlledOpaqueApiKeysApi._revealJson(revealed: true),
+          'key_id': keyId,
+          'slot_id': slotId,
+          'slot_name':
+              slotId == 'slot-1' ? 'default-publishable' : 'mobile-app',
+          'key_status': status,
+        };
+    if (request.method == 'GET') {
+      if (request.url.path.endsWith('/opaque-api-keys/migration')) {
+        return _ControlledOpaqueApiKeysApi._json({'status': 'active'});
+      }
+      if (request.url.path.endsWith('/api-key-slots')) {
+        return _ControlledOpaqueApiKeysApi._json({
+          'slots': [first, second]
+        });
+      }
+      if (request.url.path.endsWith('/api-key-reveals')) {
+        return _ControlledOpaqueApiKeysApi._json({
+          'reveals': [
+            reveal('key-3', 'slot-2', 'active'),
+            reveal('key-1', 'slot-1', 'pending'),
+            reveal('key-2', 'slot-1', 'active'),
+            reveal('key-5', 'slot-2', 'revoked'),
+          ],
+        });
+      }
+    }
+    if (request.method == 'POST' && request.url.path.endsWith('/claim')) {
+      final keyId = request.url.pathSegments.reversed.skip(1).first;
+      claimedKeyIds.add(keyId);
+      return _ControlledOpaqueApiKeysApi._json(
+          {'api_key': 'sb_publishable_test_$keyId'});
+    }
+    return _ControlledOpaqueApiKeysApi._json(
+        {'detail': 'Unexpected request'}, 500);
+  }
 }
 
 final class _ControlledOpaqueApiKeysApi {
