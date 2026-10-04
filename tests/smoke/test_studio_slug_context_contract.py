@@ -168,7 +168,7 @@ class StudioSlugContextContractTest(unittest.TestCase):
         self.assertNotIn("build", service)
         self.assertEqual(service["pull_policy"], "always")
         self.assertEqual(service["image"], maintenance["services"]["studio"]["image"])
-        self.assertTrue(service["image"].endswith(":20290c7-context-v7"))
+        self.assertTrue(service["image"].endswith(":20290c7-context-v8"))
         self.assertEqual(maintenance["services"]["studio"]["build"]["context"], "./studio-slug")
         self.assertEqual(set(maintenance["services"]), {"studio"})
 

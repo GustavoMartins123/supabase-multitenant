@@ -7,6 +7,7 @@ import secrets
 import sys
 import unittest
 import uuid
+import json
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -120,6 +121,99 @@ class TenantSqlIsolationTest(unittest.IsolatedAsyncioTestCase):
                 await self.asyncpg.connect(self.dsn(database, role, password))
         await self.tenant.execute("CREATE TABLE public.future_table(id integer)")
         self.assertEqual(await reader.fetchval("SELECT count(*) FROM public.future_table"), 0)
+
+    async def rls_fixture(self):
+        from app.assistant_security import AUTH_IDENTITY_SQL
+        connection = await self.asyncpg.connect(self.dsn("_supabase_" + self.refs[0]))
+        self.connections.append(connection)
+        await connection.execute("""DO $$ BEGIN
+            IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='anon') THEN CREATE ROLE anon NOLOGIN; END IF;
+            IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN CREATE ROLE authenticated NOLOGIN; END IF;
+            END $$;
+            GRANT USAGE ON SCHEMA public, auth TO anon, authenticated;""")
+        for name, source in AUTH_IDENTITY_SQL.items():
+            return_type = "uuid" if name == "uid" else "jsonb"
+            await connection.execute(f"CREATE FUNCTION auth.{name}() RETURNS {return_type} LANGUAGE sql STABLE AS $fn${source}$fn$")
+        return connection
+
+    async def test_rls_isolation_and_security_inspection_use_real_application_roles(self):
+        from app.assistant_security import inspect_table_security
+        from app.assistant_sql_execution import execute_assistant_sql
+        from fastapi import HTTPException
+
+        client = await self.rls_fixture()
+        owner_a, owner_b = uuid.uuid4(), uuid.uuid4()
+        for sql in (
+            "CREATE TABLE public.orders(id integer PRIMARY KEY, user_id uuid NOT NULL, total integer)",
+            "ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY",
+            "CREATE POLICY own_rows ON public.orders TO authenticated USING(user_id=(SELECT auth.uid())) WITH CHECK(user_id=auth.uid())",
+        ):
+            await execute_assistant_sql(self.tenant, self.sql_execution(sql))
+        await self.tenant.execute("INSERT INTO public.orders VALUES(1,$1,10),(2,$2,20)", owner_a, owner_b)
+        await client.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON public.orders TO anon, authenticated")
+        await client.execute("SET ROLE authenticated")
+        await client.fetchval("SELECT set_config('request.jwt.claims',$1,false)", json.dumps({"sub": str(owner_a)}))
+        self.assertEqual(await client.fetchval("SELECT array_agg(id) FROM public.orders"), [1])
+        self.assertEqual(await client.execute("UPDATE public.orders SET total=99 WHERE id=2"), "UPDATE 0")
+        self.assertEqual(await client.execute("DELETE FROM public.orders WHERE id=2"), "DELETE 0")
+        with self.assertRaises(self.asyncpg.InsufficientPrivilegeError):
+            await client.execute("INSERT INTO public.orders VALUES(3,$1,30)", owner_b)
+        with self.assertRaises(self.asyncpg.InsufficientPrivilegeError):
+            await client.execute("UPDATE public.orders SET user_id=$1 WHERE id=1", owner_b)
+        await client.execute("RESET ROLE; SET ROLE anon")
+        await client.execute("SELECT set_config('request.jwt.claims','{}',false)")
+        self.assertEqual(await client.fetchval("SELECT count(*) FROM public.orders"), 0)
+        with self.assertRaises(self.asyncpg.InsufficientPrivilegeError):
+            await client.execute("INSERT INTO public.orders VALUES(3,$1,30)", owner_a)
+        await client.execute("RESET ROLE")
+        reader_role, password = tenant_assistant_reader_credentials(self.ids[0], self.master)
+        reader = await self.asyncpg.connect(self.dsn("_supabase_" + self.refs[0], reader_role, password))
+        self.connections.append(reader)
+        snapshot = (await inspect_table_security(reader, ["orders"]))[0]
+        self.assertTrue(snapshot["rls_enabled"])
+        self.assertFalse(snapshot["rls_forced"])
+        self.assertEqual(snapshot["policies"][0]["roles"], ["authenticated"])
+        self.assertTrue(snapshot["effective_privileges"]["anon"]["select"])
+        self.assertFalse(snapshot["effective_privileges"]["authenticated"]["bypass_rls"])
+        for sql in (
+            "CREATE TABLE public.teams(id integer, team_id uuid)",
+            "ALTER TABLE public.teams ENABLE ROW LEVEL SECURITY",
+            "CREATE POLICY team_access ON public.teams FOR SELECT TO authenticated USING(team_id=(auth.jwt()->'app_metadata'->>'team_id')::uuid)",
+        ):
+            await execute_assistant_sql(self.tenant, self.sql_execution(sql))
+        await self.tenant.execute("INSERT INTO public.teams VALUES(1,$1),(2,$2)", owner_a, owner_b)
+        await client.execute("GRANT SELECT ON public.teams TO authenticated; SET ROLE authenticated")
+        await client.fetchval("SELECT set_config('request.jwt.claims',$1,false)", json.dumps({"sub": str(owner_a), "app_metadata": {"team_id": str(owner_a)}}))
+        self.assertEqual(await client.fetchval("SELECT array_agg(id) FROM public.teams"), [1])
+        await client.execute("RESET ROLE")
+        for sql in (
+            "ALTER POLICY own_rows ON public.orders TO anon USING(true)",
+            "ALTER TABLE public.orders DISABLE ROW LEVEL SECURITY", "DROP POLICY own_rows ON public.orders",
+            "ALTER TABLE public.orders NO FORCE ROW LEVEL SECURITY",
+        ):
+            with self.assertRaises(HTTPException) as error:
+                await execute_assistant_sql(self.tenant, self.sql_execution(sql))
+            self.assertEqual(error.exception.status_code, 409)
+        await execute_assistant_sql(self.tenant, self.sql_execution("ALTER POLICY own_rows ON public.orders USING(user_id=auth.uid())", destructive=True))
+        await execute_assistant_sql(self.tenant, self.sql_execution("DROP POLICY own_rows ON public.orders", destructive=True))
+        await client.execute("SET ROLE authenticated")
+        self.assertEqual(await client.fetchval("SELECT count(*) FROM public.orders"), 0)
+        await client.execute("RESET ROLE")
+
+    async def test_rls_rejects_tampered_identity_and_cross_schema_policies(self):
+        from app.assistant_sql_execution import execute_assistant_sql
+        from fastapi import HTTPException
+        client = await self.rls_fixture()
+        await self.tenant.execute("CREATE TABLE public.orders(user_id uuid)")
+        await client.execute("CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$SELECT '00000000-0000-4000-8000-000000000001'::uuid$$")
+        with self.assertRaises(HTTPException) as error:
+            await execute_assistant_sql(self.tenant, self.sql_execution("CREATE POLICY own ON public.orders TO authenticated USING(user_id=auth.uid())"))
+        self.assertEqual(error.exception.status_code, 403)
+        self.assertEqual(await self.tenant.fetchval("SELECT count(*) FROM pg_policies WHERE tablename='orders'"), 0)
+        for sql in ("CREATE POLICY leak ON auth.users TO authenticated USING(true)",
+                    "CREATE POLICY leak ON public.orders TO postgres USING(true)"):
+            with self.assertRaises(HTTPException):
+                await execute_assistant_sql(self.tenant, self.sql_execution(sql, destructive=True))
 
     async def test_real_tenant_pools_reuse_reset_and_bound_database_sessions(self):
         import asyncio

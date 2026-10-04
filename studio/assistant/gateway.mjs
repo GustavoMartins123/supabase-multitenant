@@ -4,7 +4,7 @@ import { AssistantToolError } from './errors.mjs'
 
 export function gateway(secret, ca) {
   return async (scope, action, payload, signal) => {
-    if (!['context', 'schema', 'rows', 'functions', 'execute', 'sql'].includes(action)) throw new Error('Unknown assistant tool')
+    if (!['context', 'schema', 'security', 'rows', 'functions', 'execute', 'sql'].includes(action)) throw new Error('Unknown assistant tool')
     const target = `/_internal/assistant/${scope.ref}/${action}`
     const method = payload === undefined ? 'GET' : 'POST'
     const body = payload === undefined ? '' : JSON.stringify(payload)

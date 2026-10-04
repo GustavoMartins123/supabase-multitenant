@@ -24,6 +24,9 @@ export function makeTools(scope, configuration, call, store, chatId, messages, s
   if (rank >= 1) {
     tools.inspect_schema = tool({ description: 'Inspect public ordinary tables and their columns. No row data.', inputSchema: z.object({}).strict(),
       execute: () => call(scope, 'schema', undefined, signal) })
+    tools.inspect_security = tool({ description: 'Inspect actual RLS flags, policies and effective anon/authenticated table/schema privileges for up to 20 ordinary public tables. No row data. Use this tool instead of querying pg_catalog or information_schema via execute_sql.',
+      inputSchema: z.object({ tables: z.array(z.string().regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/).max(63)).min(1).max(20) }).strict(),
+      execute: input => call(scope, 'security', input, signal) })
   }
   if (rank >= 2) {
     tools.read_rows = tool({ description: 'Read at most 50 rows from an ordinary public table. Returned rows are shared with the configured provider.',
@@ -44,8 +47,8 @@ export function makeTools(scope, configuration, call, store, chatId, messages, s
   if (configuration.permission === 'full') {
     for (const name of ['execute_sql', 'execute_destructive_sql']) {
       tools[name] = tool({ description: name === 'execute_sql'
-        ? 'Execute one supported non-destructive public-table SQL statement directly with full access, without individual approval. CREATE TABLE, CREATE INDEX, INSERT, UPDATE, SELECT and enabling RLS are supported. DELETE and destructive changes are forbidden through this tool.'
-        : 'Execute one supported SQL statement that deletes data or may have destructive side effects, only after the user explicitly confirms deletion in the dedicated approval dialog. Required for every DELETE, DROP, TRUNCATE and destructive ALTER.',
+        ? 'Execute one supported non-destructive public-table SQL statement directly with full access, without individual approval. CREATE TABLE, CREATE INDEX, INSERT, UPDATE, SELECT, CREATE POLICY and enabling/forcing RLS are supported. Policies must explicitly target anon/authenticated; auth.uid() and auth.jwt() are supported only inside policy expressions. ALTER/DROP POLICY, disabling RLS, DELETE and destructive changes are forbidden through this tool.'
+        : 'Execute one supported SQL statement that deletes data, changes an existing policy or removes RLS protection, only after explicit human confirmation. Required for DELETE, DROP, TRUNCATE, destructive ALTER, ALTER/DROP POLICY and disabling/unforcing RLS. Explain security exposure as well as data loss before requesting approval.',
         inputSchema: sqlSchema, needsApproval: name === 'execute_destructive_sql',
         execute: async (input, { toolCallId }) => {
           if (store.configuration(scope).permission !== 'full') throw new Error('Full SQL access is no longer authorized')
@@ -136,7 +139,7 @@ export function createHandler({ store, secret, call, modelFactory = providerMode
         && ['approval-requested', 'approval-responded'].includes(part.state)))) {
         return send(res, 409, {message: 'Non-destructive SQL no longer uses approval requests. Start a new chat to execute with the current permission.'})
       }
-      const permittedParts = new Set(['text', 'reasoning', 'step-start', 'tool-inspect_schema', 'tool-read_rows', 'tool-list_functions', 'tool-execute_function', 'tool-execute_sql', 'tool-execute_destructive_sql'])
+      const permittedParts = new Set(['text', 'reasoning', 'step-start', 'tool-inspect_schema', 'tool-inspect_security', 'tool-read_rows', 'tool-list_functions', 'tool-execute_function', 'tool-execute_sql', 'tool-execute_destructive_sql'])
       if (messages.some(message => !['user', 'assistant'].includes(message.role) || message.parts.some(part => !permittedParts.has(part.type)))) throw new Error('Unsupported assistant message content')
       phase = 'context'
       const context = await call(scope, 'context', undefined, abort.signal)

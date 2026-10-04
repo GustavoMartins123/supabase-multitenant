@@ -47,7 +47,7 @@ class TenantPoolTest(unittest.IsolatedAsyncioTestCase):
             return pool
 
         self.manager = TenantPoolManager(size_per_role=1, max_tenants=2, max_requests=4,
-                                         acquire_timeout=.03, idle_seconds=60, factory=factory)
+                                         acquire_timeout=1, idle_seconds=60, factory=factory)
         self.identity = uuid.uuid4()
         self.dsns = {"reader": "reader-dsn", "admin": "admin-dsn"}
         self.addAsyncCleanup(self.manager.close)

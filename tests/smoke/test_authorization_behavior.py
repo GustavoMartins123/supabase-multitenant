@@ -283,6 +283,7 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
         from app.routers import assistant
         with mock.patch.object(assistant, "_connect") as connection:
             for action, method, body in (("schema", "GET", b""), ("functions", "GET", b""),
+                                         ("security", "POST", b'{"tables":["example"]}'),
                                          ("rows", "POST", b'{"table":"example","limit":5}'),
                                          ("execute", "POST", b'{"function_name":"example","arguments":{}}')):
                 response = await self.request(method, f"/api/projects/abcdefghijklmnopqrst/assistant/{action}", actor=self.ex_member, body=body)

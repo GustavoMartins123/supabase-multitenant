@@ -14,10 +14,10 @@ local ok, status = internal_hmac.verify_current_request(secret, "studio-assistan
 if not ok then return reject(status, "Assistant gateway authentication failed") end
 local ref, action = ngx.var.uri:match("^/_internal/assistant/([a-z]+)/([a-z]+)$")
 if not require("project_context.project_ref_resolver").valid_ref(ref)
-    or not ({context=true, schema=true, rows=true, functions=true, execute=true, sql=true})[action]
+    or not ({context=true, schema=true, security=true, rows=true, functions=true, execute=true, sql=true})[action]
     or ngx.var.args and ngx.var.args ~= ""
 then return reject(400, "Invalid assistant gateway target") end
-local expected_method = (action == "rows" or action == "execute" or action == "sql") and "POST" or "GET"
+local expected_method = (action == "security" or action == "rows" or action == "execute" or action == "sql") and "POST" or "GET"
 if ngx.req.get_method() ~= expected_method then return reject(405, "Method not allowed") end
 local user_token = ngx.req.get_headers()["X-Assistant-User-Token"]
 if type(user_token) ~= "string" or #user_token < 50 or #user_token > 4096 then

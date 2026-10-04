@@ -18,11 +18,12 @@ class SqlPlan:
     creates: tuple[str, ...]
     row_events: tuple[tuple[str, int], ...]
     validates: tuple[str, ...]
+    identity_functions: tuple[str, ...]
 
 
 STATEMENTS = {
     "SelectStmt", "InsertStmt", "UpdateStmt", "DeleteStmt", "CreateStmt",
-    "AlterTableStmt", "IndexStmt", "DropStmt", "TruncateStmt",
+    "AlterTableStmt", "IndexStmt", "DropStmt", "TruncateStmt", "CreatePolicyStmt", "AlterPolicyStmt",
 }
 FUNCTIONS = {
     "count", "sum", "avg", "min", "max", "array_agg", "json_agg", "jsonb_agg",
@@ -44,6 +45,7 @@ ALTERATIONS = {
     "AT_AddColumn", "AT_SetNotNull", "AT_DropNotNull", "AT_ColumnDefault",
     "AT_AddConstraint", "AT_ValidateConstraint", "AT_DropColumn", "AT_DropConstraint",
     "AT_AlterColumnType", "AT_EnableRowSecurity", "AT_ForceRowSecurity",
+    "AT_DisableRowSecurity", "AT_NoForceRowSecurity",
 }
 NODES = STATEMENTS | {
     "RangeVar", "RangeSubselect", "RangeFunction", "JoinExpr", "Alias", "WithClause",
@@ -52,7 +54,7 @@ NODES = STATEMENTS | {
     "String", "BitString", "A_Star", "ColumnRef", "ResTarget", "A_Expr", "BoolExpr",
     "NullTest", "BooleanTest", "CaseExpr", "CaseWhen", "CoalesceExpr", "MinMaxExpr",
     "TypeCast", "SQLValueFunction", "FuncCall", "NamedArgExpr", "WindowDef", "SortBy",
-    "GroupingSet", "GroupingFunc", "A_ArrayExpr", "A_Indirection", "A_Indices", "SubLink",
+    "GroupingSet", "GroupingFunc", "A_ArrayExpr", "A_Indirection", "A_Indices", "SubLink", "RoleSpec",
 }
 
 
@@ -115,13 +117,25 @@ def inspect_sql(sql: str) -> SqlPlan:
         raise SqlPolicyError("This SQL operation is not available to the assistant")
     relations, creates = set(), set()
     row_events, validates = {}, set()
+    identity_functions = set()
     destructive = False
     writes = False
     for kind, node in _nodes(tree):
         if kind not in NODES:
             raise SqlPolicyError("This SQL expression or operation is not supported")
-        if kind in {"DeleteStmt", "TruncateStmt", "DropStmt"}:
+        if kind in {"DeleteStmt", "TruncateStmt", "DropStmt", "AlterPolicyStmt"}:
             destructive = True
+        if kind == "RoleSpec":
+            if statement not in {"CreatePolicyStmt", "AlterPolicyStmt"} or (
+                node.get("roletype") != "ROLESPEC_CSTRING" or node.get("rolename") not in {"anon", "authenticated"}
+            ):
+                raise SqlPolicyError("Policies must explicitly target anon or authenticated, never PUBLIC or privileged roles")
+        if kind in {"CreatePolicyStmt", "AlterPolicyStmt"}:
+            if kind == "CreatePolicyStmt" and not node.get("roles"):
+                raise SqlPolicyError("Specify the intended application roles for the policy")
+        if kind in STATEMENTS and kind != statement and kind != "SelectStmt":
+            if statement in {"CreatePolicyStmt", "AlterPolicyStmt"}:
+                raise SqlPolicyError("Policy expressions cannot modify data")
         if kind in STATEMENTS - {"SelectStmt"}:
             writes = True
         if kind in {"InsertStmt", "UpdateStmt", "DeleteStmt"}:
@@ -140,8 +154,14 @@ def inspect_sql(sql: str) -> SqlPlan:
             relations.add(relation["relname"])
         if kind == "CreateStmt":
             creates.add(node["relation"]["relname"])
-        if kind == "FuncCall" and not _builtin(_names(node["funcname"]), FUNCTIONS):
-            raise SqlPolicyError("Only the supported PostgreSQL built-in functions are permitted")
+        if kind == "FuncCall":
+            names = _names(node["funcname"])
+            if statement in {"CreatePolicyStmt", "AlterPolicyStmt"} and names in (["auth", "uid"], ["auth", "jwt"]):
+                if any(node.get(key) for key in ("args", "agg_order", "agg_filter", "over", "agg_star", "agg_distinct", "func_variadic")):
+                    raise SqlPolicyError("Use only the zero-argument auth.uid() and auth.jwt() identity functions")
+                identity_functions.add(names[-1])
+            elif not _builtin(names, FUNCTIONS):
+                raise SqlPolicyError("Only supported built-ins and policy-scoped auth.uid()/auth.jwt() are permitted")
         if kind == "TypeName" and not _builtin(_names(node.get("names") or []), TYPES):
             raise SqlPolicyError("Only built-in PostgreSQL column types are permitted")
         if kind == "A_Expr":
@@ -160,7 +180,7 @@ def inspect_sql(sql: str) -> SqlPlan:
         if kind == "AlterTableCmd":
             if node["subtype"] not in ALTERATIONS:
                 raise SqlPolicyError("This table alteration is not permitted")
-            if node["subtype"] in {"AT_DropColumn", "AT_DropConstraint", "AT_AlterColumnType"}:
+            if node["subtype"] in {"AT_DropColumn", "AT_DropConstraint", "AT_AlterColumnType", "AT_DisableRowSecurity", "AT_NoForceRowSecurity"}:
                 destructive = True
         if kind == "Constraint":
             if node.get("contype") == "CONSTR_EXCLUSION":
@@ -177,14 +197,15 @@ def inspect_sql(sql: str) -> SqlPlan:
             if len(names) > 1 and names[:-1] != ["pg_catalog"]:
                 raise SqlPolicyError("Custom sort operators are not permitted")
         if kind == "DropStmt":
-            if node.get("removeType") != "OBJECT_TABLE" or node.get("behavior") != "DROP_RESTRICT":
-                raise SqlPolicyError("Drop only public tables with RESTRICT, never CASCADE")
+            if node.get("removeType") not in {"OBJECT_TABLE", "OBJECT_POLICY"} or node.get("behavior") != "DROP_RESTRICT":
+                raise SqlPolicyError("Drop only public tables or their policies with RESTRICT, never CASCADE")
             for obj in node["objects"]:
                 names = _names(obj)
-                if len(names) != 2 or names[0] != "public":
-                    raise SqlPolicyError("Drop only explicitly qualified public tables")
+                expected = 3 if node["removeType"] == "OBJECT_POLICY" else 2
+                if len(names) != expected or names[0] != "public":
+                    raise SqlPolicyError("Drop only explicitly qualified public tables or their policies")
                 relations.add(names[1])
         if kind in {"AlterTableCmd", "TruncateStmt"} and node.get("behavior") == "DROP_CASCADE":
             raise SqlPolicyError("CASCADE is not permitted")
     return SqlPlan(statement, destructive, writes, tuple(sorted(relations)), tuple(sorted(creates)),
-                   tuple(sorted(row_events.items())), tuple(sorted(validates)))
+                   tuple(sorted(row_events.items())), tuple(sorted(validates)), tuple(sorted(identity_functions)))

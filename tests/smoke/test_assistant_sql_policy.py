@@ -9,6 +9,58 @@ from app.assistant_sql import SqlPolicyError, default_has_side_effects, inspect_
 
 
 class AssistantSqlPolicyTest(unittest.TestCase):
+    def test_policies_accept_explicit_app_roles_and_scoped_identity(self):
+        for sql in (
+            "CREATE POLICY own_rows ON public.items TO authenticated USING(user_id=(SELECT auth.uid())) WITH CHECK(user_id=auth.uid())",
+            "CREATE POLICY anonymous_read ON public.items FOR SELECT TO anon USING (true)",
+            "CREATE POLICY team_access ON public.items AS RESTRICTIVE TO authenticated USING((auth.jwt()->>'team_id')::uuid=team_id)",
+            "CREATE POLICY child_owner ON public.child TO authenticated USING(EXISTS(SELECT 1 FROM public.parent p WHERE p.id=child.parent_id AND p.user_id=auth.uid()))",
+            "ALTER TABLE public.items ENABLE ROW LEVEL SECURITY", "ALTER TABLE public.items FORCE ROW LEVEL SECURITY",
+        ):
+            with self.subTest(sql=sql):
+                self.assertFalse(inspect_sql(sql).destructive)
+        self.assertEqual(inspect_sql("CREATE POLICY own ON public.items TO authenticated USING(user_id=auth.uid())").identity_functions, ("uid",))
+
+    def test_policy_changes_and_removal_of_protection_require_confirmation(self):
+        for sql in (
+            "ALTER POLICY own ON public.items TO anon USING(true)", "DROP POLICY own ON public.items",
+            "ALTER TABLE public.items DISABLE ROW LEVEL SECURITY", "ALTER TABLE public.items NO FORCE ROW LEVEL SECURITY",
+        ):
+            self.assertTrue(inspect_sql(sql).destructive)
+
+    def test_policy_security_boundaries_fail_closed(self):
+        for sql in (
+            "CREATE POLICY any_role ON public.items USING(true)",
+            "CREATE POLICY any_role ON public.items TO PUBLIC USING(true)",
+            "CREATE POLICY super_role ON public.items TO postgres USING(true)",
+            "CREATE POLICY current_role ON public.items TO CURRENT_USER USING(true)",
+            "CREATE POLICY leak ON auth.users TO authenticated USING(true)",
+            "CREATE POLICY leak ON public.items TO authenticated USING(EXISTS(SELECT 1 FROM auth.users))",
+            "CREATE POLICY leak ON public.items TO authenticated USING(public.erase_all())",
+            "CREATE POLICY leak ON public.items TO authenticated USING(auth.uid('wrong') IS NOT NULL)",
+            "CREATE POLICY leak ON public.items TO authenticated USING(EXISTS(WITH d AS(DELETE FROM public.items RETURNING id) SELECT 1 FROM d))",
+            "SELECT auth.uid()", "SELECT * FROM pg_catalog.pg_authid", "SELECT * FROM information_schema.role_table_grants",
+            "DROP POLICY own ON public.items CASCADE", "DROP POLICY own ON auth.users",
+        ):
+            with self.subTest(sql=sql):
+                with self.assertRaises(SqlPolicyError):
+                    inspect_sql(sql)
+
+    def test_identity_functions_require_the_exact_read_only_body(self):
+        from app.assistant_security import AUTH_IDENTITY_SQL, identity_body_is_safe
+        for name, sql in AUTH_IDENTITY_SQL.items():
+            self.assertTrue(identity_body_is_safe(name, sql))
+            self.assertFalse(identity_body_is_safe(name, "SELECT public.erase_all()"))
+            self.assertFalse(identity_body_is_safe(name, "SELECT '00000000-0000-4000-8000-000000000001'::uuid"))
+            self.assertFalse(identity_body_is_safe(name, sql.replace("request.jwt.claim", "app.secret")))
+
+    def test_security_inspection_rejects_unscoped_or_arbitrary_metadata_requests(self):
+        from app.assistant_security import SecurityBody
+        from pydantic import ValidationError
+        for invalid in ({"tables":[]}, {"tables":["auth.users"]}, {"tables":["orders"], "sql":"SELECT secret"},
+                        {"tables":["orders"]*21}):
+            with self.assertRaises(ValidationError):
+                SecurityBody.model_validate(invalid)
     def test_row_events_are_distinct_from_ddl_and_foreign_key_references(self):
         self.assertEqual(inspect_sql("CREATE INDEX child_id_idx ON public.child(id)").row_events, ())
         self.assertEqual(inspect_sql("CREATE TABLE public.child(id bigint REFERENCES public.parent(id))").row_events, ())
@@ -53,7 +105,7 @@ class AssistantSqlPolicyTest(unittest.TestCase):
             "CREATE TABLE auth.stolen(id integer)", "CREATE TABLE public.child(id uuid REFERENCES auth.users(id))",
             "CREATE TEMP TABLE public.items(id integer)", "DROP TABLE public.items CASCADE",
             "TRUNCATE public.items CASCADE", "ALTER TABLE public.items OWNER TO postgres",
-            "ALTER TABLE public.items DISABLE ROW LEVEL SECURITY", "CREATE VIEW public.items AS SELECT 1",
+            "CREATE VIEW public.items AS SELECT 1",
             "CREATE TABLE public.items(id public.custom_type)", "SELECT 'x'::public.custom_type",
             "SELECT * INTO public.items FROM public.other", "SELECT * FROM public.items FOR UPDATE",
             "SELECT * FROM items", "SELECT 1 OPERATOR(public.+) 2",

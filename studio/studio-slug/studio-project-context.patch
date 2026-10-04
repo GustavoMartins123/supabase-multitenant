@@ -194,7 +194,7 @@ index c9ddbe78..3645214c 100644
  
              <div className="flex gap-3 items-center pointer-events-auto">
 diff --git a/apps/studio/components/ui/AIAssistantPanel/Message.Parts.tsx b/apps/studio/components/ui/AIAssistantPanel/Message.Parts.tsx
-index 047b51b6..91381d15 100644
+index 047b51b6..28e37f35 100644
 --- a/apps/studio/components/ui/AIAssistantPanel/Message.Parts.tsx
 +++ b/apps/studio/components/ui/AIAssistantPanel/Message.Parts.tsx
 @@ -2,10 +2,12 @@ import { UIMessage as VercelMessage } from '@ai-sdk/react'
@@ -220,11 +220,12 @@ index 047b51b6..91381d15 100644
    return (
      <Tool
        icon={
-@@ -253,6 +258,11 @@ export function MessagePartSwitcher({
+@@ -253,6 +258,12 @@ export function MessagePartSwitcher({
        return <MessagePart.Dynamic toolPart={part} />
      }
      case 'tool-list_policies':
 +    case 'tool-inspect_schema':
++    case 'tool-inspect_security':
 +    case 'tool-read_rows':
 +    case 'tool-list_functions':
 +    case 'tool-execute_function':
@@ -232,7 +233,7 @@ index 047b51b6..91381d15 100644
      case 'tool-search_docs':
      case 'tool-get_active_incidents':
      case 'tool-load_knowledge': {
-@@ -264,6 +274,7 @@ export function MessagePartSwitcher({
+@@ -264,6 +275,7 @@ export function MessagePartSwitcher({
        return <MessagePart.Text textPart={part} />
  
      case 'tool-execute_sql': {
@@ -1077,7 +1078,7 @@ new file mode 100644
 +              <option value="none">No database access</option>
 +              {status.maxPermission === 'full' && <><option value="schema">Public schema only</option><option value="read">Read public table rows</option><option value="write">Read and execute approved [AI] functions</option><option value="full">Full public-table SQL access</option></>}
 +            </select></label>
-+            <p className="text-sm text-foreground-light">Schema and row results are sent to your provider. Database tools require project administration. Full access enables supported public-table SQL, including CREATE TABLE, CREATE INDEX, INSERT and UPDATE, without individual approval. DELETE and other destructive operations always require explicit deletion confirmation. Full SQL uses tenant administration and can bypass row-level security; read-only tools respect RLS. Cluster administration and external URLs are not enabled.</p>
++            <p className="text-sm text-foreground-light">Schema and row results are sent to your provider. Database tools require project administration. Full access enables supported public-table SQL, including CREATE TABLE, CREATE INDEX, INSERT and UPDATE, without individual approval. Policy creation and enabling RLS are supported. DELETE, existing-policy changes and removal of RLS protection require explicit confirmation. Full SQL uses tenant administration and can bypass row-level security; read-only tools respect RLS. Cluster administration and external URLs are not enabled.</p>
 +            <Button block loading={saving} disabled={!model.trim() || ((changingKey || !status.hasKey) && !apiKey) || window.location.protocol !== 'https:'} onClick={save}>Save settings</Button>
 +          </>}
 +        </div>
@@ -1105,17 +1106,17 @@ new file mode 100644
 +  const confirmed = confirmedCall === toolPart.toolCallId
 +  return <div className="my-4 space-y-3 rounded-md border p-3">
 +    <p className="font-medium">{input?.label ?? 'Database operation'}</p>
-+    {destructive && <p className="text-sm text-danger">This operation may permanently delete data or have indirect side effects. Full access does not authorize deletion automatically.</p>}
++    {destructive && <p className="text-sm text-danger">This operation may permanently delete data, change existing access policies, remove RLS protection or have indirect side effects. Full access does not authorize deletion automatically.</p>}
 +    <pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs">{input?.sql ?? JSON.stringify(toolPart.input, null, 2)}</pre>
 +    {toolPart.state === 'approval-requested' && <>
 +      <p className="text-sm">Review the exact operation before authorizing it. Approval applies only to this call.</p>
 +      {destructive && <label className="flex items-start gap-2 text-sm">
 +        <input type="checkbox" checked={confirmed} disabled={readOnly || isLoading} onChange={event => setConfirmedCall(event.target.checked ? toolPart.toolCallId : undefined)} />
-+        <span>I explicitly authorize deletion and the side effects of this exact operation.</span>
++        <span>I explicitly authorize deletion, security changes and the side effects of this exact operation.</span>
 +      </label>}
 +      <div className="flex gap-2">
 +        <Button disabled={readOnly || isLoading || !addToolApprovalResponse || (destructive && !confirmed)} onClick={() => addToolApprovalResponse?.({ id: toolPart.approval.id, approved: true })}>
-+          {destructive ? 'Authorize deletion and execute' : 'Approve execution'}
++          {destructive ? 'Authorize destructive or security changes' : 'Approve execution'}
 +        </Button>
 +        <Button variant="default" disabled={readOnly || isLoading || !addToolApprovalResponse} onClick={() => addToolApprovalResponse?.({ id: toolPart.approval.id, approved: false })}>Deny</Button>
 +      </div>
@@ -1153,7 +1154,7 @@ new file mode 100644
 +  it('requires dedicated explicit deletion confirmation before approving', () => {
 +    const respond = vi.fn()
 +    render(view(part(), respond))
-+    const approve = screen.getByRole('button', { name: 'Authorize deletion and execute' })
++    const approve = screen.getByRole('button', { name: 'Authorize destructive or security changes' })
 +    expect(approve).toBeDisabled()
 +    fireEvent.click(approve)
 +    expect(respond).not.toHaveBeenCalled()
@@ -1171,7 +1172,7 @@ new file mode 100644
 +    fireEvent.click(screen.getByRole('checkbox'))
 +    rerender(view({ ...part(), toolCallId: 'call-two', approval: { id: 'approval-two' } }, respond))
 +    expect(screen.getByRole('checkbox')).not.toBeChecked()
-+    expect(screen.getByRole('button', { name: 'Authorize deletion and execute' })).toBeDisabled()
++    expect(screen.getByRole('button', { name: 'Authorize destructive or security changes' })).toBeDisabled()
 +  })
 +
 +  it('shows ordinary SQL approval without granting destructive approval', () => {
@@ -1186,7 +1187,7 @@ new file mode 100644
 +    const respond = vi.fn()
 +    const { rerender } = render(view(part(), respond, true))
 +    expect(screen.getByRole('checkbox')).toBeDisabled()
-+    expect(screen.getByRole('button', { name: 'Authorize deletion and execute' })).toBeDisabled()
++    expect(screen.getByRole('button', { name: 'Authorize destructive or security changes' })).toBeDisabled()
 +    rerender(view(part(), respond, false, true))
 +    expect(screen.getByRole('checkbox')).toBeDisabled()
 +    expect(respond).not.toHaveBeenCalled()

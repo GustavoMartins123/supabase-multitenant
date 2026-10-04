@@ -34,6 +34,21 @@ test('tool errors do not mislabel an unsupported operation as destructive', () =
   assert.match(assistantErrorMessage(new AssistantToolError(409)), /explicit destructive approval/)
 })
 
+test('security inspection is available to schema access without SQL execution', async t => {
+  const input = {tables:['orders']}
+  let turn=0
+  const model=new MockLanguageModelV3({doStream:async()=>({stream:simulateReadableStream({chunks:++turn===1
+    ? [{type:'stream-start',warnings:[]},{type:'tool-call',toolCallId:'security-one',toolName:'inspect_security',input:JSON.stringify(input)},{...finish,finishReason:{unified:'tool-calls',raw:'tool_calls'}}]
+    : textChunks()})})})
+  const {store,request,calls}=await harness(t,model)
+  store.save(actor,{provider:'openai',model:'explicit-model',permission:'schema',apiKey:'synthetic-provider-key-only'})
+  const response=await request('/api/ai/sql/generate-v4','POST',{projectRef:actor.ref,chatId:randomUUID(),messages:[{id:randomUUID(),role:'user',parts:[{type:'text',text:'Inspect RLS and grants on orders'}]}]})
+  const output=await response.text()
+  assert.equal(calls.filter(action=>action==='security').length,1)
+  assert.equal(calls.includes('sql'),false)
+  assert.match(output,/tool-output-available/)
+})
+
 test('stale ordinary SQL approval is not silently replayed as direct execution', async t => {
   const model = new MockLanguageModelV3({doStream:{stream:simulateReadableStream({chunks:textChunks()})}})
   const {store,request,calls} = await harness(t,model)

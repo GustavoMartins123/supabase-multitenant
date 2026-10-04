@@ -22,6 +22,8 @@ Database tools require project administration. Choose no database access, public
 
 Assistant database tools share bounded UUID-scoped tenant pools: two reader and two administration connections per tenant. Saturation returns an explicit error; it never opens overflow connections. Provider authentication errors identify HTTP 401 and direct you to **Assistant settings** to check or replace the saved key, without exposing provider responses or retrying.
 
+Full access also supports `CREATE POLICY` on ordinary public tables with explicit `TO anon` or `TO authenticated`, and enabling/forcing RLS. Policy changes/removal and disabling/unforcing RLS require explicit confirmation. The assistant's `inspect_security` tool reads actual RLS flags, policies and effective application-role grants without arbitrary catalog SQL. Policies do not grant table privileges; enabled RLS without a policy denies ordinary application access by default. Ownership rules must come from your application, not an automatically generated `USING (true)` policy.
+
 ---
 
 ## Table of Contents

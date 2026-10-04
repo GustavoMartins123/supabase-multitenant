@@ -12,6 +12,7 @@ from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.assistant_sql import SqlPolicyError, default_has_side_effects, inspect_sql
+from app.assistant_security import verify_identity_functions
 
 
 class SqlExecution(BaseModel):
@@ -49,6 +50,7 @@ async def execute_assistant_sql(connection, body: ExecuteSqlBody):
         raise HTTPException(409, "Explicit destructive approval is required")
     async with connection.transaction():
         await connection.execute("SET LOCAL search_path = pg_catalog; SET LOCAL statement_timeout = '10s'; SET LOCAL lock_timeout = '2s'")
+        await verify_identity_functions(connection, plan.identity_functions)
         indirect = False
         row_events = dict(plan.row_events)
         for table in plan.relations:

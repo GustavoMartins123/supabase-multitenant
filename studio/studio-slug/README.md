@@ -21,6 +21,8 @@ O contrato do patch é intencionalmente estrito:
 - histórico e configuração usam o serviço `studio-assistant`, com identidade canônica e TLS;
 - a execução de funções `[AI]` apresenta os argumentos e exige aprovação individual;
 - o acesso total executa SQL não destrutivo de tabelas públicas diretamente, sem aprovação individual;
+- a inspeção de segurança mostra RLS, policies e privilégios efetivos de `anon` e `authenticated` sem SQL arbitrário de catálogo;
+- criar policies e habilitar RLS é permitido no acesso total; alterar/remover policies ou retirar proteção RLS exige confirmação explícita;
 - exclusões e operações destrutivas exigem confirmação explícita separada, mesmo com acesso total;
 - a execução do assistente não utiliza o botão de execução direta do editor SQL.
 

@@ -112,7 +112,7 @@ test('approval is scope/chat/input bound, expires and is single-use', t => {
 test('permission levels expose only explicit tools; writes require approval before gateway call', async t => {
   const { store } = fixture(t); const actor = scope(); const calls = []
   const call = (...args) => { calls.push(args); return [] }
-  const expected = { none: [], schema: ['inspect_schema'], read: ['inspect_schema','read_rows'], write: ['inspect_schema','read_rows','list_functions','execute_function'], full: ['inspect_schema','read_rows','execute_sql','execute_destructive_sql'] }
+  const expected = { none: [], schema: ['inspect_schema','inspect_security'], read: ['inspect_schema','inspect_security','read_rows'], write: ['inspect_schema','inspect_security','read_rows','list_functions','execute_function'], full: ['inspect_schema','inspect_security','read_rows','execute_sql','execute_destructive_sql'] }
   for (const [permission, names] of Object.entries(expected)) {
     const tools = makeTools(actor, { permission }, call, store, randomUUID(), [], new AbortController().signal)
     assert.deepEqual(Object.keys(tools), names)

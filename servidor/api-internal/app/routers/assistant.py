@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.control_plane_service import audit_studio_action
 from app.assistant_sql_execution import ExecuteSqlBody, execute_assistant_sql
+from app.assistant_security import SecurityBody, inspect_table_security
 from app.database import get_pool
 from app.dependencies import (
     ensure_project_admin_access, ensure_project_member_access,
@@ -109,6 +110,22 @@ async def assistant_rows(ref: str, body: ReadRowsBody, request: Request, pool=De
         raise
     except Exception as exc:
         raise HTTPException(502, "Assistant row query failed") from exc
+
+
+@router.post("/api/projects/{ref}/assistant/security")
+async def assistant_security(ref: str, body: SecurityBody, request: Request, pool=Depends(get_pool)):
+    project, user, _ = await _context(ref, request, pool, database=True)
+    try:
+        async with _connect(project) as connection:
+            result = await inspect_table_security(connection, list(dict.fromkeys(body.tables)))
+        await _audit(pool, project, user, "assistant_security_read", "public", len(result))
+        return result
+    except HTTPException:
+        raise
+    except TimeoutError as exc:
+        raise HTTPException(504, "Assistant security inspection timed out") from exc
+    except Exception as exc:
+        raise HTTPException(502, "Assistant security inspection failed") from exc
 
 
 @router.get("/api/projects/{ref}/assistant/functions")
