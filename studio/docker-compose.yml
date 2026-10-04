@@ -116,7 +116,7 @@ services:
       AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE: /var/run/authelia-cli-secrets/JWT_SECRET
       AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE: /var/run/authelia-cli-secrets/STORAGE_ENCRYPTION_KEY
       STUDIO_BOOTSTRAP_TOKEN_FILE: /run/secrets/STUDIO_BOOTSTRAP_TOKEN
-      ASSISTANT_GATEWAY_KEY_FILE: /run/secrets/ASSISTANT_GATEWAY_KEY
+      ASSISTANT_GATEWAY_KEY_FILE: /var/run/assistant-gateway-key
     secrets:
       - JWT_SECRET
       - STORAGE_ENCRYPTION_KEY
@@ -151,7 +151,7 @@ services:
       retries: 3
   studio:
     container_name: supabase-studio
-    image: ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v4
+    image: ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v5
     pull_policy: always
     restart: unless-stopped
     logging: *vector-logging

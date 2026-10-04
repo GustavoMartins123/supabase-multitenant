@@ -13,7 +13,7 @@ export function gateway(secret, ca) {
     const headers = {
       'Content-Type': 'application/json', 'X-Internal-Version': 'internal-hmac-v1', 'X-Internal-Service': 'studio-assistant',
       'X-Internal-Timestamp': String(timestamp), 'X-Internal-Nonce': nonce,
-      'X-Internal-Signature': createHmac('sha256', secret).update(canonical).digest('hex'), 'X-User-Token': scope.userToken,
+      'X-Internal-Signature': createHmac('sha256', secret).update(canonical).digest('hex'), 'X-Assistant-User-Token': scope.userToken,
     }
     return new Promise((resolve, reject) => {
       const request = https.request({ hostname: 'nginx', port: 443, path: target, method, ca, servername: 'nginx',

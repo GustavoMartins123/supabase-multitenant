@@ -409,6 +409,22 @@ def generate_certificate(
     return created_ca
 
 
+def configure_assistant_runtime(secrets_root: Path = SECRETS_ROOT, ssl_root: Path = SSL_ROOT) -> None:
+    assistant_root = secrets_root.parent / "assistant"
+    assistant_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    for name in ("MASTER_KEY", "GATEWAY_KEY"):
+        path = assistant_root / name
+        if path.exists():
+            if not re.fullmatch(r"[0-9a-f]{64}", path.read_text(encoding="utf-8").strip()):
+                raise RuntimeConfigError(f"secret do assistente invalido: {path}")
+        else:
+            atomic_write(path, secrets.token_hex(32) + "\n", mode=0o600, replace=False)
+    issue_server_certificate(
+        assistant_root / "tls", host="studio-assistant",
+        ca_certificate=ssl_root / "ca.pem", ca_key=secrets_root / CA_KEY_NAME, only_host=True,
+    )
+
+
 def configure_runtime(
     *,
     studio_origin: str,
@@ -447,19 +463,7 @@ def configure_runtime(
         ca_key=secrets_root / CA_KEY_NAME,
         rotate_ca=rotate_ca,
     )
-    assistant_root = secrets_root.parent / "assistant"
-    assistant_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    for name in ("MASTER_KEY", "GATEWAY_KEY"):
-        path = assistant_root / name
-        if path.exists():
-            if not re.fullmatch(r"[0-9a-f]{64}", path.read_text(encoding="utf-8").strip()):
-                raise RuntimeConfigError(f"secret do assistente invalido: {path}")
-        else:
-            atomic_write(path, secrets.token_hex(32) + "\n", mode=0o600, replace=False)
-    issue_server_certificate(
-        assistant_root / "tls", host="studio-assistant",
-        ca_certificate=ssl_root / "ca.pem", ca_key=secrets_root / CA_KEY_NAME, only_host=True,
-    )
+    configure_assistant_runtime(secrets_root, ssl_root)
     if server_host is not None:
         _, validated_host = parse_origin(f"https://{server_host}")
         issue_server_certificate(

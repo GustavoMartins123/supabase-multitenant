@@ -23,6 +23,12 @@ for secret_name in JWT_SECRET STORAGE_ENCRYPTION_KEY; do
     install -m 400 -o 65534 -g 65534 "$source_path" "$target_path"
 done
 
+if [ ! -s /run/secrets/ASSISTANT_GATEWAY_KEY ]; then
+    echo "[entrypoint] ERRO: secret do assistente ausente" >&2
+    exit 1
+fi
+install -m 400 -o 65534 -g 65534 /run/secrets/ASSISTANT_GATEWAY_KEY /var/run/assistant-gateway-key
+
 if [ ! -s /config/configuration.runtime.yml ]; then
     echo "[entrypoint] ERRO: configuration.runtime.yml ausente" >&2
     exit 1

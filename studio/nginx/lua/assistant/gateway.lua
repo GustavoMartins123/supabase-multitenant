@@ -19,7 +19,12 @@ if not require("project_context.project_ref_resolver").valid_ref(ref)
 then return reject(400, "Invalid assistant gateway target") end
 local expected_method = (action == "rows" or action == "execute") and "POST" or "GET"
 if ngx.req.get_method() ~= expected_method then return reject(405, "Method not allowed") end
-if not ngx.req.get_headers()["X-User-Token"] then return reject(401, "User authorization required") end
+local user_token = ngx.req.get_headers()["X-Assistant-User-Token"]
+if type(user_token) ~= "string" or #user_token < 50 or #user_token > 4096 then
+    return reject(401, "User authorization required")
+end
+ngx.req.set_header("X-User-Token", user_token)
+ngx.req.clear_header("X-Assistant-User-Token")
 local target = "/api/projects/" .. ref .. "/assistant/" .. action
 local signed = internal_hmac.apply_current_request(os.getenv("STUDIO_GATEWAY_HMAC_SECRET"), "studio-nginx", target)
 if not signed then return reject(503, "Assistant gateway signature unavailable") end

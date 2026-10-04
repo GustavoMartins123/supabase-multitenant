@@ -24,7 +24,7 @@ def validate(root: Path, suffix: str, topology: str, values: dict[str, str], ben
     server = root / 'servidor'
     labels = {'codex.p1.run': suffix}
     for image in ('studio-nginx:latest', 'authelia/authelia:4.39.20', 'redis:8.2.2-alpine', 'codex-p1-browser:local',
-                  'ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v4', 'traefik:v3.7.6',
+                  'ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v5', 'traefik:v3.7.6',
                   'servidor-projects-api:latest', 'supabase/postgres-meta:v0.96.1'):
         assert run('docker', 'image', 'inspect', image, '--format', '{{.Os}}') == 'linux', image
     wire = 'p1-https-link-' + suffix
@@ -113,7 +113,7 @@ def validate(root: Path, suffix: str, topology: str, values: dict[str, str], ben
            '-e', 'AUTHELIA_SESSION_REDIS_HOST=redis-sessions',
            command=('authelia', '--config=/config/configuration.runtime.yml'))
     run('docker', 'network', 'connect', '--alias', 'authelia', front, 'p1-authelia-' + suffix)
-    create('p1-ui-' + suffix, 'ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v4', front,
+    create('p1-ui-' + suffix, 'ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v5', front,
            '--network-alias', 'studio', '-e', 'HOSTNAME=0.0.0.0')
     nginx_config = root / 'studio/nginx/nginx.conf'
     text = nginx_config.read_text(encoding='utf-8').replace('worker_processes auto;', 'worker_processes 2;')
