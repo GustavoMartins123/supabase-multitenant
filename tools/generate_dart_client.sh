@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 JAR="${1:-${OPENAPI_GENERATOR_JAR:-}}"
 if [[ "${1:-}" == "--jar" ]]; then
   JAR="${2:?informe o caminho do jar}"

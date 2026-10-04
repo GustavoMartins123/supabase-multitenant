@@ -7,7 +7,6 @@ say() { echo "[storage-migration] $*"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_ROOT="$(dirname "$SCRIPT_DIR")"
-REPO_ROOT="$(dirname "$SERVER_ROOT")"
 REPORTS_ROOT="$SERVER_ROOT/storage-migration-reports"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
@@ -162,13 +161,13 @@ quiesce_lifecycle() {
 }
 
 resume_lifecycle_after_success() {
-  local status="" attempts api_override
+  local status="" api_override
   if [[ "$PROJECTS_API_WAS_RUNNING" -eq 1 ]]; then
     api_override="$(read_projects_api_override)"
     (cd "$SERVER_ROOT" && docker compose \
       -f docker-compose-api.yml -f "$api_override" \
       --env-file .env up --build -d projects-api)
-    for attempts in $(seq 1 60); do
+    for _ in $(seq 1 60); do
       status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
         projects-api 2>/dev/null || true)"
       [[ "$status" == "healthy" ]] && break
@@ -551,6 +550,7 @@ migrate_project() (
   fi
   printf 'PREPARED\n' > "$state_file"
 
+  # shellcheck disable=SC2317,SC2329
   rollback_current() {
     local status="${1:-1}" rollback_failed=0
     trap - ERR TERM INT HUP

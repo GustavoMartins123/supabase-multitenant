@@ -388,10 +388,9 @@ platform_env_int() {
 }
 
 platform_size_to_mib() {
-    local declared="$1" multiplier="$2" lower number unit whole frac
+    local declared="$1" multiplier="$2" lower number whole frac
     lower="${declared,,}"
     number="${lower%[mg]}"
-    unit="${lower#"$number"}"
     [[ "$number" =~ ^([0-9]+)(\.([0-9]{1,2}))?$ ]] || return 1
     whole="${BASH_REMATCH[1]}"
     frac="${BASH_REMATCH[3]:-0}"
@@ -527,8 +526,6 @@ platform_compute_capacity() {
     local shared_base shared_increment
     shared_base="$(platform_shared_baseline_total "$reserve" "$PLATFORM_CAP_HOST_CPUS")"
     shared_increment="$(platform_shared_per_project_total "$reserve")"
-    PLATFORM_CAP_SHARED_BASE_MIB="$shared_base"
-    PLATFORM_CAP_SHARED_PER_PROJECT_MIB="$shared_increment"
 
     local work_mem_floor_mib=4 autovacuum=4
     PLATFORM_CAP_WORK_MEM_NODES="$work_mem_nodes"
@@ -537,11 +534,11 @@ platform_compute_capacity() {
     local hash_multiplier=2
     PLATFORM_CAP_HASH_MEM_MULTIPLIER="$hash_multiplier"
 
-    local projects=0 iteration budget_for_rest postgres_budget shared_total
+    local projects=0 budget_for_rest postgres_budget shared_total
     local capacity_by_memory previous=-1 shared_buffers_mib maintenance_mib
     local max_connections work_mem_mib available_for_sorts active_connections
     degraded="${degraded:-}"
-    for iteration in 1 2 3 4 5 6 7 8; do
+    for _ in 1 2 3 4 5 6 7 8; do
         shared_total=$(( shared_base + shared_increment * projects ))
         budget_for_rest=$(( PLATFORM_CAP_ALLOCATABLE_MIB - shared_total ))
         if [ "$budget_for_rest" -le 0 ]; then
@@ -631,7 +628,6 @@ platform_compute_capacity() {
     PLATFORM_CAP_WAL_SENDERS=$(( PLATFORM_CAP_REPLICATION_SLOTS + 8 ))
     PLATFORM_CAP_LOGICAL_WORKERS=$(( PLATFORM_CAP_REPLICATION_SLOTS / 2 ))
     [ "$PLATFORM_CAP_LOGICAL_WORKERS" -lt 4 ] && PLATFORM_CAP_LOGICAL_WORKERS=4
-    PLATFORM_CAP_BY_SLOTS="$projects"
 
     PLATFORM_CAP_PROJECTS="$projects"
     if [ "$PLATFORM_CAP_BY_CONNECTIONS" -lt "$PLATFORM_CAP_BY_MEMORY" ]; then
@@ -659,7 +655,6 @@ platform_compute_capacity() {
     local profile_cpus profile_cpu_centi
     profile_cpus="$(platform_env_value "PROJECT_RES_${upper}_CPUS" "$root_env")"
     profile_cpu_centi=$(( ${profile_cpus%%.*} * 100 + 10#$(printf '%s' "${profile_cpus#*.}" | cut -c1-2) ))
-    PLATFORM_CAP_PROJECT_CPU_CENTI="$profile_cpu_centi"
 
     project_cpu_centi=$(( allocatable_centi - shared_cpu_centi - postgres_cpu_centi ))
     [ "$project_cpu_centi" -lt 0 ] && project_cpu_centi=0

@@ -120,6 +120,7 @@ STORAGE_PRERESTORE="${STORAGE_TARGET}.prerestore.$$"
 [[ ! -e "$STORAGE_PRERESTORE" ]] || die "Staging anterior de Storage ainda existe"
 
 SLOT="$(realtime_primary_slot "$PROJECT")"
+# shellcheck disable=SC2034
 MSG_SLOT="$(realtime_slot_candidate "supabase_realtime_messages_replication_slot_" "$PROJECT")"
 SLOT_PLUGIN=""
 

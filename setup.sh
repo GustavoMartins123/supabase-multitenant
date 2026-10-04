@@ -66,7 +66,8 @@ init_transaction() {
 backup_file() {
     local file="$1"
     if [[ -f "$file" ]]; then
-        local backup_path="$TRANSACTION_DIR/$(echo "$file" | tr '/' '_')"
+        local backup_path
+        backup_path="$TRANSACTION_DIR/$(echo "$file" | tr '/' '_')"
         cp "$file" "$backup_path"
         MODIFIED_FILES+=("$file")
         print_status "Backup criado: $file -> $backup_path"
@@ -76,18 +77,18 @@ backup_file() {
 safe_sed() {
     local pattern="$1"
     local file="$2"
-    local temp_file="$TRANSACTION_DIR/temp_$(basename "$file")"
-    
-    if [[ ! " ${MODIFIED_FILES[@]} " =~ " ${file} " ]]; then
+    local temp_file
+    temp_file="$TRANSACTION_DIR/temp_$(basename "$file")"
+
+    if [[ " ${MODIFIED_FILES[*]} " != *" ${file} "* ]]; then
         backup_file "$file"
     fi
 
-    sed "$pattern" "$file" > "$temp_file"
-    
-    if [[ $? -eq 0 ]]; then
+    if sed "$pattern" "$file" > "$temp_file"; then
         mv "$temp_file" "$file"
         return 0
     else
+        rm -f "$temp_file"
         print_error "Falha ao aplicar modificação em $file"
         return 1
     fi
@@ -105,7 +106,8 @@ rollback_transaction() {
     
     if [[ -d "$TRANSACTION_DIR" ]]; then
         for file in "${MODIFIED_FILES[@]}"; do
-            local backup_path="$TRANSACTION_DIR/$(echo "$file" | tr '/' '_')"
+            local backup_path
+            backup_path="$TRANSACTION_DIR/$(echo "$file" | tr '/' '_')"
             if [[ -f "$backup_path" ]]; then
                 cp "$backup_path" "$file"
                 print_status "Restaurado: $file"
@@ -189,7 +191,8 @@ validate_input() {
 validate_ip() {
     local ip="$1"
     local IFS='.'
-    local -a octets=($ip)
+    local -a octets
+    read -r -a octets <<< "$ip"
     
     if [[ ${#octets[@]} -ne 4 ]]; then
         return 1

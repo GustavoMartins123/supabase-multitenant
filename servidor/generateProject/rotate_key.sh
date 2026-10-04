@@ -24,7 +24,8 @@ init_transaction() {
 backup_file() {
   local file="$1"
   if [[ -f "$file" ]]; then
-    local backup_path="$TRANSACTION_DIR/$(echo "$file" | tr '/' '_')"
+    local backup_path
+    backup_path="$TRANSACTION_DIR/$(echo "$file" | tr '/' '_')"
     cp "$file" "$backup_path"
     MODIFIED_FILES+=("$file")
     echo "   Backup criado: $(basename "$file")"
@@ -56,7 +57,8 @@ rollback_transaction() {
   
   if [[ -d "$TRANSACTION_DIR" ]]; then
     for file in "${MODIFIED_FILES[@]}"; do
-      local backup_path="$TRANSACTION_DIR/$(echo "$file" | tr '/' '_')"
+      local backup_path
+      backup_path="$TRANSACTION_DIR/$(echo "$file" | tr '/' '_')"
       if [[ -f "$backup_path" ]]; then
         cp "$backup_path" "$file" || runtime_restored=false
         echo "   Restaurado: $(basename "$file")"

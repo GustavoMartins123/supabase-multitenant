@@ -309,6 +309,7 @@ process.stdin.on("end", async () => {
 ' "$method" "$path" "$accepted"
 }
 
+# shellcheck disable=SC2120
 storage_wait_global() {
   local attempts="${1:-90}" status=""
   storage_validate_positive_integer attempts "$attempts" || return 1
@@ -413,6 +414,7 @@ storage_provision_tenant() {
   storage_validate_tenant_id "$tenant_id" || return 1
   storage_validate_project_ref "$project_ref" || return 1
   storage_assert_project_identity "$project_ref" "$tenant_id" || return 1
+  # shellcheck disable=SC2119
   storage_wait_global || return 1
   urls="$(storage_database_urls "$project_ref")" || return 1
   database_url="$(sed -n '1p' <<<"$urls")"

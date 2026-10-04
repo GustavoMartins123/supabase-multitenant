@@ -108,7 +108,7 @@ resume_source_project() {
 cleanup_tmp() { rm -rf "$TMP_DIR"; }
 rollback() {
   local status="${1:-$?}"
-  local rollback_failed=0 remaining tenant_status raw_slot slot
+  local rollback_failed=0 remaining tenant_status slot
   local -a replication_slots=()
   mapfile -t replication_slots < <(realtime_slot_candidates_unique "$NEW_PROJECT")
   trap - ERR TERM INT HUP
@@ -228,6 +228,7 @@ storage_validate_bool S3_PROTOCOL_ENABLED "$ORIGINAL_S3_ENABLED" \
   || die "S3_PROTOCOL_ENABLED da origem invalido"
 storage_validate_bool VECTOR_BUCKETS_ENABLED "$ORIGINAL_VECTOR_ENABLED" \
   || die "VECTOR_BUCKETS_ENABLED da origem invalido"
+# shellcheck disable=SC2030,SC2031
 (
   S3_PROTOCOL_CREDENTIAL_ID="$ORIGINAL_S3_CREDENTIAL_ID"
   S3_PROTOCOL_ACCESS_KEY_ID="$ORIGINAL_S3_ACCESS_KEY"
@@ -285,6 +286,7 @@ VECTOR_MAX_INDEXES="$(grep -m1 '^VECTOR_MAX_INDEXES=' "$SCRIPT_DIR/.envtemplate"
 
 template_to_file() {
   local template="$1" output="$2"
+  # shellcheck disable=SC2031
   sed \
     -e "s|{{anon_key}}|$(escape_sed_replacement "$ANON_TOKEN")|g" \
     -e "s|{{service_role_key}}|$(escape_sed_replacement "$SERVICE_TOKEN")|g" \

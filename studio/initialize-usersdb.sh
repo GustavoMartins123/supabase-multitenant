@@ -3,8 +3,10 @@ set -eu
 umask 077
 
 if [ ! -f /config/.desktop-initialized ]; then
-    [ ! -s /seed/db.sqlite3 ] && [ ! -e /seed/.studio-bootstrap-consumed ] \
-        || { echo 'Existing administrative data requires explicit migration into usersdb' >&2; exit 1; }
+    if [ -s /seed/db.sqlite3 ] || [ -e /seed/.studio-bootstrap-consumed ]; then
+        echo 'Existing administrative data requires explicit migration into usersdb' >&2
+        exit 1
+    fi
     for name in users_database.yml ids.yml db.sqlite3 notifications.txt .studio-directory-sequence; do
         [ -f "/seed/$name" ] || { echo "Missing setup seed: $name" >&2; exit 1; }
         cp "/seed/$name" "/config/$name"

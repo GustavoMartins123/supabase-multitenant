@@ -6,7 +6,6 @@
 
 VECTOR_LIFECYCLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VECTOR_SCRIPTS_DIR="$(dirname "$VECTOR_LIFECYCLE_DIR")"
-VECTOR_SERVER_ROOT="$(dirname "$VECTOR_SCRIPTS_DIR")"
 
 # shellcheck disable=SC1091
 source "$VECTOR_LIFECYCLE_DIR/storage_multitenant.sh"
@@ -143,6 +142,7 @@ vector_rekey_physical_tables() {
       -U "$POSTGRES_USER" -d "$database"
 }
 
+# shellcheck disable=SC2120
 vector_wait_storage() {
   local attempts="${1:-60}"
   storage_wait_global "$attempts"
@@ -156,6 +156,7 @@ vector_list_buckets() {
 vector_validate_storage_api() {
   local tenant_id="$1" service_key="$2" access_key="$3" secret_key="$4"
   local s3_enabled="$5" vectors_enabled="$6"
+  # shellcheck disable=SC2119
   vector_wait_storage
   storage_validate_tenant "$tenant_id" "$service_key" "$access_key" "$secret_key" \
     "$s3_enabled" "$vectors_enabled"

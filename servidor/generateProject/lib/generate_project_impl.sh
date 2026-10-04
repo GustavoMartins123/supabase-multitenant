@@ -63,7 +63,7 @@ database_exists() {
 }
 
 drop_project_replication_slots() {
-  local project="$1" raw_slot slot
+  local project="$1" slot
   local slots=()
   mapfile -t slots < <(realtime_slot_candidates_unique "$project")
   for slot in "${slots[@]}"; do

@@ -37,6 +37,7 @@ functions_config_action() {
 }
 
 functions_config_withdraw() {
+  # shellcheck disable=SC2034
   FUNCTIONS_WITHDRAWN[$1]=1
   functions_config_action withdraw "$1"
 }
