@@ -652,8 +652,6 @@ PYEOF
         exit 1
     fi
     
-    POSTGRES_NGINX_PASSWORD=$(env_secret studio/.env POSTGRES_NGINX_PASSWORD generate_postgres_password)
-
     if [ ! -f studio/.env ]; then cp studio/.env.example studio/.env; fi
     if [ ! -f studio/.analytics.env ]; then cp studio/.analytics.env.example studio/.analytics.env; fi
     safe_sed "s|^STUDIO_SERVICE_KEY_ENCRYPTION_KEY=.*|STUDIO_SERVICE_KEY_ENCRYPTION_KEY=$STUDIO_SERVICE_KEY_ENCRYPTION_KEY|g" studio/.env
@@ -663,7 +661,6 @@ PYEOF
     safe_sed "s|^PROJECTS_API_HMAC_SECRET=.*|PROJECTS_API_HMAC_SECRET=$PROJECTS_API_HMAC_SECRET|g" studio/.env
     safe_sed "s|^STUDIO_ANALYTICS_HMAC_SECRET=.*|STUDIO_ANALYTICS_HMAC_SECRET=$STUDIO_ANALYTICS_HMAC_SECRET|g" studio/.env
     safe_sed "s|^LOGFLARE_PRIVATE_ACCESS_TOKEN=.*|LOGFLARE_PRIVATE_ACCESS_TOKEN=$LOGFLARE_PRIVATE_ACCESS_TOKEN|g" studio/.analytics.env
-    safe_sed "s|POSTGRES_NGINX_PASSWORD=pass|POSTGRES_NGINX_PASSWORD=$POSTGRES_NGINX_PASSWORD|g" studio/.env
     safe_sed "s|^SERVER_DOMAIN=.*|SERVER_DOMAIN=${PROTO}://${SERVER_IP}|g" studio/.env
     python3 - studio/.env "$STUDIO_BACKEND_TLS_NAME" <<'PYEOF'
 from pathlib import Path

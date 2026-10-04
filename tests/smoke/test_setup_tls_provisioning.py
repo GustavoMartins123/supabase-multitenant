@@ -49,6 +49,21 @@ class SetupTlsProvisioningTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
 
+            assistant = root / "assistant"
+            for name in ("MASTER_KEY", "GATEWAY_KEY"):
+                self.assertRegex((assistant / name).read_text().strip(), r"^[0-9a-f]{64}$")
+            self.assertNotEqual((assistant / "MASTER_KEY").read_bytes(), (assistant / "GATEWAY_KEY").read_bytes())
+            for hostname, expected in (("studio-assistant", 0), ("nginx", 2), ("authelia", 2)):
+                result = subprocess.run(["openssl", "verify", "-CAfile", str(root / "ssl/ca.pem"),
+                                         "-verify_hostname", hostname, str(assistant / "tls/server.pem")], capture_output=True)
+                self.assertEqual(result.returncode, expected)
+            previous = {name: (assistant / name).read_bytes() for name in ("MASTER_KEY", "GATEWAY_KEY")}
+            with mock.patch.object(runtime, "ensure_internal_service_hmac_secrets", return_value=False):
+                runtime.configure_runtime(studio_origin="https://192.0.2.10:9091", force=True, rotate_secrets=True,
+                                          target=root / "config/configuration.runtime.yml", ssl_root=root / "ssl",
+                                          secrets_root=root / "secrets", server_env=root / "missing.env")
+            self.assertEqual(previous, {name: (assistant / name).read_bytes() for name in previous})
+
     def test_internal_dns_identity_rejects_literal_ips_and_configuration_injection(self):
         for identity in ("192.0.2.10", "backend.internal\nDNS:other.internal", "backend.internal:443"):
             with self.subTest(identity=identity), self.assertRaises(runtime.RuntimeConfigError):

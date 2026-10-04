@@ -44,7 +44,7 @@ tested against. One row per moving part; the platform row is the canonical
 | Nginx (data-plane proxy) | `nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim` | `servidor/.env.example` (`STORAGE_DATA_PLANE_PROXY_IMAGE`), `servidor/traefik/docker-compose.yml` |
 | Authelia | `authelia/authelia:4.39.20` | `studio/docker-compose.yml` |
 | Redis (Authelia sessions) | `redis:8.2.2-alpine` | `studio/docker-compose.yml` |
-| Postgres (control plane) | `postgres:16.13-alpine3.23` | `studio/postgres/Dockerfile` |
+| Studio assistant | `node:22-bookworm-slim`, AI SDK 6, local SQLite | `studio/assistant/Dockerfile` |
 | Python (API image) | `python:3.12.13-slim` | `servidor/api-internal/Dockerfile` |
 | Elixir / OTP (Realtime) | `1.18` / `27.3` on `bookworm-20250929-slim` | `servidor/volumes/realtime/Dockerfile` |
 | Elixir / OTP (Analytics) | `1.19.5` / `27.3.4.6` on `trixie-20260112-slim` | `servidor/volumes/analytics/Dockerfile` |

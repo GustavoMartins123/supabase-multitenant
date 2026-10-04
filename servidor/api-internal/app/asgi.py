@@ -24,6 +24,7 @@ from app.main import (
 )
 from app.routers.jobs_api import router as jobs_router
 from app.routers.project_insights import router as project_insights_router
+from app.routers.assistant import router as assistant_router
 from app.routers.project_keys import router as project_keys_router
 from app.routers.project_lifecycle_ops import router as project_lifecycle_ops_router
 from app.routers.project_members import router as project_members_router
@@ -121,6 +122,7 @@ app.include_router(project_keys_router)
 app.include_router(project_members_router)
 app.include_router(project_lifecycle_ops_router)
 app.include_router(project_insights_router)
+app.include_router(assistant_router)
 
 # Registrado por ultimo para ser a camada mais externa: valida a identidade
 # criptografica do caller antes das rotas e dependencias da aplicacao.

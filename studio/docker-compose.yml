@@ -17,6 +17,12 @@ secrets:
     file: ./secrets/authelia/STUDIO_BOOTSTRAP_TOKEN
   REDIS_SESSION_PASSWORD:
     file: ./secrets/authelia/REDIS_SESSION_PASSWORD
+  ASSISTANT_MASTER_KEY:
+    file: ./secrets/assistant/MASTER_KEY
+  ASSISTANT_GATEWAY_KEY:
+    file: ./secrets/assistant/GATEWAY_KEY
+  ASSISTANT_TLS_KEY:
+    file: ./secrets/assistant/tls/server.key
 
 services:
   redis-sessions:
@@ -93,7 +99,9 @@ services:
     depends_on:
       studio:
         condition: service_started
-    networks: [default, rede-supabase]
+      studio-assistant:
+        condition: service_healthy
+    networks: [default, rede-supabase, assistant]
     env_file:
       - .env
     environment:
@@ -108,10 +116,12 @@ services:
       AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE: /var/run/authelia-cli-secrets/JWT_SECRET
       AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE: /var/run/authelia-cli-secrets/STORAGE_ENCRYPTION_KEY
       STUDIO_BOOTSTRAP_TOKEN_FILE: /run/secrets/STUDIO_BOOTSTRAP_TOKEN
+      ASSISTANT_GATEWAY_KEY_FILE: /run/secrets/ASSISTANT_GATEWAY_KEY
     secrets:
       - JWT_SECRET
       - STORAGE_ENCRYPTION_KEY
       - STUDIO_BOOTSTRAP_TOKEN
+      - ASSISTANT_GATEWAY_KEY
     volumes:
       - ./nginx/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ./authelia:/config
@@ -119,6 +129,26 @@ services:
       - ${STUDIO_CA_CERT_PATH:-./authelia/ssl/ca.pem}:/etc/studio/extra-ca.pem:ro
     tmpfs:
       - /tmp:size=256m,mode=1777
+  studio-assistant:
+    build: ./assistant
+    restart: unless-stopped
+    logging: *vector-logging
+    networks: [assistant]
+    secrets: [ASSISTANT_MASTER_KEY, ASSISTANT_GATEWAY_KEY, ASSISTANT_TLS_KEY]
+    volumes:
+      - assistant-data:/data
+      - ./secrets/assistant/tls/server.pem:/tls/server.pem:ro
+      - ./authelia/ssl/ca.pem:/tls/ca.pem:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 1
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('https').get({hostname:'localhost',port:3443,path:'/healthz',servername:'studio-assistant',ca:require('fs').readFileSync('/tls/ca.pem')},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
   studio:
     container_name: supabase-studio
     image: ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v4
@@ -154,28 +184,13 @@ services:
     volumes:
       - ./snippets:/app/snippets
       - ${STUDIO_CA_CERT_PATH:-./authelia/ssl/ca.pem}:/etc/ssl/certs/studio-ca.pem:ro
-  # postgres:
-  #   build:
-  #     context: ./postgres
-  #     dockerfile: Dockerfile
-  #   container_name: nginx-postgres
-  #   restart: unless-stopped
-  #   environment:
-  #     POSTGRES_DB: ${POSTGRES_DB}
-  #     POSTGRES_USER: ${POSTGRES_USER}
-  #     POSTGRES_PASSWORD: ${POSTGRES_NGINX_PASSWORD}
-  #   volumes:
-  #     - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-  #     - ./postgres/entrypoint.sh:/docker-entrypoint-initdb.d/entrypoint.sh:ro
-  #     - ./postgres/logs:/var/log/postgresql
-  #     - ./postgres/data:/var/lib/postgresql/data:Z
-  #   expose:
-  #     - "8999" 
 volumes:
   usersdb:
   redis-sessions:
+  assistant-data:
 
 networks:
+  assistant:
   auth-sessions:
     internal: true
   rede-supabase:

@@ -484,7 +484,7 @@ async def get_project_ai_functions(
 
     proj_conn = None
     try:
-        proj_conn = await get_project_conn(project_row["name"])
+        proj_conn = await asyncpg.connect(get_project_meta_connection_string(project_row["name"], project_row["tenant_uuid"]), timeout=5, command_timeout=30)
         rows = await proj_conn.fetch("""
             SELECT
                 p.proname AS name,
@@ -511,7 +511,6 @@ async def get_project_ai_functions(
         clean_desc = re.sub(r"\[AI\]", "", comment, flags=re.IGNORECASE).strip()
         functions.append({
             "name": r["name"],
-                "public_ref": r["public_ref"],
             "argument_types": r["argument_types"] or "",
             "return_type": r["return_type"] or "void",
             "comment": clean_desc,
@@ -554,7 +553,7 @@ async def execute_project_function(
 
     proj_conn = None
     try:
-        proj_conn = await get_project_conn(project_row["name"])
+        proj_conn = await asyncpg.connect(get_project_meta_connection_string(project_row["name"], project_row["tenant_uuid"]), timeout=5, command_timeout=30)
 
         candidates = await proj_conn.fetch("""
             SELECT

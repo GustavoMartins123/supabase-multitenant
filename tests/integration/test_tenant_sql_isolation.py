@@ -11,7 +11,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "servidor/api-internal"))
 from app.control_plane_roles import ensure_tenant_meta_roles
-from app.tenant_meta_identity import tenant_meta_credentials
+from app.tenant_meta_identity import tenant_meta_credentials, tenant_assistant_reader_credentials
 
 DSN = os.environ.get("TENANT_SQL_TEST_ADMIN_DSN", "")
 
@@ -71,6 +71,8 @@ class TenantSqlIsolationTest(unittest.IsolatedAsyncioTestCase):
         for identity in self.ids:
             role, _ = tenant_meta_credentials(identity, self.master)
             await self.admin.execute(f'DROP ROLE "{role}"')
+            reader, _ = tenant_assistant_reader_credentials(identity, self.master)
+            await self.admin.execute(f'DROP ROLE "{reader}"')
         await self.admin.execute(f'DROP ROLE "{self.shared}"')
         await self.admin.close()
 
@@ -98,6 +100,25 @@ class TenantSqlIsolationTest(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(pg.InsufficientPrivilegeError):
                     await pg.connect(self.dsn(database, self.role, password))
         self.assertEqual(await self.other_service.fetchval("SELECT 1"), 1)
+
+    async def test_assistant_reader_cannot_write_escalate_read_auth_or_connect_other_tenants(self):
+        role, password = tenant_assistant_reader_credentials(self.ids[0], self.master)
+        reader = await self.asyncpg.connect(self.dsn("_supabase_" + self.refs[0], role, password))
+        self.connections.append(reader)
+        self.assertEqual(await reader.fetchval("SHOW default_transaction_read_only"), "on")
+        self.assertEqual(await reader.fetchval("SELECT count(*) FROM public.existing"), 0)
+        self.assertEqual(await reader.fetchval("SELECT count(*) FROM pg_auth_members WHERE member=current_user::regrole"), 0)
+        await reader.execute("SET default_transaction_read_only=off")
+        for query in ("INSERT INTO public.existing VALUES (1)", "CREATE TABLE public.stolen(id integer)",
+                      "SELECT * FROM auth.users", f'SET ROLE "{self.role}"'):
+            with self.subTest(query=query):
+                with self.assertRaises(self.asyncpg.InsufficientPrivilegeError):
+                    await reader.execute(query)
+        for database in (self.cp, "_supabase_" + self.refs[1], "template1"):
+            with self.assertRaises(self.asyncpg.InsufficientPrivilegeError):
+                await self.asyncpg.connect(self.dsn(database, role, password))
+        await self.tenant.execute("CREATE TABLE public.future_table(id integer)")
+        self.assertEqual(await reader.fetchval("SELECT count(*) FROM public.future_table"), 0)
 
     async def test_uuid_identity_survives_rename_and_does_not_follow_slug_reuse(self):
         _, password = tenant_meta_credentials(self.ids[0], self.master)

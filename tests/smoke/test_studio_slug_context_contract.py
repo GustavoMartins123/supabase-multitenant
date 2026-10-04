@@ -104,37 +104,25 @@ class StudioSlugContextContractTest(unittest.TestCase):
         self.assertNotIn("context.service_role", response)
 
     def test_ai_and_s3_require_an_explicit_project_ref(self) -> None:
-        sql_ai = (LUA / "api/ai_sql_generate_handler.lua").read_text(encoding="utf-8")
-        code_ai = (LUA / "api/ai_code_complete_handler.lua").read_text(encoding="utf-8")
+        assistant_auth = (LUA / "assistant/authenticate.lua").read_text(encoding="utf-8")
         upload_guard = (LUA / "security/upload_route_guard.lua").read_text(encoding="utf-8")
         studio_patch = (ROOT / "studio/studio-slug/studio-project-context.patch").read_text(
             encoding="utf-8"
         )
 
-        self.assertIn("studio_request.projectRef", sql_ai)
-        self.assertIn("project_access", sql_ai)
-        self.assertIn('"projectRef required"', sql_ai)
-        self.assertIn("enforce(requested_ref)", sql_ai)
-        self.assertIn("request.projectRef", code_ai)
-        self.assertIn("project_access", code_ai)
-        self.assertIn('"projectRef required"', code_ai)
-        self.assertIn("enforce(requested_ref)", code_ai)
+        self.assertIn("decoded.projectRef", assistant_auth)
+        self.assertIn("project_access", assistant_auth)
+        self.assertIn("enforce(requested_ref)", assistant_auth)
         self.assertNotIn('/api/get-s3-keys', upload_guard)
         self.assertIn('/api/projects/${encodeURIComponent(projectRef)}/storage/s3-keys', studio_patch)
 
     def test_ai_chat_history_is_namespaced_and_does_not_use_a_global_cookie(self) -> None:
-        handler = (LUA / "api/ai_sql_generate_handler.lua").read_text(encoding="utf-8")
-        generator = (LUA / "ai_sql_generate.lua").read_text(encoding="utf-8")
-        schema = (ROOT / "studio/postgres/init.sql").read_text(encoding="utf-8")
+        store = (ROOT / "studio/assistant/store.mjs").read_text(encoding="utf-8")
         nginx = (ROOT / "studio/nginx/nginx.conf").read_text(encoding="utf-8")
 
-        self.assertIn('user_id .. ":" .. context.ref .. ":" .. client_chat_id', handler)
-        self.assertIn("studio_request.chatId = session_hash", handler)
-        self.assertIn("local session_id = studio_request.chatId", generator)
-        self.assertNotIn("cookie_ai_chat_session", generator)
-        self.assertIn("AND user_id = p_user_id", schema)
-        self.assertIn("AND project_ref = p_project_ref", schema)
-        self.assertIn("ON CONFLICT (id) DO NOTHING", schema)
+        self.assertIn("WHERE user_id=? AND project_id=?", store)
+        self.assertIn("aad(scope, 'chat-state')", store)
+        self.assertNotIn("cookie_ai_chat_session", store)
         self.assertIn("ai_chat_session=; Path=/; HttpOnly; Secure;", nginx)
 
     def test_custom_studio_build_is_pinned_and_patch_checked(self) -> None:

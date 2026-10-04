@@ -1,5 +1,5 @@
 diff --git a/apps/studio/components/interfaces/App/RouteValidationWrapper.tsx b/apps/studio/components/interfaces/App/RouteValidationWrapper.tsx
-index 4e0c9382d2..37b7961c94 100644
+index 4e0c9382..37b7961c 100644
 --- a/apps/studio/components/interfaces/App/RouteValidationWrapper.tsx
 +++ b/apps/studio/components/interfaces/App/RouteValidationWrapper.tsx
 @@ -27,7 +27,7 @@ export const RouteValidationWrapper = ({ children }: PropsWithChildren<{}>) => {
@@ -8,11 +8,11 @@ index 4e0c9382d2..37b7961c94 100644
        : '/organizations'
 -    : '/project/default'
 +    : '/'
-
+ 
    /**
     * Array of urls/routes that should be ignored
 diff --git a/apps/studio/components/interfaces/SQLEditor/SQLEditor.tsx b/apps/studio/components/interfaces/SQLEditor/SQLEditor.tsx
-index c3f736f8ca..5882d48381 100644
+index c3f736f8..5882d483 100644
 --- a/apps/studio/components/interfaces/SQLEditor/SQLEditor.tsx
 +++ b/apps/studio/components/interfaces/SQLEditor/SQLEditor.tsx
 @@ -68,7 +68,7 @@ import ResizableAIWidget from '@/components/ui/AIEditor/ResizableAIWidget'
@@ -27,14 +27,216 @@ index c3f736f8ca..5882d48381 100644
 @@ -675,7 +675,7 @@ export const SQLEditor = () => {
        try {
          setIsCompletionLoading(true)
-
+ 
 -        const response = await fetch(`${BASE_PATH}/api/ai/code/complete`, {
 +        const response = await fetchHandler(`${BASE_PATH}/api/ai/code/complete`, {
            method: 'POST',
            headers: {
              'Content-Type': 'application/json',
+diff --git a/apps/studio/components/interfaces/Storage/StorageExplorer/useCopyUrl.tsx b/apps/studio/components/interfaces/Storage/StorageExplorer/useCopyUrl.tsx
+index 5581a9cf..df196e15 100644
+--- a/apps/studio/components/interfaces/Storage/StorageExplorer/useCopyUrl.tsx
++++ b/apps/studio/components/interfaces/Storage/StorageExplorer/useCopyUrl.tsx
+@@ -23,16 +23,20 @@ export const useCopyUrl = () => {
+   const onCopyUrl = useCallback(
+     (filePath: string, expiresIn?: URL_EXPIRY_DURATION) => {
+       const formattedUrl = getFileUrl(filePath, expiresIn).then((url) => {
+-        return isCustomDomainActive && hostEndpoint
+-          ? url.replace(hostEndpoint, customEndpoint)
++        const projectUrl = hostEndpoint
++          ? url.replace(`${window.location.origin}/storage/v1/${projectRef}`, `${hostEndpoint}/storage/v1`)
+           : url
++
++        return isCustomDomainActive && hostEndpoint
++          ? projectUrl.replace(hostEndpoint, customEndpoint)
++          : projectUrl
+       })
+ 
+       return copyToClipboard(formattedUrl, () => {
+         toast.success(`Copied URL for ${filePath} to clipboard.`)
+       })
+     },
+-    [customEndpoint, getFileUrl, hostEndpoint, isCustomDomainActive]
++    [customEndpoint, getFileUrl, hostEndpoint, isCustomDomainActive, projectRef]
+   )
+ 
+   return { onCopyUrl }
+diff --git a/apps/studio/components/layouts/AccountLayout/AccountLayout.tsx b/apps/studio/components/layouts/AccountLayout/AccountLayout.tsx
+index 6a7b39be..709b911c 100644
+--- a/apps/studio/components/layouts/AccountLayout/AccountLayout.tsx
++++ b/apps/studio/components/layouts/AccountLayout/AccountLayout.tsx
+@@ -39,7 +39,7 @@ const AccountLayout = ({ children, title }: PropsWithChildren<AccountLayoutProps
+         ? `/org/${lastVisitedOrganization}`
+         : IS_PLATFORM
+           ? '/organizations'
+-          : '/project/default'
++          : '/'
+ 
+   const pageTitle = buildStudioPageTitle({
+     section: title,
+@@ -120,7 +120,7 @@ const AccountLayout = ({ children, title }: PropsWithChildren<AccountLayoutProps
+ 
+   useEffect(() => {
+     if (!IS_PLATFORM && currentPath !== '/account/me') {
+-      router.push('/project/default')
++      router.push('/')
+     }
+   }, [currentPath, router])
+ 
+diff --git a/apps/studio/components/layouts/DefaultLayout.tsx b/apps/studio/components/layouts/DefaultLayout.tsx
+index 5670934a..2b33349e 100644
+--- a/apps/studio/components/layouts/DefaultLayout.tsx
++++ b/apps/studio/components/layouts/DefaultLayout.tsx
+@@ -51,7 +51,7 @@ export const DefaultLayout = ({
+         ? `/org/${lastVisitedOrganization}`
+         : IS_PLATFORM
+           ? '/organizations'
+-          : '/project/default'
++          : '/'
+     : undefined
+ 
+   useCheckLatestDeploy()
+diff --git a/apps/studio/components/layouts/Navigation/LayoutHeader/HomeIcon.tsx b/apps/studio/components/layouts/Navigation/LayoutHeader/HomeIcon.tsx
+index 0d3b227d..a127c5c0 100644
+--- a/apps/studio/components/layouts/Navigation/LayoutHeader/HomeIcon.tsx
++++ b/apps/studio/components/layouts/Navigation/LayoutHeader/HomeIcon.tsx
+@@ -1,3 +1,4 @@
++import { useParams } from 'common'
+ import Link from 'next/link'
+ import { useRouter } from 'next/router'
+ import { cn } from 'ui'
+@@ -10,6 +11,7 @@ import { IS_PLATFORM } from '@/lib/constants'
+ import { useTrack } from '@/lib/telemetry/track'
+ 
+ export const HomeIcon = ({ className }: { className?: string }) => {
++  const { ref } = useParams()
+   const { data: selectedOrganization } = useSelectedOrganizationQuery()
+   const { data: organizations } = useOrganizationsQuery()
+   const track = useTrack()
+@@ -26,7 +28,7 @@ export const HomeIcon = ({ className }: { className?: string }) => {
+     return '/organizations'
+   }
+ 
+-  const href = IS_PLATFORM ? getDefaultOrgRedirect() : '/project/default'
++  const href = IS_PLATFORM ? getDefaultOrgRedirect() : ref ? `/project/${ref}` : '/'
+ 
+   return (
+     <Link
+diff --git a/apps/studio/components/ui/AIAssistantPanel/AIAssistant.tsx b/apps/studio/components/ui/AIAssistantPanel/AIAssistant.tsx
+index 6db42ca1..ca48659f 100644
+--- a/apps/studio/components/ui/AIAssistantPanel/AIAssistant.tsx
++++ b/apps/studio/components/ui/AIAssistantPanel/AIAssistant.tsx
+@@ -560,11 +560,11 @@ export const AIAssistant = ({ className }: AIAssistantProps) => {
+           {isSuccess && !isApiKeySet && (
+             <Admonition
+               type="default"
+-              title="OpenAI API key not set"
++              title="Assistant provider key not configured"
+               description={
+                 <Markdown
+                   content={
+-                    'Add your `OPENAI_API_KEY` to your environment variables to use the AI Assistant.'
++                    'Open **Assistant settings** above to choose your provider, model and personal key for this project.'
+                   }
+                 />
+               }
+diff --git a/apps/studio/components/ui/AIAssistantPanel/AIAssistantHeader.tsx b/apps/studio/components/ui/AIAssistantPanel/AIAssistantHeader.tsx
+index 41a3a40d..1a4a9d76 100644
+--- a/apps/studio/components/ui/AIAssistantPanel/AIAssistantHeader.tsx
++++ b/apps/studio/components/ui/AIAssistantPanel/AIAssistantHeader.tsx
+@@ -14,6 +14,8 @@ import { Admonition } from 'ui-patterns'
+ import { ButtonTooltip } from '../ButtonTooltip'
+ import { AIAssistantChatSelector } from './AIAssistantChatSelector'
+ import { AIOptInModal } from './AIOptInModal'
++import { SelfHostedAssistantSettings } from './SelfHostedAssistantSettings'
++import { IS_PLATFORM } from '@/lib/constants'
+ import { useAiAssistantStateSnapshot } from '@/state/ai-assistant-state'
+ 
+ interface AIAssistantHeaderProps {
+@@ -69,7 +71,7 @@ export const AIAssistantHeader = ({
+               className="h-7 w-7 p-0"
+               tooltip={{ content: { side: 'bottom', text: 'New chat' } }}
+             />
+-            <ButtonTooltip
++            {IS_PLATFORM && <ButtonTooltip
+               variant="text"
+               size="tiny"
+               icon={<Settings strokeWidth={1.5} />}
+@@ -79,7 +81,8 @@ export const AIAssistantHeader = ({
+               tooltip={{
+                 content: { side: 'bottom', text: 'Permission settings' },
+               }}
+-            />
++            />}
++            {!IS_PLATFORM && <SelfHostedAssistantSettings />}
+             <DropdownMenu>
+               <DropdownMenuTrigger asChild>
+                 <ButtonTooltip
+diff --git a/apps/studio/components/ui/AIAssistantPanel/AssistantChatForm.tsx b/apps/studio/components/ui/AIAssistantPanel/AssistantChatForm.tsx
+index c9ddbe78..3645214c 100644
+--- a/apps/studio/components/ui/AIAssistantPanel/AssistantChatForm.tsx
++++ b/apps/studio/components/ui/AIAssistantPanel/AssistantChatForm.tsx
+@@ -9,6 +9,7 @@ import { type SqlSnippet } from './AIAssistant.types'
+ import { ModelSelector } from './ModelSelector'
+ import { getSnippetContent, SnippetRow } from './SnippetRow'
+ import type { AssistantModelId } from '@/lib/ai/model.utils'
++import { IS_PLATFORM } from '@/lib/constants'
+ 
+ export interface FormProps {
+   /* The ref for the textarea, optional. Exposed for the CommandsPopover to attach events. */
+@@ -134,7 +135,7 @@ const AssistantChatFormComponent = forwardRef<HTMLFormElement, FormProps>(
+           />
+           <div className="absolute inset-x-1.5 bottom-1.5 flex items-center justify-between pointer-events-none">
+             <div className="pointer-events-auto">
+-              <ModelSelector selectedModel={selectedModel} onSelectModel={onSelectModel} />
++              {IS_PLATFORM && <ModelSelector selectedModel={selectedModel} onSelectModel={onSelectModel} />}
+             </div>
+ 
+             <div className="flex gap-3 items-center pointer-events-auto">
+diff --git a/apps/studio/components/ui/AIAssistantPanel/Message.Parts.tsx b/apps/studio/components/ui/AIAssistantPanel/Message.Parts.tsx
+index 047b51b6..167ef633 100644
+--- a/apps/studio/components/ui/AIAssistantPanel/Message.Parts.tsx
++++ b/apps/studio/components/ui/AIAssistantPanel/Message.Parts.tsx
+@@ -1,7 +1,7 @@
+ import { UIMessage as VercelMessage } from '@ai-sdk/react'
+ import { type DynamicToolUIPart, type ReasoningUIPart, type TextUIPart, type ToolUIPart } from 'ai'
+ import { BrainIcon, CheckIcon, Loader2 } from 'lucide-react'
+-import { cn } from 'ui'
++import { Button, cn } from 'ui'
+ 
+ import { DisplayBlockRenderer } from './DisplayBlockRenderer'
+ import { EdgeFunctionRenderer } from './EdgeFunctionRenderer'
+@@ -60,6 +60,17 @@ function MessagePartDynamicTool({ toolPart }: { toolPart: DynamicToolUIPart }) {
+ }
+ 
+ function MessagePartTool({ toolPart }: { toolPart: ToolUIPart }) {
++  const { addToolApprovalResponse } = useMessageActionsContext()
++  if (toolPart.state === 'approval-requested') return (
++    <div className="my-4 space-y-3 rounded-md border p-3">
++      <p>Review this function call before approving. It may change your database.</p>
++      <pre className="overflow-x-auto text-xs">{JSON.stringify(toolPart.input, null, 2)}</pre>
++      <div className="flex gap-2">
++        <Button onClick={() => addToolApprovalResponse?.({ id: toolPart.approval.id, approved: true })}>Approve execution</Button>
++        <Button variant="default" onClick={() => addToolApprovalResponse?.({ id: toolPart.approval.id, approved: false })}>Deny</Button>
++      </div>
++    </div>
++  )
+   return (
+     <Tool
+       icon={
+@@ -253,6 +264,10 @@ export function MessagePartSwitcher({
+       return <MessagePart.Dynamic toolPart={part} />
+     }
+     case 'tool-list_policies':
++    case 'tool-inspect_schema':
++    case 'tool-read_rows':
++    case 'tool-list_functions':
++    case 'tool-execute_function':
+     case 'tool-search_docs':
+     case 'tool-get_active_incidents':
+     case 'tool-load_knowledge': {
 diff --git a/apps/studio/components/ui/AIEditor/index.tsx b/apps/studio/components/ui/AIEditor/index.tsx
-index ce8c6865a7..2b6f71f9e4 100644
+index ce8c6865..2b6f71f9 100644
 --- a/apps/studio/components/ui/AIEditor/index.tsx
 +++ b/apps/studio/components/ui/AIEditor/index.tsx
 @@ -11,7 +11,7 @@ import { DiffEditor } from '../DiffEditor'
@@ -49,81 +251,130 @@ index ce8c6865a7..2b6f71f9e4 100644
 @@ -105,7 +105,7 @@ export const AIEditor = ({
          if (!aiEndpoint) throw new Error('AI endpoint is not configured')
          setIsCompletionLoading(true)
-
+ 
 -        const response = await fetch(aiEndpoint, {
 +        const response = await fetchHandler(aiEndpoint, {
            method: 'POST',
            headers: {
              'Content-Type': 'application/json',
-diff --git a/apps/studio/components/layouts/AccountLayout/AccountLayout.tsx b/apps/studio/components/layouts/AccountLayout/AccountLayout.tsx
-index 6a7b39be1c..709b911c53 100644
---- a/apps/studio/components/layouts/AccountLayout/AccountLayout.tsx
-+++ b/apps/studio/components/layouts/AccountLayout/AccountLayout.tsx
-@@ -39,7 +39,7 @@ const AccountLayout = ({ children, title }: PropsWithChildren<AccountLayoutProps
-         ? `/org/${lastVisitedOrganization}`
-         : IS_PLATFORM
-           ? '/organizations'
--          : '/project/default'
-+          : '/'
-
-   const pageTitle = buildStudioPageTitle({
-     section: title,
-@@ -120,7 +120,7 @@ const AccountLayout = ({ children, title }: PropsWithChildren<AccountLayoutProps
-
-   useEffect(() => {
-     if (!IS_PLATFORM && currentPath !== '/account/me') {
--      router.push('/project/default')
-+      router.push('/')
-     }
-   }, [currentPath, router])
-
-diff --git a/apps/studio/components/layouts/DefaultLayout.tsx b/apps/studio/components/layouts/DefaultLayout.tsx
-index 5670934aaf..2b33349e47 100644
---- a/apps/studio/components/layouts/DefaultLayout.tsx
-+++ b/apps/studio/components/layouts/DefaultLayout.tsx
-@@ -51,7 +51,7 @@ export const DefaultLayout = ({
-         ? `/org/${lastVisitedOrganization}`
-         : IS_PLATFORM
-           ? '/organizations'
--          : '/project/default'
-+          : '/'
-     : undefined
-
-   useCheckLatestDeploy()
-diff --git a/apps/studio/components/layouts/Navigation/LayoutHeader/HomeIcon.tsx b/apps/studio/components/layouts/Navigation/LayoutHeader/HomeIcon.tsx
-index 0d3b227d3d..a127c5c025 100644
---- a/apps/studio/components/layouts/Navigation/LayoutHeader/HomeIcon.tsx
-+++ b/apps/studio/components/layouts/Navigation/LayoutHeader/HomeIcon.tsx
-@@ -1,3 +1,4 @@
-+import { useParams } from 'common'
- import Link from 'next/link'
- import { useRouter } from 'next/router'
- import { cn } from 'ui'
-@@ -10,6 +11,7 @@ import { IS_PLATFORM } from '@/lib/constants'
- import { useTrack } from '@/lib/telemetry/track'
-
- export const HomeIcon = ({ className }: { className?: string }) => {
-+  const { ref } = useParams()
-   const { data: selectedOrganization } = useSelectedOrganizationQuery()
-   const { data: organizations } = useOrganizationsQuery()
-   const track = useTrack()
-@@ -26,7 +28,7 @@ export const HomeIcon = ({ className }: { className?: string }) => {
-     return '/organizations'
+diff --git a/apps/studio/data/ai/check-api-key-query.ts b/apps/studio/data/ai/check-api-key-query.ts
+index ad5f287d..35347c4c 100644
+--- a/apps/studio/data/ai/check-api-key-query.ts
++++ b/apps/studio/data/ai/check-api-key-query.ts
+@@ -4,16 +4,20 @@ import { aiKeys } from './keys'
+ import { constructHeaders, fetchHandler } from '@/data/fetchers'
+ import { BASE_PATH, IS_PLATFORM } from '@/lib/constants'
+ import { ResponseError, UseCustomQueryOptions } from '@/types'
++import { useSelectedProjectQuery } from '@/hooks/misc/useSelectedProject'
++import { useProfileQuery } from '@/data/profile/profile-query'
+ 
+ // check to see if the OPENAI_API_KEY env var is set in self-hosted
+ // so we can disable the chat editor and add a warning about manually adding the key
+ 
+-export async function checkOpenAIKey(signal?: AbortSignal) {
++export async function checkOpenAIKey(projectRef: string | undefined, signal?: AbortSignal) {
+   if (IS_PLATFORM) {
+     return { hasKey: true }
    }
-
--  const href = IS_PLATFORM ? getDefaultOrgRedirect() : '/project/default'
-+  const href = IS_PLATFORM ? getDefaultOrgRedirect() : ref ? `/project/${ref}` : '/'
-
-   return (
-     <Link
+ 
+   const headers = await constructHeaders()
++  if (!projectRef) throw new Error('Project context is required')
++  headers.set('X-Studio-Project-Ref', projectRef)
+   const response = await fetchHandler(`${BASE_PATH}/api/ai/sql/check-api-key`, {
+     headers,
+     signal,
+@@ -37,10 +41,14 @@ export type ResourceError = { errorEventId: string; message: string }
+ export const useCheckOpenAIKeyQuery = <TData = ResourceData>({
+   enabled = true,
+   ...options
+-}: UseCustomQueryOptions<ResourceData, ResourceError, TData> = {}) =>
+-  useQuery<ResourceData, ResourceError, TData>({
+-    queryKey: aiKeys.apiKey(),
+-    queryFn: ({ signal }) => checkOpenAIKey(signal),
+-    enabled: enabled,
++}: UseCustomQueryOptions<ResourceData, ResourceError, TData> = {}) => {
++  const { data: project } = useSelectedProjectQuery()
++  const { data: profile } = useProfileQuery()
++  return useQuery<ResourceData, ResourceError, TData>({
++    queryKey: [...aiKeys.apiKey(), profile?.id, project?.ref],
++    queryFn: ({ signal }) => checkOpenAIKey(project?.ref, signal),
++    enabled: enabled && (IS_PLATFORM || !!project?.ref),
++    retry: false,
+     ...options,
+   })
++}
+diff --git a/apps/studio/data/config/deployment-mode-query.ts b/apps/studio/data/config/deployment-mode-query.ts
+index 1ecd1e34..c5a9e714 100644
+--- a/apps/studio/data/config/deployment-mode-query.ts
++++ b/apps/studio/data/config/deployment-mode-query.ts
+@@ -1,7 +1,7 @@
+ import { useQuery } from '@tanstack/react-query'
+ 
+ import { configKeys } from './keys'
+-import { handleError } from '@/data/fetchers'
++import { fetchHandler, handleError } from '@/data/fetchers'
+ import { API_URL, IS_PLATFORM } from '@/lib/constants'
+ import type { ResponseError, UseCustomQueryOptions } from '@/types'
+ 
+@@ -10,7 +10,7 @@ export type DeploymentModeResponse = {
+ }
+ 
+ export async function getDeploymentMode(signal?: AbortSignal): Promise<DeploymentModeResponse> {
+-  const response = await fetch(`${API_URL}/platform/deployment-mode`, { signal })
++  const response = await fetchHandler(`${API_URL}/platform/deployment-mode`, { signal })
+   const body = await response.json()
+ 
+   if (!response.ok) {
+diff --git a/apps/studio/data/database-integrations/stripe/stripe-sync-install-mutation.ts b/apps/studio/data/database-integrations/stripe/stripe-sync-install-mutation.ts
+index 6aebe11d..f000b5de 100644
+--- a/apps/studio/data/database-integrations/stripe/stripe-sync-install-mutation.ts
++++ b/apps/studio/data/database-integrations/stripe/stripe-sync-install-mutation.ts
+@@ -4,6 +4,7 @@ import { toast } from 'sonner'
+ 
+ import { stripeSyncKeys } from './keys'
+ import { databaseKeys } from '@/data/database/keys'
++import { fetchHandler } from '@/data/fetchers'
+ import { BASE_PATH } from '@/lib/constants'
+ import { useTrack } from '@/lib/telemetry/track'
+ import type { ResponseError } from '@/types'
+@@ -26,7 +27,7 @@ export async function installStripeSync({
+ }: StripeSyncInstallVariables): Promise<StripeSyncInstallResponse> {
+   const accessToken = await getAccessToken()
+ 
+-  const response = await fetch(`${BASE_PATH}/api/integrations/stripe-sync`, {
++  const response = await fetchHandler(`${BASE_PATH}/api/integrations/stripe-sync`, {
+     method: 'POST',
+     headers: {
+       'Content-Type': 'application/json',
+diff --git a/apps/studio/data/database-integrations/stripe/stripe-sync-uninstall-mutation.ts b/apps/studio/data/database-integrations/stripe/stripe-sync-uninstall-mutation.ts
+index 19057aa0..4ee592e8 100644
+--- a/apps/studio/data/database-integrations/stripe/stripe-sync-uninstall-mutation.ts
++++ b/apps/studio/data/database-integrations/stripe/stripe-sync-uninstall-mutation.ts
+@@ -4,6 +4,7 @@ import { toast } from 'sonner'
+ 
+ import { stripeSyncKeys } from './keys'
+ import { databaseKeys } from '@/data/database/keys'
++import { fetchHandler } from '@/data/fetchers'
+ import { BASE_PATH } from '@/lib/constants'
+ import { useTrack } from '@/lib/telemetry/track'
+ import type { ResponseError } from '@/types'
+@@ -24,7 +25,7 @@ export async function uninstallStripeSync({
+ }: StripeSyncUninstallVariables): Promise<StripeSyncUninstallResponse> {
+   const accessToken = await getAccessToken()
+ 
+-  const response = await fetch(`${BASE_PATH}/api/integrations/stripe-sync`, {
++  const response = await fetchHandler(`${BASE_PATH}/api/integrations/stripe-sync`, {
+     method: 'DELETE',
+     headers: {
+       'Content-Type': 'application/json',
 diff --git a/apps/studio/data/fetchers.ts b/apps/studio/data/fetchers.ts
-index 1ce51f26e8..a2a1f5be7f 100644
+index 1ce51f26..a2a1f5be 100644
 --- a/apps/studio/data/fetchers.ts
 +++ b/apps/studio/data/fetchers.ts
 @@ -15,9 +15,45 @@ import { ErrorMetadata } from '@/types/base'
-
+ 
  const DEFAULT_HEADERS = { Accept: 'application/json' }
-
+ 
 +const STUDIO_PROJECT_PATH = /^\/project\/([a-z_][a-z0-9_]{2,39})(?:\/|$)/
 +const STUDIO_PROJECT_HEADER = 'X-Studio-Project-Ref'
 +
@@ -188,14 +439,33 @@ index 1ce51f26e8..a2a1f5be7f 100644
 @@ -391,7 +427,7 @@ export async function fetchHeadWithTimeout<T = any>(
        ...otherHeaders,
      })
-
+ 
 -    const response = await fetch(url, {
 +    const response = await fetchHandler(url, {
        method: 'HEAD',
        referrerPolicy: 'no-referrer-when-downgrade',
        headers,
+diff --git a/apps/studio/data/graphql/execute.ts b/apps/studio/data/graphql/execute.ts
+index fbafe810..abe7fad9 100644
+--- a/apps/studio/data/graphql/execute.ts
++++ b/apps/studio/data/graphql/execute.ts
+@@ -1,12 +1,12 @@
+ import type { TypedDocumentString } from './graphql'
+-import { handleError } from '@/data/fetchers'
++import { fetchHandler, handleError } from '@/data/fetchers'
+ 
+ export async function executeGraphQL<TResult, TVariables>(
+   query: TypedDocumentString<TResult, TVariables>,
+   { variables, signal }: { variables?: TVariables; signal?: AbortSignal }
+ ) {
+   try {
+-    const response = await fetch('/api/content/graphql', {
++    const response = await fetchHandler('/api/content/graphql', {
+       method: 'POST',
+       headers: {
+         'Content-Type': 'application/json',
 diff --git a/apps/studio/data/misc/keys.ts b/apps/studio/data/misc/keys.ts
-index 36d2eed504..cd625fb250 100644
+index 36d2eed5..cd625fb2 100644
 --- a/apps/studio/data/misc/keys.ts
 +++ b/apps/studio/data/misc/keys.ts
 @@ -5,5 +5,5 @@ export const miscKeys = {
@@ -206,13 +476,13 @@ index 36d2eed504..cd625fb250 100644
 +  localS3Keys: (projectRef: string | undefined) => ['local-s3-keys', projectRef] as const,
  }
 diff --git a/apps/studio/data/misc/local-s3-keys-query.ts b/apps/studio/data/misc/local-s3-keys-query.ts
-index 1ca08be065..b3197f5f03 100644
+index 1ca08be0..b3197f5f 100644
 --- a/apps/studio/data/misc/local-s3-keys-query.ts
 +++ b/apps/studio/data/misc/local-s3-keys-query.ts
 @@ -5,9 +5,11 @@ import { fetchHandler } from '@/data/fetchers'
  import { BASE_PATH, IS_PLATFORM } from '@/lib/constants'
  import type { ResponseError, UseCustomQueryOptions } from '@/types'
-
+ 
 -export async function getLocalS3Keys() {
 +export async function getLocalS3Keys(projectRef: string) {
    try {
@@ -247,8 +517,50 @@ index 1ca08be065..b3197f5f03 100644
 +    enabled: enabled && !IS_PLATFORM && projectRef !== undefined,
      ...options,
    })
+diff --git a/apps/studio/data/platform/incident-banner-query.ts b/apps/studio/data/platform/incident-banner-query.ts
+index 2b9fa3f8..918f42ae 100644
+--- a/apps/studio/data/platform/incident-banner-query.ts
++++ b/apps/studio/data/platform/incident-banner-query.ts
+@@ -2,6 +2,7 @@ import { queryOptions } from '@tanstack/react-query'
+ import { IS_PLATFORM } from 'common'
+ 
+ import { platformKeys } from './keys'
++import { fetchHandler } from '@/data/fetchers'
+ import { BASE_PATH } from '@/lib/constants'
+ 
+ export interface IncidentBannerItem {
+@@ -18,7 +19,7 @@ export type IncidentBannerData = { incidents: Array<IncidentBannerItem> }
+ export type IncidentBannerError = unknown
+ 
+ async function getIncidentBanner(signal?: AbortSignal): Promise<IncidentBannerData> {
+-  const response = await fetch(`${BASE_PATH}/api/incident-banner`, {
++  const response = await fetchHandler(`${BASE_PATH}/api/incident-banner`, {
+     signal,
+     method: 'GET',
+     credentials: 'omit',
+diff --git a/apps/studio/data/platform/incident-status-query.ts b/apps/studio/data/platform/incident-status-query.ts
+index 42c6c627..192f6fde 100644
+--- a/apps/studio/data/platform/incident-status-query.ts
++++ b/apps/studio/data/platform/incident-status-query.ts
+@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
+ import { partition } from 'lodash'
+ 
+ import { platformKeys } from './keys'
++import { fetchHandler } from '@/data/fetchers'
+ import type { IncidentInfo } from '@/lib/api/incident-status'
+ import { BASE_PATH, IS_PLATFORM, IS_TEST_ENV } from '@/lib/constants'
+ import { ResponseError, UseCustomQueryOptions } from '@/types'
+@@ -9,7 +10,7 @@ import { ResponseError, UseCustomQueryOptions } from '@/types'
+ export async function getIncidentStatus(
+   signal?: AbortSignal
+ ): Promise<{ maintenanceEvents: IncidentInfo[]; incidents: IncidentInfo[] }> {
+-  const response = await fetch(`${BASE_PATH}/api/incident-status`, {
++  const response = await fetchHandler(`${BASE_PATH}/api/incident-status`, {
+     signal,
+     method: 'GET',
+     credentials: 'omit',
 diff --git a/apps/studio/data/profile/keys.ts b/apps/studio/data/profile/keys.ts
-index 829e7986d0..f507a8f02d 100644
+index 829e7986..f507a8f0 100644
 --- a/apps/studio/data/profile/keys.ts
 +++ b/apps/studio/data/profile/keys.ts
 @@ -1,5 +1,6 @@
@@ -260,13 +572,13 @@ index 829e7986d0..f507a8f02d 100644
    identities: () => ['profile', 'identities'] as const,
    aaLevel: () => ['mfa', 'aaLevel'] as const,
 diff --git a/apps/studio/data/profile/profile-query.ts b/apps/studio/data/profile/profile-query.ts
-index 122ce394d3..fc56e90f40 100644
+index 122ce394..fc56e90f 100644
 --- a/apps/studio/data/profile/profile-query.ts
 +++ b/apps/studio/data/profile/profile-query.ts
 @@ -1,4 +1,5 @@
  import { useQuery } from '@tanstack/react-query'
 +import { useParams } from 'common'
-
+ 
  import { profileKeys } from './keys'
  import type { Profile } from './types'
 @@ -31,11 +32,13 @@ export const useProfileQuery = <TData = ProfileData>({
@@ -286,12 +598,12 @@ index 122ce394d3..fc56e90f40 100644
    })
  }
 diff --git a/apps/studio/data/projects/keys.ts b/apps/studio/data/projects/keys.ts
-index 765133e636..e4f7d3d25b 100644
+index 765133e6..e4f7d3d2 100644
 --- a/apps/studio/data/projects/keys.ts
 +++ b/apps/studio/data/projects/keys.ts
 @@ -1,11 +1,14 @@
  export const INFINITE_PROJECTS_KEY_PREFIX = 'all-projects-infinite'
-
+ 
  export const projectKeys = {
 -  infiniteList: (params?: {
 -    limit: number
@@ -310,20 +622,20 @@ index 765133e636..e4f7d3d25b 100644
      slug: string | undefined,
      params?: {
 diff --git a/apps/studio/data/projects/projects-infinite-query.ts b/apps/studio/data/projects/projects-infinite-query.ts
-index fe114fa911..c14906b625 100644
+index fe114fa9..c14906b6 100644
 --- a/apps/studio/data/projects/projects-infinite-query.ts
 +++ b/apps/studio/data/projects/projects-infinite-query.ts
 @@ -1,8 +1,10 @@
  import { InfiniteData, useInfiniteQuery } from '@tanstack/react-query'
  import { components } from 'api-types'
 +import { useParams } from 'common'
-
+ 
  import { projectKeys } from './keys'
  import { get, handleError } from '@/data/fetchers'
 +import { IS_PLATFORM } from '@/lib/constants'
  import { useProfile } from '@/lib/profile'
  import type { ResponseError, UseCustomInfiniteQueryOptions } from '@/types'
-
+ 
 @@ -59,11 +61,12 @@ export const useProjectsInfiniteQuery = <TData = ProjectsInfiniteData>(
    > = {}
  ) => {
@@ -340,20 +652,120 @@ index fe114fa911..c14906b625 100644
      initialPageParam: 0,
      getNextPageParam(lastPage, pages) {
 diff --git a/apps/studio/data/storage/s3-vectors-wrapper-create-mutation.ts b/apps/studio/data/storage/s3-vectors-wrapper-create-mutation.ts
-index c77b8c329a..3467178e5f 100644
+index c77b8c32..3467178e 100644
 --- a/apps/studio/data/storage/s3-vectors-wrapper-create-mutation.ts
 +++ b/apps/studio/data/storage/s3-vectors-wrapper-create-mutation.ts
 @@ -18,7 +18,7 @@ import { useSelectedProjectQuery } from '@/hooks/misc/useSelectedProject'
-
+ 
  export const useS3VectorsWrapperCreateMutation = () => {
    const { data: project } = useSelectedProjectQuery()
 -  const { data: localKeys } = useLocalS3KeysQuery()
 +  const { data: localKeys } = useLocalS3KeysQuery(project?.ref)
    const { isPlatform } = useDeploymentMode()
-
+ 
    const { data: settings } = useProjectSettingsV2Query({ projectRef: project?.ref })
+diff --git a/apps/studio/data/support/generate-attachment-urls-mutation.ts b/apps/studio/data/support/generate-attachment-urls-mutation.ts
+index 56ff2a30..1221dda1 100644
+--- a/apps/studio/data/support/generate-attachment-urls-mutation.ts
++++ b/apps/studio/data/support/generate-attachment-urls-mutation.ts
+@@ -1,7 +1,7 @@
+ import { useMutation } from '@tanstack/react-query'
+ import { toast } from 'sonner'
+ 
+-import { constructHeaders } from '@/data/fetchers'
++import { constructHeaders, fetchHandler } from '@/data/fetchers'
+ import { BASE_PATH } from '@/lib/constants'
+ import type { ResponseError, UseCustomMutationOptions } from '@/types'
+ 
+@@ -24,7 +24,7 @@ export async function generateAttachmentURLs({
+   const body = bucket ? JSON.stringify({ filenames, bucket }) : JSON.stringify({ filenames })
+ 
+   try {
+-    const response = await fetch(`${BASE_PATH}/api/generate-attachment-url`, {
++    const response = await fetchHandler(`${BASE_PATH}/api/generate-attachment-url`, {
+       method: 'POST',
+       headers,
+       body,
+diff --git a/apps/studio/pages/api/platform/projects/[ref]/analytics/log-drains.ts b/apps/studio/pages/api/platform/projects/[ref]/analytics/log-drains.ts
+index 97019181..d6b2c766 100644
+--- a/apps/studio/pages/api/platform/projects/[ref]/analytics/log-drains.ts
++++ b/apps/studio/pages/api/platform/projects/[ref]/analytics/log-drains.ts
+@@ -24,8 +24,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+   switch (method) {
+     case 'GET':
+       // list log drains
+-      const url = new URL(baseUrl)
+-      url.pathname = '/api/backends'
++      const url = new URL('backends', baseUrl)
+       url.search = new URLSearchParams({
+         'metadata[type]': 'log-drain',
+       }).toString()
+@@ -55,8 +54,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+       return res.status(200).json(resp)
+     case 'POST':
+       // create the log drain
+-      const postUrl = new URL(baseUrl)
+-      postUrl.pathname = '/api/backends'
++      const postUrl = new URL('backends', baseUrl)
+       const postResult = await fetch(postUrl, {
+         body: JSON.stringify({
+           ...req.body,
+@@ -73,8 +71,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+         },
+       }).then(async (r) => await r.json())
+ 
+-      const sourcesGetUrl = new URL(baseUrl)
+-      sourcesGetUrl.pathname = '/api/sources'
++      const sourcesGetUrl = new URL('sources', baseUrl)
+       const sources = await fetch(sourcesGetUrl, {
+         method: 'GET',
+         headers: {
+@@ -101,8 +98,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+         .map((source: { name: string; id: number }) => {
+           return { backend_id: postResult.id, lql_string: `~".*?"`, source_id: source.id }
+         })
+-      const rulesPostUrl = new URL(baseUrl)
+-      rulesPostUrl.pathname = '/api/rules'
++      const rulesPostUrl = new URL('rules', baseUrl)
+       await Promise.all(
+         params.map((param: any) =>
+           fetch(rulesPostUrl, {
+diff --git a/apps/studio/pages/api/platform/projects/[ref]/analytics/log-drains/[uuid].ts b/apps/studio/pages/api/platform/projects/[ref]/analytics/log-drains/[uuid].ts
+index e2c8a742..2869bac4 100644
+--- a/apps/studio/pages/api/platform/projects/[ref]/analytics/log-drains/[uuid].ts
++++ b/apps/studio/pages/api/platform/projects/[ref]/analytics/log-drains/[uuid].ts
+@@ -25,8 +25,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+   switch (method) {
+     case 'GET':
+       // get log drain
+-      const url = new URL(baseUrl)
+-      url.pathname = `/api/backends/${uuid}`
++      const url = new URL(`backends/${uuid}`, baseUrl)
+       const result = await fetch(url, {
+         method: 'GET',
+         headers: {
+@@ -39,8 +38,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+       return res.status(200).json(result)
+     case 'PUT':
+       // create the log drain
+-      const putUrl = new URL(baseUrl)
+-      putUrl.pathname = `/api/backends/${uuid}`
++      const putUrl = new URL(`backends/${uuid}`, baseUrl)
+       delete req.body['metadata']
+       const putResult = await fetch(putUrl, {
+         body: JSON.stringify(req.body),
+@@ -60,8 +58,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+ 
+     case 'DELETE':
+       // create the log drain
+-      const deleteUrl = new URL(baseUrl)
+-      deleteUrl.pathname = `/api/backends/${uuid}`
++      const deleteUrl = new URL(`backends/${uuid}`, baseUrl)
+ 
+       await fetch(deleteUrl, {
+         headers: {
 diff --git a/apps/studio/pages/sign-in.tsx b/apps/studio/pages/sign-in.tsx
-index aeffd266dc..015436ac71 100644
+index aeffd266..015436ac 100644
 --- a/apps/studio/pages/sign-in.tsx
 +++ b/apps/studio/pages/sign-in.tsx
 @@ -79,7 +79,7 @@ const SignInPage: NextPageWithLayout = () => {
@@ -364,183 +776,14 @@ index aeffd266dc..015436ac71 100644
 +      router.replace('/')
      }
    }, [router])
-
-diff --git a/apps/studio/data/config/deployment-mode-query.ts b/apps/studio/data/config/deployment-mode-query.ts
-index 1ecd1e34c8..c5a9e714f2 100644
---- a/apps/studio/data/config/deployment-mode-query.ts
-+++ b/apps/studio/data/config/deployment-mode-query.ts
-@@ -1,7 +1,7 @@
- import { useQuery } from '@tanstack/react-query'
-
- import { configKeys } from './keys'
--import { handleError } from '@/data/fetchers'
-+import { fetchHandler, handleError } from '@/data/fetchers'
- import { API_URL, IS_PLATFORM } from '@/lib/constants'
- import type { ResponseError, UseCustomQueryOptions } from '@/types'
-
-@@ -10,7 +10,7 @@ export type DeploymentModeResponse = {
- }
-
- export async function getDeploymentMode(signal?: AbortSignal): Promise<DeploymentModeResponse> {
--  const response = await fetch(`${API_URL}/platform/deployment-mode`, { signal })
-+  const response = await fetchHandler(`${API_URL}/platform/deployment-mode`, { signal })
-   const body = await response.json()
-
-   if (!response.ok) {
-diff --git a/apps/studio/data/database-integrations/stripe/stripe-sync-install-mutation.ts b/apps/studio/data/database-integrations/stripe/stripe-sync-install-mutation.ts
-index 6aebe11d93..f000b5de5e 100644
---- a/apps/studio/data/database-integrations/stripe/stripe-sync-install-mutation.ts
-+++ b/apps/studio/data/database-integrations/stripe/stripe-sync-install-mutation.ts
-@@ -4,6 +4,7 @@ import { toast } from 'sonner'
-
- import { stripeSyncKeys } from './keys'
- import { databaseKeys } from '@/data/database/keys'
-+import { fetchHandler } from '@/data/fetchers'
- import { BASE_PATH } from '@/lib/constants'
- import { useTrack } from '@/lib/telemetry/track'
- import type { ResponseError } from '@/types'
-@@ -26,7 +27,7 @@ export async function installStripeSync({
- }: StripeSyncInstallVariables): Promise<StripeSyncInstallResponse> {
-   const accessToken = await getAccessToken()
-
--  const response = await fetch(`${BASE_PATH}/api/integrations/stripe-sync`, {
-+  const response = await fetchHandler(`${BASE_PATH}/api/integrations/stripe-sync`, {
-     method: 'POST',
-     headers: {
-       'Content-Type': 'application/json',
-diff --git a/apps/studio/data/database-integrations/stripe/stripe-sync-uninstall-mutation.ts b/apps/studio/data/database-integrations/stripe/stripe-sync-uninstall-mutation.ts
-index 19057aa0eb..4ee592e8cc 100644
---- a/apps/studio/data/database-integrations/stripe/stripe-sync-uninstall-mutation.ts
-+++ b/apps/studio/data/database-integrations/stripe/stripe-sync-uninstall-mutation.ts
-@@ -4,6 +4,7 @@ import { toast } from 'sonner'
-
- import { stripeSyncKeys } from './keys'
- import { databaseKeys } from '@/data/database/keys'
-+import { fetchHandler } from '@/data/fetchers'
- import { BASE_PATH } from '@/lib/constants'
- import { useTrack } from '@/lib/telemetry/track'
- import type { ResponseError } from '@/types'
-@@ -24,7 +25,7 @@ export async function uninstallStripeSync({
- }: StripeSyncUninstallVariables): Promise<StripeSyncUninstallResponse> {
-   const accessToken = await getAccessToken()
-
--  const response = await fetch(`${BASE_PATH}/api/integrations/stripe-sync`, {
-+  const response = await fetchHandler(`${BASE_PATH}/api/integrations/stripe-sync`, {
-     method: 'DELETE',
-     headers: {
-       'Content-Type': 'application/json',
-diff --git a/apps/studio/data/graphql/execute.ts b/apps/studio/data/graphql/execute.ts
-index fbafe81079..abe7fad98d 100644
---- a/apps/studio/data/graphql/execute.ts
-+++ b/apps/studio/data/graphql/execute.ts
-@@ -1,12 +1,12 @@
- import type { TypedDocumentString } from './graphql'
--import { handleError } from '@/data/fetchers'
-+import { fetchHandler, handleError } from '@/data/fetchers'
-
- export async function executeGraphQL<TResult, TVariables>(
-   query: TypedDocumentString<TResult, TVariables>,
-   { variables, signal }: { variables?: TVariables; signal?: AbortSignal }
- ) {
-   try {
--    const response = await fetch('/api/content/graphql', {
-+    const response = await fetchHandler('/api/content/graphql', {
-       method: 'POST',
-       headers: {
-         'Content-Type': 'application/json',
-diff --git a/apps/studio/data/platform/incident-banner-query.ts b/apps/studio/data/platform/incident-banner-query.ts
-index 2b9fa3f8b5..918f42aee3 100644
---- a/apps/studio/data/platform/incident-banner-query.ts
-+++ b/apps/studio/data/platform/incident-banner-query.ts
-@@ -2,6 +2,7 @@ import { queryOptions } from '@tanstack/react-query'
- import { IS_PLATFORM } from 'common'
-
- import { platformKeys } from './keys'
-+import { fetchHandler } from '@/data/fetchers'
- import { BASE_PATH } from '@/lib/constants'
-
- export interface IncidentBannerItem {
-@@ -18,7 +19,7 @@ export type IncidentBannerData = { incidents: Array<IncidentBannerItem> }
- export type IncidentBannerError = unknown
-
- async function getIncidentBanner(signal?: AbortSignal): Promise<IncidentBannerData> {
--  const response = await fetch(`${BASE_PATH}/api/incident-banner`, {
-+  const response = await fetchHandler(`${BASE_PATH}/api/incident-banner`, {
-     signal,
-     method: 'GET',
-     credentials: 'omit',
-diff --git a/apps/studio/data/platform/incident-status-query.ts b/apps/studio/data/platform/incident-status-query.ts
-index 42c6c62725..192f6fde5c 100644
---- a/apps/studio/data/platform/incident-status-query.ts
-+++ b/apps/studio/data/platform/incident-status-query.ts
-@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
- import { partition } from 'lodash'
-
- import { platformKeys } from './keys'
-+import { fetchHandler } from '@/data/fetchers'
- import type { IncidentInfo } from '@/lib/api/incident-status'
- import { BASE_PATH, IS_PLATFORM, IS_TEST_ENV } from '@/lib/constants'
- import { ResponseError, UseCustomQueryOptions } from '@/types'
-@@ -9,7 +10,7 @@ import { ResponseError, UseCustomQueryOptions } from '@/types'
- export async function getIncidentStatus(
-   signal?: AbortSignal
- ): Promise<{ maintenanceEvents: IncidentInfo[]; incidents: IncidentInfo[] }> {
--  const response = await fetch(`${BASE_PATH}/api/incident-status`, {
-+  const response = await fetchHandler(`${BASE_PATH}/api/incident-status`, {
-     signal,
-     method: 'GET',
-     credentials: 'omit',
-diff --git a/apps/studio/data/support/generate-attachment-urls-mutation.ts b/apps/studio/data/support/generate-attachment-urls-mutation.ts
-index 56ff2a306f..1221dda11e 100644
---- a/apps/studio/data/support/generate-attachment-urls-mutation.ts
-+++ b/apps/studio/data/support/generate-attachment-urls-mutation.ts
-@@ -1,7 +1,7 @@
- import { useMutation } from '@tanstack/react-query'
- import { toast } from 'sonner'
-
--import { constructHeaders } from '@/data/fetchers'
-+import { constructHeaders, fetchHandler } from '@/data/fetchers'
- import { BASE_PATH } from '@/lib/constants'
- import type { ResponseError, UseCustomMutationOptions } from '@/types'
-
-@@ -24,7 +24,7 @@ export async function generateAttachmentURLs({
-   const body = bucket ? JSON.stringify({ filenames, bucket }) : JSON.stringify({ filenames })
-
-   try {
--    const response = await fetch(`${BASE_PATH}/api/generate-attachment-url`, {
-+    const response = await fetchHandler(`${BASE_PATH}/api/generate-attachment-url`, {
-       method: 'POST',
-       headers,
-       body,
-diff --git a/apps/studio/state/ai-assistant-state.tsx b/apps/studio/state/ai-assistant-state.tsx
-index 7c31bfef13..e361af6179 100644
---- a/apps/studio/state/ai-assistant-state.tsx
-+++ b/apps/studio/state/ai-assistant-state.tsx
-@@ -7,7 +7,7 @@ import { createContext, PropsWithChildren, useContext, useEffect, useState } fro
- import { v4 as uuidv4 } from 'uuid'
- import { proxy, ref, snapshot, subscribe, useSnapshot } from 'valtio'
-
--import { constructHeaders } from '@/data/fetchers'
-+import { constructHeaders, fetchHandler } from '@/data/fetchers'
- import { useSelectedProjectQuery } from '@/hooks/misc/useSelectedProject'
- import { prepareMessagesForAPI } from '@/lib/ai/message-utils'
- import { isKnownAssistantModelId } from '@/lib/ai/model.utils'
-@@ -236,7 +236,7 @@ function createChatInstance(
-     transport: new DefaultChatTransport({
-       api: `${BASE_PATH}/api/ai/sql/generate-v4`,
-       fetch: async (url, init) => {
--        const response = await globalThis.fetch(url as RequestInfo, init)
-+        const response = await fetchHandler(url as RequestInfo, init)
-         const spanId = response.headers.get('x-braintrust-span-id')
-         if (spanId) {
-           state.pendingSpanIds[options.id] = spanId
+ 
 diff --git a/apps/studio/redirects.shared.ts b/apps/studio/redirects.shared.ts
-index a786fac35d..782359628e 100644
+index a786fac3..78235962 100644
 --- a/apps/studio/redirects.shared.ts
 +++ b/apps/studio/redirects.shared.ts
 @@ -31,12 +31,11 @@ export const PLATFORM_REDIRECTS: StudioRedirect[] = [
  ]
-
+ 
  export const SELF_HOSTED_REDIRECTS: StudioRedirect[] = [
 -  { source: '/', destination: '/project/default', permanent: false },
 -  { source: '/register', destination: '/project/default', permanent: false },
@@ -555,9 +798,169 @@ index a786fac35d..782359628e 100644
 +  { source: '/log-in', destination: '/', permanent: false },
    { source: '/project/:ref/building', destination: '/project/:ref', permanent: false },
  ]
-
+ 
+diff --git a/apps/studio/state/ai-assistant-state.tsx b/apps/studio/state/ai-assistant-state.tsx
+index 7c31bfef..58cbc62f 100644
+--- a/apps/studio/state/ai-assistant-state.tsx
++++ b/apps/studio/state/ai-assistant-state.tsx
+@@ -6,8 +6,10 @@ import { debounce } from 'lodash'
+ import { createContext, PropsWithChildren, useContext, useEffect, useState } from 'react'
+ import { v4 as uuidv4 } from 'uuid'
+ import { proxy, ref, snapshot, subscribe, useSnapshot } from 'valtio'
++import { toast } from 'sonner'
++import { useProfileQuery } from '@/data/profile/profile-query'
+ 
+-import { constructHeaders } from '@/data/fetchers'
++import { constructHeaders, fetchHandler } from '@/data/fetchers'
+ import { useSelectedProjectQuery } from '@/hooks/misc/useSelectedProject'
+ import { prepareMessagesForAPI } from '@/lib/ai/message-utils'
+ import { isKnownAssistantModelId } from '@/lib/ai/model.utils'
+@@ -92,6 +94,11 @@ async function openAiDb(): Promise<IDBPDatabase<AiAssistantDB>> {
+ 
+ async function getAiState(projectRef: string): Promise<StoredAiAssistantState | undefined> {
+   if (!projectRef) return undefined
++  if (!IS_PLATFORM) {
++    const response = await fetchHandler(`${BASE_PATH}/api/ai/state`, { cache: 'no-store', headers: { 'X-Studio-Project-Ref': projectRef } })
++    if (!response.ok) throw new Error('Unable to load assistant history')
++    return (await response.json()) ?? undefined
++  }
+   try {
+     const db = await openAiDb()
+     return await db.get(STORE_NAME, projectRef)
+@@ -103,6 +110,12 @@ async function getAiState(projectRef: string): Promise<StoredAiAssistantState |
+ 
+ async function saveAiState(state: StoredAiAssistantState): Promise<void> {
+   if (!state.projectRef) return
++  if (!IS_PLATFORM) {
++    const response = await fetchHandler(`${BASE_PATH}/api/ai/state`, { method: 'PUT', cache: 'no-store',
++      headers: { 'Content-Type': 'application/json', 'X-Studio-Project-Ref': state.projectRef }, body: JSON.stringify(state) })
++    if (!response.ok) throw new Error('Unable to save assistant history')
++    return
++  }
+   try {
+     const db = await openAiDb()
+     await db.put(STORE_NAME, state)
+@@ -111,7 +124,12 @@ async function saveAiState(state: StoredAiAssistantState): Promise<void> {
+   }
+ }
+ 
+-async function clearStorage(): Promise<void> {
++async function clearStorage(projectRef?: string): Promise<void> {
++  if (!IS_PLATFORM) {
++    if (!projectRef) throw new Error('Project context is required')
++    await saveAiState({ projectRef, chats: {} })
++    return
++  }
+   try {
+     const db = await openAiDb()
+     await db.clear(STORE_NAME)
+@@ -152,6 +170,7 @@ async function loadFromIndexedDB(projectRef: string): Promise<StoredAiAssistantS
+       return persistedState
+     }
+   } catch (error) {
++    if (!IS_PLATFORM) throw error
+     console.error('Error loading AI state from IndexedDB:', error)
+   }
+   return null
+@@ -236,7 +255,7 @@ function createChatInstance(
+     transport: new DefaultChatTransport({
+       api: `${BASE_PATH}/api/ai/sql/generate-v4`,
+       fetch: async (url, init) => {
+-        const response = await globalThis.fetch(url as RequestInfo, init)
++        const response = await fetchHandler(url as RequestInfo, init)
+         const spanId = response.headers.get('x-braintrust-span-id')
+         if (spanId) {
+           state.pendingSpanIds[options.id] = spanId
+@@ -256,12 +275,11 @@ function createChatInstance(
+           body: {
+             messages: cleanedMessages,
+             projectRef: state.context.projectRef,
+-            connectionString: state.context.connectionString,
++            ...(IS_PLATFORM ? { connectionString: state.context.connectionString } : {}),
+             chatId: options.id,
+             chatName: chat?.name,
+             orgSlug: state.context.orgSlug,
+-            context: state.context,
+-            model: state.model,
++            ...(IS_PLATFORM ? { context: state.context, model: state.model } : {}),
+             ...opts.body,
+           },
+           ...(IS_PLATFORM ? { headers: { Authorization: authorizationHeader ?? '' } } : {}),
+@@ -525,7 +543,7 @@ export const createAiAssistantState = (): AiAssistantState => {
+     },
+ 
+     clearStorage: async () => {
+-      await clearStorage()
++      await clearStorage(state.context.projectRef)
+     },
+   })
+ 
+@@ -562,12 +580,17 @@ export const AiAssistantStateContext = createContext<AiAssistantState>(createAiA
+ 
+ export const AiAssistantStateContextProvider = ({ children }: PropsWithChildren) => {
+   const { data: project } = useSelectedProjectQuery()
++  const { data: profile } = useProfileQuery()
++  const scope = `${profile?.id}:${project?.ref}`
++  const [loadedScope, setLoadedScope] = useState<string>()
+   // Initialize state. createAiAssistantState now just sets defaults.
+   const [state] = useState(() => createAiAssistantState())
+ 
+   // Effect to load state from IndexedDB on mount or projectRef change
+   useEffect(() => {
+     let isMounted = true
++    setLoadedScope(undefined)
++    state.resetAiAssistantPanel()
+ 
+     async function loadAndInitializeState() {
+       if (!project?.ref || typeof window === 'undefined') {
+@@ -583,7 +606,7 @@ export const AiAssistantStateContextProvider = ({ children }: PropsWithChildren)
+       loadedState = await loadFromIndexedDB(project?.ref)
+ 
+       // 2. If not in IndexedDB, try migrating from localStorage
+-      if (!loadedState) {
++      if (IS_PLATFORM && !loadedState) {
+         loadedState = await tryMigrateFromLocalStorage(project?.ref)
+       }
+ 
+@@ -596,20 +619,23 @@ export const AiAssistantStateContextProvider = ({ children }: PropsWithChildren)
+ 
+       // 4. Ensure an active chat exists and handle URL overrides
+       ensureActiveChatOrInitialize(state)
++      setLoadedScope(scope)
+     }
+ 
+-    loadAndInitializeState()
++    loadAndInitializeState().catch(() => toast.error('Unable to load assistant history. No local history was substituted.'))
+ 
+     return () => {
+       isMounted = false
+     }
+-  }, [project?.ref, state])
++  }, [project?.ref, profile?.id, scope, state])
+ 
+   // Effect to save state to IndexedDB on changes
+   useEffect(() => {
+-    if (typeof window !== 'undefined' && project?.ref) {
++    if (typeof window !== 'undefined' && project?.ref && loadedScope === scope) {
+       // Create a debounced version of saveAiState
+-      const debouncedSaveAiState = debounce(saveAiState, 500)
++      const debouncedSaveAiState = debounce((value: StoredAiAssistantState) => {
++        saveAiState(value).catch(() => toast.error('Unable to save assistant history'))
++      }, 500)
+ 
+       const unsubscribe = subscribe(state, () => {
+         const snap = snapshot(state)
+@@ -640,7 +666,7 @@ export const AiAssistantStateContextProvider = ({ children }: PropsWithChildren)
+       }
+     }
+     return undefined
+-  }, [state, project?.ref])
++  }, [state, project?.ref, loadedScope, scope])
+ 
+   return (
+     <AiAssistantStateContext.Provider value={state}>{children}</AiAssistantStateContext.Provider>
 diff --git a/apps/studio/state/storage-explorer.tsx b/apps/studio/state/storage-explorer.tsx
-index 1bb58b1..802c7e1 100644
+index 1bb58b10..802c7e10 100644
 --- a/apps/studio/state/storage-explorer.tsx
 +++ b/apps/studio/state/storage-explorer.tsx
 @@ -1175,6 +1175,7 @@ function createStorageExplorerState({
@@ -569,117 +972,111 @@ index 1bb58b1..802c7e1 100644
                uploadDataDuringCreation: uploadDataDuringCreation,
                removeFingerprintOnSuccess: true,
 @@ -1876,7 +1877,7 @@ export const StorageExplorerStateContextProvider = ({ children }: PropsWithChild
-
+ 
      if (!isPaused && hasDataReady && !storeAlreadyLoaded && isSuccessSettings) {
        const clientEndpoint = storageEndpoint ?? hostEndpoint ?? ''
 -      const resumableUploadUrl = `${clientEndpoint}/storage/v1/upload/resumable`
 +      const resumableUploadUrl = `${window.location.origin}/storage/v1/upload/resumable`
-
+ 
        setState(
          createStorageExplorerState({
-diff --git a/apps/studio/components/interfaces/Storage/StorageExplorer/useCopyUrl.tsx b/apps/studio/components/interfaces/Storage/StorageExplorer/useCopyUrl.tsx
-index 5581a9c..df196e1 100644
---- a/apps/studio/components/interfaces/Storage/StorageExplorer/useCopyUrl.tsx
-+++ b/apps/studio/components/interfaces/Storage/StorageExplorer/useCopyUrl.tsx
-@@ -23,16 +23,20 @@ export const useCopyUrl = () => {
-   const onCopyUrl = useCallback(
-     (filePath: string, expiresIn?: URL_EXPIRY_DURATION) => {
-       const formattedUrl = getFileUrl(filePath, expiresIn).then((url) => {
--        return isCustomDomainActive && hostEndpoint
--          ? url.replace(hostEndpoint, customEndpoint)
-+        const projectUrl = hostEndpoint
-+          ? url.replace(`${window.location.origin}/storage/v1/${projectRef}`, `${hostEndpoint}/storage/v1`)
-           : url
+diff --git a/apps/studio/components/ui/AIAssistantPanel/SelfHostedAssistantSettings.tsx b/apps/studio/components/ui/AIAssistantPanel/SelfHostedAssistantSettings.tsx
+new file mode 100644
+--- /dev/null
++++ b/apps/studio/components/ui/AIAssistantPanel/SelfHostedAssistantSettings.tsx
+@@ -0,0 +1,95 @@
++import { useQueryClient } from '@tanstack/react-query'
++import { Settings } from 'lucide-react'
++import { useEffect, useState } from 'react'
++import { Button, Dialog, DialogContent, DialogHeader, DialogTitle } from 'ui'
++import { toast } from 'sonner'
 +
-+        return isCustomDomainActive && hostEndpoint
-+          ? projectUrl.replace(hostEndpoint, customEndpoint)
-+          : projectUrl
-       })
-
-       return copyToClipboard(formattedUrl, () => {
-         toast.success(`Copied URL for ${filePath} to clipboard.`)
-       })
-     },
--    [customEndpoint, getFileUrl, hostEndpoint, isCustomDomainActive]
-+    [customEndpoint, getFileUrl, hostEndpoint, isCustomDomainActive, projectRef]
-   )
-
-   return { onCopyUrl }
-
-diff --git a/apps/studio/pages/api/platform/projects/[ref]/analytics/log-drains.ts b/apps/studio/pages/api/platform/projects/[ref]/analytics/log-drains.ts
---- a/apps/studio/pages/api/platform/projects/[ref]/analytics/log-drains.ts
-+++ b/apps/studio/pages/api/platform/projects/[ref]/analytics/log-drains.ts
-@@ -24,8 +24,7 @@
-   switch (method) {
-     case 'GET':
-       // list log drains
--      const url = new URL(baseUrl)
--      url.pathname = '/api/backends'
-+      const url = new URL('backends', baseUrl)
-       url.search = new URLSearchParams({
-         'metadata[type]': 'log-drain',
-       }).toString()
-@@ -55,8 +54,7 @@
-       return res.status(200).json(resp)
-     case 'POST':
-       // create the log drain
--      const postUrl = new URL(baseUrl)
--      postUrl.pathname = '/api/backends'
-+      const postUrl = new URL('backends', baseUrl)
-       const postResult = await fetch(postUrl, {
-         body: JSON.stringify({
-           ...req.body,
-@@ -73,8 +71,7 @@
-         },
-       }).then(async (r) => await r.json())
-
--      const sourcesGetUrl = new URL(baseUrl)
--      sourcesGetUrl.pathname = '/api/sources'
-+      const sourcesGetUrl = new URL('sources', baseUrl)
-       const sources = await fetch(sourcesGetUrl, {
-         method: 'GET',
-         headers: {
-@@ -101,8 +98,7 @@
-         .map((source: { name: string; id: number }) => {
-           return { backend_id: postResult.id, lql_string: `~".*?"`, source_id: source.id }
-         })
--      const rulesPostUrl = new URL(baseUrl)
--      rulesPostUrl.pathname = '/api/rules'
-+      const rulesPostUrl = new URL('rules', baseUrl)
-       await Promise.all(
-         params.map((param: any) =>
-           fetch(rulesPostUrl, {
-
-diff --git a/apps/studio/pages/api/platform/projects/[ref]/analytics/log-drains/[uuid].ts b/apps/studio/pages/api/platform/projects/[ref]/analytics/log-drains/[uuid].ts
---- a/apps/studio/pages/api/platform/projects/[ref]/analytics/log-drains/[uuid].ts
-+++ b/apps/studio/pages/api/platform/projects/[ref]/analytics/log-drains/[uuid].ts
-@@ -25,8 +25,7 @@
-   switch (method) {
-     case 'GET':
-       // get log drain
--      const url = new URL(baseUrl)
--      url.pathname = `/api/backends/${uuid}`
-+      const url = new URL(`backends/${uuid}`, baseUrl)
-       const result = await fetch(url, {
-         method: 'GET',
-         headers: {
-@@ -39,8 +38,7 @@
-       return res.status(200).json(result)
-     case 'PUT':
-       // create the log drain
--      const putUrl = new URL(baseUrl)
--      putUrl.pathname = `/api/backends/${uuid}`
-+      const putUrl = new URL(`backends/${uuid}`, baseUrl)
-       delete req.body['metadata']
-       const putResult = await fetch(putUrl, {
-         body: JSON.stringify(req.body),
-@@ -60,8 +58,7 @@
-
-     case 'DELETE':
-       // create the log drain
--      const deleteUrl = new URL(baseUrl)
--      deleteUrl.pathname = `/api/backends/${uuid}`
-+      const deleteUrl = new URL(`backends/${uuid}`, baseUrl)
-
-       await fetch(deleteUrl, {
-         headers: {
++import { fetchHandler } from '@/data/fetchers'
++import { useSelectedProjectQuery } from '@/hooks/misc/useSelectedProject'
++import { BASE_PATH } from '@/lib/constants'
++
++type SettingsState = {
++  hasKey: boolean
++  provider?: 'openai' | 'openrouter'
++  model?: string
++  permission?: 'none' | 'schema' | 'read' | 'write'
++  maxPermission: 'none' | 'write'
++}
++
++export function SelfHostedAssistantSettings() {
++  const { data: project } = useSelectedProjectQuery()
++  const queryClient = useQueryClient()
++  const [open, setOpen] = useState(false)
++  const [status, setStatus] = useState<SettingsState>()
++  const [provider, setProvider] = useState<'openai' | 'openrouter'>('openai')
++  const [model, setModel] = useState('')
++  const [permission, setPermission] = useState<'none' | 'schema' | 'read' | 'write'>('none')
++  const [apiKey, setApiKey] = useState('')
++  const [changingKey, setChangingKey] = useState(false)
++  const [saving, setSaving] = useState(false)
++
++  useEffect(() => {
++    setApiKey('')
++    setStatus(undefined)
++    setChangingKey(false)
++    if (!open || !project?.ref) return
++    const controller = new AbortController()
++    fetchHandler(`${BASE_PATH}/api/ai/settings`, { signal: controller.signal, cache: 'no-store' })
++      .then(async response => {
++        if (!response.ok) throw new Error('Unable to load assistant settings')
++        const data: SettingsState = await response.json()
++        if (controller.signal.aborted) return
++        setStatus(data)
++        setProvider(data.provider ?? 'openai')
++        setModel(data.model ?? '')
++        setPermission(data.permission ?? 'none')
++      })
++      .catch(() => { if (!controller.signal.aborted) toast.error('Unable to load assistant settings') })
++    return () => { controller.abort(); setApiKey('') }
++  }, [open, project?.ref])
++
++  const save = async () => {
++    if (!status || !project?.ref || window.location.protocol !== 'https:') return
++    setSaving(true)
++    try {
++      const response = await fetchHandler(`${BASE_PATH}/api/ai/settings`, {
++        method: 'PUT', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
++        body: JSON.stringify({ provider, model, permission, ...(apiKey ? { apiKey } : {}) }),
++      })
++      if (!response.ok) throw new Error('Unable to save assistant settings')
++      await queryClient.invalidateQueries({ queryKey: ['api-key'] })
++      setChangingKey(false)
++      setOpen(false)
++      toast.success('Assistant settings saved')
++    } catch { toast.error('Unable to save assistant settings. Check the provider, model and project permissions.') }
++    finally { setApiKey(''); setSaving(false) }
++  }
++
++  const field = 'w-full rounded-md border bg-surface-100 px-3 py-2 text-sm'
++  return <>
++    <Button variant="text" size="tiny" icon={<Settings size={16} />} onClick={() => setOpen(true)}>Assistant settings</Button>
++    <Dialog open={open} onOpenChange={value => { if (!saving) { setOpen(value); setApiKey('') } }}>
++      <DialogContent>
++        <DialogHeader><DialogTitle>Assistant settings for this project</DialogTitle></DialogHeader>
++        <div className="space-y-4 px-6 pb-6">
++          <p className="text-sm text-foreground-light">Your provider key is personal to this project. It is encrypted on the Studio server and is never returned to the browser.</p>
++          {!status ? <p>Loading settings…</p> : <>
++            <label className="block space-y-1"><span>Provider</span>
++              <select className={field} value={provider} disabled={saving} onChange={event => { setProvider(event.target.value as typeof provider); setChangingKey(true); setApiKey('') }}>
++                <option value="openai">OpenAI (Responses API)</option><option value="openrouter">OpenRouter (Chat API)</option>
++              </select></label>
++            <label className="block space-y-1"><span>Model</span><input className={field} value={model} disabled={saving} maxLength={200} autoComplete="off" placeholder="Exact provider model ID" onChange={event => setModel(event.target.value)} /></label>
++            {status.hasKey && !changingKey ? <div className="flex items-center justify-between"><span>Provider key configured</span><Button variant="default" disabled={saving} onClick={() => setChangingKey(true)}>Replace key</Button></div> :
++              <label className="block space-y-1"><span>{status.hasKey ? 'New provider key' : 'Provider key'}</span><input className={field} type="password" value={apiKey} autoComplete="new-password" spellCheck={false} disabled={saving} maxLength={1024} onChange={event => setApiKey(event.target.value)} /></label>}
++            <label className="block space-y-1"><span>Database access</span><select className={field} value={permission} disabled={saving} onChange={event => setPermission(event.target.value as typeof permission)}>
++              <option value="none">No database access</option>
++              {status.maxPermission === 'write' && <><option value="schema">Public schema only</option><option value="read">Read public table rows</option><option value="write">Read and execute approved [AI] functions</option></>}
++            </select></label>
++            <p className="text-sm text-foreground-light">Schema and row results are sent to your provider. Database tools require project administration. Function execution requires separate approval for each operation. No unrestricted SQL or external URLs are enabled.</p>
++            <Button block loading={saving} disabled={!model.trim() || ((changingKey || !status.hasKey) && !apiKey) || window.location.protocol !== 'https:'} onClick={save}>Save settings</Button>
++          </>}
++        </div>
++      </DialogContent>
++    </Dialog>
++  </>
++}

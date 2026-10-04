@@ -14,6 +14,12 @@ Projects are addressed by an independent 20-letter random reference: `https://<s
 
 > This is an unofficial project under active development.
 
+### Studio assistant
+
+In the assistant panel, open **Assistant settings** to configure your provider (OpenAI or OpenRouter), exact model ID and personal key for the current project. Once saved, the key is never returned to the browser; the interface shows **Provider key configured** and **Replace key**. Credentials and history are encrypted in local SQLite on the Studio node, with a separate setup-generated master key. No provider credentials belong in `.env`.
+
+Database tools require project administration. Choose no database access, public schema only, bounded public-table reads, or execution of explicitly tagged `[AI]` functions after individual approval. Read access respects PostgreSQL RLS. Requests use Studio HTTPS, verified internal TLS and the administrative gateway; external applications still connect through Traefik and cannot access this service. See [Studio assistant](docs/00-architecture.md#studio-assistant) for storage, permissions and backup boundaries.
+
 ---
 
 ## Table of Contents

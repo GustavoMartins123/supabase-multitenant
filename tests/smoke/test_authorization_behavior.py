@@ -265,6 +265,47 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn(response.status_code, (403, 404), response.text)
 
+    async def test_assistant_context_is_uuid_scoped_and_uses_current_role(self):
+        path = "/api/projects/abcdefghijklmnopqrst/assistant/context"
+        admin = await self.request("GET", path, actor=self.admin2)
+        self.assertEqual(admin.status_code, 200, admin.text)
+        self.assertEqual(admin.json(), {"project_id": str(self.project_a), "user_id": str(self.admin2), "role": "admin"})
+        member = await self.request("GET", path, actor=self.ex_member)
+        self.assertEqual(member.status_code, 200, member.text)
+        self.assertEqual(member.json()["role"], "member")
+        await self.pool.execute("UPDATE projects SET public_ref='bcdefghijklmnopqrstu', display_name='Renamed' WHERE id=$1", self.project_a)
+        old = await self.request("GET", path, actor=self.admin2)
+        new = await self.request("GET", path.replace("abcdefghijklmnopqrst", "bcdefghijklmnopqrstu"), actor=self.admin2)
+        self.assertEqual(old.status_code, 404)
+        self.assertEqual(new.json(), admin.json())
+
+    async def test_assistant_database_tools_reject_members_before_database_access(self):
+        from app.routers import assistant
+        with mock.patch.object(assistant, "_connect") as connection:
+            for action, method, body in (("schema", "GET", b""), ("functions", "GET", b""),
+                                         ("rows", "POST", b'{"table":"example","limit":5}'),
+                                         ("execute", "POST", b'{"function_name":"example","arguments":{}}')):
+                response = await self.request(method, f"/api/projects/abcdefghijklmnopqrst/assistant/{action}", actor=self.ex_member, body=body)
+                self.assertEqual(response.status_code, 403, response.text)
+            connection.assert_not_called()
+
+    async def test_assistant_revocation_and_directory_deactivation_are_immediate(self):
+        path = "/api/projects/abcdefghijklmnopqrst/assistant/context"
+        self.assertEqual((await self.request("GET", path, actor=self.admin2)).status_code, 200)
+        await self.pool.execute("DELETE FROM project_members WHERE user_id=$1", self.admin2)
+        self.assertEqual((await self.request("GET", path, actor=self.admin2)).status_code, 403)
+        next(user for user in self.directory_users if user["id"] == str(self.admin3))["is_active"] = False
+        self.assertEqual((await self.request("GET", path, actor=self.admin3)).status_code, 403)
+
+    async def test_assistant_rejects_unsigned_outsider_and_wrong_service(self):
+        from app.internal_hmac import build_internal_hmac_headers
+        path = "/api/projects/abcdefghijklmnopqrst/assistant/context"
+        self.assertEqual((await self.request("GET", path, headers={"X-User-Token": self.user_token(self.owner)})).status_code, 401)
+        self.assertEqual((await self.request("GET", path, actor=self.outsider)).status_code, 403)
+        headers = build_internal_hmac_headers(PROJECTS_API_SECRET, "GET", f"https://api.local{path}", b"", service="projects-api")
+        headers["X-User-Token"] = self.user_token(self.owner)
+        self.assertEqual((await self.request("GET", path, headers=headers)).status_code, 403)
+
     async def test_public_reference_does_not_grant_administrative_access(self):
         for suffix in ("status", "logs/nginx", "settings", "collaboration", "restore-points", "telemetry/users", "functions"):
             with self.subTest(endpoint=suffix):

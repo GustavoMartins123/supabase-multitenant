@@ -19,6 +19,10 @@ flowchart TB
     Authelia --> Sessions[Redis sessions - Studio node only]
     StudioGateway --> Selector[Flutter]
     StudioGateway --> Studio[Supabase Studio]
+    StudioGateway -->|signed context over HTTPS| Assistant[studio-assistant\nStudio node only]
+    Assistant --> AssistantStore[(Local encrypted SQLite)]
+    Assistant -->|HTTPS| AIProvider[OpenAI / OpenRouter]
+    Assistant -->|signed tools over HTTPS| StudioGateway
 
     StudioGateway -->|authenticated administrative transport| Traefik[Traefik]
     ExternalApp[External application] -->|public HTTPS| Traefik
@@ -117,6 +121,18 @@ https://<public-server>/<public_ref>/realtime/v1
 the public server's Traefik origin, including when Studio runs on another
 machine. Discovery does not route to the administrative API `:18000`; the
 dedicated service's `:18011` port is internal and not published on the host.
+
+## Studio assistant
+
+Assistant settings are personal to a user and project. The patched Studio interface accepts an OpenAI or OpenRouter key, an exact model ID, and a database-access level. After saving, the interface reports only that a key is configured and offers replacement; no endpoint returns that key to the browser. Browser requests use the authenticated Studio HTTPS origin, not the public application origin or the administrative API port.
+
+`studio-assistant` runs on the Studio node without a published port. OpenResty authorizes the current session and project, then signs the user UUID, project UUID, public reference, method, target, body hash, timestamp and nonce. Internal transport uses verified TLS; replayed or altered requests are rejected. Provider endpoints are fixed HTTPS origins: OpenAI uses Responses, while OpenRouter uses Chat Completions. No provider, model or protocol is substituted after a failure.
+
+The local `assistant-data` Docker volume stores SQLite in WAL mode. Provider credentials use random per-credential data keys wrapped by a separate AES-256-GCM master key; authenticated context binds ciphertext to its user, project, provider and key ID. Chat state is also encrypted and scoped to canonical UUIDs, so regenerating a public URL does not change its namespace. Setup creates `studio/secrets/assistant/MASTER_KEY` and `GATEWAY_KEY` as distinct local secrets, plus a dedicated TLS leaf. None are versioned. Back up the SQLite volume and master key separately; a missing or mismatched master key stops the service rather than replacing credentials.
+
+Access levels are `none`, `schema`, `read` and `write`. Only project/global administrators can enable database tools. Schema inspection and bounded ordinary-table reads use a dedicated `tenant_ai_reader_<tenant_uuid_without_hyphens>` PostgreSQL login, with public-table SELECT privileges, read-only transactions and no RLS bypass. Arbitrary SQL, views, foreign tables and external URLs are not tools. Write access adds only public functions explicitly tagged `[AI]`, with a separate, expiring, single-use approval bound to user, project, chat, call and arguments. These functions may change data and must be reviewed by the administrator; tagging is not a sandbox for their implementation.
+
+Each tool returns through the Studio gateway and Traefik to Projects API, which checks current identity and project administration again. The Node service handles the native AI SDK UI-message stream, cancellation, sanitized errors and no automatic retries; Lua does not parse provider SSE. External applications and publishable-key discovery do not use this assistant path.
 
 ## Project identity
 

@@ -66,4 +66,34 @@ BEGIN
     END LOOP;
 END
 $tenant_meta$;
+DO $assistant_reader$
+DECLARE
+    reader_role text := replace(current_setting('platform.meta_role'), 'tenant_meta_', 'tenant_ai_reader_');
+    reader_password text := encode(sha256(convert_to('assistant-reader-v1:' || current_setting('platform.meta_password'), 'UTF8')), 'hex');
+    parent_role text;
+BEGIN
+    IF reader_role !~ '^tenant_ai_reader_[0-9a-f]{32}$' THEN
+        RAISE EXCEPTION 'invalid assistant SQL identity';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname=reader_role) THEN
+        EXECUTE format('CREATE ROLE %I', reader_role);
+    END IF;
+    EXECUTE format('ALTER ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 4 PASSWORD %L', reader_role, reader_password);
+    FOR parent_role IN
+        SELECT parent.rolname FROM pg_auth_members m
+        JOIN pg_roles parent ON parent.oid=m.roleid
+        JOIN pg_roles member ON member.oid=m.member
+        WHERE member.rolname=reader_role
+    LOOP
+        EXECUTE format('REVOKE %I FROM %I', parent_role, reader_role);
+    END LOOP;
+    EXECUTE format('ALTER ROLE %I SET default_transaction_read_only=on', reader_role);
+    EXECUTE format('ALTER ROLE %I SET statement_timeout=%L', reader_role, '10s');
+    EXECUTE format('ALTER ROLE %I SET lock_timeout=%L', reader_role, '2s');
+    EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), reader_role);
+    EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', reader_role);
+    EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA public TO %I', reader_role);
+    EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT SELECT ON TABLES TO %I', current_setting('platform.meta_role'), reader_role);
+END
+$assistant_reader$;
 SELECT set_config('platform.meta_password', '', false);

@@ -14,6 +14,12 @@ A URL usa uma referência aleatória independente de 20 letras: `https://<servid
 
 > Este é um projeto não oficial e ainda está em desenvolvimento ativo.
 
+### Assistente do Studio
+
+No painel do assistente, abra **Assistant settings** para configurar o provedor (OpenAI ou OpenRouter), o ID exato do modelo e sua chave pessoal para o projeto atual. Depois de salva, a chave nunca volta ao navegador; a interface mostra **Provider key configured** e **Replace key**. Credenciais e histórico ficam cifrados no SQLite local do nó Studio, com chave mestra separada gerada pelo setup. Credenciais de provedor não pertencem ao `.env`.
+
+As ferramentas de banco exigem administração do projeto. Escolha sem acesso ao banco, somente schema público, leitura limitada de tabelas públicas ou execução de funções explicitamente marcadas `[AI]`, com aprovação individual. A leitura respeita RLS do PostgreSQL. As chamadas usam HTTPS do Studio, TLS interno verificado e o gateway administrativo; aplicações externas continuam acessando pelo Traefik e não têm acesso a esse serviço. Veja [Studio assistant](docs/00-architecture.md#studio-assistant) para armazenamento, permissões e backups.
+
 ---
 
 ## Sumário

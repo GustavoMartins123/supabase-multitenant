@@ -1,0 +1,8 @@
+{
+  "name": "studio-assistant",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node server.mjs", "test": "node --test test/*.test.mjs" },
+  "dependencies": { "@ai-sdk/openai": "3.0.41", "ai": "6.0.174", "zod": "3.25.76" },
+  "engines": { "node": ">=22.13.0" }
+}

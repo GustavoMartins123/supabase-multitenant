@@ -4,7 +4,7 @@ import os
 import urllib.parse
 
 from app.validation import validate_project_id
-from app.tenant_meta_identity import tenant_meta_credentials
+from app.tenant_meta_identity import tenant_meta_credentials, tenant_assistant_reader_credentials
 
 
 def _format_host(hostname: str) -> str:
@@ -60,3 +60,11 @@ def get_project_reader_connection_string(project_ref: str) -> str:
             fragment="",
         )
     )
+
+
+def get_project_assistant_reader_connection_string(project_ref: str, tenant_uuid: object) -> str:
+    meta_uri = get_project_meta_connection_string(project_ref, tenant_uuid)
+    master_uri = urllib.parse.urlparse(os.environ["META_ADMIN_DSN"])
+    role, password = tenant_assistant_reader_credentials(tenant_uuid, master_uri.password or "")
+    uri = urllib.parse.urlparse(meta_uri)
+    return urllib.parse.urlunparse(uri._replace(netloc=f"{role}:{password}@{_format_host(uri.hostname)}:{uri.port}"))

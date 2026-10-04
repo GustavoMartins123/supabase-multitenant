@@ -164,6 +164,11 @@ def ensure_internal_service_hmac_secrets(
 
     server_content = server_env.read_text(encoding="utf-8")
     studio_content = studio_env.read_text(encoding="utf-8")
+    retired_assistant_keys = {"OPENAI_API_KEY", "OPENAI_API_BASE_URL", "OPENAI_MODEL", "POSTGRES_USER", "POSTGRES_NGINX_PASSWORD", "POSTGRES_DB", "DATABASE_URL"}
+    studio_content = "\n".join(
+        line for line in studio_content.splitlines()
+        if line.split("=", 1)[0].strip() not in retired_assistant_keys
+    ) + "\n"
     resolved: dict[str, str] = {}
 
     for key in INTERNAL_SERVICE_HMAC_KEYS:
@@ -232,8 +237,8 @@ def ensure_secret_files(root: Path, *, rotate: bool) -> tuple[Path, ...]:
     return tuple(written)
 
 
-def certificate_sans(host: str, dns_host: str | None = None) -> str:
-    entries = ["DNS:authelia", "DNS:nginx", "DNS:localhost", "IP:127.0.0.1"]
+def certificate_sans(host: str, dns_host: str | None = None, *, only_host: bool = False) -> str:
+    entries = [] if only_host else ["DNS:authelia", "DNS:nginx", "DNS:localhost", "IP:127.0.0.1"]
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
@@ -296,6 +301,7 @@ def issue_server_certificate(
     ca_certificate: Path,
     ca_key: Path,
     dns_host: str | None = None,
+    only_host: bool = False,
 ) -> None:
     """Emite a folha servida por nginx e Authelia, assinada pela CA.
 
@@ -317,7 +323,7 @@ def issue_server_certificate(
                     "basicConstraints=critical,CA:FALSE",
                     "keyUsage=critical,digitalSignature,keyEncipherment",
                     "extendedKeyUsage=serverAuth",
-                    f"subjectAltName={certificate_sans(host, dns_host)}",
+                    f"subjectAltName={certificate_sans(host, dns_host, only_host=only_host)}",
                     "",
                 )
             ),
@@ -440,6 +446,19 @@ def configure_runtime(
         replace=force,
         ca_key=secrets_root / CA_KEY_NAME,
         rotate_ca=rotate_ca,
+    )
+    assistant_root = secrets_root.parent / "assistant"
+    assistant_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    for name in ("MASTER_KEY", "GATEWAY_KEY"):
+        path = assistant_root / name
+        if path.exists():
+            if not re.fullmatch(r"[0-9a-f]{64}", path.read_text(encoding="utf-8").strip()):
+                raise RuntimeConfigError(f"secret do assistente invalido: {path}")
+        else:
+            atomic_write(path, secrets.token_hex(32) + "\n", mode=0o600, replace=False)
+    issue_server_certificate(
+        assistant_root / "tls", host="studio-assistant",
+        ca_certificate=ssl_root / "ca.pem", ca_key=secrets_root / CA_KEY_NAME, only_host=True,
     )
     if server_host is not None:
         _, validated_host = parse_origin(f"https://{server_host}")

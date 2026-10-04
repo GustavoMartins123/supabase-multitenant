@@ -96,7 +96,6 @@ class F03SetupReRunGuard(unittest.TestCase):
             ("JWT_SECRET", "generate_jwt_secret"),
             ("PROJECT_DELETE_PASSWORD", "generate_jwt_secret"),
             ("PLATFORM_READER_DB_PASSWORD", "generate_key_authorizer_password"),
-            ("POSTGRES_NGINX_PASSWORD", "generate_postgres_password"),
             ("NGINX_HMAC_SECRET", "generate_hmac_secret"),
             ("HOST_AGENT_HMAC_SECRET", "generate_hmac_secret"),
         ):

@@ -16,6 +16,10 @@ O contrato do patch é intencionalmente estrito:
 - o upload resumable (tus) do Storage Explorer aponta para
   `/storage/v1/upload/resumable` na origem do Studio e envia
   `X-Studio-Project-Ref`, de modo que a service key permaneça no gateway.
+- o assistente possui configuração de provedor, modelo e chave pessoal por projeto;
+- a interface nunca recebe uma chave de provedor salva, somente o estado configurado;
+- histórico e configuração usam o serviço `studio-assistant`, com identidade canônica e TLS;
+- a execução de funções `[AI]` apresenta os argumentos e exige aprovação individual.
 
 O Dockerfile verifica o patch contra o SHA fixado antes de aplicá-lo. Se o
 upstream mudar, o build falha em vez de produzir uma imagem parcialmente
@@ -24,7 +28,7 @@ compatível.
 ## Distribuição
 
 A instalação usa a imagem pronta do GHCR. `start.sh` baixa as imagens antes
-de iniciar os serviços; somente o gateway OpenResty é construído localmente.
+de iniciar os serviços; o gateway OpenResty e o serviço do assistente são construídos localmente.
 Falha no download interrompe a inicialização, sem usar uma imagem local como
 substituta nem construir o Studio.
 

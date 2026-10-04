@@ -58,6 +58,12 @@ jobs:
           push: false
           tags: supabase-multitenant-studio-ci:local
 
+      - name: Validate assistant behavior
+        shell: bash
+        run: |
+          docker build -t studio-assistant-ci:local studio/assistant
+          docker run --rm -v "$PWD/studio/assistant/test:/app/test:ro" studio-assistant-ci:local npm test
+
       - name: Validate OpenResty configuration
         shell: bash
         run: |
@@ -84,6 +90,7 @@ jobs:
           docker run --rm \
             --entrypoint /usr/local/openresty/bin/openresty \
             --add-host studio:127.0.0.1 \
+            --add-host studio-assistant:127.0.0.1 \
             -e SERVER_DOMAIN=https://nginx \
             -e BACKEND_PROTO=https \
             -e SERVICE_KEY_VERIFY_TLS=true \
@@ -119,9 +126,9 @@ jobs:
           - name: geoip
             context: servidor/traefik/geoip
             file: servidor/traefik/geoip/Dockerfile
-          - name: studio-postgres
-            context: studio/postgres
-            file: studio/postgres/Dockerfile
+          - name: studio-assistant
+            context: studio/assistant
+            file: studio/assistant/Dockerfile
           - name: patched-studio
             context: studio/studio-slug
             file: studio/studio-slug/Dockerfile

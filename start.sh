@@ -43,8 +43,8 @@ start_studio() {
     fi
     "${STUDIO_COMPOSE[@]}" pull --ignore-buildable --policy always \
         || die "falha ao baixar as imagens do Studio; publique a versao configurada no GHCR e verifique o acesso ao registry."
-    "${STUDIO_COMPOSE[@]}" build nginx \
-        || die "falha ao construir o gateway OpenResty."
+    "${STUDIO_COMPOSE[@]}" build nginx studio-assistant \
+        || die "falha ao construir o gateway OpenResty e o assistente."
     "${STUDIO_COMPOSE[@]}" up --no-build --pull never -d \
         || die "falha ao iniciar o Studio com as imagens obtidas."
     echo "Studio iniciado."

@@ -18,3 +18,9 @@ def tenant_meta_credentials(tenant_uuid: object, master_password: str) -> tuple[
         master_password.encode(), f"tenant-meta-v1:{identity}".encode(), hashlib.sha256
     ).hexdigest()
     return f"tenant_meta_{identity.hex}", password
+
+
+def tenant_assistant_reader_credentials(tenant_uuid: object, master_password: str) -> tuple[str, str]:
+    meta_role, meta_password = tenant_meta_credentials(tenant_uuid, master_password)
+    password = hashlib.sha256(f"assistant-reader-v1:{meta_password}".encode()).hexdigest()
+    return meta_role.replace("tenant_meta_", "tenant_ai_reader_", 1), password
