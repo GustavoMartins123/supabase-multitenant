@@ -490,9 +490,9 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
     String? serverDomain,
   ) {
     final favProjects =
-        projects.where((p) => favorites.contains(p['id'])).toList();
+        projects.where((p) => favorites.contains(p['project_uuid'])).toList();
     final otherProjects =
-        projects.where((p) => !favorites.contains(p['id'])).toList();
+        projects.where((p) => !favorites.contains(p['project_uuid'])).toList();
 
     return Padding(
       padding: const EdgeInsets.all(24),
@@ -598,13 +598,16 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
           ? () {}
           : () => _openProject(project['public_ref']),
       onDuplicate: () => _showDuplicateDialog(project['public_ref']),
-      onToggleFavorite: () =>
-          ref.read(favoritesProvider.notifier).toggleFavorite(project['id']),
+      onToggleFavorite: () => ref
+          .read(favoritesProvider.notifier)
+          .toggleFavorite(project['project_uuid']),
       onDeleted: () {
         ref
             .read(projectListProvider.notifier)
             .removeProjectLocal(project['public_ref']);
-        ref.read(favoritesProvider.notifier).removeFavorite(project['id']);
+        ref
+            .read(favoritesProvider.notifier)
+            .removeFavorite(project['project_uuid']);
       },
     );
   }

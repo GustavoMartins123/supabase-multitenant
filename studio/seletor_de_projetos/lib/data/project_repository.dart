@@ -132,12 +132,12 @@ class ProjectRepository {
         );
       }
       final project = Map<String, dynamic>.from(item);
-      final id = project['id'];
+      final projectUuid = project['project_uuid'];
       final publicRef = project['public_ref'];
       final displayName = project['display_name'];
-      if (id is! String ||
+      if (projectUuid is! String ||
           !RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
-              .hasMatch(id) ||
+              .hasMatch(projectUuid) ||
           publicRef is! String ||
           !RegExp(r'^[a-z]{20}$').hasMatch(publicRef) ||
           displayName is! String ||

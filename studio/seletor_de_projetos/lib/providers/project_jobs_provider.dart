@@ -237,8 +237,8 @@ List<Map<String, dynamic>> mergeProjectsWithJobs({
   final result = projects.map(Map<String, dynamic>.from).toList();
   final indexes = <String, int>{};
   for (var i = 0; i < result.length; i++) {
-    final name = result[i]['id'] as String?;
-    if (name != null) indexes[name] = i;
+    final projectUuid = result[i]['project_uuid'] as String;
+    indexes[projectUuid] = i;
   }
 
   for (final job in jobs.where((job) => job.isInFlight)) {
@@ -267,7 +267,7 @@ List<Map<String, dynamic>> mergeProjectsWithJobs({
     result.add({
       'name': project,
       'display_name': project,
-      'id': job.projectUuid!,
+      'project_uuid': job.projectUuid!,
       'public_ref': job.publicRef!,
       'opaque_api_keys_status': 'provisioning',
       'opaque_api_key_slot_count': 0,

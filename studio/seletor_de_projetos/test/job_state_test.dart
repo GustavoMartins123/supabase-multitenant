@@ -205,7 +205,7 @@ void main() {
         projects: const [
           {
             'name': 'compartilhado',
-            'id': 'project-uuid',
+            'project_uuid': 'project-uuid',
             'public_ref': 'aaaaaaaaaaaaaaaaaaaa'
           },
         ],
