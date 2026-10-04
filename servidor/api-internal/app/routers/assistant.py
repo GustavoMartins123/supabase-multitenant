@@ -3,12 +3,14 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import asyncpg
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.control_plane_service import audit_studio_action
 from app.assistant_sql_execution import ExecuteSqlBody, execute_assistant_sql
+from app.assistant_sql_errors import assistant_sql_failure
 from app.assistant_security import SecurityBody, inspect_table_security
 from app.database import get_pool
 from app.dependencies import (
@@ -163,5 +165,7 @@ async def assistant_sql(ref: str, body: ExecuteSqlBody, request: Request, pool=D
         return result
     except HTTPException:
         raise
+    except asyncpg.PostgresError as exc:
+        raise assistant_sql_failure(exc) from exc
     except Exception as exc:
-        raise HTTPException(502, "Assistant SQL failed; the transaction was rolled back") from exc
+        raise HTTPException(502, "Assistant SQL outcome could not be confirmed. Inspect database state before continuing. No retry was attempted.") from exc

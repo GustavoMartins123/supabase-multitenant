@@ -23,7 +23,11 @@ export function gateway(secret, ca) {
         response.on('data', chunk => { size += chunk.length; if (size > 1_000_000) response.destroy(new Error('Assistant tool response exceeds limit')); else chunks.push(chunk) })
         response.on('error', () => reject(new Error('Assistant tool response interrupted')))
         response.on('end', () => {
-          if (response.statusCode !== 200) return reject(new AssistantToolError(response.statusCode))
+          if (response.statusCode !== 200) {
+            let detail
+            try { detail = JSON.parse(Buffer.concat(chunks).toString('utf8')).detail } catch {}
+            return reject(new AssistantToolError(response.statusCode, detail))
+          }
           try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))) } catch { reject(new Error('Invalid assistant tool response')) }
         })
       })

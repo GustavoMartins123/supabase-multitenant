@@ -1,11 +1,12 @@
 import { createOpenAI } from '@ai-sdk/openai'
-import { convertToModelMessages, generateText, safeValidateUIMessages, stepCountIs, streamText, tool } from 'ai'
+import { convertToModelMessages, createUIMessageStream, generateText, pipeUIMessageStreamToResponse, safeValidateUIMessages, stepCountIs, streamText, tool } from 'ai'
 import { z } from 'zod'
 import { createHash } from 'node:crypto'
 import { authenticate } from './auth.mjs'
 import { levels, settingsSchema } from './store.mjs'
 import { assistantPrompt } from './prompts.mjs'
 import { assistantErrorMessage } from './errors.mjs'
+import { boundedAssistantStream } from './stream.mjs'
 
 const chatSchema = z.object({ messages: z.array(z.any()).min(1).max(200), chatId: z.string().uuid(), projectRef: z.string() })
 const savedChat = z.object({ id: z.string().uuid(), name: z.string().max(200), messages: z.array(z.any()).max(200), createdAt: z.string(), updatedAt: z.string() })
@@ -75,12 +76,14 @@ async function readBody(req) {
   return Buffer.concat(chunks)
 }
 
-export function createHandler({ store, secret, call, modelFactory = providerModel }) {
+export function createHandler({ store, secret, call, modelFactory = providerModel, maxSteps = 20, requestTimeoutMs = 120_000 }) {
+  if (!Number.isInteger(maxSteps) || maxSteps < 2 || maxSteps > 20
+    || !Number.isInteger(requestTimeoutMs) || requestTimeoutMs < 1 || requestTimeoutMs > 120_000) throw new Error('Invalid assistant request limits')
   const active = new Set()
   return async (req, res) => {
     if (req.url === '/healthz' && req.method === 'GET') return send(res, 200, { status: 'ok' })
     let phase = 'authentication'
-    let scope, activeKey, timer
+    let scope, activeKey, timer, deadlineExceeded = false
     const abort = new AbortController()
     req.on('aborted', () => abort.abort())
     res.on('close', () => { if (!res.writableFinished) abort.abort() })
@@ -119,7 +122,7 @@ export function createHandler({ store, secret, call, modelFactory = providerMode
       if (active.has(candidateKey) || active.size >= 16) return send(res, 429, { message: 'Assistant already running; stop it before starting another request' })
       activeKey = candidateKey
       active.add(activeKey)
-      timer = setTimeout(() => abort.abort(), 120_000)
+      timer = setTimeout(() => { deadlineExceeded = true; abort.abort() }, requestTimeoutMs)
       const model = modelFactory(config)
       config.apiKey = undefined
       if (req.url === '/api/ai/code/complete') {
@@ -144,21 +147,36 @@ export function createHandler({ store, secret, call, modelFactory = providerMode
       phase = 'context'
       const context = await call(scope, 'context', undefined, abort.signal)
       if (context.project_id !== scope.projectId || context.user_id !== scope.userId || (config.permission !== 'none' && context.role !== 'admin')) throw new Error('Assistant authorization changed')
-      const tools = makeTools(scope, config, call, store, data.chatId, messages, abort.signal)
+      let summaryStepReached = false
+      const boundedCall = (...args) => {
+        if (summaryStepReached) throw new Error('Assistant operation-step budget reached; no database operation was authorized')
+        return call(...args)
+      }
+      const tools = makeTools(scope, config, boundedCall, store, data.chatId, messages, abort.signal)
+      const system = assistantPrompt(config.permission)
       phase = 'provider'
       const result = streamText({ model, tools, messages: await convertToModelMessages(messages, { tools }), maxRetries: 0,
         onError: () => undefined,
-        abortSignal: abort.signal, stopWhen: stepCountIs(5), maxOutputTokens: 4096,
-        system: assistantPrompt(config.permission) })
+        abortSignal: abort.signal, stopWhen: stepCountIs(maxSteps), maxOutputTokens: 4096,
+        prepareStep: ({ stepNumber }) => {
+          if (stepNumber < maxSteps - 1) return
+          summaryStepReached = true
+          return { activeTools: [], toolChoice: 'none', system: `${system}\nThis is the final operation-budget step. Do not request tools or execute anything. Summarize only verified results, failures and pending work; explain that further operations require a new user request.` }
+        },
+        system })
       res.setHeader('Cache-Control', 'no-store')
       await new Promise(resolve => {
         res.once('finish', resolve)
         res.once('close', resolve)
-        result.pipeUIMessageStreamToResponse(res, { originalMessages: messages,
+        const stream = createUIMessageStream({ originalMessages: messages,
           onError: assistantErrorMessage,
+          execute: ({ writer }) => writer.merge(boundedAssistantStream(result.toUIMessageStream({ onError: assistantErrorMessage }), {
+            deadlineExceeded: () => deadlineExceeded, summaryStepReached: () => summaryStepReached,
+          })),
           onFinish: ({ responseMessage, isAborted }) => {
             if (!isAborted) store.rememberApprovals(scope, data.chatId, responseMessage)
           } })
+        pipeUIMessageStreamToResponse({ response: res, stream })
       })
     } catch (error) {
       if (!res.headersSent) send(res, phase === 'authentication' ? 401 : phase === 'validation' ? 400 : 502,

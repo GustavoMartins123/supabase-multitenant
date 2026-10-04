@@ -31,7 +31,8 @@ test('full SQL tool executes a CREATE INDEX directly without an approval dialog'
 test('tool errors do not mislabel an unsupported operation as destructive', () => {
   assert.match(assistantErrorMessage(new AssistantToolError(400)), /unsupported/)
   assert.equal(assistantErrorMessage(new AssistantToolError(400)).includes('destructive'), false)
-  assert.match(assistantErrorMessage(new AssistantToolError(409)), /explicit destructive approval/)
+  assert.match(assistantErrorMessage(new AssistantToolError(409, {code:'sql_approval_required'})), /explicit destructive approval/)
+  assert.equal(assistantErrorMessage(new AssistantToolError(409)).includes('destructive'), false)
 })
 
 test('security inspection is available to schema access without SQL execution', async t => {
@@ -61,11 +62,11 @@ test('stale ordinary SQL approval is not silently replayed as direct execution',
   assert.equal(model.doStreamCalls.length,0)
 })
 
-async function harness(t, model) {
+async function harness(t, model, options = {}) {
   const store = new AssistantStore(':memory:', 'a'.repeat(64))
   const calls = []
-  const call = async (scope, action) => { calls.push(action); if (action === 'context') return { project_id:scope.projectId, user_id:scope.userId, role:scope.role }; return [] }
-  const server = createServer(createHandler({ store, secret, call, modelFactory: () => model }))
+  const call = async (scope, action) => { calls.push(action); if (action === 'context') return { project_id:scope.projectId, user_id:scope.userId, role:scope.role }; if (options.toolError) throw options.toolError; return [] }
+  const server = createServer(createHandler({ store, secret, call, modelFactory: () => model, ...options }))
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close() })
   const request = async (path, method = 'GET', payload, scope = actor, signed = true) => {
@@ -105,6 +106,97 @@ test('AI SDK delivers native UI SSE and finishes without prematurely cancelling 
   assert.match(output, /Synthetic /)
   assert.match(output, /\[DONE\]/)
   assert.equal(model.doStreamCalls.length,1)
+})
+
+test('SQL type errors are sanitized, delivered to the model and followed by a conclusion', async t => {
+  let turn = 0
+  const model = new MockLanguageModelV3({doStream:async options => {
+    if (++turn === 2) assert.match(JSON.stringify(options.prompt), /SQLSTATE 42883/)
+    return {stream:simulateReadableStream({chunks:turn === 1
+      ? [{type:'stream-start',warnings:[]},{type:'tool-call',toolCallId:'invalid-policy',toolName:'execute_sql',input:JSON.stringify({sql:'CREATE POLICY own ON public.orders TO authenticated USING(cliente_id=auth.uid())',label:'Policy'})},{...finish,finishReason:{unified:'tool-calls',raw:'tool_calls'}}]
+      : textChunks()})}
+  }})
+  const {store,request,calls} = await harness(t,model,{toolError:new AssistantToolError(422,{code:'sql_operand_types',sqlstate:'42883',message:'synthetic-secret-do-not-expose'})})
+  store.save(actor,{provider:'openai',model:'explicit-model',permission:'full',apiKey:'synthetic-provider-key-only'})
+  const response = await request('/api/ai/sql/generate-v4','POST',{projectRef:actor.ref,chatId:randomUUID(),messages:[{id:randomUUID(),role:'user',parts:[{type:'text',text:'Create the policy'}]}]})
+  const output = await response.text()
+  assert.match(output,/tool-output-error/)
+  assert.match(output,/SQLSTATE 42883/)
+  assert.equal(output.includes('"type":"error"'),false)
+  assert.match(output,/Synthetic /)
+  assert.match(output,/\[DONE\]/)
+  assert.equal(output.includes('synthetic-secret-do-not-expose'),false)
+  assert.equal(calls.filter(action=>action==='sql').length,1)
+  assert.equal(model.doStreamCalls.length,2)
+})
+
+test('multiple tools can exceed five steps and finish with a reserved summary step', async t => {
+  let turn = 0
+  const model = new MockLanguageModelV3({doStream:async options => {
+    ++turn
+    if (turn === 7) { assert.deepEqual(options.tools,[]); assert.deepEqual(options.toolChoice,{type:'none'}) }
+    return {stream:simulateReadableStream({chunks:turn < 7
+      ? [{type:'stream-start',warnings:[]},{type:'tool-call',toolCallId:`schema-${turn}`,toolName:'inspect_schema',input:'{}'},{...finish,finishReason:{unified:'tool-calls',raw:'tool_calls'}}]
+      : textChunks()})}
+  }})
+  const {store,request,calls} = await harness(t,model,{maxSteps:7})
+  store.save(actor,{provider:'openai',model:'explicit-model',permission:'schema',apiKey:'synthetic-provider-key-only'})
+  const output = await (await request('/api/ai/sql/generate-v4','POST',{projectRef:actor.ref,chatId:randomUUID(),messages:[{id:randomUUID(),role:'user',parts:[{type:'text',text:'Inspect'}]}]})).text()
+  assert.equal(calls.filter(action=>action==='schema').length,6)
+  assert.match(output,/Synthetic /)
+  assert.match(output,/operation-step budget reached/)
+  assert.equal(output.includes('"type":"error"'),false)
+  assert.match(output,/\[DONE\]/)
+  assert.equal(model.doStreamCalls.length,7)
+})
+
+test('a provider cannot execute another tool in the summary-only step', async t => {
+  let turn=0
+  const model=new MockLanguageModelV3({doStream:async()=>({stream:simulateReadableStream({chunks:[
+    {type:'stream-start',warnings:[]},{type:'tool-call',toolCallId:`ignored-choice-${++turn}`,toolName:'inspect_schema',input:'{}'},
+    {...finish,finishReason:{unified:'tool-calls',raw:'tool_calls'}},
+  ]})})})
+  const {store,request,calls}=await harness(t,model,{maxSteps:2})
+  store.save(actor,{provider:'openai',model:'explicit-model',permission:'schema',apiKey:'synthetic-provider-key-only'})
+  const output=await (await request('/api/ai/sql/generate-v4','POST',{projectRef:actor.ref,chatId:randomUUID(),messages:[{id:randomUUID(),role:'user',parts:[{type:'text',text:'Inspect'}]}]})).text()
+  assert.equal(calls.filter(action=>action==='schema').length,1)
+  assert.match(output,/operation-step budget reached/)
+  assert.match(output,/\[DONE\]/)
+  assert.equal(model.doStreamCalls.length,2)
+})
+
+test('provider length stop is explicit in the native stream', async t => {
+  const chunks=textChunks(); chunks[chunks.length-1]={...finish,finishReason:{unified:'length',raw:'length'}}
+  const model=new MockLanguageModelV3({doStream:{stream:simulateReadableStream({chunks})}})
+  const {store,request}=await harness(t,model)
+  store.save(actor,{provider:'openai',model:'explicit-model',permission:'none',apiKey:'synthetic-provider-key-only'})
+  const output=await (await request('/api/ai/sql/generate-v4','POST',{projectRef:actor.ref,chatId:randomUUID(),messages:[{id:randomUUID(),role:'user',parts:[{type:'text',text:'Explain'}]}]})).text()
+  assert.match(output,/Provider output token limit reached/)
+  assert.equal(output.includes('"type":"error"'),false)
+  assert.match(output,/\[DONE\]/)
+  assert.equal(model.doStreamCalls.length,1)
+})
+
+test('request deadline produces an explicit incomplete response without retries', async t => {
+  const model=new MockLanguageModelV3({doStream:{stream:simulateReadableStream({chunks:textChunks(),chunkDelayInMs:200})}})
+  const {store,request}=await harness(t,model,{requestTimeoutMs:50})
+  store.save(actor,{provider:'openai',model:'explicit-model',permission:'none',apiKey:'synthetic-provider-key-only'})
+  const output=await (await request('/api/ai/sql/generate-v4','POST',{projectRef:actor.ref,chatId:randomUUID(),messages:[{id:randomUUID(),role:'user',parts:[{type:'text',text:'Explain'}]}]})).text()
+  assert.match(output,/request deadline reached/)
+  assert.match(output,/in-flight operation may have completed/)
+  assert.equal(output.includes('"type":"error"'),false)
+  assert.match(output,/\[DONE\]/)
+  assert.equal(model.doStreamCalls.length,1)
+})
+
+test('SQL diagnostics require matching code, status and SQLSTATE and never forward server text',()=>{
+  const detail={code:'sql_operand_types',sqlstate:'42883',message:'synthetic-secret',hint:'synthetic-secret',query:'synthetic-secret'}
+  assert.match(new AssistantToolError(422,detail).message,/SQLSTATE 42883/)
+  for(const error of [new AssistantToolError(422,detail),new AssistantToolError(409,detail),new AssistantToolError(422,{...detail,sqlstate:'private'}),new AssistantToolError(422,{...detail,code:'private'})]) {
+    assert.equal(error.message.includes('synthetic-secret'),false)
+    assert.equal(error.message.includes('private'),false)
+  }
+  assert.equal(new AssistantToolError(409,{code:'sql_object_exists',sqlstate:'42710'}).message.includes('destructive approval'),false)
 })
 
 test('provider failure is sanitized and is not retried', async t => {

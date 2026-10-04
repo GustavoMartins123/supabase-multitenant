@@ -47,7 +47,7 @@ async def execute_assistant_sql(connection, body: ExecuteSqlBody):
         raise HTTPException(400, str(exc)) from exc
     explicit_deletion = body.execution.tool == "execute_destructive_sql"
     if plan.destructive and not explicit_deletion:
-        raise HTTPException(409, "Explicit destructive approval is required")
+        raise HTTPException(409, {"code": "sql_approval_required", "message": "Explicit destructive or security-change approval is required. No operation was executed."})
     async with connection.transaction():
         await connection.execute("SET LOCAL search_path = pg_catalog; SET LOCAL statement_timeout = '10s'; SET LOCAL lock_timeout = '2s'")
         await verify_identity_functions(connection, plan.identity_functions)
@@ -103,7 +103,7 @@ async def execute_assistant_sql(connection, body: ExecuteSqlBody):
                 checks = await connection.fetch("SELECT pg_get_expr(conbin, conrelid) AS expression FROM pg_constraint WHERE conrelid=$1 AND contype='c'", relation["oid"])
                 indirect = indirect or any(default_has_side_effects(row["expression"]) for row in checks)
         if indirect and not explicit_deletion:
-            raise HTTPException(409, "Table side effects require explicit destructive approval")
+            raise HTTPException(409, {"code": "sql_approval_required", "message": "Table side effects require explicit destructive approval. No operation was executed."})
         prepared = await connection.prepare(body.sql)
         if prepared.get_attributes():
             cursor = await prepared.cursor()

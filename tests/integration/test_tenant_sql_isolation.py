@@ -215,6 +215,20 @@ class TenantSqlIsolationTest(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException):
                 await execute_assistant_sql(self.tenant, self.sql_execution(sql, destructive=True))
 
+    async def test_invalid_numeric_ownership_policy_has_safe_diagnostics_and_rolls_back(self):
+        from app.assistant_sql_execution import execute_assistant_sql
+        from app.assistant_sql_errors import assistant_sql_failure
+        await self.rls_fixture()
+        await self.tenant.execute("CREATE TABLE public.orders(cliente_id bigint); ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY")
+        with self.assertRaises(self.asyncpg.UndefinedFunctionError) as failure:
+            await execute_assistant_sql(self.tenant, self.sql_execution("CREATE POLICY own ON public.orders TO authenticated USING(cliente_id=auth.uid())"))
+        error = assistant_sql_failure(failure.exception)
+        self.assertEqual(error.status_code, 422)
+        self.assertEqual(error.detail["sqlstate"], "42883")
+        self.assertEqual(await self.tenant.fetchval("SELECT count(*) FROM pg_policies WHERE tablename='orders'"), 0)
+        self.assertTrue(await self.tenant.fetchval("SELECT relrowsecurity FROM pg_class WHERE oid='public.orders'::regclass"))
+        self.assertEqual(await self.tenant.fetchval("SELECT 1"), 1)
+
     async def test_real_tenant_pools_reuse_reset_and_bound_database_sessions(self):
         import asyncio
         from app.tenant_pools import TenantPoolManager, TenantPoolUnavailable
