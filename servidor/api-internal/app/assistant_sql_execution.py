@@ -9,18 +9,24 @@ from uuid import UUID
 
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.assistant_sql import SqlPolicyError, default_has_side_effects, inspect_sql
 
 
-class SqlApproval(BaseModel):
+class SqlExecution(BaseModel):
     model_config = ConfigDict(extra="forbid")
     chat_id: UUID
     call_id: str = Field(min_length=1, max_length=200)
-    approval_id: str = Field(min_length=1, max_length=200)
+    approval_id: str | None = Field(default=None, min_length=1, max_length=200)
     sql_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     tool: Literal["execute_sql", "execute_destructive_sql"]
+
+    @model_validator(mode="after")
+    def validate_approval(self):
+        if (self.tool == "execute_destructive_sql") != (self.approval_id is not None):
+            raise ValueError("Only destructive SQL requires an explicit approval identifier")
+        return self
 
 
 class ExecuteSqlBody(BaseModel):
@@ -28,22 +34,23 @@ class ExecuteSqlBody(BaseModel):
     sql: str = Field(min_length=1, max_length=20000)
     label: str = Field(min_length=1, max_length=100)
     permission: Literal["full"]
-    approval: SqlApproval
+    execution: SqlExecution
 
 
-async def execute_approved_sql(connection, body: ExecuteSqlBody):
-    if not hmac.compare_digest(hashlib.sha256(body.sql.encode()).hexdigest(), body.approval.sql_hash):
-        raise HTTPException(403, "SQL does not match its approval")
+async def execute_assistant_sql(connection, body: ExecuteSqlBody):
+    if not hmac.compare_digest(hashlib.sha256(body.sql.encode()).hexdigest(), body.execution.sql_hash):
+        raise HTTPException(403, "SQL does not match its execution authority")
     try:
         plan = inspect_sql(body.sql)
     except SqlPolicyError as exc:
         raise HTTPException(400, str(exc)) from exc
-    explicit_deletion = body.approval.tool == "execute_destructive_sql"
+    explicit_deletion = body.execution.tool == "execute_destructive_sql"
     if plan.destructive and not explicit_deletion:
         raise HTTPException(409, "Explicit destructive approval is required")
     async with connection.transaction():
         await connection.execute("SET LOCAL search_path = pg_catalog; SET LOCAL statement_timeout = '10s'; SET LOCAL lock_timeout = '2s'")
         indirect = False
+        row_events = dict(plan.row_events)
         for table in plan.relations:
             relation = await connection.fetchrow("""
                 SELECT c.oid, c.relkind::text AS relkind, c.relowner = current_user::regrole AS owned,
@@ -70,21 +77,30 @@ async def execute_approved_sql(connection, body: ExecuteSqlBody):
                     AND (n.nspname <> 'pg_catalog' OR t.typtype NOT IN ('b','p')))
             """, relation["oid"]):
                 raise HTTPException(403, "Tables with custom column types are not supported")
-            side_effects = await connection.fetchval("""
-                SELECT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid=$1)
-                    OR EXISTS(SELECT 1 FROM pg_rewrite WHERE ev_class=$1)
-                    OR EXISTS(SELECT 1 FROM pg_attrdef a JOIN pg_depend d ON d.objid=a.oid
-                        AND d.classid='pg_attrdef'::regclass AND d.refclassid='pg_proc'::regclass
-                        JOIN pg_proc p ON p.oid=d.refobjid JOIN pg_namespace n ON n.oid=p.pronamespace
-                        WHERE a.adrelid=$1 AND n.nspname <> 'pg_catalog')
-            """, relation["oid"])
-            indirect = indirect or bool(side_effects)
-            if plan.writes:
+            events = row_events.get(table, 0)
+            if events:
+                side_effects = await connection.fetchval("""
+                    SELECT EXISTS(
+                        SELECT 1 FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid
+                        JOIN pg_namespace n ON n.oid=p.pronamespace
+                        WHERE t.tgrelid=$1 AND t.tgenabled <> 'D' AND (t.tgtype & $2::int) <> 0
+                        AND NOT (t.tgisinternal AND n.nspname='pg_catalog'
+                            AND p.proname IN ('RI_FKey_check_ins', 'RI_FKey_check_upd',
+                                'RI_FKey_noaction_del', 'RI_FKey_noaction_upd',
+                                'RI_FKey_restrict_del', 'RI_FKey_restrict_upd'))
+                    ) OR EXISTS(SELECT 1 FROM pg_rewrite WHERE ev_class=$1 AND (
+                        (ev_type='3' AND ($2::int & 4) <> 0)
+                        OR (ev_type='2' AND ($2::int & 16) <> 0)
+                        OR (ev_type='4' AND ($2::int & 8) <> 0)))
+                """, relation["oid"], events)
+                indirect = indirect or bool(side_effects)
+            if events & 4:
                 defaults = await connection.fetch("SELECT pg_get_expr(adbin, adrelid) AS expression FROM pg_attrdef WHERE adrelid=$1", relation["oid"])
                 indirect = indirect or any(default_has_side_effects(row["expression"]) for row in defaults)
+            if events or table in plan.validates:
                 checks = await connection.fetch("SELECT pg_get_expr(conbin, conrelid) AS expression FROM pg_constraint WHERE conrelid=$1 AND contype='c'", relation["oid"])
                 indirect = indirect or any(default_has_side_effects(row["expression"]) for row in checks)
-        if indirect and plan.writes and not explicit_deletion:
+        if indirect and not explicit_deletion:
             raise HTTPException(409, "Table side effects require explicit destructive approval")
         prepared = await connection.prepare(body.sql)
         if prepared.get_attributes():

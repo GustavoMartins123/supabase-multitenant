@@ -1077,7 +1077,7 @@ new file mode 100644
 +              <option value="none">No database access</option>
 +              {status.maxPermission === 'full' && <><option value="schema">Public schema only</option><option value="read">Read public table rows</option><option value="write">Read and execute approved [AI] functions</option><option value="full">Full public-table SQL access</option></>}
 +            </select></label>
-+            <p className="text-sm text-foreground-light">Schema and row results are sent to your provider. Database tools require project administration. Full access enables supported public-table SQL, including CREATE, INSERT and UPDATE, after individual approval. DELETE and other destructive operations always require explicit deletion confirmation. Full SQL uses tenant administration and can bypass row-level security; read-only tools respect RLS. Cluster administration and external URLs are not enabled.</p>
++            <p className="text-sm text-foreground-light">Schema and row results are sent to your provider. Database tools require project administration. Full access enables supported public-table SQL, including CREATE TABLE, CREATE INDEX, INSERT and UPDATE, without individual approval. DELETE and other destructive operations always require explicit deletion confirmation. Full SQL uses tenant administration and can bypass row-level security; read-only tools respect RLS. Cluster administration and external URLs are not enabled.</p>
 +            <Button block loading={saving} disabled={!model.trim() || ((changingKey || !status.hasKey) && !apiKey) || window.location.protocol !== 'https:'} onClick={save}>Save settings</Button>
 +          </>}
 +        </div>

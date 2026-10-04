@@ -151,7 +151,7 @@ services:
       retries: 3
   studio:
     container_name: supabase-studio
-    image: ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v6
+    image: ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v7
     pull_policy: always
     restart: unless-stopped
     logging: *vector-logging

@@ -16,6 +16,8 @@ class SqlPlan:
     writes: bool
     relations: tuple[str, ...]
     creates: tuple[str, ...]
+    row_events: tuple[tuple[str, int], ...]
+    validates: tuple[str, ...]
 
 
 STATEMENTS = {
@@ -112,6 +114,7 @@ def inspect_sql(sql: str) -> SqlPlan:
     if statement not in STATEMENTS:
         raise SqlPolicyError("This SQL operation is not available to the assistant")
     relations, creates = set(), set()
+    row_events, validates = {}, set()
     destructive = False
     writes = False
     for kind, node in _nodes(tree):
@@ -121,6 +124,15 @@ def inspect_sql(sql: str) -> SqlPlan:
             destructive = True
         if kind in STATEMENTS - {"SelectStmt"}:
             writes = True
+        if kind in {"InsertStmt", "UpdateStmt", "DeleteStmt"}:
+            name = node["relation"]["relname"]
+            event = {"InsertStmt": 4, "UpdateStmt": 16, "DeleteStmt": 8}[kind]
+            row_events[name] = row_events.get(name, 0) | event
+        if kind == "AlterTableStmt" and any(
+            command["subtype"] in {"AT_AddConstraint", "AT_ValidateConstraint"}
+            for command in node["cmds"]
+        ):
+            validates.add(node["relation"]["relname"])
         if kind == "RangeVar":
             relation = node
             if relation.get("schemaname") != "public" or relation.get("catalogname") or relation.get("relpersistence", "p") != "p":
@@ -174,4 +186,5 @@ def inspect_sql(sql: str) -> SqlPlan:
                 relations.add(names[1])
         if kind in {"AlterTableCmd", "TruncateStmt"} and node.get("behavior") == "DROP_CASCADE":
             raise SqlPolicyError("CASCADE is not permitted")
-    return SqlPlan(statement, destructive, writes, tuple(sorted(relations)), tuple(sorted(creates)))
+    return SqlPlan(statement, destructive, writes, tuple(sorted(relations)), tuple(sorted(creates)),
+                   tuple(sorted(row_events.items())), tuple(sorted(validates)))

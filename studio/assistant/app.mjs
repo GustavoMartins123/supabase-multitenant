@@ -44,14 +44,17 @@ export function makeTools(scope, configuration, call, store, chatId, messages, s
   if (configuration.permission === 'full') {
     for (const name of ['execute_sql', 'execute_destructive_sql']) {
       tools[name] = tool({ description: name === 'execute_sql'
-        ? 'Execute one supported public-table SQL statement after approval. CREATE, INSERT, UPDATE and SELECT are supported. DELETE and destructive changes are forbidden through this tool.'
+        ? 'Execute one supported non-destructive public-table SQL statement directly with full access, without individual approval. CREATE TABLE, CREATE INDEX, INSERT, UPDATE, SELECT and enabling RLS are supported. DELETE and destructive changes are forbidden through this tool.'
         : 'Execute one supported SQL statement that deletes data or may have destructive side effects, only after the user explicitly confirms deletion in the dedicated approval dialog. Required for every DELETE, DROP, TRUNCATE and destructive ALTER.',
-        inputSchema: sqlSchema, needsApproval: true,
+        inputSchema: sqlSchema, needsApproval: name === 'execute_destructive_sql',
         execute: async (input, { toolCallId }) => {
           if (store.configuration(scope).permission !== 'full') throw new Error('Full SQL access is no longer authorized')
-          const approval = store.claimApproval(scope, chatId, toolCallId, input, messages, name)
-          approval.sql_hash = createHash('sha256').update(input.sql).digest('hex')
-          return call(scope, 'sql', { ...input, permission: 'full', approval }, signal)
+          const approval = name === 'execute_destructive_sql'
+            ? store.claimApproval(scope, chatId, toolCallId, input, messages, name) : undefined
+          const execution = store.claimExecution(scope, chatId, toolCallId, input, name)
+          if (approval) execution.approval_id = approval.approval_id
+          execution.sql_hash = createHash('sha256').update(input.sql).digest('hex')
+          return call(scope, 'sql', { ...input, permission: 'full', execution }, signal)
         } })
     }
   }
@@ -129,6 +132,10 @@ export function createHandler({ store, secret, call, modelFactory = providerMode
       const validation = await safeValidateUIMessages({ messages: data.messages })
       if (!validation.success) throw new Error('Invalid assistant messages')
       const messages = validation.data
+      if (messages.some(message => message.parts.some(part => part.type === 'tool-execute_sql'
+        && ['approval-requested', 'approval-responded'].includes(part.state)))) {
+        return send(res, 409, {message: 'Non-destructive SQL no longer uses approval requests. Start a new chat to execute with the current permission.'})
+      }
       const permittedParts = new Set(['text', 'reasoning', 'step-start', 'tool-inspect_schema', 'tool-read_rows', 'tool-list_functions', 'tool-execute_function', 'tool-execute_sql', 'tool-execute_destructive_sql'])
       if (messages.some(message => !['user', 'assistant'].includes(message.role) || message.parts.some(part => !permittedParts.has(part.type)))) throw new Error('Unsupported assistant message content')
       phase = 'context'

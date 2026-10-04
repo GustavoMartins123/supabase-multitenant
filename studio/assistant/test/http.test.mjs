@@ -6,12 +6,45 @@ import { MockLanguageModelV3, simulateReadableStream } from 'ai/test'
 import { APICallError } from 'ai'
 import { createHandler } from '../app.mjs'
 import { AssistantStore } from '../store.mjs'
+import { AssistantToolError, assistantErrorMessage } from '../errors.mjs'
 
 const secret = 'b'.repeat(64)
 const actor = { userId: randomUUID(), projectId: randomUUID(), ref: 'abcdefghijklmnopqrst', role: 'admin', userToken: 'signed-synthetic-token'.repeat(4) }
 const usage = { inputTokens: { total: 1 }, outputTokens: { total: 1 } }
 const finish = { type: 'finish', finishReason: { unified:'stop', raw:'stop' }, usage }
 const textChunks = () => [{ type:'stream-start', warnings:[] }, { type:'text-start', id:'text-one' }, { type:'text-delta', id:'text-one', delta:'Synthetic ' }, { type:'text-delta', id:'text-one', delta:'answer' }, { type:'text-end', id:'text-one' }, finish]
+
+test('full SQL tool executes a CREATE INDEX directly without an approval dialog', async t => {
+  let turn = 0
+  const model = new MockLanguageModelV3({doStream:async () => ({stream:simulateReadableStream({chunks:++turn === 1
+    ? [{type:'stream-start',warnings:[]},{type:'tool-call',toolCallId:'index-call',toolName:'execute_sql',input:JSON.stringify({sql:'CREATE INDEX items_id_idx ON public.items(id)',label:'Create index'})},{...finish,finishReason:{unified:'tool-calls',raw:'tool_calls'}}]
+    : textChunks()})})})
+  const {store,request,calls} = await harness(t,model)
+  store.save(actor,{provider:'openai',model:'explicit-model',permission:'full',apiKey:'synthetic-provider-key-only'})
+  const response = await request('/api/ai/sql/generate-v4','POST',{projectRef:actor.ref,chatId:randomUUID(),messages:[{id:randomUUID(),role:'user',parts:[{type:'text',text:'Create an index'}]}]})
+  const output = await response.text()
+  assert.equal(output.includes('tool-approval-request'),false)
+  assert.equal(calls.filter(action=>action==='sql').length,1)
+  assert.match(output,/tool-output-available/)
+})
+
+test('tool errors do not mislabel an unsupported operation as destructive', () => {
+  assert.match(assistantErrorMessage(new AssistantToolError(400)), /unsupported/)
+  assert.equal(assistantErrorMessage(new AssistantToolError(400)).includes('destructive'), false)
+  assert.match(assistantErrorMessage(new AssistantToolError(409)), /explicit destructive approval/)
+})
+
+test('stale ordinary SQL approval is not silently replayed as direct execution', async t => {
+  const model = new MockLanguageModelV3({doStream:{stream:simulateReadableStream({chunks:textChunks()})}})
+  const {store,request,calls} = await harness(t,model)
+  store.save(actor,{provider:'openai',model:'explicit-model',permission:'full',apiKey:'synthetic-provider-key-only'})
+  const response = await request('/api/ai/sql/generate-v4','POST',{projectRef:actor.ref,chatId:randomUUID(),messages:[{
+    id:randomUUID(),role:'assistant',parts:[{type:'tool-execute_sql',state:'approval-responded',toolCallId:'stale',
+      input:{sql:'CREATE TABLE public.items(id integer)',label:'Create'},approval:{id:'stale-approval',approved:true}}]}]})
+  assert.equal(response.status,409)
+  assert.equal(calls.length,0)
+  assert.equal(model.doStreamCalls.length,0)
+})
 
 async function harness(t, model) {
   const store = new AssistantStore(':memory:', 'a'.repeat(64))
@@ -121,7 +154,7 @@ test('invalid messages are refused before contacting provider', async t => {
   assert.equal(model.doStreamCalls.length, 0)
 })
 
-for (const name of ['execute_sql', 'execute_destructive_sql']) {
+for (const name of ['execute_destructive_sql']) {
   test(`${name} streams an approval before executing and cannot run after permission downgrade`, async t => {
     const input = { sql: name === 'execute_sql' ? 'CREATE TABLE public.synthetic(id integer)' : 'DELETE FROM public.synthetic WHERE id=1', label: 'Synthetic operation' }
     let turn = 0

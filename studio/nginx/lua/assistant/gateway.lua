@@ -32,8 +32,8 @@ ngx.req.clear_header("X-Assistant-Execution-Proof")
 if action == "sql" then
     local signature = ngx.req.get_headers()["X-Internal-Signature"]
     local proof = require("security.hmac_sha256").hex(os.getenv("STUDIO_GATEWAY_HMAC_SECRET"),
-        "assistant-sql-approval-v1\n" .. signature .. "\n" .. user_token)
-    if not proof then return reject(503, "Assistant approval proof unavailable") end
+        "assistant-sql-execution-v1\n" .. signature .. "\n" .. user_token)
+    if not proof then return reject(503, "Assistant execution proof unavailable") end
     ngx.req.set_header("X-Assistant-Execution-Proof", proof)
 end
 ngx.var.assistant_api_target = target

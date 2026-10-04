@@ -123,32 +123,33 @@ test('permission levels expose only explicit tools; writes require approval befo
   assert.equal(calls.length, 0)
 })
 
-test('SQL approval cannot become destructive approval, change SQL, expire or cross projects', async t => {
+test('Destructive approval cannot become ordinary execution, change SQL, expire or cross projects', async t => {
   const { store } = fixture(t); const actor = scope(); const chat = randomUUID()
   const input = { sql: 'UPDATE public.items SET quantity=1 WHERE id=2', label: 'Update quantity' }
-  const part = { type: 'tool-execute_sql', state: 'approval-requested', toolCallId: 'sql-call', input, approval: { id: 'sql-approval' } }
+  const part = { type: 'tool-execute_destructive_sql', state: 'approval-requested', toolCallId: 'sql-call', input, approval: { id: 'sql-approval' } }
   store.rememberApprovals(actor, chat, { parts: [part] })
   const approved = { ...part, state: 'approval-responded', approval: { id: part.approval.id, approved: true } }
   const messages = [{ parts: [approved] }]
-  assert.throws(() => store.claimApproval(actor, chat, part.toolCallId, input, [{ parts: [{ ...approved, type: 'tool-execute_destructive_sql' }] }], 'execute_destructive_sql'))
-  assert.throws(() => store.claimApproval(actor, chat, part.toolCallId, { ...input, sql: 'DELETE FROM public.items' }, messages, 'execute_sql'))
-  assert.throws(() => store.claimApproval({ ...actor, projectId: randomUUID() }, chat, part.toolCallId, input, messages, 'execute_sql'))
-  assert.throws(() => store.claimApproval(actor, chat, part.toolCallId, input, [{ parts: [{ ...approved, approval: { ...approved.approval, approved: false } }] }], 'execute_sql'))
+  assert.throws(() => store.claimApproval(actor, chat, part.toolCallId, input, [{ parts: [{ ...approved, type: 'tool-execute_sql' }] }], 'execute_destructive_sql'))
+  assert.throws(() => store.claimApproval(actor, chat, part.toolCallId, { ...input, sql: 'DELETE FROM public.items' }, messages, 'execute_destructive_sql'))
+  assert.throws(() => store.claimApproval({ ...actor, projectId: randomUUID() }, chat, part.toolCallId, input, messages, 'execute_destructive_sql'))
+  assert.throws(() => store.claimApproval(actor, chat, part.toolCallId, input, [{ parts: [{ ...approved, approval: { ...approved.approval, approved: false } }] }], 'execute_destructive_sql'))
   store.db.prepare('UPDATE approvals SET expires_at=?').run(Date.now()-1)
-  assert.throws(() => store.claimApproval(actor, chat, part.toolCallId, input, messages, 'execute_sql'))
+  assert.throws(() => store.claimApproval(actor, chat, part.toolCallId, input, messages, 'execute_destructive_sql'))
 })
 
-test('full SQL tools require exact one-use approval and attach only server-issued authority', async t => {
+test('full SQL executes directly; destructive calls require one-use approval and server-issued authority', async t => {
   const { store } = fixture(t); const actor = scope(); const calls = []
   store.save(actor, { ...config, permission: 'full' })
   const call = async (...args) => { calls.push(args); return {} }
   for (const name of ['execute_sql', 'execute_destructive_sql']) {
     const chat = randomUUID(); const input = { sql: name === 'execute_sql' ? 'CREATE TABLE public.items(id integer)' : 'DELETE FROM public.items WHERE id=1', label: 'Synthetic SQL' }
     const part = { type: `tool-${name}`, state: 'approval-requested', toolCallId: name, input, approval: { id: randomUUID() } }
-    store.rememberApprovals(actor, chat, { parts: [part] })
-    const messages = [{ parts: [{ ...part, state: 'approval-responded', approval: { ...part.approval, approved: true } }] }]
+    if (name === 'execute_destructive_sql') store.rememberApprovals(actor, chat, { parts: [part] })
+    const messages = name === 'execute_destructive_sql'
+      ? [{ parts: [{ ...part, state: 'approval-responded', approval: { ...part.approval, approved: true } }] }] : []
     const tools = makeTools(actor, { permission: 'full' }, call, store, chat, messages, new AbortController().signal)
-    assert.equal(tools[name].needsApproval, true)
+    assert.equal(tools[name].needsApproval, name === 'execute_destructive_sql')
     store.save(actor, { ...config, permission: 'read' })
     await assert.rejects(() => tools[name].execute(input, { toolCallId: name }), /no longer authorized/)
     store.save(actor, { ...config, permission: 'full' })
@@ -157,11 +158,21 @@ test('full SQL tools require exact one-use approval and attach only server-issue
     assert.equal(scope.projectId, actor.projectId)
     assert.equal(action, 'sql')
     assert.equal(payload.permission, 'full')
-    assert.equal(payload.approval.tool, name)
-    assert.equal(payload.approval.sql_hash, createHash('sha256').update(input.sql).digest('hex'))
+    assert.equal(payload.execution.tool, name)
+    assert.equal(payload.execution.sql_hash, createHash('sha256').update(input.sql).digest('hex'))
+    assert.equal(Boolean(payload.execution.approval_id), name === 'execute_destructive_sql')
     await assert.rejects(() => tools[name].execute(input, { toolCallId: name }))
   }
   assert.equal(calls.length, 2)
+})
+
+test('direct SQL call IDs cannot be reused, changed or converted into destructive authority', t => {
+  const {store} = fixture(t); const actor = scope(); const chat = randomUUID()
+  const input = {sql:'CREATE TABLE public.items(id integer)',label:'Create table'}
+  store.claimExecution(actor,chat,'one-call',input,'execute_sql')
+  assert.throws(()=>store.claimExecution(actor,chat,'one-call',input,'execute_sql'))
+  assert.throws(()=>store.claimExecution(actor,chat,'one-call',{...input,sql:'DELETE FROM public.items'},'execute_destructive_sql'))
+  assert.throws(()=>store.claimApproval(actor,chat,'one-call',input,[],'execute_destructive_sql'))
 })
 
 test('prompts describe actual access without advertising unavailable AI functions', () => {

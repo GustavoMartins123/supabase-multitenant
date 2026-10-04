@@ -310,7 +310,7 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
         from app.routers import assistant
         path = "/api/projects/abcdefghijklmnopqrst/assistant/sql"
         sql = "DELETE FROM public.example"
-        body = json.dumps({"sql": sql, "label": "Synthetic query", "permission": "full", "approval": {
+        body = json.dumps({"sql": sql, "label": "Synthetic query", "permission": "full", "execution": {
             "chat_id": str(uuid.uuid4()), "call_id": "call", "approval_id": "approval",
             "tool": "execute_destructive_sql", "sql_hash": hashlib.sha256(sql.encode()).hexdigest(),
         }}).encode()
@@ -327,15 +327,15 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
     async def test_assistant_sql_approval_gateway_still_rechecks_actor_and_project_membership(self):
         from app.routers import assistant
         path = "/api/projects/abcdefghijklmnopqrst/assistant/sql"
-        sql = "CREATE TABLE public.example(id integer)"
-        body = json.dumps({"sql": sql, "label": "Synthetic query", "permission": "full", "approval": {
+        sql = "DELETE FROM public.example"
+        body = json.dumps({"sql": sql, "label": "Synthetic query", "permission": "full", "execution": {
             "chat_id": str(uuid.uuid4()), "call_id": "call", "approval_id": "approval",
-            "tool": "execute_sql", "sql_hash": hashlib.sha256(sql.encode()).hexdigest(),
+            "tool": "execute_destructive_sql", "sql_hash": hashlib.sha256(sql.encode()).hexdigest(),
         }}).encode()
         with mock.patch.object(assistant, "tenant_connection") as connection:
             for actor in (self.ex_member, self.outsider):
                 headers = self.signed_headers("POST", path, actor, body)
-                proof = f"assistant-sql-approval-v1\n{headers['X-Internal-Signature']}\n{headers['X-User-Token']}"
+                proof = f"assistant-sql-execution-v1\n{headers['X-Internal-Signature']}\n{headers['X-User-Token']}"
                 headers["X-Assistant-Execution-Proof"] = hmac.new(GATEWAY_SECRET.encode(), proof.encode(), hashlib.sha256).hexdigest()
                 response = await self.request("POST", path, headers=headers, body=body)
                 self.assertEqual(response.status_code, 403, response.text)
