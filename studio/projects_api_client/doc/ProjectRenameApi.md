@@ -115,7 +115,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectRenameApi();
 final projectRef = projectRef_example; // String |
-final limit = 56; // int | 
+final limit = 56; // int |
 
 try {
     final result = api_instance.getProjectRenameHistoryApiProjectsProjectRefRenameHistoryGet(projectRef, limit);
@@ -203,7 +203,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectRenameApi();
 final projectRef = projectRef_example; // String |
-final projectDisplayNameUpdate = ProjectDisplayNameUpdate(); // ProjectDisplayNameUpdate | 
+final projectDisplayNameUpdate = ProjectDisplayNameUpdate(); // ProjectDisplayNameUpdate |
 
 try {
     final result = api_instance.updateProjectDisplayNameApiProjectsProjectRefDisplayNamePatch(projectRef, projectDisplayNameUpdate);
@@ -218,7 +218,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **projectDisplayNameUpdate** | [**ProjectDisplayNameUpdate**](ProjectDisplayNameUpdate.md)|  | 
+ **projectDisplayNameUpdate** | [**ProjectDisplayNameUpdate**](ProjectDisplayNameUpdate.md)|  |
 
 ### Return type
 

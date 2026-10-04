@@ -184,7 +184,7 @@ class ProjectInsightsApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'ProjectS3VectorKeysResponse',) as ProjectS3VectorKeysResponse;
-    
+
     }
     return null;
   }
@@ -259,7 +259,7 @@ class ProjectInsightsApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'ProjectUserTelemetryResponse',) as ProjectUserTelemetryResponse;
-    
+
     }
     return null;
   }
@@ -311,7 +311,7 @@ class ProjectInsightsApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'ProjectsInfoResponse',) as ProjectsInfoResponse;
-    
+
     }
     return null;
   }
@@ -368,7 +368,7 @@ class ProjectInsightsApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AllUsersResponse',) as AllUsersResponse;
-    
+
     }
     return null;
   }
@@ -429,7 +429,7 @@ class ProjectInsightsApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
-    
+
     }
     return null;
   }
@@ -490,7 +490,7 @@ class ProjectInsightsApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
-    
+
     }
     return null;
   }
@@ -551,7 +551,7 @@ class ProjectInsightsApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
-    
+
     }
     return null;
   }
@@ -609,7 +609,7 @@ class ProjectInsightsApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
-    
+
     }
     return null;
   }
@@ -667,7 +667,7 @@ class ProjectInsightsApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
-    
+
     }
     return null;
   }
@@ -725,7 +725,7 @@ class ProjectInsightsApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
-    
+
     }
     return null;
   }
@@ -783,7 +783,7 @@ class ProjectInsightsApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
-    
+
     }
     return null;
   }
@@ -844,7 +844,7 @@ class ProjectInsightsApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
-    
+
     }
     return null;
   }
@@ -901,7 +901,7 @@ class ProjectInsightsApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'TransferResponse',) as TransferResponse;
-    
+
     }
     return null;
   }

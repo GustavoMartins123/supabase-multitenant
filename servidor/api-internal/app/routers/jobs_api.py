@@ -10,15 +10,19 @@ nao e circular.
 from __future__ import annotations
 
 import uuid
+import asyncio
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict
 
 from app.database import get_pool
+from app.identity_schemas import JobIdentity
 from app.dependencies import (
     ensure_project_admin_access,
     resolve_authenticated_user,
+    resolve_current_user,
+    resolve_user_claims_from_hmac_token,
 )
 from app.jobs import (
     create_retry_job,
@@ -26,20 +30,15 @@ from app.jobs import (
     serialize_job,
     set_job_status as _set_job_status,
 )
+from app.job_watch import job_change_hub, job_snapshot, WATCH_TIMEOUT_SECONDS
 from app.main import _build_recovery_runner
 from app.validation import parse_uuid_value
 
 router = APIRouter(tags=["jobs"])
 
 
-class JobResponse(BaseModel):
+class JobResponse(JobIdentity):
     model_config = ConfigDict(extra="allow")
-    job_id: str
-    project: str
-    public_ref: str | None
-    project_uuid: str | None = None
-    tenant_uuid: str | None = None
-    created_by: str | None = None
     action: str
     status: str
     message: str | None = None
@@ -67,14 +66,8 @@ class JobListResponse(BaseModel):
     count: int = 0
 
 
-class JobRetryResponse(BaseModel):
+class JobRetryResponse(JobIdentity):
     model_config = ConfigDict(extra="allow")
-    job_id: str
-    project: str
-    public_ref: str | None
-    project_uuid: str | None = None
-    tenant_uuid: str | None = None
-    created_by: str | None = None
     action: str
     status: str
     message: str | None = None
@@ -91,6 +84,33 @@ class JobRetryResponse(BaseModel):
     created_at: str | None = None
     updated_at: str | None = None
     queue_position: int = 0
+
+
+class JobWatchResponse(BaseModel):
+    items: list[JobResponse]
+    cursor: str
+
+
+@router.get("/api/jobs/watch", response_model=JobWatchResponse)
+async def watch_jobs(
+    request: Request,
+    response: Response,
+    cursor: str | None = Query(default=None, pattern=r"^[0-9a-f]{64}$"),
+    job_id: list[uuid.UUID] = Query(default=[], max_length=200),
+    pool=Depends(get_pool),
+):
+    signed_id, claims = resolve_user_claims_from_hmac_token(request)
+    deadline = asyncio.get_running_loop().time() + WATCH_TIMEOUT_SECONDS
+    response.headers["Cache-Control"] = "no-store"
+    while True:
+        job_change_hub.ensure_ready()
+        version = job_change_hub.version
+        auth_user = await resolve_current_user(pool, signed_id, claims)
+        snapshot = await job_snapshot(pool, auth_user, job_id)
+        remaining = deadline - asyncio.get_running_loop().time()
+        if snapshot["cursor"] != cursor or remaining <= 0:
+            return snapshot
+        await job_change_hub.wait(version, remaining)
 
 
 @router.get("/api/jobs", response_model=JobListResponse)

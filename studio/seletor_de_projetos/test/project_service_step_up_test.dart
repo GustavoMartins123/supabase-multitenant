@@ -21,6 +21,8 @@ void main() {
           jsonEncode({
             'job_id': '33333333-3333-4333-8333-333333333333',
             'project': 'demo_project',
+            'public_ref': 'abcdefghijklmnopqrst',
+            'project_uuid': null, 'tenant_uuid': null, 'created_by': null,
             'action': 'delete',
             'status': 'queued',
           }),

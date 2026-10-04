@@ -55,7 +55,7 @@ def main() -> int:
         print(f"{TARGET} is in sync")
         return 0
     TARGET.parent.mkdir(parents=True, exist_ok=True)
-    TARGET.write_text(rendered, encoding="utf-8")
+    TARGET.write_text(rendered, encoding="utf-8", newline="\n")
     paths = len(schema.get("paths", {}))
     print(f"wrote {TARGET} ({paths} paths)")
     return 0

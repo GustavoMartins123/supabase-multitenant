@@ -24,8 +24,8 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = LifecycleApi();
 final projectRef = projectRef_example; // String |
-final service = service_example; // String | 
-final lines = 56; // int | 
+final service = service_example; // String |
+final lines = 56; // int |
 
 try {
     final result = api_instance.getContainerLogsApiProjectsProjectRefLogsServiceGet(projectRef, service, lines);
@@ -40,7 +40,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **service** | **String**|  | 
+ **service** | **String**|  |
  **lines** | **int**|  | [optional] [default to 100]
 
 ### Return type

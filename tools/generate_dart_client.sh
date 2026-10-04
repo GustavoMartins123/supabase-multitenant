@@ -13,6 +13,7 @@ if [[ -z "$JAR" ]]; then
 fi
 
 python3 tools/export_openapi.py
+python3 tools/generate_identity_models.py
 SPEC30="$(mktemp --suffix=.json)"
 trap 'rm -f "$SPEC30"' EXIT
 python3 tools/openapi_to_30.py docs/api/openapi.json "$SPEC30"

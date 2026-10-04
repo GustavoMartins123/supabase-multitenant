@@ -41,6 +41,14 @@ async def resolve_authenticated_user(
     pool: asyncpg.Pool,
 ) -> dict[str, Any]:
     signed_user_id, token_claims = resolve_user_claims_from_hmac_token(request)
+    return await resolve_current_user(pool, signed_user_id, token_claims)
+
+
+async def resolve_current_user(
+    pool: asyncpg.Pool,
+    signed_user_id: uuid.UUID,
+    token_claims: dict[str, Any],
+) -> dict[str, Any]:
     from app.directory_service import confirm_directory
     snapshot = await confirm_directory(pool)
     if token_claims.get("directory_revision") != snapshot.revision:

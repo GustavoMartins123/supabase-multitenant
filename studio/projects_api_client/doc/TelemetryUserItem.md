@@ -8,11 +8,11 @@ import 'package:projects_api_client/api.dart';
 ## Properties
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**email** | **String** |  | 
+**email** | **String** |  |
 **lastLoginAt** | [**DateTime**](DateTime.md) |  |
-**phone** | **String** |  | 
-**sessionCount** | **int** |  | 
-**userId** | **String** |  | 
+**phone** | **String** |  |
+**sessionCount** | **int** |  |
+**userId** | **String** |  |
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

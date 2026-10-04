@@ -8,15 +8,15 @@ import 'package:projects_api_client/api.dart';
 ## Properties
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**anonKey** | **String** |  | 
-**displayName** | **String** |  | 
-**fileSizeLimit** | **int** |  | 
-**projectKeyVersion** | **int** |  | 
-**projectUuid** | **String** |  | 
-**ref** | **String** |  | 
-**role** | **String** |  | 
+**anonKey** | **String** |  |
+**displayName** | **String** |  |
+**fileSizeLimit** | **int** |  |
+**projectKeyVersion** | **int** |  |
+**projectUuid** | **String** |  |
+**ref** | **String** |  |
+**role** | **String** |  |
 **technicalName** | **String** |  |
-**tenantUuid** | **String** |  | 
+**tenantUuid** | **String** |  |
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

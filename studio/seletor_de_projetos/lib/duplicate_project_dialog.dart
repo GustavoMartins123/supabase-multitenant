@@ -21,12 +21,17 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
   late Animation<double> _scaleAnimation;
   bool _copyData = false;
 
-  String _crop(String s) => s.length > 40 ? s.substring(0, 40) : s;
+  String _withSuffix(String base, String suffix) {
+    final normalized = ProjectNameValidator.normalize(base);
+    final room = 39 - suffix.length;
+    final stem = normalized.length > room ? normalized.substring(0, room) : normalized;
+    return '${stem}_$suffix';
+  }
 
   @override
   void initState() {
     super.initState();
-    _ctrl.text = _crop('${widget.originalProjectName}_copy');
+    _ctrl.text = _withSuffix(widget.originalProjectName, 'copy');
 
     _animController = AnimationController(
       duration: const Duration(milliseconds: 250),
@@ -53,9 +58,6 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
     if (!ProjectNameValidator.isValidShape(txt)) {
       return 'Use minúsculas, números ou "_" (3-40 caracteres)';
     }
-    if (ProjectNameValidator.isReserved(txt)) {
-      return 'Nome reservado — escolha outro.';
-    }
     if (txt == widget.originalProjectName) {
       return 'O nome deve ser diferente do original';
     }
@@ -77,19 +79,20 @@ class _DuplicateProjectDialogState extends State<DuplicateProjectDialog>
     final today = DateFormat('ddMMyy').format(DateTime.now());
 
     suggestions.addAll([
-      _crop('${base}_copy'),
-      _crop('${base}_backup'),
-      _crop('${base}_$today'),
-      _crop('${base}_v2'),
-      _crop('${base}_clone'),
+      _withSuffix(base, 'copy'),
+      _withSuffix(base, 'backup'),
+      _withSuffix(base, today),
+      _withSuffix(base, 'v2'),
+      _withSuffix(base, 'clone'),
+      ...['dev', 'test', 'staging', 'prod', 'sandbox', 'preview', 'archive', 'v3']
+          .map((suffix) => _withSuffix(base, suffix)),
     ]);
 
-    return suggestions
+    return suggestions.toSet()
         .where(
           (s) =>
               s.isNotEmpty &&
-              ProjectNameValidator.isValidShape(s) &&
-              !ProjectNameValidator.isReserved(s),
+              ProjectNameValidator.isValidShape(s),
         )
         .toList();
   }

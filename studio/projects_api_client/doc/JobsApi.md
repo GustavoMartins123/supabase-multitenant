@@ -12,6 +12,7 @@ Method | HTTP request | Description
 [**listJobHistoryApiJobsGet**](JobsApi.md#listjobhistoryapijobsget) | **GET** /api/jobs | List Job History
 [**projectStatusApiProjectsStatusJobIdGet**](JobsApi.md#projectstatusapiprojectsstatusjobidget) | **GET** /api/projects/status/{job_id} | Project Status
 [**retryProjectJobApiJobsJobIdRetryPost**](JobsApi.md#retryprojectjobapijobsjobidretrypost) | **POST** /api/jobs/{job_id}/retry | Retry Project Job
+[**watchJobsApiJobsWatchGet**](JobsApi.md#watchjobsapijobswatchget) | **GET** /api/jobs/watch | Watch Jobs
 
 
 # **listJobHistoryApiJobsGet**
@@ -26,11 +27,11 @@ Lista o historico duravel de jobs visivel para o usuario autenticado.
 import 'package:projects_api_client/api.dart';
 
 final api_instance = JobsApi();
-final projectUuid = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | 
-final action = action_example; // String | 
-final status = status_example; // String | 
-final limit = 56; // int | 
-final offset = 56; // int | 
+final projectUuid = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String |
+final action = action_example; // String |
+final status = status_example; // String |
+final limit = 56; // int |
+final offset = 56; // int |
 
 try {
     final result = api_instance.listJobHistoryApiJobsGet(projectUuid, action, status, limit, offset);
@@ -44,9 +45,9 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **projectUuid** | **String**|  | [optional] 
- **action** | **String**|  | [optional] 
- **status** | **String**|  | [optional] 
+ **projectUuid** | **String**|  | [optional]
+ **action** | **String**|  | [optional]
+ **status** | **String**|  | [optional]
  **limit** | **int**|  | [optional] [default to 50]
  **offset** | **int**|  | [optional] [default to 0]
 
@@ -75,7 +76,7 @@ Project Status
 import 'package:projects_api_client/api.dart';
 
 final api_instance = JobsApi();
-final jobId = jobId_example; // String | 
+final jobId = jobId_example; // String |
 
 try {
     final result = api_instance.projectStatusApiProjectsStatusJobIdGet(jobId);
@@ -89,7 +90,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **jobId** | **String**|  | 
+ **jobId** | **String**|  |
 
 ### Return type
 
@@ -118,7 +119,7 @@ Cria uma nova tentativa apenas para acoes explicitamente idempotentes.
 import 'package:projects_api_client/api.dart';
 
 final api_instance = JobsApi();
-final jobId = jobId_example; // String | 
+final jobId = jobId_example; // String |
 
 try {
     final result = api_instance.retryProjectJobApiJobsJobIdRetryPost(jobId);
@@ -132,11 +133,54 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **jobId** | **String**|  | 
+ **jobId** | **String**|  |
 
 ### Return type
 
 [**JobRetryResponse**](JobRetryResponse.md)
+
+### Authorization
+
+No authorization required
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **watchJobsApiJobsWatchGet**
+> JobWatchResponse watchJobsApiJobsWatchGet(cursor, jobId)
+
+Watch Jobs
+
+### Example
+```dart
+import 'package:projects_api_client/api.dart';
+
+final api_instance = JobsApi();
+final cursor = cursor_example; // String |
+final jobId = []; // List<String> |
+
+try {
+    final result = api_instance.watchJobsApiJobsWatchGet(cursor, jobId);
+    print(result);
+} catch (e) {
+    print('Exception when calling JobsApi->watchJobsApiJobsWatchGet: $e\n');
+}
+```
+
+### Parameters
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **cursor** | **String**|  | [optional]
+ **jobId** | [**List<String>**](String.md)|  | [optional] [default to const []]
+
+### Return type
+
+[**JobWatchResponse**](JobWatchResponse.md)
 
 ### Authorization
 

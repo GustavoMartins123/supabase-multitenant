@@ -113,16 +113,12 @@ class AuthUserItem {
     if (value is Map) {
       final json = value.cast<String, dynamic>();
 
-      // Ensure that the map contains the required keys.
-      // Note 1: the values aren't checked for validity beyond being non-null.
-      // Note 2: this code is stripped in release mode!
-      assert(() {
-        requiredKeys.forEach((key) {
-          assert(json.containsKey(key), 'Required key "AuthUserItem[$key]" is missing from JSON.');
-          assert(json[key] != null, 'Required key "AuthUserItem[$key]" has a null value in JSON.');
-        });
-        return true;
-      }());
+      const nullableKeys = <String>{r'created_at', r'email', r'email_confirmed_at', r'is_sso_user', r'last_sign_in_at', r'phone', r'raw_user_meta_data'};
+      for (final key in requiredKeys) {
+        if (!json.containsKey(key) || (json[key] == null && !nullableKeys.contains(key))) {
+          throw FormatException('Invalid required field: $key');
+        }
+      }
 
       return AuthUserItem(
         createdAt: mapValueOfType<String>(json, r'created_at'),

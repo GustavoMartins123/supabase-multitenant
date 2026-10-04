@@ -43,16 +43,12 @@ class ProjectHintStatusUpdate {
     if (value is Map) {
       final json = value.cast<String, dynamic>();
 
-      // Ensure that the map contains the required keys.
-      // Note 1: the values aren't checked for validity beyond being non-null.
-      // Note 2: this code is stripped in release mode!
-      assert(() {
-        requiredKeys.forEach((key) {
-          assert(json.containsKey(key), 'Required key "ProjectHintStatusUpdate[$key]" is missing from JSON.');
-          assert(json[key] != null, 'Required key "ProjectHintStatusUpdate[$key]" has a null value in JSON.');
-        });
-        return true;
-      }());
+      const nullableKeys = <String>{};
+      for (final key in requiredKeys) {
+        if (!json.containsKey(key) || (json[key] == null && !nullableKeys.contains(key))) {
+          throw FormatException('Invalid required field: $key');
+        }
+      }
 
       return ProjectHintStatusUpdate(
         status: mapValueOfType<String>(json, r'status')!,

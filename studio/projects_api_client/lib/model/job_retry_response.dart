@@ -16,7 +16,7 @@ class JobRetryResponse {
     required this.action,
     this.attempt = 1,
     this.createdAt,
-    this.createdBy,
+    required this.createdBy,
     this.currentStep,
     this.errorCode,
     this.finishedAt,
@@ -25,14 +25,14 @@ class JobRetryResponse {
     this.message,
     this.progress,
     required this.project,
-    this.projectUuid,
+    required this.projectUuid,
     required this.publicRef,
     this.queuePosition = 0,
     this.retryOf,
     this.retryable = false,
     this.startedAt,
     required this.status,
-    this.tenantUuid,
+    required this.tenantUuid,
     this.totalSteps,
     this.updatedAt,
   });
@@ -225,16 +225,12 @@ class JobRetryResponse {
     if (value is Map) {
       final json = value.cast<String, dynamic>();
 
-      // Ensure that the map contains the required keys.
-      // Note 1: the values aren't checked for validity beyond being non-null.
-      // Note 2: this code is stripped in release mode!
-      assert(() {
-        requiredKeys.forEach((key) {
-          assert(json.containsKey(key), 'Required key "JobRetryResponse[$key]" is missing from JSON.');
-          assert(json[key] != null, 'Required key "JobRetryResponse[$key]" has a null value in JSON.');
-        });
-        return true;
-      }());
+      const nullableKeys = <String>{r'created_at', r'created_by', r'current_step', r'error_code', r'finished_at', r'message', r'progress', r'project_uuid', r'public_ref', r'retry_of', r'started_at', r'tenant_uuid', r'total_steps', r'updated_at'};
+      for (final key in requiredKeys) {
+        if (!json.containsKey(key) || (json[key] == null && !nullableKeys.contains(key))) {
+          throw FormatException('Invalid required field: $key');
+        }
+      }
 
       return JobRetryResponse(
         action: mapValueOfType<String>(json, r'action')!,
@@ -307,10 +303,13 @@ class JobRetryResponse {
   /// The list of required keys that must be present in a JSON.
   static const requiredKeys = <String>{
     'action',
+    'created_by',
     'job_id',
     'project',
+    'project_uuid',
     'public_ref',
     'status',
+    'tenant_uuid',
   };
 }
 

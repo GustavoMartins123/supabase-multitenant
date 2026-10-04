@@ -851,7 +851,7 @@ class PathConfinementTest(unittest.TestCase):
         self.assertEqual(resolved.parent, self.projects_root.resolve())
 
     def test_invalid_names_are_rejected(self) -> None:
-        for name in ("../fora", "a/b", "nome com espaco", "select", "..", "nome.ponto"):
+        for name in ("../fora", "a/b", "nome com espaco", "ab", "..", "nome.ponto"):
             with self.subTest(name=name):
                 with self.assertRaises(PathConfinementError):
                     resolve_project_dir(self.projects_root, name)

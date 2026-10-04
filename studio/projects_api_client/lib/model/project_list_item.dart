@@ -171,16 +171,12 @@ class ProjectListItem {
     if (value is Map) {
       final json = value.cast<String, dynamic>();
 
-      // Ensure that the map contains the required keys.
-      // Note 1: the values aren't checked for validity beyond being non-null.
-      // Note 2: this code is stripped in release mode!
-      assert(() {
-        requiredKeys.forEach((key) {
-          assert(json.containsKey(key), 'Required key "ProjectListItem[$key]" is missing from JSON.');
-          assert(json[key] != null, 'Required key "ProjectListItem[$key]" has a null value in JSON.');
-        });
-        return true;
-      }());
+      const nullableKeys = <String>{r'automatic_key_rotation_due_at', r'automatic_key_rotation_last_error', r'internal_token_expires_at', r'last_key_rotation_at', r'tenant_uuid'};
+      for (final key in requiredKeys) {
+        if (!json.containsKey(key) || (json[key] == null && !nullableKeys.contains(key))) {
+          throw FormatException('Invalid required field: $key');
+        }
+      }
 
       return ProjectListItem(
         automaticKeyRotationBlocked: mapValueOfType<bool>(json, r'automatic_key_rotation_blocked')!,

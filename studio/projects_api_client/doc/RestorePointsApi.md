@@ -26,7 +26,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = RestorePointsApi();
 final projectRef = projectRef_example; // String |
-final restorePointCreate = RestorePointCreate(); // RestorePointCreate | 
+final restorePointCreate = RestorePointCreate(); // RestorePointCreate |
 
 try {
     final result = api_instance.createProjectRestorePointApiProjectsProjectRefRestorePointsPost(projectRef, restorePointCreate);
@@ -41,7 +41,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **restorePointCreate** | [**RestorePointCreate**](RestorePointCreate.md)|  | 
+ **restorePointCreate** | [**RestorePointCreate**](RestorePointCreate.md)|  |
 
 ### Return type
 
@@ -69,7 +69,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = RestorePointsApi();
 final projectRef = projectRef_example; // String |
-final pointId = pointId_example; // String | 
+final pointId = pointId_example; // String |
 
 try {
     final result = api_instance.deleteProjectRestorePointApiProjectsProjectRefRestorePointsPointIdDelete(projectRef, pointId);
@@ -84,7 +84,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **pointId** | **String**|  | 
+ **pointId** | **String**|  |
 
 ### Return type
 
@@ -153,7 +153,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = RestorePointsApi();
 final projectRef = projectRef_example; // String |
-final pointId = pointId_example; // String | 
+final pointId = pointId_example; // String |
 
 try {
     final result = api_instance.restoreProjectRestorePointApiProjectsProjectRefRestorePointsPointIdRestorePost(projectRef, pointId);
@@ -168,7 +168,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **pointId** | **String**|  | 
+ **pointId** | **String**|  |
 
 ### Return type
 

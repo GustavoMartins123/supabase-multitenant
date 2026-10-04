@@ -1,5 +1,8 @@
 import 'dart:async';
 
+import 'package:flutter/widgets.dart';
+import '../data/api_client.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/job_repository.dart';
@@ -20,158 +23,190 @@ final activeProjectJobProvider = Provider.family<Job?, String>((ref, project) {
 });
 
 class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
-  static const pollInterval = Duration(seconds: 3);
-
-  Timer? _pollTimer;
-  bool _refreshing = false;
+  RequestCancellation? _request;
+  AppLifecycleListener? _lifecycle;
   bool _disposed = false;
+  bool _watching = false;
+  bool _initializing = true;
+  bool _visible = true;
+  bool _failed = false;
+  String? _cursor;
   final Map<String, Job> _trackedJobs = {};
-  final Set<String> _finishedJobIds = {};
+  final Map<String, _JobWaiter> _waiters = {};
 
   @override
   Future<List<Job>> build() async {
     ref.onDispose(() {
       _disposed = true;
-      _pollTimer?.cancel();
+      _request?.cancel();
+      _lifecycle?.dispose();
+      _failWaiters(const ApiException(ApiFailureKind.cancelled,
+          'Acompanhamento de jobs encerrado'), StackTrace.current);
     });
-    try {
-      final jobs = await ref.watch(jobRepositoryProvider).fetchInFlightJobs();
-      return _mergeWithTrackedJobs(jobs);
-    } finally {
-      _startPolling();
-    }
-  }
-
-  void _startPolling() {
-    if (_disposed) return;
-    _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(
-      pollInterval,
-      (_) => unawaited(refresh()),
-    );
-  }
-
-  Future<void> refresh() async {
-    if (_refreshing || _disposed) return;
-    _refreshing = true;
-    try {
-      final jobs = await ref.read(jobRepositoryProvider).fetchInFlightJobs();
-      if (!_disposed) state = AsyncData(_mergeWithTrackedJobs(jobs));
-    } catch (error, stackTrace) {
-      if (!_disposed) {
-        state = AsyncError(error, stackTrace);
+    _lifecycle = AppLifecycleListener(onStateChange: (state) {
+      _visible = state != AppLifecycleState.hidden &&
+          state != AppLifecycleState.paused && state != AppLifecycleState.detached;
+      if (!_visible) {
+        _request?.cancel();
+      } else if (!_failed) {
+        _cursor = null;
+        _startWatching();
       }
-    } finally {
-      _refreshing = false;
-    }
-  }
-
-  void track(
-    Job job, {
-    String? project,
-    String? action,
-    String? createdBy,
-  }) {
-    if (_disposed) return;
-    final tracked = job.verifyContext(
-      project: project,
-      action: action,
-      createdBy: createdBy,
-    );
-    if (!tracked.isInFlight) return;
-
-    _finishedJobIds.remove(tracked.id);
-    final previous = _trackedJobs[tracked.id];
-    _trackedJobs[tracked.id] =
-        previous == null ? tracked : mergeJobSnapshots(previous, tracked);
-    state = AsyncData(_mergeWithTrackedJobs(state.value ?? const []));
-  }
-
-  void updateFromJson(
-    Map<String, dynamic> json, {
-    String? project,
-    String? action,
-    String? createdBy,
-  }) {
-    final job = Job.fromJson(json).verifyContext(
-      project: project,
-      action: action,
-      createdBy: createdBy,
-    );
-    if (job.isInFlight) {
-      track(job);
-    } else {
-      finish(job.id);
-    }
-  }
-
-  void finish(String jobId) {
-    if (_disposed) return;
-    _trackedJobs.remove(jobId);
-    _finishedJobIds.add(jobId);
-    final current = [...?state.value]..removeWhere((job) => job.id == jobId);
-    state = AsyncData(current);
-    unawaited(refresh());
-  }
-
-  List<Job> _mergeWithTrackedJobs(Iterable<Job> remoteJobs) {
-    final merged = <String, Job>{};
-    for (final job in remoteJobs) {
-      if (!job.isInFlight || _finishedJobIds.contains(job.id)) continue;
-      merged[job.id] = job;
-    }
-    for (final tracked in _trackedJobs.values) {
-      if (!tracked.isInFlight || _finishedJobIds.contains(tracked.id)) {
-        continue;
-      }
-      final remote = merged[tracked.id];
-      merged[tracked.id] =
-          remote == null ? tracked : mergeJobSnapshots(remote, tracked);
-    }
-
-    final jobs = merged.values.toList();
-    jobs.sort((a, b) {
-      final aDate = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-      final bDate = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-      return aDate.compareTo(bDate);
     });
+    _request = RequestCancellation();
+    final JobSnapshot snapshot;
+    try {
+      snapshot = await ref.watch(jobRepositoryProvider).watch(cancellation: _request);
+    } catch (_) {
+      _failed = true;
+      rethrow;
+    } finally {
+      _initializing = false;
+    }
+    _cursor = snapshot.cursor;
+    final jobs = _accept(snapshot.jobs);
+    Timer.run(_startWatching);
     return jobs;
   }
 
-  Future<JobWaitResult> waitFor(
-    Job job, {
-    String? project,
-    String? action,
-    String? createdBy,
-    Duration every = const Duration(seconds: 3),
-    int max = 600,
+  Set<String> get _watchedIds => {
+    ..._trackedJobs.keys, ..._waiters.keys,
+    for (final job in state.value ?? const <Job>[]) job.id,
+  };
+
+  void _startWatching() {
+    if (_initializing || _watching || _disposed || !_visible || _failed) return;
+    unawaited(_watch());
+  }
+
+  Future<void> _watch() async {
+    _watching = true;
+    try {
+      while (!_disposed && _visible && !_failed) {
+        final request = _request = RequestCancellation();
+        try {
+          final snapshot = await ref.read(jobRepositoryProvider).watch(
+            cursor: _cursor, watchedIds: _watchedIds, cancellation: request);
+          if (_disposed || request.isCancelled) continue;
+          _cursor = snapshot.cursor;
+          state = AsyncData(_accept(snapshot.jobs));
+        } catch (error, stack) {
+          if (error is ApiException && error.kind == ApiFailureKind.cancelled) {
+            continue;
+          }
+          _failed = true;
+          if (!_disposed) state = AsyncError(error, stack);
+          _failWaiters(error, stack);
+        }
+      }
+    } finally {
+      _watching = false;
+    }
+  }
+
+  Future<void> refresh() async {
+    if (_disposed) return;
+    _failed = false;
+    _cursor = null;
+    if (!_initializing) _request?.cancel();
+    _startWatching();
+  }
+
+  void track(Job job, {String? project, String? action, String? createdBy}) {
+    if (_disposed) return;
+    if (_failed) throw StateError('Job watch unavailable; refresh required');
+    final tracked = job.verifyContext(
+      project: project, action: action, createdBy: createdBy);
+    if (!tracked.isInFlight) return;
+    final previous = _trackedJobs[tracked.id];
+    _trackedJobs[tracked.id] = previous == null
+        ? tracked : mergeJobSnapshots(previous, tracked);
+    state = AsyncData(_merge(state.value ?? const []));
+    _cursor = null;
+    if (!_initializing) _request?.cancel();
+    _startWatching();
+  }
+
+  List<Job> _accept(List<Job> jobs) {
+    for (final job in jobs) {
+      final waiter = _waiters[job.id];
+      waiter?.update(job);
+      if (!job.isInFlight) {
+        _trackedJobs.remove(job.id);
+        waiter?.complete(job);
+        _waiters.remove(job.id);
+      } else if (_trackedJobs.containsKey(job.id)) {
+        _trackedJobs[job.id] = mergeJobSnapshots(_trackedJobs[job.id]!, job);
+      }
+    }
+    return _merge(jobs.where((job) => job.isInFlight));
+  }
+
+  List<Job> _merge(Iterable<Job> jobs) {
+    final merged = {for (final job in jobs) job.id: job};
+    for (final tracked in _trackedJobs.values) {
+      final remote = merged[tracked.id];
+      merged[tracked.id] = remote == null
+          ? tracked : mergeJobSnapshots(remote, tracked);
+    }
+    final result = merged.values.toList();
+    result.sort((a, b) => (a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0))
+        .compareTo(b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0)));
+    return result;
+  }
+
+  void _failWaiters(Object error, StackTrace stack) {
+    for (final waiter in _waiters.values) {
+      if (!waiter.completer.isCompleted) waiter.completer.completeError(error, stack);
+    }
+  }
+
+  Future<JobWaitResult> waitFor(Job job, {
+    String? project, String? action, String? createdBy,
+    Duration timeout = const Duration(minutes: 30),
     void Function(Map<String, dynamic> data)? onUpdate,
   }) async {
-    final effectiveCreatedBy = createdBy ?? Session().myId;
-    track(
-      job,
-      project: project,
-      action: action,
-      createdBy: effectiveCreatedBy,
-    );
+    final verified = job.verifyContext(project: project, action: action,
+        createdBy: createdBy ?? Session().myId);
+    if (!verified.isInFlight) return _result(verified);
+    if (_failed || state.hasError) throw state.error ?? StateError('Job watch unavailable');
+    if (_waiters.containsKey(job.id)) throw StateError('Job already being awaited');
+    final waiter = _JobWaiter(project, action, createdBy ?? Session().myId, onUpdate);
+    _waiters[job.id] = waiter;
     try {
-      return await ProjectService.waitForJob(
-        job.id,
-        every: every,
-        max: max,
-        onUpdate: (data) {
-          updateFromJson(
-            data,
-            project: project,
-            action: action,
-            createdBy: effectiveCreatedBy,
-          );
-          onUpdate?.call(data);
-        },
-      );
+      track(verified);
+      final terminal = await waiter.completer.future.timeout(timeout);
+      return _result(terminal);
     } finally {
-      finish(job.id);
+      _waiters.remove(job.id);
     }
+  }
+}
+
+JobWaitResult _result(Job job) => JobWaitResult(
+  ok: job.status == 'done', status: job.status, message: job.message,
+  action: job.action, progress: job.progress, currentStep: job.currentStep);
+
+class _JobWaiter {
+  _JobWaiter(this.project, this.action, this.createdBy, this.onUpdate);
+  final String? project;
+  final String? action;
+  final String? createdBy;
+  final void Function(Map<String, dynamic>)? onUpdate;
+  final completer = Completer<Job>();
+
+  void update(Job job) {
+    job.verifyContext(project: project, action: action, createdBy: createdBy);
+    onUpdate?.call({
+      'job_id': job.id, 'project': job.project, 'public_ref': job.publicRef,
+      'project_uuid': job.projectUuid, 'tenant_uuid': job.tenantUuid,
+      'created_by': job.createdBy, 'action': job.action, 'status': job.status,
+      'message': job.message, 'progress': job.progress, 'current_step': job.currentStep,
+    });
+  }
+
+  void complete(Job job) {
+    if (!completer.isCompleted) completer.complete(job);
   }
 }
 

@@ -39,7 +39,7 @@ def run(config):
             page.on('request', lambda request: mutations.append(request.url)
                     if request.method in {'POST', 'PATCH', 'DELETE'} and
                     urlsplit(request.url).path.startswith('/api/projects') else None)
-            page.goto(origin, wait_until='networkidle', timeout=60000)
+            page.goto(origin, wait_until='domcontentloaded', timeout=60000)
             enable_accessibility(page)
             payload = page.evaluate("""async () => {
                 const response = await fetch('/api/projects');
@@ -67,7 +67,7 @@ def run(config):
                 page.screenshot(path=str(output / 'favorites.png'), full_page=True)
             saved = page.evaluate("localStorage.getItem('flutter.project_favorite_ids')")
             assert json.loads(saved) == [project['project_uuid']]
-            page.reload(wait_until='networkidle', timeout=60000)
+            page.reload(wait_until='domcontentloaded', timeout=60000)
             enable_accessibility(page)
             page.get_by_role('button', name='Remover dos favoritos').wait_for(state='visible', timeout=60000)
             assert page.evaluate("localStorage.getItem('flutter.project_favorite_ids')") == saved

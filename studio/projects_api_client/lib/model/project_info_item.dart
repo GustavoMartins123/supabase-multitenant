@@ -15,13 +15,14 @@ class ProjectInfoItem {
   ProjectInfoItem({
     required this.displayName,
     required this.fileSizeLimit,
-    required this.id,
     required this.isCallerProjectAdmin,
     required this.name,
+    required this.projectUuid,
     required this.publicRef,
     required this.runningContainers,
     required this.status,
     required this.storageLimitToken,
+    required this.tenantUuid,
     required this.totalContainers,
   });
 
@@ -29,11 +30,11 @@ class ProjectInfoItem {
 
   String fileSizeLimit;
 
-  String id;
-
   bool isCallerProjectAdmin;
 
   String name;
+
+  String projectUuid;
 
   String publicRef;
 
@@ -43,19 +44,22 @@ class ProjectInfoItem {
 
   String storageLimitToken;
 
+  String? tenantUuid;
+
   int totalContainers;
 
   @override
   bool operator ==(Object other) => identical(this, other) || other is ProjectInfoItem &&
     other.displayName == displayName &&
     other.fileSizeLimit == fileSizeLimit &&
-    other.id == id &&
     other.isCallerProjectAdmin == isCallerProjectAdmin &&
     other.name == name &&
+    other.projectUuid == projectUuid &&
     other.publicRef == publicRef &&
     other.runningContainers == runningContainers &&
     other.status == status &&
     other.storageLimitToken == storageLimitToken &&
+    other.tenantUuid == tenantUuid &&
     other.totalContainers == totalContainers;
 
   @override
@@ -63,29 +67,35 @@ class ProjectInfoItem {
     // ignore: unnecessary_parenthesis
     (displayName.hashCode) +
     (fileSizeLimit.hashCode) +
-    (id.hashCode) +
     (isCallerProjectAdmin.hashCode) +
     (name.hashCode) +
+    (projectUuid.hashCode) +
     (publicRef.hashCode) +
     (runningContainers.hashCode) +
     (status.hashCode) +
     (storageLimitToken.hashCode) +
+    (tenantUuid == null ? 0 : tenantUuid!.hashCode) +
     (totalContainers.hashCode);
 
   @override
-  String toString() => 'ProjectInfoItem[displayName=$displayName, fileSizeLimit=$fileSizeLimit, id=$id, isCallerProjectAdmin=$isCallerProjectAdmin, name=$name, publicRef=$publicRef, runningContainers=$runningContainers, status=$status, storageLimitToken=$storageLimitToken, totalContainers=$totalContainers]';
+  String toString() => 'ProjectInfoItem[displayName=$displayName, fileSizeLimit=$fileSizeLimit, isCallerProjectAdmin=$isCallerProjectAdmin, name=$name, projectUuid=$projectUuid, publicRef=$publicRef, runningContainers=$runningContainers, status=$status, storageLimitToken=$storageLimitToken, tenantUuid=$tenantUuid, totalContainers=$totalContainers]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
       json[r'display_name'] = this.displayName;
       json[r'file_size_limit'] = this.fileSizeLimit;
-      json[r'id'] = this.id;
       json[r'is_caller_project_admin'] = this.isCallerProjectAdmin;
       json[r'name'] = this.name;
+      json[r'project_uuid'] = this.projectUuid;
       json[r'public_ref'] = this.publicRef;
       json[r'running_containers'] = this.runningContainers;
       json[r'status'] = this.status;
       json[r'storage_limit_token'] = this.storageLimitToken;
+    if (this.tenantUuid != null) {
+      json[r'tenant_uuid'] = this.tenantUuid;
+    } else {
+      json[r'tenant_uuid'] = null;
+    }
       json[r'total_containers'] = this.totalContainers;
     return json;
   }
@@ -97,27 +107,24 @@ class ProjectInfoItem {
     if (value is Map) {
       final json = value.cast<String, dynamic>();
 
-      // Ensure that the map contains the required keys.
-      // Note 1: the values aren't checked for validity beyond being non-null.
-      // Note 2: this code is stripped in release mode!
-      assert(() {
-        requiredKeys.forEach((key) {
-          assert(json.containsKey(key), 'Required key "ProjectInfoItem[$key]" is missing from JSON.');
-          assert(json[key] != null, 'Required key "ProjectInfoItem[$key]" has a null value in JSON.');
-        });
-        return true;
-      }());
+      const nullableKeys = <String>{r'tenant_uuid'};
+      for (final key in requiredKeys) {
+        if (!json.containsKey(key) || (json[key] == null && !nullableKeys.contains(key))) {
+          throw FormatException('Invalid required field: $key');
+        }
+      }
 
       return ProjectInfoItem(
         displayName: mapValueOfType<String>(json, r'display_name')!,
         fileSizeLimit: mapValueOfType<String>(json, r'file_size_limit')!,
-        id: mapValueOfType<String>(json, r'id')!,
         isCallerProjectAdmin: mapValueOfType<bool>(json, r'is_caller_project_admin')!,
         name: mapValueOfType<String>(json, r'name')!,
+        projectUuid: mapValueOfType<String>(json, r'project_uuid')!,
         publicRef: mapValueOfType<String>(json, r'public_ref')!,
         runningContainers: mapValueOfType<int>(json, r'running_containers')!,
         status: mapValueOfType<String>(json, r'status')!,
         storageLimitToken: mapValueOfType<String>(json, r'storage_limit_token')!,
+        tenantUuid: mapValueOfType<String>(json, r'tenant_uuid'),
         totalContainers: mapValueOfType<int>(json, r'total_containers')!,
       );
     }
@@ -168,13 +175,14 @@ class ProjectInfoItem {
   static const requiredKeys = <String>{
     'display_name',
     'file_size_limit',
-    'id',
     'is_caller_project_admin',
     'name',
+    'project_uuid',
     'public_ref',
     'running_containers',
     'status',
     'storage_limit_token',
+    'tenant_uuid',
     'total_containers',
   };
 }

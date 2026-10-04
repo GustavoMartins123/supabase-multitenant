@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../models/project_identity.dart';
 
 final favoritesProvider = AsyncNotifierProvider<FavoritesNotifier, Set<String>>(
   FavoritesNotifier.new,
@@ -18,8 +19,7 @@ class FavoritesNotifier extends AsyncNotifier<Set<String>> {
   }
 
   void _validateProjectUuid(String projectUuid) {
-    if (!RegExp(
-            r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+    if (!RegExp(canonicalUuidPattern)
         .hasMatch(projectUuid)) {
       throw const FormatException('Favorito sem UUID de projeto canonico');
     }

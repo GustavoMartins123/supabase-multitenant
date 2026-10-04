@@ -31,7 +31,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = CollaborationApi();
 final projectRef = projectRef_example; // String |
-final projectTagAssign = ProjectTagAssign(); // ProjectTagAssign | 
+final projectTagAssign = ProjectTagAssign(); // ProjectTagAssign |
 
 try {
     final result = api_instance.assignProjectTagApiProjectsProjectRefTagsPost(projectRef, projectTagAssign);
@@ -46,7 +46,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **projectTagAssign** | [**ProjectTagAssign**](ProjectTagAssign.md)|  | 
+ **projectTagAssign** | [**ProjectTagAssign**](ProjectTagAssign.md)|  |
 
 ### Return type
 
@@ -74,7 +74,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = CollaborationApi();
 final projectRef = projectRef_example; // String |
-final projectHintCreate = ProjectHintCreate(); // ProjectHintCreate | 
+final projectHintCreate = ProjectHintCreate(); // ProjectHintCreate |
 
 try {
     final result = api_instance.createProjectHintApiProjectsProjectRefHintsPost(projectRef, projectHintCreate);
@@ -89,7 +89,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **projectHintCreate** | [**ProjectHintCreate**](ProjectHintCreate.md)|  | 
+ **projectHintCreate** | [**ProjectHintCreate**](ProjectHintCreate.md)|  |
 
 ### Return type
 
@@ -117,7 +117,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = CollaborationApi();
 final projectRef = projectRef_example; // String |
-final projectNoteCreate = ProjectNoteCreate(); // ProjectNoteCreate | 
+final projectNoteCreate = ProjectNoteCreate(); // ProjectNoteCreate |
 
 try {
     final result = api_instance.createProjectNoteApiProjectsProjectRefNotesPost(projectRef, projectNoteCreate);
@@ -132,7 +132,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **projectNoteCreate** | [**ProjectNoteCreate**](ProjectNoteCreate.md)|  | 
+ **projectNoteCreate** | [**ProjectNoteCreate**](ProjectNoteCreate.md)|  |
 
 ### Return type
 
@@ -160,7 +160,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = CollaborationApi();
 final projectRef = projectRef_example; // String |
-final projectThreadMessageCreate = ProjectThreadMessageCreate(); // ProjectThreadMessageCreate | 
+final projectThreadMessageCreate = ProjectThreadMessageCreate(); // ProjectThreadMessageCreate |
 
 try {
     final result = api_instance.createProjectThreadMessageApiProjectsProjectRefThreadMessagesPost(projectRef, projectThreadMessageCreate);
@@ -175,7 +175,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **projectThreadMessageCreate** | [**ProjectThreadMessageCreate**](ProjectThreadMessageCreate.md)|  | 
+ **projectThreadMessageCreate** | [**ProjectThreadMessageCreate**](ProjectThreadMessageCreate.md)|  |
 
 ### Return type
 
@@ -203,7 +203,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = CollaborationApi();
 final projectRef = projectRef_example; // String |
-final noteId = noteId_example; // String | 
+final noteId = noteId_example; // String |
 
 try {
     final result = api_instance.deleteProjectNoteApiProjectsProjectRefNotesNoteIdDelete(projectRef, noteId);
@@ -218,7 +218,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **noteId** | **String**|  | 
+ **noteId** | **String**|  |
 
 ### Return type
 
@@ -287,7 +287,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = CollaborationApi();
 final projectRef = projectRef_example; // String |
-final tagId = tagId_example; // String | 
+final tagId = tagId_example; // String |
 
 try {
     final result = api_instance.unassignProjectTagApiProjectsProjectRefTagsTagIdDelete(projectRef, tagId);
@@ -302,7 +302,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **tagId** | **String**|  | 
+ **tagId** | **String**|  |
 
 ### Return type
 
@@ -330,8 +330,8 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = CollaborationApi();
 final projectRef = projectRef_example; // String |
-final hintId = hintId_example; // String | 
-final projectHintStatusUpdate = ProjectHintStatusUpdate(); // ProjectHintStatusUpdate | 
+final hintId = hintId_example; // String |
+final projectHintStatusUpdate = ProjectHintStatusUpdate(); // ProjectHintStatusUpdate |
 
 try {
     final result = api_instance.updateProjectHintStatusApiProjectsProjectRefHintsHintIdPut(projectRef, hintId, projectHintStatusUpdate);
@@ -346,8 +346,8 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **hintId** | **String**|  | 
- **projectHintStatusUpdate** | [**ProjectHintStatusUpdate**](ProjectHintStatusUpdate.md)|  | 
+ **hintId** | **String**|  |
+ **projectHintStatusUpdate** | [**ProjectHintStatusUpdate**](ProjectHintStatusUpdate.md)|  |
 
 ### Return type
 
@@ -375,8 +375,8 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = CollaborationApi();
 final projectRef = projectRef_example; // String |
-final notificationId = notificationId_example; // String | 
-final projectNotificationRead = ProjectNotificationRead(); // ProjectNotificationRead | 
+final notificationId = notificationId_example; // String |
+final projectNotificationRead = ProjectNotificationRead(); // ProjectNotificationRead |
 
 try {
     final result = api_instance.updateProjectNotificationReadStateApiProjectsProjectRefNotificationsNotificationIdPatch(projectRef, notificationId, projectNotificationRead);
@@ -391,8 +391,8 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **notificationId** | **String**|  | 
- **projectNotificationRead** | [**ProjectNotificationRead**](ProjectNotificationRead.md)|  | 
+ **notificationId** | **String**|  |
+ **projectNotificationRead** | [**ProjectNotificationRead**](ProjectNotificationRead.md)|  |
 
 ### Return type
 

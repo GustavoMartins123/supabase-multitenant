@@ -258,6 +258,8 @@ class ApiClient {
           return JobResponse.fromJson(value);
         case 'JobRetryResponse':
           return JobRetryResponse.fromJson(value);
+        case 'JobWatchResponse':
+          return JobWatchResponse.fromJson(value);
         case 'KeyVersionResponse':
           return KeyVersionResponse.fromJson(value);
         case 'ListRestorePointsResponse':

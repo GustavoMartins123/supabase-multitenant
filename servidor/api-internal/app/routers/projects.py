@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 import asyncpg
 
 from app.database import get_pool
+from app.identity_schemas import ProjectIdentity, JobIdentity
 from app.dependencies import (
     ensure_project_member_access,
     get_public_project_row,
@@ -75,14 +76,9 @@ from app.validation import validate_project_id, validate_project_ref
 router = APIRouter(tags=["projects"])
 
 
-class ProjectListItem(BaseModel):
+class ProjectListItem(ProjectIdentity):
     model_config = ConfigDict(extra="allow")
 
-    project_uuid: str
-    tenant_uuid: str | None
-    name: str
-    public_ref: str = Field(pattern=r"^[a-z]{20}$", min_length=20, max_length=20)
-    display_name: str
     file_size_limit: str
     storage_limit_token: str
     internal_token_expires_at: int | None
@@ -99,14 +95,9 @@ class ProjectListItem(BaseModel):
     opaque_api_key_slot_count: int
 
 
-class QueuedJobResponse(BaseModel):
+class QueuedJobResponse(JobIdentity):
     model_config = ConfigDict(extra="allow")
 
-    job_id: str
-    project: str
-    project_uuid: str | None
-    tenant_uuid: str | None
-    created_by: str | None
     action: str
     status: str
     message: str | None

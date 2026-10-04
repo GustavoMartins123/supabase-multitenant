@@ -118,7 +118,7 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
     }
   }
 
-  Future<void> _showDuplicateDialog(String originalProjectName) async {
+  Future<void> _showDuplicateDialog(String publicRef, String originalProjectName) async {
     final Map<String, dynamic>? newProject =
         await showDialog<Map<String, dynamic>>(
       context: context,
@@ -129,7 +129,7 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
     if (!mounted) return;
     if (newProject?['name'] != null && newProject?['name'].trim().isNotEmpty) {
       await _duplicateAndWait(
-        originalProjectName,
+        publicRef,
         newProject?['name'].trim(),
         newProject?['copy_data'] ?? false,
       );
@@ -597,7 +597,7 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
       onTap: project['is_loading'] == true || project['active_job'] != null
           ? () {}
           : () => _openProject(project['public_ref']),
-      onDuplicate: () => _showDuplicateDialog(project['public_ref']),
+      onDuplicate: () => _showDuplicateDialog(project['public_ref'] as String, project['name'] as String),
       onToggleFavorite: () => ref
           .read(favoritesProvider.notifier)
           .toggleFavorite(project['project_uuid']),

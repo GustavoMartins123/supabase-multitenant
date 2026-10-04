@@ -198,6 +198,11 @@ def execute(executor_image: str, postgres_image: str) -> None:
             "tests/integration/fixtures/project_public_ref.py",
         ))
         print(docker(
+            *common, "-e", f"DB_DSN=postgresql://postgres:{password}@db:5432/postgres",
+            "--entrypoint", "python", executor_image,
+            "tests/integration/fixtures/job_watch.py",
+        ))
+        print(docker(
             *common, "-e", f"CONTROL_PLANE_TEST_DSN=postgresql://postgres:{password}@db:5432/postgres",
             "--entrypoint", "python", executor_image,
             "-m", "unittest", "discover", "-s", "tests/smoke",

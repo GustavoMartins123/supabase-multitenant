@@ -36,8 +36,8 @@ Execute Project Function
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectInsightsApi();
-final ref = ref_example; // String | 
-final requestBody = Map<String, Object>(); // Map<String, Object> | 
+final ref = ref_example; // String |
+final requestBody = Map<String, Object>(); // Map<String, Object> |
 
 try {
     final result = api_instance.executeProjectFunctionApiProjectsRefExecuteFunctionPost(ref, requestBody);
@@ -51,8 +51,8 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **ref** | **String**|  | 
- **requestBody** | [**Map<String, Object>**](Object.md)|  | 
+ **ref** | **String**|  |
+ **requestBody** | [**Map<String, Object>**](Object.md)|  |
 
 ### Return type
 
@@ -79,7 +79,7 @@ Get Project Ai Functions
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectInsightsApi();
-final ref = ref_example; // String | 
+final ref = ref_example; // String |
 
 try {
     final result = api_instance.getProjectAiFunctionsApiProjectsRefFunctionsGet(ref);
@@ -93,7 +93,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **ref** | **String**|  | 
+ **ref** | **String**|  |
 
 ### Return type
 
@@ -164,9 +164,9 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectInsightsApi();
 final projectRef = projectRef_example; // String |
-final period = period_example; // String | 
-final start = 2013-10-20T19:20:30+01:00; // DateTime | 
-final end = 2013-10-20T19:20:30+01:00; // DateTime | 
+final period = period_example; // String |
+final start = 2013-10-20T19:20:30+01:00; // DateTime |
+final end = 2013-10-20T19:20:30+01:00; // DateTime |
 
 try {
     final result = api_instance.getProjectUserTelemetryApiProjectsProjectRefTelemetryUsersGet(projectRef, period, start, end);
@@ -182,8 +182,8 @@ Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
  **period** | **String**|  | [optional] [default to '24h']
- **start** | **DateTime**|  | [optional] 
- **end** | **DateTime**|  | [optional] 
+ **start** | **DateTime**|  | [optional]
+ **end** | **DateTime**|  | [optional]
 
 ### Return type
 
@@ -210,7 +210,7 @@ Get Projects For User
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectInsightsApi();
-final requestBody = Map<String, String>(); // Map<String, String> | 
+final requestBody = Map<String, String>(); // Map<String, String> |
 
 try {
     final result = api_instance.getProjectsForUserApiAdminProjectsInfoPost(requestBody);
@@ -224,7 +224,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **requestBody** | [**Map<String, String>**](String.md)|  | 
+ **requestBody** | [**Map<String, String>**](String.md)|  |
 
 ### Return type
 
@@ -294,8 +294,8 @@ Proxy Project Meta
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectInsightsApi();
-final ref = ref_example; // String | 
-final metaPath = metaPath_example; // String | 
+final ref = ref_example; // String |
+final metaPath = metaPath_example; // String |
 
 try {
     final result = api_instance.proxyProjectMetaDelete(ref, metaPath);
@@ -309,7 +309,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **ref** | **String**|  | 
+ **ref** | **String**|  |
  **metaPath** | **String**|  | [optional] [default to '']
 
 ### Return type
@@ -337,8 +337,8 @@ Proxy Project Meta
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectInsightsApi();
-final ref = ref_example; // String | 
-final metaPath = metaPath_example; // String | 
+final ref = ref_example; // String |
+final metaPath = metaPath_example; // String |
 
 try {
     final result = api_instance.proxyProjectMetaGet(ref, metaPath);
@@ -352,7 +352,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **ref** | **String**|  | 
+ **ref** | **String**|  |
  **metaPath** | **String**|  | [optional] [default to '']
 
 ### Return type
@@ -380,8 +380,8 @@ Proxy Project Meta
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectInsightsApi();
-final ref = ref_example; // String | 
-final metaPath = metaPath_example; // String | 
+final ref = ref_example; // String |
+final metaPath = metaPath_example; // String |
 
 try {
     final result = api_instance.proxyProjectMetaPatch(ref, metaPath);
@@ -395,7 +395,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **ref** | **String**|  | 
+ **ref** | **String**|  |
  **metaPath** | **String**|  | [optional] [default to '']
 
 ### Return type
@@ -423,8 +423,8 @@ Proxy Project Meta
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectInsightsApi();
-final ref = ref_example; // String | 
-final metaPath = metaPath_example; // String | 
+final ref = ref_example; // String |
+final metaPath = metaPath_example; // String |
 
 try {
     final result = api_instance.proxyProjectMetaPathDelete(ref, metaPath);
@@ -438,8 +438,8 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **ref** | **String**|  | 
- **metaPath** | **String**|  | 
+ **ref** | **String**|  |
+ **metaPath** | **String**|  |
 
 ### Return type
 
@@ -466,8 +466,8 @@ Proxy Project Meta
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectInsightsApi();
-final ref = ref_example; // String | 
-final metaPath = metaPath_example; // String | 
+final ref = ref_example; // String |
+final metaPath = metaPath_example; // String |
 
 try {
     final result = api_instance.proxyProjectMetaPathGet(ref, metaPath);
@@ -481,8 +481,8 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **ref** | **String**|  | 
- **metaPath** | **String**|  | 
+ **ref** | **String**|  |
+ **metaPath** | **String**|  |
 
 ### Return type
 
@@ -509,8 +509,8 @@ Proxy Project Meta
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectInsightsApi();
-final ref = ref_example; // String | 
-final metaPath = metaPath_example; // String | 
+final ref = ref_example; // String |
+final metaPath = metaPath_example; // String |
 
 try {
     final result = api_instance.proxyProjectMetaPathPatch(ref, metaPath);
@@ -524,8 +524,8 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **ref** | **String**|  | 
- **metaPath** | **String**|  | 
+ **ref** | **String**|  |
+ **metaPath** | **String**|  |
 
 ### Return type
 
@@ -552,8 +552,8 @@ Proxy Project Meta
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectInsightsApi();
-final ref = ref_example; // String | 
-final metaPath = metaPath_example; // String | 
+final ref = ref_example; // String |
+final metaPath = metaPath_example; // String |
 
 try {
     final result = api_instance.proxyProjectMetaPathPost(ref, metaPath);
@@ -567,8 +567,8 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **ref** | **String**|  | 
- **metaPath** | **String**|  | 
+ **ref** | **String**|  |
+ **metaPath** | **String**|  |
 
 ### Return type
 
@@ -595,8 +595,8 @@ Proxy Project Meta
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectInsightsApi();
-final ref = ref_example; // String | 
-final metaPath = metaPath_example; // String | 
+final ref = ref_example; // String |
+final metaPath = metaPath_example; // String |
 
 try {
     final result = api_instance.proxyProjectMetaPost(ref, metaPath);
@@ -610,7 +610,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **ref** | **String**|  | 
+ **ref** | **String**|  |
  **metaPath** | **String**|  | [optional] [default to '']
 
 ### Return type
@@ -639,7 +639,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectInsightsApi();
 final projectRef = projectRef_example; // String |
-final transferBody = TransferBody(); // TransferBody | 
+final transferBody = TransferBody(); // TransferBody |
 
 try {
     final result = api_instance.transferProjectApiProjectsProjectRefTransferPost(projectRef, transferBody);
@@ -654,7 +654,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **transferBody** | [**TransferBody**](TransferBody.md)|  | 
+ **transferBody** | [**TransferBody**](TransferBody.md)|  |
 
 ### Return type
 

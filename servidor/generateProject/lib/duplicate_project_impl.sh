@@ -47,20 +47,6 @@ PROJECT_UUID="$(echo "$PROJECT_UUID" | tr '[:upper:]' '[:lower:]')"
 [[ "$NEW_PROJECT" =~ ^[a-z_][a-z0-9_]{2,39}$ ]] || die "Novo projeto invalido"
 storage_validate_tenant_id "$PROJECT_UUID" || die "project_uuid invalido"
 
-RESERVED=(default select from where insert update delete table create drop join group order limit into index view trigger procedure function database schema primary foreign key constraint unique null not and or in like between exists having union inner left right outer cross on as case when then else end if while for begin commit rollback)
-for word in "${RESERVED[@]}"; do
-  [[ "$NEW_PROJECT" != "$word" ]] || die "'$NEW_PROJECT' e palavra reservada"
-done
-
-RESERVED_ROUTES=(admin phpmyadmin xmlrpc actuator)
-for word in "${RESERVED_ROUTES[@]}"; do
-  [[ "$NEW_PROJECT" != "$word" ]] || die "'$NEW_PROJECT' e rota reservada"
-done
-
-RESERVED_API=(internal)
-for word in "${RESERVED_API[@]}"; do
-  [[ "$NEW_PROJECT" != "$word" ]] || die "'$NEW_PROJECT' e namespace reservado da API"
-done
 
 set -a
 source "$PROJECT_ROOT/.env"

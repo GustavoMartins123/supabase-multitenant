@@ -232,7 +232,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
                 job,
                 project: widget.ref,
                 action: 'delete',
-                max: 400,
+                timeout: const Duration(minutes: 20),
               ),
     );
     if (sucesso && mounted) Navigator.of(context).pop(widget.ref);

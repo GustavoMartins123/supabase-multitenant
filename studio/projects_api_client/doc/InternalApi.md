@@ -30,7 +30,7 @@ Enc Key
 import 'package:projects_api_client/api.dart';
 
 final api_instance = InternalApi();
-final ref = ref_example; // String | 
+final ref = ref_example; // String |
 
 try {
     final result = api_instance.encKeyApiProjectsInternalEncKeyRefGet(ref);
@@ -44,7 +44,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **ref** | **String**|  | 
+ **ref** | **String**|  |
 
 ### Return type
 
@@ -114,7 +114,7 @@ Resolve and authorize the project carried by the Studio URL.
 import 'package:projects_api_client/api.dart';
 
 final api_instance = InternalApi();
-final ref = ref_example; // String | 
+final ref = ref_example; // String |
 
 try {
     final result = api_instance.getStudioProjectContextApiProjectsInternalStudioContextRefGet(ref);
@@ -128,7 +128,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **ref** | **String**|  | 
+ **ref** | **String**|  |
 
 ### Return type
 
@@ -155,7 +155,7 @@ Project Key Version
 import 'package:projects_api_client/api.dart';
 
 final api_instance = InternalApi();
-final ref = ref_example; // String | 
+final ref = ref_example; // String |
 
 try {
     final result = api_instance.projectKeyVersionApiProjectsInternalKeyVersionRefGet(ref);
@@ -169,7 +169,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **ref** | **String**|  | 
+ **ref** | **String**|  |
 
 ### Return type
 
@@ -196,7 +196,7 @@ Proxy Global Analytics
 import 'package:projects_api_client/api.dart';
 
 final api_instance = InternalApi();
-final analyticsPath = analyticsPath_example; // String | 
+final analyticsPath = analyticsPath_example; // String |
 
 try {
     final result = api_instance.proxyGlobalAnalyticsDelete(analyticsPath);
@@ -210,7 +210,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **analyticsPath** | **String**|  | 
+ **analyticsPath** | **String**|  |
 
 ### Return type
 
@@ -237,7 +237,7 @@ Proxy Global Analytics
 import 'package:projects_api_client/api.dart';
 
 final api_instance = InternalApi();
-final analyticsPath = analyticsPath_example; // String | 
+final analyticsPath = analyticsPath_example; // String |
 
 try {
     final result = api_instance.proxyGlobalAnalyticsGet(analyticsPath);
@@ -251,7 +251,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **analyticsPath** | **String**|  | 
+ **analyticsPath** | **String**|  |
 
 ### Return type
 
@@ -278,7 +278,7 @@ Proxy Global Analytics
 import 'package:projects_api_client/api.dart';
 
 final api_instance = InternalApi();
-final analyticsPath = analyticsPath_example; // String | 
+final analyticsPath = analyticsPath_example; // String |
 
 try {
     final result = api_instance.proxyGlobalAnalyticsPost(analyticsPath);
@@ -292,7 +292,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **analyticsPath** | **String**|  | 
+ **analyticsPath** | **String**|  |
 
 ### Return type
 
@@ -319,7 +319,7 @@ Proxy Global Analytics
 import 'package:projects_api_client/api.dart';
 
 final api_instance = InternalApi();
-final analyticsPath = analyticsPath_example; // String | 
+final analyticsPath = analyticsPath_example; // String |
 
 try {
     final result = api_instance.proxyGlobalAnalyticsPut(analyticsPath);
@@ -333,7 +333,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **analyticsPath** | **String**|  | 
+ **analyticsPath** | **String**|  |
 
 ### Return type
 

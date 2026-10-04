@@ -68,7 +68,7 @@ class CollaborationApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'AssignProjectTagResponse',) as AssignProjectTagResponse;
-    
+
     }
     return null;
   }
@@ -125,7 +125,7 @@ class CollaborationApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'CreateProjectHintResponse',) as CreateProjectHintResponse;
-    
+
     }
     return null;
   }
@@ -182,7 +182,7 @@ class CollaborationApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'CreateProjectNoteResponse',) as CreateProjectNoteResponse;
-    
+
     }
     return null;
   }
@@ -239,7 +239,7 @@ class CollaborationApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'CreateThreadMessageResponse',) as CreateThreadMessageResponse;
-    
+
     }
     return null;
   }
@@ -297,7 +297,7 @@ class CollaborationApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'DeleteProjectNoteResponse',) as DeleteProjectNoteResponse;
-    
+
     }
     return null;
   }
@@ -350,7 +350,7 @@ class CollaborationApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'GetProjectCollaborationResponse',) as GetProjectCollaborationResponse;
-    
+
     }
     return null;
   }
@@ -408,7 +408,7 @@ class CollaborationApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'UnassignProjectTagResponse',) as UnassignProjectTagResponse;
-    
+
     }
     return null;
   }
@@ -470,7 +470,7 @@ class CollaborationApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'UpdateProjectHintResponse',) as UpdateProjectHintResponse;
-    
+
     }
     return null;
   }
@@ -532,7 +532,7 @@ class CollaborationApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'UpdateNotificationReadResponse',) as UpdateNotificationReadResponse;
-    
+
     }
     return null;
   }

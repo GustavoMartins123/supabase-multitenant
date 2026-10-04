@@ -9,9 +9,9 @@ import 'package:projects_api_client/api.dart';
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **keyIds** | **List<String>** |  | [default to const []]
-**next** | **String** |  | 
-**project** | **String** |  | 
-**status** | **String** |  | 
+**next** | **String** |  |
+**project** | **String** |  |
+**status** | **String** |  |
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

@@ -14,7 +14,7 @@ Name | Type | Description | Notes
 **members** | [**List<CollaborationMemberItem>**](CollaborationMemberItem.md) |  | [default to const []]
 **notes** | [**List<CollaborationNoteItem>**](CollaborationNoteItem.md) |  | [default to const []]
 **notifications** | [**List<CollaborationNotificationItem>**](CollaborationNotificationItem.md) |  | [default to const []]
-**project** | **String** |  | 
+**project** | **String** |  |
 **threadMessages** | [**List<CollaborationThreadItem>**](CollaborationThreadItem.md) |  | [default to const []]
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)

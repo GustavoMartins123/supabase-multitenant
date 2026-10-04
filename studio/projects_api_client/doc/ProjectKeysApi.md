@@ -67,7 +67,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectKeysApi();
 final projectRef = projectRef_example; // String |
-final automaticKeyRotationUpdate = AutomaticKeyRotationUpdate(); // AutomaticKeyRotationUpdate | 
+final automaticKeyRotationUpdate = AutomaticKeyRotationUpdate(); // AutomaticKeyRotationUpdate |
 
 try {
     final result = api_instance.updateAutomaticKeyRotationApiProjectsProjectRefAutomaticKeyRotationPut(projectRef, automaticKeyRotationUpdate);
@@ -82,7 +82,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **automaticKeyRotationUpdate** | [**AutomaticKeyRotationUpdate**](AutomaticKeyRotationUpdate.md)|  | 
+ **automaticKeyRotationUpdate** | [**AutomaticKeyRotationUpdate**](AutomaticKeyRotationUpdate.md)|  |
 
 ### Return type
 

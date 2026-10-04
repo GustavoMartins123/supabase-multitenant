@@ -25,7 +25,7 @@ Create Project
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectsApi();
-final newProject = NewProject(); // NewProject | 
+final newProject = NewProject(); // NewProject |
 
 try {
     final result = api_instance.createProjectApiProjectsPost(newProject);
@@ -39,7 +39,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **newProject** | [**NewProject**](NewProject.md)|  | 
+ **newProject** | [**NewProject**](NewProject.md)|  |
 
 ### Return type
 
@@ -67,7 +67,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectsApi();
 final projectRef = projectRef_example; // String |
-final xStepUpToken = xStepUpToken_example; // String | 
+final xStepUpToken = xStepUpToken_example; // String |
 
 try {
     final result = api_instance.deleteProjectApiProjectsProjectRefDelete(projectRef, xStepUpToken);
@@ -82,7 +82,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **xStepUpToken** | **String**|  | [optional] 
+ **xStepUpToken** | **String**|  | [optional]
 
 ### Return type
 
@@ -111,7 +111,7 @@ Duplica um projeto existente. - Valida acesso do usuário ao projeto original - 
 import 'package:projects_api_client/api.dart';
 
 final api_instance = ProjectsApi();
-final duplicateProject = DuplicateProject(); // DuplicateProject | 
+final duplicateProject = DuplicateProject(); // DuplicateProject |
 
 try {
     final result = api_instance.duplicateProjectApiProjectsDuplicatePost(duplicateProject);
@@ -125,7 +125,7 @@ try {
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **duplicateProject** | [**DuplicateProject**](DuplicateProject.md)|  | 
+ **duplicateProject** | [**DuplicateProject**](DuplicateProject.md)|  |
 
 ### Return type
 

@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:projects_api_client/api.dart' as generated;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/job.dart';
+import '../models/project_identity.dart';
 import '../models/project_collaboration.dart';
 import '../models/restore_point.dart';
 import '../models/user_models.dart';
@@ -132,19 +133,7 @@ class ProjectRepository {
         );
       }
       final project = Map<String, dynamic>.from(item);
-      final projectUuid = project['project_uuid'];
-      final publicRef = project['public_ref'];
-      final displayName = project['display_name'];
-      if (projectUuid is! String ||
-          !RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
-              .hasMatch(projectUuid) ||
-          publicRef is! String ||
-          !RegExp(r'^[a-z]{20}$').hasMatch(publicRef) ||
-          displayName is! String ||
-          displayName.trim().isEmpty ||
-          displayName.length > 80) {
-        throw const FormatException('Projeto sem identidade canonica');
-      }
+      ProjectIdentity.fromJson(project);
       projects.add(project);
     }
     return projects;
@@ -930,7 +919,7 @@ class ProjectRepository {
     final newRef = data['new_ref'];
     if (data['old_ref'] != ref ||
         newRef is! String ||
-        !RegExp(r'^[a-z]{20}$').hasMatch(newRef) ||
+        !RegExp(publicRefPattern).hasMatch(newRef) ||
         newRef == ref) {
       throw const FormatException('Referencia publica da rotacao invalida');
     }

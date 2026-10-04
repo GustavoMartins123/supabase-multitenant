@@ -9,6 +9,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 from app.control_plane_service import audit_studio_action
 from app.database import get_pool
+from app.identity_schemas import ProjectIdentity, JobIdentity
 from app.dependencies import audit_project_member_change, ensure_project_admin_access, ensure_project_member_access, get_project_role, get_public_project_row, require_synced_user_record, resolve_authenticated_user, upsert_project_member
 from app.main import AI_TOOL_MAX_ROWS, AI_TOOL_TIMEOUT_MS, _extract_project_admin_apikey, get_project_conn
 from app.project_backgrounds import _get_project_file_size_limit, _get_project_storage_limit_token
@@ -24,13 +25,9 @@ from app.validation import parse_uuid_value, validate_project_ref
 router = APIRouter(tags=["project-insights"])
 
 
-class ProjectInfoItem(BaseModel):
+class ProjectInfoItem(ProjectIdentity):
     model_config = ConfigDict(extra="allow")
-    id: str
     is_caller_project_admin: bool
-    name: str
-    public_ref: str = Field(pattern=r"^[a-z]{20}$", min_length=20, max_length=20)
-    display_name: str
     status: str
     running_containers: int
     total_containers: int
@@ -117,7 +114,7 @@ async def get_projects_for_user(
 
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT DISTINCT p.id, p.name, p.display_name, p.public_ref
+            SELECT DISTINCT p.id, p.tenant_uuid, p.name, p.display_name, p.public_ref
             FROM projects p
             JOIN project_members m ON p.id = m.project_id
             WHERE m.user_id = $1
@@ -128,7 +125,8 @@ async def get_projects_for_user(
         for r in rows:
             project_status = await get_project_status(r["name"])
             projects.append({
-                "id": str(r["id"]),
+                "project_uuid": str(r["id"]),
+                "tenant_uuid": str(r["tenant_uuid"]) if r["tenant_uuid"] else None,
                 "is_caller_project_admin": True,
                 "name": r["name"],
                 "public_ref": r["public_ref"],

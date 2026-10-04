@@ -31,7 +31,7 @@ class ProjectService {
     BuildContext context,
     String projectRef, {
     required StepUpTokenRequester requestStepUpToken,
-    SubmittedJobWaiter? submittedJobWaiter,
+    required SubmittedJobWaiter submittedJobWaiter,
     ApiClient? apiClient,
   }) async {
     final confirmed = await _showConfirmationDialog(context, projectRef);
@@ -109,7 +109,7 @@ class ProjectService {
     BuildContext context,
     String projectRef,
     String stepUpToken, {
-    SubmittedJobWaiter? submittedJobWaiter,
+    required SubmittedJobWaiter submittedJobWaiter,
     ApiClient? apiClient,
   }) async {
     var loadingDialogOpen = true;
@@ -150,9 +150,7 @@ class ProjectService {
       }
 
       final job = Job.fromResponse(response);
-      final waited = submittedJobWaiter == null
-          ? await waitForJob(job.id)
-          : await submittedJobWaiter(job);
+      final waited = await submittedJobWaiter(job);
       if (!context.mounted) return waited.ok;
       Navigator.pop(context);
       loadingDialogOpen = false;
@@ -211,96 +209,4 @@ class ProjectService {
     );
   }
 
-  static Future<JobWaitResult> waitForJob(
-    String jobId, {
-    Duration every = const Duration(seconds: 3),
-    int max = 100,
-    void Function(Map<String, dynamic> data)? onUpdate,
-    RequestCancellation? cancellation,
-  }) async {
-    Map<String, dynamic> lastData = const {};
-    final client = ApiClient();
-    try {
-      for (var i = 0; i < max; i++) {
-        if (cancellation?.isCancelled == true) {
-          throw const ApiException(
-            ApiFailureKind.cancelled,
-            'Acompanhamento do job cancelado',
-          );
-        }
-        if (i > 0) await Future.delayed(every);
-        final response = await client.get(
-          Uri.parse('/api/projects/status/$jobId'),
-          cancellation: cancellation,
-        );
-        if (response.statusCode != 200) {
-          throw ApiException.fromResponse(response);
-        }
-        final data = decodeJsonObject(
-          response,
-          context: 'Acompanhamento do job',
-        );
-        onUpdate?.call(data);
-
-        final status = data['status']?.toString();
-        if (status == null || status.isEmpty) {
-          throw const ApiException(
-            ApiFailureKind.invalidResponse,
-            'Resposta de job sem status',
-          );
-        }
-        final message = data['message']?.toString();
-        final action = data['action']?.toString();
-        final progress = (data['progress'] as num?)?.toInt();
-        final currentStep = data['current_step']?.toString();
-        lastData = data;
-
-        if (status == 'done') {
-          return JobWaitResult(
-            ok: true,
-            status: status,
-            message: message,
-            action: action,
-            progress: progress,
-            currentStep: currentStep,
-          );
-        }
-        if (status == 'failed' || status == 'cancelled') {
-          final diagnostic = [
-            if (message != null && message.isNotEmpty) message,
-            if (currentStep != null) 'Etapa: $currentStep (${progress ?? 0}%)',
-          ].join('\n');
-          return JobWaitResult(
-            ok: false,
-            status: status,
-            message: diagnostic.isEmpty ? null : diagnostic,
-            action: action,
-            progress: progress,
-            currentStep: currentStep,
-          );
-        }
-      }
-    } finally {
-      client.close();
-    }
-    return JobWaitResult(
-      ok: false,
-      status: 'timeout',
-      message:
-          'Tempo limite excedido em ${lastData['current_step'] ?? 'etapa desconhecida'} '
-          '(${lastData['progress'] ?? 0}%).',
-      action: lastData['action']?.toString(),
-      progress: (lastData['progress'] as num?)?.toInt(),
-      currentStep: lastData['current_step']?.toString(),
-    );
-  }
-
-  static Future<bool> waitUntilReady(
-    String jobId, {
-    Duration every = const Duration(seconds: 3),
-    int max = 100,
-  }) async {
-    final result = await waitForJob(jobId, every: every, max: max);
-    return result.ok;
-  }
 }

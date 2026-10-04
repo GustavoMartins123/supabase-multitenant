@@ -218,20 +218,6 @@ PROJECT_UUID="$(echo "$PROJECT_UUID" | tr '[:upper:]' '[:lower:]')"
   || die "Nome deve começar com letra minúscula/_ e conter só minúsculas, dígitos ou _ (3–40 chars)"
 [[ "$PROJECT_ID" != *.* ]] || die "Nome não pode conter ponto (.)"
 
-RESERVED=(default select from where insert update delete table create drop join group order limit into index view trigger procedure function database schema primary foreign key constraint unique null not and or in like between exists having union inner left right outer cross on as case when then else end if while for begin commit rollback)
-for word in "${RESERVED[@]}"; do
-  [[ "$PROJECT_ID" != "$word" ]] || die "'$PROJECT_ID' é palavra reservada."
-done
-
-RESERVED_ROUTES=(admin phpmyadmin xmlrpc actuator)
-for word in "${RESERVED_ROUTES[@]}"; do
-  [[ "$PROJECT_ID" != "$word" ]] || die "'$PROJECT_ID' é rota reservada."
-done
-
-RESERVED_API=(internal)
-for word in "${RESERVED_API[@]}"; do
-  [[ "$PROJECT_ID" != "$word" ]] || die "'$PROJECT_ID' é namespace reservado da API."
-done
 
 OUT_DIR="$PROJECT_ROOT/projects/$PROJECT_ID"
 project_public_ref_assert "$PROJECT_ID" "$PROJECT_UUID" "$PROJECT_PUBLIC_REF" \

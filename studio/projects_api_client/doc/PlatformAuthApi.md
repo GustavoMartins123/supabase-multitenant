@@ -28,8 +28,8 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = PlatformAuthApi();
 final projectRef = projectRef_example; // String |
-final page = 56; // int | 
-final perPage = 56; // int | 
+final page = 56; // int |
+final perPage = 56; // int |
 
 try {
     final result = api_instance.listProjectAuthUsersApiProjectsInternalAuthUsersProjectRefGet(projectRef, page, perPage);
@@ -73,7 +73,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = PlatformAuthApi();
 final projectRef = projectRef_example; // String |
-final gotruePath = gotruePath_example; // String | 
+final gotruePath = gotruePath_example; // String |
 
 try {
     final result = api_instance.proxyProjectAuthAdminDelete(projectRef, gotruePath);
@@ -88,7 +88,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **gotruePath** | **String**|  | 
+ **gotruePath** | **String**|  |
 
 ### Return type
 
@@ -116,7 +116,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = PlatformAuthApi();
 final projectRef = projectRef_example; // String |
-final gotruePath = gotruePath_example; // String | 
+final gotruePath = gotruePath_example; // String |
 
 try {
     final result = api_instance.proxyProjectAuthAdminGet(projectRef, gotruePath);
@@ -131,7 +131,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **gotruePath** | **String**|  | 
+ **gotruePath** | **String**|  |
 
 ### Return type
 
@@ -159,7 +159,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = PlatformAuthApi();
 final projectRef = projectRef_example; // String |
-final gotruePath = gotruePath_example; // String | 
+final gotruePath = gotruePath_example; // String |
 
 try {
     final result = api_instance.proxyProjectAuthAdminPatch(projectRef, gotruePath);
@@ -174,7 +174,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **gotruePath** | **String**|  | 
+ **gotruePath** | **String**|  |
 
 ### Return type
 
@@ -202,7 +202,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = PlatformAuthApi();
 final projectRef = projectRef_example; // String |
-final gotruePath = gotruePath_example; // String | 
+final gotruePath = gotruePath_example; // String |
 
 try {
     final result = api_instance.proxyProjectAuthAdminPost(projectRef, gotruePath);
@@ -217,7 +217,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **gotruePath** | **String**|  | 
+ **gotruePath** | **String**|  |
 
 ### Return type
 
@@ -245,7 +245,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = PlatformAuthApi();
 final projectRef = projectRef_example; // String |
-final gotruePath = gotruePath_example; // String | 
+final gotruePath = gotruePath_example; // String |
 
 try {
     final result = api_instance.proxyProjectAuthAdminPut(projectRef, gotruePath);
@@ -260,7 +260,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **gotruePath** | **String**|  | 
+ **gotruePath** | **String**|  |
 
 ### Return type
 

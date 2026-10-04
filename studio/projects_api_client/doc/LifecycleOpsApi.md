@@ -71,7 +71,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = LifecycleOpsApi();
 final projectRef = projectRef_example; // String |
-final recreateServices = RecreateServices(); // RecreateServices | 
+final recreateServices = RecreateServices(); // RecreateServices |
 
 try {
     final result = api_instance.recreateProjectServicesApiProjectsProjectRefRecreateServicesPost(projectRef, recreateServices);
@@ -86,7 +86,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **recreateServices** | [**RecreateServices**](RecreateServices.md)|  | 
+ **recreateServices** | [**RecreateServices**](RecreateServices.md)|  |
 
 ### Return type
 
@@ -241,7 +241,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = LifecycleOpsApi();
 final projectRef = projectRef_example; // String |
-final updateSettings = UpdateSettings(); // UpdateSettings | 
+final updateSettings = UpdateSettings(); // UpdateSettings |
 
 try {
     final result = api_instance.updateProjectSettingsApiProjectsProjectRefSettingsPut(projectRef, updateSettings);
@@ -256,7 +256,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **updateSettings** | [**UpdateSettings**](UpdateSettings.md)|  | 
+ **updateSettings** | [**UpdateSettings**](UpdateSettings.md)|  |
 
 ### Return type
 

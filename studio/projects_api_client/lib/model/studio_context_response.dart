@@ -103,16 +103,12 @@ class StudioContextResponse {
     if (value is Map) {
       final json = value.cast<String, dynamic>();
 
-      // Ensure that the map contains the required keys.
-      // Note 1: the values aren't checked for validity beyond being non-null.
-      // Note 2: this code is stripped in release mode!
-      assert(() {
-        requiredKeys.forEach((key) {
-          assert(json.containsKey(key), 'Required key "StudioContextResponse[$key]" is missing from JSON.');
-          assert(json[key] != null, 'Required key "StudioContextResponse[$key]" has a null value in JSON.');
-        });
-        return true;
-      }());
+      const nullableKeys = <String>{r'project_key_version', r'role', r'tenant_uuid'};
+      for (final key in requiredKeys) {
+        if (!json.containsKey(key) || (json[key] == null && !nullableKeys.contains(key))) {
+          throw FormatException('Invalid required field: $key');
+        }
+      }
 
       return StudioContextResponse(
         anonKey: mapValueOfType<String>(json, r'anon_key')!,

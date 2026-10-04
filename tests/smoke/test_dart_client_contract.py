@@ -27,7 +27,7 @@ class DartClientContract(unittest.TestCase):
             "update_settings.dart",
             "recreate_services.dart",
             "transfer_body.dart",
-            "project_rename_request.dart",
+            "project_display_name_update.dart",
         ):
             with self.subTest(model=name):
                 self.assertTrue((models / name).is_file(), name)

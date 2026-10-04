@@ -68,7 +68,7 @@ class RestorePointsApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'CreateRestorePointResponse',) as CreateRestorePointResponse;
-    
+
     }
     return null;
   }
@@ -126,7 +126,7 @@ class RestorePointsApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'DeleteRestorePointResponse',) as DeleteRestorePointResponse;
-    
+
     }
     return null;
   }
@@ -179,7 +179,7 @@ class RestorePointsApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'ListRestorePointsResponse',) as ListRestorePointsResponse;
-    
+
     }
     return null;
   }
@@ -237,7 +237,7 @@ class RestorePointsApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'RestoreRestorePointResponse',) as RestoreRestorePointResponse;
-    
+
     }
     return null;
   }

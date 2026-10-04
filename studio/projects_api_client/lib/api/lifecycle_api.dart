@@ -77,7 +77,7 @@ class LifecycleApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'ContainerLogsResponse',) as ContainerLogsResponse;
-    
+
     }
     return null;
   }
@@ -130,7 +130,7 @@ class LifecycleApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'ProjectStatusResponse',) as ProjectStatusResponse;
-    
+
     }
     return null;
   }

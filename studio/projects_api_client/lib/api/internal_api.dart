@@ -64,7 +64,7 @@ class InternalApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'EncKeyResponse',) as EncKeyResponse;
-    
+
     }
     return null;
   }
@@ -117,7 +117,7 @@ class InternalApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'ContentIdentityResponse',) as ContentIdentityResponse;
-    
+
     }
     return null;
   }
@@ -174,7 +174,7 @@ class InternalApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'StudioContextResponse',) as StudioContextResponse;
-    
+
     }
     return null;
   }
@@ -227,7 +227,7 @@ class InternalApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'KeyVersionResponse',) as KeyVersionResponse;
-    
+
     }
     return null;
   }
@@ -280,7 +280,7 @@ class InternalApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
-    
+
     }
     return null;
   }
@@ -333,7 +333,7 @@ class InternalApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
-    
+
     }
     return null;
   }
@@ -386,7 +386,7 @@ class InternalApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
-    
+
     }
     return null;
   }
@@ -439,7 +439,7 @@ class InternalApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
-    
+
     }
     return null;
   }
@@ -491,7 +491,7 @@ class InternalApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'Object',) as Object;
-    
+
     }
     return null;
   }

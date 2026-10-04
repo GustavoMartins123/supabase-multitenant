@@ -8,17 +8,17 @@ import 'package:projects_api_client/api.dart';
 ## Properties
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**actorName** | **String** |  | 
-**actorUserId** | **String** |  | 
-**completedAt** | **String** |  | 
-**createdAt** | **String** |  | 
-**error** | **String** |  | 
-**id** | **int** |  | 
-**jobId** | **String** |  | 
+**actorName** | **String** |  |
+**actorUserId** | **String** |  |
+**completedAt** | **String** |  |
+**createdAt** | **String** |  |
+**error** | **String** |  |
+**id** | **int** |  |
+**jobId** | **String** |  |
 **newRef** | **String** |  |
 **oldRef** | **String** |  |
-**status** | **String** |  | 
-**updatedAt** | **String** |  | 
+**status** | **String** |  |
+**updatedAt** | **String** |  |
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

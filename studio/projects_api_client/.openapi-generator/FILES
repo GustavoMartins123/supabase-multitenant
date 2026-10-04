@@ -42,6 +42,7 @@ doc/IssuedKeyResponse.md
 doc/JobListResponse.md
 doc/JobResponse.md
 doc/JobRetryResponse.md
+doc/JobWatchResponse.md
 doc/JobsApi.md
 doc/KeyVersionResponse.md
 doc/LifecycleApi.md
@@ -179,6 +180,7 @@ lib/model/issued_key_response.dart
 lib/model/job_list_response.dart
 lib/model/job_response.dart
 lib/model/job_retry_response.dart
+lib/model/job_watch_response.dart
 lib/model/key_version_response.dart
 lib/model/list_restore_points_response.dart
 lib/model/location_inner.dart
@@ -286,6 +288,7 @@ test/issued_key_response_test.dart
 test/job_list_response_test.dart
 test/job_response_test.dart
 test/job_retry_response_test.dart
+test/job_watch_response_test.dart
 test/jobs_api_test.dart
 test/key_version_response_test.dart
 test/lifecycle_api_test.dart
@@ -323,6 +326,7 @@ test/project_thread_message_create_test.dart
 test/project_user_telemetry_response_test.dart
 test/projects_api_test.dart
 test/projects_info_response_test.dart
+test/public_reference_contract_test.dart
 test/queued_job_response_test.dart
 test/recreate_project_services_response_test.dart
 test/recreate_services_test.dart

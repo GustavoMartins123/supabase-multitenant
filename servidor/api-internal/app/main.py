@@ -113,6 +113,7 @@ from app.project_identity import (
 )
 from app.database import close_pool, get_pool, initialize_pool
 from app.schema_migrations import verify_control_plane_schema
+from app.job_watch import job_change_hub
 from app.dependencies import (
     audit_project_member_change,
     ensure_project_admin_access,
@@ -518,6 +519,7 @@ async def startup():
             + ", ".join(identity_result.unresolved)
         )
     print("✅ Database pool initialized")
+    await job_change_hub.start(DB_DSN)
     await _recover_pending_jobs()
     await start_automatic_key_rotation(
         enqueue_action=_enqueue_project_action,
@@ -530,6 +532,7 @@ async def shutdown():
     await stop_automatic_opaque_key_rotation()
     await stop_automatic_key_rotation()
     await action_queue.shutdown()
+    await job_change_hub.close()
     await close_pool()
     print("✅ Database pool closed")
 

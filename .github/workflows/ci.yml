@@ -30,6 +30,8 @@ jobs:
         run: python tools/check-env-contract.py
       - name: Contrato da versao unica
         run: python tools/check-version-parity.py
+      - name: Contrato de identidade Python e Flutter
+        run: python tools/generate_identity_models.py --check
       - name: Secret scanning
         run: |
           curl -sSL -o /tmp/gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.28.0/gitleaks_8.28.0_linux_x64.tar.gz

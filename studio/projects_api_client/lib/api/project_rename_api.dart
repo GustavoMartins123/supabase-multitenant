@@ -68,7 +68,7 @@ class ProjectRenameApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'ProjectConfigTokenResponse',) as ProjectConfigTokenResponse;
-    
+
     }
     return null;
   }
@@ -125,7 +125,7 @@ class ProjectRenameApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'ProjectQueueStatusResponse',) as ProjectQueueStatusResponse;
-    
+
     }
     return null;
   }
@@ -190,7 +190,7 @@ class ProjectRenameApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'ProjectRenameHistoryResponse',) as ProjectRenameHistoryResponse;
-    
+
     }
     return null;
   }
@@ -247,7 +247,7 @@ class ProjectRenameApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'RenameProjectResponse',) as RenameProjectResponse;
-    
+
     }
     return null;
   }
@@ -308,7 +308,7 @@ class ProjectRenameApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'UpdateDisplayNameResponse',) as UpdateDisplayNameResponse;
-    
+
     }
     return null;
   }

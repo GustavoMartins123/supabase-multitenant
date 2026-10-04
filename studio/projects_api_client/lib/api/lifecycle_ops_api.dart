@@ -64,7 +64,7 @@ class LifecycleOpsApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'GetProjectSettingsResponse',) as GetProjectSettingsResponse;
-    
+
     }
     return null;
   }
@@ -125,7 +125,7 @@ class LifecycleOpsApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'RecreateProjectServicesResponse',) as RecreateProjectServicesResponse;
-    
+
     }
     return null;
   }
@@ -182,7 +182,7 @@ class LifecycleOpsApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'RestartProjectResponse',) as RestartProjectResponse;
-    
+
     }
     return null;
   }
@@ -239,7 +239,7 @@ class LifecycleOpsApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'StartProjectResponse',) as StartProjectResponse;
-    
+
     }
     return null;
   }
@@ -292,7 +292,7 @@ class LifecycleOpsApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'StopProjectResponse',) as StopProjectResponse;
-    
+
     }
     return null;
   }
@@ -349,7 +349,7 @@ class LifecycleOpsApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'UpdateProjectSettingsResponse',) as UpdateProjectSettingsResponse;
-    
+
     }
     return null;
   }

@@ -80,6 +80,7 @@ part 'model/issued_key_response.dart';
 part 'model/job_list_response.dart';
 part 'model/job_response.dart';
 part 'model/job_retry_response.dart';
+part 'model/job_watch_response.dart';
 part 'model/key_version_response.dart';
 part 'model/list_restore_points_response.dart';
 part 'model/location_inner.dart';

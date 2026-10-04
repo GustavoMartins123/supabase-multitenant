@@ -90,36 +90,13 @@ PROJECT_ROW_OPTIONAL_COMMANDS = frozenset(
     }
 )
 
-# Fonte unica do formato e dos nomes reservados de projeto. app/validation.py
-# importa esta classe em vez de manter sua propria copia. O agent revalida
-# tudo localmente e nao confia na validacao feita pela API.
 class ProjectNameValidator:
     NAME_RE = re.compile(r"^[a-z_][a-z0-9_]{2,39}$")
-    RESERVED_WORDS = frozenset(
-        {
-            "default", "select", "from", "where", "insert", "update", "delete",
-            "table", "create", "drop", "join", "group", "order", "limit", "into",
-            "index", "view", "trigger", "procedure", "function", "database",
-            "schema", "primary", "foreign", "key", "constraint", "unique", "null",
-            "not", "and", "or", "in", "like", "between", "exists", "having",
-            "union", "inner", "left", "right", "outer", "cross", "on", "as",
-            "case", "when", "then", "else", "end", "if", "while", "for", "begin",
-            "commit", "rollback",
-        }
-    )
-    RESERVED_ROUTE_NAMES = frozenset({"admin", "phpmyadmin", "xmlrpc", "actuator"})
-    RESERVED_API_NAMES = frozenset({"internal"})
 
     @classmethod
     def is_valid(cls, raw: Any) -> bool:
-        if not isinstance(raw, str):
-            return False
-        return (
-            bool(cls.NAME_RE.fullmatch(raw))
-            and raw not in cls.RESERVED_WORDS
-            and raw not in cls.RESERVED_ROUTE_NAMES
-            and raw not in cls.RESERVED_API_NAMES
-        )
+        return isinstance(raw, str) and bool(cls.NAME_RE.fullmatch(raw))
+
 
 
 RECREATE_SERVICE_NAMES = frozenset(

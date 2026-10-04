@@ -178,7 +178,7 @@ class _UserProjectsAdminScreenState
       final relevantJobFinished = previousJobs.any(
         (job) =>
             !nextIds.contains(job.id) &&
-            _projects.any((project) => project.id == job.projectUuid),
+            _projects.any((project) => project.projectUuid == job.projectUuid),
       );
       if (relevantJobFinished) _fetchProjects();
     });
@@ -714,7 +714,7 @@ class _UserProjectsAdminScreenState
                 job,
                 project: projectName,
                 action: 'delete',
-                max: 400,
+                timeout: const Duration(minutes: 20),
               ),
     );
 

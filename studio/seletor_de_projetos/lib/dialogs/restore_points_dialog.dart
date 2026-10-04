@@ -55,7 +55,7 @@ class _RestorePointsDialogState extends ConsumerState<RestorePointsDialog> {
       job,
       project: widget.projectRef,
       action: action,
-      max: max,
+      timeout: Duration(seconds: max * 3),
       onUpdate: (data) {
         if (!mounted) return;
         setState(() {

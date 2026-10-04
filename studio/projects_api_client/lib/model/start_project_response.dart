@@ -225,16 +225,12 @@ class StartProjectResponse {
     if (value is Map) {
       final json = value.cast<String, dynamic>();
 
-      // Ensure that the map contains the required keys.
-      // Note 1: the values aren't checked for validity beyond being non-null.
-      // Note 2: this code is stripped in release mode!
-      assert(() {
-        requiredKeys.forEach((key) {
-          assert(json.containsKey(key), 'Required key "StartProjectResponse[$key]" is missing from JSON.');
-          assert(json[key] != null, 'Required key "StartProjectResponse[$key]" has a null value in JSON.');
-        });
-        return true;
-      }());
+      const nullableKeys = <String>{r'created_at', r'created_by', r'current_step', r'error_code', r'finished_at', r'message', r'progress', r'project_uuid', r'public_ref', r'retry_of', r'started_at', r'tenant_uuid', r'total_steps', r'updated_at'};
+      for (final key in requiredKeys) {
+        if (!json.containsKey(key) || (json[key] == null && !nullableKeys.contains(key))) {
+          throw FormatException('Invalid required field: $key');
+        }
+      }
 
       return StartProjectResponse(
         action: mapValueOfType<String>(json, r'action')!,

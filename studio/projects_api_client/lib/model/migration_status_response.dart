@@ -107,16 +107,12 @@ class MigrationStatusResponse {
     if (value is Map) {
       final json = value.cast<String, dynamic>();
 
-      // Ensure that the map contains the required keys.
-      // Note 1: the values aren't checked for validity beyond being non-null.
-      // Note 2: this code is stripped in release mode!
-      assert(() {
-        requiredKeys.forEach((key) {
-          assert(json.containsKey(key), 'Required key "MigrationStatusResponse[$key]" is missing from JSON.');
-          assert(json[key] != null, 'Required key "MigrationStatusResponse[$key]" has a null value in JSON.');
-        });
-        return true;
-      }());
+      const nullableKeys = <String>{r'activated_at', r'cutover_started_at', r'gateway_ready_at', r'prepared_at'};
+      for (final key in requiredKeys) {
+        if (!json.containsKey(key) || (json[key] == null && !nullableKeys.contains(key))) {
+          throw FormatException('Invalid required field: $key');
+        }
+      }
 
       return MigrationStatusResponse(
         activatedAt: mapValueOfType<String>(json, r'activated_at'),

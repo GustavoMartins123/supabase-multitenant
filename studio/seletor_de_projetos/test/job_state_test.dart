@@ -6,19 +6,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:seletor_de_projetos/data/job_repository.dart';
+import 'package:seletor_de_projetos/data/api_client.dart';
 import 'package:seletor_de_projetos/models/job.dart';
 import 'package:seletor_de_projetos/providers/project_jobs_provider.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   group('Job', () {
     test('parses the durable job payload returned by the API', () {
       final job = Job.fromJson({
-        'job_id': 'job-1',
+        'job_id': '00000000-0000-4000-8000-000000000001',
         'project': 'meu_projeto',
-        'project_uuid': 'project-uuid',
+        'project_uuid': '11111111-1111-4111-8111-111111111111',
         'public_ref': 'aaaaaaaaaaaaaaaaaaaa',
-        'tenant_uuid': 'tenant-uuid',
-        'created_by': 'user-1',
+        'tenant_uuid': '22222222-2222-4222-8222-222222222222',
+        'created_by': '33333333-3333-4333-8333-333333333333',
         'action': 'create',
         'status': 'running',
         'message': 'Provisionando infraestrutura do projeto...',
@@ -28,10 +30,10 @@ void main() {
         'created_at': '2026-07-19T03:08:48.079739+00:00',
       });
 
-      expect(job.id, 'job-1');
+      expect(job.id, '00000000-0000-4000-8000-000000000001');
       expect(job.project, 'meu_projeto');
       expect(job.action, 'create');
-      expect(job.tenantUuid, 'tenant-uuid');
+      expect(job.tenantUuid, '22222222-2222-4222-8222-222222222222');
       expect(job.progress, 10);
       expect(job.currentStep, 'provision_infrastructure');
       expect(job.isInFlight, isTrue);
@@ -51,7 +53,7 @@ void main() {
       for (final ref in [
         'bbbbbbbbbbbbbbbbbbbb',
         'projeto_tecnico',
-        'project-uuid'
+        '11111111-1111-4111-8111-111111111111'
       ]) {
         expect(() => completedRename.verifyContext(project: ref),
             throwsFormatException);
@@ -60,35 +62,34 @@ void main() {
   });
 
   group('JobRepository', () {
-    test('rehydrates both queued and running jobs', () async {
-      final requestedStatuses = <String>{};
-      final repository = JobRepository(
-        client: MockClient((request) async {
-          final status = request.url.queryParameters['status']!;
-          requestedStatuses.add(status);
-          return http.Response(
-            jsonEncode({
-              'items': [
-                {
-                  'job_id': 'job-$status',
-                  'project': 'project-$status',
-                  'created_by': 'user-1',
-                  'action': 'create',
-                  'status': status,
-                  'progress': status == 'running' ? 40 : 0,
-                },
-              ],
-            }),
-            200,
-          );
-        }),
-      );
-
-      final jobs = await repository.fetchInFlightJobs();
-
-      expect(requestedStatuses, {'queued', 'running'});
-      expect(jobs.map((job) => job.status), containsAll(['queued', 'running']));
+    test('one watch returns both queued and running jobs', () async {
+      var requests = 0;
+      final repository = JobRepository(client: MockClient((request) async {
+        requests++;
+        expect(request.url.path, '/api/jobs/watch');
+        expect(request.url.queryParameters.containsKey('status'), isFalse);
+        return http.Response(jsonEncode({
+          'cursor': 'a' * 64,
+          'items': [for (var i = 1; i <= 2; i++) {
+            'job_id': '00000000-0000-4000-8000-00000000000$i',
+            'project': 'demo', 'public_ref': 'abcdefghijklmnopqrst', 'action': 'create',
+            'project_uuid': null, 'tenant_uuid': null, 'created_by': null,
+            'status': i == 1 ? 'queued' : 'running',
+          }],
+        }), 200);
+      }));
+      final snapshot = await repository.watch();
+      expect(requests, 1);
+      expect(snapshot.jobs.map((job) => job.status), ['queued', 'running']);
       repository.close();
+    });
+
+    test('a missing watched job fails closed', () async {
+      final repository = JobRepository(client: MockClient((_) async =>
+        http.Response(jsonEncode({'cursor': 'b' * 64, 'items': []}), 200)));
+      addTearDown(repository.close);
+      await expectLater(repository.watch(watchedIds: {'00000000-0000-4000-8000-000000000001'}),
+          throwsFormatException);
     });
   });
 
@@ -108,10 +109,10 @@ void main() {
         const Job(
           'job-race',
           project: 'meu_projeto',
-          projectUuid: 'project-uuid',
+          projectUuid: '11111111-1111-4111-8111-111111111111',
           publicRef: 'aaaaaaaaaaaaaaaaaaaa',
           action: 'create',
-          createdBy: 'user-1',
+          createdBy: '33333333-3333-4333-8333-333333333333',
           status: 'running',
           message: 'Pool de conexoes configurado.',
           progress: 60,
@@ -119,7 +120,7 @@ void main() {
         ),
         project: 'aaaaaaaaaaaaaaaaaaaa',
         action: 'create',
-        createdBy: 'user-1',
+        createdBy: '33333333-3333-4333-8333-333333333333',
       );
 
       initialFetch.complete(const []);
@@ -136,7 +137,7 @@ void main() {
       final older = Job(
         'job-merge',
         project: 'meu_projeto',
-        projectUuid: 'project-uuid',
+        projectUuid: '11111111-1111-4111-8111-111111111111',
         publicRef: 'aaaaaaaaaaaaaaaaaaaa',
         status: 'queued',
         progress: 5,
@@ -145,7 +146,7 @@ void main() {
       final newer = Job(
         'job-merge',
         project: 'meu_projeto',
-        projectUuid: 'project-uuid',
+        projectUuid: '11111111-1111-4111-8111-111111111111',
         publicRef: 'aaaaaaaaaaaaaaaaaaaa',
         status: 'running',
         message: 'Pool de conexoes configurado.',
@@ -170,9 +171,9 @@ void main() {
       const job = Job(
         'job-1',
         project: 'meu_projeto',
-        projectUuid: 'project-uuid',
+        projectUuid: '11111111-1111-4111-8111-111111111111',
         publicRef: 'aaaaaaaaaaaaaaaaaaaa',
-        createdBy: 'user-1',
+        createdBy: '33333333-3333-4333-8333-333333333333',
         action: 'create',
         status: 'running',
         progress: 10,
@@ -181,7 +182,7 @@ void main() {
       final projects = mergeProjectsWithJobs(
         projects: const [],
         jobs: const [job],
-        currentUserId: 'user-1',
+        currentUserId: '33333333-3333-4333-8333-333333333333',
       );
 
       expect(projects, hasLength(1));
@@ -194,7 +195,7 @@ void main() {
       const job = Job(
         'job-2',
         project: 'compartilhado',
-        projectUuid: 'project-uuid',
+        projectUuid: '11111111-1111-4111-8111-111111111111',
         publicRef: 'aaaaaaaaaaaaaaaaaaaa',
         createdBy: 'other-user',
         action: 'restart',
@@ -205,12 +206,12 @@ void main() {
         projects: const [
           {
             'name': 'compartilhado',
-            'project_uuid': 'project-uuid',
+            'project_uuid': '11111111-1111-4111-8111-111111111111',
             'public_ref': 'aaaaaaaaaaaaaaaaaaaa'
           },
         ],
         jobs: const [job],
-        currentUserId: 'user-1',
+        currentUserId: '33333333-3333-4333-8333-333333333333',
       );
 
       expect(projects, hasLength(1));
@@ -230,7 +231,7 @@ void main() {
       final projects = mergeProjectsWithJobs(
         projects: const [],
         jobs: const [job],
-        currentUserId: 'user-1',
+        currentUserId: '33333333-3333-4333-8333-333333333333',
       );
 
       expect(projects, isEmpty);
@@ -240,7 +241,7 @@ void main() {
       const job = Job(
         'job-4',
         project: 'finalizado',
-        createdBy: 'user-1',
+        createdBy: '33333333-3333-4333-8333-333333333333',
         action: 'create',
         status: 'done',
       );
@@ -248,7 +249,7 @@ void main() {
       final projects = mergeProjectsWithJobs(
         projects: const [],
         jobs: const [job],
-        currentUserId: 'user-1',
+        currentUserId: '33333333-3333-4333-8333-333333333333',
       );
 
       expect(projects, isEmpty);
@@ -258,7 +259,7 @@ void main() {
       final running = Job(
         'job-running',
         project: 'meu_projeto',
-        projectUuid: 'project-uuid',
+        projectUuid: '11111111-1111-4111-8111-111111111111',
         publicRef: 'aaaaaaaaaaaaaaaaaaaa',
         status: 'running',
         createdAt: DateTime.utc(2026, 7, 19, 1),
@@ -266,7 +267,7 @@ void main() {
       final queued = Job(
         'job-queued',
         project: 'meu_projeto',
-        projectUuid: 'project-uuid',
+        projectUuid: '11111111-1111-4111-8111-111111111111',
         publicRef: 'aaaaaaaaaaaaaaaaaaaa',
         status: 'queued',
         createdAt: DateTime.utc(2026, 7, 19, 2),
@@ -284,5 +285,12 @@ class _ControlledJobRepository extends JobRepository {
   final Completer<List<Job>> initialFetch;
 
   @override
-  Future<List<Job>> fetchInFlightJobs() => initialFetch.future;
+  Future<JobSnapshot> watch({String? cursor, Set<String> watchedIds = const {},
+      RequestCancellation? cancellation}) async {
+    if (cursor == null && !initialFetch.isCompleted) {
+      return JobSnapshot(await initialFetch.future, 'a' * 64);
+    }
+    await cancellation!.whenCancelled;
+    throw const ApiException(ApiFailureKind.cancelled, 'Cancelled');
+  }
 }

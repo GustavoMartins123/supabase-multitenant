@@ -64,7 +64,7 @@ class OpaqueApiKeysApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'MigrationAbortResponse',) as MigrationAbortResponse;
-    
+
     }
     return null;
   }
@@ -130,7 +130,7 @@ class OpaqueApiKeysApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'SlotActivationResponse',) as SlotActivationResponse;
-    
+
     }
     return null;
   }
@@ -196,7 +196,7 @@ class OpaqueApiKeysApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'SlotCancelResponse',) as SlotCancelResponse;
-    
+
     }
     return null;
   }
@@ -262,7 +262,7 @@ class OpaqueApiKeysApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'RevealClaimResponse',) as RevealClaimResponse;
-    
+
     }
     return null;
   }
@@ -324,7 +324,7 @@ class OpaqueApiKeysApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'SlotConfirmResponse',) as SlotConfirmResponse;
-    
+
     }
     return null;
   }
@@ -389,7 +389,7 @@ class OpaqueApiKeysApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'IssuedKeyResponse',) as IssuedKeyResponse;
-    
+
     }
     return null;
   }
@@ -446,7 +446,7 @@ class OpaqueApiKeysApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'MigrationCutoverResponse',) as MigrationCutoverResponse;
-    
+
     }
     return null;
   }
@@ -499,7 +499,7 @@ class OpaqueApiKeysApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'RevealListResponse',) as RevealListResponse;
-    
+
     }
     return null;
   }
@@ -552,7 +552,7 @@ class OpaqueApiKeysApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'SlotListResponse',) as SlotListResponse;
-    
+
     }
     return null;
   }
@@ -605,7 +605,7 @@ class OpaqueApiKeysApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'MigrationStatusResponse',) as MigrationStatusResponse;
-    
+
     }
     return null;
   }
@@ -662,7 +662,7 @@ class OpaqueApiKeysApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'MigrationPrepareResponse',) as MigrationPrepareResponse;
-    
+
     }
     return null;
   }
@@ -728,7 +728,7 @@ class OpaqueApiKeysApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'SlotRevokeResponse',) as SlotRevokeResponse;
-    
+
     }
     return null;
   }
@@ -798,7 +798,7 @@ class OpaqueApiKeysApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'IssuedKeyResponse',) as IssuedKeyResponse;
-    
+
     }
     return null;
   }
@@ -868,7 +868,7 @@ class OpaqueApiKeysApi {
     // FormatException when trying to decode an empty string.
     if (response.body.isNotEmpty && response.statusCode != HttpStatus.noContent) {
       return await apiClient.deserializeAsync(await _decodeBodyBytes(response), 'SlotPolicyUpdateResponse',) as SlotPolicyUpdateResponse;
-    
+
     }
     return null;
   }

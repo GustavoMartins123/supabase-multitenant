@@ -81,6 +81,7 @@ Class | Method | HTTP request | Description
 *JobsApi* | [**listJobHistoryApiJobsGet**](doc//JobsApi.md#listjobhistoryapijobsget) | **GET** /api/jobs | List Job History
 *JobsApi* | [**projectStatusApiProjectsStatusJobIdGet**](doc//JobsApi.md#projectstatusapiprojectsstatusjobidget) | **GET** /api/projects/status/{job_id} | Project Status
 *JobsApi* | [**retryProjectJobApiJobsJobIdRetryPost**](doc//JobsApi.md#retryprojectjobapijobsjobidretrypost) | **POST** /api/jobs/{job_id}/retry | Retry Project Job
+*JobsApi* | [**watchJobsApiJobsWatchGet**](doc//JobsApi.md#watchjobsapijobswatchget) | **GET** /api/jobs/watch | Watch Jobs
 *LifecycleApi* | [**getContainerLogsApiProjectsProjectRefLogsServiceGet**](doc//LifecycleApi.md#getcontainerlogsapiprojectsprojectreflogsserviceget) | **GET** /api/projects/{project_ref}/logs/{service} | Get Container Logs
 *LifecycleApi* | [**getProjectDockerStatusApiProjectsProjectRefStatusGet**](doc//LifecycleApi.md#getprojectdockerstatusapiprojectsprojectrefstatusget) | **GET** /api/projects/{project_ref}/status | Get Project Docker Status
 *LifecycleOpsApi* | [**getProjectSettingsApiProjectsProjectRefSettingsGet**](doc//LifecycleOpsApi.md#getprojectsettingsapiprojectsprojectrefsettingsget) | **GET** /api/projects/{project_ref}/settings | Get Project Settings
@@ -185,6 +186,7 @@ Class | Method | HTTP request | Description
  - [JobListResponse](doc//JobListResponse.md)
  - [JobResponse](doc//JobResponse.md)
  - [JobRetryResponse](doc//JobRetryResponse.md)
+ - [JobWatchResponse](doc//JobWatchResponse.md)
  - [KeyVersionResponse](doc//KeyVersionResponse.md)
  - [ListRestorePointsResponse](doc//ListRestorePointsResponse.md)
  - [LocationInner](doc//LocationInner.md)

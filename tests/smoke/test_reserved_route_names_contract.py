@@ -1,107 +1,41 @@
-from __future__ import annotations
-
-import pathlib
-import re
+from pathlib import Path
+import sys
 import unittest
 
-ROOT = pathlib.Path(__file__).resolve().parents[2]
-
-SLUG_WORD_RE = re.compile(r"^[a-z_][a-z0-9_]{2,39}$")
-
-
-def _extract_py_set(text: str, name: str) -> frozenset[str]:
-    match = re.search(
-        rf"{name}\s*=\s*(?:frozenset\()?\s*\{{(.*?)\}}", text, re.DOTALL
-    )
-    if not match:
-        raise AssertionError(f"{name} nao encontrado")
-    return frozenset(re.findall(r'"([^"]+)"', match.group(1)))
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "servidor/api-internal"))
+from app.host_agent_protocol import ProjectNameValidator
+from app.validation import validate_project_id
+from fastapi import HTTPException
 
 
-def _extract_bash_array(text: str, name: str) -> frozenset[str]:
-    match = re.search(rf"{name}=\(([^)]*)\)", text)
-    if not match:
-        raise AssertionError(f"{name} nao encontrado")
-    return frozenset(match.group(1).split())
+class ProjectNamesContractTest(unittest.TestCase):
+    def test_names_are_not_routing_namespaces(self):
+        for name in ("select", "default", "table", "admin", "internal", "phpmyadmin", "xmlrpc", "actuator"):
+            with self.subTest(name=name):
+                self.assertTrue(ProjectNameValidator.is_valid(name))
+                self.assertEqual(validate_project_id(name), name)
 
+    def test_unsafe_names_remain_rejected(self):
+        for name in ("../admin", "a/b", "a.b", "ab", "x" * 41, "3name", "with space"):
+            with self.subTest(name=name):
+                self.assertFalse(ProjectNameValidator.is_valid(name))
+                with self.assertRaises(HTTPException):
+                    validate_project_id(name)
 
-def _extract_dart_set(text: str, name: str) -> frozenset[str]:
-    match = re.search(rf"{name} = <String>\{{(.*?)\}};", text, re.DOTALL)
-    if not match:
-        raise AssertionError(f"{name} nao encontrado")
-    return frozenset(re.findall(r"'([^']+)'", match.group(1)))
-
-
-DART_VALIDATOR = "studio/seletor_de_projetos/lib/utils/project_name_validator.dart"
-DART_DIALOG_IMPORTS = {
-    "studio/seletor_de_projetos/lib/new_project_dialog.dart": (
-        "import 'package:seletor_de_projetos/utils/project_name_validator.dart';"
-    ),
-    "studio/seletor_de_projetos/lib/duplicate_project_dialog.dart": (
-        "import 'package:seletor_de_projetos/utils/project_name_validator.dart';"
-    ),
-}
-
-
-class ReservedRouteNamesContractTest(unittest.TestCase):
-    def test_reserved_words_are_identical_across_every_copy(self) -> None:
-        # ProjectNameValidator em host_agent_protocol.py e a fonte unica; a
-        # copia do host-agent e testada byte-a-byte contra ela em
-        # test_host_agent_contract.py.
-        canonical_text = (
-            ROOT / "servidor/api-internal/app/host_agent_protocol.py"
-        ).read_text(encoding="utf-8")
-        combined = (
-            _extract_py_set(canonical_text, "RESERVED_WORDS")
-            | _extract_py_set(canonical_text, "RESERVED_ROUTE_NAMES")
-            | _extract_py_set(canonical_text, "RESERVED_API_NAMES")
-        )
-
-        api_validation = (
-            ROOT / "servidor/api-internal/app/validation.py"
-        ).read_text(encoding="utf-8")
-        self.assertIn("from app.host_agent_protocol import ProjectNameValidator", api_validation)
-        self.assertNotIn("RESERVED_WORDS =", api_validation)
-        self.assertNotIn("RESERVED_ROUTE_NAMES =", api_validation)
-
-        for relative in (
-            "servidor/generateProject/lib/generate_project_impl.sh",
-            "servidor/generateProject/lib/duplicate_project_impl.sh",
-        ):
-            text = (ROOT / relative).read_text(encoding="utf-8")
-            got = (
-                _extract_bash_array(text, "RESERVED")
-                | _extract_bash_array(text, "RESERVED_ROUTES")
-                | _extract_bash_array(text, "RESERVED_API")
-            )
-            self.assertEqual(got, combined, relative)
-
-        dart_validator = (ROOT / DART_VALIDATOR).read_text(encoding="utf-8")
-        dart_words = _extract_dart_set(dart_validator, "reservedWords")
-        self.assertEqual(dart_words, combined, DART_VALIDATOR)
-
-        for relative, expected_import in DART_DIALOG_IMPORTS.items():
-            text = (ROOT / relative).read_text(encoding="utf-8")
-            self.assertIn(expected_import, text, relative)
-            self.assertNotIn("_reserved", text, relative)
-
-    def test_reserved_route_names_match_malicious_paths_router(self) -> None:
-        canonical_text = (
-            ROOT / "servidor/api-internal/app/host_agent_protocol.py"
-        ).read_text(encoding="utf-8")
-        route_words = _extract_py_set(canonical_text, "RESERVED_ROUTE_NAMES")
-
-        middlewares = (ROOT / "servidor/traefik/middlewares.yml").read_text(
-            encoding="utf-8"
-        )
-        rule_match = re.search(r'malicious-paths:\s*\n\s*rule: "([^"]*)"', middlewares)
-        if not rule_match:
-            raise AssertionError("rule do malicious-paths nao encontrada")
-        prefixes = re.findall(r"PathPrefix\(`/([^`]*)`\)", rule_match.group(1))
-        blockable_slugs = frozenset(
-            prefix for prefix in prefixes if SLUG_WORD_RE.fullmatch(prefix)
-        )
-        self.assertEqual(route_words, blockable_slugs)
+    def test_shell_and_flutter_keep_shape_without_blocklists(self):
+        for path in ("servidor/generateProject/lib/generate_project_impl.sh",
+                     "servidor/generateProject/lib/duplicate_project_impl.sh"):
+            source = (ROOT / path).read_text(encoding="utf-8")
+            self.assertIn("^[a-z_][a-z0-9_]{2,39}$", source)
+            self.assertNotIn("RESERVED", source)
+            self.assertNotIn("reservedWords", source)
+        dart = (ROOT / "studio/seletor_de_projetos/lib/utils/project_name_validator.dart").read_text(encoding="utf-8")
+        self.assertIn("RegExp(projectNamePattern)", dart)
+        self.assertNotIn("reservedWords", dart)
+        firewall = (ROOT / "servidor/traefik/middlewares.yml").read_text(encoding="utf-8")
+        self.assertIn("malicious-paths:", firewall)
+        self.assertIn("PathPrefix(`/phpmyadmin`)", firewall)
 
 
 if __name__ == "__main__":

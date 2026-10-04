@@ -1787,6 +1787,9 @@
           "created_by": {
             "anyOf": [
               {
+                "maxLength": 36,
+                "minLength": 36,
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
                 "type": "string"
               },
               {
@@ -1834,6 +1837,9 @@
             "type": "boolean"
           },
           "job_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
             "title": "Job Id",
             "type": "string"
           },
@@ -1860,12 +1866,18 @@
             "title": "Progress"
           },
           "project": {
+            "maxLength": 40,
+            "minLength": 3,
+            "pattern": "^[a-z_][a-z0-9_]{2,39}$",
             "title": "Project",
             "type": "string"
           },
           "project_uuid": {
             "anyOf": [
               {
+                "maxLength": 36,
+                "minLength": 36,
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
                 "type": "string"
               },
               {
@@ -1877,6 +1889,9 @@
           "public_ref": {
             "anyOf": [
               {
+                "maxLength": 20,
+                "minLength": 20,
+                "pattern": "^[a-z]{20}$",
                 "type": "string"
               },
               {
@@ -1941,6 +1956,9 @@
           "tenant_uuid": {
             "anyOf": [
               {
+                "maxLength": 36,
+                "minLength": 36,
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
                 "type": "string"
               },
               {
@@ -1976,6 +1994,9 @@
           "job_id",
           "project",
           "public_ref",
+          "project_uuid",
+          "tenant_uuid",
+          "created_by",
           "action",
           "status"
         ],
@@ -2008,6 +2029,9 @@
           "created_by": {
             "anyOf": [
               {
+                "maxLength": 36,
+                "minLength": 36,
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
                 "type": "string"
               },
               {
@@ -2055,6 +2079,9 @@
             "type": "boolean"
           },
           "job_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
             "title": "Job Id",
             "type": "string"
           },
@@ -2081,12 +2108,18 @@
             "title": "Progress"
           },
           "project": {
+            "maxLength": 40,
+            "minLength": 3,
+            "pattern": "^[a-z_][a-z0-9_]{2,39}$",
             "title": "Project",
             "type": "string"
           },
           "project_uuid": {
             "anyOf": [
               {
+                "maxLength": 36,
+                "minLength": 36,
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
                 "type": "string"
               },
               {
@@ -2098,6 +2131,9 @@
           "public_ref": {
             "anyOf": [
               {
+                "maxLength": 20,
+                "minLength": 20,
+                "pattern": "^[a-z]{20}$",
                 "type": "string"
               },
               {
@@ -2145,6 +2181,9 @@
           "tenant_uuid": {
             "anyOf": [
               {
+                "maxLength": 36,
+                "minLength": 36,
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
                 "type": "string"
               },
               {
@@ -2180,10 +2219,34 @@
           "job_id",
           "project",
           "public_ref",
+          "project_uuid",
+          "tenant_uuid",
+          "created_by",
           "action",
           "status"
         ],
         "title": "JobRetryResponse",
+        "type": "object"
+      },
+      "JobWatchResponse": {
+        "properties": {
+          "cursor": {
+            "title": "Cursor",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/JobResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "cursor"
+        ],
+        "title": "JobWatchResponse",
         "type": "object"
       },
       "KeyVersionResponse": {
@@ -2545,6 +2608,9 @@
         "additionalProperties": true,
         "properties": {
           "display_name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "\\S",
             "title": "Display Name",
             "type": "string"
           },
@@ -2552,16 +2618,22 @@
             "title": "File Size Limit",
             "type": "string"
           },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
           "is_caller_project_admin": {
             "title": "Is Caller Project Admin",
             "type": "boolean"
           },
           "name": {
+            "maxLength": 40,
+            "minLength": 3,
+            "pattern": "^[a-z_][a-z0-9_]{2,39}$",
             "title": "Name",
+            "type": "string"
+          },
+          "project_uuid": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Project Uuid",
             "type": "string"
           },
           "public_ref": {
@@ -2583,17 +2655,32 @@
             "title": "Storage Limit Token",
             "type": "string"
           },
+          "tenant_uuid": {
+            "anyOf": [
+              {
+                "maxLength": 36,
+                "minLength": 36,
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Uuid"
+          },
           "total_containers": {
             "title": "Total Containers",
             "type": "integer"
           }
         },
         "required": [
-          "id",
-          "is_caller_project_admin",
+          "project_uuid",
+          "tenant_uuid",
           "name",
           "public_ref",
           "display_name",
+          "is_caller_project_admin",
           "status",
           "running_containers",
           "total_containers",
@@ -2641,6 +2728,9 @@
             "type": "integer"
           },
           "display_name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "\\S",
             "title": "Display Name",
             "type": "string"
           },
@@ -2683,6 +2773,9 @@
             "title": "Last Key Rotation At"
           },
           "name": {
+            "maxLength": 40,
+            "minLength": 3,
+            "pattern": "^[a-z_][a-z0-9_]{2,39}$",
             "title": "Name",
             "type": "string"
           },
@@ -2695,6 +2788,9 @@
             "type": "string"
           },
           "project_uuid": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
             "title": "Project Uuid",
             "type": "string"
           },
@@ -2712,6 +2808,9 @@
           "tenant_uuid": {
             "anyOf": [
               {
+                "maxLength": 36,
+                "minLength": 36,
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
                 "type": "string"
               },
               {
@@ -3163,6 +3262,9 @@
           "created_by": {
             "anyOf": [
               {
+                "maxLength": 36,
+                "minLength": 36,
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
                 "type": "string"
               },
               {
@@ -3209,6 +3311,9 @@
             "type": "boolean"
           },
           "job_id": {
+            "maxLength": 36,
+            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
             "title": "Job Id",
             "type": "string"
           },
@@ -3235,12 +3340,18 @@
             "title": "Progress"
           },
           "project": {
+            "maxLength": 40,
+            "minLength": 3,
+            "pattern": "^[a-z_][a-z0-9_]{2,39}$",
             "title": "Project",
             "type": "string"
           },
           "project_uuid": {
             "anyOf": [
               {
+                "maxLength": 36,
+                "minLength": 36,
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
                 "type": "string"
               },
               {
@@ -3248,6 +3359,20 @@
               }
             ],
             "title": "Project Uuid"
+          },
+          "public_ref": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "minLength": 20,
+                "pattern": "^[a-z]{20}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Ref"
           },
           "queue_position": {
             "title": "Queue Position",
@@ -3286,6 +3411,9 @@
           "tenant_uuid": {
             "anyOf": [
               {
+                "maxLength": 36,
+                "minLength": 36,
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
                 "type": "string"
               },
               {
@@ -3320,6 +3448,7 @@
         "required": [
           "job_id",
           "project",
+          "public_ref",
           "project_uuid",
           "tenant_uuid",
           "created_by",
@@ -6543,6 +6672,71 @@
           }
         },
         "summary": "List Job History",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/jobs/watch": {
+      "get": {
+        "operationId": "watch_jobs_api_jobs_watch_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "job_id",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "maxItems": 200,
+              "title": "Job Id",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobWatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Watch Jobs",
         "tags": [
           "jobs"
         ]

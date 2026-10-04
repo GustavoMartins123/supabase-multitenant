@@ -77,8 +77,8 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = OpaqueApiKeysApi();
 final projectRef = projectRef_example; // String |
-final slotId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | 
-final xStepUpToken = xStepUpToken_example; // String | 
+final slotId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String |
+final xStepUpToken = xStepUpToken_example; // String |
 
 try {
     final result = api_instance.activateApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdActivationPost(projectRef, slotId, xStepUpToken);
@@ -93,8 +93,8 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **slotId** | **String**|  | 
- **xStepUpToken** | **String**|  | [optional] 
+ **slotId** | **String**|  |
+ **xStepUpToken** | **String**|  | [optional]
 
 ### Return type
 
@@ -122,7 +122,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = OpaqueApiKeysApi();
 final projectRef = projectRef_example; // String |
-final slotId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | 
+final slotId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String |
 final xStepUpToken = xStepUpToken_example; // String |
 
 try {
@@ -138,7 +138,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **slotId** | **String**|  | 
+ **slotId** | **String**|  |
  **xStepUpToken** | **String**|  | [optional]
 
 ### Return type
@@ -167,8 +167,8 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = OpaqueApiKeysApi();
 final projectRef = projectRef_example; // String |
-final keyId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | 
-final xStepUpToken = xStepUpToken_example; // String | 
+final keyId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String |
+final xStepUpToken = xStepUpToken_example; // String |
 
 try {
     final result = api_instance.claimApiKeyApiProjectsProjectRefApiKeyRevealsKeyIdClaimPost(projectRef, keyId, xStepUpToken);
@@ -183,8 +183,8 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **keyId** | **String**|  | 
- **xStepUpToken** | **String**|  | [optional] 
+ **keyId** | **String**|  |
+ **xStepUpToken** | **String**|  | [optional]
 
 ### Return type
 
@@ -212,8 +212,8 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = OpaqueApiKeysApi();
 final projectRef = projectRef_example; // String |
-final slotId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | 
-final confirmApiKeyInstallation = ConfirmApiKeyInstallation(); // ConfirmApiKeyInstallation | 
+final slotId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String |
+final confirmApiKeyInstallation = ConfirmApiKeyInstallation(); // ConfirmApiKeyInstallation |
 
 try {
     final result = api_instance.confirmApiKeySlotInstallationApiProjectsProjectRefApiKeySlotsSlotIdRotationConfirmationPost(projectRef, slotId, confirmApiKeyInstallation);
@@ -228,8 +228,8 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **slotId** | **String**|  | 
- **confirmApiKeyInstallation** | [**ConfirmApiKeyInstallation**](ConfirmApiKeyInstallation.md)|  | 
+ **slotId** | **String**|  |
+ **confirmApiKeyInstallation** | [**ConfirmApiKeyInstallation**](ConfirmApiKeyInstallation.md)|  |
 
 ### Return type
 
@@ -257,8 +257,8 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = OpaqueApiKeysApi();
 final projectRef = projectRef_example; // String |
-final createApiKeySlot = CreateApiKeySlot(); // CreateApiKeySlot | 
-final xStepUpToken = xStepUpToken_example; // String | 
+final createApiKeySlot = CreateApiKeySlot(); // CreateApiKeySlot |
+final xStepUpToken = xStepUpToken_example; // String |
 
 try {
     final result = api_instance.createApiKeySlotApiProjectsProjectRefApiKeySlotsPost(projectRef, createApiKeySlot, xStepUpToken);
@@ -273,8 +273,8 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **createApiKeySlot** | [**CreateApiKeySlot**](CreateApiKeySlot.md)|  | 
- **xStepUpToken** | **String**|  | [optional] 
+ **createApiKeySlot** | [**CreateApiKeySlot**](CreateApiKeySlot.md)|  |
+ **xStepUpToken** | **String**|  | [optional]
 
 ### Return type
 
@@ -511,7 +511,7 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = OpaqueApiKeysApi();
 final projectRef = projectRef_example; // String |
-final slotId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | 
+final slotId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String |
 final xStepUpToken = xStepUpToken_example; // String |
 
 try {
@@ -527,7 +527,7 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **slotId** | **String**|  | 
+ **slotId** | **String**|  |
  **xStepUpToken** | **String**|  | [optional]
 
 ### Return type
@@ -556,9 +556,9 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = OpaqueApiKeysApi();
 final projectRef = projectRef_example; // String |
-final slotId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | 
-final rotateApiKeySlot = RotateApiKeySlot(); // RotateApiKeySlot | 
-final xStepUpToken = xStepUpToken_example; // String | 
+final slotId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String |
+final rotateApiKeySlot = RotateApiKeySlot(); // RotateApiKeySlot |
+final xStepUpToken = xStepUpToken_example; // String |
 
 try {
     final result = api_instance.rotateApiKeySlotApiProjectsProjectRefApiKeySlotsSlotIdRotationPost(projectRef, slotId, rotateApiKeySlot, xStepUpToken);
@@ -573,9 +573,9 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **slotId** | **String**|  | 
- **rotateApiKeySlot** | [**RotateApiKeySlot**](RotateApiKeySlot.md)|  | 
- **xStepUpToken** | **String**|  | [optional] 
+ **slotId** | **String**|  |
+ **rotateApiKeySlot** | [**RotateApiKeySlot**](RotateApiKeySlot.md)|  |
+ **xStepUpToken** | **String**|  | [optional]
 
 ### Return type
 
@@ -603,8 +603,8 @@ import 'package:projects_api_client/api.dart';
 
 final api_instance = OpaqueApiKeysApi();
 final projectRef = projectRef_example; // String |
-final slotId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String | 
-final updateApiKeySlotPolicy = UpdateApiKeySlotPolicy(); // UpdateApiKeySlotPolicy | 
+final slotId = 38400000-8cf0-11bd-b23e-10b96e4ef00d; // String |
+final updateApiKeySlotPolicy = UpdateApiKeySlotPolicy(); // UpdateApiKeySlotPolicy |
 final xStepUpToken = xStepUpToken_example; // String |
 
 try {
@@ -620,8 +620,8 @@ try {
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **projectRef** | **String**|  |
- **slotId** | **String**|  | 
- **updateApiKeySlotPolicy** | [**UpdateApiKeySlotPolicy**](UpdateApiKeySlotPolicy.md)|  | 
+ **slotId** | **String**|  |
+ **updateApiKeySlotPolicy** | [**UpdateApiKeySlotPolicy**](UpdateApiKeySlotPolicy.md)|  |
  **xStepUpToken** | **String**|  | [optional]
 
 ### Return type

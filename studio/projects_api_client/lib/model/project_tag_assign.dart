@@ -67,16 +67,12 @@ class ProjectTagAssign {
     if (value is Map) {
       final json = value.cast<String, dynamic>();
 
-      // Ensure that the map contains the required keys.
-      // Note 1: the values aren't checked for validity beyond being non-null.
-      // Note 2: this code is stripped in release mode!
-      assert(() {
-        requiredKeys.forEach((key) {
-          assert(json.containsKey(key), 'Required key "ProjectTagAssign[$key]" is missing from JSON.');
-          assert(json[key] != null, 'Required key "ProjectTagAssign[$key]" has a null value in JSON.');
-        });
-        return true;
-      }());
+      const nullableKeys = <String>{r'color', r'name', r'tag_id'};
+      for (final key in requiredKeys) {
+        if (!json.containsKey(key) || (json[key] == null && !nullableKeys.contains(key))) {
+          throw FormatException('Invalid required field: $key');
+        }
+      }
 
       return ProjectTagAssign(
         color: mapValueOfType<String>(json, r'color'),

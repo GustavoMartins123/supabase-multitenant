@@ -9,7 +9,7 @@ import 'package:projects_api_client/api.dart';
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **events** | [**List<RenameHistoryEvent>**](RenameHistoryEvent.md) |  | [default to const []]
-**project** | **String** |  | 
+**project** | **String** |  |
 **renames** | [**List<RenameHistoryEntry>**](RenameHistoryEntry.md) |  | [default to const []]
 **requestedRef** | **String** |  |
 

@@ -26,6 +26,7 @@ class QueuedJobResponse {
     required this.progress,
     required this.project,
     required this.projectUuid,
+    required this.publicRef,
     required this.queuePosition,
     required this.retryOf,
     required this.retryable,
@@ -62,6 +63,8 @@ class QueuedJobResponse {
 
   String? projectUuid;
 
+  String? publicRef;
+
   int queuePosition;
 
   String? retryOf;
@@ -93,6 +96,7 @@ class QueuedJobResponse {
     other.progress == progress &&
     other.project == project &&
     other.projectUuid == projectUuid &&
+    other.publicRef == publicRef &&
     other.queuePosition == queuePosition &&
     other.retryOf == retryOf &&
     other.retryable == retryable &&
@@ -118,6 +122,7 @@ class QueuedJobResponse {
     (progress == null ? 0 : progress!.hashCode) +
     (project.hashCode) +
     (projectUuid == null ? 0 : projectUuid!.hashCode) +
+    (publicRef == null ? 0 : publicRef!.hashCode) +
     (queuePosition.hashCode) +
     (retryOf == null ? 0 : retryOf!.hashCode) +
     (retryable.hashCode) +
@@ -128,7 +133,7 @@ class QueuedJobResponse {
     (updatedAt == null ? 0 : updatedAt!.hashCode);
 
   @override
-  String toString() => 'QueuedJobResponse[action=$action, attempt=$attempt, createdAt=$createdAt, createdBy=$createdBy, currentStep=$currentStep, errorCode=$errorCode, finishedAt=$finishedAt, isIdempotent=$isIdempotent, jobId=$jobId, message=$message, progress=$progress, project=$project, projectUuid=$projectUuid, queuePosition=$queuePosition, retryOf=$retryOf, retryable=$retryable, startedAt=$startedAt, status=$status, tenantUuid=$tenantUuid, totalSteps=$totalSteps, updatedAt=$updatedAt]';
+  String toString() => 'QueuedJobResponse[action=$action, attempt=$attempt, createdAt=$createdAt, createdBy=$createdBy, currentStep=$currentStep, errorCode=$errorCode, finishedAt=$finishedAt, isIdempotent=$isIdempotent, jobId=$jobId, message=$message, progress=$progress, project=$project, projectUuid=$projectUuid, publicRef=$publicRef, queuePosition=$queuePosition, retryOf=$retryOf, retryable=$retryable, startedAt=$startedAt, status=$status, tenantUuid=$tenantUuid, totalSteps=$totalSteps, updatedAt=$updatedAt]';
 
   Map<String, dynamic> toJson() {
     final json = <String, dynamic>{};
@@ -177,6 +182,11 @@ class QueuedJobResponse {
     } else {
       json[r'project_uuid'] = null;
     }
+    if (this.publicRef != null) {
+      json[r'public_ref'] = this.publicRef;
+    } else {
+      json[r'public_ref'] = null;
+    }
       json[r'queue_position'] = this.queuePosition;
     if (this.retryOf != null) {
       json[r'retry_of'] = this.retryOf;
@@ -215,16 +225,12 @@ class QueuedJobResponse {
     if (value is Map) {
       final json = value.cast<String, dynamic>();
 
-      // Ensure that the map contains the required keys.
-      // Note 1: the values aren't checked for validity beyond being non-null.
-      // Note 2: this code is stripped in release mode!
-      assert(() {
-        requiredKeys.forEach((key) {
-          assert(json.containsKey(key), 'Required key "QueuedJobResponse[$key]" is missing from JSON.');
-          assert(json[key] != null, 'Required key "QueuedJobResponse[$key]" has a null value in JSON.');
-        });
-        return true;
-      }());
+      const nullableKeys = <String>{r'created_at', r'created_by', r'current_step', r'error_code', r'finished_at', r'message', r'progress', r'project_uuid', r'public_ref', r'retry_of', r'started_at', r'tenant_uuid', r'total_steps', r'updated_at'};
+      for (final key in requiredKeys) {
+        if (!json.containsKey(key) || (json[key] == null && !nullableKeys.contains(key))) {
+          throw FormatException('Invalid required field: $key');
+        }
+      }
 
       return QueuedJobResponse(
         action: mapValueOfType<String>(json, r'action')!,
@@ -240,6 +246,7 @@ class QueuedJobResponse {
         progress: mapValueOfType<int>(json, r'progress'),
         project: mapValueOfType<String>(json, r'project')!,
         projectUuid: mapValueOfType<String>(json, r'project_uuid'),
+        publicRef: mapValueOfType<String>(json, r'public_ref'),
         queuePosition: mapValueOfType<int>(json, r'queue_position')!,
         retryOf: mapValueOfType<String>(json, r'retry_of'),
         retryable: mapValueOfType<bool>(json, r'retryable')!,
@@ -308,6 +315,7 @@ class QueuedJobResponse {
     'progress',
     'project',
     'project_uuid',
+    'public_ref',
     'queue_position',
     'retry_of',
     'retryable',

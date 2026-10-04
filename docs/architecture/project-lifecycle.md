@@ -28,6 +28,18 @@ The Studio's project settings expose separate actions: **Rename project** update
 
 Available-member candidates come from the backend's reconciled canonical directory, not a Lua cache. The endpoint requires a project administrator or a global administrator; `mode=admin` additionally requires global administration. Inactive users and existing project administrators are excluded, and ordinary members are included only when explicitly requested.
 
+The Python identity schemas in `app/identity_schemas.py` define the project and job contracts. `tools/generate_identity_models.py` generates their Flutter models; CI rejects drift. The applications remain independently deployed and communicate through JSON over the authenticated HTTP gateway. Project lists and administrative projections use `project_uuid`, never an `id` alias. Technical names are validated for safe shape and length, not against SQL keywords or root HTTP routes: databases are prefixed and public routes use the random reference.
+
+## Job updates
+
+The selector keeps one long-poll request to `/api/jobs/watch`. The first response contains the visible active jobs and a snapshot cursor. With that cursor, the API waits for a committed change or a 25-second deadline. IDs of jobs already being followed are included explicitly so completion is delivered even after those jobs leave the active set. UI operation waiters share this subscription instead of polling status independently. Hidden tabs cancel their request and resume with a new snapshot when visible.
+
+Each API process has one dedicated PostgreSQL `LISTEN` connection, established before reading snapshots. Triggers emit `NOTIFY` after changes to jobs and authorization bindings. The notification has no job data or secrets; SQL remains the durable source. Requests release query-pool connections while waiting, capture the notification generation before reading SQL, and revalidate the current directory and principal before replying. The cursor is derived only from that principal's visible snapshot.
+
+A dead listener, revoked principal, missing watched job, or exceeded subscription limit returns an explicit error. The selector stops and exposes the error until an explicit refresh; it does not switch to periodic polling. Listener recovery requires restarting the API process. No additional Docker service is needed.
+
+References: [PostgreSQL LISTEN and its snapshot ordering](https://www.postgresql.org/docs/current/sql-listen.html), [transactional NOTIFY](https://www.postgresql.org/docs/current/sql-notify.html), and [SSE transport characteristics](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events).
+
 ## Creation
 
 Summary:
@@ -101,7 +113,7 @@ The operation does not rename directories, databases, containers, Supavisor tena
 
 The old URL becomes invalid. There is no name-based alias, UUID route, historical URL resolution or redirect. Application clients must switch their configured project URL; previously issued signed Storage URLs containing the old prefix also become invalid. Existing browser tabs must select the new project URL.
 
-Each job keeps the public reference captured at submission in `jobs.public_ref`; polling does not substitute the new reference. Its `project` field remains the technical name. History records bind old and new references to the actor, project and job.
+Each job keeps the public reference captured at submission in `jobs.public_ref`; tracking does not substitute the new reference. Its `project` field remains the technical name. History records bind old and new references to the actor, project and job.
 
 Failure triggers transactional rollback of the reference, generated files and previous service state. If rollback cannot be confirmed, Auth and Nginx remain stopped and the job requires explicit recovery.
 
