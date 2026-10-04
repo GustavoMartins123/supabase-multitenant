@@ -244,7 +244,7 @@ index 1f92fc58..3107374b 100644
        toast.success('Successfully renamed snippet!')
        if (onComplete) onComplete()
 diff --git a/apps/studio/components/interfaces/SQLEditor/SQLEditor.tsx b/apps/studio/components/interfaces/SQLEditor/SQLEditor.tsx
-index c3f736f8..ebd978eb 100644
+index c3f736f8..0bd6e113 100644
 --- a/apps/studio/components/interfaces/SQLEditor/SQLEditor.tsx
 +++ b/apps/studio/components/interfaces/SQLEditor/SQLEditor.tsx
 @@ -12,7 +12,7 @@ import { IS_PLATFORM, LOCAL_STORAGE_KEYS, useFlag, useParams } from 'common'
@@ -264,7 +264,15 @@ index c3f736f8..ebd978eb 100644
    ROWS_PER_PAGE_OPTIONS,
    sqlAiDisclaimerComment,
    untitledSnippetTitle,
-@@ -68,7 +67,7 @@ import ResizableAIWidget from '@/components/ui/AIEditor/ResizableAIWidget'
+@@ -57,6 +56,7 @@ import {
+   suffixWithLimit,
+ } from './SQLEditor.utils'
+ import { useAddDefinitions } from './useAddDefinitions'
++import { readSqlForExecution } from './readSqlForExecution'
+ import { UtilityPanel } from './UtilityPanel/UtilityPanel'
+ import {
+   isExplainQuery,
+@@ -68,15 +68,15 @@ import ResizableAIWidget from '@/components/ui/AIEditor/ResizableAIWidget'
  import { GridFooter } from '@/components/ui/GridFooter'
  import { useSqlTitleGenerateMutation } from '@/data/ai/sql-title-mutation'
  import { useDatabaseEventTriggersQuery } from '@/data/database-event-triggers/database-event-triggers-query'
@@ -273,7 +281,8 @@ index c3f736f8..ebd978eb 100644
  import { lintKeys } from '@/data/lint/keys'
  import { useReadReplicasQuery } from '@/data/read-replicas/replicas-query'
  import { useExecuteSqlMutation } from '@/data/sql/execute-sql-mutation'
-@@ -76,7 +75,6 @@ import { isError } from '@/data/utils/error-check'
++import { assertSqlQuery } from '@/data/sql/sql-query-validation'
+ import { isError } from '@/data/utils/error-check'
  import { useOrgAiOptInLevel } from '@/hooks/misc/useOrgOptedIntoAi'
  import { useSelectedOrganizationQuery } from '@/hooks/misc/useSelectedOrganization'
  import { useSelectedProjectQuery } from '@/hooks/misc/useSelectedProject'
@@ -281,7 +290,7 @@ index c3f736f8..ebd978eb 100644
  import { BASE_PATH } from '@/lib/constants'
  import { formatSql } from '@/lib/formatSql'
  import { detectOS } from '@/lib/helpers'
-@@ -105,10 +103,10 @@ const DiffEditor = dynamic(
+@@ -105,10 +105,10 @@ const DiffEditor = dynamic(
    { ssr: false }
  )
  
@@ -294,7 +303,7 @@ index c3f736f8..ebd978eb 100644
  
    const { profile } = useProfile()
    const { data: project } = useSelectedProjectQuery()
-@@ -187,22 +185,12 @@ export const SQLEditor = () => {
+@@ -187,22 +187,12 @@ export const SQLEditor = () => {
      refocusEditor()
    }, [refocusEditor])
  
@@ -318,7 +327,68 @@ index c3f736f8..ebd978eb 100644
  
    useAddDefinitions(id, monacoRef.current)
  
-@@ -675,7 +663,7 @@ export const SQLEditor = () => {
+@@ -353,24 +343,21 @@ export const SQLEditor = () => {
+         return
+       }
+ 
+-      // use the latest state
+-      const state = getSqlEditorV2StateSnapshot()
+-      const snippet = state.snippets[id]
+-
+       if (editorRef.current === null || isExecuting || project === undefined) {
+         clearPendingRunRefocus()
+         return
+       }
+ 
+       const editor = editorRef.current
+-      const selection = editor.getSelection()
+-      const selectedValue = selection ? editor.getModel()?.getValueInRange(selection) : undefined
+-
+-      const editorSql = snippet
+-        ? ((selectedValue || editorRef.current?.getValue()) ??
+-          snippet.snippet.content?.unchecked_sql)
+-        : selectedValue || editorRef.current?.getValue()
+-      const sql = sqlOverride ?? editorSql
++      const sql = readSqlForExecution(editor, sqlOverride)
++      try {
++        assertSqlQuery(sql)
++      } catch (error) {
++        clearPendingRunRefocus()
++        if (error instanceof Error) return toast.error(error.message)
++        throw error
++      }
++      const snippet = getSqlEditorV2StateSnapshot().snippets[id]
+ 
+       const hasDestructiveOperations = checkDestructiveQuery(sql)
+       const hasUpdateWithoutWhere = isUpdateWithoutWhere(sql)
+@@ -469,19 +456,15 @@ export const SQLEditor = () => {
+   const executeExplainQuery = useCallback(async () => {
+     if (isDiffOpen) return
+ 
+-    // use the latest state
+-    const state = getSqlEditorV2StateSnapshot()
+-    const snippet = state.snippets[id]
+-
+     if (editorRef.current !== null && !isExplainExecuting && project !== undefined) {
+       const editor = editorRef.current
+-      const selection = editor.getSelection()
+-      const selectedValue = selection ? editor.getModel()?.getValueInRange(selection) : undefined
+-
+-      const sql = snippet
+-        ? ((selectedValue || editorRef.current?.getValue()) ??
+-          snippet.snippet.content?.unchecked_sql)
+-        : selectedValue || editorRef.current?.getValue()
++      const sql = readSqlForExecution(editor)
++      try {
++        assertSqlQuery(sql)
++      } catch (error) {
++        if (error instanceof Error) return toast.error(error.message)
++        throw error
++      }
+ 
+       // Check for multiple statements - EXPLAIN only works on a single statement
+       const statements = splitSqlStatements(sql)
+@@ -675,7 +658,7 @@ export const SQLEditor = () => {
        try {
          setIsCompletionLoading(true)
  
@@ -327,7 +397,7 @@ index c3f736f8..ebd978eb 100644
            method: 'POST',
            headers: {
              'Content-Type': 'application/json',
-@@ -955,11 +943,6 @@ export const SQLEditor = () => {
+@@ -955,11 +938,6 @@ export const SQLEditor = () => {
                            : ''
                        }
                        id={id}
@@ -339,6 +409,46 @@ index c3f736f8..ebd978eb 100644
                        className={cn(isDiffOpen && 'hidden')}
                        editorRef={editorRef}
                        monacoRef={monacoRef}
+diff --git a/apps/studio/components/interfaces/SQLEditor/UtilityPanel/UtilityTabResults.tsx b/apps/studio/components/interfaces/SQLEditor/UtilityPanel/UtilityTabResults.tsx
+index dbc3f603..e2b553f7 100644
+--- a/apps/studio/components/interfaces/SQLEditor/UtilityPanel/UtilityTabResults.tsx
++++ b/apps/studio/components/interfaces/SQLEditor/UtilityPanel/UtilityTabResults.tsx
+@@ -41,13 +41,6 @@ export const UtilityTabResults = forwardRef<HTMLDivElement, UtilityTabResultsPro
+     const { data: projectSettings } = useProjectSettingsV2Query({ projectRef: ref })
+     const hasHipaaAddon = subscriptionHasHipaaAddon(subscription) && projectSettings?.is_sensitive
+ 
+-    const isTimeout =
+-      result?.error?.message?.includes('canceling statement due to statement timeout') ||
+-      result?.error?.message?.includes('upstream request timeout') ||
+-      result?.error?.message?.includes('Query read timeout')
+-
+-    const isNetWorkError = result?.error?.message?.includes('EHOSTUNREACH')
+-
+     if (isExecuting) {
+       return (
+         <div className="flex items-center gap-x-4 px-6 py-4 bg-table-header-light in-data-[theme*=dark]:bg-table-header-dark">
+@@ -56,6 +49,21 @@ export const UtilityTabResults = forwardRef<HTMLDivElement, UtilityTabResultsPro
+         </div>
+       )
+     } else if (result?.error) {
++      if (
++        typeof result.error.message !== 'string' ||
++        (result.error.formattedError !== undefined && typeof result.error.formattedError !== 'string')
++      ) {
++        return (
++          <div role="alert" className="px-6 py-4 font-mono text-sm">
++            Invalid SQL error response: expected message and optional formattedError strings
++          </div>
++        )
++      }
++      const isTimeout =
++        result.error.message.includes('canceling statement due to statement timeout') ||
++        result.error.message.includes('upstream request timeout') ||
++        result.error.message.includes('Query read timeout')
++      const isNetWorkError = result.error.message.includes('EHOSTUNREACH')
+       const errorLines = getSqlErrorLines(result.error)
+       const readReplicaError =
+         state.selectedDatabaseId !== ref &&
 diff --git a/apps/studio/components/interfaces/Storage/StorageExplorer/useCopyUrl.tsx b/apps/studio/components/interfaces/Storage/StorageExplorer/useCopyUrl.tsx
 index 5581a9cf..df196e15 100644
 --- a/apps/studio/components/interfaces/Storage/StorageExplorer/useCopyUrl.tsx
@@ -1050,6 +1160,36 @@ index fe114fa9..c14906b6 100644
      staleTime: 30 * 60 * 1000, // 30 minutes
      initialPageParam: 0,
      getNextPageParam(lastPage, pages) {
+diff --git a/apps/studio/data/sql/execute-sql-mutation.ts b/apps/studio/data/sql/execute-sql-mutation.ts
+index 3718fac1..f1ec7e85 100644
+--- a/apps/studio/data/sql/execute-sql-mutation.ts
++++ b/apps/studio/data/sql/execute-sql-mutation.ts
+@@ -16,6 +16,7 @@ import { MB } from '@/lib/constants'
+ import { sqlEventParser } from '@/lib/sql-event-parser'
+ import { useTrack } from '@/lib/telemetry/track'
+ import { ResponseError, UseCustomMutationOptions } from '@/types'
++import { assertSqlQuery } from './sql-query-validation'
+ 
+ // [Joshen] Intention is that we invalidate all database related keys whenever running a mutation related query
+ // So we attempt to ignore all the non-related query keys. We could probably look into grouping our query keys better
+@@ -90,6 +91,7 @@ export async function executeSql<T = any>(
+     headers?: HeadersInit
+   }) => Promise<{ data: T } | { error: ResponseError }>
+ ): Promise<{ result: T }> {
++  assertSqlQuery(sql)
+   if (!projectRef) throw new Error('projectRef is required')
+ 
+   const sqlSize = new Blob([sql]).size
+@@ -174,6 +176,9 @@ export async function executeSql<T = any>(
+   }
+ 
+   if (error) {
++    if (typeof error !== 'object' || typeof error.message !== 'string') {
++      throw new Error('Invalid SQL error response: expected a message string')
++    }
+     if (
+       isRoleImpersonationEnabled &&
+       typeof error === 'object' &&
 diff --git a/apps/studio/data/storage/s3-vectors-wrapper-create-mutation.ts b/apps/studio/data/storage/s3-vectors-wrapper-create-mutation.ts
 index c77b8c32..3467178e 100644
 --- a/apps/studio/data/storage/s3-vectors-wrapper-create-mutation.ts
@@ -4700,5 +4840,180 @@ new file mode 100644
 +    expect((await getSqlSnippetById({ projectRef: 'ref', id })).id).toBe(id)
 +    fixture.get.mockResolvedValue({ data: { ...snippet, id: 'other' } })
 +    await expect(getSqlSnippetById({ projectRef: 'ref', id })).rejects.toThrow('identity')
++  })
++})
+diff --git a/apps/studio/data/sql/sql-query-validation.ts b/apps/studio/data/sql/sql-query-validation.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/studio/data/sql/sql-query-validation.ts
+@@ -0,0 +1,8 @@
++export function assertSqlQuery(sql: unknown): asserts sql is string {
++  if (typeof sql !== 'string') {
++    throw new Error('Unable to run query: SQL text is unavailable')
++  }
++  if (sql.trim().length === 0) {
++    throw new Error('Write a SQL query before running it')
++  }
++}
+diff --git a/apps/studio/data/sql/execute-sql-empty.test.ts b/apps/studio/data/sql/execute-sql-empty.test.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/studio/data/sql/execute-sql-empty.test.ts
+@@ -0,0 +1,42 @@
++import { describe, expect, it, vi } from 'vitest'
++import type { SafeSqlFragment } from '@supabase/pg-meta'
++import { executeSql } from './execute-sql-mutation'
++
++const fixture = vi.hoisted(() => ({ post: vi.fn() }))
++vi.mock('@/data/fetchers', () => ({
++  ...fixture,
++  handleError: (error: Error) => { throw error },
++}))
++vi.mock('@/lib/telemetry/track', () => ({ useTrack: () => vi.fn() }))
++
++describe('SQL execution validation', () => {
++  it.each(['', ' ', '\n\t', undefined, null])('does not send empty or unavailable SQL (%j)', async (sql) => {
++    const override = vi.fn()
++    await expect(executeSql({ projectRef: 'abcdefghijklmnopqrst', sql: sql as SafeSqlFragment }, undefined, undefined, override))
++      .rejects.toThrow()
++    expect(override).not.toHaveBeenCalled()
++    expect(fixture.post).not.toHaveBeenCalled()
++  })
++  it('returns valid results unchanged', async () => {
++    const override = vi.fn(async () => ({ data: [{ number: 1 }] }))
++    await expect(executeSql({ projectRef: 'abcdefghijklmnopqrst', sql: 'select 1' as SafeSqlFragment }, undefined, undefined, override))
++      .resolves.toEqual({ result: [{ number: 1 }] })
++    expect(override).toHaveBeenCalledTimes(1)
++  })
++  it.each([{ detail: 'Query is required' }, { message: 123 }])('rejects a malformed SQL error explicitly', async (error) => {
++    const handler = vi.fn()
++    const override = vi.fn(async () => ({ error: error as any }))
++    await expect(executeSql({ projectRef: 'abcdefghijklmnopqrst', sql: 'select 1' as SafeSqlFragment, handleError: handler }, undefined, undefined, override))
++      .rejects.toThrow('Invalid SQL error response')
++    expect(handler).not.toHaveBeenCalled()
++    expect(override).toHaveBeenCalledTimes(1)
++  })
++  it('preserves a valid database error', async () => {
++    const error = { message: 'syntax error', code: '42601' }
++    const override = vi.fn(async () => ({ error: error as any }))
++    const handler = vi.fn((error: any) => { throw error })
++    await expect(executeSql({ projectRef: 'abcdefghijklmnopqrst', sql: 'select 1' as SafeSqlFragment, handleError: handler }, undefined, undefined, override))
++      .rejects.toEqual(error)
++    expect(handler).toHaveBeenCalledWith(error)
++  })
++})
+diff --git a/apps/studio/components/interfaces/SQLEditor/readSqlForExecution.ts b/apps/studio/components/interfaces/SQLEditor/readSqlForExecution.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/studio/components/interfaces/SQLEditor/readSqlForExecution.ts
+@@ -0,0 +1,14 @@
++import type { SafeSqlFragment } from '@supabase/pg-meta'
++import type { IStandaloneCodeEditor } from './SQLEditor.types'
++
++export function readSqlForExecution(
++  editor: Pick<IStandaloneCodeEditor, 'getSelection' | 'getModel' | 'getValue'>,
++  sqlOverride?: SafeSqlFragment
++) {
++  if (sqlOverride !== undefined) return sqlOverride
++  const selection = editor.getSelection()
++  if (selection !== null && !selection.isEmpty()) {
++    return editor.getModel()?.getValueInRange(selection)
++  }
++  return editor.getValue()
++}
+diff --git a/apps/studio/components/interfaces/SQLEditor/readSqlForExecution.test.ts b/apps/studio/components/interfaces/SQLEditor/readSqlForExecution.test.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/studio/components/interfaces/SQLEditor/readSqlForExecution.test.ts
+@@ -0,0 +1,48 @@
++import { describe, expect, it, vi } from 'vitest'
++import type { SafeSqlFragment } from '@supabase/pg-meta'
++import { readSqlForExecution } from './readSqlForExecution'
++import { assertSqlQuery } from '@/data/sql/sql-query-validation'
++
++const createEditor = () => ({
++  getValue: vi.fn(() => 'select 42'),
++  getSelection: vi.fn(() => ({ isEmpty: (): boolean => true })),
++  getModel: vi.fn(() => ({ getValueInRange: vi.fn(() => 'select 1') })),
++})
++
++describe('SQL execution reads the live editor', () => {
++  it('reads the whole document when there is only a cursor', () => {
++    const editor = createEditor()
++    expect(readSqlForExecution(editor as any)).toBe('select 42')
++    expect(editor.getModel).not.toHaveBeenCalled()
++  })
++  it('runs only the selected text', () => {
++    const editor = createEditor()
++    editor.getSelection.mockReturnValue({ isEmpty: () => false })
++    expect(readSqlForExecution(editor as any)).toBe('select 1')
++    expect(editor.getValue).not.toHaveBeenCalled()
++  })
++  it('does not execute the document when the selected text is whitespace', () => {
++    const editor = createEditor()
++    editor.getSelection.mockReturnValue({ isEmpty: () => false })
++    editor.getModel.mockReturnValue({ getValueInRange: vi.fn(() => ' \n\t') })
++    expect(() => assertSqlQuery(readSqlForExecution(editor as any))).toThrow('Write a SQL query')
++    expect(editor.getValue).not.toHaveBeenCalled()
++  })
++  it('rejects an empty document without recovering saved text', () => {
++    const editor = createEditor()
++    editor.getValue.mockReturnValue('')
++    expect(() => assertSqlQuery(readSqlForExecution(editor as any))).toThrow('Write a SQL query')
++  })
++  it('fails closed when a selected model is unavailable', () => {
++    const editor = createEditor()
++    editor.getSelection.mockReturnValue({ isEmpty: () => false })
++    editor.getModel.mockReturnValue(null as any)
++    expect(() => assertSqlQuery(readSqlForExecution(editor as any))).toThrow('SQL text is unavailable')
++    expect(editor.getValue).not.toHaveBeenCalled()
++  })
++  it('validates an explicit override without replacing it with the document', () => {
++    const editor = createEditor()
++    expect(() => assertSqlQuery(readSqlForExecution(editor as any, '' as SafeSqlFragment))).toThrow('Write a SQL query')
++    expect(editor.getValue).not.toHaveBeenCalled()
++  })
++})
+diff --git a/apps/studio/components/interfaces/SQLEditor/UtilityPanel/UtilityTabResults.errors.test.tsx b/apps/studio/components/interfaces/SQLEditor/UtilityPanel/UtilityTabResults.errors.test.tsx
+new file mode 100644
+--- /dev/null
++++ b/apps/studio/components/interfaces/SQLEditor/UtilityPanel/UtilityTabResults.errors.test.tsx
+@@ -0,0 +1,38 @@
++import { render, screen } from '@testing-library/react'
++import { beforeEach, describe, expect, it, vi } from 'vitest'
++import { UtilityTabResults } from './UtilityTabResults'
++
++const fixture = vi.hoisted(() => ({ results: {} as Record<string, any> }))
++vi.mock('common', () => ({ useParams: () => ({ ref: 'abcdefghijklmnopqrst' }) }))
++vi.mock('nuqs', () => ({ useQueryState: () => [false, vi.fn()], parseAsBoolean: { withDefault: vi.fn() } }))
++vi.mock('@/state/sql-editor-v2', () => ({ useSqlEditorV2StateSnapshot: () => fixture }))
++vi.mock('@/state/database-selector', () => ({ useDatabaseSelectorStateSnapshot: () => ({ selectedDatabaseId: 'abcdefghijklmnopqrst' }) }))
++vi.mock('@/hooks/misc/useSelectedOrganization', () => ({ useSelectedOrganizationQuery: () => ({}) }))
++vi.mock('@/data/subscriptions/org-subscription-query', () => ({ useOrgSubscriptionQuery: () => ({}) }))
++vi.mock('@/data/config/project-settings-v2-query', () => ({ useProjectSettingsV2Query: () => ({}) }))
++vi.mock('@/components/interfaces/Billing/Subscription/Subscription.utils', () => ({ subscriptionHasHipaaAddon: () => false }))
++vi.mock('@/components/ui/AiAssistantDropdown', () => ({ AiAssistantDropdown: () => null }))
++vi.mock('@/components/ui/CopyButton', () => ({ default: () => null }))
++vi.mock('./Results', () => ({ default: () => null }))
++
++const props = { id: 'query', onDebug: vi.fn(), buildDebugPrompt: () => '' }
++describe('SQL error results', () => {
++  beforeEach(() => { fixture.results = {} })
++  it.each([{ detail: 'Query is required' }, { message: 123 }, { message: 'error', formattedError: 123 }])(
++    'rejects malformed error responses without crashing on includes', (error) => {
++      fixture.results.query = [{ rows: [], error }]
++      render(<UtilityTabResults {...props} />)
++      expect(screen.getByRole('alert').textContent).toContain('Invalid SQL error response')
++    }
++  )
++  it('renders a valid database error unchanged', () => {
++    fixture.results.query = [{ rows: [], error: { message: 'syntax error at end of input' } }]
++    render(<UtilityTabResults {...props} />)
++    expect(screen.getByText('Error: syntax error at end of input')).toBeDefined()
++  })
++  it('shows the running state without processing a previous malformed error', () => {
++    fixture.results.query = [{ rows: [], error: { message: 123 } }]
++    render(<UtilityTabResults {...props} isExecuting />)
++    expect(screen.getByText('Running...')).toBeDefined()
 +  })
 +})
