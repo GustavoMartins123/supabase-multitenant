@@ -27,6 +27,8 @@ CI has three non-optional security jobs in `ci.yml`:
 - `authorization-security-live`: builds the production Studio/OpenResty image,
   obtains PostgreSQL 15 explicitly, then runs API/agent authorization, revocation,
   canonical directory and two-tenant SQL isolation checks.
+  It also checks SQL snippet ownership, immutable IDs and offline import against
+  a disposable PostgreSQL database.
   It also runs real Authelia session/browser CSRF acceptance as described below.
 - `functions-security-live`: obtains the explicit Python/Edge Runtime images and
   checks the real Linux projection/lock contract and real runtime worker
@@ -49,7 +51,7 @@ python tools/run_studio_session_tests.py \
   --studio-image studio-nginx:latest \
   --authelia-image authelia/authelia:4.39.20 --redis-image redis:8.2.2-alpine \
   --runtime-image session-runtime:local --browser-image session-browser:local \
-  --ui-image ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v9
+  --ui-image ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v10
 ```
 
 The runner creates a unique network/volume, generates a synthetic account and CA

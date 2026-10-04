@@ -105,7 +105,6 @@ services:
     env_file:
       - .env
     environment:
-      SNIPPETS_MANAGEMENT_FOLDER: ${SNIPPETS_MANAGEMENT_FOLDER}
       AVATAR_PROCESS_MAX_CONCURRENCY: ${AVATAR_PROCESS_MAX_CONCURRENCY:-2}
       AVATAR_PROCESS_TIMEOUT_MS: ${AVATAR_PROCESS_TIMEOUT_MS:-15000}
       AVATAR_MAX_PIXELS: ${AVATAR_MAX_PIXELS:-16000000}
@@ -125,7 +124,6 @@ services:
     volumes:
       - ./nginx/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ./authelia:/config
-      - ./snippets:/app/snippets
       - ${STUDIO_CA_CERT_PATH:-./authelia/ssl/ca.pem}:/etc/studio/extra-ca.pem:ro
     tmpfs:
       - /tmp:size=256m,mode=1777
@@ -151,7 +149,7 @@ services:
       retries: 3
   studio:
     container_name: supabase-studio
-    image: ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v9
+    image: ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v10
     pull_policy: always
     restart: unless-stopped
     logging: *vector-logging
@@ -180,9 +178,7 @@ services:
       NEXT_PUBLIC_ENABLE_LOGS: "true"
       ENABLED_FEATURES_LOGS_ALL: "true"
       NEXT_ANALYTICS_BACKEND_PROVIDER: postgres
-      SNIPPETS_MANAGEMENT_FOLDER: ${SNIPPETS_MANAGEMENT_FOLDER}
     volumes:
-      - ./snippets:/app/snippets
       - ${STUDIO_CA_CERT_PATH:-./authelia/ssl/ca.pem}:/etc/ssl/certs/studio-ca.pem:ro
 volumes:
   usersdb:

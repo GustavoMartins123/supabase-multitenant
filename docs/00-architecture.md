@@ -284,7 +284,7 @@ It is responsible for:
 - Auth, REST, Storage, and PG Meta rewrites;
 - Studio compatibility endpoints;
 - versioned service-key cache;
-- snippet storage separated by user and project;
+- authenticated routing of Studio SQL content to the Projects API;
 - Flutter administrative routes.
 
 Details: [OpenResty/Lua architecture](architecture/openresty-lua.md) and [Supabase Studio tab context](architecture/studio-slug-context.md).

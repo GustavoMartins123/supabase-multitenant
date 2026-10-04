@@ -124,7 +124,7 @@ spec.loader.exec_module(module)
 result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromModule(module))
 sys.exit(0 if result.wasSuccessful() and not result.skipped and result.testsRun > 0 else 1)
 '''
-        for relative in ('tests/smoke/test_authorization_behavior.py', 'tests/integration/test_studio_directory.py',
+        for relative in ('tests/smoke/test_authorization_behavior.py', 'tests/integration/test_studio_content.py', 'tests/integration/test_studio_directory.py',
                          'tests/integration/test_tenant_sql_isolation.py'):
             # Stream output; do not include the synthetic DSN in failure messages.
             status = subprocess.call([sys.executable, '-c', script, str(ROOT / relative), dsn, url])

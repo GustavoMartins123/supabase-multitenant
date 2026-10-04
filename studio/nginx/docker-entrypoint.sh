@@ -117,20 +117,6 @@ CA_BUNDLE="/var/run/studio-ca-bundle.pem"
 cat /etc/ssl/certs/ca-certificates.crt "$EXTRA_CA_CERT_FILE" > "$CA_BUNDLE"
 chmod 644 "$CA_BUNDLE"
 
-SNIPPETS_DIR="${SNIPPETS_MANAGEMENT_FOLDER:-/app/snippets}"
-if [ -d "$SNIPPETS_DIR" ]; then
-    chown -R 65534:65534 "$SNIPPETS_DIR" 2>/dev/null || true
-
-    if find "$SNIPPETS_DIR" -type d -exec chmod 777 {} + \
-        && find "$SNIPPETS_DIR" -type f -exec chmod 666 {} +; then
-        echo "[entrypoint] snippets preparados para escrita compartilhada em $SNIPPETS_DIR"
-    else
-        echo "[entrypoint] WARN: não consegui preparar $SNIPPETS_DIR; a migração de snippets pode falhar"
-    fi
-else
-    echo "[entrypoint] WARN: diretório de snippets ausente: $SNIPPETS_DIR"
-fi
-
 PROFILE_PICTURES_DIR="/config/profile-pictures"
 mkdir -p "$PROFILE_PICTURES_DIR"
 chown -R 65534:65534 "$PROFILE_PICTURES_DIR" 2>/dev/null || true

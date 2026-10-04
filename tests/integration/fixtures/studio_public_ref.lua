@@ -22,49 +22,16 @@ for _, invalid in ipairs({ "technical_project", "ABCDefghijklmnopqrst", ref .. "
     assert(not resolved and has_path and err == "invalid_path_ref", invalid)
 end
 
-local identity = require("studio_compat.content_project_identity")
-local namespace = require("studio_compat.content_namespace")
-local virtualization = require("studio_compat.content_virtualization")
-local project_uuid = "11111111-1111-4111-8111-111111111111"
-local user_uuid = "33333333-3333-4333-8333-333333333333"
-ngx.ctx.studio_project_context = { ref = ref, project_uuid = project_uuid }
-assert(identity.resolve(ref).project_id == project_uuid)
-assert(not identity.resolve(other))
-assert(not identity.resolve("technical_project"))
-assert(not identity.resolve(project_uuid))
-ngx.ctx.studio_project_context.project_uuid = "1111111-11111-4111-8111-111111111111"
-assert(not identity.resolve(ref))
-ngx.ctx.studio_project_context = { ref = ref, project_uuid = project_uuid }
-local root_name = namespace.build_folder_name(user_uuid, project_uuid)
-local root_id = namespace.actual_folder_id(root_name)
-local state = { root_folder = { id = root_id }, child_by_actual_id = {}, child_by_virtual_id = {} }
-local snippet = { id = "actual-upstream-id", name = "query", folder_id = root_id,
-                  content = { content_id = "actual-upstream-id", sql = "select 1;" } }
-local visible = virtualization.virtualize_snippet(project_uuid, user_uuid, state, snippet)
-assert(visible.id == virtualization.virtual_snippet_id("query", root_id))
-assert(visible.content.content_id == visible.id)
-assert(snippet.content.content_id == "actual-upstream-id")
-assert(virtualization.find_actual_snippet_in_collection(project_uuid, user_uuid, visible.id, state, {snippet}) == snippet,
-    "expected=" .. visible.id .. ", derived=" .. tostring(virtualization.resolve_virtual_snippet_id(project_uuid, user_uuid, snippet, nil, root_id)))
-assert(not virtualization.find_actual_snippet_in_collection(project_uuid, user_uuid, snippet.id, state, {snippet}))
-assert(not virtualization.find_actual_snippet_in_collection(project_uuid, user_uuid,
-    namespace.actual_snippet_id(namespace.actual_folder_id(user_uuid .. "__technical_project"), "query"), state, {snippet}))
-ngx.ctx.studio_project_context.ref = other
-assert(identity.resolve(other).project_id == project_uuid)
-assert(not identity.resolve(ref))
-local after_rotation = virtualization.virtualize_snippet(project_uuid, user_uuid, state, snippet)
-assert(after_rotation.id == visible.id)
-for _ = 1, 1000 do
-    assert(virtualization.virtualize_snippet(project_uuid, user_uuid, state, snippet).id == visible.id)
-end
-local actual_folder = { id = "actual-folder-id" }
-state.child_by_virtual_id["canonical-folder-id"] = { actual = actual_folder }
-state.child_by_actual_id[actual_folder.id] = { actual = actual_folder }
-assert(virtualization.resolve_actual_folder(project_uuid, user_uuid, state, "canonical-folder-id") == actual_folder)
-assert(not virtualization.resolve_actual_folder(project_uuid, user_uuid, state, actual_folder.id))
-ngx.ctx.studio_project_context = nil
-assert(not identity.resolve(other))
-print("PASS: verified UUID namespaces retain canonical snippet IDs across reference rotation; aliases rejected")
+local signer = require("security.projects_api_signer")
+local request_vars = ngx.var
+ngx.var = {}
+ngx.ctx.studio_request_project_ref = ref
+local target = signer.target_for_request("/api/platform/projects/" .. ref .. "/content/item/11111111-1111-4111-8111-111111111111")
+assert(target:find("/api/projects/" .. ref .. "/content/item/", 1, true) == 1)
+assert(not signer.target_for_request("/api/platform/projects/" .. other .. "/content"))
+ngx.ctx.studio_request_project_ref = nil
+ngx.var = request_vars
+print("PASS: content requests retain their canonical public reference and reject mismatched context")
 
 assert(os.execute("mkdir -p /tmp/studio-ref/body /tmp/studio-ref/logs") == true)
 local conf = [[

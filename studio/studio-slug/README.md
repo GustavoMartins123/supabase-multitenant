@@ -10,6 +10,10 @@ O contrato do patch é intencionalmente estrito:
 - requisições same-origin feitas pelo cliente carregam
   `X-Studio-Project-Ref: <ref>`;
 - caches que retornam dados dependentes do projeto incluem o ref na chave;
+- cada aba SQL recebe um UUID aleatório, persistido sem tradução pela Projects API;
+- renomear ou mover um snippet preserva esse UUID e o `content_id`;
+- abas SQL vazias são documentos salvos, não previews descartáveis;
+- salvar SQL não executa a consulta;
 - o código não lê cookie de projeto, `Referer` nem usa `default` como projeto;
 - as credenciais S3 locais são solicitadas pela rota explícita
   `/api/projects/<ref>/storage/s3-keys`;
@@ -47,3 +51,28 @@ docker compose -f studio/docker-compose.maintenance.yml push studio
 
 Publique a nova tag antes de distribuir a configuração que a utiliza.
 O CI de build já usa cache do GitHub Actions; instalações não precisam desse cache.
+
+## Migração de snippets existentes
+
+Instalações que armazenavam consultas em `/app/snippets` precisam de uma
+migração offline para o PostgreSQL do plano de controle. Faça backup do banco
+e do volume, interrompa o gateway e o Studio e extraia uma cópia do volume
+parado. Não remova o volume original.
+
+Após aplicar as migrations com `control-plane-migrations`, execute o importador
+com a mesma identidade administrativa e a cópia montada somente para leitura:
+
+```sh
+cd servidor
+docker compose -f docker-compose-api.yml --env-file .env run --rm --no-deps \
+  -v "$(pwd)/../tools:/migration:ro" \
+  -v "$SNIPPETS_SNAPSHOT:/snapshot:ro" \
+  --entrypoint python control-plane-migrations \
+  /migration/migrate_studio_content.py --snippets-dir /snapshot --apply
+```
+
+`SNIPPETS_SNAPSHOT` deve apontar para o caminho absoluto da cópia extraída.
+O importador preserva os IDs expostos anteriormente, valida usuário, projeto
+e conteúdo e confirma a transação inteira antes de liberar o novo Studio.
+Ele recusa destino não vazio ou arquivos sem atribuição; não existe importação
+automática nem consulta ao armazenamento antigo durante o uso da interface.

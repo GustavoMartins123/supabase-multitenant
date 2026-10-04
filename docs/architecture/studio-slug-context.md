@@ -15,7 +15,7 @@ Resolution uses this path and, for same-origin calls, the
 
 1. The Flutter selector opens `/project/<ref>`.
 2. Nginx accepts the page only when `<ref>` matches
-   `[a-z_][a-z0-9_]{2,39}`.
+   `[a-z]{20}`.
 3. Studio reads the ref from the current URL and includes
    `X-Studio-Project-Ref: <ref>` in every same-origin request made by its
    HTTP transport.

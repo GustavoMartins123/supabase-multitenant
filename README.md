@@ -14,18 +14,6 @@ Projects are addressed by an independent 20-letter random reference: `https://<s
 
 > This is an unofficial project under active development.
 
-### Studio assistant
-
-In the assistant panel, open **Assistant settings** to configure your provider (OpenAI or OpenRouter), exact model ID and personal key for the current project. Once saved, the key is never returned to the browser; the interface shows **Provider key configured** and **Replace key**. Credentials and history are encrypted in local SQLite on the Studio node, with a separate setup-generated master key. No provider credentials belong in `.env`.
-
-Database tools require project administration. Choose no database access, public schema only, bounded public-table reads, approved `[AI]` functions, or full public-table SQL access. Full access executes supported table creation, ordinary indexes, inserts and updates directly, without individual approval. Every `DELETE`, `DROP`, `TRUNCATE` and destructive alteration requires dedicated explicit deletion confirmation, even with full access. Read-only tools respect PostgreSQL RLS; full SQL uses tenant administration and can bypass RLS. Requests use Studio HTTPS, verified internal TLS and the administrative gateway; external applications still connect through Traefik and cannot access this service. See [Studio assistant](docs/00-architecture.md#studio-assistant) for storage, permissions and backup boundaries.
-
-Assistant database tools share bounded UUID-scoped tenant pools: two reader and two administration connections per tenant. Saturation returns an explicit error; it never opens overflow connections. Provider authentication errors identify HTTP 401 and direct you to **Assistant settings** to check or replace the saved key, without exposing provider responses or retrying.
-
-Full access also supports `CREATE POLICY` on ordinary public tables with explicit `TO anon` or `TO authenticated`, and enabling/forcing RLS. Policy changes/removal and disabling/unforcing RLS require explicit confirmation. The assistant's `inspect_security` tool reads actual RLS flags, policies and effective application-role grants without arbitrary catalog SQL. Policies do not grant table privileges; enabled RLS without a policy denies ordinary application access by default. Ownership rules must come from your application, not an automatically generated `USING (true)` policy.
-
-Table privileges use a dedicated assistant tool: granting or revoking SELECT, INSERT, UPDATE or DELETE on public tables for `anon` or `authenticated` requires explicit confirmation; it does not change RLS or policies.
-
 ---
 
 ## Table of Contents
@@ -33,6 +21,9 @@ Table privileges use a dedicated assistant tool: granting or revoking SELECT, IN
 - [Overview](#overview)
 - [Purpose](#purpose)
 - [Architecture](#architecture)
+  - [Shared services](#shared-services)
+  - [Services created per project](#services-created-per-project)
+  - [External application access](#external-application-access)
 - [Prerequisites](#prerequisites)
 - [How to Use](#how-to-use)
   - [1. Clone the Repository](#1-clone-the-repository)
@@ -97,69 +88,6 @@ The platform supports two deployment layouts:
 
 Applications access the project routes through Traefik. The Studio gateway is an administrative interface and does not need to be exposed as part of the public data path.
 
-### External application access
-
-An application uses the main server's public HTTPS origin, not the administrative
-Studio origin on `:9091`. In a two-machine deployment, it connects to the main
-server, not the Studio machine. The same separation applies on one machine.
-
-Application users authenticate through the project's Auth API; they do not need
-an Authelia account or a Studio session. Trusted external backends also use
-Traefik project routes with their own secret slot; secret keys must never be
-distributed to public applications.
-
-| Purpose | Address | Access |
-| --- | --- | --- |
-| Administration | `https://<studio-host>:9091` | Authelia session and administrative authorization |
-| Publishable slot discovery | `https://<public-server>/config/<application_ref>` | Public GET through Traefik; no cookie or configuration token |
-| Project API base URL | `https://<public-server>/<public_ref>` | Opaque API key and, where applicable, the application's user session |
-
-Service paths are appended to the project base URL: `/auth/v1`, `/rest/v1`,
-`/storage/v1`, `/functions/v1` and `/realtime/v1`. They are not routes at the
-public server's root. Only discovery uses the root `/config/<application_ref>`.
-
-For HTTP project requests, send the opaque key in `apikey`. An authenticated
-application user's JWT goes in `Authorization: Bearer <access_token>`; it is
-not a replacement for the API key. The project gateway validates the opaque key
-and preserves the user session for the upstream Supabase service.
-
-In the project's **Keys** settings, each slot has one card with its key versions,
-reveal action and rotation controls. Publishable slots also expose **Copy
-configuration URL**. Store that URL in the application and fetch it before
-creating the Supabase client. The response contains:
-
-| Field | Meaning |
-| --- | --- |
-| `supabase_url` | Current project base URL: `https://<public-server>/<public_ref>` |
-| `publishable_key` | Effective publishable key for this slot; never a secret key |
-| `key_id` | UUID of this key version, not the project UUID or the discovery reference; changes when a different version becomes effective |
-| `expires_at` | Expiration timestamp, or `null` when the key does not expire over time |
-
-`application_ref` is a separate random 20-letter reference for a publishable
-slot. Its discovery URL stays stable across key rotation, project rename and
-project URL regeneration. Rename changes only the display name; URL regeneration
-changes `public_ref` and the returned `supabase_url`, not `application_ref`.
-Secret slots have no public discovery URL and belong only in trusted backends.
-
-Revalidate configuration when the application returns to the foreground. If
-`key_id` or `supabase_url` changes, recreate the Supabase client and reconnect
-Realtime. Discovery does not confirm scheduled key installation and never
-returns future or unconfirmed key versions. Do not reuse an old key when
-discovery fails or replay writes automatically.
-
-Traefik sends discovery directly to the isolated `client-configuration` service.
-Neither Studio nor the administrative Projects API on `:18000` handles it;
-`:18011` is internal and is not published on the host. Responses use `no-store`
-and CORS without cookies. Unknown references return 404; slots without a valid
-effective key return 410; unverifiable configuration returns 503. Discovery is
-public, not user authentication: Auth sessions, RLS and service policies still
-control access to application data.
-
-For a deployment using the setup's private CA, the application machine must
-trust that CA and verify the public server's certificate. Do not bypass TLS
-verification. See [Opaque API keys](docs/12-opaque-api-key-operations.md) and
-[Control plane](docs/architecture/control-plane.md) for the complete contracts.
-
 ### Shared services
 
 - PostgreSQL;
@@ -187,6 +115,18 @@ The `host-agent` is also a platform-wide component, but it runs as a systemd ser
 - project configuration directory.
 
 Storage and ImgProxy are no longer created per project. Storage objects are namespaced by the project's immutable tenant UUID, while each project Nginx injects the trusted tenant identity before traffic reaches the shared Storage data plane.
+
+### External application access
+
+Applications use the public Traefik origin of the main server — never the administrative Studio origin on `:9091`. Application users authenticate through the project's Auth API; no Authelia account or Studio session is involved.
+
+| Purpose | Address | Access |
+| --- | --- | --- |
+| Administration | `https://<studio-host>:9091` | Authelia session and administrative authorization |
+| Publishable slot discovery | `https://<public-server>/config/<application_ref>` | Public GET through Traefik |
+| Project API base URL | `https://<public-server>/<public_ref>` | Opaque API key and, where applicable, the application's user session |
+
+Service paths (`/auth/v1`, `/rest/v1`, `/storage/v1`, `/functions/v1`, `/realtime/v1`) append to the project base URL. See [Opaque API keys](docs/12-opaque-api-key-operations.md) for keys, discovery, rotation and request contracts, and [HTTPS setup](docs/01-https-setup.md) for certificate trust.
 
 For implementation details, see the [architecture documentation](docs/00-architecture.md).
 
@@ -247,7 +187,7 @@ For a fresh Docker Desktop/WSL installation, use `SETUP_DOCKER_DESKTOP_WSL_HOST=
 
 This profile uses `servidor/host-agent/.docker` for both startup and unattended host-agent builds, without modifying the operator's Docker credentials. The generated configuration pulls public images anonymously. For private registries, authenticate explicitly with `docker --config servidor/host-agent/.docker login <registry>`; the Windows credential helper is not used by the Linux service.
 
-Writable Traefik configuration, Authelia's directory/SQLite state and snippets also live in Linux Docker volumes in this profile. `studio/authelia` supplies setup configuration and certificates, not the live administrative database. Initialization seeds a new volume once, preserves existing volume state and refuses automatic migration of an existing host SQLite database. Back up these volumes before any reset; never use `down -v` to restart.
+Writable Traefik configuration and Authelia's directory/SQLite state also live in Linux Docker volumes in this profile. `studio/authelia` supplies setup configuration and certificates, not the live administrative database. Initialization seeds a new volume once, preserves existing volume state and refuses automatic migration of an existing host SQLite database. Studio SQL snippets are stored by the Projects API in the control-plane PostgreSQL database, scoped to each user and project; their UUIDs stay unchanged when renamed or moved. Back up these volumes and the control-plane database before any reset; never use `down -v` to restart.
 
 For two machines, use `bash setup.sh split-node <server-ip-or-domain>`. Running `bash setup.sh` without a profile keeps the legacy interactive flow.
 

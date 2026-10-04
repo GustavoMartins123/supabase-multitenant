@@ -20,6 +20,13 @@ local function is_internal_namespace(uri)
 end
 
 local function resolve_target(uri)
+    local content_ref, resource = uri:match("^/api/platform/projects/([a-z]+)/content(.*)$")
+    if content_ref then
+        if not ref_resolver.valid_ref(content_ref) or content_ref ~= ngx.ctx.studio_request_project_ref then
+            return nil, "Canonical content target is unavailable"
+        end
+        return append_query("/api/projects/" .. content_ref .. "/content" .. resource)
+    end
     if uri == "/api/projects" or uri:find("^/api/projects/") then
         return append_query(uri)
     end

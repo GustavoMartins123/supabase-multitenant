@@ -274,6 +274,7 @@ class GatewayProxyTargetContractTest(unittest.TestCase):
             for number, line in enumerate(self.nginx.splitlines(), start=1)
             if "proxy_pass" in line
             and "$server_domain" in line
+            and "$assistant_api_target" not in line
             and "$is_args$args" not in line
         ]
         self.assertEqual(
@@ -282,6 +283,13 @@ class GatewayProxyTargetContractTest(unittest.TestCase):
             "proxy_pass com URI descarta a query string e quebra o HMAC:\n"
             + "\n".join(offenders),
         )
+
+    def test_assistant_target_rejects_queries_before_signing(self) -> None:
+        gateway = (ROOT / 'studio/nginx/lua/assistant/gateway.lua').read_text(encoding='utf-8')
+        rejection = gateway.index('or ngx.var.args and ngx.var.args ~= ""')
+        signing = gateway.index('internal_hmac.apply_current_request')
+        self.assertLess(rejection, signing)
+        self.assertIn('reject(400, "Invalid assistant gateway target")', gateway)
 
     def test_project_and_job_listings_keep_their_filters(self) -> None:
         for route in ("/api/jobs$1", "/api/projects$1"):

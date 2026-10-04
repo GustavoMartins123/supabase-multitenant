@@ -1543,6 +1543,59 @@
         "title": "EncKeyResponse",
         "type": "object"
       },
+      "ExecuteSqlBody": {
+        "additionalProperties": false,
+        "properties": {
+          "execution": {
+            "$ref": "#/components/schemas/SqlExecution"
+          },
+          "label": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "permission": {
+            "const": "full",
+            "title": "Permission",
+            "type": "string"
+          },
+          "sql": {
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Sql",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sql",
+          "label",
+          "permission",
+          "execution"
+        ],
+        "title": "ExecuteSqlBody",
+        "type": "object"
+      },
+      "FolderBody": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "parentId": {
+            "title": "Parentid",
+            "type": "null"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "FolderBody",
+        "type": "object"
+      },
       "GetProjectCollaborationResponse": {
         "additionalProperties": true,
         "properties": {
@@ -2504,6 +2557,119 @@
         "title": "NewProject",
         "type": "object"
       },
+      "PrivilegeChangeBody": {
+        "additionalProperties": false,
+        "properties": {
+          "execution": {
+            "$ref": "#/components/schemas/PrivilegeExecution"
+          },
+          "label": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "grant",
+              "revoke"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "permission": {
+            "const": "full",
+            "title": "Permission",
+            "type": "string"
+          },
+          "privileges": {
+            "items": {
+              "enum": [
+                "SELECT",
+                "INSERT",
+                "UPDATE",
+                "DELETE"
+              ],
+              "type": "string"
+            },
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Privileges",
+            "type": "array"
+          },
+          "role": {
+            "enum": [
+              "anon",
+              "authenticated"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "tables": {
+            "items": {
+              "maxLength": 63,
+              "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Tables",
+            "type": "array"
+          }
+        },
+        "required": [
+          "operation",
+          "tables",
+          "role",
+          "privileges",
+          "label",
+          "permission",
+          "execution"
+        ],
+        "title": "PrivilegeChangeBody",
+        "type": "object"
+      },
+      "PrivilegeExecution": {
+        "additionalProperties": false,
+        "properties": {
+          "approval_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Approval Id",
+            "type": "string"
+          },
+          "call_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Call Id",
+            "type": "string"
+          },
+          "chat_id": {
+            "format": "uuid",
+            "title": "Chat Id",
+            "type": "string"
+          },
+          "sql_hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sql Hash",
+            "type": "string"
+          },
+          "tool": {
+            "const": "manage_table_privileges",
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chat_id",
+          "call_id",
+          "approval_id",
+          "sql_hash",
+          "tool"
+        ],
+        "title": "PrivilegeExecution",
+        "type": "object"
+      },
       "ProjectAIFunctionItem": {
         "additionalProperties": true,
         "properties": {
@@ -3451,6 +3617,29 @@
           "queue_position"
         ],
         "title": "QueuedJobResponse",
+        "type": "object"
+      },
+      "ReadRowsBody": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "table": {
+            "maxLength": 63,
+            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+            "title": "Table",
+            "type": "string"
+          }
+        },
+        "required": [
+          "table",
+          "limit"
+        ],
+        "title": "ReadRowsBody",
         "type": "object"
       },
       "RecreateProjectServicesResponse": {
@@ -5045,6 +5234,27 @@
         "title": "RotateProjectKeyResponse",
         "type": "object"
       },
+      "SecurityBody": {
+        "additionalProperties": false,
+        "properties": {
+          "tables": {
+            "items": {
+              "maxLength": 63,
+              "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Tables",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tables"
+        ],
+        "title": "SecurityBody",
+        "type": "object"
+      },
       "SlotActivationResponse": {
         "additionalProperties": true,
         "properties": {
@@ -5455,6 +5665,259 @@
           "api_keyset_version"
         ],
         "title": "SlotRevokeResponse",
+        "type": "object"
+      },
+      "SnippetBody": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "$ref": "#/components/schemas/SqlContent"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 100000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "favorite": {
+            "default": false,
+            "title": "Favorite",
+            "type": "boolean"
+          },
+          "folder_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folder Id"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "inserted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inserted At"
+          },
+          "name": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
+          "owner_uuid": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Uuid"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "project_uuid": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Uuid"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "type": {
+            "const": "sql",
+            "title": "Type",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "updated_by": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated By"
+          },
+          "visibility": {
+            "const": "user",
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "name",
+          "visibility",
+          "content"
+        ],
+        "title": "SnippetBody",
+        "type": "object"
+      },
+      "SqlContent": {
+        "additionalProperties": true,
+        "properties": {
+          "content_id": {
+            "format": "uuid",
+            "title": "Content Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "maxLength": 50,
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "sql": {
+            "maxLength": 5000000,
+            "title": "Sql",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sql",
+          "content_id",
+          "schema_version"
+        ],
+        "title": "SqlContent",
+        "type": "object"
+      },
+      "SqlExecution": {
+        "additionalProperties": false,
+        "properties": {
+          "approval_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Id"
+          },
+          "call_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Call Id",
+            "type": "string"
+          },
+          "chat_id": {
+            "format": "uuid",
+            "title": "Chat Id",
+            "type": "string"
+          },
+          "sql_hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sql Hash",
+            "type": "string"
+          },
+          "tool": {
+            "enum": [
+              "execute_sql",
+              "execute_destructive_sql"
+            ],
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chat_id",
+          "call_id",
+          "sql_hash",
+          "tool"
+        ],
+        "title": "SqlExecution",
         "type": "object"
       },
       "StartProjectResponse": {
@@ -6276,6 +6739,13 @@
       },
       "ValidationError": {
         "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
           "loc": {
             "items": {
               "anyOf": [
@@ -10034,6 +10504,828 @@
         "summary": "Transfer Project",
         "tags": [
           "project-insights"
+        ]
+      }
+    },
+    "/api/projects/{ref}/assistant/context": {
+      "get": {
+        "operationId": "assistant_context_api_projects__ref__assistant_context_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Assistant Context",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/projects/{ref}/assistant/execute": {
+      "post": {
+        "operationId": "assistant_execute_api_projects__ref__assistant_execute_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Assistant Execute",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/projects/{ref}/assistant/functions": {
+      "get": {
+        "operationId": "assistant_functions_api_projects__ref__assistant_functions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Assistant Functions",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/projects/{ref}/assistant/privileges": {
+      "post": {
+        "operationId": "assistant_privileges_api_projects__ref__assistant_privileges_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrivilegeChangeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Assistant Privileges",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/projects/{ref}/assistant/rows": {
+      "post": {
+        "operationId": "assistant_rows_api_projects__ref__assistant_rows_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReadRowsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Assistant Rows",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/projects/{ref}/assistant/schema": {
+      "get": {
+        "operationId": "assistant_schema_api_projects__ref__assistant_schema_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Assistant Schema",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/projects/{ref}/assistant/security": {
+      "post": {
+        "operationId": "assistant_security_api_projects__ref__assistant_security_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecurityBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Assistant Security",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/projects/{ref}/assistant/sql": {
+      "post": {
+        "operationId": "assistant_sql_api_projects__ref__assistant_sql_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecuteSqlBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Assistant Sql",
+        "tags": [
+          "assistant"
+        ]
+      }
+    },
+    "/api/projects/{ref}/content": {
+      "delete": {
+        "operationId": "content_delete_api_projects__ref__content_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Content Delete",
+        "tags": [
+          "studio-content"
+        ]
+      },
+      "get": {
+        "operationId": "content_list_api_projects__ref__content_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Content List",
+        "tags": [
+          "studio-content"
+        ]
+      },
+      "put": {
+        "operationId": "content_save_api_projects__ref__content_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnippetBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Content Save",
+        "tags": [
+          "studio-content"
+        ]
+      }
+    },
+    "/api/projects/{ref}/content/count": {
+      "get": {
+        "operationId": "content_count_api_projects__ref__content_count_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Content Count",
+        "tags": [
+          "studio-content"
+        ]
+      }
+    },
+    "/api/projects/{ref}/content/folders": {
+      "delete": {
+        "operationId": "folders_delete_api_projects__ref__content_folders_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Folders Delete",
+        "tags": [
+          "studio-content"
+        ]
+      },
+      "get": {
+        "operationId": "folders_list_api_projects__ref__content_folders_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Folders List",
+        "tags": [
+          "studio-content"
+        ]
+      },
+      "post": {
+        "operationId": "folder_create_api_projects__ref__content_folders_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FolderBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Folder Create",
+        "tags": [
+          "studio-content"
+        ]
+      }
+    },
+    "/api/projects/{ref}/content/folders/{id}": {
+      "get": {
+        "operationId": "folder_item_api_projects__ref__content_folders__id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Folder Item",
+        "tags": [
+          "studio-content"
+        ]
+      },
+      "patch": {
+        "operationId": "folder_update_api_projects__ref__content_folders__id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FolderBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Folder Update",
+        "tags": [
+          "studio-content"
+        ]
+      }
+    },
+    "/api/projects/{ref}/content/item/{id}": {
+      "get": {
+        "operationId": "content_item_api_projects__ref__content_item__id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Content Item",
+        "tags": [
+          "studio-content"
         ]
       }
     },

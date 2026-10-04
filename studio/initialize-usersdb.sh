@@ -11,8 +11,6 @@ if [ ! -f /config/.desktop-initialized ]; then
         chown 65534:65534 "/config/$name"
         chmod 600 "/config/$name"
     done
-    cp -R /seed-snippets/. /snippets/
-    chown -R 65534:65534 /snippets
     touch /config/.desktop-initialized
 fi
 

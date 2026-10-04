@@ -14,16 +14,6 @@ A URL usa uma referência aleatória independente de 20 letras: `https://<servid
 
 > Este é um projeto não oficial e ainda está em desenvolvimento ativo.
 
-### Assistente do Studio
-
-No painel do assistente, abra **Assistant settings** para configurar o provedor (OpenAI ou OpenRouter), o ID exato do modelo e sua chave pessoal para o projeto atual. Depois de salva, a chave nunca volta ao navegador; a interface mostra **Provider key configured** e **Replace key**. Credenciais e histórico ficam cifrados no SQLite local do nó Studio, com chave mestra separada gerada pelo setup. Credenciais de provedor não pertencem ao `.env`.
-
-As ferramentas de banco exigem administração do projeto. Escolha sem acesso ao banco, somente schema público, leitura limitada de tabelas públicas, funções `[AI]` aprovadas ou acesso total ao SQL de tabelas públicas. O acesso total executa a criação de tabelas, índices comuns, inserções e atualizações diretamente, sem aprovação individual. Todo `DELETE`, `DROP`, `TRUNCATE` e alteração destrutiva exige confirmação explícita de exclusão, mesmo com acesso total. As ferramentas de leitura respeitam RLS do PostgreSQL; o SQL com acesso total usa a administração do tenant e pode ignorar RLS. As chamadas usam HTTPS do Studio, TLS interno verificado e o gateway administrativo; aplicações externas continuam acessando pelo Traefik e não têm acesso a esse serviço. Veja [Studio assistant](docs/00-architecture.md#studio-assistant) para armazenamento, permissões e backups.
-
-O acesso total também permite `CREATE POLICY` em tabelas públicas comuns com `TO anon` ou `TO authenticated` explícito, além de habilitar e forçar RLS. Alterar/remover policies ou desabilitar/deixar de forçar RLS exige confirmação explícita. A ferramenta `inspect_security` consulta o estado real de RLS, policies e privilégios efetivos dos papéis de aplicação, sem SQL arbitrário de catálogo. Policies não concedem privilégios de tabela; RLS habilitado sem policy nega acesso por padrão aos papéis comuns. A regra de propriedade deve vir da aplicação, não de uma policy automática com `USING (true)`.
-
-Os privilégios de tabela usam uma ferramenta específica do assistente: conceder ou revogar SELECT, INSERT, UPDATE ou DELETE em tabelas públicas para `anon` ou `authenticated` exige confirmação explícita; isso não altera RLS nem policies.
-
 ---
 
 ## Sumário
@@ -31,6 +21,9 @@ Os privilégios de tabela usam uma ferramenta específica do assistente: concede
 - [Visão geral](#visão-geral)
 - [Propósito](#propósito)
 - [Arquitetura](#arquitetura)
+  - [Serviços compartilhados](#serviços-compartilhados)
+  - [Serviços criados por projeto](#serviços-criados-por-projeto)
+  - [Acesso de aplicações externas](#acesso-de-aplicações-externas)
 - [Pré-requisitos](#pré-requisitos)
 - [Como utilizar](#como-utilizar)
   - [1. Clonar o repositório](#1-clonar-o-repositório)
@@ -95,71 +88,6 @@ A plataforma suporta duas topologias:
 
 As aplicações acessam as rotas dos projetos pelo Traefik. O gateway do Studio é uma interface administrativa e não precisa fazer parte do caminho público dos dados.
 
-### Acesso de aplicações externas
-
-Uma aplicação usa a origem HTTPS pública do servidor principal, não a origem
-administrativa do Studio em `:9091`. Com duas máquinas, ela conecta ao servidor
-principal, não à máquina do Studio. A mesma separação vale em uma única máquina.
-
-Usuários das aplicações autenticam pela API de Auth do projeto; não precisam
-de conta no Authelia ou sessão do Studio. Backends externos confiáveis também
-usam as rotas do projeto pelo Traefik, com seu próprio slot secret; secret keys
-nunca devem ser distribuídas a aplicações públicas.
-
-| Finalidade | Endereço | Acesso |
-| --- | --- | --- |
-| Administração | `https://<host-do-studio>:9091` | Sessão do Authelia e autorização administrativa |
-| Descoberta do slot publishable | `https://<servidor-publico>/config/<application_ref>` | GET público pelo Traefik; sem cookie ou token de configuração |
-| URL base das APIs do projeto | `https://<servidor-publico>/<public_ref>` | API key opaca e, quando aplicável, sessão do usuário da aplicação |
-
-Os paths dos serviços são acrescentados à URL base do projeto: `/auth/v1`,
-`/rest/v1`, `/storage/v1`, `/functions/v1` e `/realtime/v1`. Não são rotas na
-raiz do servidor público. Somente a descoberta usa `/config/<application_ref>`
-na raiz.
-
-Nas requisições HTTP ao projeto, envie a chave opaca em `apikey`. O JWT do
-usuário autenticado da aplicação vai em `Authorization: Bearer <access_token>`;
-não substitui a API key. O gateway do projeto valida a chave opaca e preserva
-a sessão do usuário para o serviço Supabase de destino.
-
-Na aba **Chaves** das configurações do projeto, cada slot tem um único cartão
-com suas versões, a ação de revelar e os controles de rotação. Slots publishable
-também oferecem **Copiar URL de configuração**. Guarde essa URL na aplicação e
-consulte-a antes de criar o cliente Supabase. A resposta contém:
-
-| Campo | Significado |
-| --- | --- |
-| `supabase_url` | URL base atual do projeto: `https://<servidor-publico>/<public_ref>` |
-| `publishable_key` | Chave publishable efetiva desse slot; nunca uma secret key |
-| `key_id` | UUID da versão da chave, não o UUID do projeto nem a referência de descoberta; muda quando outra versão passa a valer |
-| `expires_at` | Data de expiração, ou `null` quando a chave não expira pelo tempo |
-
-`application_ref` é uma referência aleatória separada de 20 letras para um slot
-publishable. Sua URL de descoberta permanece estável após rotação de chave,
-rename e regeneração da URL do projeto. Rename muda somente o nome de exibição;
-regenerar a URL muda `public_ref` e o `supabase_url` retornado, não
-`application_ref`. Slots secret não têm descoberta pública e pertencem somente
-a backends confiáveis.
-
-Consulte novamente a configuração quando a aplicação voltar ao primeiro plano.
-Se `key_id` ou `supabase_url` mudar, recrie o cliente Supabase e reconecte o
-Realtime. A descoberta não confirma a instalação de uma chave programada nem
-entrega versões futuras ou sem confirmação. Não reutilize uma chave antiga
-quando a descoberta falhar nem repita escritas automaticamente.
-
-O Traefik encaminha a descoberta diretamente ao serviço isolado
-`client-configuration`. Nem o Studio nem a Projects API administrativa em
-`:18000` participam; `:18011` é interno e não é publicado no host. Respostas usam
-`no-store` e CORS sem cookies. Referências desconhecidas retornam 404; slots sem
-chave efetiva válida retornam 410; configuração não verificável retorna 503.
-A descoberta é pública, não autenticação de usuário: sessões do Auth, RLS e
-políticas dos serviços continuam controlando o acesso aos dados da aplicação.
-
-Em uma instalação com a CA privada do setup, a máquina da aplicação precisa
-confiar nessa CA e verificar o certificado do servidor público. Não desative a
-verificação TLS. Veja [Chaves de API opacas](docs/pt-br/12-chaves-api-opacas.md)
-e [Control plane](docs/pt-br/architecture/control-plane.md) para os contratos.
-
 ### Serviços compartilhados
 
 - PostgreSQL;
@@ -187,6 +115,18 @@ O `host-agent` também é um componente global da plataforma, mas roda como serv
 - diretório de configuração do projeto.
 
 Storage e ImgProxy não são mais criados por projeto. Os objetos do Storage são namespaced pelo UUID imutável do tenant, e o Nginx de cada projeto injeta a identidade confiável do tenant antes de o tráfego chegar ao data plane compartilhado do Storage.
+
+### Acesso de aplicações externas
+
+Aplicações usam a origem pública do Traefik no servidor principal — nunca a origem administrativa do Studio em `:9091`. Usuários das aplicações autenticam pela API de Auth do projeto; sem conta no Authelia ou sessão do Studio.
+
+| Finalidade | Endereço | Acesso |
+| --- | --- | --- |
+| Administração | `https://<host-do-studio>:9091` | Sessão do Authelia e autorização administrativa |
+| Descoberta do slot publishable | `https://<servidor-publico>/config/<application_ref>` | GET público pelo Traefik |
+| URL base das APIs do projeto | `https://<servidor-publico>/<public_ref>` | API key opaca e, quando aplicável, sessão do usuário da aplicação |
+
+Os paths dos serviços (`/auth/v1`, `/rest/v1`, `/storage/v1`, `/functions/v1`, `/realtime/v1`) são acrescentados à URL base do projeto. Veja [Chaves de API opacas](docs/pt-br/12-chaves-api-opacas.md) para chaves, descoberta, rotação e contratos de requisição, e [HTTPS](docs/pt-br/01-setup-https.md) para confiança de certificados.
 
 Para os detalhes de implementação, consulte a [documentação da arquitetura](docs/pt-br/00-arquitetura.md).
 
@@ -247,7 +187,7 @@ Para uma instalação nova no Docker Desktop/WSL, use `SETUP_DOCKER_DESKTOP_WSL_
 
 Esse perfil usa `servidor/host-agent/.docker` tanto na inicialização quanto nos builds não interativos do host-agent, sem modificar as credenciais Docker do operador. A configuração gerada baixa imagens públicas anonimamente. Para registros privados, autentique explicitamente com `docker --config servidor/host-agent/.docker login <registro>`; o serviço Linux não usa o helper de credenciais do Windows.
 
-Nesse perfil, a configuração gravável do Traefik, o diretório/SQLite do Authelia e os snippets também ficam em volumes Linux do Docker. `studio/authelia` fornece configuração e certificados do setup, não o banco administrativo em uso. A inicialização preenche um volume novo uma única vez, preserva o estado existente no volume e recusa migrar automaticamente um SQLite existente no host. Faça backup desses volumes antes de qualquer reset; nunca use `down -v` para reiniciar.
+Nesse perfil, a configuração gravável do Traefik e o diretório/SQLite do Authelia também ficam em volumes Linux do Docker. `studio/authelia` fornece configuração e certificados do setup, não o banco administrativo em uso. A inicialização preenche um volume novo uma única vez, preserva o estado existente no volume e recusa migrar automaticamente um SQLite existente no host. Os snippets SQL do Studio são armazenados pela Projects API no PostgreSQL do control plane, separados por usuário e projeto; seus UUIDs não mudam ao renomear ou mover. Faça backup desses volumes e do banco do control plane antes de qualquer reset; nunca use `down -v` para reiniciar.
 
 Para duas máquinas, use `bash setup.sh split-node <ip-ou-dominio-do-servidor>`. Executar `bash setup.sh` sem perfil mantém o fluxo interativo anterior.
 

@@ -140,6 +140,7 @@ from app.meta_connections import (
 )
 from app.routers.opaque_keys import router as opaque_keys_router
 from app.routers.platform_auth import router as platform_auth_router
+from app.routers.studio_content import router as studio_content_router
 from app.version import API_VERSION
 from app.project_backgrounds import (
     _create_restore_point_background,
@@ -174,6 +175,7 @@ app.include_router(internal_router)
 app.include_router(lifecycle_router)
 app.include_router(opaque_keys_router)
 app.include_router(platform_auth_router)
+app.include_router(studio_content_router)
 
 # ``create`` nao e repetivel, mas e retomavel: o runner se religa ao mesmo
 # host_agent_command duravel com ``reuse_terminal=True`` e nunca dispara um

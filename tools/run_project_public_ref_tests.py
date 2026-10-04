@@ -135,6 +135,15 @@ def validate_studio(studio_nginx_image: str) -> None:
         "--entrypoint", "resty", studio_nginx_image,
         "/workspace/tests/integration/fixtures/studio_public_ref.lua",
     ))
+    print(docker(
+        "run", "--rm", "--read-only", "--pull=never", "--network", "none",
+        "--label", f"{LABEL}={uuid.uuid4().hex}", "--tmpfs", "/tmp:rw,exec,size=128m",
+        "--mount", f"type=bind,source={ROOT},target=/workspace,readonly",
+        "-e", "SERVER_DOMAIN=http://127.0.0.1:19853",
+        "-e", "STUDIO_GATEWAY_HMAC_SECRET=fixture-hmac-secret-not-an-installation-key",
+        "--entrypoint", "resty", studio_nginx_image,
+        "/workspace/tests/integration/fixtures/studio_content_gateway.lua",
+    ))
 
 
 def execute(executor_image: str, postgres_image: str) -> None:
