@@ -213,6 +213,7 @@ trap 'rollback_on_error 129' HUP
 now=$(date +%s)
 GLOBAL_ANON_TOKEN="$(backup_generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now,\"exp\":$((now + 3600))}" "$JWT_SECRET")"
 
+echo "HOST_AGENT_PROGRESS=restore:pause_services"
 say "Parando servicos do projeto $PROJECT..."
 functions_config_withdraw "$PROJECT"
 MUTATION_STARTED=1
@@ -228,10 +229,12 @@ docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c
   "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$DB' AND usename = 'supabase_storage_admin' AND pid <> pg_backend_pid();" \
   >/dev/null
 
+echo "HOST_AGENT_PROGRESS=restore:capture_safety_backup"
 say "Criando ponto de seguranca com o estado atual..."
 backup_capture "$PROJECT" "$SAFETY_DIR"
 echo "SAFETY_BACKUP_COMPLETE ${SAFETY_BACKUP_ID}" >&2
 
+echo "HOST_AGENT_PROGRESS=restore:safety_backup_ready"
 mapfile -t KNOWN_SLOTS < <(realtime_slot_candidates_unique "$PROJECT")
 for candidate_slot in "${KNOWN_SLOTS[@]}"; do
   if [[ "$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc "SELECT count(*) FROM pg_replication_slots WHERE slot_name = '$candidate_slot';" | tr -d '[:space:]')" == "1" ]]; then
@@ -246,6 +249,7 @@ for candidate_slot in "${KNOWN_SLOTS[@]}"; do
   fi
 done
 
+echo "HOST_AGENT_PROGRESS=restore:replace_database"
 say "Substituindo banco $DB..."
 docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
   "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$DB' AND pid <> pg_backend_pid(); ALTER DATABASE \"$DB\" RENAME TO \"$PRERESTORE_DB\";" >/dev/null
@@ -257,6 +261,7 @@ NEW_DB_CREATED=1
 docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
   "REVOKE CONNECT, TEMPORARY ON DATABASE $DB FROM PUBLIC;"
 
+echo "HOST_AGENT_PROGRESS=restore:restore_database"
 say "Restaurando dump do banco..."
 gunzip -c "$SRC_DIR/db.sql.gz" \
   | docker exec -i supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$DB" >/dev/null
@@ -264,6 +269,7 @@ gunzip -c "$SRC_DIR/realtime-structure.sql.gz" \
   | docker exec -i supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$DB" >/dev/null
 gunzip -c "$SRC_DIR/realtime-migrations.sql.gz" \
   | docker exec -i supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$DB" >/dev/null
+echo "HOST_AGENT_PROGRESS=restore:configure_database"
 docker exec -i supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$DB" \
   < "$PROJECT_ROOT/volumes/db/graphql.sql"
 
@@ -325,17 +331,20 @@ if [[ "$SLOT_DROPPED" -eq 1 && -n "$SLOT_PLUGIN" ]]; then
   create_main_slot "$DB"
 fi
 
+echo "HOST_AGENT_PROGRESS=restore:restore_storage"
 say "Restaurando storage..."
 mv "$STORAGE_TARGET" "$STORAGE_PRERESTORE"
 STORAGE_SWAPPED=1
 storage_extract_namespace_archive "$PROJECT_UUID" "$SRC_DIR/storage.tar.gz" \
   || die "Falha ao restaurar namespace Storage do tenant"
 
+echo "HOST_AGENT_PROGRESS=restore:migrate_storage"
 storage_patch_tenant_connection "$PROJECT_UUID" "$PROJECT" \
   || die "Storage nao reconectou ao banco restaurado"
 storage_run_and_assert_migrations "$PROJECT_UUID" \
   || die "Migrations Storage falharam no banco restaurado"
 
+echo "HOST_AGENT_PROGRESS=restore:restart_services"
 say "Religando servicos do projeto..."
 backup_start_project_containers "$PROJECT" || die "Falha ao religar servicos do projeto"
 storage_validate_tenant "$PROJECT_UUID" "$SERVICE_ROLE_KEY_PROJETO" \
@@ -344,15 +353,19 @@ storage_validate_tenant "$PROJECT_UUID" "$SERVICE_ROLE_KEY_PROJETO" \
   || die "Tenant Storage nao ficou saudavel apos restauracao"
 storage_assert_project_gateway "$PROJECT_UUID" "$PROJECT" "$SERVICE_ROLE_KEY_PROJETO" \
   || die "Nginx nao resolveu o tenant Storage restaurado"
+echo "HOST_AGENT_PROGRESS=restore:configure_wrappers"
 vector_sync_project_wrappers "$PROJECT" || die "Falha ao sincronizar wrappers vetoriais"
+echo "HOST_AGENT_PROGRESS=restore:configure_identity"
 provision_tenant_meta_role "$DB" "$PROJECT_UUID" \
   || die "Falha ao provisionar identidade SQL isolada apos restore"
 
 [[ "$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc "SELECT count(*) FROM pg_database WHERE datname = '$DB';" | tr -d '[:space:]')" == "1" ]] \
   || die "Verificacao final do database falhou"
 
+echo "HOST_AGENT_PROGRESS=restore:publish_configuration"
 functions_config_publish "$PROJECT"
 
+echo "HOST_AGENT_PROGRESS=restore:cleanup_transaction"
 trap - ERR TERM INT HUP
 cleanup_failed=0
 terminate_db_conns "$PRERESTORE_DB" 2>/dev/null || cleanup_failed=1

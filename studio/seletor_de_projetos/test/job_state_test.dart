@@ -162,6 +162,29 @@ void main() {
       expect(merged.progress, 60);
       expect(merged.message, 'Pool de conexoes configurado.');
       expect(merged.currentStep, 'create_supavisor_tenant');
+      final stale = mergeJobSnapshots(newer, older);
+      expect(stale.progress, 60);
+      expect(stale.currentStep, 'create_supavisor_tenant');
+    });
+
+    test('rejects a newer regressed percentage instead of mixing two phases', () {
+      final current = Job('job-progress', status: 'running', progress: 60,
+          currentStep: 'configure_storage', updatedAt: DateTime.utc(2026, 10, 5, 1));
+      final regressed = Job('job-progress', status: 'running', progress: 25,
+          currentStep: 'export_database', updatedAt: DateTime.utc(2026, 10, 5, 2));
+      expect(() => mergeJobSnapshots(current, regressed), throwsFormatException);
+    });
+
+    test('takes percentage, phase and terminal state from one fresh snapshot', () {
+      final current = Job('job-progress', status: 'running', progress: 60,
+          currentStep: 'configure_storage', updatedAt: DateTime.utc(2026, 10, 5, 1));
+      final next = Job('job-progress', status: 'done', progress: 100,
+          currentStep: 'completed', message: 'Concluído', updatedAt: DateTime.utc(2026, 10, 5, 2));
+      final merged = mergeJobSnapshots(current, next);
+      expect(merged.status, 'done');
+      expect(merged.progress, 100);
+      expect(merged.currentStep, 'completed');
+      expect(merged.message, 'Concluído');
     });
   });
 

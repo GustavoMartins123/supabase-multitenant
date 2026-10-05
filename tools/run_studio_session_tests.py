@@ -59,13 +59,23 @@ def main() -> None:
     parser.add_argument('--runtime-image', required=True, help='Linux Python + openssl image')
     parser.add_argument('--browser-image', required=True, help='Built studio_session_browser.Dockerfile')
     parser.add_argument('--ui-image', required=True, help='Production Supabase Studio image')
+    parser.add_argument('--authelia-cpus', type=float)
+    parser.add_argument('--authelia-memory')
+    parser.add_argument('--authelia-memory-swap')
     args = parser.parse_args()
+    if (args.authelia_memory is None) != (args.authelia_memory_swap is None):
+        parser.error('Authelia memory and memory-swap limits must be provided together')
     for image in (args.studio_image, args.authelia_image, args.redis_image, args.runtime_image, args.browser_image, args.ui_image):
         if run('docker', 'image', 'inspect', image, '--format', '{{.Os}}') != 'linux':
             raise RuntimeError('Existing Linux images required')
     suffix = uuid.uuid4().hex[:12]
     network = 'studio-session-' + suffix
     volume = 'studio-session-config-' + suffix
+
+    def fixture_mount(subpath: str, target: str, *, readonly: bool = True) -> list[str]:
+        specification = f'type=volume,source={volume},target={target},volume-subpath={subpath}'
+        return ['--mount', specification + (',readonly' if readonly else '')]
+
     containers: list[str] = []
     networks: list[str] = []
     volumes: list[str] = []
@@ -96,6 +106,8 @@ root=pathlib.Path('/fixture')
 config=root/'studio/authelia'
 (config/'users_database.yml').write_text('users:\\n  p1_admin:\\n    displayname: P1 Admin\\n    password: '+sys.argv[1]+'\\n    email: p1_admin@example.test\\n    groups: [active, admin]\\n')
 (root/'browser-credentials.json').write_text(sys.argv[2])
+(root/'studio/secrets/authelia/ASSISTANT_GATEWAY_KEY').write_bytes((root/'studio/secrets/assistant/GATEWAY_KEY').read_bytes())
+(root/'studio/secrets/authelia/ASSISTANT_GATEWAY_KEY').chmod(0o600)
 path=root/'studio/nginx/nginx.conf'
 text=path.read_text().replace('worker_processes auto;', 'worker_processes 2;')
 text=text.replace('error_log /var/log/studio_error.log debug;', 'error_log /dev/stderr notice;')
@@ -117,10 +129,6 @@ text=text[:index]+attack+text[index:]
 path.write_text(text)
 '''
         run('docker', 'exec', seed, 'python', '-c', script, digest, credentials)
-        config_path = run('docker', 'volume', 'inspect', volume, '--format', '{{.Mountpoint}}')
-        # Engine-local binds are synthetic files in our unique named volume.
-        config = config_path + '/studio/authelia'
-        secrets_path = config_path + '/studio/secrets/authelia'
         redis = 'studio-session-redis-' + suffix
         redis_volume = 'studio-session-redis-data-' + suffix
         run('docker', 'volume', 'create', redis_volume)
@@ -129,8 +137,8 @@ path.write_text(text)
             '--network-alias', 'redis-sessions', '--read-only', '--tmpfs', '/tmp:rw,mode=1777',
             '--memory', '384m', '--cpus', '0.5',
             '-v', redis_volume + ':/data',
-            '-v', secrets_path + '/REDIS_SESSION_PASSWORD:/run/secrets/REDIS_SESSION_PASSWORD:ro',
-            '-v', config_path + '/studio/redis:/scripts:ro', '--entrypoint', 'sh',
+            *fixture_mount('studio/secrets/authelia', '/run/secrets'),
+            *fixture_mount('studio/redis', '/scripts'), '--entrypoint', 'sh',
             args.redis_image, '/scripts/start-sessions.sh')
         containers.append(redis)
         run('docker', 'start', redis)
@@ -141,13 +149,20 @@ path.write_text(text)
             time.sleep(0.5)
         authelia = 'studio-session-authelia-' + suffix
         secret_args = []
+        resource_args = []
+        if args.authelia_cpus is not None:
+            if args.authelia_cpus <= 0:
+                raise ValueError('Authelia CPU limit must be positive')
+            resource_args += ['--cpus', str(args.authelia_cpus)]
+        if args.authelia_memory is not None:
+            resource_args += ['--memory', args.authelia_memory, '--memory-swap', args.authelia_memory_swap]
         for name, variable in [('JWT_SECRET', 'IDENTITY_VALIDATION_RESET_PASSWORD_JWT'),
                                ('SESSION_SECRET', 'SESSION'), ('STORAGE_ENCRYPTION_KEY', 'STORAGE_ENCRYPTION_KEY')]:
             key = 'AUTHELIA_' + variable + ('_SECRET_FILE' if name != 'STORAGE_ENCRYPTION_KEY' else '_FILE')
-            secret_args += ['-v', f'{secrets_path}/{name}:/run/secrets/{name}:ro', '-e', f'{key}=/run/secrets/{name}']
+            secret_args += ['-e', f'{key}=/run/secrets/{name}']
         run('docker', 'create', '--name', authelia, '--pull=never', '--network', network,
-            '--network-alias', 'authelia', '-v', config + ':/config', *secret_args,
-            '-v', secrets_path + '/REDIS_SESSION_PASSWORD:/run/secrets/REDIS_SESSION_PASSWORD:ro',
+            '--network-alias', 'authelia', *resource_args, *fixture_mount('studio/authelia', '/config', readonly=False), *secret_args,
+            *fixture_mount('studio/secrets/authelia', '/run/secrets'),
             '-e', 'AUTHELIA_SESSION_REDIS_PASSWORD_FILE=/run/secrets/REDIS_SESSION_PASSWORD',
             '-e', 'AUTHELIA_SESSION_REDIS_HOST=redis-sessions',
             args.authelia_image, 'authelia', '--config=/config/configuration.runtime.yml')
@@ -172,17 +187,14 @@ path.write_text(text)
                'STUDIO_BOOTSTRAP_TOKEN_FILE': '/run/secrets/STUDIO_BOOTSTRAP_TOKEN',
                'ASSISTANT_GATEWAY_KEY_FILE': '/var/run/assistant-gateway-key'}
         env_args = [part for key, value in env.items() for part in ('-e', key + '=' + value)]
-        mounts = ['-v', config + ':/config', '-v', config_path + '/studio/nginx/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro',
-                  '-v', config_path + '/studio/nginx/docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro']
-        for name in ('JWT_SECRET', 'STORAGE_ENCRYPTION_KEY', 'STUDIO_BOOTSTRAP_TOKEN'):
-            mounts += ['-v', f'{secrets_path}/{name}:/run/secrets/{name}:ro']
-        # The production entrypoint refuses to start without the assistant
-        # gateway secret; configure_studio_runtime.py seeded it next to the
-        # Authelia secrets in the disposable fixture volume.
-        assistant_key = config_path + '/studio/secrets/assistant/GATEWAY_KEY'
-        mounts += ['-v', assistant_key + ':/run/secrets/ASSISTANT_GATEWAY_KEY:ro']
+        mounts = [*fixture_mount('studio/authelia', '/config', readonly=False),
+                  *fixture_mount('studio/secrets/authelia', '/run/secrets'),
+                  '-v', volume + ':/fixture:ro']
         run('docker', 'create', '--name', nginx, '--pull=never', '--network', network,
-            '--network-alias', 'studio.p1.test', '--network-alias', 'nginx', *env_args, *mounts, args.studio_image)
+            '--network-alias', 'studio.p1.test', '--network-alias', 'nginx', *env_args, *mounts,
+            '--entrypoint', 'sh', args.studio_image, '-c',
+            'cp /fixture/studio/nginx/nginx.conf /usr/local/openresty/nginx/conf/nginx.conf && '
+            'exec sh /fixture/studio/nginx/docker-entrypoint.sh')
         containers.append(nginx)
         # Merge current source without hiding installed Lua dependencies.
         run('docker', 'cp', str(ROOT / 'studio/nginx/lua') + '/.', nginx + ':/usr/local/openresty/lualib/')
@@ -199,18 +211,19 @@ path.write_text(text)
         browser = 'studio-session-browser-' + suffix
         run('docker', 'create', '--name', browser, '--pull=never', '--network', network, '--shm-size', '256m',
             '-e', 'NO_PROXY=studio.p1.test',
-            '-v', config + '/ssl/ca.pem:/fixture/studio/authelia/ssl/ca.pem:ro',
-            '-v', config_path + '/browser-credentials.json:/fixture/browser-credentials.json:ro',
-            '-v', config_path + '/tests/integration/test_studio_real_session.py:/test.py:ro',
-            args.browser_image, '/test.py')
+            '-v', volume + ':/fixture:ro',
+            args.browser_image, '/fixture/tests/integration/test_studio_real_session.py')
         containers.append(browser)
         print(run('docker', 'start', '-a', browser))
         if int(run('docker', 'inspect', browser, '--format', '{{.State.ExitCode}}')):
             raise RuntimeError('Required real session test failed')
     except BaseException:
         for name in containers:
-            if '-nginx-' in name or '-authelia-' in name:
+            if '-nginx-' in name or '-authelia-' in name or '-redis-' in name:
                 print(run('docker', 'logs', '--tail', '25', name))
+            if '-authelia-' in name:
+                state = json.loads(run('docker', 'inspect', name))[0]['State']
+                print('Authelia failure state:', {'oom_killed': state['OOMKilled'], 'exit_code': state['ExitCode']})
         raise
     finally:
         cleanup_errors = []

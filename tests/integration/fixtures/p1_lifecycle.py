@@ -14,6 +14,7 @@ import secrets
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 import uuid
 import urllib.error
 import urllib.request
@@ -207,14 +208,122 @@ def main() -> None:
 
     def lifecycle(script: str, *arguments: str) -> None:
         print('Running real lifecycle', script, flush=True)
+        child_env = os.environ.copy()
         if script in {'generate_project.sh', 'duplicate_project.sh'}:
             ref = arguments[0] if script == 'generate_project.sh' else arguments[1]
             arguments = ((*arguments[:2], public_refs[ref], *arguments[2:])
                          if script == 'generate_project.sh' else (*arguments, public_refs[ref]))
-            run('env', 'API_GATEWAY_TOKEN_PROJETO=' + gateway_tokens[ref], 'bash',
-                str(server / 'generateProject' / script), *arguments, cwd=server)
+            child_env['API_GATEWAY_TOKEN_PROJETO'] = gateway_tokens[ref]
         else:
+            ref = arguments[0]
+        sys.path.insert(0, str(server / 'host-agent'))
+        from hostagent.commands import (
+            RunningCommandState, CommandContext, _run_lifecycle_script,
+            CREATE_PROGRESS_EVENTS, DUPLICATE_PROGRESS_EVENTS, ROTATE_PROGRESS_EVENTS,
+            REFERENCE_PROGRESS_EVENTS, BACKUP_PROGRESS_EVENTS, RESTORE_PROGRESS_EVENTS,
+            DELETE_FILES_PROGRESS_EVENTS,
+        )
+        contracts = {
+            'generate_project.sh': ('create', 'create_project', CREATE_PROGRESS_EVENTS, 5, 70),
+            'duplicate_project.sh': ('duplicate', 'duplicate_project', DUPLICATE_PROGRESS_EVENTS, 5, 70),
+            'rotate_key.sh': ('rotate_keys', 'rotate_keys', ROTATE_PROGRESS_EVENTS, 10, 80),
+            'rename_project.sh': ('rename', 'rename_project', REFERENCE_PROGRESS_EVENTS, 5, 95),
+            'backup_project.sh': ('backup', 'backup_project', BACKUP_PROGRESS_EVENTS, 5, 95),
+            'restore_project.sh': ('restore', 'restore_project', RESTORE_PROGRESS_EVENTS, 5, 90),
+            'delete_project.sh': ('delete', 'delete_project_files', DELETE_FILES_PROGRESS_EVENTS, 82, 89),
+        }
+        if script not in contracts:
             run('bash', str(server / 'generateProject' / script), *arguments, cwd=server)
+            return
+
+        async def observe() -> None:
+            import asyncpg
+            from app.jobs import configure_jobs, set_job_status
+            from app.project_backgrounds import _fail_job_from_command, _job_progress_mirror
+            from app.host_agent import wait_command
+            from app.job_watch import job_change_hub, job_snapshot
+            from hostagent import db
+            action, command, events, lower, upper = contracts[script]
+            pool = await asyncpg.create_pool(os.environ['DB_DSN'], min_size=1, max_size=3)
+            async def provider():
+                return pool
+            configure_jobs(provider)
+            queue = asyncio.Queue()
+            updates = []
+            job, intent = uuid.uuid4(), uuid.uuid4()
+            identity = await pool.fetchrow('SELECT id, public_ref FROM projects WHERE name=$1', ref)
+            await pool.execute("""INSERT INTO jobs(job_id,project,project_uuid,public_ref,created_by,action,status,progress)
+                VALUES($1,$2,$3,$4,$5,$6,'running',$7)""", job, ref, identity['id'], identity['public_ref'], uuid.UUID(owner), action, lower)
+            await pool.execute("""INSERT INTO host_agent_commands(id,job_id,project,project_uuid,command,issued_at,signature,
+                timeout_seconds,status,worker_id) VALUES($1,$2,$3,$4,$5,$6,'privileged-fixture',1800,'running','fixture')""",
+                intent, job, ref, identity['id'], command, int(time.time()))
+            mirror = _job_progress_mirror(str(job), start_progress=lower, end_progress=upper)
+            class ObservedState(RunningCommandState):
+                def report(self, **kw):
+                    super().report(**kw)
+                    queue.put_nowait((self.progress, self.current_step, self.message))
+            state = ObservedState()
+            ctx = CommandContext(SimpleNamespace(root=server, scripts_dir=server / 'generateProject'), state, 1800, command)
+            await job_change_hub.start(os.environ['DB_DSN'])
+            async def persist():
+                while (update := await queue.get()) is not None:
+                    progress, step, message = update
+                    assert await db.heartbeat_command(pool, intent, 'fixture', 60, progress=progress, current_step=step, message=message)
+                    record = await pool.fetchrow('SELECT * FROM host_agent_commands WHERE id=$1', intent)
+                    version = job_change_hub.version
+                    await mirror(record)
+                    await asyncio.wait_for(job_change_hub.wait(version, 2), 3)
+                    snapshot = await job_snapshot(pool, {'db_user_id': uuid.UUID(owner), 'is_global_admin': False}, [job])
+                    item = next(item for item in snapshot['items'] if item['job_id'] == str(job))
+                    assert item['progress'] == lower + progress * (upper - lower) // 100
+                    assert item['current_step'] == step and item['message'] == message
+                    assert item['status'] == 'running' and item['progress'] < 100
+                    updates.append(item)
+                    print(f"Live job phase {action}: {item['progress']}% {step}", flush=True)
+            consumer = asyncio.create_task(persist())
+            try:
+                outcome, _ = await _run_lifecycle_script(ctx, script, list(arguments), env=child_env,
+                                                        error_code='fixture_failed', progress_events=events)
+                queue.put_nowait(None)
+                await consumer
+                assert outcome.status == 'done', state.stderr_tail()
+                assert len(updates) >= 2, (script, updates)
+                assert all(a['progress'] <= b['progress'] for a, b in zip(updates, updates[1:]))
+                assert await db.finish_command(pool, intent, 'fixture', status='done', progress=state.progress, current_step=state.current_step)
+                completed = await pool.fetchrow('SELECT * FROM host_agent_commands WHERE id=$1', intent)
+                assert completed['progress'] == 100 and completed['current_step'] == 'completed'
+                await set_job_status(str(job), 'done', current_step='completed')
+                snapshot = await job_snapshot(pool, {'db_user_id': uuid.UUID(owner), 'is_global_admin': False}, [job])
+                item = next(item for item in snapshot['items'] if item['job_id'] == str(job))
+                assert item['status'] == 'done' and item['progress'] == 100
+                if action == 'create':
+                    failed_job, failed_intent = uuid.uuid4(), uuid.uuid4()
+                    await pool.execute("""INSERT INTO jobs(job_id,project,project_uuid,public_ref,created_by,action,status,progress)
+                        VALUES($1,$2,$3,$4,$5,'duplicate','running',5)""",
+                        failed_job, ref, identity['id'], identity['public_ref'], uuid.UUID(owner))
+                    await pool.execute("""INSERT INTO host_agent_commands(id,job_id,project,project_uuid,command,issued_at,
+                        signature,timeout_seconds,status,worker_id) VALUES($1,$2,$3,$4,'duplicate_project',$5,
+                        'privileged-fixture',1800,'running','fixture')""",
+                        failed_intent, failed_job, ref, identity['id'], int(time.time()))
+                    assert await db.finish_command(pool, failed_intent, 'fixture', status='failed', exit_code=4,
+                                                   error_code='fixture_restore_failed', progress=40,
+                                                   current_step='restore_database', message='Fixture failure before heartbeat')
+                    record = await wait_command(pool, failed_intent,
+                                                on_progress=_job_progress_mirror(str(failed_job), start_progress=5, end_progress=70))
+                    assert record['progress'] == 40 and record['current_step'] == 'restore_database'
+                    await _fail_job_from_command(str(failed_job), record, default_error='fixture_failed',
+                                                 message_prefix='Fixture failed')
+                    snapshot = await job_snapshot(pool, {'db_user_id': uuid.UUID(owner), 'is_global_admin': False}, [failed_job])
+                    item = next(item for item in snapshot['items'] if item['job_id'] == str(failed_job))
+                    assert (item['status'], item['progress'], item['current_step']) == ('failed', 31, 'restore_database')
+                    print('Terminal failure before heartbeat preserved in persisted job snapshot', flush=True)
+            finally:
+                if not consumer.done():
+                    consumer.cancel()
+                    await asyncio.gather(consumer, return_exceptions=True)
+                await job_change_hub.close()
+                await pool.close()
+        asyncio.run(observe())
 
     def check_projection(ref: str, tenant: str) -> dict[str, str]:
         path = server / '.functions-tenants' / (ref + '.json')

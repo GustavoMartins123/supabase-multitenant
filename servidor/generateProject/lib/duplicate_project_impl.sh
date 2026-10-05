@@ -306,6 +306,7 @@ template_to_file() {
     "$template" > "$output"
 }
 
+echo "HOST_AGENT_PROGRESS=duplicate:prepare_destination"
 functions_config_withdraw "$NEW_PROJECT"
 mkdir -p "$OUT_DIR/nginx" "$OUT_DIR/pooler"
 CREATED_DIR=1
@@ -322,6 +323,7 @@ docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c
 provision_platform_reader_role
 
 if [[ "$COPY_MODE" == "with-data" ]]; then
+  echo "HOST_AGENT_PROGRESS=duplicate:pause_source"
   for source_service in nginx rest auth meta; do
     source_name="supabase-$source_service-$ORIGINAL_PROJECT"
     if [[ "$(docker inspect -f '{{.State.Running}}' "$source_name" 2>/dev/null || true)" == "true" ]]; then
@@ -339,9 +341,11 @@ if [[ "$COPY_MODE" == "with-data" ]]; then
   docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
     "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$ORIGINAL_DB' AND usename = 'supabase_storage_admin' AND pid <> pg_backend_pid();" \
     >/dev/null
+  echo "HOST_AGENT_PROGRESS=duplicate:export_database"
   docker exec supabase-db pg_dump -U supabase_admin -d "$ORIGINAL_DB" \
     --exclude-schema=realtime > "$DUMP_FILE"
 else
+  echo "HOST_AGENT_PROGRESS=duplicate:export_database"
   docker exec supabase-db pg_dump -U supabase_admin -d "$ORIGINAL_DB" \
     --schema=auth --schema=storage --schema-only > "$DUMP_FILE"
   docker exec supabase-db pg_dump -U supabase_admin -d "$ORIGINAL_DB" \
@@ -357,11 +361,13 @@ docker exec supabase-db pg_dump -U supabase_admin -d "$ORIGINAL_DB" --data-only 
   -t 'realtime.schema_migrations' > "$RT_MIGRATIONS_FILE"
 
 if [[ "$COPY_MODE" == "with-data" ]]; then
+  echo "HOST_AGENT_PROGRESS=duplicate:copy_storage"
   storage_clone_tenant_namespace "$ORIGINAL_UUID" "$PROJECT_UUID" \
     || die "Falha ao copiar objetos para o namespace do clone"
   resume_source_project || die "Clone capturado, mas a origem nao foi religada"
 fi
 
+echo "HOST_AGENT_PROGRESS=duplicate:restore_database"
 docker exec -i supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$NEW_DB" < "$DUMP_FILE"
 docker exec -i supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$NEW_DB" \
   < "$PROJECT_ROOT/volumes/db/graphql.sql"
@@ -386,6 +392,7 @@ docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c
 docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
   "ALTER ROLE supabase_storage_admin IN DATABASE \"$NEW_DB\" SET search_path = storage, public;"
 
+echo "HOST_AGENT_PROGRESS=duplicate:isolate_vectors"
 vector_validate_database "$NEW_DB" || die "Clone sem pgvector valido"
 vector_strip_copied_wrappers "$NEW_DB" || die "Falha ao remover wrappers/segredos copiados"
 if [[ "$COPY_MODE" == "with-data" ]]; then
@@ -427,10 +434,12 @@ if [[ -n "$realtime_tables" ]]; then
 fi
 
 if [[ "$COPY_MODE" == "schema-only" ]]; then
+  echo "HOST_AGENT_PROGRESS=duplicate:create_empty_storage"
   storage_create_empty_tenant_namespace "$PROJECT_UUID" \
     || die "Falha ao criar namespace vazio do clone"
 fi
 
+echo "HOST_AGENT_PROGRESS=duplicate:configure_realtime"
 realtime_payload=$(jq -cn \
   --arg uuid "$PROJECT_UUID" --arg secret "$JWT_SECRET_PROJETO" \
   --arg db "$NEW_DB" --arg host "$POSTGRES_HOST" --arg port "$POSTGRES_PORT" \
@@ -444,6 +453,7 @@ response=$(docker exec realtime-dev.supabase-realtime curl -sS -w '\n%{http_code
 code=$(echo "$response" | tail -n1)
 [[ "$code" == "200" || "$code" == "201" ]] || die "Falha no Realtime (HTTP $code)"
 
+echo "HOST_AGENT_PROGRESS=duplicate:configure_pooler"
 pg_version=$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc "SELECT version();" | awk '{print $2}')
 supavisor_payload=$(jq -cn \
   --arg id "$NEW_PROJECT" --arg host "$POSTGRES_HOST" --arg port "$POSTGRES_PORT" \
@@ -456,12 +466,14 @@ response=$(docker exec supabase-pooler curl -sS -w '\n%{http_code}' \
 code=$(echo "$response" | tail -n1)
 [[ "$code" == "200" || "$code" == "201" || "$code" == "204" ]] || die "Falha no Supavisor (HTTP $code)"
 
+echo "HOST_AGENT_PROGRESS=duplicate:configure_storage"
 storage_provision_tenant "$PROJECT_UUID" "$NEW_PROJECT" "$JWT_SECRET_PROJETO" \
   "$ANON_TOKEN" "$SERVICE_TOKEN" "$FILE_SIZE_LIMIT" \
   "$ENABLE_IMAGE_TRANSFORMATION" "$S3_PROTOCOL_ENABLED" "$VECTOR_BUCKETS_ENABLED" \
   "$VECTOR_MAX_BUCKETS" "$VECTOR_MAX_INDEXES" \
   || die "Falha ao registrar tenant Storage do clone"
 
+echo "HOST_AGENT_PROGRESS=duplicate:create_credentials"
 IFS=$'\t' read -r S3_PROTOCOL_CREDENTIAL_ID S3_PROTOCOL_ACCESS_KEY_ID \
   S3_PROTOCOL_ACCESS_KEY_SECRET \
   <<<"$(storage_create_s3_credentials "$PROJECT_UUID")"
@@ -476,6 +488,7 @@ SERVICE_ROLE_KEY_PROJETO="$SERVICE_TOKEN"
 export PROJECT_UUID SERVICE_ROLE_KEY_PROJETO S3_PROTOCOL_CREDENTIAL_ID \
   S3_PROTOCOL_ACCESS_KEY_ID S3_PROTOCOL_ACCESS_KEY_SECRET
 
+echo "HOST_AGENT_PROGRESS=duplicate:render_files"
 template_to_file "$SCRIPT_DIR/nginxtemplate" "$OUT_DIR/nginx/nginx_${NEW_PROJECT}.conf"
 template_to_file "$SCRIPT_DIR/.envtemplate" "$OUT_DIR/.env"
 template_to_file "$SCRIPT_DIR/dockercomposetemplate" "$OUT_DIR/docker-compose.yml"
@@ -487,12 +500,14 @@ apply_project_resource_limits "$PROJECT_ROOT/.env" "$OUT_DIR/.env" \
   "${PROJECT_RESOURCE_PROFILE_OVERRIDE:-}" "$ORIGINAL_DIR/.env"
 chmod 644 "$OUT_DIR/nginx/nginx_${NEW_PROJECT}.conf" "$OUT_DIR/.dockerignore"
 
+echo "HOST_AGENT_PROGRESS=duplicate:start_services"
 COMPOSE_STARTED=1
 (
   cd "$OUT_DIR"
   docker compose -p "$NEW_PROJECT" --env-file ../../.env --env-file .env up --build -d
 )
 
+echo "HOST_AGENT_PROGRESS=duplicate:verify_storage"
 vector_validate_storage_api "$PROJECT_UUID" "$SERVICE_TOKEN" \
   "$S3_PROTOCOL_ACCESS_KEY_ID" "$S3_PROTOCOL_ACCESS_KEY_SECRET" \
   "$S3_PROTOCOL_ENABLED" "$VECTOR_BUCKETS_ENABLED" \
@@ -500,21 +515,22 @@ vector_validate_storage_api "$PROJECT_UUID" "$SERVICE_TOKEN" \
 storage_assert_project_gateway "$PROJECT_UUID" "$NEW_PROJECT" "$SERVICE_TOKEN" \
   || die "Nginx do clone nao resolveu o tenant Storage correto"
 
+echo "HOST_AGENT_PROGRESS=duplicate:configure_wrappers"
 vector_sync_project_wrappers "$NEW_PROJECT" || die "Falha ao recriar wrappers vetoriais do clone"
+echo "HOST_AGENT_PROGRESS=duplicate:configure_identity"
 grant_platform_reader_on_tenant "$NEW_DB"
 provision_tenant_meta_role "$NEW_DB" "$PROJECT_UUID" \
   || die "Falha ao provisionar identidade SQL isolada do clone"
 
+echo "HOST_AGENT_PROGRESS=duplicate:publish_configuration"
+source "$SCRIPT_DIR/lib/platform_capacity.sh"
+platform_apply_shared_limits "$PROJECT_ROOT/.env" \
+  || die "Falha ao aplicar limites da camada compartilhada"
 functions_config_publish "$NEW_PROJECT"
 
 trap - ERR TERM INT HUP
 cleanup_tmp
 trap - EXIT
 
-if [[ -f "$SCRIPT_DIR/lib/platform_capacity.sh" ]]; then
-  source "$SCRIPT_DIR/lib/platform_capacity.sh"
-  platform_apply_shared_limits "$PROJECT_ROOT/.env" \
-    || echo "Aviso: limites da camada compartilhada nao foram reaplicados." >&2
-fi
-
+echo "HOST_AGENT_PROGRESS=duplicate:infrastructure_ready"
 echo "✅ Projeto $NEW_PROJECT duplicado com credenciais SigV4 e wrappers isolados"

@@ -50,6 +50,27 @@ class RealSessionTest(unittest.TestCase):
                     method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
                         password:credentials.password,action:'delete_project',project:'abcdefghijklmnopqrst',resource:'abcdefghijklmnopqrst'})})).status''', credentials)
                 self.assertEqual(reauth, 200)
+                invalid_reauth = page.evaluate('''async credentials => {
+                    const response = await fetch('/api/security/step-up', {
+                        method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+                            password:credentials.password+'-invalid',action:'delete_project',
+                            project:'abcdefghijklmnopqrst',resource:'abcdefghijklmnopqrst'})});
+                    return {status:response.status, body:await response.json()};
+                }''', credentials)
+                self.assertEqual(invalid_reauth['status'], 403, invalid_reauth['body'])
+                self.assertEqual(invalid_reauth['body'], {'error': 'Senha atual invalida'})
+                concurrent_reauth = page.evaluate('''async credentials => {
+                    const statuses = await Promise.all([0,1].map(async () => {
+                        const response = await fetch('/api/security/step-up', {
+                            method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+                                password:credentials.password,action:'delete_project',
+                                project:'abcdefghijklmnopqrst',resource:'abcdefghijklmnopqrst'})});
+                        await response.text();
+                        return response.status;
+                    }));
+                    return statuses;
+                }''', credentials)
+                self.assertEqual(concurrent_reauth, [200, 200])
                 # A valid session must survive a short idle period without relogin.
                 page.wait_for_timeout(10000)
                 self.assertEqual(page.evaluate('''async () => (await fetch('/api/csrf-probe', {

@@ -37,6 +37,10 @@ from .security import (
     resolve_project_dir,
 )
 from .templates import sync_project_generated_files
+from .progress import (
+    DUPLICATE_PROGRESS_EVENTS, ROTATE_PROGRESS_EVENTS, REFERENCE_PROGRESS_EVENTS,
+    RESTORE_PROGRESS_EVENTS, DELETE_FILES_PROGRESS_EVENTS, DELETE_STORAGE_PROGRESS_EVENTS,
+)
 
 logger = logging.getLogger("hostagent.commands")
 
@@ -104,6 +108,14 @@ CREATE_PROGRESS_EVENTS: dict[str, ProgressEvent] = {
         "render_project_files",
         "Arquivos do projeto gerados.",
     ),
+    "HOST_AGENT_PROGRESS=create:database_started": (20, "create_database", "Criando o banco de dados..."),
+    "HOST_AGENT_PROGRESS=create:realtime_started": (30, "create_realtime_tenant", "Configurando o Realtime..."),
+    "HOST_AGENT_PROGRESS=create:supavisor_started": (40, "create_supavisor_tenant", "Configurando o pool de conexões..."),
+    "HOST_AGENT_PROGRESS=create:storage_started": (50, "create_storage_tenant", "Registrando o tenant Storage..."),
+    "HOST_AGENT_PROGRESS=create:services_starting": (78, "start_project_services", "Construindo e iniciando os serviços do projeto..."),
+    "HOST_AGENT_PROGRESS=create:storage_verifying": (86, "verify_storage", "Validando Storage, S3 e o gateway..."),
+    "HOST_AGENT_PROGRESS=create:identity_started": (95, "configure_identity", "Provisionando a identidade SQL isolada..."),
+    "HOST_AGENT_PROGRESS=create:configuration_publishing": (98, "publish_configuration", "Publicando a configuração do projeto..."),
     "HOST_AGENT_PROGRESS=create:database_created": (
         25,
         "create_database",
@@ -140,6 +152,12 @@ CREATE_PROGRESS_EVENTS: dict[str, ProgressEvent] = {
         "Storage validado; finalizando projeto...",
     ),
 }
+
+RESTORE_PROGRESS_EVENTS.update({
+    marker: (5 + progress * 25 // 100, "safety_" + step, "Ponto de segurança: " + message)
+    for marker, (progress, step, message) in BACKUP_PROGRESS_EVENTS.items()
+    if marker not in {"HOST_AGENT_PROGRESS=backup:services_stopped", "HOST_AGENT_PROGRESS=backup:services_restarted"}
+})
 
 ROLLBACK_COMPLETE_MARKER = "HOST_AGENT_ROLLBACK_COMPLETE=1"
 ROLLBACK_FAILED_MARKER = "HOST_AGENT_ROLLBACK_FAILED="
@@ -229,8 +247,16 @@ def _apply_progress_events(
     events: Mapping[str, ProgressEvent],
     seen: set[str],
 ) -> None:
-    for marker, (progress, step, message) in events.items():
-        if marker not in seen and marker in window:
+    namespaces = {event.split("=", 1)[1].split(":", 1)[0] for event in events}
+    for marker in window.splitlines():
+        if marker.startswith("HOST_AGENT_PROGRESS=") and marker not in events:
+            namespace = marker.split("=", 1)[1].split(":", 1)[0]
+            if namespace in namespaces:
+                raise ValueError(f"Unknown lifecycle progress event: {marker}")
+        if marker in events and marker not in seen:
+            progress, step, message = events[marker]
+            if progress < state.progress:
+                raise ValueError(f"Lifecycle progress regressed at {marker}")
             seen.add(marker)
             state.report(progress=progress, step=step, message=message)
 
@@ -246,6 +272,8 @@ async def _pump_stream(
 ) -> None:
     if reader is None:
         return
+    pending = b""
+    discarding_line = False
     while True:
         chunk = await reader.read(4096)
         if not chunk:
@@ -256,9 +284,24 @@ async def _pump_stream(
             for marker in markers:
                 if marker in window:
                     seen.add(marker)
-        if progress_events:
-            window = state._stdout if stream == "stdout" else state._stderr
-            _apply_progress_events(window, state, progress_events, progress_seen)
+        if progress_events and stream == "stdout":
+            pending += chunk
+            lines = pending.split(b"\n")
+            pending = lines.pop()
+            if discarding_line and lines:
+                lines.pop(0)
+                discarding_line = False
+            try:
+                _apply_progress_events(
+                    b"\n".join(lines).decode(errors="replace"), state,
+                    progress_events, progress_seen,
+                )
+            except ValueError:
+                state.abort.set()
+                raise
+            if len(pending) > _OUTPUT_WINDOW_LIMIT:
+                pending = b""
+                discarding_line = True
 
 
 async def run_process(
@@ -859,6 +902,7 @@ async def handle_duplicate_project(ctx: CommandContext, project: str, args: dict
         [original, project, str(args["copy_mode"]), str(args["tenant_uuid"]), str(args["original_tenant_uuid"]), str(args["public_ref"])],
         env=env,
         error_code="duplicate_failed",
+        progress_events=DUPLICATE_PROGRESS_EVENTS,
     )
     return outcome
 
@@ -888,9 +932,11 @@ async def handle_delete_project_files(ctx: CommandContext, project: str, args: d
         "delete_project.sh",
         [project],
         error_code="delete_files_failed",
+        progress_events=DELETE_FILES_PROGRESS_EVENTS,
     )
     tenant_uuid = str(args["tenant_uuid"]).strip()
     if outcome.status == "done" and tenant_uuid:
+        ctx.state.report(progress=80, step="remove_project_backups", message="Removendo os pontos de restauração do projeto...")
         removed = await _remove_backup_tree(
             resolve_backup_project_dir(ctx.config.backups_root, tenant_uuid)
         )
@@ -908,6 +954,7 @@ async def handle_delete_project_storage(
         "delete_storage_tenant.sh",
         [project, tenant_uuid],
         error_code="delete_storage_tenant_failed",
+        progress_events=DELETE_STORAGE_PROGRESS_EVENTS,
     )
     return outcome
 
@@ -920,6 +967,7 @@ async def handle_rotate_keys(ctx: CommandContext, project: str, args: dict[str, 
         "rotate_key.sh",
         [project],
         error_code="rotate_script_failed",
+        progress_events=ROTATE_PROGRESS_EVENTS,
     )
     return outcome
 
@@ -935,6 +983,7 @@ async def handle_rename_project(ctx: CommandContext, project: str, args: dict[st
         "rename_project.sh",
         [project, project_uuid, args["tenant_uuid"], args["old_ref"], args["new_ref"]],
         error_code="rename_failed",
+        progress_events=REFERENCE_PROGRESS_EVENTS,
         markers=("ROLLBACK_COMPLETE", "REFERENCE_ROTATED"),
     )
     rolled_back = "ROLLBACK_COMPLETE" in process.markers_seen
@@ -1083,6 +1132,7 @@ async def handle_restore_project(ctx: CommandContext, project: str, args: dict[s
         "restore_project.sh",
         [project, backup_id, safety_backup_id],
         error_code="restore_failed",
+        progress_events=RESTORE_PROGRESS_EVENTS,
         markers=("SAFETY_BACKUP_COMPLETE", "ROLLBACK_COMPLETE", "ROLLBACK_INCOMPLETE"),
     )
     safety_completed = "SAFETY_BACKUP_COMPLETE" in process.markers_seen
@@ -1111,6 +1161,7 @@ async def handle_restore_project(ctx: CommandContext, project: str, args: dict[s
 
 
 async def handle_delete_restore_point(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
+    ctx.state.report(progress=10, step="validate_restore_point_removal", message="Validando a remoção do ponto de restauração...")
     project_uuid, failure = _resolve_backup_context(
         ctx, project, args.get("tenant_uuid")
     )
@@ -1119,7 +1170,9 @@ async def handle_delete_restore_point(ctx: CommandContext, project: str, args: d
     assert project_uuid is not None
     backup_id = str(args["backup_id"]).lower()
     backup_dir = resolve_backup_dir(ctx.config.backups_root, project_uuid, backup_id)
+    ctx.state.report(progress=50, step="remove_restore_point_files", message="Removendo os arquivos do ponto de restauração...")
     removed = await _remove_backup_tree(backup_dir)
+    ctx.state.report(progress=90, step="verify_restore_point_removal", message="Verificando a remoção do ponto de restauração...")
     if backup_dir.exists():
         return CommandOutcome(
             status="failed",

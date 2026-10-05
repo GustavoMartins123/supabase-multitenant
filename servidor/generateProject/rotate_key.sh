@@ -216,6 +216,7 @@ service_jti=$(openssl rand -hex 16)
 echo "🔄 Gerando novos tokens para projeto $PROJECT_ID..."
 echo "   Usando issuer: $PROJECT_UUID"
 
+echo "HOST_AGENT_PROGRESS=rotate:generate_tokens"
 NEW_ANON=$(generate_jwt    "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now,\"exp\":$exp,\"jti\":\"$anon_jti\"}"         "$JWT_SECRET_PROJETO")
 NEW_SERVICE=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now,\"exp\":$exp,\"jti\":\"$service_jti\"}" "$JWT_SECRET_PROJETO")
 PUBLIC_BASE_URL="$(normalize_public_base_url "$SERVER_URL" "${SERVER_PROTO:-}")"
@@ -257,6 +258,7 @@ template_to_file() {
 functions_config_withdraw "$PROJECT_ID"
 init_transaction
 
+echo "HOST_AGENT_PROGRESS=rotate:configure_storage"
 storage_patch_tenant_keys "$PROJECT_UUID" "$NEW_ANON" "$NEW_SERVICE" \
   || die "Storage nao aceitou os novos JWTs internos"
 STORAGE_KEYS_UPDATED=true
@@ -267,6 +269,7 @@ backup_file "$PROJECT_DIR/docker-compose.yml"
 backup_file "$PROJECT_DIR/.env"
 backup_file "$PROJECT_DIR/.dockerignore"
 
+echo "HOST_AGENT_PROGRESS=rotate:render_files"
 template_to_file "$SCRIPT_DIR/nginxtemplate" "$PROJECT_DIR/nginx/nginx_${PROJECT_ID}.conf"
 template_to_file "$SCRIPT_DIR/Dockerfile" "$PROJECT_DIR/Dockerfile"
 template_to_file "$SCRIPT_DIR/dockercomposetemplate" "$PROJECT_DIR/docker-compose.yml"
@@ -278,12 +281,14 @@ chmod 644 "$PROJECT_DIR/nginx/nginx_${PROJECT_ID}.conf" "$PROJECT_DIR/.dockerign
 replace_env_value "ANON_KEY_PROJETO" "$NEW_ANON" "$PROJECT_DIR/.env"
 replace_env_value "SERVICE_ROLE_KEY_PROJETO" "$NEW_SERVICE" "$PROJECT_DIR/.env"
 
+echo "HOST_AGENT_PROGRESS=rotate:restart_services"
 cd "$PROJECT_DIR"
 docker compose -p "$PROJECT_ID" \
   --env-file ../../.env \
   --env-file .env \
   up --build -d nginx
 
+echo "HOST_AGENT_PROGRESS=rotate:verify_storage"
 storage_validate_tenant "$PROJECT_UUID" "$NEW_SERVICE" \
   "$S3_PROTOCOL_ACCESS_KEY_ID" "$S3_PROTOCOL_ACCESS_KEY_SECRET" \
   "$S3_PROTOCOL_ENABLED" "$VECTOR_BUCKETS_ENABLED" \
@@ -297,5 +302,6 @@ echo ""
 echo "⚠️  NOTA: O JWT_SECRET_PROJETO não foi alterado"
 echo "   Apenas os tokens foram regenerados com o mesmo secret."
 
+echo "HOST_AGENT_PROGRESS=rotate:publish_configuration"
 functions_config_publish "$PROJECT_ID"
 commit_transaction

@@ -454,15 +454,19 @@ echo "HOST_AGENT_PROGRESS=create:transaction_initialized"
 mkdir -p "$OUT_DIR/nginx" "$OUT_DIR/pooler"
 register_created_dir "$OUT_DIR"
 
+echo "HOST_AGENT_PROGRESS=create:database_started"
 generate_db
 echo "HOST_AGENT_PROGRESS=create:database_created"
+echo "HOST_AGENT_PROGRESS=create:realtime_started"
 realtime_tenant
 echo "HOST_AGENT_PROGRESS=create:realtime_created"
+echo "HOST_AGENT_PROGRESS=create:supavisor_started"
 supavisor_tenant
 echo "HOST_AGENT_PROGRESS=create:supavisor_created"
 
 # Registra a intencao antes da chamada: uma falha de transporte pode ocorrer
 # depois de o registry ter persistido o tenant.
+echo "HOST_AGENT_PROGRESS=create:storage_started"
 storage_assert_tenant_absent "$PROJECT_UUID" \
   || die "Tenant UUID ja existe no Storage compartilhado"
 register_storage_tenant "$PROJECT_UUID"
@@ -492,12 +496,14 @@ apply_project_resource_limits "$PROJECT_ROOT/.env" "$OUT_DIR/.env" "${PROJECT_RE
 chmod 644 "$OUT_DIR/nginx/nginx_${PROJECT_ID}.conf" "$OUT_DIR/.dockerignore"
 echo "HOST_AGENT_PROGRESS=create:files_rendered"
 
+echo "HOST_AGENT_PROGRESS=create:services_starting"
 COMPOSE_STARTED=1
 (
   cd "$OUT_DIR"
   docker compose -p "$PROJECT_ID" --env-file ../../.env --env-file .env up --build -d
 )
 echo "HOST_AGENT_PROGRESS=create:services_started"
+echo "HOST_AGENT_PROGRESS=create:storage_verifying"
 vector_validate_storage_api "$PROJECT_UUID" "$SERVICE_TOKEN" \
   "$S3_PROTOCOL_ACCESS_KEY_ID" "$S3_PROTOCOL_ACCESS_KEY_SECRET" \
   "$S3_PROTOCOL_ENABLED" "$VECTOR_BUCKETS_ENABLED" \
@@ -506,17 +512,17 @@ storage_assert_project_gateway "$PROJECT_UUID" "$PROJECT_ID" "$SERVICE_TOKEN" \
   || die "Nginx do projeto nao resolveu o tenant Storage correto"
 echo "HOST_AGENT_PROGRESS=create:storage_verified"
 
+echo "HOST_AGENT_PROGRESS=create:identity_started"
 grant_platform_reader_on_tenant "_supabase_$PROJECT_ID" \
   || die "Falha ao conceder leitura de telemetria ao platform_reader"
 provision_tenant_meta_role "_supabase_$PROJECT_ID" "$PROJECT_UUID" \
   || die "Falha ao provisionar identidade SQL isolada do projeto"
 
-if [[ -f "$SCRIPT_DIR/lib/platform_capacity.sh" ]]; then
-  source "$SCRIPT_DIR/lib/platform_capacity.sh"
-  platform_apply_shared_limits "$PROJECT_ROOT/.env" \
-    || echo "Aviso: limites da camada compartilhada nao foram reaplicados." >&2
-fi
+source "$SCRIPT_DIR/lib/platform_capacity.sh"
+platform_apply_shared_limits "$PROJECT_ROOT/.env" \
+  || die "Falha ao aplicar limites da camada compartilhada"
 
 echo "✅  Projeto $PROJECT_ID configurado com Storage Vectors e SigV4"
+echo "HOST_AGENT_PROGRESS=create:configuration_publishing"
 functions_config_publish "$PROJECT_ID"
 commit_transaction

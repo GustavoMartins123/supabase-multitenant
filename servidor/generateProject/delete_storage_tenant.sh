@@ -13,6 +13,7 @@ source "$SCRIPT_DIR/lib/functions_config.sh"
 source "$SCRIPT_DIR/lib/storage_multitenant.sh"
 
 PROJECT_ID="${1:-}"
+echo "HOST_AGENT_PROGRESS=delete_storage:validate"
 TENANT_ID="$(tr '[:upper:]' '[:lower:]' <<<"${2:-}")"
 [[ "$PROJECT_ID" =~ ^[a-z_][a-z0-9_]{2,39}$ ]] \
   || die "project_id invalido"
@@ -37,7 +38,11 @@ storage_assert_project_identity "$PROJECT_ID" "$TENANT_ID" \
 
 storage_wait_global || die "Storage compartilhado indisponivel"
 functions_config_withdraw "$PROJECT_ID"
-storage_delete_tenant "$TENANT_ID" || die "Falha ao excluir tenant Storage"
+echo "HOST_AGENT_PROGRESS=delete_storage:remove_tenant"
+storage_delete_tenant_registry "$TENANT_ID" || die "Falha ao excluir tenant Storage"
+echo "HOST_AGENT_PROGRESS=delete_storage:remove_objects"
+storage_remove_tenant_namespace "$TENANT_ID" || die "Falha ao remover namespace Storage"
+echo "HOST_AGENT_PROGRESS=delete_storage:verify"
 storage_assert_tenant_absent "$TENANT_ID" || die "Tenant Storage ainda existe"
 
 echo "Tenant Storage $TENANT_ID e seu namespace foram removidos."

@@ -236,14 +236,14 @@ Job mergeJobSnapshots(Job current, Job incoming) {
       !incomingValue.isBefore(currentValue),
   };
   final newest = incomingIsNewer ? incoming : current;
-  final progressValues =
-      [current.progress, incoming.progress].whereType<int>().toList();
-  final progress = progressValues.isEmpty
-      ? null
-      : progressValues.reduce((a, b) => a > b ? a : b);
-  final status = current.status == 'running' || incoming.status == 'running'
-      ? 'running'
-      : newest.status;
+  if (incomingIsNewer &&
+      current.progress != null && incoming.progress != null &&
+      incoming.progress! < current.progress!) {
+    throw const FormatException('Progresso do job regrediu');
+  }
+  if (incomingIsNewer && current.status == 'running' && incoming.status == 'queued') {
+    throw const FormatException('Estado do job regrediu');
+  }
 
   return Job(
     current.id,
@@ -253,9 +253,9 @@ Job mergeJobSnapshots(Job current, Job incoming) {
     tenantUuid: newest.tenantUuid,
     createdBy: newest.createdBy,
     action: newest.action,
-    status: status,
+    status: newest.status,
     message: newest.message,
-    progress: progress,
+    progress: newest.progress,
     currentStep: newest.currentStep,
     totalSteps: newest.totalSteps,
     createdAt: current.createdAt ?? incoming.createdAt,

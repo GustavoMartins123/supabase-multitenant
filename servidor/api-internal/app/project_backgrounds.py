@@ -129,21 +129,23 @@ async def _failed_create_recovery_context(
     return bool(rows), tenant_uuids
 
 
-def _job_progress_mirror(job_id: str):
+def _job_progress_mirror(job_id: str, *, start_progress: int = 0, end_progress: int = 95):
     """Espelha progresso do comando do host-agent no job correspondente."""
 
+    if not 0 <= start_progress < end_progress < 100:
+        raise ValueError("Invalid job progress span")
+
     async def on_progress(command_row) -> None:
-        try:
-            progress = command_row["progress"]
-            await _set_job_status(
-                job_id,
-                "running",
-                message=command_row["message"],
-                progress=max(1, min(95, progress)) if progress else None,
-                current_step=command_row["current_step"],
-            )
-        except Exception as exc:  # noqa: BLE001
-            print(f"[host_agent] falha ao espelhar progresso do job {job_id}: {exc}")
+        progress = command_row["progress"]
+        if not isinstance(progress, int) or not 0 <= progress <= 100:
+            raise ValueError("Invalid host-agent progress")
+        await _set_job_status(
+            job_id,
+            "running",
+            message=command_row["message"],
+            progress=start_progress + progress * (end_progress - start_progress) // 100,
+            current_step=command_row["current_step"],
+        )
 
     return on_progress
 
@@ -223,7 +225,7 @@ async def _provision_and_store_keys(job_id: str, project_name: str, user: uuid.U
                 "resource_profile": resource_profile,
             },
             reuse_terminal=True,
-            on_progress=_job_progress_mirror(job_id),
+            on_progress=_job_progress_mirror(job_id, start_progress=5, end_progress=70),
         )
         if record["status"] != "done":
             result = command_result(record)
@@ -463,7 +465,7 @@ async def _duplicate_and_store_keys(
                 "resource_profile": resource_profile,
             },
             reuse_terminal=True,
-            on_progress=_job_progress_mirror(job_id),
+            on_progress=_job_progress_mirror(job_id, start_progress=5, end_progress=70),
         )
         if record["status"] != "done":
             await _fail_job_from_command(
@@ -637,6 +639,11 @@ async def _delete_project_impl(
                 requested_by=job_requested_by,
                 args=args,
                 reuse_terminal=True,
+                on_progress=_job_progress_mirror(
+                    current_job_id,
+                    start_progress={"delete_project_containers": 15, "delete_project_storage": 25, "delete_project_files": 82}[command],
+                    end_progress={"delete_project_containers": 24, "delete_project_storage": 34, "delete_project_files": 89}[command],
+                ),
             )
         return await run_host_agent_command(
             pool,
@@ -947,7 +954,7 @@ async def _rotate_project_key_background(
             requested_by=actor_user_id,
             args={"trigger": trigger},
             reuse_terminal=True,
-            on_progress=_job_progress_mirror(job_id),
+            on_progress=_job_progress_mirror(job_id, start_progress=10, end_progress=80),
         )
         if record["status"] != "done":
             await _fail_job_from_command(
@@ -1133,7 +1140,7 @@ async def _create_restore_point_background(
                 "tenant_uuid": str(tenant_uuid),
             },
             reuse_terminal=True,
-            on_progress=_job_progress_mirror(job_id),
+            on_progress=_job_progress_mirror(job_id, start_progress=5, end_progress=95),
         )
         if record["status"] != "done":
             detail = record["message"] or record["error_code"] or "erro desconhecido"
@@ -1236,7 +1243,7 @@ async def _restore_project_background(
                 "tenant_uuid": str(tenant_uuid),
             },
             reuse_terminal=True,
-            on_progress=_job_progress_mirror(job_id),
+            on_progress=_job_progress_mirror(job_id, start_progress=5, end_progress=90),
         )
         result = command_result(record)
         safety_completed = bool(result.get("safety_backup_completed"))
@@ -1300,9 +1307,6 @@ async def _restore_project_background(
                         else " O projeto pode estar em estado parcial."
                     )
                     + f"\n\n{output[-2000:]}"
-                ),
-                current_step=(
-                    "rollback_completed" if rolled_back else "rollback_unconfirmed"
                 ),
                 error_code=(
                     "restore_rolled_back" if rolled_back else "restore_failed"
@@ -1410,7 +1414,7 @@ async def _delete_restore_point_background(
                 "tenant_uuid": str(tenant_uuid),
             },
             reuse_terminal=True,
-            on_progress=_job_progress_mirror(job_id),
+            on_progress=_job_progress_mirror(job_id, start_progress=10, end_progress=95),
         )
         if record["status"] != "done":
             detail = record["message"] or record["error_code"] or "erro desconhecido"
@@ -1507,7 +1511,7 @@ async def _container_lifecycle_background(
             project=project_name,
             project_uuid=await _get_job_project_uuid(pool, job_id),
             requested_by=actor_user_id,
-            on_progress=_job_progress_mirror(job_id),
+            on_progress=_job_progress_mirror(job_id, start_progress=1, end_progress=95),
         )
         if record["status"] != "done":
             await _fail_job_from_command(
@@ -1619,7 +1623,7 @@ async def _recreate_project_services_background(
             project_uuid=job_row["project_uuid"] if job_row else None,
             requested_by=job_row["created_by"] if job_row else None,
             args={"services": services},
-            on_progress=_job_progress_mirror(job_id),
+            on_progress=_job_progress_mirror(job_id, start_progress=10, end_progress=80),
         )
         if record["status"] != "done":
             await _fail_job_from_command(

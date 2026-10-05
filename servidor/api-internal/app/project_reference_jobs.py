@@ -45,7 +45,7 @@ async def rename_project_background(
                 await set_job_status(
                     job_id,
                     "done" if history["status"] == "succeeded" else "failed",
-                    current_step="completed",
+                    current_step="completed" if history["status"] == "succeeded" else None,
                     message="Rotacao ja finalizada.",
                 )
                 return
@@ -71,7 +71,7 @@ async def rename_project_background(
                 "tenant_uuid": str(project["tenant_uuid"]),
             },
             reuse_terminal=True,
-            on_progress=_job_progress_mirror(job_id),
+            on_progress=_job_progress_mirror(job_id, start_progress=5, end_progress=95),
         )
         result = command_result(record)
         async with pool.acquire() as conn:
@@ -152,15 +152,10 @@ async def rename_project_background(
                                 },
                             )
                 await conn.execute(
-                    "UPDATE jobs SET status=$1, message=$2, progress=$3, current_step=$4, error_code=$5, finished_at=now(), updated_at=now() WHERE job_id=$6",
+                    "UPDATE jobs SET status=$1, message=$2, progress=CASE WHEN $3 THEN 100 ELSE progress END, current_step=CASE WHEN $3 THEN 'completed' ELSE current_step END, error_code=$4, finished_at=now(), updated_at=now() WHERE job_id=$5",
                     "done" if succeeded else "failed",
                     message,
-                    100 if succeeded else record["progress"] or 0,
-                    "completed"
-                    if succeeded
-                    else "rollback_completed"
-                    if rolled_back
-                    else "rollback_unconfirmed",
+                    succeeded,
                     None if succeeded else record["error_code"],
                     uuid.UUID(str(job_id)),
                 )

@@ -324,6 +324,8 @@ class HostAgent:
             stderr_tail=state.stderr_tail(),
             result=outcome.result,
             message=outcome.message,
+            progress=state.progress,
+            current_step=state.current_step,
         )
         if not persisted:
             logger.warning(

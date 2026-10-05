@@ -376,7 +376,9 @@ class ReferenceRotation:
         self.rollback()
 
     def rotate(self) -> None:
+        print("HOST_AGENT_PROGRESS=reference:validate", flush=True)
         replacements = self.preflight()
+        print("HOST_AGENT_PROGRESS=reference:prepare_transaction", flush=True)
         self.running = [
             name
             for name in self.compose("ps", "--status", "running", "--services").splitlines()
@@ -398,13 +400,18 @@ class ReferenceRotation:
         self.checkpoint("prepared")
         try:
             self.functions("withdraw")
+            print("HOST_AGENT_PROGRESS=reference:stop_services", flush=True)
             self.checkpoint("stopping_gateway")
             self.compose("stop", "nginx", "auth")
+            print("HOST_AGENT_PROGRESS=reference:render_files", flush=True)
             self.render(replacements)
             self.checkpoint("files_rendered")
+            print("HOST_AGENT_PROGRESS=reference:commit_reference", flush=True)
             self.swap(self.old_ref, self.new_ref)
             self.checkpoint("reference_committed")
+            print("HOST_AGENT_PROGRESS=reference:restart_services", flush=True)
             self.restart()
+            print("HOST_AGENT_PROGRESS=reference:publish_configuration", flush=True)
             self.functions("publish")
             self.checkpoint("completed")
         except BaseException:

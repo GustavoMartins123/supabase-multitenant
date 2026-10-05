@@ -263,6 +263,8 @@ async def finish_command(
     stderr_tail: str | None = None,
     result: dict[str, Any] | None = None,
     message: str | None = None,
+    progress: int | None = None,
+    current_step: str | None = None,
 ) -> bool:
     """Finaliza o comando; no-op se a API ja o marcou como expirado."""
     outcome = await pool.execute(
@@ -275,7 +277,8 @@ async def finish_command(
             stderr_tail = COALESCE($7, stderr_tail),
             result = COALESCE($8::jsonb, result),
             message = COALESCE($9, message),
-            progress = CASE WHEN $3 = 'done' THEN 100 ELSE progress END,
+            progress = CASE WHEN $3 = 'done' THEN 100 ELSE COALESCE($10, progress) END,
+            current_step = CASE WHEN $3 = 'done' THEN 'completed' ELSE COALESCE($11, current_step) END,
             finished_at = now(),
             updated_at = now()
         WHERE id = $1 AND worker_id = $2 AND status = 'running'
@@ -289,6 +292,8 @@ async def finish_command(
         stderr_tail,
         json.dumps(result) if result is not None else None,
         message,
+        progress,
+        current_step,
     )
     return outcome == "UPDATE 1"
 

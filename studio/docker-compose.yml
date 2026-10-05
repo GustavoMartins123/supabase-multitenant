@@ -61,6 +61,8 @@ services:
   authelia:
     image: authelia/authelia:4.39.20
     container_name: authelia
+    mem_limit: 384m
+    memswap_limit: 768m
     command:
       - authelia
       - --config=/config/configuration.runtime.yml

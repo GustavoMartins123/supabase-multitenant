@@ -70,7 +70,7 @@ PLATFORM_SHARED_BASELINE_MIB=(
     "studio-nginx:128"
     "vector:34"
     "projects-api:78"
-    "authelia:43"
+    "authelia:192"
     "edge-functions:155"
     "traffic-redis:384"
     "key-authorizer:63"
@@ -464,6 +464,26 @@ platform_service_limit_mib() {
     printf '%s' "$(( (raw + 15) / 16 * 16 ))"
 }
 
+platform_service_memswap_mib() {
+    local service="$1" memory="$2" entry declared=0
+    for entry in "${PLATFORM_SHARED_BASELINE_MIB[@]}"; do
+        [ "${entry%%:*}" = "$service" ] && declared=1
+    done
+    [ "$declared" -eq 1 ] \
+        || { platform_capacity_error "servico sem politica de swap: $service"; return 1; }
+    case "$memory" in
+        ''|*[!0-9]*|0)
+            platform_capacity_error "limite de memoria invalido: $memory"
+            return 1
+            ;;
+    esac
+    if [ "$service" = authelia ]; then
+        printf '%s' "$(( memory * 2 ))"
+    else
+        printf '%s' "$memory"
+    fi
+}
+
 platform_format_mib() {
     local mib="$1"
     if [ "$mib" -ge 1024 ]; then
@@ -764,7 +784,7 @@ platform_render_compose_override() {
     local root_env="$1" target="$2" output="$3"
     platform_compute_capacity "$root_env" || return 1
 
-    local entry service file compose_name memory cpus pids temporary any=0
+    local entry service file compose_name memory swap cpus pids temporary any=0
     temporary="$(mktemp "${output}.XXXXXX")" || return 1
     {
         printf '# Gerado por lib/platform_capacity.sh — NAO EDITE A MAO.\n'
@@ -795,11 +815,12 @@ platform_render_compose_override() {
             [ "$file" = "$target" ] || continue
             memory="$(platform_service_limit_mib "$service" "$PLATFORM_CAP_PROJECTS" \
                 "$PLATFORM_CAP_RESERVE_PERCENT" "$PLATFORM_CAP_HOST_CPUS")" || return 1
+            swap="$(platform_service_memswap_mib "$service" "$memory")" || return 1
             cpus="$(platform_service_cpu_centi "$service" "$PLATFORM_CAP_SHARED_CPU_BUDGET_CENTI")" || return 1
             pids="$(platform_service_pids "$service" "$PLATFORM_CAP_RESERVE_PERCENT")" || return 1
             printf '  %s:\n' "$compose_name"
             printf '    mem_limit: %sm\n' "$memory"
-            printf '    memswap_limit: %sm\n' "$memory"
+            printf '    memswap_limit: %sm\n' "$swap"
             printf '    cpus: "%d.%02d"\n' "$(( cpus / 100 ))" "$(( cpus % 100 ))"
             printf '    pids_limit: %s\n' "$pids"
             any=1
@@ -821,27 +842,29 @@ platform_apply_shared_limits() {
     command -v docker >/dev/null 2>&1 \
         || { platform_capacity_error "docker ausente; nao da para aplicar limites"; return 1; }
 
-    local entry service container memory cpus pids applied=0 skipped=0
+    local entry service container memory swap cpus pids applied=0 skipped=0
     for entry in "${PLATFORM_SHARED_BASELINE_MIB[@]}"; do
         service="${entry%%:*}"
-        container="$(platform_service_container "$service")" || continue
+        container="$(platform_service_container "$service")" \
+            || { platform_capacity_error "servico sem container declarado: $service"; return 1; }
         docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null | grep -qx true \
             || { skipped=$(( skipped + 1 )); continue; }
 
         memory="$(platform_service_limit_mib "$service" "$PLATFORM_CAP_PROJECTS" \
             "$PLATFORM_CAP_RESERVE_PERCENT" "$PLATFORM_CAP_HOST_CPUS")" || return 1
+        swap="$(platform_service_memswap_mib "$service" "$memory")" || return 1
         cpus="$(platform_service_cpu_centi "$service" "$PLATFORM_CAP_SHARED_CPU_BUDGET_CENTI")" || return 1
         pids="$(platform_service_pids "$service" "$PLATFORM_CAP_RESERVE_PERCENT")" || return 1
 
         if docker update \
-            --memory "${memory}m" --memory-swap "${memory}m" \
+            --memory "${memory}m" --memory-swap "${swap}m" \
             --cpus "$(printf '%d.%02d' "$(( cpus / 100 ))" "$(( cpus % 100 ))")" \
             --pids-limit "$pids" \
             "$container" >/dev/null 2>&1; then
             applied=$(( applied + 1 ))
         else
-            echo "Aviso: nao foi possivel aplicar limites em $container" >&2
-            skipped=$(( skipped + 1 ))
+            platform_capacity_error "nao foi possivel aplicar limites em $container"
+            return 1
         fi
     done
     echo "Limites da camada compartilhada aplicados: $applied ajustados, $skipped ignorados (teto: $PLATFORM_CAP_PROJECTS projetos)"

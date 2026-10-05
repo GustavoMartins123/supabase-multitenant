@@ -175,6 +175,8 @@ async def wait_command(
             raise HostAgentError("command_missing", "Intencao sumiu do banco.")
 
         if row["status"] in {"done", "failed", "cancelled"}:
+            if row["status"] != "done" and on_progress is not None:
+                await on_progress(row)
             return row
 
         if on_progress is not None:
@@ -320,7 +322,7 @@ async def run_command_for_job(
         if existing["status"] in {"queued", "running"}:
             return await wait_command(pool, existing["id"], on_progress=on_progress)
         if reuse_terminal:
-            return existing
+            return await wait_command(pool, existing["id"], on_progress=on_progress)
     return await run_command(
         pool,
         command=command,

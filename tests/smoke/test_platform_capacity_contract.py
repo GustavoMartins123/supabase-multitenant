@@ -402,6 +402,24 @@ class ComposeLimitsContract(unittest.TestCase):
                     for key in ("mem_limit", "memswap_limit", "cpus", "pids_limit"):
                         self.assertIn(key, spec)
 
+    def test_authelia_swap_is_present_in_base_compose_and_generated_override(self) -> None:
+        import yaml
+        base = yaml.safe_load(self.TARGETS['studio'].read_text(encoding='utf-8'))['services']['authelia']
+        self.assertEqual((base['mem_limit'], base['memswap_limit']), ('384m', '768m'))
+        services = self._render('studio')['services']
+        for name, service in services.items():
+            memory = int(service['mem_limit'][:-1])
+            swap_total = int(service['memswap_limit'][:-1])
+            self.assertEqual(swap_total, memory * (2 if name == 'authelia' else 1))
+
+    def test_swap_scales_with_authentication_memory_and_rejects_invalid_input(self) -> None:
+        self.assertEqual(run_helper('platform_service_memswap_mib authelia 512'), '1024')
+        self.assertEqual(run_helper('platform_service_memswap_mib studio-nginx 256'), '256')
+        for service, memory in (('unknown', '384'), ('authelia', '-1'), ('authelia', '0'), ('authelia', 'invalid')):
+            result = subprocess.run(['bash', '-c', f'source "{HELPER}"; platform_service_memswap_mib {service} {memory}'],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+
     def test_override_targets_only_services_that_exist(self) -> None:
         import yaml
 
@@ -439,6 +457,18 @@ class ComposeLimitsContract(unittest.TestCase):
 
 
 class HostAdaptiveBaselineContract(unittest.TestCase):
+    def test_authentication_budget_covers_password_hashing_not_only_idle_rss(self) -> None:
+        for cores in (1, 4, 20):
+            with self.subTest(cores=cores):
+                baseline = int(run_helper(
+                    f"PLATFORM_SERVICE_CONTAINER=(); platform_service_baseline_mib authelia {cores}"
+                ))
+                limit = int(run_helper(
+                    f"PLATFORM_SERVICE_CONTAINER=(); platform_service_limit_mib authelia 0 20 {cores}"
+                ))
+                self.assertGreaterEqual(baseline, 43 + 2 * 64)
+                self.assertGreaterEqual(limit, 384)
+
     def test_measurement_can_only_raise_the_baseline(self) -> None:
         source = HELPER.read_text(encoding="utf-8")
         body = source.split("platform_service_baseline_mib() {", 1)[1].split("\n}", 1)[
@@ -927,6 +957,27 @@ class SharedTierContract(unittest.TestCase):
 
 
 class SharedLimitsReapplicationContract(unittest.TestCase):
+    def test_live_updates_use_the_same_swap_policy_and_fail_explicitly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = pathlib.Path(tmp) / 'docker-arguments'
+            script = f'''source "{HELPER}"
+platform_compute_capacity() {{ PLATFORM_CAP_PROJECTS=0; PLATFORM_CAP_RESERVE_PERCENT=20; PLATFORM_CAP_HOST_CPUS=4; PLATFORM_CAP_SHARED_CPU_BUDGET_CENTI=320; }}
+platform_service_limit_mib() {{ printf 384; }}
+PLATFORM_SHARED_BASELINE_MIB=("authelia:192")
+docker() {{
+    if [ "$1" = inspect ]; then printf 'true\\n'; return 0; fi
+    printf '%s\\n' "$*" >> "{log}"
+    return "${{UPDATE_EXIT_CODE:-0}}"
+}}
+platform_apply_shared_limits unused.env
+'''
+            result = subprocess.run(['bash', '-c', script], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('--memory 384m --memory-swap 768m', log.read_text())
+            result = subprocess.run(['bash', '-c', 'UPDATE_EXIT_CODE=1; ' + script], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('nao foi possivel aplicar limites em authelia', result.stderr)
+
     def test_shared_limits_are_reapplied_on_create_and_delete(self) -> None:
         for script in (
             ROOT / "servidor/generateProject/lib/generate_project_impl.sh",
@@ -937,6 +988,7 @@ class SharedLimitsReapplicationContract(unittest.TestCase):
                 self.assertIn(
                     "platform_apply_shared_limits", script.read_text(encoding="utf-8")
                 )
+                self.assertNotIn('Aviso: limites da camada compartilhada nao foram reaplicados', script.read_text(encoding='utf-8'))
 
 
 if __name__ == "__main__":
