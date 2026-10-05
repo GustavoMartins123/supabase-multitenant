@@ -313,7 +313,7 @@ process.stdout.write(JSON.stringify({status:response.status,body}));
     def check_signed_gateway(ref: str, credential_ref: str, expected: int,
                              *, tamper: bool = False) -> None:
         env = environment(server / 'projects' / credential_ref / '.env')
-        host = 'supabase-nginx-' + ref + ':8080'
+        host = 'supabase-nginx-' + ref + ':8081'
         path, body = '/vector/ListVectorBuckets', b'{}'
         stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
         day = stamp[:8]
@@ -335,7 +335,6 @@ process.stdout.write(JSON.stringify({status:response.status,body}));
             # A source credential must not select its tenant through a clone gateway.
             'X-Forwarded-Host': env['PROJECT_UUID'] + '.storage.internal',
             'Authorization': f'AWS4-HMAC-SHA256 Credential={env["S3_PROTOCOL_ACCESS_KEY_ID"]}/{scope}, SignedHeaders={signed}, Signature={signature}',
-            **admission_headers(ref, path, 'POST'),
         })
         try:
             with urllib.request.urlopen(request, timeout=15) as response:
@@ -360,6 +359,22 @@ process.stdout.write(body);});'''
         return run('docker', 'exec', '-i', 'supabase-storage-global', 'node', '-e', command,
                    env['PROJECT_UUID'], method, path, mime, data=env['SERVICE_ROLE_KEY_PROJETO'] + '\n' + body)
 
+    def check_internal_auth_boundary(ref: str) -> None:
+        env = environment(server / 'projects' / ref / '.env')
+        for method, authorization, expected in [('POST', None, 403),
+                                                 ('POST', 'Bearer ' + env['SERVICE_ROLE_KEY_PROJETO'], 403),
+                                                 ('GET', None, 405)]:
+            request = urllib.request.Request('http://supabase-nginx-' + ref + ':8081/vector/ListVectorBuckets',
+                                             data=b'{}' if method == 'POST' else None, method=method)
+            if authorization:
+                request.add_header('Authorization', authorization)
+            try:
+                with urllib.request.urlopen(request, timeout=15) as response:
+                    status = response.status
+            except urllib.error.HTTPError as error:
+                status = error.code
+            assert status == expected, (method, status)
+
     def check_object(ref: str) -> None:
         assert object_request(ref, 'GET', '/object/p1-files/original.txt', '', 'text/plain') == 'original object'
 
@@ -382,7 +397,11 @@ process.stdout.write(body);});'''
             assert not (server / 'projects' / ('p1_missing_' + suffix)).exists()
             assert sql("SELECT count(*) FROM pg_database WHERE datname='_supabase_p1_missing_" + suffix + "';") == '0'
     print('Missing/invalid gateway tokens fail closed before physical mutation', flush=True)
-    sql('CREATE TABLE public.lifecycle_marker(id int primary key, value text); INSERT INTO public.lifecycle_marker VALUES(1,\'original\');', '_supabase_' + project)
+    sql("""CREATE TABLE public.lifecycle_marker(id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, value text);
+        INSERT INTO public.lifecycle_marker(value) VALUES('original');
+        CREATE TABLE public.lifecycle_serial(id bigserial PRIMARY KEY, value text);
+        INSERT INTO public.lifecycle_serial(value) VALUES('original');
+        CREATE SEQUENCE public.lifecycle_independent;""", '_supabase_' + project)
     object_request(project, 'POST', '/bucket', '{"id":"p1-files","name":"p1-files","public":false}', 'application/json')
     object_request(project, 'POST', '/object/p1-files/original.txt', 'original object', 'text/plain')
     check_object(project)
@@ -391,6 +410,9 @@ process.stdout.write(body);});'''
     vector_request(project, 'CreateIndex', {**vector_identity, 'dataType': 'float32', 'dimension': 3, 'distanceMetric': 'cosine'})
     vector_request(project, 'PutVectors', {**vector_identity, 'vectors': [{'key': 'original', 'data': {'float32': [1, 0, 0]}}]})
     check_vector(project)
+    lifecycle('operations/setup_vector_bucket_wrapper.sh', project, 'p1-vectors')
+    sql("CREATE SCHEMA vector_client; IMPORT FOREIGN SCHEMA \"p1-vectors\" FROM SERVER p1_vectors_fdw_server INTO vector_client OPTIONS(strict 'true');", '_supabase_' + project)
+    assert sql('SELECT count(*) FROM vector_client.p1_index;', '_supabase_' + project) == '1'
     seed(copied, second_uuid)
     lifecycle('duplicate_project.sh', project, copied, 'with-data', second_uuid, first_uuid)
     check_projection(copied, second_uuid)
@@ -400,6 +422,31 @@ process.stdout.write(body);});'''
     check_signed_gateway(copied, copied, 200)
     check_signed_gateway(copied, copied, 403, tamper=True)
     check_signed_gateway(copied, project, 403)
+    check_internal_auth_boundary(copied)
+    clone_db = '_supabase_' + copied
+    clone_role = 'tenant_meta_' + second_uuid.replace('-', '')
+    source_role = 'tenant_meta_' + first_uuid.replace('-', '')
+    assert sql(f"SELECT has_database_privilege('{source_role}', current_database(), 'CONNECT');", clone_db) == 'f'
+    owners = sql("SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('lifecycle_marker','lifecycle_marker_id_seq','lifecycle_serial','lifecycle_serial_id_seq','lifecycle_independent') AND c.relowner=" + "'" + clone_role + "'::regrole;", clone_db)
+    assert owners == '5', owners
+    assert sql("INSERT INTO public.lifecycle_marker(value) VALUES('clone') RETURNING id;", clone_db).splitlines()[0] == '2'
+    assert sql("INSERT INTO public.lifecycle_serial(value) VALUES('clone') RETURNING id;", clone_db).splitlines()[0] == '2'
+    sql("CREATE SCHEMA vector_client_clone; IMPORT FOREIGN SCHEMA \"p1-vectors\" FROM SERVER p1_vectors_fdw_server INTO vector_client_clone OPTIONS(strict 'true');", clone_db)
+    assert sql('SELECT count(*) FROM vector_client_clone.p1_index;', clone_db) == '1'
+    assert sql("SELECT count(*) FROM pg_foreign_table;", clone_db) == '1'
+    assert sql("SELECT bool_and(srvoptions::text LIKE '%:8081/vector%') FROM pg_foreign_server;", clone_db) == 't'
+    vector_request(copied, 'PutVectors', {**vector_identity, 'vectors': [{'key': 'clone-only', 'data': {'float32': [0, 1, 0]}}]})
+    assert sql('SELECT count(*) FROM vector_client_clone.p1_index;', clone_db) == '2'
+    assert sql('SELECT count(*) FROM vector_client.p1_index;', '_supabase_' + project) == '1'
+    run('docker', 'stop', 'supabase-nginx-' + copied)
+    try:
+        failed_probe = subprocess.run(['bash', str(server / 'generateProject/operations/setup_vector_bucket_wrapper.sh'),
+                                       copied, 'p1-vectors'], capture_output=True, text=True, cwd=server)
+        assert failed_probe.returncode != 0
+        assert sql("SELECT count(*) FROM pg_namespace WHERE nspname LIKE 'vector_wrapper_probe_%';", clone_db) == '0'
+    finally:
+        run('docker', 'start', 'supabase-nginx-' + copied)
+    assert sql('SELECT count(*) FROM vector_client_clone.p1_index;', clone_db) == '2'
     print('Real SigV4 gateway: valid signature accepted; forged signature and cross-tenant credential denied', flush=True)
     assert sql('SELECT value FROM public.lifecycle_marker WHERE id=1;', '_supabase_' + copied) == 'original'
     job_id = str(uuid.uuid4())
@@ -428,17 +475,21 @@ process.stdout.write(body);});'''
     assert rotated['jwt_secret'] == initial['jwt_secret']
     assert rotated['anon_key'] != initial['anon_key']
     assert rotated['service_role_key'] != initial['service_role_key']
+    assert sql('SELECT count(*) FROM vector_client.p1_index;', '_supabase_' + project) == '1'
     check_projection(copied, second_uuid)
     backup, safety = str(uuid.uuid4()), str(uuid.uuid4())
     lifecycle('backup_project.sh', project, backup)
     sql("UPDATE public.lifecycle_marker SET value='changed';", '_supabase_' + project)
     object_request(project, 'PUT', '/object/p1-files/original.txt', 'changed object', 'text/plain')
+    vector_request(project, 'PutVectors', {**vector_identity, 'vectors': [{'key': 'original', 'data': {'float32': [0, 0, 1]}}]})
     lifecycle('restore_project.sh', project, backup, safety)
     assert sql('SELECT value FROM public.lifecycle_marker WHERE id=1;', '_supabase_' + project) == 'original'
     check_projection(project, first_uuid)
     check_gateway(project)
     check_vector(project)
     check_object(project)
+    assert sql('SELECT count(*) FROM vector_client.p1_index;', '_supabase_' + project) == '1'
+    assert sql('SELECT count(*) FROM vector_client_clone.p1_index;', clone_db) == '2'
     # The file-removal primitive explicitly requires containers to be gone.
     run('docker', 'compose', '-p', project, '--env-file', '../../.env', '--env-file', '.env', 'down', cwd=server / 'projects' / project)
     lifecycle('delete_project.sh', project)
@@ -454,6 +505,13 @@ process.stdout.write(body);});'''
     check_gateway(schema_only, marker=False)
     assert sql('SELECT count(*) FROM public.lifecycle_marker;', '_supabase_' + schema_only) == '0'
     assert sql('SELECT count(*) FROM storage.objects;', '_supabase_' + schema_only) == '0'
+    assert sql('SELECT count(*) FROM storage.vector_indexes;', '_supabase_' + schema_only) == '0'
+    assert sql("SELECT count(*) FROM pg_tables WHERE schemaname='storage_vectors' AND tablename <> 'migrations';", '_supabase_' + schema_only) == '0'
+    assert sql('SELECT count(*) FROM pg_foreign_server;', '_supabase_' + schema_only) == '0'
+    vector_request(schema_only, 'CreateVectorBucket', {'vectorBucketName': 'fresh-vectors'})
+    vector_request(schema_only, 'CreateIndex', {'vectorBucketName': 'fresh-vectors', 'indexName': 'fresh-index', 'dataType': 'float32', 'dimension': 3, 'distanceMetric': 'cosine'})
+    lifecycle('operations/setup_vector_bucket_wrapper.sh', schema_only, 'fresh-vectors')
+    check_signed_gateway(schema_only, copied, 403)
     config = json.loads(run('docker', 'inspect', 'supabase-edge-functions'))[0]
     assert {m['Destination'] for m in config['Mounts']} == {'/home/deno/functions', '/home/deno/tenant-config'}
     assert config['Config']['Env'] and not any(e.startswith(('POSTGRES_PASSWORD=', 'JWT_SECRET=', 'SUPABASE_SERVICE_ROLE_KEY=')) for e in config['Config']['Env'])

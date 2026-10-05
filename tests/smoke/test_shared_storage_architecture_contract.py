@@ -312,6 +312,9 @@ class SharedStorageLifecycleContractTest(unittest.TestCase):
         )[0]
         self.assertIn("storage_validate_file_tree", clone)
         self.assertIn("storage_validate_file_tree", self.backup)
+        self.assertIn("tar --xattrs --xattrs-include='user.supabase.*' --no-acls --numeric-owner", clone)
+        self.assertIn("tar --xattrs --xattrs-include='user.supabase.*' --no-acls --numeric-owner", self.backup)
+        self.assertNotIn("--xattrs-include='*'", clone)
         migration = read(SCRIPTS / "migrate_shared_storage.sh")
         self.assertIn(
             'storage_validate_file_tree "$old_namespace" "namespace Storage antigo"',

@@ -64,7 +64,7 @@ local function patch_s3_vectors_wrapper_query(body, context)
         return nil, "Canonical technical name is required for the S3 Vectors Wrapper"
     end
 
-    local endpoint = "http://supabase-nginx-" .. technical_name .. ":8080/vector"
+    local endpoint = "http://supabase-nginx-" .. technical_name .. ":8081/vector"
     local patched, replacements = query:gsub(
         "(endpoint_url%s+)'[^']*'",
         "%1'" .. endpoint .. "'"

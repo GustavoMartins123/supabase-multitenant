@@ -572,4 +572,29 @@ http {
 
 
     }
+
+    server {
+        listen 8081;
+        server_name _{{project_id}};
+
+        location /vector/ {
+            allow ${SUPABASE_NETWORK_SUBNET};
+            deny all;
+
+            if ($request_method != POST) { return 405; }
+            if ($http_authorization !~ "^AWS4-HMAC-SHA256 ") { return 403; }
+
+            proxy_pass http://$storage_upstream;
+            proxy_http_version 1.1;
+            proxy_set_header Host $http_host;
+            proxy_set_header apikey "";
+            proxy_set_header X-Forwarded-Host "{{project_uuid}}.storage.internal";
+            proxy_set_header X-Forwarded-Prefix "";
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $remote_addr;
+            proxy_set_header X-Forwarded-Proto http;
+        }
+
+        location / { return 404; }
+    }
 }

@@ -493,7 +493,7 @@ process.stdin.on("end", async () => {
 }
 
 # Bloqueia novas operacoes do tenant sem parar o Storage global. Um pool URL
-# deliberadamente inalcançavel permanece truthy no upstream, portanto
+# deliberadamente inalcanÃ§avel permanece truthy no upstream, portanto
 # getDbSettings nao pode cair para databaseUrl. A sonda confirma o fail-closed
 # antes de o lifecycle tocar no banco ou no namespace fisico.
 storage_quiesce_tenant() {
@@ -720,13 +720,13 @@ storage_clone_tenant_namespace() {
     return 1
   }
   mkdir -p "$staging" || return 1
-  if ! (cd "$source_path" && tar --xattrs --xattrs-include='*' --acls -cpf - .) \
-    | (cd "$staging" && tar --xattrs --xattrs-include='*' --acls -xpf -); then
+  if ! (cd "$source_path" && tar --xattrs --xattrs-include='user.supabase.*' --no-acls --numeric-owner -cpf - .) \
+    | (cd "$staging" && tar --xattrs --xattrs-include='user.supabase.*' --no-acls --no-same-owner -xpf -); then
     rm -rf -- "$staging"
     storage_fail "falha ao copiar namespace $source_tenant"
     return 1
   fi
-  mv -- "$staging" "$destination_path"
+  mv -- "$staging" "$destination_path" || return 1
   storage_enforce_namespace_ownership "$destination_path"
 }
 
@@ -782,13 +782,13 @@ storage_extract_namespace_archive() {
     return 1
   }
   mkdir -p "$staging" || return 1
-  if ! tar --xattrs --xattrs-include='*' --acls --numeric-owner \
+  if ! tar --xattrs --xattrs-include='user.supabase.*' --no-acls --no-same-owner \
     -xzpf "$archive" -C "$staging"; then
     rm -rf -- "$staging"
     storage_fail "falha ao extrair objetos do tenant $tenant_id"
     return 1
   fi
-  mv -- "$staging" "$target"
+  mv -- "$staging" "$target" || return 1
   storage_enforce_namespace_ownership "$target"
 }
 

@@ -151,19 +151,22 @@ the project's own database.
 Each project's FDW points to its Nginx:
 
 ```text
-http://supabase-nginx-<project_ref>:8080/vector
+http://supabase-nginx-<technical_name>:8081/vector
 ```
 
 The wrapper signs this endpoint's `Host`. Nginx preserves this canonical host
-and injects the immutable UUID into `X-Forwarded-Host`. This allows the
-endpoint to change during rename without changing tenant identity. The
-lifecycle reconciles `endpoint_url` after duplicate, rename, and restore.
+and injects the immutable UUID into `X-Forwarded-Host`. Display-name changes
+and public URL regeneration do not change the internal endpoint. Duplicate and
+restore reconcile `endpoint_url` with the destination's technical identity.
+Wrapper setup requires Wrappers >= 0.5.7 and imports the bucket as the remote
+schema in a transaction.
 
 The physical name of a pgvector table includes a hash calculated by upstream
 from the bucket, tenant, and index. A `with-data` clone renames these tables in
 a transaction to hashes for the new UUID. The clone also removes copied FDWs
 and Vault secrets, creates new credentials, and recreates wrappers only for its
-own Vector Buckets. `schema-only` creates an empty namespace and metadata.
+own Vector Buckets. `schema-only` creates an empty namespace and metadata,
+without copying physical vector tables or vector foreign tables from the source.
 
 ## Create and validation
 
@@ -194,7 +197,10 @@ not restarted for project settings.
 
 Backup places only the requested Storage tenant into fail-closed maintenance,
 confirms through the data plane that it accepts no new operations, stops the
-project containers, and archives only the contents of its namespace.
+project containers, and archives only the contents of its namespace. Object
+bytes and Storage metadata attributes (`user.supabase.*`) are copied; host ACLs
+and unrelated filesystem attributes are not part of the object contract. Restore
+assigns the destination namespace to the configured Storage user.
 Maintenance uses a deliberately unreachable `databasePoolUrl`; it does not
 use `null`, because official Storage would query `databaseUrl`. Format-2
 manifest binds `project_uuid`, `storage_tenant_id`, and

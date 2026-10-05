@@ -161,7 +161,7 @@ local ok, err = xpcall(function()
         .. "VALIDATOR s3_vectors_fdw_validator OPTIONS (endpoint_url 'https://untrusted.example/vector')"
     local echo = request(base .. "/query", cjson.encode({ query = wrapper }))
     local query = assert(cjson.decode(echo.body)).query
-    assert(query:find("http://supabase-nginx-technical_project:8080/vector", 1, true))
+    assert(query:find("http://supabase-nginx-technical_project:8081/vector", 1, true))
     assert(not query:find(ref, 1, true) and not query:find("untrusted.example", 1, true))
     assert(echo.target == "/api/projects/" .. ref .. "/meta/query")
 

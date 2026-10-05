@@ -99,7 +99,7 @@ class StorageVectorLifecycleIntegrationTests(unittest.TestCase):
         self.assertIn("s3_vectors_fdw_validator", pg_meta)
         self.assertIn("endpoint_url", pg_meta)
         self.assertIn(
-            '"http://supabase-nginx-" .. technical_name .. ":8080/vector"',
+            '"http://supabase-nginx-" .. technical_name .. ":8081/vector"',
             pg_meta,
         )
         self.assertNotIn("supabase-storage-", pg_meta)

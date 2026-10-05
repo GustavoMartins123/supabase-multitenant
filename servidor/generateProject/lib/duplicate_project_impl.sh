@@ -345,7 +345,8 @@ else
   docker exec supabase-db pg_dump -U supabase_admin -d "$ORIGINAL_DB" \
     --schema=auth --schema=storage --schema-only > "$DUMP_FILE"
   docker exec supabase-db pg_dump -U supabase_admin -d "$ORIGINAL_DB" \
-    --exclude-schema=auth --exclude-schema=storage --exclude-schema=realtime --schema-only >> "$DUMP_FILE"
+    --exclude-schema=auth --exclude-schema=storage --exclude-schema=realtime \
+    --exclude-table='storage_vectors.*' --schema-only >> "$DUMP_FILE"
   docker exec supabase-db pg_dump -U supabase_admin -d "$ORIGINAL_DB" --data-only \
     -t 'auth.schema_migrations' -t 'storage.migrations' >> "$DUMP_FILE"
 fi

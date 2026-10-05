@@ -149,19 +149,21 @@ database do proprio projeto.
 O FDW de cada projeto aponta para seu Nginx:
 
 ```text
-http://supabase-nginx-<project_ref>:8080/vector
+http://supabase-nginx-<technical_name>:8081/vector
 ```
 
 O wrapper assina o `Host` desse endpoint. O Nginx preserva esse host canonico e
-injeta o UUID imutavel em `X-Forwarded-Host`. Desse modo o endpoint pode mudar
-no rename sem alterar a identidade do tenant. O lifecycle reconcilia os
-`endpoint_url` depois de duplicate, rename e restore.
+injeta o UUID imutavel em `X-Forwarded-Host`. Alterar o nome de exibicao ou
+regenerar a URL publica nao altera o endpoint interno. Duplicate e restore
+reconciliam `endpoint_url` com a identidade tecnica do destino. O setup exige
+Wrappers >= 0.5.7 e importa o bucket como schema remoto em uma transacao.
 
 O nome fisico de uma tabela pgvector inclui um hash calculado pelo upstream a
 partir de bucket, tenant e index. Um clone `with-data` renomeia essas tabelas em
 transacao para hashes do novo UUID. O clone tambem remove FDWs e Vault secrets
 copiados, cria credenciais novas e recria wrappers somente para seus proprios
-Vector Buckets. `schema-only` cria namespace e metadata vazios.
+Vector Buckets. `schema-only` cria namespace e metadata vazios, sem copiar
+tabelas vetoriais fisicas ou foreign tables vetoriais da origem.
 
 ## Create e validacao
 
@@ -192,7 +194,10 @@ sao reiniciados por settings de projeto.
 
 Backup coloca somente o tenant Storage solicitado em manutenção fail-closed,
 confirma pelo data plane que ele não aceita novas operações, para os containers
-do projeto e arquiva somente o conteúdo do seu namespace. A manutenção usa uma
+do projeto e arquiva somente o conteúdo do seu namespace. Bytes dos objetos e
+atributos de metadata do Storage (`user.supabase.*`) são copiados; ACLs do host e
+atributos não relacionados do filesystem não fazem parte do contrato dos objetos.
+Restore atribui o namespace de destino ao usuário configurado do Storage. A manutenção usa uma
 `databasePoolUrl` deliberadamente inalcançável; não usa `null`, porque o Storage
 oficial passaria a consultar `databaseUrl`. O manifest formato 2 vincula
 `project_uuid`, `storage_tenant_id` e `storage_layout=tenant-namespace`.

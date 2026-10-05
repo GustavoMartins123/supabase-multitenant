@@ -604,8 +604,8 @@ migrate_project() (
     destination="$(storage_assert_namespace_target "$PROJECT_UUID")"
     [[ ! -e "$destination" ]] || return 1
     mkdir -p "$destination"
-    (cd "$old_namespace" && tar --xattrs --xattrs-include='*' --acls -cpf - .) \
-      | (cd "$destination" && tar --xattrs --xattrs-include='*' --acls -xpf -)
+    (cd "$old_namespace" && tar --xattrs --xattrs-include='user.supabase.*' --no-acls -cpf - .) \
+      | (cd "$destination" && tar --xattrs --xattrs-include='user.supabase.*' --no-acls --no-same-owner -xpf -)
   }
   storage_clone_tenant_namespace_from_legacy
   printf 'OBJECTS_COPIED\n' > "$state_file"
@@ -692,10 +692,11 @@ convert_backup() (
   cp -a "$backup_dir/." "$stage/"
   trap 'drop_temp_database "$temp_db" >/dev/null 2>&1 || true; rm -rf -- "$stage" "$extract"' EXIT
 
-  tar -xzf "$backup_dir/storage.tar.gz" -C "$extract"
+  tar --xattrs --xattrs-include='user.supabase.*' --no-acls --no-same-owner \
+    -xzf "$backup_dir/storage.tar.gz" -C "$extract"
   [[ -d "$extract/stub/stub" && ! -L "$extract/stub" ]] \
     || { report backup "$backup_id" failed "layout stub/stub ausente"; return 1; }
-  (cd "$extract/stub/stub" && tar --xattrs --xattrs-include='*' --acls -cpf - .) \
+  (cd "$extract/stub/stub" && tar --xattrs --xattrs-include='user.supabase.*' --no-acls -cpf - .) \
     | gzip > "$stage/storage.tar.gz"
   storage_validate_namespace_archive "$stage/storage.tar.gz"
 

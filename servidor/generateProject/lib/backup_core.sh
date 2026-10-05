@@ -87,7 +87,7 @@ backup_capture() {
     || { echo "Namespace Storage do tenant ausente" >&2; return 1; }
   storage_validate_file_tree "$storage_namespace" "namespace do backup" \
     || return 1
-  (cd "$storage_namespace" && tar --xattrs --xattrs-include='*' --acls -cpf - .) \
+  (cd "$storage_namespace" && tar --xattrs --xattrs-include='user.supabase.*' --no-acls --numeric-owner -cpf - .) \
     | gzip > "$tmp_dir/storage.tar.gz"
   storage_validate_namespace_archive "$tmp_dir/storage.tar.gz"
   backup_progress storage_archived

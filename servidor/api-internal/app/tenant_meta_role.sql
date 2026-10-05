@@ -25,6 +25,7 @@ BEGIN
     END LOOP;
     EXECUTE format('ALTER ROLE %I SET statement_timeout = %L', tenant_role, '30s');
     EXECUTE format('ALTER ROLE %I SET lock_timeout = %L', tenant_role, '10s');
+    EXECUTE format('REVOKE CONNECT, TEMPORARY ON DATABASE %I FROM PUBLIC', current_database());
     EXECUTE format('GRANT CONNECT, CREATE, TEMPORARY ON DATABASE %I TO %I', current_database(), tenant_role);
     -- Ownership is local to public; shared Auth/Storage roles are never granted.
     EXECUTE format('ALTER SCHEMA public OWNER TO %I', tenant_role);
@@ -33,6 +34,12 @@ BEGIN
         JOIN pg_namespace n ON n.oid=c.relnamespace
         WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','S','f')
           AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid=c.oid AND d.deptype='e' AND d.classid='pg_class'::regclass)
+          AND NOT (c.relkind='S' AND EXISTS (
+              SELECT 1 FROM pg_depend d
+              WHERE d.classid='pg_class'::regclass AND d.objid=c.oid
+                AND d.refclassid='pg_class'::regclass AND d.deptype IN ('a','i')
+          ))
+        ORDER BY CASE WHEN c.relkind='S' THEN 1 ELSE 0 END, c.oid
     LOOP
         EXECUTE format('ALTER %s public.%I OWNER TO %I',
             CASE obj.relkind WHEN 'S' THEN 'SEQUENCE' WHEN 'v' THEN 'VIEW'

@@ -80,7 +80,7 @@ SERVER_NAME="${VECTOR_NAMES[1]:-}"
 
 ACCESS_SECRET_NAME="${WRAPPER_NAME}_vault_access_key_id"
 SECRET_SECRET_NAME="${WRAPPER_NAME}_vault_secret_access_key"
-VECTOR_ENDPOINT="http://supabase-nginx-${PROJECT_ID}:8080/vector"
+VECTOR_ENDPOINT="http://supabase-nginx-${PROJECT_ID}:8081/vector"
 
 # Confirma que o bucket existe no tenant real antes de alterar o catalogo.
 echo "▶ Validando o vector bucket '$BUCKET_NAME' no Storage API..."
@@ -88,7 +88,7 @@ storage_assert_vector_bucket "$PROJECT_UUID" "$SERVICE_ROLE_KEY_PROJETO" "$BUCKE
   || fail "Vector Bucket nao pertence ao tenant do projeto"
 
 # A imagem Supabase Postgres fornece Vault e Wrappers. O Studio exige Wrappers
-# >= 0.5.6 para reconhecer a integracao S3 Vectors.
+# >= 0.5.7 para importar o bucket pelo nome do schema remoto.
 echo "▶ Instalando/verificando Vault e Wrappers em $POSTGRES_DATABASE..."
 docker exec -i supabase-db psql \
   -X -q -v ON_ERROR_STOP=1 \
@@ -117,9 +117,9 @@ match = re.match(r"^(\d+)\.(\d+)\.(\d+)", version)
 if not match:
     raise SystemExit(f"versao Wrappers invalida: {version}")
 parts = tuple(map(int, match.groups()))
-if parts < (0, 5, 6):
+if parts < (0, 5, 7):
     raise SystemExit(
-        f"Wrappers >= 0.5.6 obrigatorio para S3 Vectors; encontrado {version}"
+        f"Wrappers >= 0.5.7 obrigatorio para S3 Vectors; encontrado {version}"
     )
 PY
 
@@ -336,51 +336,26 @@ PROBE_SCHEMA="vector_wrapper_probe_${PROJECT_ID}_$$"
 PROBE_SCHEMA="${PROBE_SCHEMA:0:63}"
 
 echo "▶ Testando o wrapper contra $VECTOR_ENDPOINT..."
-if python3 - "$WRAPPERS_VERSION" <<'PY'
-import re
-import sys
-m = re.match(r"^(\d+)\.(\d+)\.(\d+)", sys.argv[1])
-raise SystemExit(0 if m and tuple(map(int, m.groups())) >= (0, 5, 7) else 1)
-PY
-then
-  docker exec -i \
-    -e PROBE_SCHEMA="$PROBE_SCHEMA" \
-    -e PROBE_SERVER="$SERVER_NAME" \
-    -e PROBE_BUCKET="$BUCKET_NAME" \
-    supabase-db psql \
-      -X -q -v ON_ERROR_STOP=1 \
-      -U "$POSTGRES_USER" \
-      -d "$POSTGRES_DATABASE" <<'SQL'
+docker exec -i \
+  -e PROBE_SCHEMA="$PROBE_SCHEMA" \
+  -e PROBE_SERVER="$SERVER_NAME" \
+  -e PROBE_BUCKET="$BUCKET_NAME" \
+  supabase-db psql \
+    -X -q -v ON_ERROR_STOP=1 \
+    -U "$POSTGRES_USER" \
+    -d "$POSTGRES_DATABASE" <<'SQL'
 \getenv probe_schema PROBE_SCHEMA
 \getenv probe_server PROBE_SERVER
 \getenv probe_bucket PROBE_BUCKET
+BEGIN;
 CREATE SCHEMA :"probe_schema";
 IMPORT FOREIGN SCHEMA :"probe_bucket"
   FROM SERVER :"probe_server"
   INTO :"probe_schema"
   OPTIONS (strict 'true');
 DROP SCHEMA :"probe_schema" CASCADE;
+COMMIT;
 SQL
-else
-  docker exec -i \
-    -e PROBE_SCHEMA="$PROBE_SCHEMA" \
-    -e PROBE_SERVER="$SERVER_NAME" \
-    -e PROBE_BUCKET="$BUCKET_NAME" \
-    supabase-db psql \
-      -X -q -v ON_ERROR_STOP=1 \
-      -U "$POSTGRES_USER" \
-      -d "$POSTGRES_DATABASE" <<'SQL'
-\getenv probe_schema PROBE_SCHEMA
-\getenv probe_server PROBE_SERVER
-\getenv probe_bucket PROBE_BUCKET
-CREATE SCHEMA :"probe_schema";
-IMPORT FOREIGN SCHEMA :"probe_schema"
-  FROM SERVER :"probe_server"
-  INTO :"probe_schema"
-  OPTIONS (bucket_name :'probe_bucket', strict 'true');
-DROP SCHEMA :"probe_schema" CASCADE;
-SQL
-fi
 
 echo "✅ Integracao S3 Vectors Wrapper configurada para '$BUCKET_NAME'."
 echo "   FDW:      $WRAPPER_NAME"

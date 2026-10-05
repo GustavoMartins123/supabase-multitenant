@@ -5,6 +5,8 @@ die() { echo "ERRO: $*" >&2; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_ROOT="$(dirname "$SCRIPT_DIR")"
+# shellcheck disable=SC2034
+PROJECT_ROOT="$SERVER_ROOT"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/functions_config.sh"
 # shellcheck disable=SC1091
