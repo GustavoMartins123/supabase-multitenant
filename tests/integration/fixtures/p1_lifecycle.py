@@ -69,7 +69,7 @@ def main() -> None:
               'PROJECTS_API_ALLOWED_IP_RANGES': '172.50.0.0/16',
               'PUSH_API_URL': 'https://studio.p1.test/api/internal/push',
                'PROJECTS_API_PORT': '18000', 'PG_META_PORT': '8080',
-               'ACCESS_ADMIN_CIDRS': '172.50.0.0/16',
+               'ACCESS_ADMIN_CIDRS': '172.50.0.0/16,172.52.0.0/24',
                'STUDIO_CACHE_INVALIDATION_URL': 'https://studio.p1.test', 'PROJECTS_API_STOP_GRACE_PERIOD': '30s'}
     for key in ('POSTGRES_PASSWORD', 'META_GUEST_PASSWORD', 'KEY_AUTHORIZER_DB_PASSWORD',
                 'PLATFORM_APP_DB_PASSWORD', 'META_ADMIN_DB_PASSWORD', 'HOST_AGENT_DB_PASSWORD',

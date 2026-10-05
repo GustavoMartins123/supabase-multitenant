@@ -81,7 +81,9 @@ class AccessPolicy(PolicyModel):
         return any(address in ipaddress.ip_network(value) for value in self.allowed_networks)
 
     def allows_country(self, country: str | None) -> bool:
-        return self.geo_mode != "restrict" or country in self.allowed_countries
+        return self.geo_mode != "restrict" or (
+            country is not None and self.allowed_countries is not None and country in self.allowed_countries
+        )
 
 
 def canonical_ip(value: str):
