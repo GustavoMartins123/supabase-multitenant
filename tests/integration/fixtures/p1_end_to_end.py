@@ -69,7 +69,8 @@ def validate(root: Path, suffix: str, topology: str, values: dict[str, str], ben
     env_path = server / '.env'
     env_text = env_path.read_text(encoding='utf-8')
     for key, value in {'TRAEFIK_ENABLE_TLS': 'true', 'TRAEFIK_TLS_MODE': 'file',
-                       'PROJECTS_API_ALLOWED_IP_RANGES': '172.50.0.0/16,172.52.0.0/24'}.items():
+                       'PROJECTS_API_ALLOWED_IP_RANGES': '172.50.0.0/16,172.52.0.0/24',
+                       'ACCESS_ADMIN_CIDRS': '172.50.0.0/16,172.52.0.0/24'}.items():
         assert re.search(rf'(?m)^{key}=.*$', env_text), key
         env_text = re.sub(rf'(?m)^{key}=.*$', lambda _: key + '=' + value, env_text)
     env_path.write_text(env_text, encoding='utf-8')

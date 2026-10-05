@@ -55,3 +55,8 @@ fingerprint = "tests/smoke/test_host_agent_contract.py:jwt:658"
 description = "synthetic unsigned JWT fixture pinned by the gitleaks rules contract test (decodes to {\"role\":\"anon\"} with literal signature \"signature\")"
 paths = ['''tests/smoke/test_gitleaks_config\.py''']
 regexes = ['''eyJhbGciOiJIUzI1NiJ9\.eyJyb2xlIjoiYW5vbiJ9\.c2lnbmF0dXJl''']
+
+[[allowlists]]
+description = "internal geoip-api service URL, not a credential"
+paths = ['''servidor/key-authorizer/admission\.py''']
+regexes = ['''geoip-api:8000/v1/ip/country''']
