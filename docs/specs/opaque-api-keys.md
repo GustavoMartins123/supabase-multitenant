@@ -554,12 +554,17 @@ and uses its own rotation until a fully coordinated migration.
 - decide whether a future elevated window will allow multiple actions instead of
   the current strictly bound, one-time grants;
 - scope by table, schema, function, or row;
-- IP restriction and secret-key blocking by User-Agent;
-- distributed cache/Redis in the authorizer;
+- secret-key blocking by User-Agent;
 - automatic integration with Vault, KMS, or external secret managers;
-- rate limit and individual quota per key ID;
 - removal of HS256 and migration to ES256/JWKS;
 - replacement of Nginx with Envoy.
 
 These items receive neither partial implementation nor a secondary path in this
 change.
+
+Geographic restrictions, rate limits and request quotas belong to project and
+slot policies. Accounting uses the stable slot UUID, not the issued `key_id`, so
+rotation cannot replenish a consumer's limits. The data-plane authorizer uses
+dedicated Redis token buckets and durable PostgreSQL quotas; it does not cache
+authorization decisions. See [Project and consumer admission](../00-architecture.md#project-and-consumer-admission)
+and the [operations runbook](../12-opaque-api-key-operations.md#geography-rate-limits-and-request-quotas).

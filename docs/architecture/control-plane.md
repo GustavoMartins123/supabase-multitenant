@@ -60,11 +60,11 @@ The schema belongs to versioned migrations in `servidor/api-internal/app/migrati
 
 | Role | Consumer | Scope |
 | --- | --- | --- |
-| `key_authorizer` | key-authorizer service | column-scoped `SELECT` on `projects`, `project_api_key_slots`, `project_api_keys`; `UPDATE (last_used_at)` |
+| `key_authorizer` | key-authorizer service | column-scoped identity reads, policy and traffic-epoch `SELECT`, `UPDATE (last_used_at)`; execution of bounded quota reservation and epoch initialization functions; no direct quota or epoch writes |
 | `client_configuration_reader` | client-configuration service | read-only `SELECT` on `public_client_configurations`; no base tables, users, secrets or writes |
 | `host_agent_rw` | host-agent worker | `SELECT/INSERT/UPDATE` on `host_agent_workers` and `host_agent_commands`; `SELECT/INSERT/UPDATE/DELETE` on `project_container_state`; column-scoped read-only `SELECT` on `projects` (`id`, `name`, `owner_id`, `tenant_uuid`, `automatic_key_rotation_enabled`), `users` (`id`, `is_active`), `user_groups` (`user_id`, `group_name`) and `project_members` (`project_id`, `user_id`, `role`) so the agent re-authorizes every command against the database instead of trusting the Projects API. No project secret, no write outside the agent tables, no tenant database. |
 | `platform_reader` | Projects API telemetry | per-tenant database: `CONNECT` plus `SELECT` on `auth.users` and `auth.sessions`, provisioned by the lifecycle scripts. Required at API startup; there is no global-credential fallback. |
-| `platform_app` | Projects API control-plane pool | full DML on control-plane tables in schema `public`; no cluster administration, no tenant databases. The API's `DB_DSN` is this identity. |
+| `platform_app` | Projects API control-plane pool | DML on control-plane management tables in schema `public`, including access policies; quota usage is read-only and traffic epoch is inaccessible; no cluster administration or tenant databases. The API's `DB_DSN` is this identity. |
 | `platform_meta_admin` | Postgres-Meta connections and the privileged steps of project deletion (`META_ADMIN_DSN`) | member of `supabase_admin`, dedicated revocable credential. Carries the work `platform_app` cannot reach: `_realtime`/`_supavisor` metadata, terminating other roles' backends, replication slots and `DROP DATABASE`. The global superuser never exists in the API environment. |
 
 All identities are provisioned by the privileged migration command and required at startup: the agent refuses to run without `HOST_AGENT_DB_PASSWORD`, and the API refuses without `PLATFORM_APP_DB_PASSWORD`, `META_ADMIN_DSN` and `PLATFORM_READER_DB_PASSWORD`. No component derives credentials from the global superuser anymore.
@@ -101,8 +101,14 @@ Routes live under `/api/projects/{project_ref}/api-key-*` and `/opaque-api-keys/
 
 Public discovery is a data-plane service, not a route in the Projects API.
 Traefik routes `GET /config/{application_ref}` on the public Supabase origin
-directly to `client-configuration:18011`. Neither Studio nor the administrative
+through admission to `client-configuration:18011`. Neither Studio nor the administrative
 API `:18000` participates in these requests.
+
+The Traefik admission middleware asks the data-plane authorizer to evaluate the
+project and publishable-slot geography and the separate discovery rate budget.
+The configuration service redeems the single-use ticket before reading its
+projection; direct requests without a ticket are rejected. It shares the private
+admission secret, not an administrative HMAC or a project secret.
 
 Each publishable slot has a unique, stable `application_ref`; secret slots have
 no reference. The service returns only `supabase_url`, `publishable_key`, `key_id`
@@ -143,7 +149,9 @@ revalidate on return to the foreground; a changed `key_id` or `supabase_url` req
 the client and reconnecting Realtime, never replaying writes automatically.
 
 Responses are `no-store`, support cross-origin reads without cookies, and are
-rate-limited by Traefik. Discovery is public, not consumer authentication: user
+rate-limited by the authorizer at Traefik admission. Geographic denial returns
+403, rate exhaustion returns 429 with `Retry-After`, and dependency failure
+returns 503. Discovery is public, not consumer authentication: user
 sessions, RLS and service policies remain responsible for authorization.
 
 ### Jobs

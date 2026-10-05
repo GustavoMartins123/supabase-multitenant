@@ -52,6 +52,13 @@
       },
       "ValidationError": {
         "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
           "loc": {
             "items": {
               "anyOf": [
@@ -116,6 +123,15 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "description": "Geographic denial or invalid admission ticket"
+          },
+          "404": {
+            "description": "Unknown application reference"
+          },
+          "410": {
+            "description": "No effective publishable key"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -125,6 +141,12 @@
               }
             },
             "description": "Validation Error"
+          },
+          "429": {
+            "description": "Discovery rate exhausted; Retry-After indicates the wait"
+          },
+          "503": {
+            "description": "Configuration or admission dependency unavailable"
           }
         },
         "summary": "Get Client Configuration"

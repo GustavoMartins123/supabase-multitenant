@@ -115,6 +115,8 @@ def main() -> None:
         print(checked.stdout.strip())
         # Separate interpreters preserve each module's import-time environment.
         script = '''import importlib.util, os, sys, unittest
+from pathlib import Path
+sys.path.insert(0, str(Path(sys.argv[1]).resolve().parents[2]))
 os.environ['CONTROL_PLANE_TEST_DSN'] = sys.argv[2]
 os.environ['TENANT_SQL_TEST_ADMIN_DSN'] = sys.argv[2]
 os.environ['STUDIO_DIRECTORY_TEST_URL'] = sys.argv[3]

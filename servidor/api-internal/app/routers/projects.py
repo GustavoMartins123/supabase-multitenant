@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 import asyncpg
 
 from app.database import get_pool
+from app.access_policy import copy_project_access_policy
 from app.identity_schemas import ProjectIdentity, JobIdentity
 from app.dependencies import (
     ensure_project_member_access,
@@ -360,6 +361,8 @@ async def duplicate_project(
                     project_row["id"],
                     public_ref,
                 )
+
+                await copy_project_access_policy(conn, project_row["id"], project_id, auth_user["db_user_id"])
 
                 await conn.execute("""
                     INSERT INTO project_members(project_id, user_id, role)

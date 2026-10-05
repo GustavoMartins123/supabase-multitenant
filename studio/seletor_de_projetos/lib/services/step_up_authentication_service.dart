@@ -11,6 +11,7 @@ enum StepUpAction {
   rotateSecretKey('rotate_secret_key'),
   activateSecretKey('activate_secret_key'),
   updateSecretKeyPolicy('update_secret_key_policy'),
+  updateAccessPolicy('update_access_policy'),
   cancelSecretKeyRotation('cancel_secret_key_rotation'),
   revokeSecretKey('revoke_secret_key');
 

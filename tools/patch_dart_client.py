@@ -43,8 +43,18 @@ ENUM_FALLBACK = re.compile(r"(\w+Enum)\.fromJson\(([^)]+)\) \?\? '([\w-]+)'")
 
 def patch(path: pathlib.Path) -> dict[str, int]:
     text = path.read_text(encoding="utf-8")
-    counts = {"empty_equals": 0, "empty_ctor": 0, "empty_hashcode": 0, "enum_fallback": 0, "cast_map": 0, "required_keys": 0}
+    counts = {"empty_equals": 0, "empty_ctor": 0, "empty_hashcode": 0, "enum_fallback": 0, "cast_map": 0, "required_keys": 0, "null_only": 0}
     model_name = re.search(r"^class (\w+) \{", text, re.M)
+    if model_name:
+        schema = json.loads(SCHEMA_FILE.read_text(encoding="utf-8"))
+        model = schema["components"]["schemas"].get(model_name.group(1), {})
+        for key, prop in model.get("properties", {}).items():
+            if prop.get("type") == "null":
+                expression = rf"\w+\.fromJson\(json\[r'{re.escape(key)}'\]\)"
+                replacement = (f"(json[r'{key}'] == null ? null : "
+                               f"throw const FormatException('Invalid null-only field: {key}'))")
+                text, count = re.subn(expression, lambda _: replacement, text)
+                counts["null_only"] += count
     if model_name and "requiredKeys.forEach" in text:
         schema = json.loads(SCHEMA_FILE.read_text(encoding="utf-8"))
         model = schema["components"]["schemas"].get(model_name.group(1))
@@ -92,7 +102,7 @@ def main() -> int:
     if not MODEL_DIR.is_dir():
         print(f"missing {MODEL_DIR}; generate the client first")
         return 1
-    total = {"empty_equals": 0, "empty_ctor": 0, "empty_hashcode": 0, "enum_fallback": 0, "cast_map": 0, "required_keys": 0}
+    total = {"empty_equals": 0, "empty_ctor": 0, "empty_hashcode": 0, "enum_fallback": 0, "cast_map": 0, "required_keys": 0, "null_only": 0}
     touched: list[str] = []
     targets = sorted(MODEL_DIR.glob("*.dart"))
     if API_DIR.is_dir():

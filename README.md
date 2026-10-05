@@ -10,6 +10,12 @@ Each project receives its own PostgreSQL database, JWT secret, Realtime tenant, 
 
 Projects use multiple opaque publishable/secret API-key slots. Expiration is optional per key; expiring slots can rotate automatically before expiration, while internal anon/service-role JWTs remain server-only. Administrators can disable automatic rotation per project or slot, and failed rotations stop explicitly until intervention.
 
+Project and slot policies combine country/CIDR restrictions, request rates and
+daily or monthly quotas. Administrators configure the project under **Acesso**
+and each consumer under **Acesso e limites** in its slot card. Traefik delegates
+admission to the data-plane authorizer; stable slot accounting survives key
+rotation. See the [operations runbook](docs/12-opaque-api-key-operations.md#geography-rate-limits-and-request-quotas).
+
 Projects are addressed by an independent 20-letter random reference: `https://<server>/<public_ref>` and `/project/<public_ref>` in Studio. The technical name does not determine the URL. **Generate new URL** rotates only that reference; the previous URL stops working without an alias or redirect. See [Project lifecycle](docs/architecture/project-lifecycle.md) for maintenance migration instructions.
 
 > This is an unofficial project under active development.
@@ -61,7 +67,10 @@ flowchart LR
     HostAgent --> Docker[Docker daemon]
 
     TenantGateway --> KeyAuthorizer[key-authorizer]
+    Traefik -->|geography, rate and quota admission| KeyAuthorizer
     KeyAuthorizer --> PostgreSQL
+    KeyAuthorizer --> TrafficRedis[Dedicated traffic Redis]
+    KeyAuthorizer --> GeoIP[Local GeoIP]
     TenantGateway --> Auth[GoTrue]
     TenantGateway --> Rest[PostgREST]
     TenantGateway --> StorageDataPlane[Shared Storage data plane]
@@ -99,6 +108,7 @@ Applications access the project routes through Traefik. The Studio gateway is an
 - Edge Functions;
 - Postgres Meta;
 - key-authorizer;
+- dedicated traffic Redis and local GeoIP;
 - client-configuration;
 - Projects API;
 - Traefik;

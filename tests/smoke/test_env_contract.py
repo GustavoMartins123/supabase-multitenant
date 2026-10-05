@@ -65,6 +65,7 @@ class EnvContractToolTest(unittest.TestCase):
 
         example = (ROOT / "servidor" / ".env.example").read_text(encoding="utf-8")
         setup = (ROOT / "setup.sh").read_text(encoding="utf-8")
+        runtime = (ROOT / "tools/configure_access_runtime.py").read_text(encoding="utf-8")
         pass_keys = [
             line[:-len("=pass")]
             for line in example.splitlines()
@@ -77,6 +78,7 @@ class EnvContractToolTest(unittest.TestCase):
                     re.search(rf"env_secret \S+ {re.escape(key)} ", setup)
                     is not None
                     or f"s|{key}=" in setup
+                    or ("tools/configure_access_runtime.py" in setup and key in runtime)
                 )
                 allowlisted = (
                     key == "TRAEFIK_ACME_EMAIL"

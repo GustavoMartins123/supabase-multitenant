@@ -142,6 +142,13 @@ async def ensure_key_authorizer_role(
                     ON project_api_keys TO key_authorizer;
                 GRANT SELECT (project_id, secret_hash, is_active)
                     ON project_studio_keys TO key_authorizer;
+                GRANT SELECT ON project_access_policies, slot_access_policies,
+                    access_rate_epoch TO key_authorizer;
+                GRANT EXECUTE ON FUNCTION initialize_access_rate_epoch(),
+                    consume_access_quota(uuid,uuid,boolean) TO key_authorizer;
+                GRANT SELECT (public_ref) ON projects TO key_authorizer;
+                GRANT SELECT (application_ref) ON project_api_key_slots TO key_authorizer;
+                GRANT SELECT ON public_client_configurations TO key_authorizer;
                 """
             )
             password_statement = await conn.fetchval(
@@ -276,8 +283,10 @@ async def ensure_platform_app_role(
                 GRANT USAGE ON SCHEMA public TO platform_app;
                 GRANT SELECT, INSERT, UPDATE, DELETE
                     ON ALL TABLES IN SCHEMA public TO platform_app;
-                GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public
-                    TO platform_app;
+                  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public
+                      TO platform_app;
+                  REVOKE ALL ON access_rate_epoch FROM platform_app;
+                  REVOKE INSERT, UPDATE, DELETE ON access_quota_usage FROM platform_app;
                 """
             )
             password_statement = await conn.fetchval(

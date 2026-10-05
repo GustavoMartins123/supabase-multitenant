@@ -223,10 +223,10 @@ class OpaqueKeyContractTest(unittest.TestCase):
     def test_authorizer_binds_key_to_project_gateway_and_service(self) -> None:
         for contract in (
             "api_gateway_token_hash",
-            "hmac.compare_digest(provided_gateway_hash, stored_gateway_hash)",
+            "hmac.compare_digest(hashlib.sha256(token.encode()).digest(), bytes(project['api_gateway_token_hash']))",
             "s.project_id = $1",
             "k.secret_hash = $2",
-            "target_service not in key[\"allowed_services\"]",
+            "service not in key['allowed_services']",
             "(k.expires_at IS NULL OR k.expires_at > now())",
             "k.confirmed_at IS NOT NULL",
         ):

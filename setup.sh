@@ -636,6 +636,8 @@ PYEOF
     safe_sed "s|SERVER_PROTO=pass|SERVER_PROTO=${PROTO}|g" servidor/.env
     safe_sed "s|^PUSH_API_URL=.*|PUSH_API_URL=https://${LOCAL_IP}:${STUDIO_HTTPS_PORT}/api/internal/push|g" servidor/.env
     safe_sed "s|^PROJECTS_API_ALLOWED_IP_RANGES=.*|PROJECTS_API_ALLOWED_IP_RANGES=${LOCAL_IP}/32,${SUPABASE_NETWORK_SUBNET}|g" servidor/.env
+    backup_file "servidor/traefik/traefik.runtime.yml"
+    python3 tools/configure_access_runtime.py --env servidor/.env --studio-ip "$LOCAL_IP" --studio-network "$SUPABASE_NETWORK_SUBNET"
     if [[ "$SERVER_IP" != "$LOCAL_IP" ]]; then
         safe_sed "s|^VECTOR_FLUENTD_BIND=.*|VECTOR_FLUENTD_BIND=0.0.0.0|g" servidor/.env
     fi

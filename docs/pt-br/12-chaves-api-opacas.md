@@ -44,20 +44,20 @@ Internet.
 
 ## Atualização do schema
 
-A Projects API aplica a migration
-`20260812_opaque_api_key_optional_expiration.sql` quando detecta o schema
-anterior. Ela torna `rotation_interval_days` e `project_api_keys.expires_at`
-nullable, substitui as constraints e adapta o índice de vencimento. Não executa
-`UPDATE` nas chaves: todas as linhas existentes preservam seu `expires_at`.
+Migrations versionadas são aplicadas pelo serviço privilegiado e efêmero
+`control-plane-migrations` antes de iniciar Projects API e authorizer. A API que
+atende requisições apenas confere o ledger; nunca altera o schema no startup.
+Veja [Migrations do control plane](architecture/control-plane-migrations.md).
 
-Depois do deploy, confirme que a migration terminou antes de permitir PATCH de
-política. Falha de migration impede a inicialização canônica da Projects API;
-não altere as constraints manualmente para contornar o erro.
+`0003_opaque_api_key_optional_expiration.sql` torna `rotation_interval_days` e
+`project_api_keys.expires_at` nullable sem alterar os vencimentos existentes.
+`0002_step_up_grants.sql` registra ator, sessão hasheada, ação, alvo e timestamps,
+nunca senhas, tokens bearer ou plaintext de API keys. `0020_access_policies.sql`
+provisiona regras explícitas de projeto e slot e ledgers persistentes de consumo.
 
-O deploy também aplica `20260812_step_up_grants.sql`, que cria somente o ledger
-de consumo dos grants de reautenticação. Ele registra ator, sessão hasheada,
-ação, alvo e timestamps; nunca armazena senha, token bearer ou plaintext da API
-key. Falha dessa migration impede a inicialização da Projects API.
+Confirme a migration concluída antes de atender gestão ou aplicações. Falha de
+migration bloqueia a inicialização canônica; não altere constraints manualmente
+para contornar o erro.
 
 ## Projeto novo ou duplicado
 
@@ -311,6 +311,50 @@ Slots configurados como **Não expira** não são candidatos do scheduler e não
 geram pending automático. Cutovers manuais explicitamente agendados continuam
 sendo processados.
 
+## Geografia, limites de taxa e quotas de requisições
+
+Administradores configuram a regra do projeto nas configurações, aba **Acesso**,
+e a regra do consumidor em **Acesso e limites** no cartão do slot. Alterações do
+projeto ou de slots secret exigem confirmação de senha. As políticas usam
+revisões otimistas: após uma edição concorrente, recarregue em vez de sobrescrever
+a alteração de outro administrador.
+
+Escolha geografia irrestrita no projeto, herança no slot ou restrição por países
+e CIDRs explicitamente permitidos. Projeto e slot precisam permitir a origem.
+Seleção vazia nega países; selecionar todos ainda nega origens desconhecidas.
+A LAN não recebe permissão implícita. A busca na lista de países não descarta
+seleções que estejam ocultas pelo filtro.
+
+Cada escopo pode definir requisições por segundo, capacidade de burst e teto
+diário ou mensal. Os períodos usam UTC. **Consultar consumo atual** consulta
+manualmente, sem polling. Os limites pertencem ao slot estável: rotacionar
+`key_id` não os reinicia. Consumo diário e mensal é registrado mesmo com os
+tetos desabilitados; habilitar ou trocar o período utiliza esse consumo existente.
+Uma requisição admitida conta mesmo quando a operação no upstream falha depois.
+Taxa ou quota esgotada retorna HTTP 429 com `Retry-After`.
+
+Projetos novos começam com geografia explicitamente irrestrita e slots herdando
+a regra, sem limites de taxa ou quota. Duplicação copia a política do projeto e
+dos slots iniciais correspondentes, mas inicia contadores independentes; não
+clona todos os aplicativos consumidores. RLS e grants do banco continuam
+independentes da admissão HTTP.
+
+O setup gera `ACCESS_ADMISSION_SECRET`, `ACCESS_RATE_REDIS_PASSWORD`,
+`ACCESS_ADMIN_CIDRS` e `traefik/traefik.runtime.yml` privados. Revise as origens
+explícitas do Studio antes da implantação. `ACCESS_TRUSTED_PROXY_CIDRS` fica
+vazio para clientes diretos; configure somente redes de proxies confiáveis reais,
+regenere o runtime pelo setup e reinicie Traefik e seu watcher de configuração
+para aplicar a mudança de confiança. O `traffic-redis` dedicado não publica
+porta e usa volume persistente próprio, separado do Redis de sessões do Studio.
+Aplique as migrations e reconstrua os serviços do servidor antes de iniciar o
+authorizer. Alterações do Flutter são entregues pela imagem do Studio, não por
+build feito pelo usuário da instalação.
+
+Atualizações GeoIP usam o `update_geoip.sh` gerado pelo setup: o download é
+validado pela imagem do serviço GeoIP e substitui o banco atomicamente no
+diretório montado. O leitor observa a substituição sem reiniciar o serviço.
+Atualização inválida retorna erro explícito sem substituir o banco.
+
 ## Incidentes
 
 ### Secret key exposta
@@ -356,6 +400,26 @@ JWT público e não habilite uma rota de bypass.
 - `gateway_recovery_required`: corrija host-agent/Docker/template e repita o
   cutover.
 - `active`: não execute migração novamente; gerencie slots normalmente.
+
+### Perda do estado do Redis de tráfego
+
+Pare o authorizer durante a recuperação de seu volume Redis dedicado. Reiniciar
+com AOF intacto preserva os token buckets. Perder o epoch registrado bloqueia a
+admissão; não o substitua automaticamente nem reinicie contadores no deploy.
+
+Se não for possível recuperar o volume, consulte o epoch atual com a identidade
+privilegiada de migrations e reconheça explicitamente a perda dos contadores:
+
+```bash
+docker compose --env-file servidor/.env -f servidor/docker-compose-api.yml run \
+  --rm --no-deps --entrypoint python control-plane-migrations \
+  -m app.reset_access_rate_epoch --expected-epoch <epoch-atual> \
+  --confirm-rate-counter-loss
+```
+
+Inicie o authorizer com um volume Redis de tráfego vazio. A operação substitui o
+epoch e repõe os token buckets perdidos; não reinicia quotas PostgreSQL ou sessões
+do Studio. Nunca a execute como parte do startup normal.
 
 ## Auditoria e dados seguros para diagnóstico
 

@@ -107,7 +107,7 @@ class SetupSecretGenerationContract(unittest.TestCase):
             if line.startswith(("DB_PASSWORD=", "PASSWORD=")) or
             ("_PASSWORD=pass" in line and not IDENTITY_PASSWORD_RE.match(line)
              and not line.startswith(("#", "POSTGRES_PASSWORD=", "SMTP_PASS",
-                                      "DASHBOARD_PASSWORD=", "META_GUEST_PASSWORD=")))
+                                      "DASHBOARD_PASSWORD=", "META_GUEST_PASSWORD=", "ACCESS_RATE_REDIS_PASSWORD=")))
         ]
         self.assertEqual(leftovers, [], f"senhas sem contrato de geracao: {leftovers}")
 

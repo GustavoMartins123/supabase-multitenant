@@ -101,9 +101,10 @@ def migration_actions() -> set[str]:
         API_ROOT
         / "app"
         / "migrations"
-        / "0008_step_up_secret_management.sql"
+        / "0020_access_policies.sql"
     ).read_text(encoding="utf-8")
-    return set(re.findall(r"'([a-z_]+)'", sql))
+    block = sql.split("studio_step_up_grant_consumptions_action_check CHECK (action IN (", 1)[1].split("));", 1)[0]
+    return set(re.findall(r"'([a-z_]+)'", block))
 
 
 def flutter_actions() -> set[str]:

@@ -145,7 +145,7 @@ class PublicRefRenderingTest(unittest.TestCase):
                 self.assertFalse(output.exists())
 
     def test_traefik_exposes_only_ref_and_keeps_technical_upstream(self) -> None:
-        (self.root / ".env").write_text("SERVER_PROTO=http\n", encoding="utf-8")
+        (self.root / ".env").write_text("SERVER_PROTO=http\nACCESS_ADMISSION_SECRET=" + "a" * 64 + "\nACCESS_TRUSTED_PROXY_CIDRS=\n", encoding="utf-8")
         model = yaml.safe_load(renderer.render(self.root / ".env", self.root / "projects"))
         http = model["http"]
         self.assertEqual(http["routers"][f"project-{NAME}"]["rule"],
@@ -156,7 +156,7 @@ class PublicRefRenderingTest(unittest.TestCase):
         self.assertEqual(http["middlewares"][f"project-guard-{NAME}"]["plugin"]["supabaseguard"]["scope"], TENANT)
 
     def test_traefik_refuses_missing_noncanonical_or_duplicate_ref(self) -> None:
-        (self.root / ".env").write_text("SERVER_PROTO=http\n", encoding="utf-8")
+        (self.root / ".env").write_text("SERVER_PROTO=http\nACCESS_ADMISSION_SECRET=" + "a" * 64 + "\nACCESS_TRUSTED_PROXY_CIDRS=\n", encoding="utf-8")
         for replacement in ("", "PROJECT_PUBLIC_REF=bad\n", f'PROJECT_PUBLIC_REF="{REF}"\n',
                             f"PROJECT_PUBLIC_REF={REF}\nPROJECT_PUBLIC_REF={REF}\n"):
             (self.project / ".env").write_text(
@@ -172,7 +172,7 @@ class PublicRefRenderingTest(unittest.TestCase):
             renderer.render(self.root / ".env", self.root / "projects")
 
     def test_watcher_withdraws_previous_routes_when_canonical_config_fails(self) -> None:
-        (self.root / ".env").write_text("SERVER_PROTO=http\n", encoding="utf-8")
+        (self.root / ".env").write_text("SERVER_PROTO=http\nACCESS_ADMISSION_SECRET=" + "a" * 64 + "\nACCESS_TRUSTED_PROXY_CIDRS=\n", encoding="utf-8")
         middlewares = self.root / "middlewares.yml"
         middlewares.write_text("http:\n  middlewares: {}\n", encoding="utf-8")
         output = self.root / "dynamic/projects.yml"

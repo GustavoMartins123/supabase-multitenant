@@ -888,38 +888,39 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_authorizer_accepts_only_scoped_active_studio_key_not_raw_jwt(self):
         import importlib.util
-        import httpx
-        from app import opaque_keys
+        from fastapi import HTTPException
+        from app import opaque_keys, access_policy
         from app.studio_administrative_keys import get_studio_administrative_key
         sys.modules["opaque_keys"] = opaque_keys
+        sys.modules["access_policy"] = access_policy
+        sys.path.insert(0, str(ROOT / "servidor/key-authorizer"))
         spec = importlib.util.spec_from_file_location("studio_authorizer_test", ROOT / "servidor/key-authorizer/app.py")
         authorizer = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(authorizer)
-        authorizer._pool = self.pool
+        with mock.patch.dict(os.environ, {"ACCESS_ADMISSION_SECRET": "4" * 64}):
+            spec.loader.exec_module(authorizer)
         gateway = "a" * 64
         await self.pool.execute("UPDATE projects SET api_gateway_token_hash=$1, opaque_keys_activated_at=now() WHERE id=$2", hashlib.sha256(gateway.encode()).digest(), self.project_a)
         async with self.pool.acquire() as conn:
             async with conn.transaction():
                 key = await get_studio_administrative_key(conn, project_id=self.project_a)
-        headers = {"X-Project-Ref": "projeto_a", "X-Project-Gateway-Token": gateway,
-            "X-Api-Key-Header": key, "X-Original-Authorization": "Bearer " + key,
-            "X-Allow-Missing-Key": "0", "X-Target-Service": "storage"}
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=authorizer.app), base_url="http://authorizer") as client:
+            project = await authorizer.project_identity(conn, "projeto_a", gateway)
             for service in ("rest", "graphql", "storage"):
-                headers["X-Target-Service"] = service
-                result = await client.get("/v1/authorize", headers=headers)
-                self.assertEqual(result.status_code, 204, result.text)
-                self.assertEqual(result.headers["X-Opaque-Key-Role"], "service_role")
-                self.assertEqual(result.headers["X-Opaque-Preserve-Authorization"], "0")
-            for service in ("auth", "functions", "realtime"):
-                headers["X-Target-Service"] = service
-                self.assertEqual((await client.get("/v1/authorize", headers=headers)).status_code, 403)
-            headers["X-Target-Service"] = "rest"
-            headers["X-Api-Key-Header"] = "eyJhbGciOiJIUzI1NiJ9.raw.jwt"
-            self.assertEqual((await client.get("/v1/authorize", headers=headers)).status_code, 403)
-            headers["X-Api-Key-Header"] = key
-            await self.pool.execute("UPDATE project_studio_keys SET is_active=false WHERE project_id=$1", self.project_a)
-            self.assertEqual((await client.get("/v1/authorize", headers=headers)).status_code, 403)
+                body = authorizer.AdmissionRequest(project_ref="projeto_a",gateway_token=gateway,
+                    uri="/abcdefghijklmnopqrst/"+service+"/v1/resource",method="GET",client_ip="127.0.0.1",
+                    api_key=key,authorization="Bearer "+key)
+                identity, parsed, _ = await authorizer.key_identity(conn,project,body,service,False,"")
+                self.assertTrue(identity['administrative'])
+                self.assertEqual(parsed.role,"service_role")
+            for candidate, service in ((key,"auth"),("eyJhbGciOiJIUzI1NiJ9.raw.jwt","storage")):
+                body.api_key=candidate
+                with self.assertRaises(HTTPException) as denied:
+                    await authorizer.key_identity(conn,project,body,service,False,"")
+                self.assertEqual(denied.exception.status_code,403)
+            body.api_key=key
+            await self.pool.execute("UPDATE project_studio_keys SET is_active=false WHERE project_id=$1",self.project_a)
+            with self.assertRaises(HTTPException) as denied:
+                await authorizer.key_identity(conn,project,body,"storage",False,"")
+            self.assertEqual(denied.exception.status_code,403)
 
     async def duplicate_intent(self):
         sys.path.insert(0, str(ROOT / "servidor/host-agent"))

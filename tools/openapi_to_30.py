@@ -1,8 +1,9 @@
 """Converte docs/api/openapi.json (3.1) para um subconjunto 3.0 legivel
 pelo openapi-generator 7.x (cliente Dart).
 
-Unica transformacao: `anyOf: [T, {"type": "null"}]` vira `T` com
-`"nullable": true`. Todo o resto passa intacto. O artefato publicado
+`anyOf: [T, {"type": "null"}]` vira `T` com `"nullable": true`.
+Campos exclusivamente nulos usam `nullable` e `enum: [null]`, sem um
+tipo `null` inexistente em OpenAPI 3.0. Todo o resto passa intacto. O artefato publicado
 continua 3.1; esta conversao serve apenas como entrada do gerador.
 
 Uso: python tools/openapi_to_30.py [entrada] [saida]
@@ -25,11 +26,16 @@ def _convert(node: object) -> object:
     if not isinstance(node, dict):
         return node
     node = {key: _convert(value) for key, value in node.items()}
+    if node.get("type") == "null":
+        node["type"] = "object"
+        node["nullable"] = True
+        node["enum"] = [None]
     branches = node.get("anyOf")
     if isinstance(branches, list) and len(branches) == 2:
-        nullables = [b for b in branches if b == {"type": "null"}]
+        null_schema = {"type": "object", "nullable": True, "enum": [None]}
+        nullables = [b for b in branches if b == null_schema]
         if len(nullables) == 1:
-            other = next(b for b in branches if b != {"type": "null"})
+            other = next(b for b in branches if b != null_schema)
             if isinstance(other, dict):
                 merged = dict(other)
                 merged["nullable"] = True

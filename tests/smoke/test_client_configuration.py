@@ -73,7 +73,7 @@ class ApplicationReferenceTest(unittest.TestCase):
         self.assertNotIn('proxy_pass', section)
         compose = (ROOT/'servidor/docker-compose-api.yml').read_text()
         section = compose[compose.index('  client-configuration:'):compose.index('  key-authorizer:')]
-        self.assertIn('networks: [client-configuration-data]', section)
+        self.assertIn('networks: [client-configuration-data, traffic-admission]', section)
         self.assertNotIn('PROJECT_SECRETS_MASTER_KEY', section)
         self.assertNotIn('volumes:', section)
 

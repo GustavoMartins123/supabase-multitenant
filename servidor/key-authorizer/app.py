@@ -1,5 +1,4 @@
-"""Fail-closed data-plane authorizer for project opaque API keys."""
-
+"""Fail-closed data-plane opaque identity and project/slot admission."""
 from __future__ import annotations
 
 import hashlib
@@ -9,25 +8,25 @@ import re
 import urllib.parse
 
 import asyncpg
-from fastapi import FastAPI, Header, HTTPException, Response
+import httpx
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
+from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
-from opaque_keys import (
-    ALLOWED_SERVICES,
-    OpaqueKeyError,
-    parse_opaque_key,
-    should_preserve_authorization,
-)
+from opaque_keys import ALLOWED_SERVICES, OpaqueKeyError, parse_opaque_key, should_preserve_authorization
+from admission import AdmissionEngine, AdmissionRequest, query_key, route
 
-
-PROJECT_RE = re.compile(r"^[a-z_][a-z0-9_]{2,39}$")
-GATEWAY_TOKEN_RE = re.compile(r"^[a-f0-9]{64}$")
-DB_DSN = (os.getenv("DB_DSN") or "").strip()
-if not DB_DSN:
-    raise RuntimeError("DB_DSN is required by key-authorizer")
-
+PROJECT_RE = re.compile(r'^[a-z_][a-z0-9_]{2,39}$')
+GATEWAY_TOKEN_RE = re.compile(r'^[a-f0-9]{64}$')
+DB_DSN = os.environ['DB_DSN']
+ADMISSION_SECRET = os.environ['ACCESS_ADMISSION_SECRET']
+if not GATEWAY_TOKEN_RE.fullmatch(ADMISSION_SECRET):
+    raise RuntimeError('Invalid ACCESS_ADMISSION_SECRET')
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-_pool: asyncpg.Pool | None = None
-
+_pool = None
+_engine = None
 
 def _forbidden() -> HTTPException:
     return HTTPException(
@@ -95,162 +94,87 @@ def _candidate_key(
     return candidate
 
 
-@app.on_event("startup")
-async def startup() -> None:
-    global _pool
-    _pool = await asyncpg.create_pool(DB_DSN, min_size=2, max_size=20)
-    async with _pool.acquire() as conn:
-        await conn.fetchval("SELECT 1")
 
 
-@app.on_event("shutdown")
-async def shutdown() -> None:
-    global _pool
-    if _pool is not None:
+@app.on_event('startup')
+async def startup():
+    global _pool, _engine
+    _pool = await asyncpg.create_pool(DB_DSN, min_size=2, max_size=20, command_timeout=3)
+    redis = Redis(host='traffic-redis', port=6379, password=os.environ['ACCESS_RATE_REDIS_PASSWORD'],
+        decode_responses=True, socket_timeout=2, socket_connect_timeout=2, retry_on_timeout=False)
+    _engine = AdmissionEngine(_pool, redis, os.environ['ACCESS_ADMIN_CIDRS'])
+    await _engine.startup()
+
+
+@app.on_event('shutdown')
+async def shutdown():
+    if _engine:
+        await _engine.redis.aclose()
+        await _engine.http.aclose()
+    if _pool:
         await _pool.close()
-        _pool = None
 
 
-@app.get("/healthz")
-async def healthz() -> dict[str, str]:
-    if _pool is None:
-        raise HTTPException(503, "authorizer database pool is unavailable")
+@app.exception_handler(HTTPException)
+async def http_error(request, exc):
+    headers = dict(exc.headers or {})
+    headers['Cache-Control'] = 'no-store'
+    return JSONResponse({'error': 'admission_denied' if exc.status_code < 500 else 'admission_unavailable',
+        'message': str(exc.detail)}, status_code=exc.status_code, headers=headers)
+
+
+@app.middleware('http')
+async def dependency_boundary(request, call_next):
     try:
-        async with _pool.acquire() as conn:
-            await conn.fetchval("SELECT 1")
-    except (asyncpg.PostgresError, OSError) as exc:
-        raise HTTPException(503, "authorizer database is unavailable") from exc
-    return {"status": "ok"}
+        return await call_next(request)
+    except (asyncpg.PostgresError, asyncpg.InterfaceError, OSError, TimeoutError, RedisError,
+        httpx.HTTPError, ValidationError, ValueError, KeyError, TypeError):
+        return JSONResponse({'error':'admission_unavailable','message':'Admission could not be verified'},
+            status_code=503, headers={'Cache-Control':'no-store'})
 
 
-@app.get("/v1/authorize", status_code=204)
-async def authorize(
-    x_project_ref: str | None = Header(default=None),
-    x_project_gateway_token: str | None = Header(default=None),
-    x_api_key_header: str | None = Header(default=None),
-    x_api_key_query: str | None = Header(default=None),
-    x_original_authorization: str | None = Header(default=None),
-    x_original_args: str | None = Header(default=None),
-    x_target_service: str | None = Header(default=None),
-    x_required_role: str | None = Header(default=None),
-    x_allow_missing_key: str | None = Header(default=None),
-) -> Response:
-    """Validate one request without returning or logging credential material."""
+@app.get('/healthz')
+async def healthz():
+    if not _pool or not _engine:
+        raise HTTPException(503, 'Admission evaluator not ready')
+    await _pool.fetchval('SELECT 1')
+    if await _engine.redis.get('access:epoch') != _engine.epoch:
+        raise HTTPException(503, 'Traffic counter epoch unavailable')
+    return {'status':'ok'}
 
-    project_ref = x_project_ref or ""
-    gateway_token = x_project_gateway_token or ""
-    target_service = x_target_service or ""
-    required_role = x_required_role or ""
-    allow_missing_value = (
-        x_allow_missing_key if x_allow_missing_key is not None else ""
-    )
-    if any(
-        value != value.strip()
-        for value in (
-            project_ref,
-            gateway_token,
-            target_service,
-            required_role,
-            allow_missing_value,
-        )
-    ):
+
+async def project_identity(conn, name, token):
+    if not PROJECT_RE.fullmatch(name) or not GATEWAY_TOKEN_RE.fullmatch(token):
         raise _forbidden()
-    if not PROJECT_RE.fullmatch(project_ref):
+    project = await conn.fetchrow('SELECT id,public_ref,api_gateway_token_hash,api_keyset_version,opaque_keys_activated_at FROM projects WHERE name=$1', name)
+    if project is None or project['api_gateway_token_hash'] is None or project['opaque_keys_activated_at'] is None:
         raise _forbidden()
-    if not GATEWAY_TOKEN_RE.fullmatch(gateway_token):
+    if not hmac.compare_digest(hashlib.sha256(token.encode()).digest(), bytes(project['api_gateway_token_hash'])):
         raise _forbidden()
-    if target_service not in ALLOWED_SERVICES:
-        raise _forbidden()
-    if required_role not in {"", "anon", "service_role"}:
-        raise _forbidden()
-    if allow_missing_value not in {"0", "1"}:
-        raise _forbidden()
-    allow_missing = allow_missing_value == "1"
-    if allow_missing and target_service != "storage":
-        raise _forbidden()
+    return project
+
+
+async def key_identity(conn, project, body, service, missing, required):
+    _, _, _, parts = route(body.uri, project['public_ref'])
     try:
-        api_key = _candidate_key(
-            x_api_key_header,
-            x_api_key_query,
-            x_original_args,
-            allow_missing=allow_missing,
-        )
-    except OpaqueKeyError as exc:
-        raise _forbidden() from exc
-
-    if _pool is None:
-        raise HTTPException(503, "key authorizer is not ready")
+        api_key = _candidate_key(body.api_key, query_key(parts.query), parts.query, allow_missing=missing)
+    except OpaqueKeyError:
+        raise _forbidden() from None
+    authorization = body.authorization
+    if authorization != authorization.strip():
+        raise _forbidden()
+    if api_key is None:
+        if re.match(r'^Bearer\s+sb_(?:publishable|secret)_', authorization, flags=re.IGNORECASE):
+            raise _forbidden()
+        return None, None, True
     try:
-        async with _pool.acquire() as conn:
-            project = await conn.fetchrow(
-                """
-                SELECT id, api_gateway_token_hash, api_keyset_version,
-                       opaque_keys_activated_at
-                FROM projects
-                WHERE name = $1
-                """,
-                project_ref,
-            )
-            if (
-                project is None
-                or project["api_gateway_token_hash"] is None
-                or project["opaque_keys_activated_at"] is None
-            ):
-                raise _forbidden()
-            provided_gateway_hash = hashlib.sha256(
-                gateway_token.encode("utf-8")
-            ).digest()
-            stored_gateway_hash = bytes(project["api_gateway_token_hash"])
-            if not hmac.compare_digest(provided_gateway_hash, stored_gateway_hash):
-                raise _forbidden()
-
-            if api_key is None:
-                authorization = x_original_authorization or ""
-                if authorization != authorization.strip():
-                    raise _forbidden()
-                if re.match(
-                    r"^Bearer\s+sb_(?:publishable|secret)_",
-                    authorization,
-                    flags=re.IGNORECASE,
-                ):
-                    raise _forbidden()
-                return Response(
-                    status_code=204,
-                    headers={
-                        "Cache-Control": "no-store",
-                        "X-Opaque-Key-Present": "0",
-                        "X-Opaque-Preserve-Authorization": "1",
-                        "X-Opaque-Keyset-Version": str(
-                            project["api_keyset_version"]
-                        ),
-                    },
-                )
-
-            try:
-                parsed = parse_opaque_key(project["id"], api_key)
-                authorization = x_original_authorization or ""
-                if authorization != authorization.strip():
-                    raise OpaqueKeyError(
-                        "Authorization contains non-canonical whitespace"
-                    )
-                if (
-                    target_service in {"storage", "functions"}
-                    and authorization
-                    and not re.match(
-                        r"^Bearer\s+", authorization, flags=re.IGNORECASE
-                    )
-                ):
-                    preserve_authorization = True
-                else:
-                    preserve_authorization = should_preserve_authorization(
-                        api_key, authorization
-                    )
-            except OpaqueKeyError as exc:
-                raise _forbidden() from exc
-
-            key = await conn.fetchrow(
-                """
-                SELECT k.id, s.kind, s.allowed_services
+        parsed = parse_opaque_key(project['id'], api_key)
+        preserve = bool(service in {'storage','functions'} and authorization and not re.match(r'^Bearer\s+', authorization, re.IGNORECASE))
+        if not preserve:
+            preserve = should_preserve_authorization(api_key, authorization)
+    except OpaqueKeyError:
+        raise _forbidden() from None
+    key = await conn.fetchrow('''                SELECT k.id, s.id AS slot_id, false AS administrative, s.kind, s.allowed_services
                 FROM project_api_keys k
                 JOIN project_api_key_slots s ON s.id = k.slot_id
                 WHERE s.project_id = $1
@@ -277,49 +201,82 @@ async def authorize(
                       )
                   )
                 UNION ALL
-                SELECT sk.project_id AS id, 'secret' AS kind,
+                SELECT sk.project_id AS id, NULL::uuid AS slot_id, true AS administrative, 'secret' AS kind,
                        ARRAY['rest','graphql','storage']::text[] AS allowed_services
                 FROM project_studio_keys sk
                 WHERE sk.project_id = $1 AND sk.secret_hash = $2 AND sk.is_active
-                """,
-                project["id"],
-                parsed.digest,
-            )
-            if (
-                key is None
-                or key["kind"] != parsed.kind
-                or target_service not in key["allowed_services"]
-                or (required_role and parsed.role != required_role)
-            ):
-                raise _forbidden()
-            await conn.execute(
-                """
-                UPDATE project_api_keys
-                SET last_used_at = now()
-                WHERE id = $1
-                  AND (last_used_at IS NULL OR last_used_at < now() - interval '5 minutes')
-                """,
-                key["id"],
-            )
-    except HTTPException:
-        raise
-    except (asyncpg.PostgresError, OSError) as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="API key authorization unavailable",
-            headers={"Cache-Control": "no-store", "Retry-After": "1"},
-        ) from exc
+''', project['id'], parsed.digest)
+    if key is None or key['kind'] != parsed.kind or service not in key['allowed_services'] or (required and parsed.role != required):
+        raise _forbidden()
+    return key, parsed, preserve
 
-    return Response(
-        status_code=204,
-        headers={
-            "Cache-Control": "no-store",
-            "X-Opaque-Key-Role": parsed.role,
-            "X-Opaque-Key-Present": "1",
-            "X-Opaque-Key-Id": str(key["id"]),
-            "X-Opaque-Preserve-Authorization": (
-                "1" if preserve_authorization else "0"
-            ),
-            "X-Opaque-Keyset-Version": str(project["api_keyset_version"]),
-        },
-    )
+
+async def discovery_identity(conn, body):
+    service, _, _, parts = route(body.uri, None)
+    ref = parts.path.removeprefix('/config/')
+    slot = await conn.fetchrow("SELECT id,project_id FROM project_api_key_slots WHERE application_ref=$1 AND kind='publishable'", ref)
+    if slot is None:
+        raise HTTPException(404, 'Application configuration not found')
+    row = await conn.fetchrow('SELECT available,key_id FROM public_client_configurations WHERE application_ref=$1', ref)
+    if row is None or not row['available'] or row['key_id'] is None:
+        raise HTTPException(410, 'Application configuration unavailable')
+    return {'id': slot['project_id']}, {'id': row['key_id'], 'slot_id':slot['id'], 'administrative':False}, service
+
+
+@app.post('/v1/admit', status_code=204)
+async def admit(body: AdmissionRequest, x_admission_secret: str = Header()):
+    if not hmac.compare_digest(x_admission_secret, ADMISSION_SECRET):
+        raise _forbidden()
+    if body.method not in {'GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'}:
+        raise HTTPException(405, 'Method not permitted')
+    async with _pool.acquire() as conn:
+        if body.project_ref == '' and body.gateway_token == '':
+            if body.method not in {'GET','OPTIONS'}:
+                raise HTTPException(405, 'Only GET and OPTIONS are supported')
+            project, identity, service = await discovery_identity(conn, body)
+            discovery = True
+        else:
+            project = await project_identity(conn, body.project_ref, body.gateway_token)
+            service, missing, required, _ = route(body.uri, project['public_ref'])
+            identity, _, _ = await key_identity(conn, project, body, service, missing, required) if body.method != 'OPTIONS' else (None,None,True)
+            discovery = False
+    ticket = await _engine.issue(body, identity, project, service, discovery)
+    return Response(status_code=204, headers={'X-Gateway-Admission':ticket} if ticket else {})
+
+
+@app.get('/v1/authorize', status_code=204)
+async def authorize(request: Request):
+    h = request.headers
+    if not h.get('x-gateway-admission'):
+        raise _forbidden()
+    body = AdmissionRequest(project_ref=h.get('x-project-ref',''), gateway_token=h.get('x-project-gateway-token',''),
+        uri=h.get('x-admission-uri',''), method=h.get('x-admission-method',''), client_ip='127.0.0.1',
+        api_key=h.get('x-api-key-header',''), authorization=h.get('x-original-authorization',''))
+    async with _pool.acquire() as conn:
+        project = await project_identity(conn, body.project_ref, body.gateway_token)
+        service, missing, required, parts = route(body.uri, project['public_ref'])
+        if body.uri != '/' + project['public_ref'] + h.get('x-gateway-request-uri',''):
+            raise _forbidden()
+        if h.get('x-target-service') not in {service, 'callback'} or body.method != h.get('x-gateway-request-method'):
+            raise _forbidden()
+        if h.get('x-target-service') == 'callback' and not missing:
+            raise _forbidden()
+        key, parsed, preserve = await key_identity(conn, project, body, service, missing, required)
+        await _engine.redeem(h.get('x-gateway-admission',''), body, project, key)
+        if key and not key['administrative']:
+            await conn.execute("UPDATE project_api_keys SET last_used_at=now() WHERE id=$1 AND (last_used_at IS NULL OR last_used_at < now()-interval '5 minutes')", key['id'])
+    headers = {'Cache-Control':'no-store','X-Opaque-Key-Present':'1' if key else '0',
+        'X-Opaque-Preserve-Authorization':'1' if preserve else '0','X-Opaque-Keyset-Version':str(project['api_keyset_version'])}
+    if parsed:
+        headers.update({'X-Opaque-Key-Role':parsed.role,'X-Opaque-Key-Id':str(key['id'])})
+    return Response(status_code=204, headers=headers)
+
+
+@app.post('/v1/check-discovery', status_code=204)
+async def check_discovery(body: AdmissionRequest, x_admission_secret: str = Header(), x_gateway_admission: str = Header()):
+    if not hmac.compare_digest(x_admission_secret, ADMISSION_SECRET) or body.project_ref or body.gateway_token:
+        raise _forbidden()
+    async with _pool.acquire() as conn:
+        project, key, _ = await discovery_identity(conn, body)
+    await _engine.redeem(x_gateway_admission, body, project, key)
+    return Response(status_code=204)

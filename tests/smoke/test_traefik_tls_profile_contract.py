@@ -42,6 +42,7 @@ class RendererTlsBehaviorTest(unittest.TestCase):
         (project / ".env").write_text(
             "PROJECT_ID=projeto_a\n"
             "PROJECT_PUBLIC_REF=abcdefghijklmnopqrst\n"
+            "API_GATEWAY_TOKEN_PROJETO=" + "a" * 64 + "\n"
             "PROJECT_UUID=9c8ce9f0-3b4e-4bcb-a739-2c1e8ad0e9aa\n",
             encoding="utf-8",
         )
@@ -50,7 +51,7 @@ class RendererTlsBehaviorTest(unittest.TestCase):
         self._tmp.cleanup()
 
     def write_env(self, content: str) -> None:
-        self.env.write_text(content, encoding="utf-8")
+        self.env.write_text(content + "ACCESS_ADMISSION_SECRET=" + "a" * 64 + "\nACCESS_TRUSTED_PROXY_CIDRS=\n", encoding="utf-8")
 
     def test_default_env_keeps_http_only_routers(self) -> None:
         self.write_env("PROJECTS_API_PORT=18000\n")

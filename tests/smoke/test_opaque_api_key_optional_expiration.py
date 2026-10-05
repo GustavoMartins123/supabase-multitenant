@@ -219,7 +219,7 @@ class OptionalOpaqueKeyExpirationContractTest(unittest.TestCase):
             "s.status = 'active'",
             "k.status = 'active'",
             "k.status = 'pending'",
-            'target_service not in key["allowed_services"]',
+            "service not in key['allowed_services']",
         ):
             with self.subTest(contract=contract):
                 self.assertIn(contract, self.authorizer)

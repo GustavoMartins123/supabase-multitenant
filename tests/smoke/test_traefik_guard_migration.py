@@ -26,7 +26,7 @@ class FileProviderRendererTests(unittest.TestCase):
         output = root / "dynamic" / "routes.yml"
         projects.mkdir(parents=True, exist_ok=True)
         root_env.write_text(
-            "PROJECTS_API_PORT=18000\n",
+            "PROJECTS_API_PORT=18000\nACCESS_ADMISSION_SECRET=" + "a" * 64 + "\nACCESS_TRUSTED_PROXY_CIDRS=\n",
             encoding="utf-8",
         )
         middlewares.write_text("http:\n  middlewares: {}\n", encoding="utf-8")
@@ -69,13 +69,13 @@ class FileProviderRendererTests(unittest.TestCase):
         root_env = fixture_root / "server.env"
         root_env.write_text(
             "PROJECTS_API_PORT=18000\n"
-            "PROJECTS_API_ALLOWED_IP_RANGES=127.0.0.1/32,172.50.0.0/16\n",
+            "PROJECTS_API_ALLOWED_IP_RANGES=127.0.0.1/32,172.50.0.0/16\nACCESS_ADMISSION_SECRET=" + "a" * 64 + "\nACCESS_TRUSTED_PROXY_CIDRS=\n",
             encoding="utf-8",
         )
         (project / ".env").write_text(
             "PROJECT_ID=meu_projeto\n"
             "PROJECT_UUID=11111111-2222-3333-4444-555555555555\n"
-            "PROJECT_PUBLIC_REF=abcdefghijklmnopqrst\n",
+            "PROJECT_PUBLIC_REF=abcdefghijklmnopqrst\nAPI_GATEWAY_TOKEN_PROJETO=" + "b" * 64 + "\n",
             encoding="utf-8",
         )
         try:

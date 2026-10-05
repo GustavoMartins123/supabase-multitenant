@@ -14,6 +14,7 @@ local ACTIONS = {
     rotate_secret_key = true,
     activate_secret_key = true,
     update_secret_key_policy = true,
+    update_access_policy = true,
     cancel_secret_key_rotation = true,
     revoke_secret_key = true,
 }
@@ -92,6 +93,11 @@ end
 if action == "create_secret_key" then
     if #resource < 3 or #resource > 40 or not resource:match(SLOT_PATTERN) then
         return respond(ngx.HTTP_BAD_REQUEST, "Invalid API key slot name")
+    end
+elseif action == "update_access_policy" then
+    local identity, revision = resource:match("^([^:]+):([1-9]%d*)$")
+    if not identity or not identity:match(UUID_PATTERN) or #revision > 16 or tonumber(revision) > 9007199254740991 then
+        return respond(ngx.HTTP_BAD_REQUEST, "Invalid access policy resource")
     end
 elseif action ~= "delete_project" and not resource:match(UUID_PATTERN) then
     return respond(ngx.HTTP_BAD_REQUEST, "Invalid API key resource")

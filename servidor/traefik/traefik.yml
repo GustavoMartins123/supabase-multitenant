@@ -19,6 +19,8 @@ certificatesResolvers:
 
 experimental:
   localPlugins:
+    gatewayadmission:
+      moduleName: "github.com/GustavoMartins123/gatewayadmission"
     supabaseguard:
       moduleName: "github.com/GustavoMartins123/supabaseguard"
   plugins:

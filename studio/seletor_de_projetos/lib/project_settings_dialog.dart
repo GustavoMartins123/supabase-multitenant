@@ -26,6 +26,7 @@ import 'widgets/project_settings/members_section.dart';
 import 'widgets/project_settings/env_settings_section.dart';
 import 'widgets/project_settings/user_telemetry_section.dart';
 import 'widgets/project_settings/opaque_api_keys_section.dart';
+import 'widgets/project_settings/access_policy_dialog.dart';
 import 'models/all_users.dart';
 
 const _kTabs = <({String label, IconData icon})>[
@@ -274,7 +275,8 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
                   controller: _tabController,
                   children: [
                     _buildGeneralTab(projectUrl, myRole, projectBusy),
-                    _buildKeysTab(myRole, projectBusy, isAdmin, serverDomain as String),
+                    _buildKeysTab(
+                        myRole, projectBusy, isAdmin, serverDomain as String),
                     _buildEnvironmentTab(isAdmin),
                     _buildAccessTab(isAdmin),
                   ],
@@ -347,7 +349,8 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     ]);
   }
 
-  Widget _buildKeysTab(String? myRole, bool projectBusy, bool isAdmin, String publicBaseUrl) {
+  Widget _buildKeysTab(
+      String? myRole, bool projectBusy, bool isAdmin, String publicBaseUrl) {
     return _buildTabBody([
       OpaqueApiKeysSection(
         projectRef: widget.ref,
@@ -371,6 +374,16 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
 
   Widget _buildAccessTab(bool isAdmin) {
     return _buildTabBody([
+      if (isAdmin) ...[
+        SectionWidget(
+            title: 'ACESSO E LIMITES',
+            child: SecondaryButton(
+                label: 'Configurar países, taxa e quota',
+                icon: Icons.public,
+                onPressed: () =>
+                    showAccessPolicyDialog(context, projectRef: widget.ref))),
+        const SizedBox(height: 20),
+      ],
       MembersSection(projectRef: widget.ref),
       if (isAdmin) ...[
         const SizedBox(height: 20),

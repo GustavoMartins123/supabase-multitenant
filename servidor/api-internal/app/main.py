@@ -139,6 +139,7 @@ from app.meta_connections import (
     get_project_reader_connection_string,
 )
 from app.routers.opaque_keys import router as opaque_keys_router
+from app.routers.access_policy import router as access_policy_router
 from app.routers.platform_auth import router as platform_auth_router
 from app.routers.studio_content import router as studio_content_router
 from app.version import API_VERSION
@@ -174,6 +175,7 @@ app.include_router(collaboration_router)
 app.include_router(internal_router)
 app.include_router(lifecycle_router)
 app.include_router(opaque_keys_router)
+app.include_router(access_policy_router)
 app.include_router(platform_auth_router)
 app.include_router(studio_content_router)
 

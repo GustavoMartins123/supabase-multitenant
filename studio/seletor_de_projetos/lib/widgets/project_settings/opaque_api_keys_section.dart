@@ -17,6 +17,7 @@ import '../step_up_authentication_dialog.dart';
 import 'claimed_opaque_api_key_dialog.dart';
 import 'create_opaque_slot_dialog.dart';
 import 'expiration_policy_dialog.dart';
+import 'access_policy_dialog.dart';
 
 class OpaqueApiKeysSection extends ConsumerStatefulWidget {
   const OpaqueApiKeysSection({
@@ -818,6 +819,15 @@ class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
                 (key) => _keyDetails(state, slot, key),
               ),
           if (widget.canManage) ...[
+            SecondaryButton(
+                label: 'Acesso e limites',
+                icon: Icons.public,
+                onPressed: _managementDisabled(state)
+                    ? null
+                    : () => showAccessPolicyDialog(context,
+                        projectRef: widget.projectRef,
+                        slotId: slot.id,
+                        secret: slot.kind == 'secret')),
             for (final key in pending)
               if (key.revealedAt != null && key.confirmedAt == null)
                 Padding(

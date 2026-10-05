@@ -31,6 +31,7 @@ STEP_UP_ACTIONS = frozenset(
         "rotate_secret_key",
         "activate_secret_key",
         "update_secret_key_policy",
+        "update_access_policy",
         "cancel_secret_key_rotation",
         "revoke_secret_key",
     }
@@ -173,6 +174,10 @@ def resolve_step_up_grant(
             _forbidden()
     elif action == "create_secret_key":
         if not _SLOT_NAME_PATTERN.fullmatch(resource):
+            _forbidden()
+    elif action == "update_access_policy":
+        scope_id, separator, revision = resource.partition(":")
+        if not separator or _canonical_uuid(scope_id) is None or not re.fullmatch(r"[1-9][0-9]{0,15}", revision) or int(revision) > 9007199254740991:
             _forbidden()
     elif _canonical_uuid(resource) is None:
         _forbidden()

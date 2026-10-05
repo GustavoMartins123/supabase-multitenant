@@ -171,7 +171,9 @@ def validate(root: Path, suffix: str, topology: str, values: dict[str, str], ben
     traefik_static.write_text(yaml.safe_dump({
         'entryPoints': {'web': {'address': ':80'}, 'websecure': {'address': ':443'}},
         'providers': {'file': {'directory': str(dynamic), 'watch': True}},
-        'experimental': {'localPlugins': {'supabaseguard': {'moduleName': 'github.com/GustavoMartins123/supabaseguard'}}},
+        'experimental': {'localPlugins': {
+            'supabaseguard': {'moduleName': 'github.com/GustavoMartins123/supabaseguard'},
+            'gatewayadmission': {'moduleName': 'github.com/GustavoMartins123/gatewayadmission'}}},
         'accessLog': {'format': 'json'}, 'log': {'level': 'INFO'},
         'global': {'checkNewVersion': False, 'sendAnonymousUsage': False}}), encoding='utf-8')
     traefik = create('p1-traefik-' + suffix, 'traefik:v3.7.6', 'rede-supabase',

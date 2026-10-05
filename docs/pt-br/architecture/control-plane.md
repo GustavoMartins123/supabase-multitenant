@@ -77,11 +77,11 @@ privilegio, e nao apenas o `key_authorizer`:
 
 | Role | Consumidor | Escopo |
 | --- | --- | --- |
-| `key_authorizer` | servico key-authorizer | `SELECT` por coluna em `projects`, `project_api_key_slots`, `project_api_keys`; `UPDATE (last_used_at)` |
+| `key_authorizer` | servico key-authorizer | leitura de identidade por coluna, `SELECT` de políticas e epoch de tráfego, `UPDATE (last_used_at)`; execução das funções delimitadas de reserva de quota e inicialização do epoch; sem escrita direta em quota ou epoch |
 | `client_configuration_reader` | serviço client-configuration | `SELECT` somente leitura em `public_client_configurations`; sem tabelas base, usuários, segredos ou escritas |
 | `host_agent_rw` | worker do host-agent | `SELECT/INSERT/UPDATE` em `host_agent_workers` e `host_agent_commands`; `SELECT/INSERT/UPDATE/DELETE` em `project_container_state`; `SELECT` somente leitura por coluna em `projects` (`id`, `name`, `owner_id`, `tenant_uuid`, `automatic_key_rotation_enabled`), `users` (`id`, `is_active`), `user_groups` (`user_id`, `group_name`) e `project_members` (`project_id`, `user_id`, `role`), para o agent reautorizar cada comando contra o banco em vez de confiar na Projects API. Nenhum segredo de projeto, nenhuma escrita fora das tabelas do agent, nenhum database de tenant |
 | `platform_reader` | telemetria da Projects API | por database de tenant: `CONNECT` + `SELECT` em `auth.users` e `auth.sessions`; exigida no startup da API — nao existe fallback para credencial global |
-| `platform_app` | pool do control plane na Projects API | DML completo nas tabelas do control plane (schema public); sem administracao de cluster nem databases de tenant. O `DB_DSN` da API e essa identidade |
+| `platform_app` | pool do control plane na Projects API | DML nas tabelas de gestão do control plane (schema public), incluindo políticas de acesso; consumo de quota somente leitura e epoch de tráfego inacessível; sem administracao de cluster nem databases de tenant. O `DB_DSN` da API e essa identidade |
 | `platform_meta_admin` | conexoes do Postgres-Meta e as etapas privilegiadas da exclusao de projeto (`META_ADMIN_DSN`) | membro de `supabase_admin`, credencial propria revogavel. Executa o que `platform_app` nao alcanca: metadata de `_realtime`/`_supavisor`, encerramento de backends de outros papeis, slots de replicacao e `DROP DATABASE`. O superuser global nao existe no ambiente da API |
 | `platform_reader` | telemetria da Projects API | por database de tenant: `CONNECT` + `SELECT` em `auth.users` e `auth.sessions` (helper `lib/tenant_reader_role.sh`) |
 
@@ -108,8 +108,14 @@ As rotas ficam sob `/api/projects/{project_ref}/api-key-*` e `/opaque-api-keys/m
 ### Configuração pública por aplicativo
 
 A descoberta pertence ao plano de dados. O Traefik público encaminha
-`GET /config/{application_ref}` diretamente para `client-configuration:18011`.
+`GET /config/{application_ref}` pela admissão até `client-configuration:18011`.
 O Studio e a API administrativa `:18000` não participam dessas consultas.
+
+O middleware de admissão do Traefik consulta o autorizador do plano de dados
+para avaliar a geografia do projeto e do slot publishable e a taxa separada da
+descoberta. O serviço de configuração resgata o ticket de uso único antes de
+ler sua projeção; acesso direto sem ticket é rejeitado. Ele recebe o segredo
+privado de admissão, não um HMAC administrativo ou segredo de projeto.
 
 Cada slot publishable tem uma referência opaca estável; slots secret não têm
 descoberta. O contrato devolve somente `supabase_url`, `publishable_key`, `key_id`
@@ -143,7 +149,9 @@ Não entrega versões futuras ou sem confirmação; ausência, revogação, expi
 ou SQL indisponível resultam em erro explícito, sem outra chave ou slot.
 
 Renomear não altera a descoberta; regenerar a URL muda apenas `supabase_url` na
-resposta. Respostas usam `no-store` e CORS sem cookies; Traefik limita requisições.
+resposta. Respostas usam `no-store` e CORS sem cookies; o authorizer limita
+requisições na admissão do Traefik. Geografia negada retorna 403, taxa esgotada
+retorna 429 com `Retry-After` e falha de dependência retorna 503.
 O aplicativo recria seu cliente ao mudar `key_id` ou `supabase_url`, sem repetir escritas.
 A descoberta é pública: sessões, RLS e políticas continuam responsáveis pela
 autorização.

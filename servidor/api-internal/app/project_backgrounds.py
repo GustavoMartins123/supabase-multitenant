@@ -15,6 +15,7 @@ from app.project_settings import get_project_file_size_limit
 from app.host_agent import HostAgentError, HostAgentOffline, command_result, run_command as run_host_agent_command, run_command_for_job as run_host_agent_command_for_job
 from app.validation import parse_uuid_value
 from app.opaque_key_service import bootstrap_project_opaque_keys
+from app.access_policy import copy_matching_slot_access_policies
 from app.control_plane_service import audit_studio_action, create_studio_notification
 from app.project_env_secrets import PROJECTS_ROOT, read_project_secret_keys as _read_project_secret_keys
 from app.service_key_cache import invalidate_service_key_cache
@@ -442,6 +443,7 @@ async def _duplicate_and_store_keys(
                     created_by=owner_id,
                     gateway_token=gateway_token,
                 )
+                await copy_matching_slot_access_policies(conn, original_uuid, project_uuid, owner_id)
 
         record = await run_host_agent_command_for_job(
             pool,

@@ -10,6 +10,12 @@ Cada projeto recebe seu próprio database PostgreSQL, JWT secret, tenant do Real
 
 Cada projeto possui múltiplos slots de API keys opacas `publishable`/`secret`. A expiração é opcional por chave; slots com expiração podem rotacionar automaticamente antes do vencimento, enquanto os JWTs internos anon/service role permanecem somente no servidor. Um administrador pode desativar a automação no projeto ou no slot, e falhas ficam bloqueadas e visíveis até uma retomada explícita.
 
+Políticas de projeto e slot combinam restrições por países/CIDRs, taxa de
+requisições e quotas diárias ou mensais. Administradores configuram o projeto
+em **Acesso** e cada consumidor em **Acesso e limites** no cartão do slot.
+O Traefik delega a admissão ao autorizador do plano de dados; o consumo do slot
+permanece após rotacionar a chave. Veja o [guia operacional](docs/pt-br/12-chaves-api-opacas.md#geografia-limites-de-taxa-e-quotas-de-requisições).
+
 A URL usa uma referência aleatória independente de 20 letras: `https://<servidor>/<public_ref>` e `/project/<public_ref>` no Studio. O nome técnico não determina a URL. **Gerar nova URL** troca somente a referência; a URL anterior deixa de funcionar, sem alias ou redirecionamento. A migração de instalações existentes está descrita em [Lifecycle dos projetos](docs/pt-br/architecture/project-lifecycle.md).
 
 > Este é um projeto não oficial e ainda está em desenvolvimento ativo.
@@ -61,7 +67,10 @@ flowchart LR
     HostAgent --> Docker[Docker daemon]
 
     TenantGateway --> KeyAuthorizer[key-authorizer]
+    Traefik -->|admissão de geografia, taxa e quota| KeyAuthorizer
     KeyAuthorizer --> PostgreSQL
+    KeyAuthorizer --> TrafficRedis[Redis de tráfego dedicado]
+    KeyAuthorizer --> GeoIP[GeoIP local]
     TenantGateway --> Auth[GoTrue]
     TenantGateway --> Rest[PostgREST]
     TenantGateway --> StorageDataPlane[Data plane compartilhado do Storage]
@@ -99,6 +108,7 @@ As aplicações acessam as rotas dos projetos pelo Traefik. O gateway do Studio 
 - Edge Functions;
 - Postgres Meta;
 - key-authorizer;
+- Redis de tráfego dedicado e GeoIP local;
 - client-configuration;
 - Projects API;
 - Traefik;

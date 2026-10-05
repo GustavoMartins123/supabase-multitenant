@@ -1,6 +1,137 @@
 {
   "components": {
     "schemas": {
+      "AccessPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_countries": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Countries"
+          },
+          "allowed_networks": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 128,
+            "title": "Allowed Networks",
+            "type": "array"
+          },
+          "geo_mode": {
+            "enum": [
+              "unrestricted",
+              "inherit",
+              "restrict"
+            ],
+            "title": "Geo Mode",
+            "type": "string"
+          },
+          "rate_limit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RateLimit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request_quota": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RequestQuota"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "geo_mode",
+          "allowed_countries",
+          "allowed_networks",
+          "rate_limit",
+          "request_quota"
+        ],
+        "title": "AccessPolicy",
+        "type": "object"
+      },
+      "AccessUsageResponse": {
+        "properties": {
+          "usage": {
+            "items": {
+              "$ref": "#/components/schemas/AccessUsageRow"
+            },
+            "title": "Usage",
+            "type": "array"
+          }
+        },
+        "required": [
+          "usage"
+        ],
+        "title": "AccessUsageResponse",
+        "type": "object"
+      },
+      "AccessUsageRow": {
+        "properties": {
+          "admitted": {
+            "title": "Admitted",
+            "type": "integer"
+          },
+          "period": {
+            "enum": [
+              "day",
+              "month"
+            ],
+            "title": "Period",
+            "type": "string"
+          },
+          "period_end": {
+            "format": "date-time",
+            "title": "Period End",
+            "type": "string"
+          },
+          "period_start": {
+            "format": "date-time",
+            "title": "Period Start",
+            "type": "string"
+          },
+          "scope_id": {
+            "format": "uuid",
+            "title": "Scope Id",
+            "type": "string"
+          },
+          "scope_type": {
+            "enum": [
+              "project",
+              "slot",
+              "admin"
+            ],
+            "title": "Scope Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope_id",
+          "scope_type",
+          "period",
+          "period_start",
+          "period_end",
+          "admitted"
+        ],
+        "title": "AccessUsageRow",
+        "type": "object"
+      },
       "AddMember": {
         "properties": {
           "role": {
@@ -769,6 +900,55 @@
           "current_ref"
         ],
         "title": "ContentIdentityResponse",
+        "type": "object"
+      },
+      "CountryCatalog": {
+        "properties": {
+          "countries": {
+            "items": {
+              "$ref": "#/components/schemas/CountryItem"
+            },
+            "title": "Countries",
+            "type": "array"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "source",
+          "countries"
+        ],
+        "title": "CountryCatalog",
+        "type": "object"
+      },
+      "CountryItem": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "name_en": {
+            "title": "Name En",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "name_en"
+        ],
+        "title": "CountryItem",
         "type": "object"
       },
       "CreateApiKeySlot": {
@@ -2557,6 +2737,66 @@
         "title": "NewProject",
         "type": "object"
       },
+      "PolicyResponse": {
+        "properties": {
+          "policy": {
+            "$ref": "#/components/schemas/AccessPolicy"
+          },
+          "project_policy": {
+            "$ref": "#/components/schemas/AccessPolicy"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "scope": {
+            "enum": [
+              "project",
+              "slot"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "scope_id": {
+            "title": "Scope Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "scope_id",
+          "revision",
+          "policy",
+          "project_policy",
+          "updated_at"
+        ],
+        "title": "PolicyResponse",
+        "type": "object"
+      },
+      "PolicyUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "policy": {
+            "$ref": "#/components/schemas/AccessPolicy"
+          },
+          "revision": {
+            "maximum": 9007199254740991.0,
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "policy"
+        ],
+        "title": "PolicyUpdate",
+        "type": "object"
+      },
       "PrivilegeChangeBody": {
         "additionalProperties": false,
         "properties": {
@@ -3619,6 +3859,29 @@
         "title": "QueuedJobResponse",
         "type": "object"
       },
+      "RateLimit": {
+        "additionalProperties": false,
+        "properties": {
+          "burst": {
+            "maximum": 1000000.0,
+            "minimum": 1.0,
+            "title": "Burst",
+            "type": "integer"
+          },
+          "requests_per_second": {
+            "maximum": 100000.0,
+            "minimum": 1.0,
+            "title": "Requests Per Second",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "requests_per_second",
+          "burst"
+        ],
+        "title": "RateLimit",
+        "type": "object"
+      },
       "ReadRowsBody": {
         "additionalProperties": false,
         "properties": {
@@ -4278,6 +4541,31 @@
           "new_ref"
         ],
         "title": "RenameProjectResponse",
+        "type": "object"
+      },
+      "RequestQuota": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "maximum": 1000000000000.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "period": {
+            "enum": [
+              "day",
+              "month"
+            ],
+            "title": "Period",
+            "type": "string"
+          }
+        },
+        "required": [
+          "period",
+          "limit"
+        ],
+        "title": "RequestQuota",
         "type": "object"
       },
       "RestartProjectResponse": {
@@ -7312,6 +7600,27 @@
         ]
       }
     },
+    "/api/projects/countries": {
+      "get": {
+        "operationId": "countries_api_projects_countries_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CountryCatalog"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Countries",
+        "tags": [
+          "access-policies"
+        ]
+      }
+    },
     "/api/projects/duplicate": {
       "post": {
         "description": "Duplica um projeto existente.\n- Valida acesso do usu\u00e1rio ao projeto original\n- Cria registro no banco\n- Dispara job em background para executar script de duplica\u00e7\u00e3o",
@@ -7961,6 +8270,156 @@
         ]
       }
     },
+    "/api/projects/{project_ref}/access-policy": {
+      "get": {
+        "operationId": "project_policy_api_projects__project_ref__access_policy_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_ref",
+            "required": true,
+            "schema": {
+              "title": "Project Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Project Policy",
+        "tags": [
+          "access-policies"
+        ]
+      },
+      "put": {
+        "operationId": "update_project_policy_api_projects__project_ref__access_policy_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_ref",
+            "required": true,
+            "schema": {
+              "title": "Project Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-step-up-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Step-Up-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Project Policy",
+        "tags": [
+          "access-policies"
+        ]
+      }
+    },
+    "/api/projects/{project_ref}/access-usage": {
+      "get": {
+        "operationId": "usage_api_projects__project_ref__access_usage_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_ref",
+            "required": true,
+            "schema": {
+              "title": "Project Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessUsageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Usage",
+        "tags": [
+          "access-policies"
+        ]
+      }
+    },
     "/api/projects/{project_ref}/api-key-reveals": {
       "get": {
         "operationId": "get_api_key_reveals_api_projects__project_ref__api_key_reveals_get",
@@ -8320,6 +8779,134 @@
         "summary": "Update Api Key Slot Policy",
         "tags": [
           "opaque-api-keys"
+        ]
+      }
+    },
+    "/api/projects/{project_ref}/api-key-slots/{slot_id}/access-policy": {
+      "get": {
+        "operationId": "slot_policy_api_projects__project_ref__api_key_slots__slot_id__access_policy_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_ref",
+            "required": true,
+            "schema": {
+              "title": "Project Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Slot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Slot Policy",
+        "tags": [
+          "access-policies"
+        ]
+      },
+      "put": {
+        "operationId": "update_slot_policy_api_projects__project_ref__api_key_slots__slot_id__access_policy_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_ref",
+            "required": true,
+            "schema": {
+              "title": "Project Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Slot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-step-up-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Step-Up-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Slot Policy",
+        "tags": [
+          "access-policies"
         ]
       }
     },

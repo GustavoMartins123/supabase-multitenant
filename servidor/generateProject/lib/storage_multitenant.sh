@@ -47,7 +47,11 @@ storage_percent_encode() {
 }
 
 storage_global_env_value() {
-  local key="$1" file="$STORAGE_SERVER_ROOT/.env" count value
+  storage_env_value "$STORAGE_SERVER_ROOT/.env" "$1"
+}
+
+storage_env_value() {
+  local file="$1" key="$2" count value
   [[ -f "$file" ]] || {
     storage_fail "arquivo global $file ausente"
     return 1
@@ -865,6 +869,36 @@ process.stdin.on("end", async () => {
 ' "$tenant_id"
 }
 
+storage_gateway_admission_ticket() {
+  local project_ref="$1" probe_uri="$2" probe_method="$3" probe_key="${4:-}"
+  local project_env="$STORAGE_SERVER_ROOT/projects/$project_ref/.env"
+  local public_ref gateway_token admission_secret probe_ip
+  public_ref="$(storage_env_value "$project_env" PROJECT_PUBLIC_REF)" || return 1
+  gateway_token="$(storage_env_value "$project_env" API_GATEWAY_TOKEN_PROJETO)" || return 1
+  admission_secret="$(storage_global_env_value ACCESS_ADMISSION_SECRET)" || return 1
+  probe_ip="$(docker inspect --format '{{(index .NetworkSettings.Networks "supabase-storage-gateways").IPAddress}}' \
+    "$STORAGE_DATA_PLANE_CONTAINER")" || return 1
+  [[ "$probe_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+    storage_fail "origem real do probe Storage ausente"
+    return 1
+  }
+  [[ "$public_ref" =~ ^[a-z]{20}$ && "$gateway_token" =~ ^[a-f0-9]{64}$ \
+    && "$admission_secret" =~ ^[a-f0-9]{64}$ ]] || {
+    storage_fail "identidade de admissao ausente para $project_ref"
+    return 1
+  }
+  docker exec "supabase-nginx-$project_ref" sh -eu -c '
+    response="$(wget -S -O /dev/null -T 10 \
+      --header="X-Admission-Secret: $4" \
+      --header="Content-Type: application/json" \
+      --post-data="{\"project_ref\":\"$1\",\"gateway_token\":\"$3\",\"uri\":\"/$2$5\",\"method\":\"$6\",\"client_ip\":\"$8\",\"api_key\":\"$7\",\"authorization\":\"\"}" \
+      "http://key-authorizer:18010/v1/admit" 2>&1)" || { echo "admissao do probe falhou" >&2; exit 1; }
+    ticket="$(printf "%s" "$response" | sed -n "s/^.*X-Gateway-Admission: //Ip" | tr -d "\r" | head -n 1)"
+    printf "%s" "$ticket" | grep -Eq "^[A-Za-z0-9_-]{43}$" || { echo "admissao do probe falhou" >&2; exit 1; }
+    printf "%s" "$ticket"' \
+    sh "$project_ref" "$public_ref" "$gateway_token" "$admission_secret" "$probe_uri" "$probe_method" "$probe_key" "$probe_ip"
+}
+
 storage_assert_project_gateway() {
   local tenant_id="$1" project_ref="$2" service_key="$3"
   storage_validate_tenant_id "$tenant_id" || return 1
@@ -875,11 +909,22 @@ storage_assert_project_gateway() {
   }
   storage_assert_data_plane_container_contract || return 1
   storage_assert_project_gateway_container_contract "$project_ref" || return 1
-  printf '%s\n' "$service_key" \
+  local public_ref admission_ticket
+  public_ref="$(storage_env_value "$STORAGE_SERVER_ROOT/projects/$project_ref/.env" PROJECT_PUBLIC_REF)" || return 1
+  [[ "$public_ref" =~ ^[a-z]{20}$ ]] || {
+    storage_fail "PROJECT_PUBLIC_REF ausente para $project_ref"
+    return 1
+  }
+  admission_ticket="$(storage_gateway_admission_ticket "$project_ref" /storage/v1/bucket GET)" || return 1
+  printf '%s\n' "$service_key" "$admission_ticket" \
     | docker exec -i "$STORAGE_DATA_PLANE_CONTAINER" sh -eu -c '
 IFS= read -r key
+IFS= read -r ticket
 body="$(wget -qO- -T 10 \
   --header="Authorization: Bearer $key" \
+  --header="X-Gateway-Admission: $ticket" \
+  --header="X-Admission-Uri: /$2/storage/v1/bucket" \
+  --header="X-Admission-Method: GET" \
   --header="X-Forwarded-Host: 00000000-0000-0000-0000-000000000000.storage.internal" \
   --header="X-Request-Id: gateway-probe-$$" \
   "http://supabase-nginx-$1:8080/storage/v1/bucket")" || {
@@ -890,7 +935,7 @@ case "$body" in
   \[*\]) ;;
   *) echo "Storage gateway retornou body invalido" >&2; exit 34 ;;
 esac
-' sh "$project_ref"
+' sh "$project_ref" "$public_ref"
 }
 
 storage_vector_request() {

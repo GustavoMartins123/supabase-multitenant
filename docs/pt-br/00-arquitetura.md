@@ -27,8 +27,11 @@ flowchart TB
     Traefik -->|/public_ref/...| ProjectNginx[Nginx do projeto]
 
     ProjectsAPI --> PostgreSQL[(PostgreSQL)]
-    ProjectNginx --> KeyAuthorizer[key-authorizer]
+    Traefik -->|metadados de admissão| KeyAuthorizer[key-authorizer]
+    ProjectNginx -->|resgate do ticket e revalidação| KeyAuthorizer
     KeyAuthorizer --> PostgreSQL
+    KeyAuthorizer --> TrafficRedis[Redis de tráfego]
+    KeyAuthorizer --> GeoIP[GeoIP local]
 
     ProjectsAPI -->|intenções HMAC em host_agent_commands| PostgreSQL
     HostAgent[host-agent\nsystemd no host] -->|lease, heartbeat e resultado| PostgreSQL
@@ -83,7 +86,6 @@ Os componentes principais são:
 - Flutter selector;
 - Nginx/OpenResty com Lua para o Studio;
 - Projects API em FastAPI;
-- `key-authorizer` fail-closed para as API keys dos tenants;
 - host-agent no servidor principal;
 - database `postgres` como banco do control plane.
 
@@ -311,23 +313,68 @@ JWTs `anon` e `service_role` permanecem no servidor. A expiração deles e a exp
 
 Detalhes: [Operação de chaves de API opacas](12-chaves-api-opacas.md).
 
+### Admissão por projeto e consumidor
+
+O Flutter administra as regras pelo gateway autenticado do Studio e pela
+Projects API privada. A API mantém uma política por UUID do projeto e outra
+por UUID do slot no PostgreSQL, verifica a permissão de administrador do projeto
+e grava revisão e auditoria na mesma transação. Alterações do projeto ou de slots
+secret também exigem step-up de uso único, vinculado à sessão, ao escopo e à
+revisão. Flutter e Lua não avaliam as políticas de acesso das aplicações.
+
+No data plane, o middleware `gatewayadmission` do Traefik envia os metadados da
+requisição ao `key-authorizer` antes de encaminhar o body. O autorizador verifica
+a identidade do gateway, a chave opaca efetiva e seu escopo de serviços, e lê as
+políticas atuais do projeto e do slot. O GeoIP local resolve o país; o Redis de
+tráfego consome token buckets atomicamente; o PostgreSQL reserva o consumo
+diário e mensal. A admissão emite um ticket curto, de uso único, vinculado ao
+projeto, à versão da chave, ao método, à URI e às revisões. O Nginx do projeto
+resgata o ticket e revalida a identidade antes de traduzir a role para o JWT
+interno. Ticket e segredo de admissão não chegam ao upstream Supabase. A porta
+da API administrativa não participa desse caminho.
+
+A geografia do projeto é explicitamente irrestrita ou restrita. O slot herda
+essa regra e pode acrescentar uma restrição: as duas precisam permitir a origem.
+Regras restritas combinam países selecionados e exceções CIDR explícitas;
+seleção vazia permite somente as redes listadas. Redes privadas não recebem
+exceção automática. Somente os CIDRs configurados para proxies podem fornecer
+o endereço encaminhado do cliente; entrypoints e middleware do Traefik usam a
+mesma lista de confiança.
+
+Taxa e quota usam UUIDs estáveis de projeto e slot, não `key_id`, nomes, URLs ou
+revisões. Rotação de chave, edição de política, rename e geração de URL não
+reabastecem o consumo. Quotas contam requisições admitidas, inclusive quando a
+operação no upstream falha depois, e não medem bytes, custo SQL ou mensagens
+WebSocket. Os períodos são dia e mês civil UTC. O Redis persiste token buckets
+com AOF e `noeviction`; o PostgreSQL mantém quotas e o epoch do tráfego. Decisões
+de autorização não são cacheadas. A credencial privada do Studio utiliza um
+orçamento administrativo separado e limitado, condicionado às origens explícitas
+do Studio. O Redis de sessões permanece independente.
+
+A descoberta verifica a geografia do projeto e do slot publishable, mas usa
+taxa própria por origem, sem gastar quota da aplicação. Callbacks Auth e
+capabilities Storage sem chave usam as regras do projeto; uma URL assinada de
+Storage não identifica sozinha o slot emissor. No Realtime, a admissão verifica
+novos handshakes, não conexões já abertas.
+
 ### Configuração pública por aplicativo
 
 `GET /config/{application_ref}` retorna exatamente `supabase_url`,
 `publishable_key`, `key_id` e `expires_at` anulável. O serviço usa
 `client_configuration_reader`, que só lê a view com security barrier
 `public_client_configurations`, não usuários, segredos, reveals cifrados ou
-tabelas base. Não recebe master key ou HMAC administrativo e compartilha uma
-rede Docker interna isolada somente com Traefik e PostgreSQL.
+tabelas base. Não recebe master key ou HMAC administrativo e utiliza redes
+Docker internas isoladas com Traefik, PostgreSQL e o serviço de admissão.
 
 O control plane grava material publishable na mesma transação de emissão da
 chave. A view seleciona a mesma versão efetiva do key-authorizer: não expõe
 pending futuro ou sem confirmação, e uma versão confirmada com ativação vencida
 e chave expirada nunca restaura a predecessora. Referências desconhecidas
 retornam 404, slots sem chave efetiva válida retornam 410 e material não
-verificável ou falha de SQL retorna 503. Respostas usam `no-store`, permitem GET
-entre origens sem cookies e têm limite de requisições no Traefik. Não há token
-de configuração ou consulta de slot padrão.
+verificável ou falha de SQL retorna 503. A admissão rejeita geografia com 403 e
+taxa esgotada com 429 e `Retry-After`. Respostas usam `no-store` e permitem GET
+entre origens sem cookies. Não há token de configuração ou consulta de slot
+padrão.
 
 Aplicações guardam a URL estável de descoberta do slot, consultam antes de criar
 o cliente Supabase e revalidam ao voltar ao primeiro plano. `key_id` diferente
@@ -362,7 +409,9 @@ Usuário
 ```text
 Aplicação externa (sem sessão do Studio)
   -> Traefik público GET /config/<application_ref>
+  -> key-authorizer: geografia e taxa de descoberta
   -> client-configuration :18011 (interno)
+  -> resgate do ticket de admissão
   -> public_client_configurations (somente leitura)
   -> supabase_url, publishable_key, key_id, expires_at
 ```
@@ -372,8 +421,9 @@ Aplicação externa (sem sessão do Studio)
 ```text
 Aplicação
   -> Traefik público /<public_ref>/... usando publishable_key
+  -> key-authorizer: identidade, geografia, taxa e quota
   -> Nginx do projeto
-  -> key-authorizer
+  -> key-authorizer: resgate do ticket e revalidação
   -> tradução para JWT interno ou preservação da sessão
   -> Auth, REST, Storage, Functions ou Realtime
 ```
@@ -417,17 +467,6 @@ O host-agent continua fora dos containers, como serviço systemd, mesmo na topol
 A máquina local executa Studio, OpenResty e Authelia. O servidor principal executa o data plane, a Projects API e o host-agent.
 
 A topologia não deve ser representada por branches permanentes diferentes. A distinção fica na configuração dos endereços, certificados e rotas.
-
-## Limitações atuais
-
-- serviços globais representam pontos compartilhados de falha e ampliam o blast radius operacional;
-- o `key-authorizer` ainda faz lookup PostgreSQL por requisição e não possui cache distribuído;
-- não existe escalabilidade horizontal completa do control plane;
-- Storage distribuído não faz parte da configuração padrão;
-- isolamento lógico por tenant não elimina risco de noisy-neighbor em recursos globais como pools, disco, I/O e CPU;
-- updates do Supabase podem exigir adaptação dos patches de Realtime e dos rewrites/compat layers do Studio;
-- a compatibilidade precisa ser validada com smoke tests e projetos reais;
-- backup, restore e disaster recovery dependem da operação do ambiente.
 
 ## Documentos relacionados
 

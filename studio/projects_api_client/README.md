@@ -41,15 +41,13 @@ Please follow the [installation procedure](#installation--usage) and then run th
 import 'package:projects_api_client/api.dart';
 
 
-final api_instance = CollaborationApi();
-final projectRef = projectRef_example; // String |
-final projectTagAssign = ProjectTagAssign(); // ProjectTagAssign |
+final api_instance = AccessPoliciesApi();
 
 try {
-    final result = api_instance.assignProjectTagApiProjectsProjectRefTagsPost(projectRef, projectTagAssign);
+    final result = api_instance.countriesApiProjectsCountriesGet();
     print(result);
 } catch (e) {
-    print('Exception when calling CollaborationApi->assignProjectTagApiProjectsProjectRefTagsPost: $e\n');
+    print('Exception when calling AccessPoliciesApi->countriesApiProjectsCountriesGet: $e\n');
 }
 
 ```
@@ -60,6 +58,20 @@ All URIs are relative to *http://localhost*
 
 Class | Method | HTTP request | Description
 ------------ | ------------- | ------------- | -------------
+*AccessPoliciesApi* | [**countriesApiProjectsCountriesGet**](doc//AccessPoliciesApi.md#countriesapiprojectscountriesget) | **GET** /api/projects/countries | Countries
+*AccessPoliciesApi* | [**projectPolicyApiProjectsProjectRefAccessPolicyGet**](doc//AccessPoliciesApi.md#projectpolicyapiprojectsprojectrefaccesspolicyget) | **GET** /api/projects/{project_ref}/access-policy | Project Policy
+*AccessPoliciesApi* | [**slotPolicyApiProjectsProjectRefApiKeySlotsSlotIdAccessPolicyGet**](doc//AccessPoliciesApi.md#slotpolicyapiprojectsprojectrefapikeyslotsslotidaccesspolicyget) | **GET** /api/projects/{project_ref}/api-key-slots/{slot_id}/access-policy | Slot Policy
+*AccessPoliciesApi* | [**updateProjectPolicyApiProjectsProjectRefAccessPolicyPut**](doc//AccessPoliciesApi.md#updateprojectpolicyapiprojectsprojectrefaccesspolicyput) | **PUT** /api/projects/{project_ref}/access-policy | Update Project Policy
+*AccessPoliciesApi* | [**updateSlotPolicyApiProjectsProjectRefApiKeySlotsSlotIdAccessPolicyPut**](doc//AccessPoliciesApi.md#updateslotpolicyapiprojectsprojectrefapikeyslotsslotidaccesspolicyput) | **PUT** /api/projects/{project_ref}/api-key-slots/{slot_id}/access-policy | Update Slot Policy
+*AccessPoliciesApi* | [**usageApiProjectsProjectRefAccessUsageGet**](doc//AccessPoliciesApi.md#usageapiprojectsprojectrefaccessusageget) | **GET** /api/projects/{project_ref}/access-usage | Usage
+*AssistantApi* | [**assistantContextApiProjectsRefAssistantContextGet**](doc//AssistantApi.md#assistantcontextapiprojectsrefassistantcontextget) | **GET** /api/projects/{ref}/assistant/context | Assistant Context
+*AssistantApi* | [**assistantExecuteApiProjectsRefAssistantExecutePost**](doc//AssistantApi.md#assistantexecuteapiprojectsrefassistantexecutepost) | **POST** /api/projects/{ref}/assistant/execute | Assistant Execute
+*AssistantApi* | [**assistantFunctionsApiProjectsRefAssistantFunctionsGet**](doc//AssistantApi.md#assistantfunctionsapiprojectsrefassistantfunctionsget) | **GET** /api/projects/{ref}/assistant/functions | Assistant Functions
+*AssistantApi* | [**assistantPrivilegesApiProjectsRefAssistantPrivilegesPost**](doc//AssistantApi.md#assistantprivilegesapiprojectsrefassistantprivilegespost) | **POST** /api/projects/{ref}/assistant/privileges | Assistant Privileges
+*AssistantApi* | [**assistantRowsApiProjectsRefAssistantRowsPost**](doc//AssistantApi.md#assistantrowsapiprojectsrefassistantrowspost) | **POST** /api/projects/{ref}/assistant/rows | Assistant Rows
+*AssistantApi* | [**assistantSchemaApiProjectsRefAssistantSchemaGet**](doc//AssistantApi.md#assistantschemaapiprojectsrefassistantschemaget) | **GET** /api/projects/{ref}/assistant/schema | Assistant Schema
+*AssistantApi* | [**assistantSecurityApiProjectsRefAssistantSecurityPost**](doc//AssistantApi.md#assistantsecurityapiprojectsrefassistantsecuritypost) | **POST** /api/projects/{ref}/assistant/security | Assistant Security
+*AssistantApi* | [**assistantSqlApiProjectsRefAssistantSqlPost**](doc//AssistantApi.md#assistantsqlapiprojectsrefassistantsqlpost) | **POST** /api/projects/{ref}/assistant/sql | Assistant Sql
 *CollaborationApi* | [**assignProjectTagApiProjectsProjectRefTagsPost**](doc//CollaborationApi.md#assignprojecttagapiprojectsprojectreftagspost) | **POST** /api/projects/{project_ref}/tags | Assign Project Tag
 *CollaborationApi* | [**createProjectHintApiProjectsProjectRefHintsPost**](doc//CollaborationApi.md#createprojecthintapiprojectsprojectrefhintspost) | **POST** /api/projects/{project_ref}/hints | Create Project Hint
 *CollaborationApi* | [**createProjectNoteApiProjectsProjectRefNotesPost**](doc//CollaborationApi.md#createprojectnoteapiprojectsprojectrefnotespost) | **POST** /api/projects/{project_ref}/notes | Create Project Note
@@ -143,10 +155,23 @@ Class | Method | HTTP request | Description
 *RestorePointsApi* | [**deleteProjectRestorePointApiProjectsProjectRefRestorePointsPointIdDelete**](doc//RestorePointsApi.md#deleteprojectrestorepointapiprojectsprojectrefrestorepointspointiddelete) | **DELETE** /api/projects/{project_ref}/restore-points/{point_id} | Delete Project Restore Point
 *RestorePointsApi* | [**listProjectRestorePointsApiProjectsProjectRefRestorePointsGet**](doc//RestorePointsApi.md#listprojectrestorepointsapiprojectsprojectrefrestorepointsget) | **GET** /api/projects/{project_ref}/restore-points | List Project Restore Points
 *RestorePointsApi* | [**restoreProjectRestorePointApiProjectsProjectRefRestorePointsPointIdRestorePost**](doc//RestorePointsApi.md#restoreprojectrestorepointapiprojectsprojectrefrestorepointspointidrestorepost) | **POST** /api/projects/{project_ref}/restore-points/{point_id}/restore | Restore Project Restore Point
+*StudioContentApi* | [**contentCountApiProjectsRefContentCountGet**](doc//StudioContentApi.md#contentcountapiprojectsrefcontentcountget) | **GET** /api/projects/{ref}/content/count | Content Count
+*StudioContentApi* | [**contentDeleteApiProjectsRefContentDelete**](doc//StudioContentApi.md#contentdeleteapiprojectsrefcontentdelete) | **DELETE** /api/projects/{ref}/content | Content Delete
+*StudioContentApi* | [**contentItemApiProjectsRefContentItemIdGet**](doc//StudioContentApi.md#contentitemapiprojectsrefcontentitemidget) | **GET** /api/projects/{ref}/content/item/{id} | Content Item
+*StudioContentApi* | [**contentListApiProjectsRefContentGet**](doc//StudioContentApi.md#contentlistapiprojectsrefcontentget) | **GET** /api/projects/{ref}/content | Content List
+*StudioContentApi* | [**contentSaveApiProjectsRefContentPut**](doc//StudioContentApi.md#contentsaveapiprojectsrefcontentput) | **PUT** /api/projects/{ref}/content | Content Save
+*StudioContentApi* | [**folderCreateApiProjectsRefContentFoldersPost**](doc//StudioContentApi.md#foldercreateapiprojectsrefcontentfolderspost) | **POST** /api/projects/{ref}/content/folders | Folder Create
+*StudioContentApi* | [**folderItemApiProjectsRefContentFoldersIdGet**](doc//StudioContentApi.md#folderitemapiprojectsrefcontentfoldersidget) | **GET** /api/projects/{ref}/content/folders/{id} | Folder Item
+*StudioContentApi* | [**folderUpdateApiProjectsRefContentFoldersIdPatch**](doc//StudioContentApi.md#folderupdateapiprojectsrefcontentfoldersidpatch) | **PATCH** /api/projects/{ref}/content/folders/{id} | Folder Update
+*StudioContentApi* | [**foldersDeleteApiProjectsRefContentFoldersDelete**](doc//StudioContentApi.md#foldersdeleteapiprojectsrefcontentfoldersdelete) | **DELETE** /api/projects/{ref}/content/folders | Folders Delete
+*StudioContentApi* | [**foldersListApiProjectsRefContentFoldersGet**](doc//StudioContentApi.md#folderslistapiprojectsrefcontentfoldersget) | **GET** /api/projects/{ref}/content/folders | Folders List
 
 
 ## Documentation For Models
 
+ - [AccessPolicy](doc//AccessPolicy.md)
+ - [AccessUsageResponse](doc//AccessUsageResponse.md)
+ - [AccessUsageRow](doc//AccessUsageRow.md)
  - [AddMember](doc//AddMember.md)
  - [AddMemberResponse](doc//AddMemberResponse.md)
  - [AllUsersMemberItem](doc//AllUsersMemberItem.md)
@@ -167,6 +192,8 @@ Class | Method | HTTP request | Description
  - [ContainerInfoItem](doc//ContainerInfoItem.md)
  - [ContainerLogsResponse](doc//ContainerLogsResponse.md)
  - [ContentIdentityResponse](doc//ContentIdentityResponse.md)
+ - [CountryCatalog](doc//CountryCatalog.md)
+ - [CountryItem](doc//CountryItem.md)
  - [CreateApiKeySlot](doc//CreateApiKeySlot.md)
  - [CreateProjectHintResponse](doc//CreateProjectHintResponse.md)
  - [CreateProjectNoteResponse](doc//CreateProjectNoteResponse.md)
@@ -178,6 +205,8 @@ Class | Method | HTTP request | Description
  - [DirectoryUser](doc//DirectoryUser.md)
  - [DuplicateProject](doc//DuplicateProject.md)
  - [EncKeyResponse](doc//EncKeyResponse.md)
+ - [ExecuteSqlBody](doc//ExecuteSqlBody.md)
+ - [FolderBody](doc//FolderBody.md)
  - [GetProjectCollaborationResponse](doc//GetProjectCollaborationResponse.md)
  - [GetProjectSettingsResponse](doc//GetProjectSettingsResponse.md)
  - [HTTPValidationError](doc//HTTPValidationError.md)
@@ -195,10 +224,16 @@ Class | Method | HTTP request | Description
  - [MigrationPrepareResponse](doc//MigrationPrepareResponse.md)
  - [MigrationStatusResponse](doc//MigrationStatusResponse.md)
  - [NewProject](doc//NewProject.md)
+ - [OwnerId](doc//OwnerId.md)
+ - [PolicyResponse](doc//PolicyResponse.md)
+ - [PolicyUpdate](doc//PolicyUpdate.md)
+ - [PrivilegeChangeBody](doc//PrivilegeChangeBody.md)
+ - [PrivilegeExecution](doc//PrivilegeExecution.md)
  - [ProjectAIFunctionItem](doc//ProjectAIFunctionItem.md)
  - [ProjectDisplayNameUpdate](doc//ProjectDisplayNameUpdate.md)
  - [ProjectHintCreate](doc//ProjectHintCreate.md)
  - [ProjectHintStatusUpdate](doc//ProjectHintStatusUpdate.md)
+ - [ProjectId](doc//ProjectId.md)
  - [ProjectInfoItem](doc//ProjectInfoItem.md)
  - [ProjectListItem](doc//ProjectListItem.md)
  - [ProjectNoteCreate](doc//ProjectNoteCreate.md)
@@ -213,12 +248,15 @@ Class | Method | HTTP request | Description
  - [ProjectUserTelemetryResponse](doc//ProjectUserTelemetryResponse.md)
  - [ProjectsInfoResponse](doc//ProjectsInfoResponse.md)
  - [QueuedJobResponse](doc//QueuedJobResponse.md)
+ - [RateLimit](doc//RateLimit.md)
+ - [ReadRowsBody](doc//ReadRowsBody.md)
  - [RecreateProjectServicesResponse](doc//RecreateProjectServicesResponse.md)
  - [RecreateServices](doc//RecreateServices.md)
  - [RemoveMemberResponse](doc//RemoveMemberResponse.md)
  - [RenameHistoryEntry](doc//RenameHistoryEntry.md)
  - [RenameHistoryEvent](doc//RenameHistoryEvent.md)
  - [RenameProjectResponse](doc//RenameProjectResponse.md)
+ - [RequestQuota](doc//RequestQuota.md)
  - [RestartProjectResponse](doc//RestartProjectResponse.md)
  - [RestorePointCreate](doc//RestorePointCreate.md)
  - [RestorePointItem](doc//RestorePointItem.md)
@@ -229,6 +267,7 @@ Class | Method | HTTP request | Description
  - [RevealListResponse](doc//RevealListResponse.md)
  - [RotateApiKeySlot](doc//RotateApiKeySlot.md)
  - [RotateProjectKeyResponse](doc//RotateProjectKeyResponse.md)
+ - [SecurityBody](doc//SecurityBody.md)
  - [SlotActivationResponse](doc//SlotActivationResponse.md)
  - [SlotCancelResponse](doc//SlotCancelResponse.md)
  - [SlotConfirmResponse](doc//SlotConfirmResponse.md)
@@ -237,6 +276,9 @@ Class | Method | HTTP request | Description
  - [SlotListResponse](doc//SlotListResponse.md)
  - [SlotPolicyUpdateResponse](doc//SlotPolicyUpdateResponse.md)
  - [SlotRevokeResponse](doc//SlotRevokeResponse.md)
+ - [SnippetBody](doc//SnippetBody.md)
+ - [SqlContent](doc//SqlContent.md)
+ - [SqlExecution](doc//SqlExecution.md)
  - [StartProjectResponse](doc//StartProjectResponse.md)
  - [StopProjectResponse](doc//StopProjectResponse.md)
  - [StudioContextResponse](doc//StudioContextResponse.md)

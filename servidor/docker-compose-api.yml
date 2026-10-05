@@ -7,6 +7,28 @@ x-vector-logging: &vector-logging
     fluentd-sub-second-precision: "true"
 
 services:
+  traffic-redis:
+    container_name: traffic-redis
+    image: redis:8.2.2-alpine
+    restart: unless-stopped
+    networks: [traffic-admission]
+    environment:
+      ACCESS_RATE_REDIS_PASSWORD: ${ACCESS_RATE_REDIS_PASSWORD:?defina ACCESS_RATE_REDIS_PASSWORD}
+    entrypoint: ["/bin/sh", "/start-traffic.sh"]
+    volumes:
+      - ./traffic-redis/start.sh:/start-traffic.sh:ro
+      - traffic-rate-data:/data
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 384m
+    memswap_limit: 384m
+    cpus: "0.50"
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$ACCESS_RATE_REDIS_PASSWORD redis-cli ping | grep -qx PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
   control-plane-migrations:
     container_name: control-plane-migrations
     build:
@@ -41,7 +63,7 @@ services:
       dockerfile: ./client-configuration/Dockerfile
     restart: unless-stopped
     logging: *vector-logging
-    networks: [client-configuration-data]
+    networks: [client-configuration-data, traffic-admission]
     expose: ["18011"]
     depends_on:
       control-plane-migrations:
@@ -59,6 +81,7 @@ services:
       DB_DSN: postgres://client_configuration_reader:${CLIENT_CONFIGURATION_DB_PASSWORD:?defina CLIENT_CONFIGURATION_DB_PASSWORD}@supabase-db:${POSTGRES_PORT}/${POSTGRES_DB}
       SERVER_URL: ${SERVER_URL:?defina SERVER_URL}
       SERVER_PROTO: ${SERVER_PROTO:?defina SERVER_PROTO}
+      ACCESS_ADMISSION_SECRET: ${ACCESS_ADMISSION_SECRET:?defina ACCESS_ADMISSION_SECRET}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18011/healthz', timeout=2)"]
       interval: 15s
@@ -73,9 +96,11 @@ services:
       dockerfile: ./key-authorizer/Dockerfile
     restart: unless-stopped
     logging: *vector-logging
-    networks: [rede-supabase]
+    networks: [rede-supabase, traffic-admission]
     expose: ["18010"]
     depends_on:
+      traffic-redis:
+        condition: service_healthy
       control-plane-migrations:
         condition: service_completed_successfully
     read_only: true
@@ -87,6 +112,9 @@ services:
       - ALL
     environment:
       DB_DSN: postgres://key_authorizer:${KEY_AUTHORIZER_DB_PASSWORD:?defina KEY_AUTHORIZER_DB_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      ACCESS_RATE_REDIS_PASSWORD: ${ACCESS_RATE_REDIS_PASSWORD:?defina ACCESS_RATE_REDIS_PASSWORD}
+      ACCESS_ADMISSION_SECRET: ${ACCESS_ADMISSION_SECRET:?defina ACCESS_ADMISSION_SECRET}
+      ACCESS_ADMIN_CIDRS: ${ACCESS_ADMIN_CIDRS:?defina ACCESS_ADMIN_CIDRS}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18010/healthz', timeout=2)"]
       interval: 15s
@@ -206,6 +234,8 @@ services:
 
 
 networks:
+  traffic-admission:
+    internal: true
   client-configuration-data:
     external: true
   rede-supabase:
@@ -213,3 +243,6 @@ networks:
   analytics-internal:
     name: supabase-analytics-internal
     external: true
+
+volumes:
+  traffic-rate-data:

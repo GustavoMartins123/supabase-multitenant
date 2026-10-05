@@ -1,70 +1,40 @@
 #!/bin/bash
+set -Eeuo pipefail
 
 MMDB_PATH="__MMDB_PATH__"
 BACKUP_DIR="__BACKUP_DIR__"
-BASE_URL="https://github.com/P3TERX/GeoLite.mmdb/releases/download"
-FILE_NAME="GeoLite2-Country.mmdb"
 GITHUB_API="https://api.github.com/repos/P3TERX/GeoLite.mmdb/releases/latest"
 
-mkdir -p "$BACKUP_DIR"
+[[ "$MMDB_PATH" = /* && "$BACKUP_DIR" = /* ]] || { echo "Caminhos absolutos devem ser gerados pelo setup.sh." >&2; exit 1; }
+TRAEFIK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MMDB_DIR="$(dirname "$MMDB_PATH")"
+mkdir -p "$MMDB_DIR" "$BACKUP_DIR"
+exec 9>"$MMDB_DIR/.update.lock"
+flock -n 9 || { echo "Atualizacao GeoIP ja esta em execucao." >&2; exit 1; }
+TEMPORARY="$(mktemp "$MMDB_DIR/.update.XXXXXXXX")"
+trap 'rm -f -- "$TEMPORARY"' EXIT
 
-DOWNLOADED=false
-DOWNLOADED_URL=""
+RELEASE="$(curl --fail --silent --show-error --location --max-time 30 "$GITHUB_API")"
+URL="$(printf '%s' "$RELEASE" | python3 -c '
+import json, sys
+assets = [a["browser_download_url"] for a in json.load(sys.stdin)["assets"] if a["name"] == "GeoLite2-Country.mmdb"]
+if len(assets) != 1 or not assets[0].startswith("https://github.com/P3TERX/GeoLite.mmdb/releases/download/"):
+    raise SystemExit("Release GeoIP sem asset canonico")
+print(assets[0])')"
+curl --fail --silent --show-error --location --max-time 120 --output "$TEMPORARY" "$URL"
+docker compose --env-file "$TRAEFIK_DIR/../.env" -f "$TRAEFIK_DIR/docker-compose.yml" \
+    run --rm --no-deps --no-build --entrypoint python geoip-api -c '
+import maxminddb, sys
+with maxminddb.open_database(sys.argv[1]) as reader:
+    if reader.metadata().database_type not in {"GeoLite2-Country", "GeoIP2-Country"}:
+        raise SystemExit("Database GeoIP invalido")
+    if not reader.get("8.8.8.8"):
+        raise SystemExit("Database GeoIP sem registro de validacao")
+' "/data/$(basename "$TEMPORARY")"
 
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
-}
-
-log "Consultando API do GitHub para obter a última release..."
-LATEST_RELEASE=$(curl -sL "$GITHUB_API")
-
-if [[ -n "$LATEST_RELEASE" ]] && echo "$LATEST_RELEASE" | grep -q "tag_name"; then
-    RELEASE_DATE=$(echo "$LATEST_RELEASE" | grep -oP '"tag_name":\s*"\K[^"]+')
-    log "Última release encontrada: $RELEASE_DATE"
-    
-    URL="${BASE_URL}/${RELEASE_DATE}/${FILE_NAME}"
-    log "Tentando download: $URL"
-    
-    HTTP_CODE=$(curl -sL -o /tmp/geolite_tmp.mmdb -w "%{http_code}" "$URL")
-    
-    if [[ "$HTTP_CODE" == "200" ]]; then
-        if file /tmp/geolite_tmp.mmdb | grep -q "data\|MaxMind\|mmdb"; then
-            DOWNLOADED=true
-            DOWNLOADED_URL="$URL"
-            log "Download OK: $RELEASE_DATE (HTTP $HTTP_CODE)"
-        else
-            log "Arquivo inválido, tentando método alternativo..."
-            rm -f /tmp/geolite_tmp.mmdb
-        fi
-    else
-        log "Falha no download (HTTP $HTTP_CODE), tentando método alternativo..."
-        rm -f /tmp/geolite_tmp.mmdb
-    fi
-else
-    log "Não foi possível consultar a API do GitHub, tentando método alternativo..."
+if [[ -f "$MMDB_PATH" ]]; then
+    cp -- "$MMDB_PATH" "$BACKUP_DIR/GeoLite2-Country_$(date '+%Y%m%d_%H%M%S').mmdb"
 fi
-
-
-if [[ "$DOWNLOADED" == true ]]; then
-    MMDB_DIR=$(dirname "$MMDB_PATH")
-    if [[ ! -d "$MMDB_DIR" ]]; then
-        mkdir -p "$MMDB_DIR"
-        log "Diretório criado: $MMDB_DIR"
-    fi
-
-    if [[ -f "$MMDB_PATH" ]]; then
-        BACKUP_NAME="GeoLite2-Country_$(date '+%Y%m%d_%H%M%S').mmdb"
-        cp "$MMDB_PATH" "$BACKUP_DIR/$BACKUP_NAME"
-        log "Backup salvo: $BACKUP_DIR/$BACKUP_NAME"
-
-        find "$BACKUP_DIR" -name "*.mmdb" -mtime +60 -delete
-        log "Backups antigos (+60d) removidos"
-    fi
-
-    mv /tmp/geolite_tmp.mmdb "$MMDB_PATH"
-    log "Arquivo atualizado com sucesso! Fonte: $DOWNLOADED_URL"
-else
-    log "Nenhuma versão nova encontrada após $MAX_RETRIES tentativas. Mantendo arquivo atual."
-    rm -f /tmp/geolite_tmp.mmdb
-    exit 1
-fi
+chmod 644 "$TEMPORARY"
+mv -f -- "$TEMPORARY" "$MMDB_PATH"
+echo "GeoIP atualizado e validado."

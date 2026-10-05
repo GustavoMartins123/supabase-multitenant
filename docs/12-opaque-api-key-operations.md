@@ -45,22 +45,21 @@ the Internet.
 
 ## Schema update
 
-The Projects API applies the
-`0003_opaque_api_key_optional_expiration.sql` migration when it detects
-the previous schema. It makes `rotation_interval_days` and
-`project_api_keys.expires_at` nullable, replaces the constraints, and adapts
-the expiration index. It does not run an `UPDATE` on keys: all existing rows
-preserve their `expires_at`.
+Versioned migrations are applied by the privileged, ephemeral
+`control-plane-migrations` service before the Projects API and authorizer start.
+The request-serving API only checks the migration ledger; it never changes the
+schema at startup. See [Control-plane migrations](architecture/control-plane-migrations.md).
 
-After deployment, confirm that the migration finished before allowing policy
-PATCH requests. A migration failure prevents canonical Projects API startup;
-do not change constraints manually to bypass the error.
+`0003_opaque_api_key_optional_expiration.sql` makes `rotation_interval_days` and
+`project_api_keys.expires_at` nullable without changing existing expiration
+values. `0002_step_up_grants.sql` records actor, hashed session, action, target and
+timestamps, never passwords, bearer tokens or API-key plaintext.
+`0020_access_policies.sql` provisions explicit project and slot policies and
+durable usage ledgers.
 
-The deployment also applies `0002_step_up_grants.sql`, which creates only
-the reauthentication-grant consumption ledger. It records actor, hashed
-session, action, target, and timestamps; it never stores a password, bearer
-token, or API-key plaintext. A failure of this migration prevents Projects API
-startup.
+Confirm successful migration before serving management or application requests.
+A migration failure blocks canonical startup; do not change constraints manually
+to bypass the error.
 
 ## New or duplicated project
 
@@ -197,6 +196,50 @@ Deploy the API and discovery images, recreate the Traefik configuration watcher,
 and update Flutter so it copies the public Supabase origin rather than Studio's.
 No public discovery credential, master key or administrative HMAC is sent to
 the discovery container. Validate rotation, revocation, SQL permissions and CORS.
+
+## Geography, rate limits and request quotas
+
+Project administrators configure the project rule under project settings,
+**Acesso**, and the consumer rule using **Acesso e limites** on the slot card.
+Project rules and secret-slot changes require password confirmation. Policies
+use optimistic revisions: reload after a concurrent edit rather than overwriting
+another administrator's change.
+
+Select unrestricted geography for the project, inherited geography for a slot,
+or restrict countries and explicitly allowed CIDRs. Project and slot rules are
+cumulative. An empty selection denies countries; selecting every country still
+denies unknown origins. LAN access is not implicitly allowed. The country list
+supports search and selection without discarding selections hidden by the filter.
+
+Each scope can set requests per second with a burst capacity and a daily or
+monthly request ceiling. Windows use UTC. **Consultar consumo atual** fetches
+usage manually, without polling. Limits belong to the stable slot, so rotating
+`key_id` does not reset them. Both day and month usage are recorded even while
+ceilings are disabled; enabling or changing the period uses that existing usage.
+An admitted request counts even if an upstream operation later fails. An
+exhausted rate or quota returns HTTP 429 with `Retry-After`.
+
+New projects start with explicit unrestricted project geography and inherited
+slot geography, with rate and quota limits disabled. Duplication copies project
+rules and rules of matching bootstrap slots, but starts independent counters;
+it does not clone every consuming application. RLS and database grants remain
+independent of HTTP admission.
+
+Setup generates private `ACCESS_ADMISSION_SECRET`,
+`ACCESS_RATE_REDIS_PASSWORD`, `ACCESS_ADMIN_CIDRS` and
+`traefik/traefik.runtime.yml`. Review the explicit Studio origins before
+deployment. `ACCESS_TRUSTED_PROXY_CIDRS` is empty for direct clients; configure
+only actual trusted proxy networks and regenerate the runtime file through
+setup, then restart Traefik and its configuration watcher to apply trust changes.
+The dedicated `traffic-redis` has no published port and uses its own persistent
+volume, separate from Studio session Redis. Apply migrations and rebuild the
+server services before starting the authorizer. Flutter changes are delivered
+through the Studio image, not a client-side build by installed users.
+
+GeoIP updates use the setup-generated `update_geoip.sh`: the download is validated
+with the GeoIP service image and atomically replaces the database in its mounted
+directory. The reader observes replacements without a service restart. Invalid
+updates return an explicit error without replacing the database.
 
 ## Create additional slots
 
@@ -361,6 +404,26 @@ Restore `key-authorizer` or its database connection. Do not remove
 - `gateway_recovery_required`: fix host-agent/Docker/template and repeat the
   cutover.
 - `active`: do not run migration again; manage slots normally.
+
+### Loss of traffic Redis state
+
+Stop the authorizer while recovering its dedicated Redis volume. A restart with
+an intact AOF preserves rate buckets. Loss of the recorded traffic epoch blocks
+admission; do not replace it automatically or reset counters during deployment.
+
+If the volume cannot be recovered, read the current epoch using the privileged
+migration database identity and explicitly acknowledge rate-counter loss:
+
+```bash
+docker compose --env-file servidor/.env -f servidor/docker-compose-api.yml run \
+  --rm --no-deps --entrypoint python control-plane-migrations \
+  -m app.reset_access_rate_epoch --expected-epoch <current-epoch> \
+  --confirm-rate-counter-loss
+```
+
+Start the authorizer against an empty dedicated traffic Redis volume. This
+operation replaces the epoch and replenishes lost rate buckets; it does not
+reset PostgreSQL quotas or Studio sessions. Never perform it as routine startup.
 
 ## Audit and safe diagnostic data
 

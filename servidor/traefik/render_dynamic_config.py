@@ -110,6 +110,17 @@ def render(
     cert_dir: pathlib.Path | None = None,
 ) -> str:
     settings = read_env(root_env)
+    admission_secret = settings["ACCESS_ADMISSION_SECRET"]
+    if not re.fullmatch(r"[a-f0-9]{64}", admission_secret):
+        raise ValueError("ACCESS_ADMISSION_SECRET invalido")
+    proxy_cidrs = settings["ACCESS_TRUSTED_PROXY_CIDRS"].split(",") if settings["ACCESS_TRUSTED_PROXY_CIDRS"] else []
+    for value in proxy_cidrs:
+        network = ipaddress.ip_network(value, strict=True)
+        if isinstance(network, ipaddress.IPv6Network) and network.network_address.ipv4_mapped:
+            raise ValueError("Proxy IPv4 mapeado exige notacao IPv4")
+        if network.prefixlen == 0:
+            raise ValueError("Proxy trust irrestrito recusado")
+    gateway_tokens: dict[str, str] = {}
     api_port = settings.get("PROJECTS_API_PORT", "18000")
     if not api_port.isdigit():
         raise ValueError("PROJECTS_API_PORT deve ser numerica")
@@ -162,6 +173,10 @@ def render(
             if not PUBLIC_REF_RE.fullmatch(public_ref) or public_ref in seen_refs:
                 raise ValueError(f"PROJECT_PUBLIC_REF invalido ou duplicado: {project_id}")
             seen_refs.add(public_ref)
+            token = project_env["API_GATEWAY_TOKEN_PROJETO"]
+            if not re.fullmatch(r"[a-f0-9]{64}", token):
+                raise ValueError(f"Gateway token invalido: {project_id}")
+            gateway_tokens[project_id] = token
             projects.append((project_id, project_uuid, public_ref))
 
     lines = [
@@ -196,7 +211,7 @@ def render(
     lines.extend([
         "      priority: 1000",
         "      middlewares:",
-        "        - client-configuration-limit",
+        "        - discovery-admission",
         "        - security-headers",
         "      service: client-configuration",
     ])
@@ -217,6 +232,7 @@ def render(
                 "      middlewares:",
                 "        - rate-limit",
                 f"        - project-guard-{project_id}",
+                f"        - project-admission-{project_id}",
                 "        - security-headers",
                 f"        - project-strip-{project_id}",
                 f"      service: project-{project_id}",
@@ -243,11 +259,6 @@ def render(
     lines.extend(
         [
             "  middlewares:",
-            "    client-configuration-limit:",
-            "      rateLimit:",
-            "        average: 10",
-            "        burst: 20",
-            '        period: "1s"',
             "    projects-api-allowlist:",
             "      ipAllowList:",
             "        sourceRange:",
@@ -287,6 +298,19 @@ def render(
                 f"          - \"/{public_ref}\"",
             ]
         )
+
+    for name, project_id in [("discovery-admission", None)] + [
+        (f"project-admission-{project_id}", project_id) for project_id, _, _ in projects
+    ]:
+        lines.extend([
+            f"    {name}:", "      plugin:", "        gatewayadmission:",
+            '          evaluatorURL: "http://key-authorizer:18010/v1/admit"',
+            f"          secret: {yaml_quote(admission_secret)}",
+            f"          projectRef: {yaml_quote(project_id if project_id is not None else '')}",
+            f"          gatewayToken: {yaml_quote(gateway_tokens[project_id] if project_id is not None else '')}",
+            "          trustedProxyCIDRs:" + ("" if proxy_cidrs else " []"),
+        ])
+        lines.extend(f"            - {yaml_quote(value)}" for value in proxy_cidrs)
 
     lines.extend(
         [
@@ -373,7 +397,7 @@ def main() -> int:
                 args.middlewares_file.read_text(encoding="utf-8"),
             )
             write_atomic(args.output, content)
-        except (ValueError, OSError) as exc:
+        except (ValueError, OSError, KeyError) as exc:
             write_atomic(args.output, "http:\n  routers: {}\n  middlewares: {}\n  services: {}\n")
             raise SystemExit(f"Configuracao de rotas retirada: {exc}") from exc
         if not args.watch:

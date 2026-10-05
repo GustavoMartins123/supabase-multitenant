@@ -97,8 +97,7 @@ class _StepUpAuthenticationDialogState
               Text(widget.description),
               const SizedBox(height: 8),
               const Text(
-                'Use a senha da sua propria conta. Nenhuma senha global do '
-                'servidor e necessaria.',
+                'Use a senha da sua propria conta.',
                 style: TextStyle(
                   color: SupabaseColors.textMuted,
                   fontSize: 11,

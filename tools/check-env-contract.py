@@ -103,12 +103,16 @@ REQUIRED_IN_REAL_ENV = [
     "PROJECTS_API_HMAC_SECRET",
     "LOGFLARE_PRIVATE_ACCESS_TOKEN",
     "HOST_AGENT_HMAC_SECRET",
+    "ACCESS_ADMISSION_SECRET",
+    "ACCESS_RATE_REDIS_PASSWORD",
+    "ACCESS_ADMIN_CIDRS",
 ]
 
 OPTIONAL_EMPTY_IN_REAL_ENV = {
     "PROJECT_SECRETS_PREVIOUS_MASTER_KEYS",
     "FUNCTIONS_SUPABASE_ANON_KEY",
     "FUNCTIONS_SUPABASE_SERVICE_ROLE_KEY",
+    "ACCESS_TRUSTED_PROXY_CIDRS",
 }
 
 
@@ -208,6 +212,8 @@ def check_parity(report: Report) -> None:
             f"Compose interpola {name} mas nenhum .env.example declara"
         )
     setup_text = (ROOT / SETUP_SCRIPT).read_text(encoding="utf-8")
+    if "tools/configure_access_runtime.py" in setup_text:
+        setup_text += (ROOT / "tools/configure_access_runtime.py").read_text(encoding="utf-8")
     pass_keys: set[str] = set()
     for relative in EXAMPLE_FILES:
         for line in (ROOT / relative).read_text(encoding="utf-8").splitlines():

@@ -68,6 +68,29 @@ jobs:
       - name: Validar arquivos Compose
         run: python tools/check-env-contract.py --compose
 
+  access-admission-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build isolated admission test images
+        run: |
+          docker build -t access-api:test -f servidor/api-internal/Dockerfile servidor
+          docker build -t access-authorizer:test -f servidor/key-authorizer/Dockerfile servidor
+          docker build -t access-configuration:test -f servidor/client-configuration/Dockerfile servidor
+          docker build -t access-geoip:test servidor/traefik/geoip
+      - name: Required real Traefik, geography and quota checks
+        run: python tools/run_access_policy_tests.py
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.1"
+      - name: Admission middleware race tests
+        working-directory: servidor/traefik/plugins-local/src/github.com/GustavoMartins123/gatewayadmission
+        run: go test -race ./...
+
   migrations-live:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -124,7 +147,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Security test dependencies
-        run: python -m pip install -r servidor/api-internal/requirements.txt -r servidor/host-agent/requirements.txt
+        run: python -m pip install -r servidor/api-internal/requirements.txt -r servidor/host-agent/requirements.txt redis==5.2.1
       - name: Build production OpenResty image and obtain disposable PostgreSQL
         run: |
           docker build -t studio-security-ci:local -f studio/Dockerfile studio
@@ -180,6 +203,7 @@ jobs:
           docker pull darthsim/imgproxy:v4.0.11
           docker pull supabase/gotrue:v2.193.0-rc.3
           docker pull postgrest/postgrest:v14.14
+          docker pull redis:8.2.2-alpine
       - name: Explicit end-to-end dependencies
         if: matrix.topology != 'physical'
         run: |

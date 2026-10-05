@@ -9,6 +9,9 @@ events {
 
 http {
     server_tokens off;
+    log_format gateway '$remote_addr [$time_local] "$request_method $uri" $status $body_bytes_sent request_id=$http_x_request_id';
+    access_log /dev/stdout gateway;
+    error_log /dev/stderr crit;
     client_body_temp_path /tmp/client_temp;
     proxy_temp_path       /tmp/proxy_temp;
     fastcgi_temp_path     /tmp/fastcgi_temp;
@@ -16,6 +19,7 @@ http {
     scgi_temp_path        /tmp/scgi_temp;
     resolver 127.0.0.11 valid=30s ipv6=off;
     map_hash_bucket_size 256;
+    variables_hash_max_size 2048;
     sendfile on;
     tcp_nopush on;
     tcp_nodelay on;
@@ -51,6 +55,11 @@ http {
     map $http_upgrade $connection_upgrade {
         default upgrade;
         ''      close;
+    }
+
+    map $request $admission_request_method {
+        default "";
+        ~^(?<original_request_method>[A-Z]+)[[:space:]] $original_request_method;
     }
 
     map $opaque_role $opaque_internal_jwt {
@@ -93,6 +102,8 @@ http {
         server_name _{{project_id}};
         absolute_redirect off;
         port_in_redirect off;
+        if ($http_x_gateway_admission = "") { return 403; }
+        auth_request /_internal/opaque-key-authorize;
 
         auth_request_set $opaque_role $upstream_http_x_opaque_key_role;
         auth_request_set $opaque_key_present $upstream_http_x_opaque_key_present;
@@ -107,6 +118,7 @@ http {
 
         location = /_internal/opaque-key-authorize {
             internal;
+            auth_request off;
             proxy_pass http://key-authorizer:18010/v1/authorize;
             proxy_pass_request_body off;
             proxy_pass_request_headers off;
@@ -114,15 +126,17 @@ http {
             proxy_set_header X-Project-Ref "{{project_id}}";
             proxy_set_header X-Project-Gateway-Token "${API_GATEWAY_TOKEN_PROJETO}";
             proxy_set_header X-Api-Key-Header $http_apikey;
-            proxy_set_header X-Api-Key-Query $arg_apikey;
             proxy_set_header X-Original-Authorization $http_authorization;
-            proxy_set_header X-Original-Args $args;
             proxy_set_header X-Target-Service $opaque_target_service;
-            proxy_set_header X-Required-Role $opaque_required_role;
-            proxy_set_header X-Allow-Missing-Key $opaque_allow_missing_key;
+            proxy_set_header X-Gateway-Admission $http_x_gateway_admission;
+            proxy_set_header X-Admission-URI $http_x_admission_uri;
+            proxy_set_header X-Admission-Method $http_x_admission_method;
+            proxy_set_header X-Gateway-Request-URI $request_uri;
+            proxy_set_header X-Gateway-Request-Method $admission_request_method;
         }
        
         location /recovery.html {
+            set $opaque_target_service auth;
             allow ${SUPABASE_NETWORK_SUBNET};
             deny all;
             root /usr/share/nginx/html;
@@ -132,6 +146,7 @@ http {
         }
 
         location /invite.html {
+            set $opaque_target_service auth;
             allow ${SUPABASE_NETWORK_SUBNET};
             deny all;
             root /usr/share/nginx/html;
@@ -141,6 +156,7 @@ http {
         }
 
         location /magiclink.html {
+            set $opaque_target_service auth;
             allow ${SUPABASE_NETWORK_SUBNET};
             deny all;
             root /usr/share/nginx/html;
@@ -150,6 +166,7 @@ http {
         }
 
         location /confirmation.html {
+            set $opaque_target_service auth;
             allow ${SUPABASE_NETWORK_SUBNET};
             deny all;
             root /usr/share/nginx/html;
@@ -159,6 +176,7 @@ http {
         }
 
         location /email_change.html {
+            set $opaque_target_service auth;
             allow ${SUPABASE_NETWORK_SUBNET};
             deny all;
             root /usr/share/nginx/html;
@@ -168,6 +186,7 @@ http {
         }
 
         location = /verify-success.html {
+            set $opaque_target_service auth;
             root /usr/share/nginx/html;
             add_header Content-Type text/html;
             add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
@@ -175,6 +194,7 @@ http {
         }
 
         location = /verify-success.html/ {
+            set $opaque_target_service auth;
             root /usr/share/nginx/html;
             try_files /verify-success.html =404;
             add_header Content-Type text/html;
@@ -183,6 +203,7 @@ http {
         }
 
         location = /verify-success.js {
+            set $opaque_target_service auth;
             root /usr/share/nginx/html;
             default_type application/javascript;
             add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
@@ -190,6 +211,7 @@ http {
         }
 
         location = /verify-success.html/verify-success.js {
+            set $opaque_target_service auth;
             root /usr/share/nginx/html;
             try_files /verify-success.js =404;
             default_type application/javascript;
@@ -200,8 +222,6 @@ http {
         
         location /auth/v1/ {
             set $opaque_target_service auth;
-            set $opaque_required_role "";
-            set $opaque_allow_missing_key 0;
             auth_request /_internal/opaque-key-authorize;
 
             if ($request_method = 'OPTIONS') {
@@ -218,6 +238,10 @@ http {
             proxy_hide_header Access-Control-Allow-Methods;
             proxy_hide_header Access-Control-Allow-Headers;
 
+            proxy_set_header X-Gateway-Admission "";
+            proxy_set_header X-Admission-URI "";
+            proxy_set_header X-Admission-Method "";
+            proxy_set_header X-Admission-Origin-IP "";
             proxy_pass http://$auth_upstream;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
@@ -242,8 +266,13 @@ http {
         }
         
         location = /auth/v1/verify {
+            set $opaque_target_service auth;
             rewrite ^/auth/v1/(.*)$ /$1?$args break;
             proxy_hide_header Access-Control-Allow-Origin;
+            proxy_set_header X-Gateway-Admission "";
+            proxy_set_header X-Admission-URI "";
+            proxy_set_header X-Admission-Method "";
+            proxy_set_header X-Admission-Origin-IP "";
             proxy_pass http://$auth_upstream;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
@@ -260,8 +289,13 @@ http {
         }
 
         location = /auth/v1/callback {
+            set $opaque_target_service auth;
             rewrite ^/auth/v1/(.*)$ /$1?$args break;
             proxy_hide_header Access-Control-Allow-Origin;
+            proxy_set_header X-Gateway-Admission "";
+            proxy_set_header X-Admission-URI "";
+            proxy_set_header X-Admission-Method "";
+            proxy_set_header X-Admission-Origin-IP "";
             proxy_pass http://$auth_upstream;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
@@ -278,8 +312,13 @@ http {
         }
 
         location = /auth/v1/authorize {
+            set $opaque_target_service auth;
             rewrite ^/auth/v1/(.*)$ /$1?$args break;
             proxy_hide_header Access-Control-Allow-Origin;
+            proxy_set_header X-Gateway-Admission "";
+            proxy_set_header X-Admission-URI "";
+            proxy_set_header X-Admission-Method "";
+            proxy_set_header X-Admission-Origin-IP "";
             proxy_pass http://$auth_upstream/authorize;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
@@ -297,10 +336,12 @@ http {
 
         location = /rest/v1/ {
             set $opaque_target_service rest;
-            set $opaque_required_role service_role;
-            set $opaque_allow_missing_key 0;
             auth_request /_internal/opaque-key-authorize;
             rewrite ^/rest/v1/(.*)$ /$1 break; 
+            proxy_set_header X-Gateway-Admission "";
+            proxy_set_header X-Admission-URI "";
+            proxy_set_header X-Admission-Method "";
+            proxy_set_header X-Admission-Origin-IP "";
             proxy_pass http://$rest_upstream;
             proxy_set_header apikey $opaque_upstream_apikey;
             proxy_set_header Authorization $opaque_upstream_authorization;
@@ -311,8 +352,6 @@ http {
 
         location /rest/v1/ {
             set $opaque_target_service rest;
-            set $opaque_required_role "";
-            set $opaque_allow_missing_key 0;
             auth_request /_internal/opaque-key-authorize;
 
             if ($request_method = 'OPTIONS') {
@@ -326,6 +365,10 @@ http {
             
             proxy_hide_header Access-Control-Allow-Origin;
             
+            proxy_set_header X-Gateway-Admission "";
+            proxy_set_header X-Admission-URI "";
+            proxy_set_header X-Admission-Method "";
+            proxy_set_header X-Admission-Origin-IP "";
             proxy_pass http://$rest_upstream;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
@@ -343,8 +386,6 @@ http {
 
         location /graphql/v1 {
             set $opaque_target_service graphql;
-            set $opaque_required_role "";
-            set $opaque_allow_missing_key 0;
             auth_request /_internal/opaque-key-authorize;
 
             if ($request_method = 'OPTIONS') {
@@ -356,6 +397,10 @@ http {
             }
             proxy_hide_header Access-Control-Allow-Origin;
             
+            proxy_set_header X-Gateway-Admission "";
+            proxy_set_header X-Admission-URI "";
+            proxy_set_header X-Admission-Method "";
+            proxy_set_header X-Admission-Origin-IP "";
             proxy_pass http://$rest_upstream/rpc/graphql;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
@@ -374,8 +419,6 @@ http {
         location ^~ /realtime/v1/websocket {
             access_log off;
             set $opaque_target_service realtime;
-            set $opaque_required_role "";
-            set $opaque_allow_missing_key 0;
             auth_request /_internal/opaque-key-authorize;
             
             if ($request_method = 'OPTIONS') {
@@ -385,6 +428,10 @@ http {
                 return 204;
             }
 
+            proxy_set_header X-Gateway-Admission "";
+            proxy_set_header X-Admission-URI "";
+            proxy_set_header X-Admission-Method "";
+            proxy_set_header X-Admission-Origin-IP "";
             proxy_pass http://$realtime_upstream/socket/websocket?$opaque_realtime_upstream_args;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
@@ -404,8 +451,6 @@ http {
 
         location /storage/v1/ {
             set $opaque_target_service storage;
-            set $opaque_required_role "";
-            set $opaque_allow_missing_key 1;
             auth_request /_internal/opaque-key-authorize;
 
             if ($request_method = 'OPTIONS') {
@@ -443,6 +488,10 @@ http {
             proxy_set_header Authorization $opaque_upstream_authorization;
             proxy_set_header X-Api-Key-Id $opaque_key_id;
 
+            proxy_set_header X-Gateway-Admission "";
+            proxy_set_header X-Admission-URI "";
+            proxy_set_header X-Admission-Method "";
+            proxy_set_header X-Admission-Origin-IP "";
             proxy_pass http://$storage_upstream;
 
             proxy_redirect ~^https?://[^/]+/{{project_public_ref}}/storage/v1/upload/resumable/(.*)$ $real_scheme://$http_host/{{project_public_ref}}/storage/v1/upload/resumable/$1;
@@ -457,9 +506,18 @@ http {
         # Endpoint SigV4 dos S3 Vectors Wrappers. O gateway fixa o tenant e
         # ignora qualquer tentativa do cliente de escolher outro por header.
         location /vector/ {
+            set $opaque_target_service storage;
+            auth_request /_internal/opaque-key-authorize;
+            proxy_set_header apikey $opaque_upstream_apikey;
+            proxy_set_header Authorization $opaque_upstream_authorization;
+            proxy_set_header X-Api-Key-Id $opaque_key_id;
             allow ${SUPABASE_NETWORK_SUBNET};
             deny all;
 
+            proxy_set_header X-Gateway-Admission "";
+            proxy_set_header X-Admission-URI "";
+            proxy_set_header X-Admission-Method "";
+            proxy_set_header X-Admission-Origin-IP "";
             proxy_pass http://$storage_upstream;
             proxy_http_version 1.1;
             proxy_set_header Host $http_host;
@@ -472,8 +530,6 @@ http {
         
         location /functions/v1/ {
             set $opaque_target_service functions;
-            set $opaque_required_role "";
-            set $opaque_allow_missing_key 0;
             auth_request /_internal/opaque-key-authorize;
 
             if ($request_method = 'OPTIONS') {
@@ -489,6 +545,10 @@ http {
             proxy_hide_header Access-Control-Allow-Headers;
 
             rewrite ^/functions/v1/(.*)$ /$1 break;
+            proxy_set_header X-Gateway-Admission "";
+            proxy_set_header X-Admission-URI "";
+            proxy_set_header X-Admission-Method "";
+            proxy_set_header X-Admission-Origin-IP "";
             proxy_pass http://$functions_upstream;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;

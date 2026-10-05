@@ -6,6 +6,7 @@ import re
 from urllib.parse import urlsplit, urlunsplit
 
 import asyncpg
+import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
@@ -33,6 +34,8 @@ async def lifespan(app):
     app.state.public_origin = public_base_url(os.environ['SERVER_URL'], os.environ['SERVER_PROTO'])
     app.state.pool = await asyncpg.create_pool(dsn, min_size=1, max_size=8, command_timeout=3,
         server_settings={'default_transaction_read_only': 'on', 'statement_timeout': '3000'})
+    app.state.admission_secret = os.environ['ACCESS_ADMISSION_SECRET']
+    app.state.admission_http = httpx.AsyncClient(timeout=3, follow_redirects=False)
     try:
         async with app.state.pool.acquire() as conn:
             if await conn.fetchval('SELECT current_user') != 'client_configuration_reader':
@@ -40,6 +43,7 @@ async def lifespan(app):
             await conn.fetch('SELECT application_ref FROM public_client_configurations LIMIT 0')
         yield
     finally:
+        await app.state.admission_http.aclose()
         await app.state.pool.close()
 
 
@@ -72,7 +76,9 @@ async def public_request_boundary(request: Request, call_next):
         elif request.headers.get('transfer-encoding') or request.headers.get('content-length', '0') != '0':
             response = JSONResponse({'detail': 'Configuration requests must not contain a body'}, status_code=400)
         else:
-            response = await call_next(request)
+            response = await check_admission(request)
+            if response is None:
+                response = await call_next(request)
         response.headers.update(NO_STORE)
         response.headers['Access-Control-Allow-Origin'] = '*'
         response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
@@ -80,6 +86,27 @@ async def public_request_boundary(request: Request, call_next):
         response.headers['X-Content-Type-Options'] = 'nosniff'
         return response
     return await call_next(request)
+
+
+async def check_admission(request):
+    uri = request.headers.get('x-admission-uri')
+    method = request.headers.get('x-admission-method')
+    ticket = request.headers.get('x-gateway-admission')
+    if uri != request.url.path or method != request.method or not ticket:
+        return JSONResponse({'error':'admission_denied','message':'Admission ticket required'}, status_code=403)
+    try:
+        response = await app.state.admission_http.post('http://key-authorizer:18010/v1/check-discovery',
+            headers={'X-Admission-Secret':app.state.admission_secret,'X-Gateway-Admission':ticket},
+            json={'project_ref':'','gateway_token':'','uri':uri,'method':method,
+                'client_ip':request.headers.get('x-admission-origin-ip',''),
+                'api_key':request.headers.get('apikey',''),'authorization':request.headers.get('authorization','')})
+        if response.status_code == 204:
+            return None
+        if response.status_code != 403:
+            raise ValueError('Admission protocol failed')
+        return JSONResponse({'error':'admission_denied','message':'Admission ticket rejected'}, status_code=403)
+    except (httpx.HTTPError, ValueError):
+        return JSONResponse({'error':'admission_unavailable','message':'Admission could not be verified'}, status_code=503)
 
 
 @app.get('/healthz', include_in_schema=False)
@@ -91,7 +118,12 @@ async def healthz():
     return {'status': 'ok'}
 
 
-@app.get('/config/{application_ref}', response_model=ClientConfigurationResponse)
+@app.get('/config/{application_ref}', response_model=ClientConfigurationResponse,
+    responses={403: {'description': 'Geographic denial or invalid admission ticket'},
+        404: {'description': 'Unknown application reference'},
+        410: {'description': 'No effective publishable key'},
+        429: {'description': 'Discovery rate exhausted; Retry-After indicates the wait'},
+        503: {'description': 'Configuration or admission dependency unavailable'}})
 async def get_client_configuration(application_ref: str):
     try:
         rows = await app.state.pool.fetch('''

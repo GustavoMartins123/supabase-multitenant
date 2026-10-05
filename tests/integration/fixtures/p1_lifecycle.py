@@ -56,7 +56,7 @@ def main() -> None:
     for image in ('servidor-db:latest', 'servidor-realtime:latest', 'servidor-control-plane-migrations:latest',
                   'supabase/edge-runtime:v1.74.2', 'supabase/supavisor:2.9.7', 'supabase/storage-api:v1.61.12',
                   'nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim', 'darthsim/imgproxy:v4.0.11',
-                  'supabase/gotrue:v2.193.0-rc.3', 'postgrest/postgrest:v14.14'):
+                  'supabase/gotrue:v2.193.0-rc.3', 'postgrest/postgrest:v14.14', 'redis:8.2.2-alpine'):
         assert run('docker', 'image', 'inspect', image, '--format', '{{.Os}}') == 'linux', image
     env_file = server / '.env'
     text = (server / '.env.example').read_text()
@@ -67,13 +67,15 @@ def main() -> None:
               'SERVER_DOMAIN': 'https://server.p1.test', 'SERVER_URL': 'server.p1.test', 'SERVER_PROTO': 'https',
               'PROJECTS_API_ALLOWED_IP_RANGES': '172.50.0.0/16',
               'PUSH_API_URL': 'https://studio.p1.test/api/internal/push',
-              'PROJECTS_API_PORT': '18000', 'PG_META_PORT': '8080',
-              'STUDIO_CACHE_INVALIDATION_URL': 'https://studio.p1.test', 'PROJECTS_API_STOP_GRACE_PERIOD': '30s'}
+               'PROJECTS_API_PORT': '18000', 'PG_META_PORT': '8080',
+               'ACCESS_ADMIN_CIDRS': '172.50.0.0/16',
+               'STUDIO_CACHE_INVALIDATION_URL': 'https://studio.p1.test', 'PROJECTS_API_STOP_GRACE_PERIOD': '30s'}
     for key in ('POSTGRES_PASSWORD', 'META_GUEST_PASSWORD', 'KEY_AUTHORIZER_DB_PASSWORD',
                 'PLATFORM_APP_DB_PASSWORD', 'META_ADMIN_DB_PASSWORD', 'HOST_AGENT_DB_PASSWORD',
                 'PLATFORM_READER_DB_PASSWORD', 'CLIENT_CONFIGURATION_DB_PASSWORD', 'JWT_SECRET', 'NGINX_HMAC_SECRET',
                 'STUDIO_GATEWAY_HMAC_SECRET', 'PROJECTS_API_HMAC_SECRET', 'HOST_AGENT_HMAC_SECRET',
-                'PG_META_CRYPTO_KEY', 'SECRET_KEY_BASE'):
+                'PG_META_CRYPTO_KEY', 'SECRET_KEY_BASE', 'ACCESS_ADMISSION_SECRET',
+                'ACCESS_RATE_REDIS_PASSWORD'):
         values[key] = secrets.token_hex(32)
     values['DB_ENC_KEY'] = secrets.token_hex(8)
     values['VAULT_ENC_KEY'] = secrets.token_hex(16)
@@ -120,10 +122,24 @@ def main() -> None:
     authorizer.update(image='servidor-key-authorizer:latest', logging={'driver': 'json-file'},
                       labels=labels.copy(), restart='no')
     authorizer['volumes'] = [str(server / 'key-authorizer/app.py') + ':/app/app.py:ro',
-                             str(server / 'api-internal/app/opaque_keys.py') + ':/app/opaque_keys.py:ro']
+                             str(server / 'key-authorizer/admission.py') + ':/app/admission.py:ro',
+                             str(server / 'api-internal/app/opaque_keys.py') + ':/app/opaque_keys.py:ro',
+                             str(server / 'api-internal/app/access_policy.py') + ':/app/access_policy.py:ro',
+                             str(server / 'api-internal/app/data') + ':/app/data:ro']
     # Migrations are explicitly completed before startup below.
     authorizer.pop('depends_on')
     model['services']['key-authorizer'] = authorizer
+    traffic_redis = yaml.safe_load((server / 'docker-compose-api.yml').read_text())['services']['traffic-redis']
+    traffic_redis.update(logging={'driver': 'json-file'}, labels=labels.copy(), restart='no')
+    model['services']['traffic-redis'] = traffic_redis
+    api_model = yaml.safe_load((server / 'docker-compose-api.yml').read_text())
+    referenced = {name for service in model['services'].values()
+                  for name in (service.get('networks') or []) if isinstance(name, str)}
+    for name in sorted(referenced - set(model['networks'])):
+        definition = dict(api_model['networks'][name])
+        definition['labels'] = labels.copy()
+        model['networks'][name] = definition
+    model['volumes']['traffic-rate-data'] = {'name': 'p1-traffic-rate-' + suffix, 'labels': labels.copy()}
     (server / 'p1-compose.yml').write_text(yaml.safe_dump(model, sort_keys=False))
     # Add only test resource ownership/logging plumbing to generated projects.
     template = server / 'generateProject/dockercomposetemplate'
@@ -147,7 +163,7 @@ def main() -> None:
             raise RuntimeError('PostgreSQL TCP readiness timeout: ' + run('docker', 'logs', 'supabase-db'))
         time.sleep(1)
     run(*compose, 'run', '--rm', '--no-deps', 'control-plane-migrations', cwd=server)
-    run(*compose, 'up', '-d', '--wait', '--wait-timeout', '180', *services, 'key-authorizer', cwd=server)
+    run(*compose, 'up', '-d', '--wait', '--wait-timeout', '180', *services, 'traffic-redis', 'key-authorizer', cwd=server)
 
     if len(sys.argv) > 3:
         assert sys.argv[3] == 'end-to-end' and sys.argv[4] in {'single', 'split'}
@@ -219,21 +235,39 @@ def main() -> None:
         print('Projection and real Edge worker verified:', ref, flush=True)
         return result
 
+    def admission_headers(ref: str, uri: str, method: str = 'GET', api_key: str = '') -> dict[str, str]:
+        payload = json.dumps({'project_ref': ref, 'gateway_token': gateway_tokens[ref],
+                              'uri': '/' + public_refs[ref] + uri, 'method': method,
+                              'client_ip': '172.50.200.10', 'api_key': api_key, 'authorization': ''})
+        headers = run('curl', '--silent', '--show-error', '--fail', '--output', '/dev/null', '--dump-header', '-',
+                      '--request', 'POST', '--header', 'X-Admission-Secret: ' + os.environ['ACCESS_ADMISSION_SECRET'],
+                      '--header', 'Content-Type: application/json', '--data-binary', '@-',
+                      'http://key-authorizer:18010/v1/admit', data=payload)
+        ticket = next(line.split(':', 1)[1].strip() for line in headers.splitlines()
+                      if line.lower().startswith('x-gateway-admission:'))
+        return {'X-Gateway-Admission': ticket, 'X-Admission-Uri': '/' + public_refs[ref] + uri,
+                'X-Admission-Method': method}
+
+    def curl_headers(values: dict[str, str]) -> list[str]:
+        return [item for name, value in values.items() for item in ('-H', name + ': ' + value)]
+
     def check_gateway(ref: str, marker: bool = True) -> None:
         env = environment(server / 'projects' / ref / '.env')
         assert env['API_EXTERNAL_URL'] == 'https://server.p1.test/' + public_refs[ref] + '/auth/v1'
         auth = json.loads(run('curl', '--fail', '--silent', '--show-error',
-                             '-H', 'apikey: ' + opaque_keys[ref],
-                             'http://supabase-nginx-' + ref + ':8080/auth/v1/health'))
+                              '-H', 'apikey: ' + opaque_keys[ref],
+                              *curl_headers(admission_headers(ref, '/auth/v1/health', 'GET', opaque_keys[ref])),
+                              'http://supabase-nginx-' + ref + ':8080/auth/v1/health'))
         assert auth['name'] == 'GoTrue'
         if marker:
             sql("NOTIFY pgrst, 'reload schema';", '_supabase_' + ref)
-            request = urllib.request.Request(
-                'http://supabase-nginx-' + ref + ':8080/rest/v1/lifecycle_marker?select=value',
-                headers={'apikey': opaque_keys[ref]})
             deadline = time.monotonic() + 20
             while True:
                 try:
+                    request = urllib.request.Request(
+                        'http://supabase-nginx-' + ref + ':8080/rest/v1/lifecycle_marker?select=value',
+                        headers={'apikey': opaque_keys[ref],
+                                 **admission_headers(ref, '/rest/v1/lifecycle_marker?select=value', 'GET', opaque_keys[ref])})
                     with urllib.request.urlopen(request, timeout=10) as response:
                         assert json.load(response) == [{'value': 'original'}]
                     break
@@ -301,6 +335,7 @@ process.stdout.write(JSON.stringify({status:response.status,body}));
             # A source credential must not select its tenant through a clone gateway.
             'X-Forwarded-Host': env['PROJECT_UUID'] + '.storage.internal',
             'Authorization': f'AWS4-HMAC-SHA256 Credential={env["S3_PROTOCOL_ACCESS_KEY_ID"]}/{scope}, SignedHeaders={signed}, Signature={signature}',
+            **admission_headers(ref, path, 'POST'),
         })
         try:
             with urllib.request.urlopen(request, timeout=15) as response:

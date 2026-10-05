@@ -182,6 +182,12 @@ class ApiClient {
           return valueString == 'true' || valueString == '1';
         case 'DateTime':
           return value is DateTime ? value : DateTime.tryParse(value);
+        case 'AccessPolicy':
+          return AccessPolicy.fromJson(value);
+        case 'AccessUsageResponse':
+          return AccessUsageResponse.fromJson(value);
+        case 'AccessUsageRow':
+          return AccessUsageRow.fromJson(value);
         case 'AddMember':
           return AddMember.fromJson(value);
         case 'AddMemberResponse':
@@ -222,6 +228,10 @@ class ApiClient {
           return ContainerLogsResponse.fromJson(value);
         case 'ContentIdentityResponse':
           return ContentIdentityResponse.fromJson(value);
+        case 'CountryCatalog':
+          return CountryCatalog.fromJson(value);
+        case 'CountryItem':
+          return CountryItem.fromJson(value);
         case 'CreateApiKeySlot':
           return CreateApiKeySlot.fromJson(value);
         case 'CreateProjectHintResponse':
@@ -244,6 +254,10 @@ class ApiClient {
           return DuplicateProject.fromJson(value);
         case 'EncKeyResponse':
           return EncKeyResponse.fromJson(value);
+        case 'ExecuteSqlBody':
+          return ExecuteSqlBody.fromJson(value);
+        case 'FolderBody':
+          return FolderBody.fromJson(value);
         case 'GetProjectCollaborationResponse':
           return GetProjectCollaborationResponse.fromJson(value);
         case 'GetProjectSettingsResponse':
@@ -278,6 +292,16 @@ class ApiClient {
           return MigrationStatusResponse.fromJson(value);
         case 'NewProject':
           return NewProject.fromJson(value);
+        case 'OwnerId':
+          return OwnerId.fromJson(value);
+        case 'PolicyResponse':
+          return PolicyResponse.fromJson(value);
+        case 'PolicyUpdate':
+          return PolicyUpdate.fromJson(value);
+        case 'PrivilegeChangeBody':
+          return PrivilegeChangeBody.fromJson(value);
+        case 'PrivilegeExecution':
+          return PrivilegeExecution.fromJson(value);
         case 'ProjectAIFunctionItem':
           return ProjectAIFunctionItem.fromJson(value);
         case 'ProjectDisplayNameUpdate':
@@ -286,6 +310,8 @@ class ApiClient {
           return ProjectHintCreate.fromJson(value);
         case 'ProjectHintStatusUpdate':
           return ProjectHintStatusUpdate.fromJson(value);
+        case 'ProjectId':
+          return ProjectId.fromJson(value);
         case 'ProjectInfoItem':
           return ProjectInfoItem.fromJson(value);
         case 'ProjectListItem':
@@ -314,6 +340,10 @@ class ApiClient {
           return ProjectsInfoResponse.fromJson(value);
         case 'QueuedJobResponse':
           return QueuedJobResponse.fromJson(value);
+        case 'RateLimit':
+          return RateLimit.fromJson(value);
+        case 'ReadRowsBody':
+          return ReadRowsBody.fromJson(value);
         case 'RecreateProjectServicesResponse':
           return RecreateProjectServicesResponse.fromJson(value);
         case 'RecreateServices':
@@ -326,6 +356,8 @@ class ApiClient {
           return RenameHistoryEvent.fromJson(value);
         case 'RenameProjectResponse':
           return RenameProjectResponse.fromJson(value);
+        case 'RequestQuota':
+          return RequestQuota.fromJson(value);
         case 'RestartProjectResponse':
           return RestartProjectResponse.fromJson(value);
         case 'RestorePointCreate':
@@ -346,6 +378,8 @@ class ApiClient {
           return RotateApiKeySlot.fromJson(value);
         case 'RotateProjectKeyResponse':
           return RotateProjectKeyResponse.fromJson(value);
+        case 'SecurityBody':
+          return SecurityBody.fromJson(value);
         case 'SlotActivationResponse':
           return SlotActivationResponse.fromJson(value);
         case 'SlotCancelResponse':
@@ -362,6 +396,12 @@ class ApiClient {
           return SlotPolicyUpdateResponse.fromJson(value);
         case 'SlotRevokeResponse':
           return SlotRevokeResponse.fromJson(value);
+        case 'SnippetBody':
+          return SnippetBody.fromJson(value);
+        case 'SqlContent':
+          return SqlContent.fromJson(value);
+        case 'SqlExecution':
+          return SqlExecution.fromJson(value);
         case 'StartProjectResponse':
           return StartProjectResponse.fromJson(value);
         case 'StopProjectResponse':
