@@ -1,4 +1,4 @@
-FROM python:3.12.13-slim
+FROM python:3.14.7-slim
 
 WORKDIR /app
 COPY ./key-authorizer/requirements.txt ./requirements.txt
