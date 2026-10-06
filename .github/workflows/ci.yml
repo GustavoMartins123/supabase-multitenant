@@ -11,7 +11,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Instalar dependencias de teste
@@ -73,7 +73,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Build isolated admission test images
@@ -106,7 +106,7 @@ jobs:
           --health-interval=5s --health-timeout=5s --health-retries=10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Instalar dependencias de teste
@@ -125,7 +125,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Explicit disposable test images
@@ -143,7 +143,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Security test dependencies
@@ -183,7 +183,7 @@ jobs:
         topology: [physical, single, split]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Build production lifecycle dependencies
