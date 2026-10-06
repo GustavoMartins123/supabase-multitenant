@@ -84,7 +84,7 @@ jobs:
           docker build -t access-geoip:test servidor/traefik/geoip
       - name: Required real Traefik, geography and quota checks
         run: python tools/run_access_policy_tests.py
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.25.1"
       - name: Admission middleware race tests
