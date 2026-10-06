@@ -370,7 +370,7 @@ def main() -> None:
         assert auth['name'] == 'GoTrue'
         if marker:
             sql("NOTIFY pgrst, 'reload schema';", '_supabase_' + ref)
-            deadline = time.monotonic() + 20
+            deadline = time.monotonic() + 60
             while True:
                 try:
                     request = urllib.request.Request(
@@ -383,7 +383,10 @@ def main() -> None:
                 except urllib.error.HTTPError as error:
                     if error.code != 404 or time.monotonic() > deadline:
                         raise
-                    time.sleep(0.2)
+                except (TimeoutError, ConnectionError, OSError, urllib.error.URLError):
+                    if time.monotonic() > deadline:
+                        raise
+                time.sleep(0.2)
         print('Real Auth and REST gateway verified:', public_refs[ref], flush=True)
 
     def vector_request(ref: str, operation: str, payload: dict) -> dict | None:
