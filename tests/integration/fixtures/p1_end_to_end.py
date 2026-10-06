@@ -269,7 +269,7 @@ def validate(root: Path, suffix: str, topology: str, values: dict[str, str], ben
             time.sleep(1)
 
     print('REAL END-TO-END TOPOLOGY:', topology, flush=True)
-    alpha, beta, renamed = 'e2e_a_' + suffix, 'e2e_b_' + suffix, 'e2e_r_' + suffix
+    alpha, beta = 'e2e_a_' + suffix, 'e2e_b_' + suffix
 
     def ref_of(name: str) -> str:
         # The canonical public reference is generated server-side; re-read it
@@ -456,23 +456,26 @@ if(!response.ok){console.error(response.status+': '+await response.text());proce
     assert sql('SELECT value FROM public.lifecycle_marker WHERE id=1;', '_supabase_' + beta) == 'original'
     assert expect('owner', 'GET', '/api/platform/storage/' + ref_of(beta) + '/vector-buckets/p1-vectors/indexes', 200)['indexes'][0]['dimension'] == 3
     expect('admin', 'GET', '/api/platform/storage/' + ref_of(beta) + '/buckets', 404)  # Membership isn't copied.
-    job('admin', 'POST', '/api/projects/' + ref_of(alpha) + '/rename', {'new_name': renamed})
-    assert not (server / '.functions-tenants' / (alpha + '.json')).exists()
-    projection(renamed)
-    job('admin', 'POST', '/api/projects/' + ref_of(renamed) + '/rotate-key')
-    rotated = projection(renamed)
+    old_ref = ref_of(alpha)
+    job('admin', 'POST', '/api/projects/' + old_ref + '/rename', {})
+    assert ref_of(alpha) != old_ref
+    rotated_record = json.loads((server / '.functions-tenants' / (alpha + '.json')).read_text())
+    assert rotated_record['project_ref'] == ref_of(alpha)
+    projection(alpha)
+    job('admin', 'POST', '/api/projects/' + ref_of(alpha) + '/rotate-key')
+    rotated = projection(alpha)
     assert rotated['service_role_key'] != initial['service_role_key'] and rotated['jwt_secret'] == initial['jwt_secret']
-    backup = job('admin', 'POST', '/api/projects/' + ref_of(renamed) + '/restore-points', {'title': 'P1 verified point'})
-    sql("UPDATE public.lifecycle_marker SET value='changed';", '_supabase_' + renamed)
-    storage_seed(renamed, 'PUT', '/object/p1-files/original.json', {'value': 'changed'})
-    restore_path = '/api/projects/' + ref_of(renamed) + '/restore-points/' + backup['restore_point_id'] + '/restore'
+    backup = job('admin', 'POST', '/api/projects/' + ref_of(alpha) + '/restore-points', {'title': 'P1 verified point'})
+    sql("UPDATE public.lifecycle_marker SET value='changed';", '_supabase_' + alpha)
+    storage_seed(alpha, 'PUT', '/object/p1-files/original.json', {'value': 'changed'})
+    restore_path = '/api/projects/' + ref_of(alpha) + '/restore-points/' + backup['restore_point_id'] + '/restore'
     expect('admin', 'POST', restore_path, 403)
     job('owner', 'POST', restore_path)
-    projection(renamed)
-    assert sql('SELECT value FROM public.lifecycle_marker WHERE id=1;', '_supabase_' + renamed) == 'original'
-    private_object(renamed)
-    assert 'data' in expect('owner', 'POST', '/api/platform/projects/' + ref_of(renamed) + '/api/graphql', 200, {'query': '{ __typename }'})
-    restored_rest = '/api/platform/projects/' + ref_of(renamed) + '/api/rest/lifecycle_marker?select=id,value'
+    projection(alpha)
+    assert sql('SELECT value FROM public.lifecycle_marker WHERE id=1;', '_supabase_' + alpha) == 'original'
+    private_object(alpha)
+    assert 'data' in expect('owner', 'POST', '/api/platform/projects/' + ref_of(alpha) + '/api/graphql', 200, {'query': '{ __typename }'})
+    restored_rest = '/api/platform/projects/' + ref_of(alpha) + '/api/rest/lifecycle_marker?select=id,value'
     assert expect('owner', 'GET', restored_rest, 200) == [{'id': 1, 'value': 'original'}]
     print('PASS API + signed agent duplicate / rename / JWT renewal / backup / restore', flush=True)
 
@@ -498,12 +501,12 @@ if(!response.ok){console.error(response.status+': '+await response.text());proce
         time.sleep(1)
     expect('owner', 'GET', restored_rest, 200)
     for prefix in ('supabase_realtime_messages_replication_slot_', 'supabase_realtime_replication_slot_'):
-        slot = (prefix + renamed)[:63]
-        sql("SELECT pg_create_logical_replication_slot('" + slot + "','pgoutput');", '_supabase_' + renamed)
-    assert sql("SELECT count(*) FROM pg_replication_slots WHERE database='_supabase_" + renamed + "';") == '2'
+        slot = (prefix + alpha)[:63]
+        sql("SELECT pg_create_logical_replication_slot('" + slot + "','pgoutput');", '_supabase_' + alpha)
+    assert sql("SELECT count(*) FROM pg_replication_slots WHERE database='_supabase_" + alpha + "';") == '2'
     assert sql("SELECT rolreplication FROM pg_roles WHERE rolname='platform_meta_admin';") == 'f'
     foreign_slot = ('supabase_realtime_replication_slot_' + beta)[:63]
-    sql("SELECT pg_create_logical_replication_slot('" + foreign_slot + "','pgoutput');", '_supabase_' + renamed)
+    sql("SELECT pg_create_logical_replication_slot('" + foreign_slot + "','pgoutput');", '_supabase_' + alpha)
     scope_check = '''import asyncio,os,asyncpg,sys
 async def main():
     conn=await asyncpg.connect(os.environ['META_ADMIN_DSN'])
@@ -522,21 +525,21 @@ async def main():
         else: raise AssertionError('platform_app received privileged slot cleanup')
     finally: await conn.close()
 asyncio.run(main())'''
-    run('docker', 'exec', 'projects-api', 'python', '-c', scope_check, renamed, beta, foreign_slot)
+    run('docker', 'exec', 'projects-api', 'python', '-c', scope_check, alpha, beta, foreign_slot)
     assert sql("SELECT count(*) FROM pg_replication_slots WHERE slot_name='" + foreign_slot + "';") == '1'
     sql("SELECT pg_drop_replication_slot('" + foreign_slot + "');")
-    delete_target = ref_of(renamed)
+    delete_target = ref_of(alpha)
     token = expect('global', 'POST', '/api/security/step-up', 200,
                    {'action': 'delete_project', 'project': delete_target, 'resource': delete_target}, step_up=True)['step_up_token']
     job('global', 'DELETE', '/api/projects/' + delete_target, headers={'X-Step-Up-Token': token})
-    assert not (server / 'projects' / renamed).exists()
-    assert not (server / '.functions-tenants' / (renamed + '.json')).exists()
-    assert sql("SELECT count(*) FROM pg_database WHERE datname='_supabase_" + renamed + "';") == '0'
-    assert sql("SELECT count(*) FROM projects WHERE name='" + renamed + "';") == '0'
+    assert not (server / 'projects' / alpha).exists()
+    assert not (server / '.functions-tenants' / (alpha + '.json')).exists()
+    assert sql("SELECT count(*) FROM pg_database WHERE datname='_supabase_" + alpha + "';") == '0'
+    assert sql("SELECT count(*) FROM projects WHERE name='" + alpha + "';") == '0'
     assert not (server / 'volumes/storage/objects' / initial['project_uuid']).exists()
     assert sql("SELECT count(*) FROM _realtime.tenants WHERE external_id='" + initial['project_uuid'] + "';") == '0'
-    assert sql("SELECT count(*) FROM _supavisor.tenants WHERE external_id='" + renamed + "';") == '0'
-    assert sql("SELECT count(*) FROM pg_replication_slots WHERE database='_supabase_" + renamed + "';") == '0'
+    assert sql("SELECT count(*) FROM _supavisor.tenants WHERE external_id='" + alpha + "';") == '0'
+    assert sql("SELECT count(*) FROM pg_replication_slots WHERE database='_supabase_" + alpha + "';") == '0'
     expect('owner', 'GET', restored_rest, 404)
     projection(beta)
     assert expect('owner', 'GET', '/api/platform/projects/' + ref_of(beta) + '/api/rest/lifecycle_marker?select=id,value', 200)[0]['value'] == 'original'
