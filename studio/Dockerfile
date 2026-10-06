@@ -15,7 +15,7 @@ RUN flutter build web --release
 
 FROM ${AUTHELIA_IMAGE} AS authelia-cli
 
-FROM openresty/openresty:1.31.1.1-1-bookworm-fat
+FROM openresty/openresty:1.31.1.1-3-bookworm-fat
 
 
 RUN apt-get update \
