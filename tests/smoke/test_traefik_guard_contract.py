@@ -53,9 +53,9 @@ class TraefikGuardContractTests(unittest.TestCase):
         ):
             self.assertIn(f"{key}=", env_example)
 
-    def test_malicious_router_uses_existing_web_entrypoint(self) -> None:
+    def test_malicious_routers_cover_tls_entrypoint(self) -> None:
         dynamic = (ROOT / "servidor/traefik/middlewares.yml").read_text(encoding="utf-8")
-        self.assertNotIn("websecure", dynamic)
+        self.assertEqual(4, dynamic.count("        - websecure\n"))
         self.assertNotIn("tls: {}", dynamic)
 
 

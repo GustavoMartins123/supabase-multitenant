@@ -1,6 +1,8 @@
 local cjson = require("cjson.safe")
 
-local uri = ngx.var.uri or ""
+-- uri may already be /rest/v1, /graphql/v1 or /storage/v1 after a Lua rewrite.
+-- Classify the immutable browser URL, not the internal upstream URL.
+local uri = (ngx.var.request_uri or ""):match("^([^?]*)") or ""
 local is_api = uri == "/api"
     or uri:sub(1, 5) == "/api/"
     or uri:sub(1, 15) == "/_internal_api/"

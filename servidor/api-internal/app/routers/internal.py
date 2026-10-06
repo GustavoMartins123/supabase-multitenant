@@ -1,16 +1,21 @@
 """Rotas internas consumidas por Nginx, Studio e serviços do control plane."""
 
-import hmac
+import re
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.control_plane_service import sync_user_record
+from app.directory_service import DirectorySnapshot, reconcile_directory
 from app.database import get_pool
 from app.dependencies import (
+    ensure_project_admin_access,
     ensure_project_member_access,
     get_project_role,
+    get_public_project_row,
     resolve_authenticated_user,
 )
 from app.project_settings import get_project_file_size_limit
@@ -21,42 +26,164 @@ from app.runtime_config import (
     service_key_transport_fernet,
 )
 from app.schemas import UserSyncPayload
-from app.validation import validate_project_id
+from app.validation import validate_project_id, validate_project_ref
+from app.studio_administrative_keys import get_studio_administrative_key
 
 
 router = APIRouter(tags=["internal"])
 
 
+class UserSyncResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    username: str
+    groups: list[str]
+    is_active: bool
+    email: str | None
+    picture_url: str | None
+    profile: dict[str, Any]
+    profile_version: int
+    profile_updated_at: str | None
+
+
+class ContentIdentityResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    project_id: str
+    current_ref: str
+
+
+class StudioContextResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    project_uuid: str
+    tenant_uuid: str | None
+    ref: str = Field(pattern=r"^[a-z]{20}$", min_length=20, max_length=20)
+    technical_name: str
+    display_name: str
+    role: str | None
+    anon_key: str
+    file_size_limit: int
+    project_key_version: int | None
+
+
+class EncKeyResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    enc_service_key: str
+    project_key_version: int | None
+
+
+class KeyVersionResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    project_key_version: int
+
+
 def _require_studio_nginx(request: Request) -> None:
-    if request.headers.get("X-Internal-Service") != "studio-nginx":
+    """Exige a identidade verificada pelo middleware HMAC, nunca o header cru."""
+    if getattr(request.state, "internal_service", None) != "studio-nginx":
         raise HTTPException(403, "Internal service access required")
+
+
+_END_USER_CONTEXT_HEADERS = ("X-User-Token", "X-User-Groups", "Remote-Groups")
+
+
+def _reject_end_user_context(request: Request) -> None:
+    """Fecha a rota a qualquer requisicao originada em um usuario final.
+
+    A identidade HMAC sozinha nao distingue "o gateway chamando por si" de "o
+    gateway assinando o pedido de um usuario": esta checagem faz essa distincao
+    mesmo que o roteamento volte a expor o namespace /internal/.
+    """
+    for header in _END_USER_CONTEXT_HEADERS:
+        if request.headers.get(header):
+            raise HTTPException(403, "Internal service access required")
+
+
+def _analytics_allowed_methods(analytics_path: str) -> set[str] | None:
+    safe_segment = r"[A-Za-z0-9_.-]{1,128}"
+    if re.fullmatch(rf"api/endpoints/query/{safe_segment}", analytics_path):
+        return {"GET"}
+    if analytics_path == "api/backends":
+        return {"GET", "POST"}
+    if re.fullmatch(rf"api/backends/{safe_segment}", analytics_path):
+        return {"GET", "PUT", "DELETE"}
+    if analytics_path == "api/sources":
+        return {"GET"}
+    if analytics_path == "api/rules":
+        return {"POST"}
+    return None
 
 
 @router.api_route(
     "/api/internal/analytics/{analytics_path:path}",
-    methods=["GET", "POST"],
+    methods=["GET"],
+    operation_id="proxy_global_analytics_get",
+)
+@router.api_route(
+    "/api/internal/analytics/{analytics_path:path}",
+    methods=["POST"],
+    operation_id="proxy_global_analytics_post",
+)
+@router.api_route(
+    "/api/internal/analytics/{analytics_path:path}",
+    methods=["PUT"],
+    operation_id="proxy_global_analytics_put",
+)
+@router.api_route(
+    "/api/internal/analytics/{analytics_path:path}",
+    methods=["DELETE"],
+    operation_id="proxy_global_analytics_delete",
 )
 async def proxy_global_analytics(
     analytics_path: str,
     request: Request,
 ):
-    if not analytics_path.startswith("api/") or ".." in analytics_path:
+    _require_studio_nginx(request)
+
+    allowed_methods = _analytics_allowed_methods(analytics_path)
+    if allowed_methods is None:
         raise HTTPException(404, "Analytics path not allowed")
+    if request.method not in allowed_methods:
+        raise HTTPException(405, "Analytics method not allowed")
 
-    provided_token = request.headers.get("x-api-key", "")
-    authorization = request.headers.get("authorization", "")
-    if not provided_token and authorization.lower().startswith("bearer "):
-        provided_token = authorization[7:].strip()
-    if not provided_token or not hmac.compare_digest(
-        provided_token,
-        LOGFLARE_PRIVATE_ACCESS_TOKEN,
-    ):
-        raise HTTPException(403, "Invalid Analytics token")
+    raw_query = request.scope.get("query_string", b"")
+    if len(raw_query) > 16 * 1024:
+        raise HTTPException(414, "Analytics query is too large")
+    query_items: list[tuple[str, str | int | float | bool | None]] = [
+        (key, value) for key, value in request.query_params.multi_items()
+    ]
+    if len(query_items) > 64:
+        raise HTTPException(400, "Too many Analytics query parameters")
 
-    upstream_headers = {"x-api-key": LOGFLARE_PRIVATE_ACCESS_TOKEN}
-    content_type = request.headers.get("content-type")
-    if content_type:
-        upstream_headers["content-type"] = content_type
+    raw_content_length = request.headers.get("content-length")
+    if raw_content_length:
+        try:
+            content_length = int(raw_content_length)
+        except ValueError as exc:
+            raise HTTPException(400, "Invalid Content-Length") from exc
+        if content_length < 0 or content_length > 256 * 1024:
+            raise HTTPException(413, "Analytics request body is too large")
+
+    body = await request.body()
+    if len(body) > 256 * 1024:
+        raise HTTPException(413, "Analytics request body is too large")
+
+    if request.method in {"POST", "PUT"}:
+        content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        if content_type != "application/json":
+            raise HTTPException(415, "Analytics mutations require application/json")
+    elif body:
+        raise HTTPException(400, "Request body is not allowed for this Analytics method")
+
+    upstream_headers = {
+        "x-api-key": LOGFLARE_PRIVATE_ACCESS_TOKEN,
+        "accept": "application/json",
+    }
+    if body:
+        upstream_headers["content-type"] = "application/json"
 
     try:
         async with httpx.AsyncClient(
@@ -65,9 +192,9 @@ async def proxy_global_analytics(
             upstream = await client.request(
                 request.method,
                 f"{ANALYTICS_INTERNAL_URL}/{analytics_path}",
-                params=list(request.query_params.multi_items()),
+                params=query_items,
                 headers=upstream_headers,
-                content=await request.body(),
+                content=body,
             )
     except httpx.HTTPError as exc:
         raise HTTPException(502, "Analytics service unavailable") from exc
@@ -84,104 +211,66 @@ async def proxy_global_analytics(
 
 @router.post("/api/projects/internal/users/sync")
 async def sync_user_identity(
-    body: UserSyncPayload,
-    pool=Depends(get_pool),
-):
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            synced = await sync_user_record(
-                conn,
-                user_id=body.id,
-                username=body.username,
-                display_name=body.display_name,
-                groups=body.groups,
-                is_active=body.is_active,
-                source=body.source,
-            )
-    return synced
-
-
-@router.get("/api/projects/internal/content-identity/{project_name}")
-async def get_content_project_identity(
-    project_name: str,
+    body: DirectorySnapshot,
     request: Request,
     pool=Depends(get_pool),
 ):
-    """Resolve o slug mutável para o UUID estável usado apenas por content."""
-    project_name = validate_project_id(project_name)
     _require_studio_nginx(request)
+    _reject_end_user_context(request)
 
     async with pool.acquire() as conn:
-        project = await conn.fetchrow(
-            "SELECT id, name FROM projects WHERE name = $1",
-            project_name,
-        )
-        if not project:
-            raise HTTPException(404, "Project not found")
+        async with conn.transaction():
+            synced = await reconcile_directory(conn, body)
+    return synced
 
-        history = await conn.fetch(
-            """
-            SELECT old_name, new_name
-            FROM project_name_history
-            WHERE project_id = $1
-              AND status = 'succeeded'
-            ORDER BY created_at ASC
-            """,
-            project["id"],
-        )
 
-    aliases: list[str] = []
-    seen: set[str] = set()
-    candidates = (
-        [project["name"]]
-        + [row["old_name"] for row in history]
-        + [row["new_name"] for row in history]
-    )
-    for candidate in candidates:
-        if candidate and candidate not in seen:
-            seen.add(candidate)
-            aliases.append(candidate)
-
+@router.get(
+    "/api/projects/internal/content-identity/{project_ref}",
+    response_model=ContentIdentityResponse,
+)
+async def get_content_project_identity(project_ref: str, request: Request, pool=Depends(get_pool)):
+    project_ref = validate_project_ref(project_ref)
+    _require_studio_nginx(request)
+    _reject_end_user_context(request)
+    async with pool.acquire() as conn:
+        project = await get_public_project_row(conn, project_ref)
     return JSONResponse(
-        content={
-            "project_id": str(project["id"]),
-            "current_ref": project["name"],
-            "aliases": aliases,
-        },
+        content={"project_id": str(project["id"]), "current_ref": project["public_ref"]},
         headers={"Cache-Control": "no-store"},
     )
 
 
-@router.get("/api/projects/internal/studio-context/{ref}")
+@router.get(
+    "/api/projects/internal/studio-context/{ref}",
+    response_model=StudioContextResponse,
+)
 async def get_studio_project_context(
     ref: str,
     request: Request,
     pool=Depends(get_pool),
 ):
     """Resolve and authorize the project carried by the Studio URL."""
-    ref = validate_project_id(ref)
+    ref = validate_project_ref(ref)
     _require_studio_nginx(request)
     auth_user = await resolve_authenticated_user(request, pool)
+    access = request.query_params.get("access", "member")
+    if access not in {"member", "admin"}:
+        raise HTTPException(400, "Invalid Studio access mode")
+    enc_admin_key = None
 
     async with pool.acquire() as conn:
         async with conn.transaction():
-            project = await conn.fetchrow(
-                """
-                SELECT id, tenant_uuid, name, display_name,
-                       anon_key, project_key_version
-                FROM projects
-                WHERE name = $1
-                """,
-                ref,
-            )
-            if not project:
-                raise HTTPException(404, "Project not found")
+            project = await get_public_project_row(conn, ref, for_update=access == "admin")
 
             await ensure_project_member_access(
                 conn,
                 project_id=project["id"],
                 auth_user=auth_user,
             )
+            if access == "admin":
+                await ensure_project_admin_access(conn, project_id=project["id"], auth_user=auth_user)
+                administrative_key = await get_studio_administrative_key(conn, project_id=project["id"])
+                enc_admin_key = service_key_transport_fernet.encrypt(administrative_key.encode()).decode()
             role = await get_project_role(
                 conn,
                 project_id=project["id"],
@@ -190,13 +279,17 @@ async def get_studio_project_context(
             if role is None and auth_user["is_global_admin"]:
                 role = "admin"
 
-            if not project["anon_key"]:
+            keys = await conn.fetchrow(
+                "SELECT anon_key, project_key_version FROM projects WHERE id = $1",
+                project["id"],
+            )
+            if not keys or not keys["anon_key"]:
                 raise HTTPException(409, "Project API key is not ready")
             anon_key = await decrypt_project_secret(
                 conn,
                 project_id=project["id"],
                 column="anon_key",
-                ciphertext=project["anon_key"],
+                ciphertext=keys["anon_key"],
             )
 
     return JSONResponse(
@@ -205,34 +298,38 @@ async def get_studio_project_context(
             "tenant_uuid": (
                 str(project["tenant_uuid"]) if project["tenant_uuid"] else None
             ),
-            "ref": project["name"],
+            "ref": project["public_ref"],
+            "technical_name": project["name"],
             "display_name": project["display_name"] or project["name"],
             "role": role,
             "anon_key": anon_key,
             "file_size_limit": int(get_project_file_size_limit(project["name"])),
-            "project_key_version": project["project_key_version"],
+            "project_key_version": keys["project_key_version"],
+            "enc_admin_key": enc_admin_key,
         },
         headers={"Cache-Control": "no-store"},
     )
 
 
-@router.get("/api/projects/internal/enc-key/{ref}")
+@router.get("/api/projects/internal/enc-key/{ref}", response_model=EncKeyResponse)
 async def enc_key(
     ref: str,
     request: Request,
     pool=Depends(get_pool)
 ):
-    ref = validate_project_id(ref)
+    ref = validate_project_ref(ref)
     _require_studio_nginx(request)
+    _reject_end_user_context(request)
 
     async with pool.acquire() as conn:
         async with conn.transaction():
+            project = await get_public_project_row(conn, ref)
             row = await conn.fetchrow(
                 """
                 SELECT id, service_role, project_key_version
-                FROM projects WHERE name=$1
+                FROM projects WHERE id=$1
                 """,
-                ref,
+                project["id"],
             )
             if not row or not row["service_role"]:
                 raise HTTPException(status_code=404, detail="Project not found")
@@ -251,18 +348,24 @@ async def enc_key(
     }
 
 
-@router.get("/api/projects/internal/key-version/{ref}")
+@router.get(
+    "/api/projects/internal/key-version/{ref}",
+    response_model=KeyVersionResponse,
+)
 async def project_key_version(
     ref: str,
     request: Request,
     pool=Depends(get_pool),
 ):
-    ref = validate_project_id(ref)
+    ref = validate_project_ref(ref)
     _require_studio_nginx(request)
-    version = await pool.fetchval(
-        "SELECT project_key_version FROM projects WHERE name = $1",
-        ref,
-    )
+    _reject_end_user_context(request)
+    async with pool.acquire() as conn:
+        project = await get_public_project_row(conn, ref)
+        version = await conn.fetchval(
+            "SELECT project_key_version FROM projects WHERE id = $1",
+            project["id"],
+        )
     if version is None:
         raise HTTPException(404, "Project not found")
     return {"project_key_version": version}

@@ -62,7 +62,11 @@ function _M.new(self, key)
 end
 
 function _M._time()
-  return os.time()
+  -- Fernet issuers use a high-resolution wall clock. Refresh Nginx's wall
+  -- clock before truncating to seconds; libc time() may lag a second boundary.
+  -- This does not permit future tokens or change expiry/clock-skew policy.
+  ngx.update_time()
+  return ngx.time()
 end
 
 function _M._iv()

@@ -1,5 +1,8 @@
 local cjson = require("cjson.safe")
 
+require("security.forged_identity").strip()
+require("security.csrf").enforce()
+
 local method = ngx.req.get_method()
 local uri = ngx.var.uri or ""
 

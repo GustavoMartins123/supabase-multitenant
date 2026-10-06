@@ -20,14 +20,12 @@ class InternalTlsHardeningTest(unittest.TestCase):
         runtime = read("servidor/api-internal/app/runtime_config.py")
         worker = read("servidor/api-internal/app/push_worker.py")
         cache_client = read("servidor/api-internal/app/service_key_cache.py")
-        snippets_client = read("servidor/api-internal/app/snippets_migration.py")
 
         self.assertIn('"STUDIO_CACHE_INVALIDATION_VERIFY_TLS", "true"', runtime)
         self.assertIn('"/docker/push-certs/ca.pem"', runtime)
         self.assertIn("context.check_hostname = True", runtime)
         self.assertIn("must remain enabled for HTTPS", runtime)
         self.assertIn("verify=build_studio_cache_ssl_context()", cache_client)
-        self.assertIn("verify=build_studio_cache_ssl_context()", snippets_client)
 
         self.assertIn('os.getenv("PUSH_VERIFY_TLS", "true")', worker)
         self.assertIn("ssl.create_default_context(cafile=PUSH_CA_FILE)", worker)
@@ -41,7 +39,7 @@ class InternalTlsHardeningTest(unittest.TestCase):
         helper = read("studio/nginx/lua/utils/outbound_tls.lua")
         self.assertIn("lua_ssl_trusted_certificate /var/run/studio-ca-bundle.pem;", nginx)
         self.assertIn("outbound_tls.apply_internal", lua)
-        self.assertIn('os.getenv("SERVICE_KEY_VERIFY_TLS") or "true"', helper)
+        self.assertIn('M.verify_internal = true', helper)
         self.assertIn("options.ssl_verify = M.verify_internal", helper)
         self.assertIn("options.ssl_server_name = hostname(url)", helper)
 
@@ -98,11 +96,11 @@ class SignedContractHardeningTest(unittest.TestCase):
 
 class HealthAndRouterArchitectureTest(unittest.TestCase):
     def test_healthz_bypasses_auth_and_is_used_by_compose(self) -> None:
-        main = read("servidor/api-internal/app/main.py")
+        auth = read("servidor/api-internal/app/internal_service_auth.py")
         health = read("servidor/api-internal/app/routers/health.py")
         compose = read("servidor/docker-compose-api.yml")
         self.assertIn('@router.get("/healthz"', health)
-        self.assertIn('request.url.path == "/healthz"', main)
+        self.assertIn('request.url.path == "/healthz"', auth)
         self.assertIn("127.0.0.1:18000/healthz", compose)
 
     def test_large_domains_use_dedicated_routers_and_dependencies(self) -> None:

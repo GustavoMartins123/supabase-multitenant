@@ -28,6 +28,7 @@ def _read_bounded_integer(name: str, *, default: int, minimum: int) -> int:
         raise RuntimeError(f"{name} must be at least {minimum}")
     return value
 
+
 DB_DSN = os.getenv("DB_DSN")
 HOST_AGENT_HMAC_SECRET = os.getenv("HOST_AGENT_HMAC_SECRET")
 PROJECT_SECRETS_MASTER_KEY = os.getenv("PROJECT_SECRETS_MASTER_KEY")
@@ -41,8 +42,12 @@ PROJECT_SECRETS_PREVIOUS_MASTER_KEYS = tuple(
 )
 PG_META_CRYPTO_KEY = os.getenv("PG_META_CRYPTO_KEY")
 STUDIO_SERVICE_KEY_ENCRYPTION_KEY = os.getenv("STUDIO_SERVICE_KEY_ENCRYPTION_KEY")
-NGINX_SHARED_TOKEN = os.getenv("NGINX_SHARED_TOKEN")
 NGINX_HMAC_SECRET = os.getenv("NGINX_HMAC_SECRET")
+STUDIO_GATEWAY_HMAC_SECRET = os.getenv("STUDIO_GATEWAY_HMAC_SECRET")
+PROJECTS_API_HMAC_SECRET = os.getenv("PROJECTS_API_HMAC_SECRET")
+INTERNAL_HMAC_MAX_SKEW_SECONDS = _read_bounded_integer(
+    "INTERNAL_HMAC_MAX_SKEW_SECONDS", default=60, minimum=5
+)
 LOGFLARE_PRIVATE_ACCESS_TOKEN = os.getenv("LOGFLARE_PRIVATE_ACCESS_TOKEN")
 ANALYTICS_INTERNAL_URL = os.getenv(
     "ANALYTICS_INTERNAL_URL", "http://analytics:4000"
@@ -108,7 +113,7 @@ def build_studio_cache_ssl_context() -> bool | ssl.SSLContext:
 def _validate_pg_meta_internal_url(raw_url: str) -> str:
     parsed = urllib.parse.urlparse(raw_url.strip().rstrip("/"))
     if parsed.scheme not in {"http", "https"}:
-        raise RuntimeError("Invalid PG_META_INTERNAL_URL: scheme must be http or https")
+        raise RuntimeError("Invalid PG_META_INTERNAL_URL: scheme must use http or https")
     if not parsed.hostname:
         raise RuntimeError("Invalid PG_META_INTERNAL_URL: missing hostname")
     if parsed.username or parsed.password:
@@ -135,13 +140,25 @@ for key_name, key_value in {
     "PROJECT_SECRETS_MASTER_KEY": PROJECT_SECRETS_MASTER_KEY,
     "PG_META_CRYPTO_KEY": PG_META_CRYPTO_KEY,
     "STUDIO_SERVICE_KEY_ENCRYPTION_KEY": STUDIO_SERVICE_KEY_ENCRYPTION_KEY,
-    "NGINX_SHARED_TOKEN": NGINX_SHARED_TOKEN,
     "NGINX_HMAC_SECRET": NGINX_HMAC_SECRET,
+    "STUDIO_GATEWAY_HMAC_SECRET": STUDIO_GATEWAY_HMAC_SECRET,
+    "PROJECTS_API_HMAC_SECRET": PROJECTS_API_HMAC_SECRET,
     "LOGFLARE_PRIVATE_ACCESS_TOKEN": LOGFLARE_PRIVATE_ACCESS_TOKEN,
     "HOST_AGENT_HMAC_SECRET": HOST_AGENT_HMAC_SECRET,
 }.items():
     if not key_value:
         raise RuntimeError(f"Missing {key_name} environment variable")
+
+assert STUDIO_GATEWAY_HMAC_SECRET
+assert PROJECTS_API_HMAC_SECRET
+assert PROJECT_SECRETS_MASTER_KEY
+assert PG_META_CRYPTO_KEY
+assert STUDIO_SERVICE_KEY_ENCRYPTION_KEY
+
+if hmac.compare_digest(STUDIO_GATEWAY_HMAC_SECRET, PROJECTS_API_HMAC_SECRET):
+    raise RuntimeError(
+        "STUDIO_GATEWAY_HMAC_SECRET and PROJECTS_API_HMAC_SECRET must be distinct"
+    )
 
 try:
     project_secret_manager = ProjectSecretManager(

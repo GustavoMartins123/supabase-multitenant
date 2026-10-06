@@ -37,7 +37,16 @@ require_host_agent_installation() {
 start_studio() {
     echo "Iniciando Studio, Authelia e OpenResty..."
     cd "$ROOT_DIR/studio"
-    docker compose up --build -d
+    STUDIO_COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.capacity.yml)
+    if [ -n "$(sed -n 's/^DOCKER_DESKTOP_WSL_HOST=//p' "$ROOT_DIR/servidor/.env")" ]; then
+        STUDIO_COMPOSE+=(-f docker-compose.desktop-wsl.yml)
+    fi
+    "${STUDIO_COMPOSE[@]}" pull --ignore-buildable --policy always \
+        || die "falha ao baixar as imagens do Studio; publique a versao configurada no GHCR e verifique o acesso ao registry."
+    "${STUDIO_COMPOSE[@]}" build nginx studio-assistant \
+        || die "falha ao construir o gateway OpenResty e o assistente."
+    "${STUDIO_COMPOSE[@]}" up --no-build --pull never -d \
+        || die "falha ao iniciar o Studio com as imagens obtidas."
     echo "Studio iniciado."
 }
 
@@ -60,14 +69,81 @@ case "$DEPLOYMENT_PROFILE" in
 esac
 
 require_host_agent_installation
+agent_docker_config="$(sed -n 's/^HOST_AGENT_DOCKER_CONFIG=//p' "$ROOT_DIR/servidor/.env")"
+if [ -n "$agent_docker_config" ]; then
+    [ -f "$agent_docker_config/config.json" ] || die "configuracao Docker do host-agent ausente."
+    export DOCKER_CONFIG="$agent_docker_config"
+fi
+python3 "$ROOT_DIR/tools/configure_api_resource_profiles.py" \
+    --source "$ROOT_DIR/servidor/.env" \
+    --output "$ROOT_DIR/servidor/.resource-profiles.env" \
+    || die "falha ao gerar configuracao delimitada de perfis da Projects API."
+
+python3 "$ROOT_DIR/servidor/generateProject/functions_config.py" \
+    --root "$ROOT_DIR/servidor" sync \
+    || die "falha ao gerar projecao delimitada de credenciais das Functions."
+
+[ -f "$ROOT_DIR/servidor/.storage.env" ] \
+    || die "servidor/.storage.env ausente; execute setup.sh ou a migracao do Storage compartilhado."
+
+# Stacks anteriores precisam ser convertidos pela ferramenta transitoria. O
+# runtime novo recusa explicitamente qualquer compose com Storage por projeto.
+shopt -s nullglob
+for project_compose in "$ROOT_DIR"/servidor/projects/*/docker-compose.yml; do
+    if grep -Eq 'container_name:[[:space:]]*supabase-(storage|imgproxy)-' "$project_compose"; then
+        die "stack por projeto antiga detectada em $project_compose; execute servidor/generateProject/migrate_shared_storage.sh."
+    fi
+done
 
 echo "Iniciando a base de dados e os servicos Supabase..."
+mkdir -p "$ROOT_DIR/servidor/volumes/storage/objects"
+storage_run_as="$(sed -n 's/^STORAGE_RUN_AS_USER=//p' "$ROOT_DIR/servidor/.env" | head -1 | tr -d '\"')"
+storage_uid="${storage_run_as%%:*}"
+case "$storage_uid" in
+    ''|*[!0-9]*) storage_uid=1000 ;;
+esac
+if [ "$(id -u)" != "$storage_uid" ]; then
+    die "o volume do Storage exige que o operador seja o UID de STORAGE_RUN_AS_USER ($storage_uid em servidor/.env); alinhe o usuario ou ajuste a variavel."
+fi
+chmod 2775 "$ROOT_DIR/servidor/volumes/storage" "$ROOT_DIR/servidor/volumes/storage/objects"
 cd "$ROOT_DIR/servidor"
 API_OVERRIDE="docker-compose.${SERVER_TOPOLOGY}.yml"
-API_COMPOSE=(docker compose -f docker-compose-api.yml -f "$API_OVERRIDE" --env-file .env)
+API_COMPOSE=(docker compose -f docker-compose-api.yml -f "$API_OVERRIDE" \
+    -f "$ROOT_DIR/servidor/docker-compose-api.capacity.yml" --env-file .env)
 
-docker compose -f docker-compose.yml --env-file .env up --build -d
-"${API_COMPOSE[@]}" up --build -d
+echo "Derivando capacidade da plataforma para este host..."
+source "$ROOT_DIR/servidor/generateProject/lib/platform_capacity.sh"
+platform_render_postgres_conf "$ROOT_DIR/servidor/.env" \
+    "$ROOT_DIR/servidor/volumes/db/platform-capacity.conf" \
+    || die "nao foi possivel derivar a capacidade; rode 'bash servidor/generateProject/lib/platform_capacity.sh --report servidor/.env' para ver o erro."
+CAPACITY_SERVIDOR="$ROOT_DIR/servidor/docker-compose.capacity.yml"
+CAPACITY_API="$ROOT_DIR/servidor/docker-compose-api.capacity.yml"
+CAPACITY_STUDIO="$ROOT_DIR/studio/docker-compose.capacity.yml"
+CAPACITY_TRAEFIK="$ROOT_DIR/servidor/traefik/docker-compose.capacity.yml"
+platform_render_compose_override "$ROOT_DIR/servidor/.env" servidor "$CAPACITY_SERVIDOR" \
+    || die "falha ao gerar os limites do compose principal."
+platform_render_compose_override "$ROOT_DIR/servidor/.env" api "$CAPACITY_API" \
+    || die "falha ao gerar os limites do compose da API."
+platform_render_compose_override "$ROOT_DIR/servidor/.env" studio "$CAPACITY_STUDIO" \
+    || die "falha ao gerar os limites do compose do Studio."
+platform_render_compose_override "$ROOT_DIR/servidor/.env" traefik "$CAPACITY_TRAEFIK" \
+    || die "falha ao gerar os limites do compose do Traefik."
+platform_compute_capacity "$ROOT_DIR/servidor/.env" >/dev/null
+if [ -n "${PLATFORM_CAP_DEGRADED:-}" ]; then
+    echo "  AVISO: capacidade degradada - ${PLATFORM_CAP_DEGRADED}"
+fi
+echo "  referencia desta maquina: $PLATFORM_CAP_PROJECTS projetos no perfil $PLATFORM_CAP_PROFILE (apenas informativo; perfis sao tetos por projeto, nao reservas)"
+
+SERVER_COMPOSE=(docker compose -f docker-compose.yml -f "$CAPACITY_SERVIDOR")
+desktop_wsl_host="$(sed -n 's/^DOCKER_DESKTOP_WSL_HOST=//p' .env)"
+if [ -n "$desktop_wsl_host" ]; then
+    [ ! -f "$ROOT_DIR/servidor/volumes/db/data/PG_VERSION" ] \
+        || die "banco no bind mount existente; migre os dados explicitamente antes de selecionar Docker Desktop/WSL."
+    [ -n "$(sed -n 's/^HOST_AGENT_DB_DSN=//p' .env)" ] \
+        || die "DOCKER_DESKTOP_WSL_HOST exige HOST_AGENT_DB_DSN configurado pelo setup."
+    SERVER_COMPOSE+=(-f docker-compose.desktop-wsl.yml)
+fi
+"${SERVER_COMPOSE[@]}" --env-file .env up --build -d
 
 echo "Aguardando o banco de dados ficar pronto..."
 counter=0
@@ -80,6 +156,17 @@ until [ "$(docker inspect -f '{{.State.Health.Status}}' supabase-db)" = "healthy
     sleep 5
     counter=$((counter + 1))
 done
+
+echo
+echo "Aplicando migrations do control plane e iniciando a Projects API..."
+"${API_COMPOSE[@]}" up --build -d \
+    || die "falha ao migrar o control plane ou iniciar a Projects API. Consulte: docker logs control-plane-migrations"
+
+echo "Aguardando Storage compartilhado ficar pronto..."
+# shellcheck disable=SC1091
+source "$ROOT_DIR/servidor/generateProject/lib/storage_multitenant.sh"
+storage_wait_global 60 \
+    || die "Storage/data plane compartilhados nao ficaram saudaveis; em instalacao existente, execute a migracao antes de iniciar projetos."
 
 echo
 echo "Aguardando Projects API ficar pronta..."
@@ -124,24 +211,28 @@ done
 
 echo
 echo "Iniciando Traefik com File Provider..."
-docker compose -f traefik/docker-compose.yml --env-file .env up -d
+TRAEFIK_COMPOSE=(docker compose -f traefik/docker-compose.yml -f "$CAPACITY_TRAEFIK")
+if [ -n "$desktop_wsl_host" ]; then
+    TRAEFIK_COMPOSE+=(-f traefik/docker-compose.desktop-wsl.yml)
+fi
+"${TRAEFIK_COMPOSE[@]}" --env-file .env up -d --force-recreate
 
 echo "Iniciando projetos Supabase..."
-shopt -s nullglob
-for project_dir in projects/*/; do
-    project_name="$(basename "$project_dir")"
-    [ -f "$project_dir/docker-compose.yml" ] || continue
-
-    echo "Iniciando projeto: $project_name"
-    docker compose -p "$project_name" \
-        -f "$project_dir/docker-compose.yml" \
-        --env-file .env \
-        --env-file "$project_dir/.env" \
-        up --build -d
-done
+# shellcheck disable=SC1091
+source "$ROOT_DIR/servidor/generateProject/lib/project_boot.sh"
+BOOT_PROJECT_FAILURES=0
+if ! start_all_projects "$ROOT_DIR/servidor/projects" "$ROOT_DIR/servidor/.env"; then
+    echo "AVISO: nem todos os projetos iniciaram; o Studio sera iniciado mesmo assim." >&2
+    BOOT_PROJECT_FAILURES=1
+fi
 
 if [ "$DEPLOYMENT_PROFILE" = "single-node" ]; then
     start_studio
+fi
+
+if [ "$BOOT_PROJECT_FAILURES" -ne 0 ]; then
+    echo "Perfil $DEPLOYMENT_PROFILE iniciado com falhas em projetos (ver AVISO acima)." >&2
+    exit 1
 fi
 
 echo "Perfil $DEPLOYMENT_PROFILE iniciado com sucesso."

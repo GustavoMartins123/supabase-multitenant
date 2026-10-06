@@ -1,12 +1,14 @@
 local cjson = require("cjson.safe")
 local fernet = require("resty.fernet")
 local http = require("resty.http")
+local internal_hmac = require("security.internal_hmac")
 local service_key_version = require("cache.service_key_version")
 local outbound_tls = require("utils.outbound_tls")
+local ref_resolver = require("project_context.project_ref_resolver")
 
 local server_domain = (os.getenv("SERVER_DOMAIN") or ""):gsub("/+$", "")
-local hostname = string.match(server_domain or "", "//([^/:]+)") or "localhost"
-local shared_token = os.getenv("NGINX_SHARED_TOKEN")
+local hostname = string.match(server_domain, "^https?://([^/:]+)")
+local hmac_secret = os.getenv("STUDIO_GATEWAY_HMAC_SECRET")
 local encryption_key = os.getenv("STUDIO_SERVICE_KEY_ENCRYPTION_KEY")
 local cache_ttl = tonumber(os.getenv("SERVICE_KEY_CACHE_TTL_SECONDS")) or 60
 local fetch_error_ttl = tonumber(os.getenv("SERVICE_KEY_FETCH_ERROR_TTL_SECONDS")) or 2
@@ -28,15 +30,23 @@ local function fetch_error_key(project_ref)
 end
 
 local function internal_request(path)
+    local signed_headers, sign_err = internal_hmac.sign_headers(
+        hmac_secret,
+        "studio-nginx",
+        "GET",
+        path,
+        ""
+    )
+    if not signed_headers then
+        return nil, sign_err or "falha ao assinar chamada interna"
+    end
+    signed_headers["Host"] = hostname
+
     local http_client = http.new()
     http_client:set_timeout(1000)
     local url = server_domain .. path
     return http_client:request_uri(url, outbound_tls.apply_internal(url, {
-        headers = {
-            ["X-Shared-Token"] = shared_token,
-            ["X-Internal-Service"] = "studio-nginx",
-            ["Host"] = hostname,
-        },
+        headers = signed_headers,
         method = "GET",
         keepalive = true,
     }))
@@ -108,11 +118,12 @@ local function fetch_service_key(project_ref)
 end
 
 local function get_service_key(project_ref)
-    if not project_ref or project_ref == "" or project_ref == "default" then
+    if not ref_resolver.valid_ref(project_ref) then
+        ngx.log(ngx.ERR, "Invalid public reference for service key lookup")
         return ""
     end
-    if server_domain == ""
-        or not shared_token or shared_token == ""
+    if not hostname
+        or not hmac_secret or hmac_secret == ""
         or not encryption_key or encryption_key == ""
     then
         ngx.log(ngx.ERR, "Configuração do cache de service key ausente")

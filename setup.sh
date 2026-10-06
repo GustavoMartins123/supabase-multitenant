@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -Ee
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -45,6 +45,19 @@ read_env_value() {
     grep -m1 "^${key}=" "$file" | cut -d= -f2-
 }
 
+env_secret() {
+    local file="$1"
+    local key="$2"
+    shift 2
+    local current
+    current=$(read_env_value "$file" "$key" 2>/dev/null || true)
+    if [ -n "$current" ] && [ "$current" != "pass" ]; then
+        printf '%s' "$current"
+    else
+        "$@"
+    fi
+}
+
 init_transaction() {
     mkdir -p "$TRANSACTION_DIR"
     print_status "Sistema de transação inicializado em $TRANSACTION_DIR"
@@ -53,7 +66,8 @@ init_transaction() {
 backup_file() {
     local file="$1"
     if [[ -f "$file" ]]; then
-        local backup_path="$TRANSACTION_DIR/$(echo "$file" | tr '/' '_')"
+        local backup_path
+        backup_path="$TRANSACTION_DIR/$(echo "$file" | tr '/' '_')"
         cp "$file" "$backup_path"
         MODIFIED_FILES+=("$file")
         print_status "Backup criado: $file -> $backup_path"
@@ -63,18 +77,18 @@ backup_file() {
 safe_sed() {
     local pattern="$1"
     local file="$2"
-    local temp_file="$TRANSACTION_DIR/temp_$(basename "$file")"
-    
-    if [[ ! " ${MODIFIED_FILES[@]} " =~ " ${file} " ]]; then
+    local temp_file
+    temp_file="$TRANSACTION_DIR/temp_$(basename "$file")"
+
+    if [[ " ${MODIFIED_FILES[*]} " != *" ${file} "* ]]; then
         backup_file "$file"
     fi
 
-    sed "$pattern" "$file" > "$temp_file"
-    
-    if [[ $? -eq 0 ]]; then
+    if sed "$pattern" "$file" > "$temp_file"; then
         mv "$temp_file" "$file"
         return 0
     else
+        rm -f "$temp_file"
         print_error "Falha ao aplicar modificação em $file"
         return 1
     fi
@@ -92,7 +106,8 @@ rollback_transaction() {
     
     if [[ -d "$TRANSACTION_DIR" ]]; then
         for file in "${MODIFIED_FILES[@]}"; do
-            local backup_path="$TRANSACTION_DIR/$(echo "$file" | tr '/' '_')"
+            local backup_path
+            backup_path="$TRANSACTION_DIR/$(echo "$file" | tr '/' '_')"
             if [[ -f "$backup_path" ]]; then
                 cp "$backup_path" "$file"
                 print_status "Restaurado: $file"
@@ -139,8 +154,20 @@ generate_hmac_secret() {
     openssl rand -hex 32
 }
 
+generate_storage_admin_key() {
+    openssl rand -hex 32
+}
+
+generate_storage_encryption_key() {
+    openssl rand -hex 32
+}
+
 generate_postgres_password() {
   openssl rand -base64 32 | tr '/+' '_-' | tr -d '\n'
+}
+
+generate_key_authorizer_password() {
+  openssl rand -hex 32
 }
 
 generate_user_realtime() {
@@ -164,7 +191,8 @@ validate_input() {
 validate_ip() {
     local ip="$1"
     local IFS='.'
-    local -a octets=($ip)
+    local -a octets
+    read -r -a octets <<< "$ip"
     
     if [[ ${#octets[@]} -ne 4 ]]; then
         return 1
@@ -270,10 +298,119 @@ confirm_network_topology() {
     done
 }
 
+validate_env_contract() {
+    print_status "Validando contrato das variáveis de ambiente..."
+    local fail=0
+    local env_file line key value
+    for env_file in servidor/.env servidor/.analytics.env servidor/.storage.env studio/.env studio/.analytics.env; do
+        if [[ ! -f "$env_file" ]]; then
+            print_error "Arquivo ausente após setup: $env_file"
+            fail=1
+            continue
+        fi
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            [[ -z "$line" || "$line" == \#* ]] && continue
+            [[ "$line" != *=* ]] && { print_error "Linha sem '=' em $env_file: $line"; fail=1; continue; }
+            key="${line%%=*}"
+            value="${line#*=}"
+            if [[ "$key" == *" "* ]]; then
+                print_error "Chave com espaço em $env_file: $key"
+                fail=1
+            fi
+            if [[ "$value" == "pass" && "$key" != "TRAEFIK_ACME_EMAIL" ]]; then
+                print_error "Placeholder sobrevivente: $key em $env_file"
+                fail=1
+            fi
+            if [[ "$value" =~ \<[^\<\>\ ]+\> ]]; then
+                print_error "Placeholder não substituído: $key em $env_file"
+                fail=1
+            fi
+            trimmed_value="${value# }"
+            trimmed_value="${trimmed_value% }"
+            if [[ "$value" != "$trimmed_value" ]]; then
+                print_error "Espaço nas bordas: $key em $env_file"
+                fail=1
+            fi
+        done < "$env_file"
+    done
+    local required_key required_file
+    for required_key in PROJECT_SECRETS_MASTER_KEY PG_META_CRYPTO_KEY STUDIO_SERVICE_KEY_ENCRYPTION_KEY NGINX_HMAC_SECRET HOST_AGENT_HMAC_SECRET; do
+        value=$(read_env_value servidor/.env "$required_key" 2>/dev/null || true)
+        if [[ -z "$value" || "$value" == "pass" ]]; then
+            print_error "Chave obrigatória vazia ou placeholder: $required_key em servidor/.env"
+            fail=1
+        fi
+    done
+    for required_file in servidor/.analytics.env studio/.analytics.env; do
+        value=$(read_env_value "$required_file" LOGFLARE_PRIVATE_ACCESS_TOKEN 2>/dev/null || true)
+        if [[ -z "$value" || "$value" == "pass" ]]; then
+            print_error "LOGFLARE_PRIVATE_ACCESS_TOKEN vazio ou placeholder em $required_file"
+            fail=1
+        fi
+    done
+    for required_file in servidor/.env studio/.env; do
+        for required_key in STUDIO_GATEWAY_HMAC_SECRET PROJECTS_API_HMAC_SECRET; do
+            value=$(read_env_value "$required_file" "$required_key" 2>/dev/null || true)
+            if [[ ! "$value" =~ ^[0-9a-fA-F]{64}$ ]]; then
+                print_error "$required_key vazio ou placeholder em $required_file"
+                fail=1
+            fi
+        done
+    done
+    value=$(read_env_value studio/.env STUDIO_ANALYTICS_HMAC_SECRET 2>/dev/null || true)
+    if [[ ! "$value" =~ ^[0-9a-fA-F]{64}$ ]]; then
+        print_error "STUDIO_ANALYTICS_HMAC_SECRET invalido em studio/.env"
+        fail=1
+    fi
+    if ! python3 - servidor/.env <<'PYEOF'
+import ipaddress
+import sys
+
+values = {}
+with open(sys.argv[1], encoding="utf-8") as handle:
+    for raw in handle:
+        if "=" in raw and not raw.startswith("#"):
+            key, _, value = raw.partition("=")
+            values[key.strip()] = value.strip()
+try:
+    subnet = ipaddress.ip_network(values["SUPABASE_NETWORK_SUBNET"], strict=False)
+    gateway = ipaddress.ip_address(values["SUPABASE_NETWORK_GATEWAY"])
+    ip_range = ipaddress.ip_network(values["SUPABASE_NETWORK_IP_RANGE"], strict=False)
+except (KeyError, ValueError) as exc:
+    print(f"rede invalida em servidor/.env: {exc}")
+    sys.exit(1)
+if gateway not in subnet:
+    print(f"gateway {gateway} fora da subnet {subnet}")
+    sys.exit(1)
+if not ip_range.subnet_of(subnet):
+    print(f"ip-range {ip_range} fora da subnet {subnet}")
+    sys.exit(1)
+for item in values.get("PROJECTS_API_ALLOWED_IP_RANGES", "").split(","):
+    item = item.strip()
+    if not item:
+        continue
+    try:
+        ipaddress.ip_address(item.split("/")[0])
+        if "/" in item:
+            ipaddress.ip_network(item, strict=False)
+    except ValueError:
+        print(f"PROJECTS_API_ALLOWED_IP_RANGES invalido: {item!r}")
+        sys.exit(1)
+PYEOF
+    then
+        print_error "Validação de rede falhou em servidor/.env"
+        fail=1
+    fi
+    if [[ "$fail" -ne 0 ]]; then
+        return 1
+    fi
+    print_success "Contrato de ambiente válido."
+}
+
 print_setup_usage() {
     cat <<'EOF'
 Uso:
-  bash setup.sh single-node
+  bash setup.sh single-node [IP_PUBLICADO]
   bash setup.sh split-node [IP_OU_DOMINIO_DO_SERVIDOR]
   bash setup.sh
 
@@ -325,14 +462,11 @@ main() {
         exit 1
     fi
     print_status "Detectando IP local da máquina..."
-    LOCAL_IP=$(ip route get 8.8.8.8 | awk '{print $7; exit}')
-
-    if [ -z "$LOCAL_IP" ]; then
-        LOCAL_IP=$(grep nameserver /etc/resolv.conf | awk '{print $2}') 
-    fi
-
-    if [ -z "$LOCAL_IP" ]; then
-        LOCAL_IP=$(hostname -I | awk '{print $1}')
+    if [[ "$topology_profile" == "single-node" && -n "$configured_server" ]]; then
+        validate_ip "$configured_server" || { print_error "IP publicado invalido"; return 1; }
+        LOCAL_IP="$configured_server"
+    else
+        LOCAL_IP=$(ip route get 8.8.8.8 | awk '{print $7; exit}')
     fi
     
     if [ -z "$LOCAL_IP" ]; then
@@ -345,20 +479,18 @@ main() {
     SUPABASE_NETWORK_SUBNET=$(read_env_value servidor/.env.example SUPABASE_NETWORK_SUBNET)
     print_status "Gerando chaves de criptografia e tokens..."
 
-    PROJECT_SECRETS_MASTER_KEY=$(generate_fernet_key)
-    STUDIO_SERVICE_KEY_ENCRYPTION_KEY=$(generate_fernet_key)
-    PG_META_CRYPTO_KEY=$(generate_hmac_secret)
-    SHARED_NGINX_TOKEN=$(generate_logflare_api_key)
-    SHARED_NGINX_HMAC_SECRET=$(generate_hmac_secret)
-    SHARED_INTERNAL_HMAC_SECRET=$(generate_hmac_secret)
-    HOST_AGENT_HMAC_SECRET=$(generate_hmac_secret)
+    PROJECT_SECRETS_MASTER_KEY=$(env_secret servidor/.env PROJECT_SECRETS_MASTER_KEY generate_fernet_key)
+    STUDIO_SERVICE_KEY_ENCRYPTION_KEY=$(env_secret servidor/.env STUDIO_SERVICE_KEY_ENCRYPTION_KEY generate_fernet_key)
+    PG_META_CRYPTO_KEY=$(env_secret servidor/.env PG_META_CRYPTO_KEY generate_hmac_secret)
+    SHARED_NGINX_HMAC_SECRET=$(env_secret servidor/.env NGINX_HMAC_SECRET generate_hmac_secret)
+    SHARED_INTERNAL_HMAC_SECRET=$(env_secret servidor/.env INTERNAL_HMAC_SECRET generate_hmac_secret)
+    HOST_AGENT_HMAC_SECRET=$(env_secret servidor/.env HOST_AGENT_HMAC_SECRET generate_hmac_secret)
+    STUDIO_GATEWAY_HMAC_SECRET=$(env_secret servidor/.env STUDIO_GATEWAY_HMAC_SECRET generate_hmac_secret)
+    PROJECTS_API_HMAC_SECRET=$(env_secret servidor/.env PROJECTS_API_HMAC_SECRET generate_hmac_secret)
+    STUDIO_ANALYTICS_HMAC_SECRET=$(env_secret studio/.env STUDIO_ANALYTICS_HMAC_SECRET generate_hmac_secret)
 
     case "$topology_profile" in
         single-node)
-            if [[ -n "$configured_server" ]]; then
-                print_error "O perfil single-node usa automaticamente o IP local e nao aceita um servidor separado."
-                return 1
-            fi
             SERVER_IP="$LOCAL_IP"
             confirm_network_topology "$LOCAL_IP" "$SERVER_IP" false
             ;;
@@ -399,53 +531,113 @@ main() {
         exit 1
     fi
 
-    DB_ENC_KEY=$(generate_db_enc_key)
-    VAULT_ENC_KEY=$(generate_vault_enc_key)
-    SECRET_KEY_BASE=$(generate_secret_key_base)
-    LOGFLARE_PUBLIC_ACCESS_TOKEN=$(generate_logflare_api_key)
-    LOGFLARE_PRIVATE_ACCESS_TOKEN=$(generate_logflare_api_key)
-    LOGFLARE_DB_ENCRYPTION_KEY=$(generate_logflare_encryption_key)
+    DB_ENC_KEY=$(env_secret servidor/.env DB_ENC_KEY generate_db_enc_key)
+    VAULT_ENC_KEY=$(env_secret servidor/.env VAULT_ENC_KEY generate_vault_enc_key)
+    SECRET_KEY_BASE=$(env_secret servidor/.env SECRET_KEY_BASE generate_secret_key_base)
+    LOGFLARE_PUBLIC_ACCESS_TOKEN=$(env_secret servidor/.analytics.env LOGFLARE_PUBLIC_ACCESS_TOKEN generate_logflare_api_key)
+    LOGFLARE_PRIVATE_ACCESS_TOKEN=$(env_secret servidor/.analytics.env LOGFLARE_PRIVATE_ACCESS_TOKEN generate_logflare_api_key)
+    LOGFLARE_DB_ENCRYPTION_KEY=$(env_secret servidor/.analytics.env LOGFLARE_DB_ENCRYPTION_KEY generate_logflare_encryption_key)
     if [[ "$LOGFLARE_PUBLIC_ACCESS_TOKEN" == "$LOGFLARE_PRIVATE_ACCESS_TOKEN" ]]; then
         print_error "Tokens publico e privado do Logflare nao podem ser iguais"
         return 1
     fi
-    PROJECT_DELETE_PASSWORD=$(generate_jwt_secret)
-    DASHBOARD_USER=$(generate_user_realtime)
-    DASHBOARD_PASSWORD=$(generate_realtime_dashboard_pass)
-    JWT_SECRET=$(generate_jwt_secret)
-    POSTGRES_PASSWORD=$(generate_postgres_password)
-    META_GUEST_PASSWORD=$(generate_postgres_password)
+    PROJECT_DELETE_PASSWORD=$(env_secret servidor/.env PROJECT_DELETE_PASSWORD generate_jwt_secret)
+    DASHBOARD_USER=$(env_secret servidor/.env DASHBOARD_USER generate_user_realtime)
+    DASHBOARD_PASSWORD=$(env_secret servidor/.env DASHBOARD_PASSWORD generate_realtime_dashboard_pass)
+    JWT_SECRET=$(env_secret servidor/.env JWT_SECRET generate_jwt_secret)
+    POSTGRES_PASSWORD=$(env_secret servidor/.env POSTGRES_PASSWORD generate_postgres_password)
+    META_GUEST_PASSWORD=$(env_secret servidor/.env META_GUEST_PASSWORD generate_postgres_password)
+    KEY_AUTHORIZER_DB_PASSWORD=$(env_secret servidor/.env KEY_AUTHORIZER_DB_PASSWORD generate_key_authorizer_password)
+    CLIENT_CONFIGURATION_DB_PASSWORD=$(env_secret servidor/.env CLIENT_CONFIGURATION_DB_PASSWORD generate_key_authorizer_password)
+    STORAGE_ADMIN_API_KEY=$(env_secret servidor/.storage.env SERVER_ADMIN_API_KEYS generate_storage_admin_key)
+    STORAGE_AUTH_ENCRYPTION_KEY=$(env_secret servidor/.storage.env AUTH_ENCRYPTION_KEY generate_storage_encryption_key)
 
-    cp servidor/.env.example servidor/.env
-    cp servidor/.analytics.env.example servidor/.analytics.env
+    if [ ! -f servidor/.env ]; then cp servidor/.env.example servidor/.env; fi
+    if [ ! -f servidor/.analytics.env ]; then cp servidor/.analytics.env.example servidor/.analytics.env; fi
+    if [ ! -f servidor/.storage.env ]; then cp servidor/.storage.env.example servidor/.storage.env; fi
 
     safe_sed "s|POSTGRES_PASSWORD=pass|POSTGRES_PASSWORD=$POSTGRES_PASSWORD|g" servidor/.env
     safe_sed "s|META_GUEST_PASSWORD=pass|META_GUEST_PASSWORD=$META_GUEST_PASSWORD|g" servidor/.env
+    safe_sed "s|KEY_AUTHORIZER_DB_PASSWORD=pass|KEY_AUTHORIZER_DB_PASSWORD=$KEY_AUTHORIZER_DB_PASSWORD|g" servidor/.env
+    CLIENT_CONFIGURATION_DB_PASSWORD="$CLIENT_CONFIGURATION_DB_PASSWORD" python3 - <<'PYEOF'
+import os
+from pathlib import Path
+from tools.configure_studio_runtime import _set_env_value, atomic_write
+path = Path('servidor/.env')
+content = path.read_text(encoding='utf-8')
+key = 'CLIENT_CONFIGURATION_DB_PASSWORD'
+if sum(line.startswith(key + '=') for line in content.splitlines()) > 1:
+    raise RuntimeError('Duplicate CLIENT_CONFIGURATION_DB_PASSWORD entry')
+content = _set_env_value(content, key, os.environ[key])
+atomic_write(path, content, mode=0o600, replace=True)
+PYEOF
+    PLATFORM_READER_DB_PASSWORD=$(env_secret servidor/.env PLATFORM_READER_DB_PASSWORD generate_key_authorizer_password)
+    safe_sed "s|PLATFORM_READER_DB_PASSWORD=pass|PLATFORM_READER_DB_PASSWORD=$PLATFORM_READER_DB_PASSWORD|g" servidor/.env
+    PLATFORM_APP_DB_PASSWORD=$(env_secret servidor/.env PLATFORM_APP_DB_PASSWORD generate_key_authorizer_password)
+    safe_sed "s|PLATFORM_APP_DB_PASSWORD=pass|PLATFORM_APP_DB_PASSWORD=$PLATFORM_APP_DB_PASSWORD|g" servidor/.env
+    META_ADMIN_DB_PASSWORD=$(env_secret servidor/.env META_ADMIN_DB_PASSWORD generate_key_authorizer_password)
+    safe_sed "s|META_ADMIN_DB_PASSWORD=pass|META_ADMIN_DB_PASSWORD=$META_ADMIN_DB_PASSWORD|g" servidor/.env
+    HOST_AGENT_DB_PASSWORD=$(env_secret servidor/.env HOST_AGENT_DB_PASSWORD generate_key_authorizer_password)
+    safe_sed "s|HOST_AGENT_DB_PASSWORD=pass|HOST_AGENT_DB_PASSWORD=$HOST_AGENT_DB_PASSWORD|g" servidor/.env
+    if [[ -n "${SETUP_DOCKER_DESKTOP_WSL_HOST:-}" ]]; then
+        validate_ip "$SETUP_DOCKER_DESKTOP_WSL_HOST" || { print_error "Interface WSL invalida"; return 1; }
+        python3 - "$SETUP_DOCKER_DESKTOP_WSL_HOST" <<'PYEOF'
+import ipaddress
+import sys
+address = ipaddress.ip_address(sys.argv[1])
+networks = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+if not any(address in ipaddress.ip_network(network) for network in networks):
+    sys.exit("A interface WSL deve ser um endereco privado RFC1918")
+PYEOF
+        python3 - servidor/.env "$SETUP_DOCKER_DESKTOP_WSL_HOST" <<'PYEOF'
+from pathlib import Path
+import sys
+from tools.configure_studio_runtime import _read_env_value, _set_env_value, atomic_write
+path = Path(sys.argv[1])
+content = path.read_text(encoding="utf-8")
+password = _read_env_value(content, "HOST_AGENT_DB_PASSWORD")
+port = _read_env_value(content, "POSTGRES_PORT")
+database = _read_env_value(content, "POSTGRES_DB")
+content = _set_env_value(content, "DOCKER_DESKTOP_WSL_HOST", sys.argv[2])
+content = _set_env_value(content, "HOST_AGENT_DB_DSN", f"postgresql://host_agent_rw:{password}@{sys.argv[2]}:{port}/{database}")
+atomic_write(path, content, mode=0o600, replace=True)
+PYEOF
+    fi
     safe_sed "s|DB_ENC_KEY=pass|DB_ENC_KEY=$DB_ENC_KEY|g" servidor/.env
     safe_sed "s|VAULT_ENC_KEY=pass|VAULT_ENC_KEY=$VAULT_ENC_KEY|g" servidor/.env
     safe_sed "s|SECRET_KEY_BASE=pass|SECRET_KEY_BASE=$SECRET_KEY_BASE|g" servidor/.env
     safe_sed "s|LOGFLARE_PUBLIC_ACCESS_TOKEN=pass|LOGFLARE_PUBLIC_ACCESS_TOKEN=$LOGFLARE_PUBLIC_ACCESS_TOKEN|g" servidor/.analytics.env
     safe_sed "s|LOGFLARE_PRIVATE_ACCESS_TOKEN=pass|LOGFLARE_PRIVATE_ACCESS_TOKEN=$LOGFLARE_PRIVATE_ACCESS_TOKEN|g" servidor/.analytics.env
     safe_sed "s|LOGFLARE_DB_ENCRYPTION_KEY=pass|LOGFLARE_DB_ENCRYPTION_KEY=$LOGFLARE_DB_ENCRYPTION_KEY|g" servidor/.analytics.env
+    safe_sed "s|SERVER_ADMIN_API_KEYS=pass|SERVER_ADMIN_API_KEYS=$STORAGE_ADMIN_API_KEY|g" servidor/.storage.env
+    safe_sed "s|AUTH_ENCRYPTION_KEY=pass|AUTH_ENCRYPTION_KEY=$STORAGE_AUTH_ENCRYPTION_KEY|g" servidor/.storage.env
     safe_sed "s|JWT_SECRET=pass|JWT_SECRET=$JWT_SECRET|g" servidor/.env
     safe_sed "s|PROJECT_SECRETS_MASTER_KEY=pass|PROJECT_SECRETS_MASTER_KEY=$PROJECT_SECRETS_MASTER_KEY|g" servidor/.env
     safe_sed "s|PG_META_CRYPTO_KEY=pass|PG_META_CRYPTO_KEY=$PG_META_CRYPTO_KEY|g" servidor/.env
     safe_sed "s|^STUDIO_SERVICE_KEY_ENCRYPTION_KEY=.*|STUDIO_SERVICE_KEY_ENCRYPTION_KEY=$STUDIO_SERVICE_KEY_ENCRYPTION_KEY|g" servidor/.env
-    safe_sed "s|^NGINX_SHARED_TOKEN=.*|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" servidor/.env
     safe_sed "s|^NGINX_HMAC_SECRET=.*|NGINX_HMAC_SECRET=$SHARED_NGINX_HMAC_SECRET|g" servidor/.env
     safe_sed "s|^INTERNAL_HMAC_SECRET=.*|INTERNAL_HMAC_SECRET=$SHARED_INTERNAL_HMAC_SECRET|g" servidor/.env
     safe_sed "s|^HOST_AGENT_HMAC_SECRET=.*|HOST_AGENT_HMAC_SECRET=$HOST_AGENT_HMAC_SECRET|g" servidor/.env
+    safe_sed "s|^STUDIO_GATEWAY_HMAC_SECRET=.*|STUDIO_GATEWAY_HMAC_SECRET=$STUDIO_GATEWAY_HMAC_SECRET|g" servidor/.env
+    safe_sed "s|^PROJECTS_API_HMAC_SECRET=.*|PROJECTS_API_HMAC_SECRET=$PROJECTS_API_HMAC_SECRET|g" servidor/.env
     safe_sed "s|PROJECT_DELETE_PASSWORD=pass|PROJECT_DELETE_PASSWORD=$PROJECT_DELETE_PASSWORD|g" servidor/.env
-    if [[ "$SERVER_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
-    [[ "$SERVER_IP" =~ : ]]; then
-        PROTO="http"
-    else
-        PROTO="https"
+    PROTO="https"
+    BACKEND_HOST="$SERVER_IP"
+    STUDIO_BACKEND_TLS_NAME=""
+    RUNTIME_DNS_ARGS=()
+    if [[ "$(validate_input "$SERVER_IP")" == "ip" ]]; then
+        BACKEND_HOST="supabase-backend.internal"
+        STUDIO_BACKEND_TLS_NAME="$BACKEND_HOST"
+        RUNTIME_DNS_ARGS=(--server-dns-host "$BACKEND_HOST")
     fi
+    safe_sed "s|^TRAEFIK_ENABLE_TLS=.*|TRAEFIK_ENABLE_TLS=true|g" servidor/.env
+    safe_sed "s|^TRAEFIK_TLS_MODE=.*|TRAEFIK_TLS_MODE=file|g" servidor/.env
     safe_sed "s|SERVER_URL=pass|SERVER_URL=${SERVER_IP}|g" servidor/.env
     safe_sed "s|SERVER_PROTO=pass|SERVER_PROTO=${PROTO}|g" servidor/.env
     safe_sed "s|^PUSH_API_URL=.*|PUSH_API_URL=https://${LOCAL_IP}:${STUDIO_HTTPS_PORT}/api/internal/push|g" servidor/.env
     safe_sed "s|^PROJECTS_API_ALLOWED_IP_RANGES=.*|PROJECTS_API_ALLOWED_IP_RANGES=${LOCAL_IP}/32,${SUPABASE_NETWORK_SUBNET}|g" servidor/.env
+    backup_file "servidor/traefik/traefik.runtime.yml"
+    python3 tools/configure_access_runtime.py --env servidor/.env --studio-ip "$LOCAL_IP" --studio-network "$SUPABASE_NETWORK_SUBNET"
     if [[ "$SERVER_IP" != "$LOCAL_IP" ]]; then
         safe_sed "s|^VECTOR_FLUENTD_BIND=.*|VECTOR_FLUENTD_BIND=0.0.0.0|g" servidor/.env
     fi
@@ -455,6 +647,7 @@ main() {
     safe_sed "s|^STUDIO_CACHE_INVALIDATION_CA_FILE=.*|STUDIO_CACHE_INVALIDATION_CA_FILE=/docker/push-certs/ca.pem|g" servidor/.env
     safe_sed "s|DASHBOARD_USER=pass|DASHBOARD_USER=${DASHBOARD_USER}|g" servidor/.env
     safe_sed "s|DASHBOARD_PASSWORD=pass|DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD}|g" servidor/.env
+    safe_sed "s|^STORAGE_RUN_AS_USER=.*|STORAGE_RUN_AS_USER=$(id -u):$(id -g)|g" servidor/.env
     print_success "Arquivo servidor/.env configurado com sucesso!"
 
     print_status "Configurando studio..."
@@ -464,17 +657,24 @@ main() {
         exit 1
     fi
     
-    POSTGRES_NGINX_PASSWORD=$(generate_postgres_password)
-
-    cp studio/.env.example studio/.env
-    cp studio/.analytics.env.example studio/.analytics.env
+    if [ ! -f studio/.env ]; then cp studio/.env.example studio/.env; fi
+    if [ ! -f studio/.analytics.env ]; then cp studio/.analytics.env.example studio/.analytics.env; fi
     safe_sed "s|^STUDIO_SERVICE_KEY_ENCRYPTION_KEY=.*|STUDIO_SERVICE_KEY_ENCRYPTION_KEY=$STUDIO_SERVICE_KEY_ENCRYPTION_KEY|g" studio/.env
-    safe_sed "s|^NGINX_SHARED_TOKEN=.*|NGINX_SHARED_TOKEN=$SHARED_NGINX_TOKEN|g" studio/.env
     safe_sed "s|^NGINX_HMAC_SECRET=.*|NGINX_HMAC_SECRET=$SHARED_NGINX_HMAC_SECRET|g" studio/.env
     safe_sed "s|^INTERNAL_HMAC_SECRET=.*|INTERNAL_HMAC_SECRET=$SHARED_INTERNAL_HMAC_SECRET|g" studio/.env
+    safe_sed "s|^STUDIO_GATEWAY_HMAC_SECRET=.*|STUDIO_GATEWAY_HMAC_SECRET=$STUDIO_GATEWAY_HMAC_SECRET|g" studio/.env
+    safe_sed "s|^PROJECTS_API_HMAC_SECRET=.*|PROJECTS_API_HMAC_SECRET=$PROJECTS_API_HMAC_SECRET|g" studio/.env
+    safe_sed "s|^STUDIO_ANALYTICS_HMAC_SECRET=.*|STUDIO_ANALYTICS_HMAC_SECRET=$STUDIO_ANALYTICS_HMAC_SECRET|g" studio/.env
     safe_sed "s|^LOGFLARE_PRIVATE_ACCESS_TOKEN=.*|LOGFLARE_PRIVATE_ACCESS_TOKEN=$LOGFLARE_PRIVATE_ACCESS_TOKEN|g" studio/.analytics.env
-    safe_sed "s|POSTGRES_NGINX_PASSWORD=pass|POSTGRES_NGINX_PASSWORD=$POSTGRES_NGINX_PASSWORD|g" studio/.env
     safe_sed "s|^SERVER_DOMAIN=.*|SERVER_DOMAIN=${PROTO}://${SERVER_IP}|g" studio/.env
+    python3 - studio/.env "$STUDIO_BACKEND_TLS_NAME" <<'PYEOF'
+from pathlib import Path
+import sys
+from tools.configure_studio_runtime import _set_env_value, atomic_write
+path = Path(sys.argv[1])
+content = _set_env_value(path.read_text(encoding="utf-8"), "STUDIO_BACKEND_TLS_NAME", sys.argv[2])
+atomic_write(path, content, mode=0o600, replace=True)
+PYEOF
     if [[ "$SERVER_IP" != "$LOCAL_IP" ]]; then
         safe_sed "s|^VECTOR_FLUENTD_ADDRESS=.*|VECTOR_FLUENTD_ADDRESS=${SERVER_IP}:24224|g" studio/.env
     fi
@@ -483,18 +683,19 @@ main() {
 
     assert_env_value servidor/.env STUDIO_SERVICE_KEY_ENCRYPTION_KEY "$STUDIO_SERVICE_KEY_ENCRYPTION_KEY"
     assert_env_value studio/.env STUDIO_SERVICE_KEY_ENCRYPTION_KEY "$STUDIO_SERVICE_KEY_ENCRYPTION_KEY"
-    assert_env_value servidor/.env NGINX_SHARED_TOKEN "$SHARED_NGINX_TOKEN"
-    assert_env_value studio/.env NGINX_SHARED_TOKEN "$SHARED_NGINX_TOKEN"
     assert_env_value servidor/.env NGINX_HMAC_SECRET "$SHARED_NGINX_HMAC_SECRET"
     assert_env_value studio/.env NGINX_HMAC_SECRET "$SHARED_NGINX_HMAC_SECRET"
     assert_env_value servidor/.env INTERNAL_HMAC_SECRET "$SHARED_INTERNAL_HMAC_SECRET"
     assert_env_value studio/.env INTERNAL_HMAC_SECRET "$SHARED_INTERNAL_HMAC_SECRET"
     assert_env_value servidor/.env HOST_AGENT_HMAC_SECRET "$HOST_AGENT_HMAC_SECRET"
+    assert_env_value studio/.env STUDIO_ANALYTICS_HMAC_SECRET "$STUDIO_ANALYTICS_HMAC_SECRET"
     assert_env_value servidor/.analytics.env LOGFLARE_PUBLIC_ACCESS_TOKEN "$LOGFLARE_PUBLIC_ACCESS_TOKEN"
     assert_env_value servidor/.analytics.env LOGFLARE_PRIVATE_ACCESS_TOKEN "$LOGFLARE_PRIVATE_ACCESS_TOKEN"
     assert_env_value servidor/.analytics.env LOGFLARE_DB_ENCRYPTION_KEY "$LOGFLARE_DB_ENCRYPTION_KEY"
+    assert_env_value servidor/.storage.env SERVER_ADMIN_API_KEYS "$STORAGE_ADMIN_API_KEY"
+    assert_env_value servidor/.storage.env AUTH_ENCRYPTION_KEY "$STORAGE_AUTH_ENCRYPTION_KEY"
     assert_env_value studio/.analytics.env LOGFLARE_PRIVATE_ACCESS_TOKEN "$LOGFLARE_PRIVATE_ACCESS_TOKEN"
-    chmod 600 servidor/.env servidor/.analytics.env studio/.env studio/.analytics.env
+    chmod 600 servidor/.env servidor/.analytics.env servidor/.storage.env studio/.env studio/.analytics.env
     print_success "Arquivo studio/.env configurado com sucesso!"
     
     echo ""
@@ -503,6 +704,7 @@ main() {
     print_status "Arquivos configurados:"
     echo "  ✓ servidor/.env"
     echo "  ✓ servidor/.analytics.env"
+    echo "  ✓ servidor/.storage.env"
     echo "  ✓ studio/.env"
     echo "  ✓ studio/.analytics.env"
     echo ""
@@ -510,10 +712,13 @@ main() {
     echo "  - PROJECT_SECRETS_MASTER_KEY (somente servidor)"
     echo "  - PG_META_CRYPTO_KEY (servidor e Postgres-Meta)"
     echo "  - STUDIO_SERVICE_KEY_ENCRYPTION_KEY (servidor e Studio)"
-    echo "  - NGINX_SHARED_TOKEN (servidor e studio)"
-    echo "  - NGINX_HMAC_SECRET (servidor e studio)"
+    echo "  - NGINX_HMAC_SECRET (servidor e studio; tokens de usuario)"
+    echo "  - STUDIO_GATEWAY_HMAC_SECRET (servidor e studio; gerado pelo configurador)"
+    echo "  - PROJECTS_API_HMAC_SECRET (servidor e studio; gerado pelo configurador)"
+    echo "  - STUDIO_ANALYTICS_HMAC_SECRET (studio; autenticacao analytics)"
     echo "  - INTERNAL_HMAC_SECRET (servidor e studio)"
     echo "  - HOST_AGENT_HMAC_SECRET (servidor e host-agent)"
+    echo "  - SERVER_ADMIN_API_KEYS/AUTH_ENCRYPTION_KEY (somente Storage global)"
     echo ""
     print_status "Lifecycle fisico agora roda no host-agent. Instale-o com:"
     echo "  sudo bash servidor/host-agent/install.sh"
@@ -529,6 +734,8 @@ main() {
     print_status "Gerando configuracao local e certificados do Studio/Authelia..."
     python3 tools/configure_studio_runtime.py \
         --studio-origin "https://${LOCAL_IP}:${STUDIO_HTTPS_PORT}" \
+        --server-host "$SERVER_IP" \
+        "${RUNTIME_DNS_ARGS[@]}" \
         --force
 
     print_status "Copiando certificado do Studio para o servidor Python..."
@@ -537,18 +744,51 @@ main() {
     cp studio/authelia/ssl/ca.pem servidor/certs/ca.pem
     print_success "Certificado copiado para servidor/certs/ca.pem"
 
+    mkdir -p servidor/volumes/storage/objects
+    storage_run_as="$(sed -n 's/^STORAGE_RUN_AS_USER=//p' servidor/.env | head -1 | tr -d '\"')"
+    storage_uid="${storage_run_as%%:*}"
+    case "$storage_uid" in
+        ''|*[!0-9]*) storage_uid=1000 ;;
+    esac
+    if [ "$(id -u)" != "$storage_uid" ]; then
+        echo "Erro: o volume do Storage exige que o operador seja o UID de STORAGE_RUN_AS_USER ($storage_uid em servidor/.env)." >&2
+        exit 1
+    fi
+    chmod 2775 servidor/volumes/storage servidor/volumes/storage/objects
+
 
     print_success "Studio e Authelia configurados para $LOCAL_IP."
     print_status "Configurando update_geoip.sh com o caminho real..."
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [[ -n "${SETUP_DOCKER_DESKTOP_WSL_HOST:-}" ]]; then
+        python3 - servidor/.env "$SCRIPT_DIR/servidor/host-agent/.docker" <<'PYEOF'
+from pathlib import Path
+import sys
+from tools.configure_studio_runtime import _set_env_value, atomic_write
+env_path = Path(sys.argv[1])
+config_root = Path(sys.argv[2])
+config_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+config = config_root / "config.json"
+if not config.exists():
+    atomic_write(config, "{}\n", mode=0o600, replace=False)
+content = _set_env_value(env_path.read_text(encoding="utf-8"), "HOST_AGENT_DOCKER_CONFIG", str(config_root))
+atomic_write(env_path, content, mode=0o600, replace=True)
+PYEOF
+    fi
     backup_file "servidor/traefik/update_geoip.sh"
-    safe_sed "s|seucaminho|$SCRIPT_DIR|g" servidor/traefik/update_geoip.sh
+    cp servidor/traefik/update_geoip.sh.example servidor/traefik/update_geoip.sh
+    touch servidor/traefik/access.log
+    safe_sed "s|^MMDB_PATH=.*|MMDB_PATH=\"$SCRIPT_DIR/servidor/traefik/geoip/GeoLite2-Country.mmdb\"|" servidor/traefik/update_geoip.sh
+    safe_sed "s|^BACKUP_DIR=.*|BACKUP_DIR=\"$SCRIPT_DIR/servidor/traefik/logs_backup/geo\"|" servidor/traefik/update_geoip.sh
+    chmod 755 servidor/traefik/update_geoip.sh
     safe_sed "s|HOST_PROJECT_ROOT=\"pass\"|HOST_PROJECT_ROOT=\"$SCRIPT_DIR\"|g" servidor/.env
 
     bash servidor/verify_key_config.sh
     print_success "Api python configurada para permitir esse ip $LOCAL_IP a consultar ela."
     print_success "Script update_geoip.sh configurado com o caminho: $SCRIPT_DIR"
-    
+
+    validate_env_contract
+
     commit_transaction
 }
 main "$@"

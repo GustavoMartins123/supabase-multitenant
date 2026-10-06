@@ -1,0 +1,10 @@
+displayName: Gateway Admission
+type: middleware
+import: github.com/GustavoMartins123/gatewayadmission
+summary: Project and consumer admission through the private data-plane evaluator.
+testData:
+  evaluatorURL: http://key-authorizer:18010/v1/admit
+  secret: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  projectRef: ""
+  gatewayToken: ""
+  trustedProxyCIDRs: []

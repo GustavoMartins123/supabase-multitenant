@@ -59,35 +59,56 @@ if ngx.ctx.process_sign_response and not ngx.ctx.sign_response_processed then
 
     ngx.ctx.response_body = (ngx.ctx.response_body or "") .. (chunk or "")
 
-    if eof then
-        ngx.ctx.sign_response_processed = true
-        local success, response_data = pcall(cjson.decode, ngx.ctx.response_body)
-
-        if success and response_data and type(response_data) == "table" and #response_data > 0 then
-            local first_item = response_data[1]
-            if first_item and first_item.signedURL then
-                local context = ngx.ctx.studio_project_context
-                local public_origin = (os.getenv("SERVER_DOMAIN") or ""):gsub("/+$", "")
-                if type(context) ~= "table" or not context.ref or public_origin == "" then
-                    ngx.log(ngx.ERR, "Contexto do projeto ausente ao montar signed URL")
-                    ngx.arg[1] = ngx.ctx.response_body
-                    return
-                end
-
-                local signed_url = ngx.re.gsub(first_item.signedURL, "^/", "", "jo")
-                local full_url = public_origin .. "/" .. context.ref .. "/storage/v1/" .. signed_url
-                cjson.encode_escape_forward_slash(false)
-                local result = { signedUrl = full_url }
-
-                ngx.arg[1] = cjson.encode(result)
-            else
-                ngx.arg[1] = ngx.ctx.response_body
-            end
-        else
-            ngx.log(ngx.ERR, "signedURL is missing or null")
-            ngx.arg[1] = ngx.ctx.response_body
-        end
-    else
+    if not eof then
         ngx.arg[1] = nil
+        return
     end
+
+    ngx.ctx.sign_response_processed = true
+    local raw_body = ngx.ctx.response_body
+    local success, response_data = pcall(cjson.decode, raw_body)
+
+    if not success or type(response_data) ~= "table" or #response_data == 0 then
+        ngx.log(ngx.ERR, "signedURL is missing or null")
+        ngx.arg[1] = raw_body
+        return
+    end
+
+    local context = ngx.ctx.studio_project_context
+    local origin = ngx.var.studio_public_origin or ""
+    if type(context) ~= "table" or not context.ref or origin == "" then
+        ngx.log(ngx.ERR, "Contexto do projeto ausente ao montar signed URL")
+        ngx.arg[1] = raw_body
+        return
+    end
+
+    local prefix = origin .. "/storage/v1/" .. context.ref .. "/"
+    local function absolute(signed_url)
+        return prefix .. ngx.re.gsub(signed_url, "^/", "", "jo")
+    end
+
+    cjson.encode_escape_forward_slash(false)
+
+    if ngx.ctx.sign_response_mode == "multi" then
+        local items = setmetatable({}, cjson.array_mt)
+        for _, item in ipairs(response_data) do
+            if type(item) == "table" then
+                items[#items + 1] = {
+                    path = item.path,
+                    error = item.error,
+                    signedUrl = item.signedURL and absolute(item.signedURL) or nil,
+                }
+            end
+        end
+        ngx.arg[1] = cjson.encode(items)
+        return
+    end
+
+    local first_item = response_data[1]
+    if type(first_item) ~= "table" or not first_item.signedURL then
+        ngx.arg[1] = raw_body
+        return
+    end
+
+    ngx.arg[1] = cjson.encode({ signedUrl = absolute(first_item.signedURL) })
 end

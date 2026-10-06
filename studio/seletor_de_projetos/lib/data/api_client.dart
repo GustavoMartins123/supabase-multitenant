@@ -354,8 +354,8 @@ final class ApiClient {
         );
       }
       throw ApiException(
-        ApiFailureKind.cancelled,
-        'Requisicao cancelada',
+        cancelled ? ApiFailureKind.cancelled : ApiFailureKind.transport,
+        cancelled ? 'Requisicao cancelada' : 'Requisicao interrompida',
         uri: uri,
       );
     } on http.ClientException catch (error) {

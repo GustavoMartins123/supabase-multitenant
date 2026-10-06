@@ -60,13 +60,15 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
         ),
       );
 
-  Future<void> _createAndWait(String name) async {
+  Future<void> _createAndWait(String name,
+      {String resourceProfile = 'medium'}) async {
     setState(() => _creating = true);
     _snack('Gerando… aguarde', SupabaseColors.info);
 
     try {
       final notifier = ref.read(projectListProvider.notifier);
-      final ok = await notifier.createProjectAndWait(name);
+      final ok = await notifier.createProjectAndWait(name,
+          resourceProfile: resourceProfile);
       if (!mounted) return;
       _snack(
         ok ? 'Projeto criado!' : 'Falhou ao criar',
@@ -116,7 +118,7 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
     }
   }
 
-  Future<void> _showDuplicateDialog(String originalProjectName) async {
+  Future<void> _showDuplicateDialog(String publicRef, String originalProjectName) async {
     final Map<String, dynamic>? newProject =
         await showDialog<Map<String, dynamic>>(
       context: context,
@@ -127,7 +129,7 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
     if (!mounted) return;
     if (newProject?['name'] != null && newProject?['name'].trim().isNotEmpty) {
       await _duplicateAndWait(
-        originalProjectName,
+        publicRef,
         newProject?['name'].trim(),
         newProject?['copy_data'] ?? false,
       );
@@ -303,13 +305,16 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
                       onPressed: _creating || hasProjectCreationInFlight
                           ? null
                           : () async {
-                              final name = await showDialog<String>(
+                              final result = await showDialog<
+                                  ({String name, String resourceProfile})>(
                                 context: context,
                                 builder: (_) => const NewProjectDialog(),
                               );
                               if (!mounted) return;
-                              if (name != null && name.trim().isNotEmpty) {
-                                await _createAndWait(name.trim());
+                              if (result != null &&
+                                  result.name.trim().isNotEmpty) {
+                                await _createAndWait(result.name.trim(),
+                                    resourceProfile: result.resourceProfile);
                               }
                             },
                       icon: Icons.add,
@@ -485,9 +490,9 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
     String? serverDomain,
   ) {
     final favProjects =
-        projects.where((p) => favorites.contains(p['name'])).toList();
+        projects.where((p) => favorites.contains(p['project_uuid'])).toList();
     final otherProjects =
-        projects.where((p) => !favorites.contains(p['name'])).toList();
+        projects.where((p) => !favorites.contains(p['project_uuid'])).toList();
 
     return Padding(
       padding: const EdgeInsets.all(24),
@@ -572,16 +577,15 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
     String? serverDomain,
   ) {
     return ProjectCard(
-      refKey: project['name'] as String,
-      anonKey: project['anon_token'] ?? '',
+      refKey: project['public_ref'] as String,
+      technicalName: project['name'] as String,
+      opaqueApiKeysStatus: project['opaque_api_keys_status'] as String,
+      opaqueApiKeySlotCount: project['opaque_api_key_slot_count'] as int,
       isLoading: project['is_loading'] == true,
       activeJob: project['active_job'],
       isFavorite: isFavorite,
       serverDomain: serverDomain,
-      displayName: project['display_name'] as String?,
-      keyExpiresAtEpoch: project['key_expires_at'] as int?,
-      keyExpiringSoon: project['key_expiring_soon'] == true,
-      keyExpired: project['key_expired'] == true,
+      displayName: project['display_name'] as String,
       automaticKeyRotationEnabled:
           project['automatic_key_rotation_enabled'] as bool,
       automaticKeyRotationBlocked:
@@ -590,18 +594,20 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
           project['automatic_key_rotation_last_error']?.toString(),
       automaticKeyRotationLeadDays:
           project['automatic_key_rotation_lead_days'] as int,
-      keyMetadataValid: project['key_metadata_valid'] as bool,
       onTap: project['is_loading'] == true || project['active_job'] != null
           ? () {}
-          : () => _openProject(project['name']),
-      onDuplicate: () => _showDuplicateDialog(project['name']),
-      onToggleFavorite: () =>
-          ref.read(favoritesProvider.notifier).toggleFavorite(project['name']),
+          : () => _openProject(project['public_ref']),
+      onDuplicate: () => _showDuplicateDialog(project['public_ref'] as String, project['name'] as String),
+      onToggleFavorite: () => ref
+          .read(favoritesProvider.notifier)
+          .toggleFavorite(project['project_uuid']),
       onDeleted: () {
         ref
             .read(projectListProvider.notifier)
-            .removeProjectLocal(project['name']);
-        ref.read(favoritesProvider.notifier).removeFavorite(project['name']);
+            .removeProjectLocal(project['public_ref']);
+        ref
+            .read(favoritesProvider.notifier)
+            .removeFavorite(project['project_uuid']);
       },
     );
   }
@@ -615,7 +621,6 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
         );
         if (!mounted) return;
         await ref.read(projectListProvider.notifier).refresh();
-        await ref.read(projectJobsProvider.notifier).refresh();
       },
       backgroundColor: SupabaseColors.surface300,
       foregroundColor: SupabaseColors.textPrimary,

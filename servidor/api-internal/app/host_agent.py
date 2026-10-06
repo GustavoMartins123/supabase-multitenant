@@ -2,8 +2,11 @@
 
 A API nao executa mais Docker nem shell: ela grava a intencao assinada em
 ``host_agent_commands`` e aguarda o agent
-executar. Este modulo tambem cria o schema das tabelas do agent e expoe o
-snapshot de containers mantido por ele.
+executar. Este modulo tambem expoe o snapshot de containers mantido por ele.
+
+As tabelas ``host_agent_workers``, ``host_agent_commands`` e
+``project_container_state`` sao criadas pelas migrations do control plane
+(``app/migrations``).
 """
 
 from __future__ import annotations
@@ -47,76 +50,6 @@ class HostAgentOffline(HostAgentError):
         )
 
 
-async def ensure_host_agent_schema(pool: asyncpg.Pool) -> None:
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS host_agent_workers (
-                worker_id TEXT PRIMARY KEY,
-                hostname TEXT,
-                pid INTEGER,
-                version TEXT,
-                started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                last_heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                stopped_at TIMESTAMPTZ
-            );
-
-            CREATE TABLE IF NOT EXISTS host_agent_commands (
-                id UUID PRIMARY KEY,
-                job_id UUID REFERENCES jobs(job_id) ON DELETE SET NULL,
-                project TEXT NOT NULL,
-                project_uuid UUID,
-                command TEXT NOT NULL,
-                args JSONB NOT NULL DEFAULT '{}'::jsonb,
-                requested_by UUID,
-                issued_at BIGINT NOT NULL,
-                signature TEXT NOT NULL,
-                timeout_seconds INTEGER NOT NULL CHECK (timeout_seconds > 0),
-                status TEXT NOT NULL DEFAULT 'queued'
-                    CHECK (status IN ('queued','running','done','failed','cancelled')),
-                progress SMALLINT NOT NULL DEFAULT 0
-                    CHECK (progress BETWEEN 0 AND 100),
-                current_step TEXT,
-                message TEXT,
-                worker_id TEXT,
-                lease_seconds INTEGER NOT NULL DEFAULT 60,
-                lease_expires_at TIMESTAMPTZ,
-                heartbeat_at TIMESTAMPTZ,
-                exit_code INTEGER,
-                error_code TEXT,
-                stdout_tail TEXT,
-                stderr_tail TEXT,
-                result JSONB,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                started_at TIMESTAMPTZ,
-                finished_at TIMESTAMPTZ,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_host_agent_commands_status_created
-                ON host_agent_commands(status, created_at);
-            CREATE INDEX IF NOT EXISTS idx_host_agent_commands_job
-                ON host_agent_commands(job_id, command, created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_host_agent_commands_project_active
-                ON host_agent_commands(project)
-                WHERE status IN ('queued', 'running');
-
-            CREATE TABLE IF NOT EXISTS project_container_state (
-                container_name TEXT PRIMARY KEY,
-                project TEXT NOT NULL,
-                state TEXT,
-                status TEXT,
-                image TEXT,
-                ports TEXT,
-                created_at_text TEXT,
-                refreshed_at TIMESTAMPTZ NOT NULL DEFAULT now()
-            );
-            CREATE INDEX IF NOT EXISTS idx_project_container_state_project
-                ON project_container_state(project);
-            """
-        )
-
-
 async def worker_alive(pool: asyncpg.Pool) -> bool:
     return bool(
         await pool.fetchval(
@@ -149,6 +82,12 @@ async def submit_command(
     timeout_seconds: int | None = None,
 ) -> uuid.UUID:
     """Grava a intencao assinada e acorda o agent via NOTIFY."""
+    if requested_by is not None:
+        from app.directory_service import confirm_directory
+        snapshot = await confirm_directory(pool)
+        actor = next((u for u in snapshot.users if u.id == requested_by), None)
+        if actor is None or not actor.is_active:
+            raise HostAgentError("authorization_denied", "Actor revoked in canonical directory")
     args = args or {}
     errors = validate_command_args(command, project, args)
     if errors:
@@ -166,6 +105,7 @@ async def submit_command(
         requested_by=str(requested_by) if requested_by else None,
         args=args,
         issued_at=issued_at,
+        timeout_seconds=timeout,
     )
     async with pool.acquire() as conn:
         await conn.execute(
@@ -235,6 +175,8 @@ async def wait_command(
             raise HostAgentError("command_missing", "Intencao sumiu do banco.")
 
         if row["status"] in {"done", "failed", "cancelled"}:
+            if row["status"] != "done" and on_progress is not None:
+                await on_progress(row)
             return row
 
         if on_progress is not None:
@@ -380,7 +322,7 @@ async def run_command_for_job(
         if existing["status"] in {"queued", "running"}:
             return await wait_command(pool, existing["id"], on_progress=on_progress)
         if reuse_terminal:
-            return existing
+            return await wait_command(pool, existing["id"], on_progress=on_progress)
     return await run_command(
         pool,
         command=command,

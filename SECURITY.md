@@ -1,54 +1,59 @@
-<!--
-  Conteúdo original de apps/docs/public/.well-known/security.txt
--->
-Contact: https://hackerone.com/ca63b563-9661-4ac3-8d23-7581582ef451/embedded_submissions/new
-Canonical: https://supabase.com/.well-known/security.txt
+# Política de segurança
 
+Este repositório é um projeto **não oficial** que integra e adapta componentes do ecossistema Supabase para uma plataforma self-hosted multi-tenant.
 
-At Supabase, we consider the security of our systems a top priority. But no matter how much effort we put into system security, there can still be vulnerabilities present.
+A política de segurança da Supabase upstream **não é** o canal de disclosure deste repositório. Vulnerabilidades específicas deste código, dos scripts de lifecycle, do control plane, do OpenResty/Lua, do host-agent, do key-authorizer ou das integrações multi-tenant devem ser tratadas como vulnerabilidades deste projeto.
 
-If you discover a vulnerability, we would like to know about it so we can take steps to address it as quickly as possible. We would like to ask you to help us better protect our clients and our systems.
+## Como reportar uma vulnerabilidade deste repositório
 
-Out of scope vulnerabilities:
+Prefira o mecanismo de **private vulnerability reporting** do GitHub deste repositório quando ele estiver habilitado.
 
-- Clickjacking on pages with no sensitive actions.
-- Unauthenticated/logout/login CSRF.
-- Attacks requiring MITM or physical access to a user's device.
-- Attacks requiring social engineering.
-- Any activity that could lead to the disruption of our service (DoS).
-- Content spoofing and text injection issues without showing an attack vector/without being able to modify HTML/CSS.
-- Email spoofing
-- Missing DNSSEC, CAA, CSP headers
-- Lack of Secure or HTTP only flag on non-sensitive cookies
-- Deadlinks
-- User enumeration
+Se esse mecanismo não estiver disponível, entre em contato com o mantenedor pelo perfil do GitHub para combinar um canal privado. Não publique payloads, credenciais, dumps, dados de usuários ou detalhes suficientes para exploração em uma issue pública.
 
-Testing guidelines:
-- Do not run automated scanners on other customer projects. Running automated scanners can run up costs for our users. Aggressively configured scanners might inadvertently disrupt services, exploit vulnerabilities, lead to system instability or breaches and violate Terms of Service from our upstream providers. Our own security systems won't be able to distinguish hostile reconnaissance from whitehat research. If you wish to run an automated scanner, notify us at security@supabase.io and only run it on your own Supabase project. Do NOT attack projects of other customers.
-- Do not take advantage of the vulnerability or problem you have discovered, for example by downloading more data than necessary to demonstrate the vulnerability or deleting or modifying other people's data.
+Um relatório útil deve incluir, quando possível:
 
-Reporting guidelines:
-- E-mail your findings to security@supabase.io.
-- Do provide sufficient information to reproduce the problem, so we will be able to resolve it as quickly as possible.
+- branch, commit ou versão afetada;
+- componente afetado;
+- pré-condições necessárias;
+- passos mínimos para reprodução;
+- impacto observado ou potencial;
+- diferença entre comportamento esperado e comportamento real;
+- sugestão de mitigação, caso exista.
 
-Disclosure guidelines:
-- In order to protect our customers, do not reveal the problem to others until we have researched, addressed and informed our affected customers.
-- If you want to publicly share your research about Supabase at a conference, in a blog or any other public forum, you should share a draft with us for review and approval at least 30 days prior to the publication date. Please note that the following should not be included:
-    - Data regarding any Supabase customer projects
-    - Supabase customers' data
-    - information about Supabase employees, contractors or partners
+Não há SLA público de resposta ou recompensa financeira prometida por este repositório.
 
-What we promise:
-- We will respond to your report within 7 business days with our evaluation of the report and an expected resolution date.
-- If you have followed the instructions above, we will not take any legal action against you in regard to the report.
-- We will handle your report with strict confidentiality, and not pass on your personal details to third parties without your permission.
-- We will keep you informed of the progress towards resolving the problem.
-- In the public information concerning the problem reported, we will give your name as the discoverer of the problem (unless you desire otherwise).
+## Vulnerabilidades em componentes upstream
 
-We strive to resolve all problems as quickly as possible, and we would like to play an active role in the ultimate publication on the problem after it is resolved.
+Se o problema estiver em um componente Supabase não modificado e for reproduzível no projeto upstream, use a política oficial de segurança do respectivo projeto Supabase.
 
-<!--
-  Modificado por GustavoMartins123, 05/05/2025:
-  - Removido o arquivo separado e embutido aqui
-  - Mantidos os avisos originais
--->
+Se a vulnerabilidade existir apenas por causa de uma adaptação, patch, configuração ou integração deste repositório, reporte-a aqui primeiro.
+
+## Diretrizes para testes
+
+- Teste somente infraestrutura que você possui ou para a qual tenha autorização explícita.
+- Não execute scanners agressivos contra tenants, hosts ou projetos de terceiros.
+- Não realize DoS, exaustão deliberada de recursos ou testes que possam comprometer disponibilidade compartilhada.
+- Não acesse mais dados do que o mínimo necessário para demonstrar o problema.
+- Não altere ou exclua dados reais para provar impacto.
+- Não reutilize segredos encontrados durante um teste fora do escopo mínimo da reprodução.
+- Redija tokens, JWTs, API keys, cookies, URLs com credenciais e dados pessoais antes de compartilhar logs ou evidências.
+
+## Áreas sensíveis desta arquitetura
+
+Relatórios envolvendo as seguintes fronteiras devem receber atenção especial:
+
+- isolamento entre `project_ref`, `projects.id` e `tenant_uuid`;
+- autorização de API keys opacas e comportamento fail-closed do `key-authorizer`;
+- passagem de JWTs internos anon/service role pelos gateways;
+- isolamento do Storage global e do namespace por tenant;
+- acesso à Admin API do Storage e às redes internas de controle/data plane;
+- HMAC, lease, reautorização e confinamento de comandos do `host-agent`;
+- envelope encryption e transporte de segredos;
+- isolamento de database, Supavisor e Realtime entre projetos;
+- rewrites e compat layers do Supabase Studio/OpenResty.
+
+## Divulgação
+
+Evite divulgação pública antes de existir correção ou mitigação razoável, principalmente quando o problema permitir acesso entre tenants, exposição de segredos, execução no host ou bypass de autorização.
+
+Depois da correção, o mantenedor e o pesquisador podem combinar uma divulgação responsável com escopo técnico suficiente para documentar o problema sem expor dados ou segredos reais.

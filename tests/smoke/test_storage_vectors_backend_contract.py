@@ -4,6 +4,8 @@ import pathlib
 import subprocess
 import unittest
 
+from tests.smoke.common import bash_path, git_compatible_bash
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 ENV_TEMPLATE = ROOT / "servidor/generateProject/.envtemplate"
 CREATE_TEMPLATE_SCRIPT = ROOT / "servidor/volumes/db/create_template.sh"
@@ -15,21 +17,33 @@ GENERATE_IMPL = ROOT / "servidor/generateProject/lib/generate_project_impl.sh"
 DUPLICATE_IMPL = ROOT / "servidor/generateProject/lib/duplicate_project_impl.sh"
 RENAME_IMPL = ROOT / "servidor/generateProject/lib/rename_project_impl.sh"
 API_DOCKERFILE = ROOT / "servidor/api-internal/Dockerfile"
+GLOBAL_COMPOSE = ROOT / "servidor/docker-compose.yml"
+STORAGE_LIBRARY = ROOT / "servidor/generateProject/lib/storage_multitenant.sh"
 
 
 class StorageVectorsBackendContractTests(unittest.TestCase):
+    def test_sigv4_host_is_separate_from_tenant_routing(self) -> None:
+        compose = GLOBAL_COMPOSE.read_text(encoding="utf-8")
+        self.assertIn("S3_PROTOCOL_NON_CANONICAL_HOST_HEADER: host", compose)
+        self.assertIn('S3_ALLOW_FORWARDED_HEADER: "false"', compose)
+        gateway = (ROOT / "servidor/generateProject/nginxtemplate").read_text(encoding="utf-8")
+        vector = gateway.split("location /vector/ {", 1)[1].split("\n        }", 1)[0]
+        self.assertIn("proxy_set_header Host $http_host;", vector)
+        self.assertIn('proxy_set_header X-Forwarded-Host "{{project_uuid}}.storage.internal";', vector)
+        data_plane = (ROOT / "servidor/volumes/storage-proxy/nginx.conf").read_text(encoding="utf-8")
+        self.assertIn("proxy_set_header Host $http_host;", data_plane)
+
     def test_project_template_enables_real_pgvector_backend(self) -> None:
         env = ENV_TEMPLATE.read_text(encoding="utf-8")
+        compose = GLOBAL_COMPOSE.read_text(encoding="utf-8")
 
-        self.assertIn("VECTOR_ENABLED=true", env)
-        self.assertIn("VECTOR_BUCKET_PROVIDER=pgvector", env)
-        self.assertIn("VECTOR_DATABASE_CREATE=false", env)
-        self.assertIn("VECTOR_STORE_MIGRATIONS_ENABLED=true", env)
-        self.assertIn(
-            "VECTOR_DATABASE_URL=postgres://${STORAGE_DB_USER}:${POSTGRES_PASSWORD}"
-            "@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DATABASE}",
-            env,
-        )
+        self.assertIn("VECTOR_BUCKETS_ENABLED=true", env)
+        self.assertIn("VECTOR_MAX_BUCKETS=10", env)
+        self.assertIn("VECTOR_MAX_INDEXES=20", env)
+        self.assertNotIn("VECTOR_DATABASE_URL", env)
+        self.assertIn("VECTOR_BUCKET_PROVIDER: pgvector", compose)
+        self.assertIn('VECTOR_DATABASE_CREATE: "false"', compose)
+        self.assertIn('VECTOR_STORE_MIGRATIONS_ENABLED: "true"', compose)
         self.assertIn("S3_PROTOCOL_ACCESS_KEY_ID={{s3_protocol_access_key_id}}", env)
         self.assertIn("S3_PROTOCOL_ACCESS_KEY_SECRET={{s3_protocol_access_key_secret}}", env)
 
@@ -54,81 +68,58 @@ class StorageVectorsBackendContractTests(unittest.TestCase):
 
     def test_generate_duplicate_and_rename_share_the_vector_contract(self) -> None:
         library = VECTOR_LIBRARY.read_text(encoding="utf-8")
+        storage_library = STORAGE_LIBRARY.read_text(encoding="utf-8")
         generate = GENERATE_IMPL.read_text(encoding="utf-8")
         duplicate = DUPLICATE_IMPL.read_text(encoding="utf-8")
-        rename = RENAME_IMPL.read_text(encoding="utf-8")
+        rotation = (ROOT / "servidor/generateProject/rotate_project_reference.py").read_text(encoding="utf-8")
 
-        self.assertIn("openssl rand -hex 16", library)
-        self.assertIn("openssl rand -hex 32", library)
+        self.assertIn("storage_create_s3_credentials", storage_library)
+        self.assertIn('POST "/s3/$tenant_id/credentials"', storage_library)
         self.assertIn("vector_wait_storage", library)
         self.assertIn("vector_validate_storage_api", library)
 
-        self.assertIn("unset S3_PROTOCOL_ACCESS_KEY_ID S3_PROTOCOL_ACCESS_KEY_SECRET", generate)
+        self.assertIn("storage_provision_tenant", generate)
+        self.assertIn("storage_create_s3_credentials", generate)
         self.assertIn("vector_validate_database", generate)
         self.assertIn("vector_validate_storage_api", generate)
 
-        self.assertIn("unset S3_PROTOCOL_ACCESS_KEY_ID S3_PROTOCOL_ACCESS_KEY_SECRET", duplicate)
+        self.assertIn("storage_provision_tenant", duplicate)
+        self.assertIn("storage_create_s3_credentials", duplicate)
         self.assertIn("vector_strip_copied_wrappers", duplicate)
+        self.assertIn("vector_rekey_physical_tables", duplicate)
         self.assertIn("vector_sync_project_wrappers", duplicate)
         self.assertNotIn("ALTER DATABASE current_database()", duplicate)
 
-        self.assertIn("vector_ensure_s3_credentials", rename)
-        self.assertIn("vector_validate_database", rename)
-        self.assertIn("vector_sync_project_wrappers", rename)
+        # Renames only rotate the public reference: the tenant UUID (and
+        # therefore every vector/S3 identity keyed by it) is verified
+        # unchanged and never rewritten by the rotation.
+        self.assertIn('updates = {"PROJECT_PUBLIC_REF": self.new_ref', rotation)
+        self.assertIn('("PROJECT_UUID", self.tenant_uuid)', rotation)
+        self.assertNotIn("vector_rekey_physical_tables", rotation)
 
-    def test_rename_reloads_env_and_rolls_back_dependencies_in_order(self) -> None:
+    def test_rename_uses_canonical_env_and_rolls_back_dependencies_in_order(self) -> None:
         rename = RENAME_IMPL.read_text(encoding="utf-8")
+        rotation = (ROOT / "servidor/generateProject/rotate_project_reference.py").read_text(encoding="utf-8")
 
-        rollback_start = rename.index("rollback_on_error()")
-        rollback_end = rename.index("trap rollback_on_error ERR")
-        rollback = rename[rollback_start:rollback_end]
+        # The shell wrapper is a thin locked entrypoint; the runner owns the
+        # env handling, the journal and the rollback ordering.
+        self.assertIn("rotate_project_reference.py", rename)
+        self.assertIn("functions_config_lock", rename)
+        self.assertNotIn("source \"$OLD_DIR/.env\"", rename)
+        self.assertNotIn("source \"$NEW_DIR/.env\"", rename)
 
-        restore_old_env = rollback.index('source "$OLD_DIR/.env"')
-        stop_new_pool = rollback.index(
-            'GET "/api/tenants/$NEW_NAME/terminate"'
-        )
-        delete_new_tenant = rollback.index(
-            "DELETE FROM _supavisor.users WHERE tenant_external_id = '$NEW_NAME'"
-        )
-        restore_database = rollback.index(
-            r'ALTER DATABASE \"$NEW_DB\" RENAME TO \"$OLD_DB\"'
-        )
-        restore_old_tenant = rollback.index(
-            'PUT "/api/tenants/$OLD_NAME"'
-        )
-        start_old_stack = rollback.index("compose_old up -d")
-
-        self.assertLess(restore_old_env, start_old_stack)
-        self.assertLess(stop_new_pool, delete_new_tenant)
-        self.assertLess(delete_new_tenant, restore_database)
-        self.assertLess(restore_database, restore_old_tenant)
-        self.assertLess(restore_old_tenant, start_old_stack)
-
-        generated_env_validated = rename.index(
-            'grep -qx "PROJECT_ID=$NEW_NAME" "$NEW_DIR/.env"'
-        )
-        load_new_env = rename.index(
-            'source "$NEW_DIR/.env"', generated_env_validated
-        )
-        start_new_stack = rename.index("compose_new up --build -d", load_new_env)
-
-        self.assertLess(generated_env_validated, load_new_env)
-        self.assertLess(load_new_env, start_new_stack)
-
-        forward_start = rename.index('say "Parando stack antiga..."')
-        mark_realtime_mutation = rename.index("REALTIME_UPDATED=1", forward_start)
-        update_realtime = rename.index(
-            'PUT "/api/tenants/$PROJECT_UUID"', mark_realtime_mutation
-        )
-        mark_supavisor_mutation = rename.index(
-            "SUPAVISOR_UPDATED=1", forward_start
-        )
-        update_supavisor = rename.index(
-            'PUT "/api/tenants/$NEW_NAME"', mark_supavisor_mutation
-        )
-
-        self.assertLess(mark_realtime_mutation, update_realtime)
-        self.assertLess(mark_supavisor_mutation, update_supavisor)
+        self.assertIn("read_canonical_env_value", rotation)
+        rollback_start = rotation.index("def rollback(self) -> None:")
+        rollback = rotation[rollback_start:]
+        withdraw_functions = rollback.index('self.functions("withdraw")')
+        stop_gateway = rollback.index('self.compose("stop", "nginx", "auth")')
+        swap_ref = rollback.index("self.swap(self.new_ref, self.old_ref)")
+        publish_functions = rollback.index('self.functions("publish")')
+        self.assertLess(withdraw_functions, stop_gateway)
+        self.assertLess(stop_gateway, swap_ref)
+        self.assertLess(swap_ref, publish_functions)
+        self.assertIn("Rollback cannot prove the canonical reference", rotation)
+        self.assertIn("Rotation journal identity does not match the requested rollback", rotation)
 
     def test_public_entrypoints_delegate_to_organized_implementations(self) -> None:
         expectations = {
@@ -175,7 +166,9 @@ class StorageVectorsBackendContractTests(unittest.TestCase):
             RENAME_IMPL,
         )
         for script in scripts:
-            subprocess.run(["bash", "-n", str(script)], check=True)
+            subprocess.run(
+                [git_compatible_bash(), "-n", bash_path(script)], check=True
+            )
 
 
 if __name__ == "__main__":

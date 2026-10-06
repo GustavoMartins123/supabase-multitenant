@@ -1,0 +1,11 @@
+services:
+  db:
+    ports:
+      - "${DOCKER_DESKTOP_WSL_HOST:?configure the private Windows WSL interface}:${POSTGRES_PORT}:${POSTGRES_PORT}"
+    volumes:
+      - type: volume
+        source: desktop-db-data
+        target: /var/lib/postgresql/data
+
+volumes:
+  desktop-db-data:

@@ -1,12 +1,14 @@
 import 'package:http/http.dart' as http;
 
 import '../data/api_client.dart';
+import 'project_identity.dart';
 
 class Job {
   const Job(
     this.id, {
     this.project,
     this.projectUuid,
+    this.publicRef,
     this.tenantUuid,
     this.createdBy,
     this.action,
@@ -23,6 +25,7 @@ class Job {
 
   final String? project;
   final String? projectUuid;
+  final String? publicRef;
   final String? tenantUuid;
   final String? createdBy;
   final String? action;
@@ -37,19 +40,22 @@ class Job {
   bool get isInFlight => status == 'queued' || status == 'running';
 
   factory Job.fromJson(Map<String, dynamic> json) {
-    final id = json['job_id']?.toString();
-    if (id == null || id.isEmpty) {
-      throw const FormatException('Job sem job_id');
+    final identity = JobIdentity.fromJson(json);
+    final status = _requireText(json, 'status');
+    if (!const {'queued', 'running', 'done', 'failed', 'cancelled'}.contains(status) ||
+        ((status == 'queued' || status == 'running') && identity.publicRef == null)) {
+      throw const FormatException('Estado ou referencia do job invalido');
     }
 
     return Job(
-      id,
-      project: json['project']?.toString(),
-      projectUuid: json['project_uuid']?.toString(),
-      tenantUuid: json['tenant_uuid']?.toString(),
-      createdBy: json['created_by']?.toString(),
-      action: json['action']?.toString(),
-      status: _requireText(json, 'status'),
+      identity.jobId,
+      project: identity.project,
+      projectUuid: identity.projectUuid,
+      publicRef: identity.publicRef,
+      tenantUuid: identity.tenantUuid,
+      createdBy: identity.createdBy,
+      action: _requireText(json, 'action'),
+      status: status,
       message: json['message']?.toString(),
       progress: (json['progress'] as num?)?.toInt(),
       currentStep: json['current_step']?.toString(),
@@ -61,18 +67,10 @@ class Job {
 
   Job verifyContext({
     String? project,
-    Iterable<String>? acceptedProjects,
     String? action,
     String? createdBy,
   }) {
-    if (project != null && acceptedProjects != null) {
-      throw ArgumentError(
-        'Use project ou acceptedProjects, nunca os dois',
-      );
-    }
-    final validProjects =
-        project == null ? acceptedProjects?.toSet() : <String>{project};
-    if (validProjects != null && !validProjects.contains(this.project)) {
+    if (project != null && publicRef != project) {
       throw const FormatException(
         'Contrato do job invalido: project divergente ou ausente',
       );

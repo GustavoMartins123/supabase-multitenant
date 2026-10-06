@@ -184,7 +184,7 @@ class ProjectNotification {
       case 'project_thread_message_created':
         return 'Nova mensagem na thread';
       case 'project_renamed':
-        return 'Projeto renomeado';
+        return 'URL do projeto alterada';
       default:
         return kind;
     }
@@ -298,13 +298,13 @@ class ProjectRenameEvent {
   String get label {
     switch (action) {
       case 'project_rename_started':
-        return 'Renomeação iniciada';
+        return 'Troca de URL iniciada';
       case 'project_rename_succeeded':
-        return 'Renomeação concluída';
+        return 'Troca de URL concluída';
       case 'project_rename_failed':
-        return 'Falha na renomeação';
+        return 'Falha na troca de URL';
       case 'project_rename_rolled_back':
-        return 'Renomeação revertida';
+        return 'Troca de URL revertida';
       case 'project_display_name_changed':
         return 'Nome de exibição alterado';
       default:
@@ -315,8 +315,8 @@ class ProjectRenameEvent {
   factory ProjectRenameEvent.fromJson(Map<String, dynamic> json) {
     return ProjectRenameEvent(
       id: json['id'].toString(),
-      action: json['action']?.toString() ?? '',
-      actorName: json['actor_name']?.toString() ?? 'Sistema',
+      action: json['action'] as String,
+      actorName: json['actor_name'] as String,
       oldValue: json['old_value'] is Map
           ? Map<String, dynamic>.from(json['old_value'] as Map)
           : null,
@@ -324,8 +324,7 @@ class ProjectRenameEvent {
           ? Map<String, dynamic>.from(json['new_value'] as Map)
           : null,
       targetId: json['target_id']?.toString(),
-      createdAt: DateTime.tryParse(json['created_at']?.toString() ?? '') ??
-          DateTime.now(),
+      createdAt: DateTime.parse(json['created_at'] as String),
     );
   }
 }

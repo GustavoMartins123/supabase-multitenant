@@ -10,25 +10,41 @@ from __future__ import annotations
 import pathlib
 import re
 
-from dotenv import dotenv_values
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from app.internal_service_auth import InternalServiceAuthenticationMiddleware
+from app.dependencies import get_public_project_row
+from app.project_env_secrets import read_canonical_project_fields
 from app.main import (
     app,
     ensure_project_admin_access,
     get_pool,
-    get_project_row,
     resolve_authenticated_user,
 )
-from app.validation import validate_project_id
+from app.routers.jobs_api import router as jobs_router
+from app.routers.project_insights import router as project_insights_router
+from app.routers.assistant import router as assistant_router
+from app.routers.project_keys import router as project_keys_router
+from app.routers.project_lifecycle_ops import router as project_lifecycle_ops_router
+from app.routers.project_members import router as project_members_router
+from app.routers.project_rename import router as project_rename_router
+from app.routers.projects import router as projects_router
+from app.routers.restore_points import router as restore_points_router
+from app.schemas import ProjectS3VectorKeysResponse
+from app.validation import validate_project_ref
 
 PROJECTS_ROOT = pathlib.Path("/docker/projects").resolve()
 ACCESS_KEY_RE = re.compile(r"^[0-9a-fA-F]{32}$")
 SECRET_KEY_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
 
-def _read_project_s3_vector_keys(project_name: str) -> tuple[str, str]:
+def _read_project_s3_vector_keys(
+    project_name: str,
+    *,
+    tenant_uuid: object,
+    public_ref: str,
+) -> tuple[str, str]:
     project_dir = (PROJECTS_ROOT / project_name).resolve()
     if project_dir.parent != PROJECTS_ROOT:
         raise HTTPException(400, "Invalid project path")
@@ -37,9 +53,20 @@ def _read_project_s3_vector_keys(project_name: str) -> tuple[str, str]:
     if not env_path.is_file():
         raise HTTPException(409, "Project environment file is missing")
 
-    values = dotenv_values(env_path, interpolate=False)
-    access_key = str(values.get("S3_PROTOCOL_ACCESS_KEY_ID") or "").strip()
-    secret_key = str(values.get("S3_PROTOCOL_ACCESS_KEY_SECRET") or "").strip()
+    try:
+        values = read_canonical_project_fields(PROJECTS_ROOT, project_name, (
+            "PROJECT_ID", "PROJECT_UUID", "PROJECT_PUBLIC_REF",
+            "S3_PROTOCOL_ACCESS_KEY_ID", "S3_PROTOCOL_ACCESS_KEY_SECRET",
+        ))
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if (not tenant_uuid or values["PROJECT_UUID"] != str(tenant_uuid)
+            or values["PROJECT_ID"] != project_name or values["PROJECT_PUBLIC_REF"] != public_ref):
+        raise HTTPException(
+            409, "Project environment identity does not match this project"
+        )
+    access_key = values["S3_PROTOCOL_ACCESS_KEY_ID"]
+    secret_key = values["S3_PROTOCOL_ACCESS_KEY_SECRET"]
 
     if not ACCESS_KEY_RE.fullmatch(access_key):
         raise HTTPException(409, "Project S3 protocol access key is not configured")
@@ -49,24 +76,19 @@ def _read_project_s3_vector_keys(project_name: str) -> tuple[str, str]:
     return access_key, secret_key
 
 
-@app.get("/api/projects/{project_name}/storage/s3-keys")
+@app.get("/api/projects/{project_ref}/storage/s3-keys", tags=["project-insights"], response_model=ProjectS3VectorKeysResponse)
 async def get_project_s3_vector_keys(
-    project_name: str,
+    project_ref: str,
     request: Request,
     pool=Depends(get_pool),
 ):
-    """Return the selected tenant's SigV4 pair to an authorized Studio admin.
+    """Return the selected tenant's SigV4 pair to an authorized Studio admin."""
 
-    OpenResty rewrites the Studio's fixed ``/api/get-s3-keys`` endpoint to this
-    project-scoped route. The global shared-token middleware authenticates the
-    Studio-to-control-plane hop and the signed user token is checked here.
-    """
-
-    project_name = validate_project_id(project_name)
+    project_ref = validate_project_ref(project_ref)
     auth_user = await resolve_authenticated_user(request, pool)
 
     async with pool.acquire() as conn:
-        project = await get_project_row(conn, project_name)
+        project = await get_public_project_row(conn, project_ref)
         await ensure_project_admin_access(
             conn,
             project_id=project["id"],
@@ -77,7 +99,11 @@ async def get_project_s3_vector_keys(
             ),
         )
 
-    access_key, secret_key = _read_project_s3_vector_keys(project_name)
+    access_key, secret_key = _read_project_s3_vector_keys(
+        project["name"],
+        tenant_uuid=project["tenant_uuid"],
+        public_ref=project["public_ref"],
+    )
     return JSONResponse(
         content={"accessKey": access_key, "secretKey": secret_key},
         headers={
@@ -86,3 +112,18 @@ async def get_project_s3_vector_keys(
             "X-Content-Type-Options": "nosniff",
         },
     )
+
+
+app.include_router(jobs_router)
+app.include_router(projects_router)
+app.include_router(project_rename_router)
+app.include_router(restore_points_router)
+app.include_router(project_keys_router)
+app.include_router(project_members_router)
+app.include_router(project_lifecycle_ops_router)
+app.include_router(project_insights_router)
+app.include_router(assistant_router)
+
+# Registrado por ultimo para ser a camada mais externa: valida a identidade
+# criptografica do caller antes das rotas e dependencias da aplicacao.
+app.add_middleware(InternalServiceAuthenticationMiddleware)

@@ -5,9 +5,16 @@ die() { echo "❌ $*" >&2; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/functions_config.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
+source "$SCRIPT_DIR/lib/resource_profiles.sh"
+source "$SCRIPT_DIR/lib/project_public_ref.sh"
 
 TRANSACTION_DIR="$PROJECT_ROOT/.rotate_transaction_$$"
 MODIFIED_FILES=()
+STORAGE_KEYS_UPDATED=false
 
 init_transaction() {
   mkdir -p "$TRANSACTION_DIR"
@@ -17,7 +24,8 @@ init_transaction() {
 backup_file() {
   local file="$1"
   if [[ -f "$file" ]]; then
-    local backup_path="$TRANSACTION_DIR/$(echo "$file" | tr '/' '_')"
+    local backup_path
+    backup_path="$TRANSACTION_DIR/$(echo "$file" | tr '/' '_')"
     cp "$file" "$backup_path"
     MODIFIED_FILES+=("$file")
     echo "   Backup criado: $(basename "$file")"
@@ -35,13 +43,24 @@ rollback_transaction() {
   trap - ERR
   set +e
   local runtime_restored=true
+  if [[ "$FUNCTIONS_CONFIG_LOCKED" == 1 ]] && [[ "${FUNCTIONS_WITHDRAWN[$PROJECT_ID]:-0}" == 1 ]]; then
+    functions_config_withdraw "$PROJECT_ID" || runtime_restored=false
+  fi
   echo "❌ Erro detectado! Revertendo alterações..."
+
+  if [[ "$STORAGE_KEYS_UPDATED" == "true" ]]; then
+    if ! storage_patch_tenant_keys "$PROJECT_UUID" "$CURRENT_ANON" "$CURRENT_SERVICE"; then
+      runtime_restored=false
+      echo "❌ Configuracao anterior do tenant Storage nao foi restaurada." >&2
+    fi
+  fi
   
   if [[ -d "$TRANSACTION_DIR" ]]; then
     for file in "${MODIFIED_FILES[@]}"; do
-      local backup_path="$TRANSACTION_DIR/$(echo "$file" | tr '/' '_')"
+      local backup_path
+      backup_path="$TRANSACTION_DIR/$(echo "$file" | tr '/' '_')"
       if [[ -f "$backup_path" ]]; then
-        cp "$backup_path" "$file"
+        cp "$backup_path" "$file" || runtime_restored=false
         echo "   Restaurado: $(basename "$file")"
       fi
     done
@@ -58,6 +77,9 @@ rollback_transaction() {
         runtime_restored=false
         echo "❌ Arquivos restaurados, mas o runtime anterior do Nginx não pôde ser confirmado." >&2
       fi
+    fi
+    if [[ "$runtime_restored" == "true" ]]; then
+      functions_config_publish "$PROJECT_ID" || runtime_restored=false
     fi
     if [[ "$runtime_restored" == "true" ]]; then
       rm -rf "$TRANSACTION_DIR"
@@ -82,40 +104,82 @@ set +a
 PROJECT_ID="${1:-}"
 
 [[ -z "$PROJECT_ID" ]] && die "Uso: $0 <project_id>"
+[[ "$PROJECT_ID" =~ ^[a-z_][a-z0-9_]{2,39}$ ]] \
+  || die "PROJECT_ID invalido"
 
+functions_config_lock "$PROJECT_ID"
 PROJECT_DIR="$PROJECT_ROOT/projects/$PROJECT_ID"
 [[ -d "$PROJECT_DIR" ]] || die "Projeto '$PROJECT_ID' não encontrado em $PROJECT_DIR"
+for command in docker openssl sed grep; do
+  command -v "$command" >/dev/null || die "Comando obrigatorio ausente: $command"
+done
+for template in nginxtemplate Dockerfile dockercomposetemplate .dockerignore; do
+  [[ -f "$SCRIPT_DIR/$template" ]] || die "Template ausente: $template"
+done
+for file in .env "nginx/nginx_${PROJECT_ID}.conf" Dockerfile docker-compose.yml .dockerignore; do
+  [[ -f "$PROJECT_DIR/$file" ]] || die "Arquivo do projeto ausente: $file"
+done
 
 get_env_value() {
   local key="$1"
   local file="$2"
-  local value
-  value=$(grep -m1 "^${key}=" "$file" | cut -d'=' -f2- || true)
+  local assignment_count canonical_count value
+  assignment_count="$(grep -Ec "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" "$file" || true)"
+  canonical_count="$(grep -c "^${key}=" "$file" || true)"
+  [[ "$assignment_count" == "1" && "$canonical_count" == "1" ]] \
+    || die "$key deve ter exatamente uma atribuicao canonica em $file"
+  value="$(sed -n "s/^${key}=//p" "$file")"
+  [[ "$value" != *$'\r'* && -n "$value" && "$value" == "${value# }" && "$value" == "${value% }" ]] \
+    || die "$key possui valor nao canonico em $file"
   printf '%s' "$value"
 }
 
-upsert_env_value() {
+replace_env_value() {
   local key="$1"
   local value="$2"
   local file="$3"
   local escaped_value
   escaped_value=$(escape_sed_replacement "$value")
-
-  if grep -q "^${key}=" "$file"; then
-    sed -i "s|^${key}=.*|${key}=${escaped_value}|" "$file"
-  else
-    printf '\n%s=%s\n' "$key" "$value" >> "$file"
-  fi
+  get_env_value "$key" "$file" >/dev/null
+  sed -i "s|^${key}=.*|${key}=${escaped_value}|" "$file"
 }
 
-CONFIG_TOKEN=$(get_env_value "CONFIG_TOKEN_PROJETO" "$PROJECT_DIR/.env")
 JWT_SECRET_PROJETO=$(get_env_value "JWT_SECRET_PROJETO" "$PROJECT_DIR/.env")
 PROJECT_UUID=$(get_env_value "PROJECT_UUID" "$PROJECT_DIR/.env")
+PROJECT_PUBLIC_REF="$(project_public_ref_read "$PROJECT_DIR/.env")" \
+  || die "Referencia publica ausente ou invalida"
+API_GATEWAY_TOKEN_PROJETO=$(get_env_value "API_GATEWAY_TOKEN_PROJETO" "$PROJECT_DIR/.env")
+CURRENT_ANON=$(get_env_value "ANON_KEY_PROJETO" "$PROJECT_DIR/.env")
+CURRENT_SERVICE=$(get_env_value "SERVICE_ROLE_KEY_PROJETO" "$PROJECT_DIR/.env")
+S3_PROTOCOL_CREDENTIAL_ID=$(get_env_value "S3_PROTOCOL_CREDENTIAL_ID" "$PROJECT_DIR/.env")
+S3_PROTOCOL_ACCESS_KEY_ID=$(get_env_value "S3_PROTOCOL_ACCESS_KEY_ID" "$PROJECT_DIR/.env")
+S3_PROTOCOL_ACCESS_KEY_SECRET=$(get_env_value "S3_PROTOCOL_ACCESS_KEY_SECRET" "$PROJECT_DIR/.env")
+S3_PROTOCOL_ENABLED=$(get_env_value "S3_PROTOCOL_ENABLED" "$PROJECT_DIR/.env")
+VECTOR_BUCKETS_ENABLED=$(get_env_value "VECTOR_BUCKETS_ENABLED" "$PROJECT_DIR/.env")
+PROJECT_UUID="$(tr '[:upper:]' '[:lower:]' <<<"$PROJECT_UUID")"
+project_public_ref_assert "$PROJECT_ID" "$PROJECT_UUID" "$PROJECT_PUBLIC_REF" \
+  || die "Referencia publica diverge do control plane"
 
-[[ -z "$CONFIG_TOKEN" ]] && die "CONFIG_TOKEN_PROJETO não encontrado no .env do projeto"
-[[ -z "$JWT_SECRET_PROJETO" ]]  && die "JWT_SECRET_PROJETO não encontrado no .env do projeto"
-
-[[ -z "$PROJECT_UUID" ]] && die "PROJECT_UUID não encontrado no .env do projeto"
+[[ "$JWT_SECRET_PROJETO" =~ ^[A-Za-z0-9_-]{43}=?$ ]] \
+  || die "JWT_SECRET_PROJETO invalido"
+[[ "$PROJECT_UUID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] \
+  || die "PROJECT_UUID invalido"
+[[ "$API_GATEWAY_TOKEN_PROJETO" =~ ^[a-f0-9]{64}$ ]] \
+  || die "API_GATEWAY_TOKEN_PROJETO ausente ou invalido"
+[[ "$CURRENT_ANON" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]] \
+  || die "ANON_KEY_PROJETO atual invalida"
+[[ "$CURRENT_SERVICE" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]] \
+  || die "SERVICE_ROLE_KEY_PROJETO atual invalida"
+export PROJECT_UUID S3_PROTOCOL_CREDENTIAL_ID S3_PROTOCOL_ACCESS_KEY_ID \
+  S3_PROTOCOL_ACCESS_KEY_SECRET VECTOR_BUCKETS_ENABLED
+storage_validate_bool VECTOR_BUCKETS_ENABLED "$VECTOR_BUCKETS_ENABLED" \
+  || die "VECTOR_BUCKETS_ENABLED invalido"
+storage_validate_bool S3_PROTOCOL_ENABLED "$S3_PROTOCOL_ENABLED" \
+  || die "S3_PROTOCOL_ENABLED invalido"
+vector_validate_s3_credentials || die "Credenciais SigV4 do projeto invalidas"
+storage_assert_project_identity "$PROJECT_ID" "$PROJECT_UUID" \
+  || die "Identidade Storage diverge do control plane"
+storage_wait_global || die "Storage compartilhado indisponivel"
 
 generate_jwt() {
   local payload="$1" secret="$2"
@@ -152,22 +216,22 @@ service_jti=$(openssl rand -hex 16)
 echo "🔄 Gerando novos tokens para projeto $PROJECT_ID..."
 echo "   Usando issuer: $PROJECT_UUID"
 
+echo "HOST_AGENT_PROGRESS=rotate:generate_tokens"
 NEW_ANON=$(generate_jwt    "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now,\"exp\":$exp,\"jti\":\"$anon_jti\"}"         "$JWT_SECRET_PROJETO")
 NEW_SERVICE=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now,\"exp\":$exp,\"jti\":\"$service_jti\"}" "$JWT_SECRET_PROJETO")
 PUBLIC_BASE_URL="$(normalize_public_base_url "$SERVER_URL" "${SERVER_PROTO:-}")"
-PROJECT_PUBLIC_URL="$PUBLIC_BASE_URL/$PROJECT_ID"
+PROJECT_PUBLIC_URL="$PUBLIC_BASE_URL/$PROJECT_PUBLIC_REF"
 PROJECT_AUTH_EXTERNAL_URL="$PROJECT_PUBLIC_URL/auth/v1"
 
 template_to_file() {
   local template="$1" outfile="$2"
-  local anon_key service_role_key project_id project_uuid config_token jwt_secret
+  local anon_key service_role_key project_id project_uuid jwt_secret
   local server_url public_base_url project_public_url project_auth_external_url project_root
 
   anon_key="$(escape_sed_replacement "$NEW_ANON")"
   service_role_key="$(escape_sed_replacement "$NEW_SERVICE")"
   project_id="$(escape_sed_replacement "$PROJECT_ID")"
   project_uuid="$(escape_sed_replacement "$PROJECT_UUID")"
-  config_token="$(escape_sed_replacement "$CONFIG_TOKEN")"
   jwt_secret="$(escape_sed_replacement "$JWT_SECRET_PROJETO")"
   server_url="$(escape_sed_replacement "$SERVER_URL")"
   public_base_url="$(escape_sed_replacement "$PUBLIC_BASE_URL")"
@@ -180,8 +244,9 @@ template_to_file() {
     -e "s|{{service_role_key}}|$service_role_key|g" \
     -e "s|{{project_id}}|$project_id|g" \
     -e "s|{{project_uuid}}|$project_uuid|g" \
-    -e "s|{{config_token}}|$config_token|g" \
+    -e "s|{{project_public_ref}}|$PROJECT_PUBLIC_REF|g" \
     -e "s|{{jwt_secret}}|$jwt_secret|g" \
+    -e "s|{{api_gateway_token}}|$(escape_sed_replacement "$API_GATEWAY_TOKEN_PROJETO")|g" \
     -e "s|{{server_url}}|$server_url|g" \
     -e "s|{{public_base_url}}|$public_base_url|g" \
     -e "s|{{project_public_url}}|$project_public_url|g" \
@@ -190,7 +255,13 @@ template_to_file() {
     "$template" > "$outfile"
 }
 
+functions_config_withdraw "$PROJECT_ID"
 init_transaction
+
+echo "HOST_AGENT_PROGRESS=rotate:configure_storage"
+storage_patch_tenant_keys "$PROJECT_UUID" "$NEW_ANON" "$NEW_SERVICE" \
+  || die "Storage nao aceitou os novos JWTs internos"
+STORAGE_KEYS_UPDATED=true
 
 backup_file "$PROJECT_DIR/nginx/nginx_${PROJECT_ID}.conf"
 backup_file "$PROJECT_DIR/Dockerfile"
@@ -198,21 +269,32 @@ backup_file "$PROJECT_DIR/docker-compose.yml"
 backup_file "$PROJECT_DIR/.env"
 backup_file "$PROJECT_DIR/.dockerignore"
 
+echo "HOST_AGENT_PROGRESS=rotate:render_files"
 template_to_file "$SCRIPT_DIR/nginxtemplate" "$PROJECT_DIR/nginx/nginx_${PROJECT_ID}.conf"
 template_to_file "$SCRIPT_DIR/Dockerfile" "$PROJECT_DIR/Dockerfile"
 template_to_file "$SCRIPT_DIR/dockercomposetemplate" "$PROJECT_DIR/docker-compose.yml"
 template_to_file "$SCRIPT_DIR/.dockerignore" "$PROJECT_DIR/.dockerignore"
 chmod 600 "$PROJECT_DIR/.env"
+apply_project_resource_limits "$PROJECT_ROOT/.env" "$PROJECT_DIR/.env" "${PROJECT_RESOURCE_PROFILE_OVERRIDE:-}"
 chmod 644 "$PROJECT_DIR/nginx/nginx_${PROJECT_ID}.conf" "$PROJECT_DIR/.dockerignore"
 
-upsert_env_value "ANON_KEY_PROJETO" "$NEW_ANON" "$PROJECT_DIR/.env"
-upsert_env_value "SERVICE_ROLE_KEY_PROJETO" "$NEW_SERVICE" "$PROJECT_DIR/.env"
+replace_env_value "ANON_KEY_PROJETO" "$NEW_ANON" "$PROJECT_DIR/.env"
+replace_env_value "SERVICE_ROLE_KEY_PROJETO" "$NEW_SERVICE" "$PROJECT_DIR/.env"
 
+echo "HOST_AGENT_PROGRESS=rotate:restart_services"
 cd "$PROJECT_DIR"
 docker compose -p "$PROJECT_ID" \
   --env-file ../../.env \
   --env-file .env \
   up --build -d nginx
+
+echo "HOST_AGENT_PROGRESS=rotate:verify_storage"
+storage_validate_tenant "$PROJECT_UUID" "$NEW_SERVICE" \
+  "$S3_PROTOCOL_ACCESS_KEY_ID" "$S3_PROTOCOL_ACCESS_KEY_SECRET" \
+  "$S3_PROTOCOL_ENABLED" "$VECTOR_BUCKETS_ENABLED" \
+  || die "Tenant Storage falhou apos rotacao de JWTs"
+storage_assert_project_gateway "$PROJECT_UUID" "$PROJECT_ID" "$NEW_SERVICE" \
+  || die "Nginx nao encaminhou os novos JWTs ao tenant Storage"
 
 echo ""
 echo "✅ Tokens rotacionados com sucesso para projeto $PROJECT_ID"
@@ -220,4 +302,6 @@ echo ""
 echo "⚠️  NOTA: O JWT_SECRET_PROJETO não foi alterado"
 echo "   Apenas os tokens foram regenerados com o mesmo secret."
 
+echo "HOST_AGENT_PROGRESS=rotate:publish_configuration"
+functions_config_publish "$PROJECT_ID"
 commit_transaction

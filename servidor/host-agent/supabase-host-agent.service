@@ -4,12 +4,12 @@
 Description=Supabase multitenant host-agent (comandos fechados de lifecycle)
 After=network-online.target docker.service
 Wants=network-online.target
-Requires=docker.service
 
 [Service]
 Type=exec
 User=__HOST_AGENT_USER__
 Environment="HOST_AGENT_ROOT=__SERVIDOR_DIR__"
+__DOCKER_CONFIG_ENV__
 ExecStartPre="__AGENT_DIR__/.venv/bin/python" -m hostagent --root "__SERVIDOR_DIR__" --wait-for-schema
 ExecStart="__AGENT_DIR__/.venv/bin/python" -m hostagent --root "__SERVIDOR_DIR__"
 WorkingDirectory=__AGENT_DIR__
@@ -24,6 +24,25 @@ NoNewPrivileges=true
 ProtectKernelModules=true
 ProtectKernelTunables=true
 ProtectControlGroups=true
+# Sandbox: o agent roda como usuario comum, fala com o Docker pelo socket de
+# grupo e grava apenas dentro do repositorio (SERVIDOR_DIR/AGENT_DIR podem
+# viver sob /home, por isso o ReadWritePaths explicito).
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=-"__SERVIDOR_DIR__"
+ReadWritePaths=-"__AGENT_DIR__"
+# `docker compose build` grava o estado do buildx em ~/.docker; sem isso o
+# build do nginx do projeto morre em "read-only file system".
+ReadWritePaths=-"__SERVICE_HOME__/.docker"
+PrivateTmp=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
 
 [Install]
 WantedBy=multi-user.target

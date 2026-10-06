@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
-import 'package:jwt_decoder/jwt_decoder.dart';
 
 import 'supabase_colors.dart';
 import 'session.dart';
@@ -12,6 +10,7 @@ import 'providers/project_settings_provider.dart';
 import 'providers/project_list_provider.dart';
 import 'providers/project_jobs_provider.dart';
 import 'services/project_service.dart';
+import 'services/step_up_authentication_service.dart';
 import 'dialogs/transfer_project_dialog.dart';
 import 'dialogs/rename_project_dialog.dart';
 import 'dialogs/rename_history_dialog.dart';
@@ -26,30 +25,34 @@ import 'widgets/project_settings/status_section.dart';
 import 'widgets/project_settings/members_section.dart';
 import 'widgets/project_settings/env_settings_section.dart';
 import 'widgets/project_settings/user_telemetry_section.dart';
-import 'models/project_member.dart';
+import 'widgets/project_settings/opaque_api_keys_section.dart';
+import 'widgets/project_settings/access_policy_dialog.dart';
 import 'models/all_users.dart';
+
+const _kTabs = <({String label, IconData icon})>[
+  (label: 'Geral', icon: Icons.info_outline),
+  (label: 'Chaves', icon: Icons.key_outlined),
+  (label: 'Ambiente', icon: Icons.tune),
+  (label: 'Acesso', icon: Icons.people_outline),
+];
 
 class ProjectSettingsDialog extends ConsumerStatefulWidget {
   const ProjectSettingsDialog({
     super.key,
     required this.ref,
-    required this.anonKey,
     required this.automaticKeyRotationEnabled,
     required this.automaticKeyRotationBlocked,
     required this.automaticKeyRotationLeadDays,
-    required this.keyMetadataValid,
-    this.displayName,
+    required this.displayName,
     this.automaticKeyRotationLastError,
   });
 
   final String ref;
-  final String anonKey;
-  final String? displayName;
+  final String displayName;
   final bool automaticKeyRotationEnabled;
   final bool automaticKeyRotationBlocked;
   final String? automaticKeyRotationLastError;
   final int automaticKeyRotationLeadDays;
-  final bool keyMetadataValid;
 
   @override
   ConsumerState<ProjectSettingsDialog> createState() =>
@@ -57,22 +60,18 @@ class ProjectSettingsDialog extends ConsumerStatefulWidget {
 }
 
 class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late AnimationController _animController;
   late Animation<double> _fadeAnimation;
+  late TabController _tabController;
 
-  late String _currentAnonKey;
-  late String _currentConfigToken;
-  String? _currentDisplayName;
+  late String _currentDisplayName;
   late final TextEditingController _displayNameController;
-  bool _rotatingKey = false;
   late bool _automaticKeyRotationEnabled;
   late bool _automaticKeyRotationBlocked;
-  late bool _keyMetadataValid;
   String? _automaticKeyRotationLastError;
   bool _updatingAutomaticKeyRotation = false;
   bool _savingDisplayName = false;
-  bool _loadingConfigToken = false;
 
   @override
   void initState() {
@@ -86,29 +85,28 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
       curve: Curves.easeOut,
     );
     _animController.forward();
+    _tabController = TabController(length: _kTabs.length, vsync: this);
 
-    _currentAnonKey = widget.anonKey;
     _automaticKeyRotationEnabled = widget.automaticKeyRotationEnabled;
     _automaticKeyRotationBlocked = widget.automaticKeyRotationBlocked;
-    _keyMetadataValid = widget.keyMetadataValid;
     _automaticKeyRotationLastError = widget.automaticKeyRotationLastError;
-    _currentConfigToken = '';
     _currentDisplayName = widget.displayName;
     _displayNameController = TextEditingController(
-      text: widget.displayName ?? '',
+      text: widget.displayName,
     );
   }
 
   @override
   void dispose() {
     _displayNameController.dispose();
+    _tabController.dispose();
     _animController.dispose();
     super.dispose();
   }
 
   Future<void> _saveDisplayName() async {
     final newName = _displayNameController.text.trim();
-    if (newName == (_currentDisplayName ?? '')) {
+    if (newName == _currentDisplayName) {
       return;
     }
     setState(() => _savingDisplayName = true);
@@ -119,11 +117,11 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
       if (!mounted) return;
       setState(() {
         _currentDisplayName = saved;
-        _displayNameController.text = _currentDisplayName ?? '';
+        _displayNameController.text = _currentDisplayName;
       });
       await ref.read(projectListProvider.notifier).refresh();
       if (!mounted) return;
-      _showSnack('Nome de exibição atualizado.', SupabaseColors.success);
+      _showSnack('Nome do projeto atualizado.', SupabaseColors.success);
     } catch (e) {
       final msg = e.toString().replaceFirst('Exception: ', '');
       _showSnack('Erro ao atualizar nome: $msg', SupabaseColors.error);
@@ -136,15 +134,14 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     final result = await showDialog<RenameProjectResult>(
       context: context,
       builder: (_) => RenameProjectDialog(
-        projectName: widget.ref,
-        currentDisplayName: _currentDisplayName,
+        projectRef: widget.ref,
       ),
     );
     if (result == null) return;
     if (!mounted) return;
     await ref.read(projectListProvider.notifier).refresh();
     if (!mounted) return;
-    Navigator.of(context).pop(result.newName);
+    Navigator.of(context).pop(result.newRef);
   }
 
   void _openHistoryDialog() {
@@ -165,95 +162,6 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
         margin: const EdgeInsets.all(16),
       ),
     );
-  }
-
-  Future<void> _rotateKey() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: SupabaseColors.bg200,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-          side: const BorderSide(color: SupabaseColors.border),
-        ),
-        title: const Row(
-          children: [
-            Icon(Icons.warning_rounded, color: SupabaseColors.warning),
-            SizedBox(width: 8),
-            Text(
-              'Gerar nova chave?',
-              style: TextStyle(color: SupabaseColors.textPrimary),
-            ),
-          ],
-        ),
-        content: const Text(
-          'A chave atual será invalidada. Apps usando ela vão parar de funcionar até serem atualizados.',
-          style: TextStyle(color: SupabaseColors.textSecondary),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancelar'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(
-              foregroundColor: SupabaseColors.warning,
-            ),
-            child: const Text('Gerar'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm != true || !mounted) return;
-
-    setState(() => _rotatingKey = true);
-    try {
-      final job =
-          await ref.read(projectRepositoryProvider).rotateKey(widget.ref);
-      final result = await ref.read(projectJobsProvider.notifier).waitFor(
-            job,
-            project: widget.ref,
-            action: 'rotate_key',
-          );
-      if (!mounted) return;
-      if (!result.ok) {
-        _showSnack(
-          result.message ?? 'Falha ao rotacionar as chaves.',
-          SupabaseColors.error,
-        );
-        return;
-      }
-
-      await ref.read(projectListProvider.notifier).refresh(throwOnError: true);
-      if (!mounted) return;
-      final projects = ref.read(projectListProvider).requireValue;
-      String? newKey;
-      for (final project in projects) {
-        if (project['name'] == widget.ref) {
-          newKey = project['anon_token']?.toString();
-          _automaticKeyRotationEnabled =
-              project['automatic_key_rotation_enabled'] as bool;
-          _automaticKeyRotationBlocked =
-              project['automatic_key_rotation_blocked'] as bool;
-          _automaticKeyRotationLastError =
-              project['automatic_key_rotation_last_error']?.toString();
-          _keyMetadataValid = project['key_metadata_valid'] as bool;
-          break;
-        }
-      }
-      if (newKey == null || newKey.isEmpty) {
-        throw Exception('Nova chave não retornada pela listagem de projetos');
-      }
-      setState(() => _currentAnonKey = newKey!);
-
-      _showSnack('Nova chave gerada!', SupabaseColors.success);
-    } catch (e) {
-      _showSnack('Erro ao gerar chave: $e', SupabaseColors.error);
-    } finally {
-      if (mounted) setState(() => _rotatingKey = false);
-    }
   }
 
   Future<void> _setAutomaticKeyRotation(bool enabled) async {
@@ -293,34 +201,18 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     }
   }
 
-  Future<void> _loadConfigToken() async {
-    setState(() => _loadingConfigToken = true);
-    try {
-      final token = await ref
-          .read(projectRepositoryProvider)
-          .fetchProjectConfigToken(widget.ref);
-      if (!mounted) return;
-      setState(() => _currentConfigToken = token);
-    } catch (e) {
-      _showSnack(
-        'Erro ao carregar token: ${e.toString().replaceFirst('Exception: ', '')}',
-        SupabaseColors.error,
-      );
-    } finally {
-      if (mounted) setState(() => _loadingConfigToken = false);
-    }
-  }
-
   Future<void> _deleteProject() async {
     bool sucesso = await ProjectService.confirmAndDeleteProject(
       context,
       widget.ref,
+      requestStepUpToken:
+          ref.read(stepUpAuthenticationServiceProvider).requestToken,
       submittedJobWaiter: (job) =>
           ref.read(projectJobsProvider.notifier).waitFor(
                 job,
                 project: widget.ref,
                 action: 'delete',
-                max: 400,
+                timeout: const Duration(minutes: 20),
               ),
     );
     if (sucesso && mounted) Navigator.of(context).pop(widget.ref);
@@ -329,24 +221,35 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
   @override
   Widget build(BuildContext context) {
     final configAsync = ref.watch(configProvider);
-    final serverDomain = configAsync.value?['server_domain'] as String? ?? '';
-    final projectUrl =
-        serverDomain.isNotEmpty ? '$serverDomain/${widget.ref}' : widget.ref;
+    if (configAsync.isLoading) return _buildLoadingDialog();
+    if (configAsync.hasError) {
+      return _buildErrorDialog(
+          'Não foi possível carregar a URL: ${configAsync.error}');
+    }
+    final serverDomain = configAsync.requireValue['server_domain'];
+    final baseUrl = serverDomain is String ? Uri.tryParse(serverDomain) : null;
+    if (baseUrl == null ||
+        !baseUrl.hasAuthority ||
+        (baseUrl.scheme != 'https' && baseUrl.scheme != 'http')) {
+      return _buildErrorDialog(
+          'A URL base do servidor não está configurada corretamente.');
+    }
+    final projectUrl = '$serverDomain/${widget.ref}';
 
     final membersAsync = ref.watch(projectMembersProvider(widget.ref));
     final activeJob = ref.watch(activeProjectJobProvider(widget.ref));
     final projectBusy = activeJob != null;
-    final myId = Session().myId;
-    final myRole = membersAsync.value
-        ?.firstWhere(
-          (m) => m.userId == myId,
-          orElse: () => ProjectMember(userId: '', role: 'member'),
-        )
-        .role;
-
-    if (myRole == null && membersAsync.isLoading) {
-      return _buildLoadingDialog();
+    if (membersAsync.isLoading) return _buildLoadingDialog();
+    if (membersAsync.hasError) {
+      return _buildErrorDialog(
+          'Não foi possível verificar o acesso: ${membersAsync.error}');
     }
+    String? myRole;
+    for (final member in membersAsync.requireValue) {
+      if (member.userId == Session().myId) myRole = member.role;
+    }
+
+    final isAdmin = myRole == 'admin' || Session().isSysAdmin;
 
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -366,34 +269,17 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
             mainAxisSize: MainAxisSize.min,
             children: [
               _buildHeader(),
+              _buildTabBar(),
               Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      StatusSection(projectRef: widget.ref),
-                      const SizedBox(height: 20),
-                      _buildUrlSection(projectUrl),
-                      const SizedBox(height: 20),
-                      _buildIdentitySection(myRole, projectBusy),
-                      const SizedBox(height: 20),
-                      _buildAnonKeySection(myRole, projectBusy),
-                      const SizedBox(height: 20),
-                      if (myRole == 'admin' || Session().isSysAdmin) ...[
-                        UserTelemetrySection(projectRef: widget.ref),
-                        const SizedBox(height: 20),
-                        _buildConfigTokenSection(),
-                        const SizedBox(height: 20),
-                      ],
-                      EnvSettingsSection(
-                        projectRef: widget.ref,
-                        isAdmin: myRole == 'admin' || Session().isSysAdmin,
-                      ),
-                      const SizedBox(height: 20),
-                      MembersSection(projectRef: widget.ref),
-                    ],
-                  ),
+                child: TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _buildGeneralTab(projectUrl, myRole, projectBusy),
+                    _buildKeysTab(
+                        myRole, projectBusy, isAdmin, serverDomain as String),
+                    _buildEnvironmentTab(isAdmin),
+                    _buildAccessTab(isAdmin),
+                  ],
                 ),
               ),
               _buildFooter(myRole, projectBusy),
@@ -402,6 +288,108 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
         ),
       ),
     );
+  }
+
+  Widget _buildTabBar() {
+    return Container(
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: SupabaseColors.border)),
+      ),
+      child: TabBar(
+        controller: _tabController,
+        isScrollable: false,
+        labelColor: SupabaseColors.brand,
+        unselectedLabelColor: SupabaseColors.textMuted,
+        indicatorColor: SupabaseColors.brand,
+        indicatorSize: TabBarIndicatorSize.tab,
+        dividerColor: Colors.transparent,
+        labelStyle: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+        unselectedLabelStyle: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+        ),
+        tabs: [
+          for (final tab in _kTabs)
+            Tab(
+              height: 44,
+              icon: Icon(tab.icon, size: 16),
+              iconMargin: const EdgeInsets.only(bottom: 2),
+              text: tab.label,
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Cada aba rola sozinha: o TabBarView recebe altura limitada do Expanded.
+  Widget _buildTabBody(List<Widget> children) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: children,
+      ),
+    );
+  }
+
+  Widget _buildGeneralTab(
+    String projectUrl,
+    String? myRole,
+    bool projectBusy,
+  ) {
+    return _buildTabBody([
+      StatusSection(projectRef: widget.ref),
+      const SizedBox(height: 20),
+      _buildUrlSection(projectUrl, myRole, projectBusy),
+      const SizedBox(height: 20),
+      _buildProjectNameSection(myRole, projectBusy),
+    ]);
+  }
+
+  Widget _buildKeysTab(
+      String? myRole, bool projectBusy, bool isAdmin, String publicBaseUrl) {
+    return _buildTabBody([
+      OpaqueApiKeysSection(
+        projectRef: widget.ref,
+        publicBaseUrl: publicBaseUrl,
+        canManage: isAdmin,
+        projectBusy: projectBusy,
+      ),
+      const SizedBox(height: 20),
+      _buildAutomaticKeyRotationSection(myRole, projectBusy),
+      if (isAdmin) ...[
+        const SizedBox(height: 20),
+      ],
+    ]);
+  }
+
+  Widget _buildEnvironmentTab(bool isAdmin) {
+    return _buildTabBody([
+      EnvSettingsSection(projectRef: widget.ref, isAdmin: isAdmin),
+    ]);
+  }
+
+  Widget _buildAccessTab(bool isAdmin) {
+    return _buildTabBody([
+      if (isAdmin) ...[
+        SectionWidget(
+            title: 'ACESSO E LIMITES',
+            child: SecondaryButton(
+                label: 'Configurar países, taxa e quota',
+                icon: Icons.public,
+                onPressed: () =>
+                    showAccessPolicyDialog(context, projectRef: widget.ref))),
+        const SizedBox(height: 20),
+      ],
+      MembersSection(projectRef: widget.ref),
+      if (isAdmin) ...[
+        const SizedBox(height: 20),
+        UserTelemetrySection(projectRef: widget.ref),
+      ],
+    ]);
   }
 
   Widget _buildHeader() {
@@ -440,7 +428,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  widget.ref,
+                  _currentDisplayName,
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
@@ -491,6 +479,21 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     );
   }
 
+  Widget _buildErrorDialog(String message) {
+    return Dialog(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(message),
+          const SizedBox(height: 16),
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Fechar')),
+        ]),
+      ),
+    );
+  }
+
   Widget _buildLoadingDialog() {
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -527,7 +530,8 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     );
   }
 
-  Widget _buildUrlSection(String projectUrl) {
+  Widget _buildUrlSection(String projectUrl, String? myRole, bool projectBusy) {
+    final canManage = myRole == 'admin' || Session().isSysAdmin;
     return SectionWidget(
       title: 'URL DO PROJETO',
       child: Container(
@@ -537,34 +541,55 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
           borderRadius: BorderRadius.circular(6),
           border: Border.all(color: SupabaseColors.border),
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Icon(
-              Icons.link_rounded,
-              size: 16,
-              color: SupabaseColors.textMuted,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: SelectableText(
-                projectUrl.isNotEmpty ? projectUrl : 'Carregando...',
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontFamily: 'monospace',
-                  color: SupabaseColors.textSecondary,
+            Row(
+              children: [
+                const Icon(Icons.link_rounded,
+                    size: 16, color: SupabaseColors.textMuted),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: SelectableText(projectUrl,
+                      style: const TextStyle(
+                          fontSize: 13,
+                          fontFamily: 'monospace',
+                          color: SupabaseColors.textSecondary)),
                 ),
-              ),
+                IconButtonWidget(
+                  icon: Icons.copy_rounded,
+                  tooltip: 'Copiar URL',
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: projectUrl));
+                    _showSnack('URL copiada!', SupabaseColors.success);
+                  },
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            IconButtonWidget(
-              icon: Icons.copy_rounded,
-              tooltip: 'Copiar URL',
-              onPressed: projectUrl.isNotEmpty
-                  ? () {
-                      Clipboard.setData(ClipboardData(text: projectUrl));
-                      _showSnack('URL copiada!', SupabaseColors.success);
-                    }
-                  : null,
+            const SizedBox(height: 10),
+            const Text(
+                'Gerar outra URL invalida a anterior. O nome do projeto não muda.',
+                style:
+                    TextStyle(fontSize: 12, color: SupabaseColors.textMuted)),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              children: [
+                TextButton.icon(
+                  onPressed: _openHistoryDialog,
+                  icon: const Icon(Icons.history_rounded, size: 16),
+                  label: const Text('Histórico de alterações'),
+                ),
+                if (canManage)
+                  SecondaryButton(
+                    label: 'Gerar nova URL',
+                    icon: Icons.link_rounded,
+                    onPressed: _savingDisplayName || projectBusy
+                        ? null
+                        : _openRenameDialog,
+                  ),
+              ],
             ),
           ],
         ),
@@ -572,284 +597,43 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     );
   }
 
-  Widget _buildIdentitySection(String? myRole, bool projectBusy) {
-    final isAdmin = myRole == 'admin' || Session().isSysAdmin;
-    final hasDisplayChange =
-        _displayNameController.text.trim() != (_currentDisplayName ?? '');
-
+  Widget _buildProjectNameSection(String? myRole, bool projectBusy) {
+    final canManage = myRole == 'admin' || Session().isSysAdmin;
+    final hasChange = _displayNameController.text.trim() != _currentDisplayName;
     return SectionWidget(
-      title: 'IDENTIDADE DO PROJETO',
+      title: 'NOME DO PROJETO',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: SupabaseColors.bg300,
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: SupabaseColors.border),
+          TextField(
+            key: const ValueKey('project-name-field'),
+            controller: _displayNameController,
+            enabled: canManage && !_savingDisplayName && !projectBusy,
+            maxLength: 80,
+            style: const TextStyle(
+                fontSize: 13, color: SupabaseColors.textPrimary),
+            decoration: const InputDecoration(
+              isDense: true,
+              labelText: 'Nome do projeto',
+              helperText:
+                  'Alterar o nome não modifica a URL nem a infraestrutura.',
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Text(
-                      'SLUG / PATH',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1,
-                        color: SupabaseColors.textMuted,
-                      ),
-                    ),
-                    const Spacer(),
-                    TextButton.icon(
-                      onPressed: () => _openHistoryDialog(),
-                      icon: const Icon(Icons.history_rounded, size: 14),
-                      label: const Text('Histórico'),
-                      style: TextButton.styleFrom(
-                        foregroundColor: SupabaseColors.textSecondary,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Expanded(
-                      child: SelectableText(
-                        widget.ref,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontFamily: 'monospace',
-                          color: SupabaseColors.textPrimary,
-                        ),
-                      ),
-                    ),
-                    if (isAdmin) ...[
-                      const SizedBox(width: 8),
-                      SecondaryButton(
-                        label: 'Renomear',
-                        icon: Icons.drive_file_rename_outline_rounded,
-                        onPressed: _savingDisplayName || projectBusy
-                            ? null
-                            : _openRenameDialog,
-                      ),
-                    ],
-                  ],
-                ),
-              ],
-            ),
+            onChanged: (_) => setState(() {}),
           ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: SupabaseColors.bg300,
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: SupabaseColors.border),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'NOME DE EXIBIÇÃO',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1,
-                    color: SupabaseColors.textMuted,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: _displayNameController,
-                  enabled: isAdmin && !_savingDisplayName && !projectBusy,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: SupabaseColors.textPrimary,
-                  ),
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    hintText: 'Nome humano do projeto',
-                  ),
-                  onChanged: (_) {
-                    if (mounted) setState(() {});
-                  },
-                ),
-                if (isAdmin) ...[
-                  const SizedBox(height: 10),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: SecondaryButton(
-                      onPressed:
-                          !hasDisplayChange || _savingDisplayName || projectBusy
-                              ? null
-                              : _saveDisplayName,
-                      icon: Icons.save_outlined,
-                      label: _savingDisplayName
-                          ? 'Salvando...'
-                          : 'Salvar display name',
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAnonKeySection(String? myRole, bool projectBusy) {
-    final hasKey = _currentAnonKey.isNotEmpty;
-    return SectionWidget(
-      title: 'CHAVE ANÔNIMA',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: SupabaseColors.bg300,
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: SupabaseColors.border),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: SelectableText(
-                    hasKey ? _currentAnonKey : 'Não disponível',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontFamily: 'monospace',
-                      color: SupabaseColors.textSecondary,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButtonWidget(
-                  icon: Icons.copy_rounded,
-                  tooltip: 'Copiar',
-                  onPressed: hasKey
-                      ? () {
-                          Clipboard.setData(
-                            ClipboardData(text: _currentAnonKey),
-                          );
-                          _showSnack('Chave copiada!', SupabaseColors.success);
-                        }
-                      : null,
-                ),
-              ],
-            ),
-          ),
-          if (hasKey && _keyMetadataValid) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                const Icon(
-                  Icons.schedule_rounded,
-                  size: 14,
-                  color: SupabaseColors.textMuted,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  'Expira em: ${DateFormat('dd/MM/yyyy HH:mm').format(JwtDecoder.getExpirationDate(_currentAnonKey))}',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: SupabaseColors.textMuted,
-                  ),
-                ),
-              ],
-            ),
-          ],
-          if (hasKey && !_keyMetadataValid) ...[
-            const SizedBox(height: 8),
-            const Text(
-              'Metadata de expiração inválida. A rotação automática está bloqueada.',
-              style: TextStyle(fontSize: 11, color: SupabaseColors.error),
-            ),
-          ],
-          if (myRole == 'admin' || Session().isSysAdmin) ...[
-            const SizedBox(height: 12),
-            Container(
-              decoration: BoxDecoration(
-                color: SupabaseColors.bg300,
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(
-                  color: _automaticKeyRotationBlocked
-                      ? SupabaseColors.error
-                      : SupabaseColors.border,
-                ),
+          if (canManage) ...[
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerRight,
+              child: SecondaryButton(
+                onPressed: !hasChange ||
+                        _displayNameController.text.trim().isEmpty ||
+                        _savingDisplayName ||
+                        projectBusy
+                    ? null
+                    : _saveDisplayName,
+                icon: Icons.edit_outlined,
+                label: _savingDisplayName ? 'Salvando...' : 'Renomear projeto',
               ),
-              child: Column(
-                children: [
-                  SwitchListTile.adaptive(
-                    value: _automaticKeyRotationEnabled,
-                    onChanged: _updatingAutomaticKeyRotation || projectBusy
-                        ? null
-                        : _setAutomaticKeyRotation,
-                    activeThumbColor: SupabaseColors.brand,
-                    title: const Text(
-                      'Rotação automática',
-                      style: TextStyle(
-                        color: SupabaseColors.textPrimary,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    subtitle: Text(
-                      'Gera novas chaves ${widget.automaticKeyRotationLeadDays} '
-                      'dias antes da expiração.',
-                      style: const TextStyle(
-                        color: SupabaseColors.textMuted,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ),
-                  if (_automaticKeyRotationBlocked) ...[
-                    const Divider(height: 1, color: SupabaseColors.border),
-                    Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _automaticKeyRotationLastError ??
-                                'A rotação automática foi bloqueada após uma falha.',
-                            style: const TextStyle(
-                              color: SupabaseColors.error,
-                              fontSize: 11,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          SecondaryButton(
-                            label: 'Retomar rotação automática',
-                            icon: Icons.play_arrow_rounded,
-                            onPressed:
-                                _updatingAutomaticKeyRotation || projectBusy
-                                    ? null
-                                    : () => _setAutomaticKeyRotation(true),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            SecondaryButton(
-              label: 'Gerar nova chave',
-              icon: Icons.refresh_rounded,
-              onPressed: _rotatingKey || projectBusy ? null : _rotateKey,
             ),
           ],
         ],
@@ -857,69 +641,50 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     );
   }
 
-  Widget _buildConfigTokenSection() {
-    final hasToken = _currentConfigToken.isNotEmpty;
+  Widget _buildAutomaticKeyRotationSection(
+    String? myRole,
+    bool projectBusy,
+  ) {
+    final canManage = myRole == 'admin' || Session().isSysAdmin;
     return SectionWidget(
-      title: 'TOKEN DE CONFIGURAÇÃO',
+      title: 'POLITICA GLOBAL DE ROTACAO',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: SupabaseColors.bg300,
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: SupabaseColors.border),
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            value: _automaticKeyRotationEnabled,
+            onChanged:
+                !canManage || _updatingAutomaticKeyRotation || projectBusy
+                    ? null
+                    : _setAutomaticKeyRotation,
+            activeThumbColor: SupabaseColors.brand,
+            title: const Text(
+              'Rotacao automatica do projeto',
+              style: TextStyle(
+                color: SupabaseColors.textPrimary,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: SelectableText(
-                    hasToken ? _currentConfigToken : 'Não disponível',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontFamily: 'monospace',
-                      color: SupabaseColors.textSecondary,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButtonWidget(
-                  icon:
-                      hasToken ? Icons.copy_rounded : Icons.visibility_outlined,
-                  tooltip: hasToken ? 'Copiar' : 'Carregar token',
-                  onPressed: hasToken
-                      ? () {
-                          Clipboard.setData(
-                            ClipboardData(text: _currentConfigToken),
-                          );
-                          _showSnack('Token copiado!', SupabaseColors.success);
-                        }
-                      : (_loadingConfigToken ? null : _loadConfigToken),
-                ),
-              ],
+            subtitle: Text(
+              'Prepara cada slot ${widget.automaticKeyRotationLeadDays} dias '
+              'antes do vencimento e tambem renova os tokens internos.',
+              style: const TextStyle(
+                color: SupabaseColors.textMuted,
+                fontSize: 11,
+              ),
             ),
           ),
-          if (hasToken) ...[
+          if (_automaticKeyRotationBlocked) ...[
             const SizedBox(height: 8),
-            Row(
-              children: [
-                const Icon(
-                  Icons.info_outline,
-                  size: 14,
-                  color: SupabaseColors.textMuted,
-                ),
-                const SizedBox(width: 6),
-                const Expanded(
-                  child: Text(
-                    'Use este token no header X-Config-Token para acessar o endpoint /config',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: SupabaseColors.textMuted,
-                    ),
-                  ),
-                ),
-              ],
+            Text(
+              _automaticKeyRotationLastError ??
+                  'A rotacao automatica foi bloqueada por uma falha explicita.',
+              style: const TextStyle(
+                color: SupabaseColors.error,
+                fontSize: 11,
+              ),
             ),
           ],
         ],

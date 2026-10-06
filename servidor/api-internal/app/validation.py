@@ -6,6 +6,7 @@ import uuid
 from fastapi import HTTPException
 
 from app.host_agent_protocol import ProjectNameValidator
+from app.project_public_ref import validate_public_ref
 
 
 SERVICE_NAME_RE = re.compile(r"^[a-z][a-z0-9\-]{0,39}$")
@@ -41,11 +42,14 @@ def validate_project_id(raw: str) -> str:
             "Nome invalido: use letras minusculas, numeros ou '_', "
             "(3-40 caracteres, comecando por letra ou '_').",
         )
-    if name in ProjectNameValidator.RESERVED_WORDS:
-        raise HTTPException(400, "Nome invalido: palavra reservada SQL.")
-    if name in ProjectNameValidator.RESERVED_ROUTE_NAMES:
-        raise HTTPException(400, "Nome invalido: rota reservada do Traefik.")
     return name
+
+
+def validate_project_ref(raw: str) -> str:
+    try:
+        return validate_public_ref(raw)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 def validate_service_name(raw: str) -> str:

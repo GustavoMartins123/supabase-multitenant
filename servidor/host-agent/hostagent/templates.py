@@ -7,10 +7,12 @@ Dockerfile e docker-compose do projeto durante o recreate.
 
 from __future__ import annotations
 
+import os
 import re
+import tempfile
 from pathlib import Path
 
-from .envfile import read_env_file
+from .envfile import read_canonical_env_value
 from .security import ensure_inside
 
 
@@ -18,10 +20,11 @@ def _normalize_public_base_url(url: str, proto: str | None = None) -> str:
     normalized = url.rstrip("/")
     if not re.match(r"^https?://", normalized):
         normalized_proto = (proto or "").strip().lower()
-        if normalized_proto in {"http", "https"}:
-            normalized = f"{normalized_proto}://{normalized}"
-        else:
-            normalized = f"https://{normalized}"
+        if normalized_proto not in {"http", "https"}:
+            raise RuntimeError(
+                "SERVER_PROTO deve ser http ou https quando SERVER_URL nao inclui esquema"
+            )
+        normalized = f"{normalized_proto}://{normalized}"
     return normalized
 
 
@@ -29,21 +32,39 @@ def _render_template(template_path: Path, output_path: Path, replacements: dict[
     content = template_path.read_text(encoding="utf-8")
     for key, value in replacements.items():
         content = content.replace(f"{{{{{key}}}}}", value)
+    unresolved = sorted(set(re.findall(r"\{\{[a-z0-9_]+\}\}", content)))
+    if unresolved:
+        raise RuntimeError(
+            f"Template {template_path.name} possui placeholders sem valor: "
+            + ", ".join(unresolved)
+        )
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(content, encoding="utf-8")
+    existing_mode = output_path.stat().st_mode & 0o777 if output_path.exists() else 0o600
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{output_path.name}.", suffix=".tmp", dir=output_path.parent
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary_name, existing_mode)
+        os.replace(temporary_name, output_path)
+    except Exception:
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def _build_replacements(root: Path, project_dir: Path, project: str) -> dict[str, str]:
-    root_env = read_env_file(root / ".env")
-    if not root_env:
-        raise RuntimeError("Arquivo .env raiz nao encontrado")
-    project_env = read_env_file(project_dir / ".env")
-    if not project_env:
-        raise RuntimeError(f"Arquivo .env nao encontrado para o projeto '{project}'")
-
-    server_url = root_env.get("SERVER_URL", "").strip()
-    server_proto = root_env.get("SERVER_PROTO", "").strip()
-    host_project_root = root_env.get("HOST_PROJECT_ROOT", "").strip()
+    root_env_path = root / ".env"
+    server_url = read_canonical_env_value(root_env_path, "SERVER_URL")
+    server_proto = read_canonical_env_value(root_env_path, "SERVER_PROTO")
+    host_project_root = read_canonical_env_value(
+        root_env_path, "HOST_PROJECT_ROOT"
+    )
     if not server_url:
         raise RuntimeError("SERVER_URL ausente no .env raiz")
     if not host_project_root:
@@ -52,25 +73,60 @@ def _build_replacements(root: Path, project_dir: Path, project: str) -> dict[str
     required_project_keys = (
         "ANON_KEY_PROJETO",
         "SERVICE_ROLE_KEY_PROJETO",
-        "CONFIG_TOKEN_PROJETO",
         "JWT_SECRET_PROJETO",
+        "API_GATEWAY_TOKEN_PROJETO",
+        "PROJECT_UUID",
+        "PROJECT_PUBLIC_REF",
     )
-    missing = [key for key in required_project_keys if not project_env.get(key, "").strip()]
+    project_env_path = project_dir / ".env"
+    raw_project_env = {
+        key: read_canonical_env_value(project_env_path, key)
+        for key in required_project_keys
+    }
+    missing = [key for key, value in raw_project_env.items() if not value]
     if missing:
         raise RuntimeError(
             f".env do projeto '{project}' sem chaves obrigatorias: {', '.join(missing)}"
         )
+    project_env = {
+        key: value
+        for key, value in raw_project_env.items()
+        if value is not None
+    }
+    if not re.fullmatch(
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+        r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+        project_env["PROJECT_UUID"],
+    ):
+        raise RuntimeError("PROJECT_UUID invalido no .env do projeto")
+    if not re.fullmatch(
+        r"[a-f0-9]{64}", project_env["API_GATEWAY_TOKEN_PROJETO"]
+    ):
+        raise RuntimeError("API_GATEWAY_TOKEN_PROJETO invalido no .env do projeto")
+    if not re.fullmatch(
+        r"[A-Za-z0-9_-]{43}=?", project_env["JWT_SECRET_PROJETO"]
+    ):
+        raise RuntimeError("JWT_SECRET_PROJETO invalido no .env do projeto")
+    jwt_re = re.compile(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
+    if not jwt_re.fullmatch(project_env["ANON_KEY_PROJETO"]):
+        raise RuntimeError("ANON_KEY_PROJETO invalida no .env do projeto")
+    if not jwt_re.fullmatch(project_env["SERVICE_ROLE_KEY_PROJETO"]):
+        raise RuntimeError("SERVICE_ROLE_KEY_PROJETO invalida no .env do projeto")
 
     public_base_url = _normalize_public_base_url(server_url, server_proto)
-    project_public_url = f"{public_base_url}/{project}"
+    public_ref = project_env["PROJECT_PUBLIC_REF"]
+    if not re.fullmatch(r"[a-z]{20}", public_ref):
+        raise RuntimeError("PROJECT_PUBLIC_REF invalido no .env do projeto")
+    project_public_url = f"{public_base_url}/{public_ref}"
 
     return {
         "anon_key": project_env["ANON_KEY_PROJETO"],
         "service_role_key": project_env["SERVICE_ROLE_KEY_PROJETO"],
         "project_id": project,
-        "project_uuid": project_env.get("PROJECT_UUID") or project,
-        "config_token": project_env["CONFIG_TOKEN_PROJETO"],
+        "project_uuid": project_env["PROJECT_UUID"],
+        "project_public_ref": public_ref,
         "jwt_secret": project_env["JWT_SECRET_PROJETO"],
+        "api_gateway_token": project_env["API_GATEWAY_TOKEN_PROJETO"],
         "server_url": server_url,
         "public_base_url": public_base_url,
         "project_public_url": project_public_url,

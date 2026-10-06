@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 import '../data/api_client.dart';
 import '../models/job.dart';
+import 'step_up_authentication_service.dart';
+import '../widgets/step_up_authentication_dialog.dart';
 
 class JobWaitResult {
   const JobWaitResult({
@@ -27,19 +30,33 @@ class ProjectService {
   static Future<bool> confirmAndDeleteProject(
     BuildContext context,
     String projectRef, {
-    SubmittedJobWaiter? submittedJobWaiter,
+    required StepUpTokenRequester requestStepUpToken,
+    required SubmittedJobWaiter submittedJobWaiter,
+    ApiClient? apiClient,
   }) async {
     final confirmed = await _showConfirmationDialog(context, projectRef);
     if (!confirmed || !context.mounted) return false;
 
-    final password = await _showPasswordDialog(context);
-    if (password == null || password.isEmpty || !context.mounted) return false;
+    final stepUpToken = await showStepUpAuthenticationDialog(
+      context,
+      title: 'Reautenticar para excluir',
+      description:
+          'Confirme sua identidade antes de excluir permanentemente este projeto.',
+      authenticate: (password) => requestStepUpToken(
+        password: password,
+        action: StepUpAction.deleteProject,
+        projectRef: projectRef,
+        resourceId: projectRef,
+      ),
+    );
+    if (stepUpToken == null || !context.mounted) return false;
 
     return await _executeProjectDeletion(
       context,
       projectRef,
-      password,
+      stepUpToken,
       submittedJobWaiter: submittedJobWaiter,
+      apiClient: apiClient,
     );
   }
 
@@ -88,60 +105,12 @@ class ProjectService {
     ).then((value) => value ?? false);
   }
 
-  static Future<String?> _showPasswordDialog(BuildContext context) async {
-    final passwordController = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-
-    return showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('Senha de Exclusão'),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Digite a senha para confirmar a operação:'),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: passwordController,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Senha de Exclusão',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.lock),
-                ),
-                validator: (value) =>
-                    value == null || value.isEmpty ? 'Senha obrigatória' : null,
-                autofocus: true,
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              if (formKey.currentState!.validate()) {
-                Navigator.pop(context, passwordController.text);
-              }
-            },
-            child: const Text('Confirmar'),
-          ),
-        ],
-      ),
-    );
-  }
-
   static Future<bool> _executeProjectDeletion(
     BuildContext context,
     String projectRef,
-    String password, {
-    SubmittedJobWaiter? submittedJobWaiter,
+    String stepUpToken, {
+    required SubmittedJobWaiter submittedJobWaiter,
+    ApiClient? apiClient,
   }) async {
     var loadingDialogOpen = true;
     showDialog(
@@ -161,29 +130,27 @@ class ProjectService {
     );
 
     try {
-      final response = await (() async {
-        final client = ApiClient();
-        try {
-          return await client.delete(
-            Uri.parse('/api/admin/projects/$projectRef'),
-            headers: {
-              'X-Delete-Password': password,
-              'Content-Type': 'application/json',
-            },
-          );
-        } finally {
-          client.close();
-        }
-      })();
+      late final http.Response response;
+      final client = apiClient ?? ApiClient();
+      try {
+        response = await client.delete(
+          Uri.parse('/api/admin/projects/$projectRef'),
+          headers: {
+            'X-Step-Up-Token': stepUpToken,
+            'Content-Type': 'application/json',
+          },
+        );
+      } finally {
+        stepUpToken = '';
+        if (apiClient == null) client.close();
+      }
 
       if (response.statusCode != 202) {
         throw ApiException.fromResponse(response);
       }
 
       final job = Job.fromResponse(response);
-      final waited = submittedJobWaiter == null
-          ? await waitForJob(job.id)
-          : await submittedJobWaiter(job);
+      final waited = await submittedJobWaiter(job);
       if (!context.mounted) return waited.ok;
       Navigator.pop(context);
       loadingDialogOpen = false;
@@ -242,96 +209,4 @@ class ProjectService {
     );
   }
 
-  static Future<JobWaitResult> waitForJob(
-    String jobId, {
-    Duration every = const Duration(seconds: 3),
-    int max = 100,
-    void Function(Map<String, dynamic> data)? onUpdate,
-    RequestCancellation? cancellation,
-  }) async {
-    Map<String, dynamic> lastData = const {};
-    final client = ApiClient();
-    try {
-      for (var i = 0; i < max; i++) {
-        if (cancellation?.isCancelled == true) {
-          throw const ApiException(
-            ApiFailureKind.cancelled,
-            'Acompanhamento do job cancelado',
-          );
-        }
-        if (i > 0) await Future.delayed(every);
-        final response = await client.get(
-          Uri.parse('/api/projects/status/$jobId'),
-          cancellation: cancellation,
-        );
-        if (response.statusCode != 200) {
-          throw ApiException.fromResponse(response);
-        }
-        final data = decodeJsonObject(
-          response,
-          context: 'Acompanhamento do job',
-        );
-        onUpdate?.call(data);
-
-        final status = data['status']?.toString();
-        if (status == null || status.isEmpty) {
-          throw const ApiException(
-            ApiFailureKind.invalidResponse,
-            'Resposta de job sem status',
-          );
-        }
-        final message = data['message']?.toString();
-        final action = data['action']?.toString();
-        final progress = (data['progress'] as num?)?.toInt();
-        final currentStep = data['current_step']?.toString();
-        lastData = data;
-
-        if (status == 'done') {
-          return JobWaitResult(
-            ok: true,
-            status: status,
-            message: message,
-            action: action,
-            progress: progress,
-            currentStep: currentStep,
-          );
-        }
-        if (status == 'failed' || status == 'cancelled') {
-          final diagnostic = [
-            if (message != null && message.isNotEmpty) message,
-            if (currentStep != null) 'Etapa: $currentStep (${progress ?? 0}%)',
-          ].join('\n');
-          return JobWaitResult(
-            ok: false,
-            status: status,
-            message: diagnostic.isEmpty ? null : diagnostic,
-            action: action,
-            progress: progress,
-            currentStep: currentStep,
-          );
-        }
-      }
-    } finally {
-      client.close();
-    }
-    return JobWaitResult(
-      ok: false,
-      status: 'timeout',
-      message:
-          'Tempo limite excedido em ${lastData['current_step'] ?? 'etapa desconhecida'} '
-          '(${lastData['progress'] ?? 0}%).',
-      action: lastData['action']?.toString(),
-      progress: (lastData['progress'] as num?)?.toInt(),
-      currentStep: lastData['current_step']?.toString(),
-    );
-  }
-
-  static Future<bool> waitUntilReady(
-    String jobId, {
-    Duration every = const Duration(seconds: 3),
-    int max = 100,
-  }) async {
-    final result = await waitForJob(jobId, every: every, max: max);
-    return result.ok;
-  }
 }

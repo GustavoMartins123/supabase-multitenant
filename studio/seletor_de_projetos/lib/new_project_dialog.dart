@@ -14,6 +14,7 @@ class NewProjectDialog extends StatefulWidget {
 
 class _NewProjectDialogState extends State<NewProjectDialog>
     with SingleTickerProviderStateMixin {
+  String _resourceProfile = 'medium';
   final _ctrl = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   final _rand = Random.secure();
@@ -21,6 +22,8 @@ class _NewProjectDialogState extends State<NewProjectDialog>
   late Animation<double> _scaleAnimation;
 
   String _crop(String s) => s.length > 40 ? s.substring(0, 40) : s;
+
+  String _cropForSuffix(String s) => s.length > 30 ? s.substring(0, 30) : s;
 
   static const _prefixes = <String>[
     'app',
@@ -94,42 +97,41 @@ class _NewProjectDialogState extends State<NewProjectDialog>
     void addIfValid(String s) {
       final normalized = _crop(ProjectNameValidator.normalize(s));
       if (normalized.isNotEmpty &&
-          ProjectNameValidator.isValidShape(normalized) &&
-          !ProjectNameValidator.isReserved(normalized)) {
+          ProjectNameValidator.isValidShape(normalized)) {
         suggestions.add(normalized);
       }
     }
 
-    if (!ProjectNameValidator.isReserved(base)) addIfValid(base);
+    addIfValid(base);
 
     final today = DateFormat('ddMMyy').format(DateTime.now());
     final year = DateFormat('yyyy').format(DateTime.now());
-    addIfValid('${base}_$today');
-    addIfValid('${base}_v1');
-    addIfValid('${base}_$year');
-    addIfValid('${base}_dev');
-    addIfValid('${base}_prod');
-    addIfValid('${base}_test');
+    addIfValid('${_cropForSuffix(base)}_$today');
+    addIfValid('${_cropForSuffix(base)}_v1');
+    addIfValid('${_cropForSuffix(base)}_$year');
+    addIfValid('${_cropForSuffix(base)}_dev');
+    addIfValid('${_cropForSuffix(base)}_prod');
+    addIfValid('${_cropForSuffix(base)}_test');
 
     if (base.length <= 10) {
-      for (final prefix in _prefixes.take(3)) {
+      for (final prefix in _prefixes.take(6)) {
         addIfValid('${prefix}_$base');
       }
-      for (final suffix in _suffixes.take(3)) {
-        addIfValid('${base}_$suffix');
+      for (final suffix in _suffixes.take(6)) {
+        addIfValid('${_cropForSuffix(base)}_$suffix');
       }
     }
 
-    addIfValid('${base}_${_randString(4)}');
-    addIfValid('${base}_${_rand.nextInt(999) + 1}');
+    addIfValid('${_cropForSuffix(base)}_${_randString(4)}');
+    addIfValid('${_cropForSuffix(base)}_${_rand.nextInt(999) + 1}');
 
     if (suggestions.length < 8) {
       addIfValid('my_$base');
-      addIfValid('${base}_project');
-      addIfValid('${base}_app');
+      addIfValid('${_cropForSuffix(base)}_project');
+      addIfValid('${_cropForSuffix(base)}_app');
     }
 
-    return suggestions.take(10).toList();
+    return suggestions.take(20).toList();
   }
 
   List<String> _getDefaultSuggestions() {
@@ -141,6 +143,16 @@ class _NewProjectDialogState extends State<NewProjectDialog>
       'projeto_$today',
       'idr_${_randString(4)}',
       'sistema_novo',
+      'portal_clientes',
+      'loja_online',
+      'painel_admin',
+      'agenda',
+      'catalogo',
+      'financeiro',
+      'chat',
+      'dashboard',
+      'integracoes',
+      'workspace',
       'app_${_randString(4)}',
     ]);
 
@@ -154,15 +166,14 @@ class _NewProjectDialogState extends State<NewProjectDialog>
     if (!ProjectNameValidator.isValidShape(txt)) {
       return 'Use minúsculas, números ou "_" (3-40 caracteres)';
     }
-    if (ProjectNameValidator.isReserved(txt)) {
-      return 'Nome reservado — escolha outro.';
-    }
     return null;
   }
 
   void _submit() {
     if (_formKey.currentState!.validate()) {
-      Navigator.pop(context, ProjectNameValidator.normalize(_ctrl.text));
+      Navigator.pop(context,
+          (name: ProjectNameValidator.normalize(_ctrl.text),
+          resourceProfile: _resourceProfile));
     }
   }
 
@@ -254,6 +265,35 @@ class _NewProjectDialogState extends State<NewProjectDialog>
                         color: SupabaseColors.textSecondary,
                       ),
                     ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      isExpanded: true,
+                      initialValue: _resourceProfile,
+                      decoration: const InputDecoration(
+                        labelText: 'Perfil de Recursos',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 'small', child: Text('Pequeno (256 MB / 0,5 CPU)')),
+                        DropdownMenuItem(value: 'medium', child: Text('Médio (1 GB / 1,5 CPU)')),
+                        DropdownMenuItem(value: 'large', child: Text('Grande (4 GB / 3 CPUs)')),
+                        DropdownMenuItem(
+                            value: 'custom',
+                            child: Text('Personalizado (definido no .env do servidor)')),
+                      ],
+                      onChanged: (v) =>
+                          setState(() => _resourceProfile = v ?? 'medium'),
+                    ),
+                    if (_resourceProfile == 'custom')
+                      const Padding(
+                        padding: EdgeInsets.only(top: 6),
+                        child: Text(
+                          'Usa o slot PROJECT_RES_CUSTOM_* do .env do servidor. '
+                          'Após criar, ajuste RAM/CPU/PIDs livremente nas '
+                          'configurações do projeto.',
+                          style: TextStyle(fontSize: 11, color: Colors.white70),
+                        ),
+                      ),
                     const SizedBox(height: 8),
                     Autocomplete<String>(
                       optionsBuilder: (textEditingValue) {

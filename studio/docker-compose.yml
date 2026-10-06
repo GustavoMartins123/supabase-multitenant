@@ -13,10 +13,42 @@ secrets:
     file: ./secrets/authelia/SESSION_SECRET
   STORAGE_ENCRYPTION_KEY:
     file: ./secrets/authelia/STORAGE_ENCRYPTION_KEY
+  STUDIO_BOOTSTRAP_TOKEN:
+    file: ./secrets/authelia/STUDIO_BOOTSTRAP_TOKEN
+  REDIS_SESSION_PASSWORD:
+    file: ./secrets/authelia/REDIS_SESSION_PASSWORD
+  ASSISTANT_MASTER_KEY:
+    file: ./secrets/assistant/MASTER_KEY
+  ASSISTANT_GATEWAY_KEY:
+    file: ./secrets/assistant/GATEWAY_KEY
+  ASSISTANT_TLS_KEY:
+    file: ./secrets/assistant/tls/server.key
 
 services:
+  redis-sessions:
+    image: redis:8.2.2-alpine
+    entrypoint: ["sh", "/usr/local/bin/start-sessions.sh"]
+    volumes:
+      - redis-sessions:/data
+      - ./redis/start-sessions.sh:/usr/local/bin/start-sessions.sh:ro
+      - ./redis/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+    secrets:
+      - REDIS_SESSION_PASSWORD
+    networks: [auth-sessions]
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    mem_limit: 384m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "sh", "/usr/local/bin/healthcheck.sh"]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+    restart: unless-stopped
+    logging: *vector-logging
   usersdb-init:
-    image: ${USERSDB_INIT_IMAGE}
+    image: alpine:3.23
     command: >
         sh -c "cp -R /seed/* /config &&
               chown -R 65534:65534 /config &&
@@ -27,8 +59,10 @@ services:
     restart: "no"
     logging: *vector-logging
   authelia:
-    image: ${AUTHELIA_IMAGE}
+    image: authelia/authelia:4.39.20
     container_name: authelia
+    mem_limit: 384m
+    memswap_limit: 768m
     command:
       - authelia
       - --config=/config/configuration.runtime.yml
@@ -39,10 +73,17 @@ services:
       - AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE=/run/secrets/JWT_SECRET
       - AUTHELIA_SESSION_SECRET_FILE=/run/secrets/SESSION_SECRET
       - AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE=/run/secrets/STORAGE_ENCRYPTION_KEY
+      - AUTHELIA_SESSION_REDIS_PASSWORD_FILE=/run/secrets/REDIS_SESSION_PASSWORD
+      - AUTHELIA_SESSION_REDIS_HOST=redis-sessions
     secrets:
       - JWT_SECRET
       - SESSION_SECRET
       - STORAGE_ENCRYPTION_KEY
+      - REDIS_SESSION_PASSWORD
+    depends_on:
+      redis-sessions:
+        condition: service_healthy
+    networks: [default, auth-sessions]
     restart: unless-stopped
     logging: *vector-logging
 
@@ -51,7 +92,7 @@ services:
       context: .
       dockerfile: Dockerfile 
       args:
-        AUTHELIA_IMAGE: ${AUTHELIA_IMAGE}
+        AUTHELIA_IMAGE: authelia/authelia:4.39.20
     container_name: nginx
     ports:
       - "${STUDIO_HTTPS_PORT}:443"
@@ -60,11 +101,12 @@ services:
     depends_on:
       studio:
         condition: service_started
-    networks: [default, rede-supabase]
+      studio-assistant:
+        condition: service_healthy
+    networks: [default, rede-supabase, assistant]
     env_file:
       - .env
     environment:
-      SNIPPETS_MANAGEMENT_FOLDER: ${SNIPPETS_MANAGEMENT_FOLDER}
       AVATAR_PROCESS_MAX_CONCURRENCY: ${AVATAR_PROCESS_MAX_CONCURRENCY:-2}
       AVATAR_PROCESS_TIMEOUT_MS: ${AVATAR_PROCESS_TIMEOUT_MS:-15000}
       AVATAR_MAX_PIXELS: ${AVATAR_MAX_PIXELS:-16000000}
@@ -74,25 +116,43 @@ services:
       STUDIO_EXTRA_CA_CERT_FILE: /etc/studio/extra-ca.pem
       AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE: /var/run/authelia-cli-secrets/JWT_SECRET
       AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE: /var/run/authelia-cli-secrets/STORAGE_ENCRYPTION_KEY
+      STUDIO_BOOTSTRAP_TOKEN_FILE: /run/secrets/STUDIO_BOOTSTRAP_TOKEN
+      ASSISTANT_GATEWAY_KEY_FILE: /var/run/assistant-gateway-key
     secrets:
       - JWT_SECRET
       - STORAGE_ENCRYPTION_KEY
+      - STUDIO_BOOTSTRAP_TOKEN
+      - ASSISTANT_GATEWAY_KEY
     volumes:
       - ./nginx/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ./authelia:/config
-      - ./snippets:/app/snippets
       - ${STUDIO_CA_CERT_PATH:-./authelia/ssl/ca.pem}:/etc/studio/extra-ca.pem:ro
     tmpfs:
       - /tmp:size=256m,mode=1777
+  studio-assistant:
+    build: ./assistant
+    restart: unless-stopped
+    logging: *vector-logging
+    networks: [assistant]
+    secrets: [ASSISTANT_MASTER_KEY, ASSISTANT_GATEWAY_KEY, ASSISTANT_TLS_KEY]
+    volumes:
+      - assistant-data:/data
+      - ./secrets/assistant/tls/server.pem:/tls/server.pem:ro
+      - ./authelia/ssl/ca.pem:/tls/ca.pem:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 1
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('https').get({hostname:'localhost',port:3443,path:'/healthz',servername:'studio-assistant',ca:require('fs').readFileSync('/tls/ca.pem')},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
   studio:
     container_name: supabase-studio
-    build:
-      context: ./studio-slug
-      dockerfile: Dockerfile
-      args:
-        SUPABASE_STUDIO_COMMIT: ${SUPABASE_STUDIO_COMMIT:-20290c71bdc48bef1720bfe7d292f3b9e6154f7d}
-        SUPABASE_STUDIO_REPOSITORY: ${SUPABASE_STUDIO_REPOSITORY:-https://github.com/supabase/supabase.git}
-    image: ${STUDIO_SLUG_IMAGE:-ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v1}
+    image: ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v11
+    pull_policy: always
     restart: unless-stopped
     logging: *vector-logging
     healthcheck:
@@ -105,8 +165,6 @@ services:
       interval: 5s
       retries: 3
       start_period: 20s
-    env_file:
-      - .analytics.env
     networks: [default, rede-supabase]
     environment:
       HOSTNAME: "0.0.0.0"
@@ -116,33 +174,22 @@ services:
       DEFAULT_PROJECT_NAME: postgres
       SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
       LOGFLARE_URL: https://nginx:443/_internal/logflare
+      LOGFLARE_PRIVATE_ACCESS_TOKEN: "internal-proxy-authenticated"
+      STUDIO_ANALYTICS_HMAC_SECRET: "${STUDIO_ANALYTICS_HMAC_SECRET:?STUDIO_ANALYTICS_HMAC_SECRET is required}"
+      NODE_OPTIONS: "--require=/usr/local/lib/studio-logflare-hmac.cjs"
       NEXT_PUBLIC_ENABLE_LOGS: "true"
       ENABLED_FEATURES_LOGS_ALL: "true"
       NEXT_ANALYTICS_BACKEND_PROVIDER: postgres
-      SNIPPETS_MANAGEMENT_FOLDER: ${SNIPPETS_MANAGEMENT_FOLDER}
     volumes:
-      - ./snippets:/app/snippets
       - ${STUDIO_CA_CERT_PATH:-./authelia/ssl/ca.pem}:/etc/ssl/certs/studio-ca.pem:ro
-  # postgres:
-  #   build:
-  #     context: ./postgres
-  #     dockerfile: Dockerfile
-  #   container_name: nginx-postgres
-  #   restart: unless-stopped
-  #   environment:
-  #     POSTGRES_DB: ${POSTGRES_DB}
-  #     POSTGRES_USER: ${POSTGRES_USER}
-  #     POSTGRES_PASSWORD: ${POSTGRES_NGINX_PASSWORD}
-  #   volumes:
-  #     - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-  #     - ./postgres/entrypoint.sh:/docker-entrypoint-initdb.d/entrypoint.sh:ro
-  #     - ./postgres/logs:/var/log/postgresql
-  #     - ./postgres/data:/var/lib/postgresql/data:Z
-  #   expose:
-  #     - "8999" 
 volumes:
   usersdb:
+  redis-sessions:
+  assistant-data:
 
 networks:
+  assistant:
+  auth-sessions:
+    internal: true
   rede-supabase:
     external: true

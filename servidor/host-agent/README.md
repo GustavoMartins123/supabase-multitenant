@@ -76,6 +76,7 @@ Tudo é lido de `servidor/.env` (ou variáveis de ambiente com o mesmo nome):
 | `HOST_AGENT_MAX_PARALLEL_COMMANDS` | `3` | Comandos simultâneos (nunca 2 do mesmo projeto). |
 | `HOST_AGENT_SHUTDOWN_GRACE` | `300` | Espera por comandos em execução no stop. |
 | `HOST_AGENT_SCHEMA_WAIT_TIMEOUT` | `180` | Espera da unit pelas tabelas criadas pela Projects API. |
+| `HOST_AGENT_DB_COMMAND_TIMEOUT` | `30.0` | Prazo de cada query; sem ele um socket morto trava os loops. |
 
 Para alterar apenas a espera curta feita durante a instalação, exporte
 `HOST_AGENT_INSTALL_SCHEMA_WAIT_TIMEOUT` (default: `15` segundos).

@@ -107,6 +107,7 @@ async def scan_automatic_key_rotations(
                 FROM projects p
                 WHERE p.automatic_key_rotation_enabled
                   AND p.automatic_key_rotation_blocked_at IS NULL
+                  AND p.opaque_gateway_ready_at IS NOT NULL
                   AND p.anon_key IS NOT NULL
                   AND p.service_role IS NOT NULL
                   AND (
@@ -203,16 +204,21 @@ async def scan_automatic_key_rotations(
                 claimed.append((project["name"], job_id))
 
     for project_name, job_id in claimed:
+        async def run_rotation(
+            job_id: str = job_id, project_name: str = project_name
+        ) -> None:
+            await rotation_runner(
+                job_id,
+                project_name,
+                None,
+                trigger="automatic",
+            )
+
         try:
             await enqueue_action(
                 project_name,
                 job_id,
-                lambda job_id=job_id, project_name=project_name: rotation_runner(
-                    job_id,
-                    project_name,
-                    None,
-                    trigger="automatic",
-                ),
+                run_rotation,
             )
         except Exception as exc:
             await block_automatic_key_rotation(

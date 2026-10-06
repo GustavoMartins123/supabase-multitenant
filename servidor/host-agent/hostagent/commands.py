@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
+import secrets
 import shutil
 import signal
 from dataclasses import dataclass, field
@@ -19,7 +21,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping
 
 from .config import AgentConfig
-from .envfile import read_env_file
+from .envfile import read_canonical_env_value, read_env_file, upsert_env_value
 from .host_agent_protocol import (
     COMMAND_TERM_GRACE,
     CONTAINER_LOGS_LIMIT,
@@ -29,13 +31,20 @@ from .host_agent_protocol import (
 )
 from .security import (
     PathConfinementError,
+    ensure_inside,
     resolve_backup_dir,
     resolve_backup_project_dir,
     resolve_project_dir,
 )
 from .templates import sync_project_generated_files
+from .progress import (
+    DUPLICATE_PROGRESS_EVENTS, ROTATE_PROGRESS_EVENTS, REFERENCE_PROGRESS_EVENTS,
+    RESTORE_PROGRESS_EVENTS, DELETE_FILES_PROGRESS_EVENTS, DELETE_STORAGE_PROGRESS_EVENTS,
+)
 
-PROJECT_SERVICE_ORDER = ["meta", "auth", "rest", "imgproxy", "storage", "nginx"]
+logger = logging.getLogger("hostagent.commands")
+
+PROJECT_SERVICE_ORDER = ["meta", "auth", "rest", "nginx"]
 _OUTPUT_WINDOW_LIMIT = 64_000
 
 ProgressEvent = tuple[int, str, str]
@@ -95,44 +104,72 @@ CREATE_PROGRESS_EVENTS: dict[str, ProgressEvent] = {
         "Preparando arquivos do projeto...",
     ),
     "HOST_AGENT_PROGRESS=create:files_rendered": (
-        25,
+        72,
         "render_project_files",
         "Arquivos do projeto gerados.",
     ),
+    "HOST_AGENT_PROGRESS=create:database_started": (20, "create_database", "Criando o banco de dados..."),
+    "HOST_AGENT_PROGRESS=create:realtime_started": (30, "create_realtime_tenant", "Configurando o Realtime..."),
+    "HOST_AGENT_PROGRESS=create:supavisor_started": (40, "create_supavisor_tenant", "Configurando o pool de conexões..."),
+    "HOST_AGENT_PROGRESS=create:storage_started": (50, "create_storage_tenant", "Registrando o tenant Storage..."),
+    "HOST_AGENT_PROGRESS=create:services_starting": (78, "start_project_services", "Construindo e iniciando os serviços do projeto..."),
+    "HOST_AGENT_PROGRESS=create:storage_verifying": (86, "verify_storage", "Validando Storage, S3 e o gateway..."),
+    "HOST_AGENT_PROGRESS=create:identity_started": (95, "configure_identity", "Provisionando a identidade SQL isolada..."),
+    "HOST_AGENT_PROGRESS=create:configuration_publishing": (98, "publish_configuration", "Publicando a configuração do projeto..."),
     "HOST_AGENT_PROGRESS=create:database_created": (
-        40,
+        25,
         "create_database",
         "Banco de dados criado.",
     ),
     "HOST_AGENT_PROGRESS=create:realtime_created": (
-        52,
+        38,
         "create_realtime_tenant",
         "Tenant do Realtime criado.",
     ),
     "HOST_AGENT_PROGRESS=create:supavisor_created": (
-        60,
+        48,
         "create_supavisor_tenant",
         "Pool de conexões configurado.",
     ),
-    "HOST_AGENT_PROGRESS=create:services_started": (
+    "HOST_AGENT_PROGRESS=create:storage_tenant_created": (
+        60,
+        "create_storage_tenant",
+        "Tenant do Storage compartilhado registrado.",
+    ),
+    "HOST_AGENT_PROGRESS=create:storage_credentials_created": (
         66,
+        "create_storage_credentials",
+        "Credenciais SigV4 exclusivas criadas.",
+    ),
+    "HOST_AGENT_PROGRESS=create:services_started": (
+        82,
         "start_project_services",
         "Serviços do projeto iniciados.",
     ),
     "HOST_AGENT_PROGRESS=create:storage_verified": (
-        69,
+        92,
         "verify_storage",
         "Storage validado; finalizando projeto...",
     ),
 }
 
+RESTORE_PROGRESS_EVENTS.update({
+    marker: (5 + progress * 25 // 100, "safety_" + step, "Ponto de segurança: " + message)
+    for marker, (progress, step, message) in BACKUP_PROGRESS_EVENTS.items()
+    if marker not in {"HOST_AGENT_PROGRESS=backup:services_stopped", "HOST_AGENT_PROGRESS=backup:services_restarted"}
+})
+
 ROLLBACK_COMPLETE_MARKER = "HOST_AGENT_ROLLBACK_COMPLETE=1"
 ROLLBACK_FAILED_MARKER = "HOST_AGENT_ROLLBACK_FAILED="
 STALE_STATE_MARKER = "HOST_AGENT_STALE_STATE="
+STORAGE_RESUME_FAILED_MARKER = "HOST_AGENT_STORAGE_RESUME_FAILED=1"
+SERVICES_RESTART_FAILED_MARKER = "HOST_AGENT_SERVICES_RESTART_FAILED=1"
 LIFECYCLE_MARKERS = (
     ROLLBACK_COMPLETE_MARKER,
     ROLLBACK_FAILED_MARKER,
     STALE_STATE_MARKER,
+    STORAGE_RESUME_FAILED_MARKER,
+    SERVICES_RESTART_FAILED_MARKER,
 )
 
 
@@ -156,6 +193,7 @@ class RunningCommandState:
     _stderr: str = ""
     dirty: bool = field(default=False)
     progress_changed: asyncio.Event = field(default_factory=asyncio.Event)
+    abort: asyncio.Event = field(default_factory=asyncio.Event)
 
     def report(
         self,
@@ -193,6 +231,7 @@ class CommandContext:
     state: RunningCommandState
     timeout_seconds: int
     command: str
+    project_uuid: str | None = None
 
 
 @dataclass
@@ -208,8 +247,16 @@ def _apply_progress_events(
     events: Mapping[str, ProgressEvent],
     seen: set[str],
 ) -> None:
-    for marker, (progress, step, message) in events.items():
-        if marker not in seen and marker in window:
+    namespaces = {event.split("=", 1)[1].split(":", 1)[0] for event in events}
+    for marker in window.splitlines():
+        if marker.startswith("HOST_AGENT_PROGRESS=") and marker not in events:
+            namespace = marker.split("=", 1)[1].split(":", 1)[0]
+            if namespace in namespaces:
+                raise ValueError(f"Unknown lifecycle progress event: {marker}")
+        if marker in events and marker not in seen:
+            progress, step, message = events[marker]
+            if progress < state.progress:
+                raise ValueError(f"Lifecycle progress regressed at {marker}")
             seen.add(marker)
             state.report(progress=progress, step=step, message=message)
 
@@ -225,6 +272,8 @@ async def _pump_stream(
 ) -> None:
     if reader is None:
         return
+    pending = b""
+    discarding_line = False
     while True:
         chunk = await reader.read(4096)
         if not chunk:
@@ -235,9 +284,24 @@ async def _pump_stream(
             for marker in markers:
                 if marker in window:
                     seen.add(marker)
-        if progress_events:
-            window = state._stdout if stream == "stdout" else state._stderr
-            _apply_progress_events(window, state, progress_events, progress_seen)
+        if progress_events and stream == "stdout":
+            pending += chunk
+            lines = pending.split(b"\n")
+            pending = lines.pop()
+            if discarding_line and lines:
+                lines.pop(0)
+                discarding_line = False
+            try:
+                _apply_progress_events(
+                    b"\n".join(lines).decode(errors="replace"), state,
+                    progress_events, progress_seen,
+                )
+            except ValueError:
+                state.abort.set()
+                raise
+            if len(pending) > _OUTPUT_WINDOW_LIMIT:
+                pending = b""
+                discarding_line = True
 
 
 async def run_process(
@@ -245,6 +309,7 @@ async def run_process(
     ctx: CommandContext,
     *,
     cwd: Path | None = None,
+    env: Mapping[str, str] | None = None,
     markers: tuple[str, ...] = (),
     progress_events: Mapping[str, ProgressEvent] | None = None,
 ) -> ProcessResult:
@@ -253,6 +318,7 @@ async def run_process(
     proc = await asyncio.create_subprocess_exec(
         *argv,
         cwd=str(cwd) if cwd else None,
+        env=dict(env) if env is not None else None,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         start_new_session=True,
@@ -281,17 +347,42 @@ async def run_process(
         ),
     )
     timed_out = False
+    abort_task = asyncio.create_task(ctx.state.abort.wait())
+    proc_task = asyncio.create_task(proc.wait())
     try:
-        await asyncio.wait_for(proc.wait(), timeout=ctx.timeout_seconds)
-    except asyncio.TimeoutError:
-        timed_out = True
+        done, _pending = await asyncio.wait(
+            {proc_task, abort_task},
+            timeout=ctx.timeout_seconds,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if abort_task in done and not proc_task.done():
+            _terminate_process_group(proc, signal.SIGTERM)
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=term_grace)
+            except asyncio.TimeoutError:
+                _terminate_process_group(proc, signal.SIGKILL)
+                await proc.wait()
+        elif not done:
+            timed_out = True
+            _terminate_process_group(proc, signal.SIGTERM)
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=term_grace)
+            except asyncio.TimeoutError:
+                _terminate_process_group(proc, signal.SIGKILL)
+                await proc.wait()
+    except asyncio.CancelledError:
         _terminate_process_group(proc, signal.SIGTERM)
         try:
             await asyncio.wait_for(proc.wait(), timeout=term_grace)
         except asyncio.TimeoutError:
             _terminate_process_group(proc, signal.SIGKILL)
             await proc.wait()
+        raise
     finally:
+        if not abort_task.done():
+            abort_task.cancel()
+        if not proc_task.done():
+            proc_task.cancel()
         try:
             await asyncio.wait_for(pumps, timeout=10)
         except asyncio.TimeoutError:
@@ -337,8 +428,12 @@ async def docker_ps_all() -> list[dict[str, Any]]:
     containers: list[dict[str, Any]] = []
     for line in stdout.splitlines():
         line = line.strip()
-        if line:
+        if not line:
+            continue
+        try:
             containers.append(json.loads(line))
+        except ValueError:
+            logger.warning("ignorando linha nao-JSON do docker ps: %r", line[:200])
     return containers
 
 
@@ -481,7 +576,37 @@ async def handle_recreate_services(ctx: CommandContext, project: str, args: dict
     services = [str(service) for service in args["services"]]
     project_dir = resolve_project_dir(ctx.config.projects_root, project, must_exist=True)
 
-    touches_nginx = "nginx" in services
+    storage_requested = "storage" in services
+    compose_services = [service for service in services if service != "storage"]
+    if storage_requested:
+        ctx.state.report(
+            progress=10,
+            step="apply_storage_settings",
+            message="Atualizando configuracao do tenant Storage...",
+        )
+        storage_outcome = await run_process(
+            ["bash", str(ctx.config.scripts_dir / "apply_storage_settings.sh"), project],
+            ctx,
+            cwd=ctx.config.scripts_dir,
+        )
+        if storage_outcome.timed_out:
+            return CommandOutcome(status="failed", error_code="timeout", exit_code=storage_outcome.returncode)
+        if storage_outcome.returncode != 0:
+            return CommandOutcome(
+                status="failed",
+                error_code="storage_settings_failed",
+                exit_code=storage_outcome.returncode,
+                message="Falha ao aplicar settings do tenant Storage; consulte stderr_tail.",
+            )
+
+    if not compose_services:
+        return CommandOutcome(
+            status="done",
+            exit_code=0,
+            result={"updated_tenant_services": ["storage"]},
+        )
+
+    touches_nginx = "nginx" in compose_services
     if touches_nginx:
         ctx.state.report(progress=10, step="render_templates", message="Regenerando templates do projeto...")
         sync_project_generated_files(
@@ -491,7 +616,7 @@ async def handle_recreate_services(ctx: CommandContext, project: str, args: dict
             project=project,
         )
 
-    ctx.state.report(progress=30, step="compose_up", message=f"Recriando servicos: {', '.join(services)}")
+    ctx.state.report(progress=30, step="compose_up", message=f"Recriando servicos: {', '.join(compose_services)}")
     argv = [
         "docker", "compose",
         "-p", project,
@@ -502,7 +627,7 @@ async def handle_recreate_services(ctx: CommandContext, project: str, args: dict
     if touches_nginx:
         argv.append("--build")
     argv.append("--force-recreate")
-    argv += services
+    argv += compose_services
 
     outcome = await run_process(argv, ctx, cwd=project_dir)
     if outcome.timed_out:
@@ -514,7 +639,137 @@ async def handle_recreate_services(ctx: CommandContext, project: str, args: dict
             exit_code=outcome.returncode,
             message="Erro no recreate; consulte stderr_tail.",
         )
-    return CommandOutcome(status="done", exit_code=0, result={"recreated_services": services})
+    return CommandOutcome(
+        status="done",
+        exit_code=0,
+        result={
+            "recreated_services": compose_services,
+            "updated_tenant_services": ["storage"] if storage_requested else [],
+        },
+    )
+
+
+async def handle_ensure_opaque_gateway_token(
+    ctx: CommandContext, project: str, args: dict[str, Any]
+) -> CommandOutcome:
+    project_dir = resolve_project_dir(
+        ctx.config.projects_root, project, must_exist=True
+    )
+    env_path = ensure_inside(project_dir, project_dir / ".env")
+    gateway_token = read_canonical_env_value(
+        env_path, "API_GATEWAY_TOKEN_PROJETO"
+    )
+    if gateway_token is not None:
+        if not re.fullmatch(r"[a-f0-9]{64}", gateway_token):
+            return CommandOutcome(
+                status="failed",
+                error_code="invalid_gateway_token",
+                message="API_GATEWAY_TOKEN_PROJETO existente possui formato invalido.",
+            )
+    else:
+        gateway_token = secrets.token_hex(32)
+        upsert_env_value(env_path, "API_GATEWAY_TOKEN_PROJETO", gateway_token)
+    return CommandOutcome(
+        status="done",
+        exit_code=0,
+        result={"gateway_token_ready": True},
+    )
+
+
+async def handle_stage_opaque_gateway(
+    ctx: CommandContext, project: str, args: dict[str, Any]
+) -> CommandOutcome:
+    project_dir = resolve_project_dir(
+        ctx.config.projects_root, project, must_exist=True
+    )
+    gateway_token = read_canonical_env_value(
+        project_dir / ".env", "API_GATEWAY_TOKEN_PROJETO"
+    )
+    if gateway_token is None or not re.fullmatch(
+        r"[a-f0-9]{64}", gateway_token
+    ):
+        return CommandOutcome(
+            status="failed",
+            error_code="gateway_token_not_ready",
+            message="API_GATEWAY_TOKEN_PROJETO ausente ou invalido.",
+        )
+
+    ctx.state.report(
+        progress=15,
+        step="render_opaque_gateway",
+        message="Materializando configuracao exclusiva para chaves opacas...",
+    )
+    try:
+        sync_project_generated_files(
+            root=ctx.config.root,
+            scripts_dir=ctx.config.scripts_dir,
+            project_dir=project_dir,
+            project=project,
+        )
+    except RuntimeError as exc:
+        return CommandOutcome(
+            status="failed",
+            error_code="opaque_gateway_render_failed",
+            message=str(exc),
+        )
+    if ctx.state.abort.is_set():
+        return CommandOutcome(
+            status="failed",
+            error_code="lease_lost",
+            message="Lease perdido durante a execucao; processo interrompido.",
+        )
+
+    ctx.state.report(
+        progress=40,
+        step="stop_legacy_gateway",
+        message="Parando gateway legado antes do corte opaco...",
+    )
+    stop_result = await run_process(
+        [
+            "docker", "compose", "-p", project,
+            "--env-file", "../../.env", "--env-file", ".env",
+            "stop", "nginx",
+        ],
+        ctx,
+        cwd=project_dir,
+    )
+    ctx.state.report(
+        progress=70,
+        step="start_opaque_gateway",
+        message="Religando gateway com a configuracao de chaves opacas...",
+    )
+    start_result = await run_process(
+        [
+            "docker", "compose", "-p", project,
+            "--env-file", "../../.env", "--env-file", ".env",
+            "start", "nginx",
+        ],
+        ctx,
+        cwd=project_dir,
+    )
+    if stop_result.timed_out or start_result.timed_out:
+        return CommandOutcome(
+            status="failed", error_code="timeout", exit_code=start_result.returncode
+        )
+    if stop_result.returncode != 0:
+        return CommandOutcome(
+            status="failed",
+            error_code="legacy_gateway_stop_failed",
+            exit_code=stop_result.returncode,
+            message="Nao foi possivel parar o gateway legado.",
+        )
+    if start_result.returncode != 0:
+        return CommandOutcome(
+            status="failed",
+            error_code="legacy_gateway_restart_failed",
+            exit_code=start_result.returncode,
+            message="Gateway parado e nao foi possivel religa-lo; verifique o nginx do projeto.",
+        )
+    return CommandOutcome(
+        status="done",
+        exit_code=0,
+        result={"legacy_gateway_stopped": False, "opaque_gateway_staged": True},
+    )
 
 
 async def _run_lifecycle_script(
@@ -522,6 +777,8 @@ async def _run_lifecycle_script(
     script_name: str,
     script_args: list[str],
     *,
+    cwd: Path | None = None,
+    env: Mapping[str, str] | None = None,
     error_code: str,
     markers: tuple[str, ...] = (),
     progress_events: Mapping[str, ProgressEvent] | None = None,
@@ -540,7 +797,8 @@ async def _run_lifecycle_script(
     result = await run_process(
         ["bash", str(script), *script_args],
         ctx,
-        cwd=ctx.config.root,
+        cwd=cwd or ctx.config.root,
+        env=env,
         markers=lifecycle_markers,
         progress_events=progress_events,
     )
@@ -576,17 +834,26 @@ async def _run_lifecycle_script(
 async def handle_create_project(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
     resolve_project_dir(ctx.config.projects_root, project)
     ctx.state.report(progress=10, step="provision_infrastructure", message="Provisionando infraestrutura do projeto...")
-    recover_stale = bool(args.get("recover_stale", False))
-    stale_tenant_uuids = [str(item) for item in args.get("stale_tenant_uuids", [])]
+    recover_stale = args["recover_stale"]
+    stale_tenant_uuids = [str(item) for item in args["stale_tenant_uuids"]]
+    env = os.environ.copy()
+    gateway_token = args.get("gateway_token")
+    if gateway_token:
+        env["API_GATEWAY_TOKEN_PROJETO"] = str(gateway_token)
+    resource_profile = args.get("resource_profile")
+    if resource_profile:
+        env["PROJECT_RESOURCE_PROFILE_OVERRIDE"] = str(resource_profile)
     outcome, process = await _run_lifecycle_script(
         ctx,
         "generate_project.sh",
         [
             project,
             str(args["tenant_uuid"]),
+            str(args["public_ref"]),
             "true" if recover_stale else "false",
             *stale_tenant_uuids,
         ],
+        env=env,
         error_code="provision_failed",
         progress_events=CREATE_PROGRESS_EVENTS,
     )
@@ -616,34 +883,79 @@ async def handle_create_project(ctx: CommandContext, project: str, args: dict[st
 
 async def handle_duplicate_project(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
     original = str(args["original_name"])
-    resolve_project_dir(ctx.config.projects_root, original, must_exist=True)
+    source_dir = resolve_project_dir(ctx.config.projects_root, original, must_exist=True)
+    physical_uuid = read_canonical_env_value(source_dir / ".env", "PROJECT_UUID")
+    if not isinstance(physical_uuid, str) or physical_uuid.lower() != args["original_tenant_uuid"].lower():
+        return CommandOutcome(status="failed", error_code="source_identity_mismatch", message="UUID fisico da origem diverge da intencao assinada.")
     resolve_project_dir(ctx.config.projects_root, project)
     ctx.state.report(progress=10, step="duplicate_infrastructure", message="Duplicando infraestrutura e banco...")
+    env = os.environ.copy()
+    gateway_token = args.get("gateway_token")
+    if gateway_token:
+        env["API_GATEWAY_TOKEN_PROJETO"] = str(gateway_token)
+    resource_profile = args.get("resource_profile")
+    if resource_profile:
+        env["PROJECT_RESOURCE_PROFILE_OVERRIDE"] = str(resource_profile)
     outcome, _ = await _run_lifecycle_script(
         ctx,
         "duplicate_project.sh",
-        [original, project, str(args["copy_mode"]), str(args["tenant_uuid"])],
+        [original, project, str(args["copy_mode"]), str(args["tenant_uuid"]), str(args["original_tenant_uuid"]), str(args["public_ref"])],
+        env=env,
         error_code="duplicate_failed",
+        progress_events=DUPLICATE_PROGRESS_EVENTS,
     )
     return outcome
 
 
 async def handle_delete_project_files(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
     resolve_project_dir(ctx.config.projects_root, project)
+    remaining = await list_project_containers(project)
+    if remaining:
+        names = sorted(
+            {
+                name
+                for entry in remaining
+                for name in container_names(entry)
+                if match_project(entry, project)
+            }
+        )
+        return CommandOutcome(
+            status="failed",
+            error_code="project_containers_present",
+            message=(
+                "Containers do projeto ainda existem; "
+                f"remova-os antes dos arquivos: {', '.join(names[:5])}."
+            ),
+        )
     outcome, _ = await _run_lifecycle_script(
         ctx,
         "delete_project.sh",
         [project],
         error_code="delete_files_failed",
+        progress_events=DELETE_FILES_PROGRESS_EVENTS,
     )
-    tenant_uuid = str(
-        args.get("tenant_uuid") or args.get("project_uuid") or ""
-    ).strip()
+    tenant_uuid = str(args["tenant_uuid"]).strip()
     if outcome.status == "done" and tenant_uuid:
+        ctx.state.report(progress=80, step="remove_project_backups", message="Removendo os pontos de restauração do projeto...")
         removed = await _remove_backup_tree(
             resolve_backup_project_dir(ctx.config.backups_root, tenant_uuid)
         )
         outcome.result = {**(outcome.result or {}), "backups_removed": removed}
+    return outcome
+
+
+async def handle_delete_project_storage(
+    ctx: CommandContext, project: str, args: dict[str, Any]
+) -> CommandOutcome:
+    resolve_project_dir(ctx.config.projects_root, project, must_exist=True)
+    tenant_uuid = str(args["tenant_uuid"]).strip()
+    outcome, _ = await _run_lifecycle_script(
+        ctx,
+        "delete_storage_tenant.sh",
+        [project, tenant_uuid],
+        error_code="delete_storage_tenant_failed",
+        progress_events=DELETE_STORAGE_PROGRESS_EVENTS,
+    )
     return outcome
 
 
@@ -655,24 +967,30 @@ async def handle_rotate_keys(ctx: CommandContext, project: str, args: dict[str, 
         "rotate_key.sh",
         [project],
         error_code="rotate_script_failed",
+        progress_events=ROTATE_PROGRESS_EVENTS,
     )
     return outcome
 
 
 async def handle_rename_project(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
-    new_name = str(args["new_name"])
-    resolve_project_dir(ctx.config.projects_root, project)
-    resolve_project_dir(ctx.config.projects_root, new_name)
-    ctx.state.report(progress=5, step="migrate_infrastructure", message=f"Renomeando {project} -> {new_name}...")
+    project_uuid = ctx.project_uuid
+    if project_uuid is None or not is_valid_uuid(project_uuid):
+        raise ValueError("Canonical project UUID is required for reference rotation")
+    resolve_project_dir(ctx.config.projects_root, project, must_exist=True)
+    ctx.state.report(progress=5, step="rotate_public_reference", message="Atualizando referencia publica...")
     outcome, process = await _run_lifecycle_script(
         ctx,
         "rename_project.sh",
-        [project, new_name],
+        [project, project_uuid, args["tenant_uuid"], args["old_ref"], args["new_ref"]],
         error_code="rename_failed",
-        markers=("ROLLBACK_COMPLETE",),
+        progress_events=REFERENCE_PROGRESS_EVENTS,
+        markers=("ROLLBACK_COMPLETE", "REFERENCE_ROTATED"),
     )
     rolled_back = "ROLLBACK_COMPLETE" in process.markers_seen
-    outcome.result = {**(outcome.result or {}), "rolled_back": rolled_back}
+    outcome.result = {"rolled_back": rolled_back, "old_ref": args["old_ref"], "new_ref": args["new_ref"]}
+    if outcome.status == "done" and "REFERENCE_ROTATED" not in process.markers_seen:
+        outcome.status = "failed"
+        outcome.error_code = "rotation_completion_unconfirmed"
     if outcome.status == "failed" and outcome.error_code == "rename_failed" and rolled_back:
         outcome.error_code = "rename_rolled_back"
     return outcome
@@ -731,6 +1049,7 @@ async def handle_backup_project(ctx: CommandContext, project: str, args: dict[st
     )
     if failure is not None:
         return failure
+    assert project_uuid is not None
     backup_id = str(args["backup_id"]).lower()
     backup_dir = resolve_backup_dir(ctx.config.backups_root, project_uuid, backup_id)
     if backup_dir.exists():
@@ -744,13 +1063,31 @@ async def handle_backup_project(ctx: CommandContext, project: str, args: dict[st
         step="capture_backup",
         message="Capturando banco e storage do projeto...",
     )
-    outcome, _ = await _run_lifecycle_script(
+    outcome, process = await _run_lifecycle_script(
         ctx,
         "backup_project.sh",
         [project, backup_id],
         error_code="backup_failed",
         progress_events=BACKUP_PROGRESS_EVENTS,
     )
+    storage_resume_failed = STORAGE_RESUME_FAILED_MARKER in process.markers_seen
+    services_restart_failed = (
+        SERVICES_RESTART_FAILED_MARKER in process.markers_seen
+    )
+    outcome.result = {
+        **(outcome.result or {}),
+        "storage_resume_failed": storage_resume_failed,
+        "services_restart_failed": services_restart_failed,
+    }
+    if outcome.status == "failed" and (
+        storage_resume_failed or services_restart_failed
+    ):
+        outcome.error_code = "backup_resume_failed"
+        outcome.message = (
+            "Backup falhou e o projeto pode estar parado: "
+            + ("tenant Storage segue bloqueado; " if storage_resume_failed else "")
+            + ("containers seguem desligados." if services_restart_failed else "")
+        )
     if outcome.status == "done":
         size = await asyncio.to_thread(_dir_size_bytes, backup_dir)
         outcome.result = {**(outcome.result or {}), "size_bytes": size}
@@ -764,6 +1101,7 @@ async def handle_restore_project(ctx: CommandContext, project: str, args: dict[s
     )
     if failure is not None:
         return failure
+    assert project_uuid is not None
     backup_id = str(args["backup_id"]).lower()
     safety_backup_id = str(args["safety_backup_id"]).lower()
     backup_dir = resolve_backup_dir(
@@ -794,12 +1132,15 @@ async def handle_restore_project(ctx: CommandContext, project: str, args: dict[s
         "restore_project.sh",
         [project, backup_id, safety_backup_id],
         error_code="restore_failed",
-        markers=("SAFETY_BACKUP_COMPLETE", "ROLLBACK_COMPLETE"),
+        progress_events=RESTORE_PROGRESS_EVENTS,
+        markers=("SAFETY_BACKUP_COMPLETE", "ROLLBACK_COMPLETE", "ROLLBACK_INCOMPLETE"),
     )
     safety_completed = "SAFETY_BACKUP_COMPLETE" in process.markers_seen
     rolled_back = "ROLLBACK_COMPLETE" in process.markers_seen
-    result = {
+    rollback_incomplete = "ROLLBACK_INCOMPLETE" in process.markers_seen
+    result: dict[str, Any] = {
         "rolled_back": rolled_back,
+        "rollback_incomplete": rollback_incomplete,
         "safety_backup_completed": safety_completed,
     }
     if safety_completed:
@@ -807,20 +1148,31 @@ async def handle_restore_project(ctx: CommandContext, project: str, args: dict[s
             _dir_size_bytes, safety_dir
         )
     outcome.result = {**(outcome.result or {}), **result}
-    if outcome.status == "failed" and outcome.error_code == "restore_failed" and rolled_back:
+    if outcome.status == "failed" and rollback_incomplete:
+        outcome.error_code = "restore_rollback_incomplete"
+        outcome.message = (
+            "Restore falhou e o rollback ficou incompleto: o projeto pode "
+            "estar parado ou com dados parcialmente restaurados; "
+            "intervencao manual necessaria."
+        )
+    elif outcome.status == "failed" and outcome.error_code == "restore_failed" and rolled_back:
         outcome.error_code = "restore_rolled_back"
     return outcome
 
 
 async def handle_delete_restore_point(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
+    ctx.state.report(progress=10, step="validate_restore_point_removal", message="Validando a remoção do ponto de restauração...")
     project_uuid, failure = _resolve_backup_context(
         ctx, project, args.get("tenant_uuid")
     )
     if failure is not None:
         return failure
+    assert project_uuid is not None
     backup_id = str(args["backup_id"]).lower()
     backup_dir = resolve_backup_dir(ctx.config.backups_root, project_uuid, backup_id)
+    ctx.state.report(progress=50, step="remove_restore_point_files", message="Removendo os arquivos do ponto de restauração...")
     removed = await _remove_backup_tree(backup_dir)
+    ctx.state.report(progress=90, step="verify_restore_point_removal", message="Verificando a remoção do ponto de restauração...")
     if backup_dir.exists():
         return CommandOutcome(
             status="failed",
@@ -872,9 +1224,12 @@ COMMAND_HANDLERS: dict[str, CommandHandler] = {
     "stop_project": handle_stop_project,
     "restart_project": handle_restart_project,
     "recreate_services": handle_recreate_services,
+    "ensure_opaque_gateway_token": handle_ensure_opaque_gateway_token,
+    "stage_opaque_gateway": handle_stage_opaque_gateway,
     "create_project": handle_create_project,
     "duplicate_project": handle_duplicate_project,
     "delete_project_containers": handle_delete_project_containers,
+    "delete_project_storage": handle_delete_project_storage,
     "delete_project_files": handle_delete_project_files,
     "rotate_keys": handle_rotate_keys,
     "rename_project": handle_rename_project,

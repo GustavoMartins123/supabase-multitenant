@@ -170,5 +170,135 @@ class InternalPushHmacContractTest(unittest.TestCase):
         )
 
 
+class InternalServiceHmacContractTest(unittest.TestCase):
+    def test_service_identity_method_target_and_body_are_bound_to_mac(self) -> None:
+        secret = "studio-gateway-derived-secret"
+        body = b'{"project":"demo"}'
+        timestamp = 1_750_000_123
+        nonce = "cd" * 16
+        url = "https://api.example/api/projects/demo/start?force=1"
+
+        headers = internal_hmac.build_internal_hmac_headers(
+            secret,
+            "POST",
+            url,
+            body,
+            service="studio-nginx",
+            timestamp=timestamp,
+            nonce=nonce,
+        )
+        self.assertEqual(headers["X-Internal-Version"], "internal-hmac-v1")
+        self.assertEqual(headers["X-Internal-Service"], "studio-nginx")
+        self.assertNotIn("X-Internal-Caller", headers)
+
+        target = "/api/projects/demo/start?force=1"
+        self.assertTrue(
+            internal_hmac.verify_internal_hmac_signature(
+                secret,
+                service="studio-nginx",
+                method="POST",
+                target=target,
+                body=body,
+                timestamp=timestamp,
+                nonce=nonce,
+                signature=headers["X-Internal-Signature"],
+            )
+        )
+
+        for changed in (
+            {"service": "projects-api"},
+            {"method": "DELETE"},
+            {"target": "/api/projects/demo/stop?force=1"},
+            {"body": body + b"!"},
+        ):
+            values = {
+                "service": "studio-nginx",
+                "method": "POST",
+                "target": target,
+                "body": body,
+            }
+            values.update(changed)
+            self.assertFalse(
+                internal_hmac.verify_internal_hmac_signature(
+                    secret,
+                    service=values["service"],
+                    method=values["method"],
+                    target=values["target"],
+                    body=values["body"],
+                    timestamp=timestamp,
+                    nonce=nonce,
+                    signature=headers["X-Internal-Signature"],
+                )
+            )
+
+    def test_scope_target_preserves_raw_path_and_query(self) -> None:
+        target = internal_hmac.request_target_from_scope(
+            {
+                "path": "/api/projects/demo",
+                "raw_path": b"/api/projects/demo",
+                "query_string": b"cursor=a%2Fb&limit=20",
+            }
+        )
+        self.assertEqual(target, "/api/projects/demo?cursor=a%2Fb&limit=20")
+
+
+class GatewayProxyTargetContractTest(unittest.TestCase):
+    """A assinatura cobre o request-target que o upstream realmente recebe.
+
+    `projects_api_signer.lua` sempre acrescenta `ngx.var.args` ao alvo
+    assinado. Um `proxy_pass` com URI descarta a query string a menos que ela
+    seja repassada, e nesse caso a Projects API calcula um alvo diferente do
+    assinado e recusa a requisicao com 403.
+    """
+
+    def setUp(self) -> None:
+        self.nginx = (ROOT / "studio" / "nginx" / "nginx.conf").read_text(
+            encoding="utf-8"
+        )
+        self.signer = (
+            ROOT
+            / "studio"
+            / "nginx"
+            / "lua"
+            / "security"
+            / "projects_api_signer.lua"
+        ).read_text(encoding="utf-8")
+
+    def test_signer_binds_the_query_string_to_the_target(self) -> None:
+        self.assertIn("local args = ngx.var.args", self.signer)
+        self.assertIn('return target .. "?" .. args', self.signer)
+
+    def test_every_signed_proxy_pass_forwards_the_query_string(self) -> None:
+        offenders = [
+            f"{number}: {line.strip()}"
+            for number, line in enumerate(self.nginx.splitlines(), start=1)
+            if "proxy_pass" in line
+            and "$server_domain" in line
+            and "$assistant_api_target" not in line
+            and "$is_args$args" not in line
+        ]
+        self.assertEqual(
+            offenders,
+            [],
+            "proxy_pass com URI descarta a query string e quebra o HMAC:\n"
+            + "\n".join(offenders),
+        )
+
+    def test_assistant_target_rejects_queries_before_signing(self) -> None:
+        gateway = (ROOT / 'studio/nginx/lua/assistant/gateway.lua').read_text(encoding='utf-8')
+        rejection = gateway.index('or ngx.var.args and ngx.var.args ~= ""')
+        signing = gateway.index('internal_hmac.apply_current_request')
+        self.assertLess(rejection, signing)
+        self.assertIn('reject(400, "Invalid assistant gateway target")', gateway)
+
+    def test_project_and_job_listings_keep_their_filters(self) -> None:
+        for route in ("/api/jobs$1", "/api/projects$1"):
+            with self.subTest(route=route):
+                self.assertIn(
+                    f"proxy_pass $server_domain{route}$is_args$args;",
+                    self.nginx,
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

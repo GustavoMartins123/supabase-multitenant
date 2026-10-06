@@ -9,6 +9,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import db
 from .envfile import read_env_file
 
 
@@ -32,6 +33,10 @@ class AgentConfig:
     max_parallel_commands: int
     shutdown_grace: int
     schema_wait_timeout: float
+    db_command_timeout: float
+    studio_directory_url: str = ""
+    studio_directory_secret: str = ""
+    studio_directory_ca_file: str | None = None
 
 
 def _float_env(env: dict[str, str], key: str, default: float) -> float:
@@ -43,6 +48,43 @@ def _int_env(env: dict[str, str], key: str, default: int) -> int:
     raw = (os.environ.get(key) or env.get(key) or "").strip()
     return int(raw) if raw else default
 
+
+def _env_lookup(env: dict[str, str], key: str) -> str:
+    return (os.environ.get(key) or env.get(key) or "").strip()
+
+
+def build_db_dsn_from_env(env: dict[str, str]) -> str:
+    """Resolve o DSN do agent: HOST_AGENT_DB_DSN explicito > host_agent_rw.
+
+    Fail-closed: sem DSN explicito e sem HOST_AGENT_DB_PASSWORD util, o agent
+    recusa iniciar — nao existe mais derivacao por POSTGRES_USER.
+    """
+
+    dsn = _env_lookup(env, "HOST_AGENT_DB_DSN")
+    if dsn:
+        return dsn
+
+    agent_user = _env_lookup(env, "HOST_AGENT_DB_USER") or "host_agent_rw"
+    agent_password = _env_lookup(env, "HOST_AGENT_DB_PASSWORD")
+    if not agent_password or agent_password == "pass":
+        raise ConfigError(
+            "HOST_AGENT_DB_PASSWORD ausente ou placeholder; o fallback pelo "
+            "POSTGRES_USER foi removido. Gere a senha e aplique as migrations "
+            "(role host_agent_rw) antes de iniciar o agent."
+        )
+    db_name = (
+        _env_lookup(env, "HOST_AGENT_DB_NAME")
+        or env.get("POSTGRES_DB")
+        or "postgres"
+    )
+    if not env.get("POSTGRES_HOST") or not env.get("POSTGRES_PORT"):
+        raise ConfigError("POSTGRES_HOST/POSTGRES_PORT ausentes no .env")
+    return (
+        "postgresql://"
+        f"{urllib.parse.quote(agent_user, safe='')}"
+        f":{urllib.parse.quote(agent_password, safe='')}"
+        f"@{env['POSTGRES_HOST']}:{env['POSTGRES_PORT']}/{db_name}"
+    )
 
 def load_config(root: str | Path) -> AgentConfig:
     root_path = Path(root).resolve()
@@ -68,23 +110,11 @@ def load_config(root: str | Path) -> AgentConfig:
     if not hmac_secret or hmac_secret == "pass":
         raise ConfigError("HOST_AGENT_HMAC_SECRET ausente ou placeholder")
 
-    dsn = (os.environ.get("HOST_AGENT_DB_DSN") or env.get("HOST_AGENT_DB_DSN") or "").strip()
-    if not dsn:
-        missing = [
-            key
-            for key in ("POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB")
-            if not env.get(key)
-        ]
-        if missing:
-            raise ConfigError(
-                "variaveis de banco ausentes no .env: " + ", ".join(missing)
-            )
-        dsn = (
-            "postgresql://"
-            f"{urllib.parse.quote(env['POSTGRES_USER'], safe='')}"
-            f":{urllib.parse.quote(env['POSTGRES_PASSWORD'], safe='')}"
-            f"@{env['POSTGRES_HOST']}:{env['POSTGRES_PORT']}/{env['POSTGRES_DB']}"
-        )
+    dsn = build_db_dsn_from_env(env)
+    directory_url = _env_lookup(env, "STUDIO_CACHE_INVALIDATION_URL")
+    directory_secret = _env_lookup(env, "PROJECTS_API_HMAC_SECRET")
+    if not directory_url or not directory_secret:
+        raise ConfigError("STUDIO_CACHE_INVALIDATION_URL/PROJECTS_API_HMAC_SECRET required for canonical user authorization")
 
     worker_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
 
@@ -94,6 +124,9 @@ def load_config(root: str | Path) -> AgentConfig:
         scripts_dir=scripts_dir,
         backups_root=backups_root,
         dsn=dsn,
+        studio_directory_url=directory_url,
+        studio_directory_secret=directory_secret,
+        studio_directory_ca_file=str(root_path / "certs" / "ca.pem"),
         hmac_secret=hmac_secret,
         worker_id=worker_id,
         poll_interval=_float_env(env, "HOST_AGENT_POLL_INTERVAL", 2.0),
@@ -103,4 +136,7 @@ def load_config(root: str | Path) -> AgentConfig:
         max_parallel_commands=_int_env(env, "HOST_AGENT_MAX_PARALLEL_COMMANDS", 3),
         shutdown_grace=_int_env(env, "HOST_AGENT_SHUTDOWN_GRACE", 300),
         schema_wait_timeout=_float_env(env, "HOST_AGENT_SCHEMA_WAIT_TIMEOUT", 180.0),
+        db_command_timeout=_float_env(
+            env, "HOST_AGENT_DB_COMMAND_TIMEOUT", db.DEFAULT_COMMAND_TIMEOUT
+        ),
     )

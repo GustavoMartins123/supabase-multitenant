@@ -1,14 +1,20 @@
 import uuid
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Dict, Any, Literal, Optional
+
+ResourceProfile = Literal["small", "medium", "large", "custom"]
 
 class NewProject(BaseModel):
     name: str
+    resource_profile: ResourceProfile = "medium"
 
 class DuplicateProject(BaseModel):
-    original_name: str
+    model_config = ConfigDict(extra="forbid")
+
+    original_public_ref: str = Field(pattern=r"^[a-z]{20}$", min_length=20, max_length=20)
     new_name: str
     copy_data: bool = False
+    resource_profile: Optional[ResourceProfile] = None
 
 class UserSyncPayload(BaseModel):
     id: uuid.UUID
@@ -51,8 +57,7 @@ class ProjectThreadMessageCreate(BaseModel):
     body: str
 
 class ProjectRenameRequest(BaseModel):
-    new_name: str = Field(min_length=3, max_length=40)
-    display_name: Optional[str] = Field(default=None, max_length=80)
+    model_config = ConfigDict(extra="forbid")
 
 class ProjectDisplayNameUpdate(BaseModel):
     display_name: str = Field(min_length=1, max_length=80)
@@ -67,3 +72,10 @@ class RestorePointCreate(BaseModel):
 
 class AutomaticKeyRotationUpdate(BaseModel):
     enabled: bool
+
+
+class ProjectS3VectorKeysResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    accessKey: str
+    secretKey: str

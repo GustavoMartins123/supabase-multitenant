@@ -1,0 +1,287 @@
+## Setup de Notificações Push (Firebase FCM)
+
+Por padrão, a plataforma utiliza uma arquitetura descentralizada para o envio de notificações push via Firebase Cloud Messaging (FCM). O roteamento e a assinatura de segurança (OAuth2) acontecem na borda (Gateway Nginx), enquanto um *Worker* assíncrono em Python gerencia as filas usando um padrão híbrido de escuta ativa (LISTEN/NOTIFY) no PostgreSQL.
+
+> [!NOTE]
+> A infraestrutura base do **Gateway (Nginx + Lua)** para push já vem pronta, mas o fluxo atual nao depende apenas do `firebase.json`.
+> A rota `/api/internal/push` e protegida por assinatura HMAC backend-to-backend e foi desenhada para uso exclusivo do `push-worker`.
+> Se o worker estiver em outra maquina, ele deve chamar o Nginx do Studio em `https://<IP_DO_STUDIO>:9091/api/internal/push`.
+> A porta `9091` e a origem publica unica do Studio; o Authelia fica acessivel pela mesma origem em `/auth`.
+
+Os passos a seguir configuram as credenciais do Google e preparam o banco de dados dos projetos para se integrarem a esse fluxo.
+
+### ⚠️ Pré-requisitos
+
+Antes de prosseguir, certifique-se de que:
+
+- **Projeto Firebase**: Você possui um projeto criado no [Firebase Console](https://console.firebase.google.com/).
+- **Service Account**: Você gerou e baixou a chave privada (arquivo JSON) da Conta de Serviço do Firebase (Configurações do Projeto > Contas de Serviço > Gerar nova chave privada).
+- **Worker habilitado**: por padrão, o serviço `push-worker` vem comentado em `servidor/docker-compose-api.yml`. Descomente-o e suba o container antes de validar o fluxo ponta a ponta.
+- **Segredo compartilhado interno**: `INTERNAL_HMAC_SECRET` deve estar configurado com o mesmo valor em `studio/.env` e `servidor/.env`. O `setup.sh` gera esse valor automaticamente.
+- **URL correta do gateway**: `PUSH_API_URL` deve apontar para `https://<IP_DO_STUDIO>:9091/api/internal/push`.
+- **TLS confiável entre as máquinas**: se `PUSH_VERIFY_TLS=true`, o certificado do Studio precisa ser confiável no servidor Python. O `setup.sh` copia `studio/authelia/ssl/ca.pem` para `servidor/certs/ca.pem`, que e montado no container como `/docker/push-certs/ca.pem`.
+
+---
+
+### Passo 1: Fornecer a Chave do Firebase ao Gateway
+
+Como o script Lua (`send_push.lua`) já está configurado no Nginx para assinar o JWT e disparar o push, você só precisa fornecer a chave de serviço. O Nginx possui um volume mapeado para a pasta `./authelia` no host, correspondendo ao diretório `/config` internamente.
+
+**1.1. Renomear e Posicionar o Arquivo**
+
+Pegue o arquivo JSON baixado do Firebase Console, renomeie-o para `firebase.json` e mova-o para dentro da pasta `authelia` do seu servidor Gateway. A rota `/api/internal/push` utilizará este arquivo automaticamente.
+
+Execute o comando a partir da raiz do seu servidor de borda:
+
+```bash
+# Move o arquivo para a pasta que o Nginx lê como /config
+mv /caminho/do/seu/download/arquivo-do-google.json ./authelia/firebase.json
+```
+
+Importante: Certifique-se de que o arquivo seja um arquivo real e não um diretório. Se o Docker criou uma pasta fantasma chamada `firebase.json/` anteriormente, exclua a pasta antes de mover o arquivo. O Nginx refletirá a mudança na mesma hora, sem necessidade de reiniciar.
+
+### Passo 1.2: Confirmar variaveis de integracao entre Studio e Worker
+
+O fluxo atual de push depende das variaveis abaixo:
+
+```env
+# studio/.env
+INTERNAL_HMAC_SECRET=...
+INTERNAL_HMAC_MAX_SKEW_SECONDS=60
+
+# servidor/.env
+INTERNAL_HMAC_SECRET=...
+PUSH_API_URL=https://<IP_DO_STUDIO>:9091/api/internal/push
+PUSH_VERIFY_TLS=true
+PUSH_CA_FILE=/docker/push-certs/ca.pem
+```
+
+Notas importantes:
+
+- `INTERNAL_HMAC_SECRET` precisa ser o mesmo nas duas maquinas. O worker usa esse segredo para assinar cada chamada e o Lua valida a assinatura.
+- `INTERNAL_HMAC_MAX_SKEW_SECONDS` define a janela maxima, em segundos, aceita pelo Nginx entre o timestamp assinado e o relogio local. O padrao e `60`.
+- `PUSH_API_URL` deve apontar para o IP ou dominio usado no certificado do Studio.
+- Se o certificado do Studio for autoassinado, ele precisa conter SAN compativel com o host usado em `PUSH_API_URL`.
+
+A chamada do worker para `/api/internal/push` usa estes headers internos:
+
+```text
+X-Internal-Service: push-worker
+X-Internal-Timestamp: <unix_timestamp>
+X-Internal-Nonce: <nonce_aleatorio>
+X-Internal-Signature: <hmac_sha256_hex>
+```
+
+O HMAC assina metodo, path, timestamp, nonce e o `sha256` do corpo da requisicao. O Nginx valida a janela de tempo e guarda o nonce temporariamente para reduzir replay.
+
+### Passo 2: Estruturar o Banco de Dados dos Projetos
+
+Para cada projeto (tenant) que utilizará notificações, precisamos criar as tabelas do padrão Outbox, a função de alerta e as políticas de segurança (RLS).
+
+Abra o painel SQL do Supabase do seu projeto e execute os blocos a seguir.
+
+**2.1. Criar Tabela de Tokens e RLS**
+
+Esta tabela armazena os tokens FCM dos dispositivos dos usuários.
+
+```sql
+CREATE TABLE public.push_tokens (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NULL,
+  token text NOT NULL,
+  platform text NULL,
+  created_at timestamp with time zone NULL DEFAULT now(),
+  CONSTRAINT push_tokens_pkey PRIMARY KEY (id),
+  CONSTRAINT push_tokens_token_key UNIQUE (token),
+  CONSTRAINT push_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users (id) ON DELETE CASCADE,
+  CONSTRAINT push_tokens_platform_check CHECK (
+    (platform = ANY (ARRAY['ios'::text, 'android'::text]))
+  )
+) TABLESPACE pg_default;
+
+
+ALTER TABLE public.push_tokens ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Usuários gerenciam seus próprios tokens" 
+ON public.push_tokens 
+FOR ALL 
+USING (auth.uid() = user_id);
+```
+
+**2.2. Criar Função de Alerta (O Grito do Banco)**
+
+Esta função é a peça central do sistema híbrido. Ela acorda o Worker em Python instantaneamente via canal Pub/Sub do Postgres, economizando processamento de CPU (evitando polling constante).
+
+```sql
+CREATE OR REPLACE FUNCTION notify_new_push()
+RETURNS trigger AS $$
+BEGIN
+  -- Emite um sinal no canal 'new_push' para acordar o Worker
+  PERFORM pg_notify('new_push', ''); 
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+**2.3. Criar Tabela de Notificações e Trigger**
+
+Esta é a "caixa de saída". Insira mensagens nesta tabela (com status pendente) para que o Worker as processe e envie.
+
+```sql
+CREATE TABLE public.notifications (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NULL,
+  body text NOT NULL,
+  created_at timestamp with time zone NULL DEFAULT now(),
+  status text NULL DEFAULT 'pendente'::text,
+  CONSTRAINT notifications_pkey PRIMARY KEY (id),
+  CONSTRAINT notifications_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users (id) ON DELETE CASCADE
+) TABLESPACE pg_default;
+
+CREATE TRIGGER trigger_new_push
+AFTER INSERT ON public.notifications 
+FOR EACH STATEMENT 
+EXECUTE FUNCTION notify_new_push();
+
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Usuários leem apenas suas notificações" 
+ON public.notifications 
+FOR SELECT 
+USING (auth.uid() = user_id);
+```
+
+**2.4. Adicionar o estado durável de entrega exigido pelo worker resiliente**
+
+Execute este bloco uma vez em cada database de projeto existente. O worker não
+executa DDL em runtime: ele recusa um schema incompleto e continua tentando
+até que esta migration seja aplicada.
+
+```sql
+ALTER TABLE public.notifications
+  ADD COLUMN IF NOT EXISTS available_at timestamp with time zone NOT NULL DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS attempts integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS locked_at timestamp with time zone NULL,
+  ADD COLUMN IF NOT EXISTS last_error text NULL;
+
+CREATE TABLE IF NOT EXISTS public.notification_deliveries (
+  notification_id uuid NOT NULL REFERENCES public.notifications (id) ON DELETE CASCADE,
+  token text NOT NULL,
+  platform text NULL,
+  status text NOT NULL DEFAULT 'pendente',
+  attempts integer NOT NULL DEFAULT 0,
+  available_at timestamp with time zone NOT NULL DEFAULT now(),
+  locked_at timestamp with time zone NULL,
+  last_error text NULL,
+  delivered_at timestamp with time zone NULL,
+  CONSTRAINT notification_deliveries_pkey PRIMARY KEY (notification_id, token)
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_push_available
+  ON public.notifications (status, available_at, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_notification_deliveries_push_available
+  ON public.notification_deliveries (notification_id, status, available_at);
+
+ALTER TABLE public.notification_deliveries ENABLE ROW LEVEL SECURITY;
+```
+
+### Passo 3: Ativar o Worker no Docker Compose
+
+Por padrão, para economizar recursos caso o módulo de notificações não seja utilizado, o serviço do `push-worker` vem comentado no arquivo de orquestração da API.
+
+Você deve editar o arquivo `docker-compose-api.yml` e descomentar o bloco correspondente.
+
+**3.1. Editar o arquivo**
+Abra o `docker-compose-api.yml` e remova os `#` da frente do serviço `push-worker`. Ele deve ficar alinhado com o `projects-api`, assim:
+
+```yaml
+  push-worker:
+    container_name: push-worker
+    build:
+      context: .
+      dockerfile: ./api-internal/Dockerfile
+    restart: unless-stopped
+    networks: [rede-supabase]
+    environment:
+      PYTHONUNBUFFERED: 1
+      DB_DSN: postgres://supabase_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/postgres
+      PUSH_API_URL: ${PUSH_API_URL}
+      INTERNAL_HMAC_SECRET: ${INTERNAL_HMAC_SECRET}
+      PUSH_VERIFY_TLS: ${PUSH_VERIFY_TLS}
+      PUSH_CA_FILE: ${PUSH_CA_FILE}
+      PUSH_REQUEST_TIMEOUT: ${PUSH_REQUEST_TIMEOUT:-10}
+      PUSH_BATCH_SIZE: ${PUSH_BATCH_SIZE:-10}
+      PUSH_MAX_ATTEMPTS: ${PUSH_MAX_ATTEMPTS:-8}
+      PUSH_REQUEST_RETRIES: ${PUSH_REQUEST_RETRIES:-2}
+      PUSH_RETRY_BASE_SECONDS: ${PUSH_RETRY_BASE_SECONDS:-2}
+      PUSH_MAX_RETRY_SECONDS: ${PUSH_MAX_RETRY_SECONDS:-60}
+      PUSH_NOTIFICATION_LEASE_SECONDS: ${PUSH_NOTIFICATION_LEASE_SECONDS:-900}
+      PUSH_SCHEMA_RETRY_SECONDS: ${PUSH_SCHEMA_RETRY_SECONDS:-60}
+      PUSH_DB_CONNECT_TIMEOUT: ${PUSH_DB_CONNECT_TIMEOUT:-10}
+      PUSH_MAX_TENANT_CONNECTIONS: ${PUSH_MAX_TENANT_CONNECTIONS:-32}
+    volumes:
+      - ./certs:/docker/push-certs:ro
+    command: ["python", "app/push_worker.py"]
+```
+
+**3.2. Aplicar a alteração**
+Após salvar o arquivo, suba o contêiner executando o comando abaixo dentro da pasta `servidor/`:
+
+```bash
+docker compose -f docker-compose-api.yml --env-file .env up --build -d push-worker
+```
+
+### Passo 4: Como Enviar uma Notificação
+
+A partir deste momento, o fluxo está completamente automatizado. O Nginx está com a chave, o Python está monitorando dinamicamente e o banco possui o gatilho.
+
+Para disparar uma notificação, basta que o seu aplicativo, uma função Edge, ou uma Trigger de outra tabela insira um registro na tabela notifications:
+
+```sql
+-- Exemplo de envio via SQL
+INSERT INTO public.notifications (user_id, body) 
+VALUES ('uuid-do-usuario-aqui', 'Sua nova notificação chegou!');
+```
+
+O status mudará automaticamente de `pendente` para `enviado`,
+`enviado_parcial`, `sem_token` ou `erro`. Falhas transitórias voltam para
+`pendente` com backoff exponencial; uma
+entrega só vai para erro depois do limite configurado de tentativas.
+
+### Passo 5: Troubleshooting e Logs
+
+Se as notificações não estiverem chegando ou o status no banco de dados ficar como `erro`, a investigação deve seguir uma ordem específica para identificar onde a falha ocorreu:
+
+**5.1. Verificando o Worker (Servidor de Projetos)**
+
+O primeiro lugar para olhar é o contêiner do Python, pois ele é responsável por ler a fila do banco e iniciar o disparo. Execute o comando no servidor onde a API dos projetos está rodando:
+
+```bash
+docker logs -f push-worker
+```
+
+Se aparecer erro de TLS parecido com `certificate verify failed` ou `IP address mismatch`, revise nesta ordem:
+
+1. `PUSH_API_URL` esta usando o host correto e a porta `9091`
+2. o certificado do Studio contem SAN para esse IP ou dominio
+3. `servidor/certs/ca.pem` foi atualizado com o certificado correto
+4. o container do `push-worker` foi recriado depois da troca do certificado
+
+**5.2. Verificando o Gateway Nginx (Servidor Studio)**
+
+Se o log do Worker não mostrar nenhum erro de conexão, mas a notificação ainda não chegou, o bloqueio ocorreu na camada do Lua/Nginx (validação HMAC interna, leitura do firebase.json, assinatura OAuth2 do Google ou comunicação com o Firebase).
+
+Acesse o contêiner do Nginx no servidor do Studio e leia o arquivo de log de erros:
+
+```bash
+docker exec -it nginx bash
+cat /var/log/studio_error.log
+```
+
+Se o log mostrar `401` ou `403` para `/api/internal/push`, valide:
+
+- se o `INTERNAL_HMAC_SECRET` do worker e o mesmo do `studio/.env`
+- se o worker esta fazendo `POST`
+- se o relogio das duas maquinas esta sincronizado, pois a assinatura usa timestamp curto
+- se o Nginx do Studio foi recriado depois da atualizacao do `.env`

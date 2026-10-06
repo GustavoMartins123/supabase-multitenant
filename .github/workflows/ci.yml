@@ -1,0 +1,241 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  static-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar dependencias de teste
+        run: |
+          python -m pip install --upgrade pip
+          [ -f requirements-dev.txt ] && python -m pip install -r requirements-dev.txt || true
+          python -m pip install -r servidor/api-internal/requirements.txt
+      - name: Sintaxe Python
+        run: python -m compileall -q servidor/api-internal/app servidor/host-agent/hostagent tools
+      - name: Nomes indefinidos (NameError em runtime)
+        run: |
+          python -m pip install 'ruff==0.13.2'
+          python -m ruff check --select F821 --no-cache \
+            servidor/api-internal/app servidor/host-agent/hostagent tools tests
+      - name: Contrato das variaveis de ambiente
+        run: python tools/check-env-contract.py
+      - name: Contrato da versao unica
+        run: python tools/check-version-parity.py
+      - name: Contrato de identidade Python e Flutter
+        run: python tools/generate_identity_models.py --check
+      - name: Secret scanning
+        run: |
+          curl -sSL -o /tmp/gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.28.0/gitleaks_8.28.0_linux_x64.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp
+          /tmp/gitleaks detect --source . --no-git -v --config .gitleaks.toml
+      - name: Dependency audit (pip)
+        run: |
+          python -m pip install pip-audit
+          for req in servidor/api-internal/requirements.txt requirements-dev.txt servidor/host-agent/requirements.txt servidor/key-authorizer/requirements.txt servidor/traefik/geoip/requirements.txt; do
+            python -m pip_audit -r "$req" || exit 1
+          done
+      - name: Type checking (mypy, progressivo)
+        run: |
+          python -m mypy servidor/api-internal/app servidor/host-agent/hostagent tools/openapi_to_30.py tools/check-env-contract.py tools/check-version-parity.py tools/export_openapi.py tools/patch_dart_client.py
+      - name: Suite smoke (contratos)
+        run: python -m pytest tests/smoke -q
+      - name: Sintaxe Bash
+        run: |
+          fail=0
+          while IFS= read -r f; do bash -n "$f" || fail=1; done \
+            < <(git ls-files '*.sh')
+          exit $fail
+      - name: Sintaxe Lua
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq lua5.4 >/dev/null
+          fail=0
+          while IFS= read -r f; do luac -p -s "$f" || fail=1; done \
+            < <(git ls-files '*.lua')
+          exit $fail
+      - name: ShellCheck
+        run: |
+          shellcheck --version >/dev/null 2>&1 || { echo "shellcheck ausente"; exit 1; }
+          git ls-files '*.sh' | xargs -r shellcheck -x
+      - name: Validar arquivos Compose
+        run: python tools/check-env-contract.py --compose
+
+  access-admission-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build isolated admission test images
+        run: |
+          docker build -t access-api:test -f servidor/api-internal/Dockerfile servidor
+          docker build -t access-authorizer:test -f servidor/key-authorizer/Dockerfile servidor
+          docker build -t access-configuration:test -f servidor/client-configuration/Dockerfile servidor
+          docker build -t access-geoip:test servidor/traefik/geoip
+      - name: Required real Traefik, geography and quota checks
+        run: python tools/run_access_policy_tests.py
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.1"
+      - name: Admission middleware race tests
+        working-directory: servidor/traefik/plugins-local/src/github.com/GustavoMartins123/gatewayadmission
+        run: go test -race ./...
+
+  migrations-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s --health-timeout=5s --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar dependencias de teste
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r servidor/api-internal/requirements.txt
+          python -m pip install pytest==9.1.0
+      - name: Cadeia de migrations em Postgres real
+        env:
+          RUN_MIGRATIONS_INTEGRATION: "1"
+          MIGRATIONS_ADMIN_DSN: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+        run: python -m pytest tests/integration/test_control_plane_migrations_postgres.py -q
+
+  functions-security-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Explicit disposable test images
+        run: |
+          docker pull python:3.12-slim-bookworm
+          docker pull supabase/edge-runtime:v1.74.2
+      - name: Required Functions filesystem and worker isolation checks (no skips)
+        run: |
+          python tools/run_functions_security_tests.py \
+            --lifecycle-image python:3.12-slim-bookworm \
+            --edge-image supabase/edge-runtime:v1.74.2
+
+  authorization-security-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Security test dependencies
+        run: python -m pip install -r servidor/api-internal/requirements.txt -r servidor/host-agent/requirements.txt redis==5.2.1
+      - name: Build production OpenResty image and obtain disposable PostgreSQL
+        run: |
+          docker build -t studio-security-ci:local -f studio/Dockerfile studio
+          docker pull postgres:15
+      - name: Required authorization, revocation, directory and tenant SQL checks (no skips)
+        run: |
+          python tools/run_auth_security_tests.py \
+            --postgres-image postgres:15 --postgres-user postgres \
+            --studio-image studio-security-ci:local
+      - name: Explicit real-session test images
+        run: |
+          docker build -t session-browser-ci:local -f tests/integration/fixtures/studio_session_browser.Dockerfile tests/integration/fixtures
+          docker build -t session-runtime-ci:local -f tests/integration/fixtures/studio_session_runtime.Dockerfile tests/integration/fixtures
+          docker pull authelia/authelia:4.39.20
+          docker pull redis:8.2.2-alpine
+          docker pull ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v11
+      - name: Required real Authelia browser CSRF acceptance (verified TLS, no skips)
+        run: |
+          python tools/run_studio_session_tests.py \
+            --studio-image studio-security-ci:local \
+            --authelia-image authelia/authelia:4.39.20 --redis-image redis:8.2.2-alpine \
+            --runtime-image session-runtime-ci:local \
+            --browser-image session-browser-ci:local \
+            --ui-image ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v11
+
+  p1-lifecycle-live:
+    name: Lifecycle and authorization (${{ matrix.topology }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        topology: [physical, single, split]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build production lifecycle dependencies
+        run: |
+          docker build -t servidor-db:latest servidor/volumes/db
+          docker build -t servidor-realtime:latest -f servidor/volumes/realtime/Dockerfile servidor
+          docker build -t servidor-projects-api:latest -f servidor/api-internal/Dockerfile servidor
+          docker tag servidor-projects-api:latest servidor-control-plane-migrations:latest
+          docker build -t servidor-key-authorizer:latest -f servidor/key-authorizer/Dockerfile servidor
+          docker build -t codex-p1-executor:local -f tests/integration/fixtures/p1_executor.Dockerfile tests/integration/fixtures
+      - name: Explicit production service images
+        run: |
+          docker pull supabase/edge-runtime:v1.74.2
+          docker pull supabase/supavisor:2.9.7
+          docker pull supabase/storage-api:v1.61.12
+          docker pull nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim
+          docker pull darthsim/imgproxy:v4.0.11
+          docker pull supabase/gotrue:v2.193.0-rc.3
+          docker pull postgrest/postgrest:v14.14
+          docker pull redis:8.2.2-alpine
+      - name: Explicit end-to-end dependencies
+        if: matrix.topology != 'physical'
+        run: |
+          docker build -t studio-nginx:latest -f studio/Dockerfile studio
+          docker build -t codex-p1-browser:local -f tests/integration/fixtures/studio_session_browser.Dockerfile tests/integration/fixtures
+          docker pull authelia/authelia:4.39.20
+          docker pull redis:8.2.2-alpine
+          docker pull ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v11
+          docker pull traefik:v3.7.6
+          docker pull supabase/postgres-meta:v0.96.1
+      - name: Required physical script lifecycle and real Storage/Vectors drill
+        if: matrix.topology == 'physical'
+        run: python tools/run_p1_lifecycle_tests.py --executor-image codex-p1-executor:local
+      - name: Required real browser/API/agent lifecycle and authorization acceptance
+        if: matrix.topology != 'physical'
+        run: |
+          python tools/run_p1_end_to_end_tests.py --executor-image codex-p1-executor:local \
+            --topology '${{ matrix.topology }}' --result '.tmp-appdata/p1-e2e-${{ matrix.topology }}.json'
+
+
+  flutter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: flutter analyze
+        working-directory: studio/seletor_de_projetos
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      - name: flutter test
+        working-directory: studio/seletor_de_projetos
+        run: flutter test

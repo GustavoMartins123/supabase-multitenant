@@ -3,12 +3,14 @@ from __future__ import annotations
 import pathlib
 import shutil
 import subprocess
+import sys
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class UserAvatarThumbnailTests(unittest.TestCase):
+    @unittest.skipIf(sys.platform == "win32", "requires a working Lua 5.1 runtime (Linux-only)")
     def test_avatar_uuid_normalization_uses_lua_patterns_correctly(self) -> None:
         runtime = shutil.which("lua5.1") or shutil.which("lua")
         if not runtime:
@@ -38,7 +40,10 @@ assert(processor.normalize_uuid("11111111-2222-3333-4444-555555555555/../x") == 
 
     def test_cache_loads_picture_from_authelia(self) -> None:
         source = (ROOT / "studio/nginx/lua/init/init_worker.lua").read_text(encoding="utf-8")
-        self.assertIn('picture = attr.picture or ""', source)
+        self.assertIn('picture=user.source.profile.picture', source)
+        snapshot = (ROOT / "studio/nginx/lua/admin_api/directory_snapshot.lua").read_text(encoding="utf-8")
+        self.assertIn('"picture"', snapshot)
+        self.assertIn('profile[field] = attr[field] or ""', snapshot)
 
     def test_authenticated_directory_can_serve_any_active_user(self) -> None:
         source = (
@@ -76,6 +81,7 @@ assert(processor.normalize_uuid("11111111-2222-3333-4444-555555555555/../x") == 
         self.assertEqual(handler.count('uri:match("^/api/users/'), 1)
         self.assertIn('if not requested_user_id then', handler)
 
+    @unittest.skipIf(sys.platform == "win32", "requires a working Lua 5.1 runtime (Linux-only)")
     def test_avatar_content_entrypoint_invokes_the_handler(self) -> None:
         content = ROOT / "studio/nginx/lua/admin_api/user_avatar_content.lua"
         runtime = shutil.which("lua5.1") or shutil.which("lua")
@@ -98,6 +104,7 @@ assert(calls == 1)
             capture_output=True,
         )
 
+    @unittest.skipIf(sys.platform == "win32", "requires a working Lua 5.1 runtime (Linux-only)")
     def test_avatar_get_flushes_the_binary_body_without_early_exit(self) -> None:
         handler_path = (
             ROOT / "studio/nginx/lua/admin_api/user_avatar_handler.lua"
@@ -234,7 +241,7 @@ assert(exit_calls == 0)
     def test_user_lists_expose_picture_url(self) -> None:
         for relative in (
             "studio/nginx/lua/admin_api/users_list.lua",
-            "studio/nginx/lua/admin_api/available_users.lua",
+            "servidor/api-internal/app/routers/project_members.py",
             "studio/nginx/lua/admin_api/project_members.lua",
         ):
             source = (ROOT / relative).read_text(encoding="utf-8")

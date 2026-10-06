@@ -23,6 +23,12 @@ for secret_name in JWT_SECRET STORAGE_ENCRYPTION_KEY; do
     install -m 400 -o 65534 -g 65534 "$source_path" "$target_path"
 done
 
+if [ ! -s /run/secrets/ASSISTANT_GATEWAY_KEY ]; then
+    echo "[entrypoint] ERRO: secret do assistente ausente" >&2
+    exit 1
+fi
+install -m 400 -o 65534 -g 65534 /run/secrets/ASSISTANT_GATEWAY_KEY /var/run/assistant-gateway-key
+
 if [ ! -s /config/configuration.runtime.yml ]; then
     echo "[entrypoint] ERRO: configuration.runtime.yml ausente" >&2
     exit 1
@@ -32,7 +38,7 @@ chmod 644 /config/configuration.runtime.yml
 chown 65534:65534 /config 2>/dev/null || true
 chmod 777 /config || true
 
-for file in /config/users_database.yml /config/ids.yml /config/db.sqlite3; do
+for file in /config/users_database.yml /config/ids.yml /config/db.sqlite3 /config/.studio-directory-sequence; do
     [ -e "$file" ] || continue
     if chown 65534:65534 "$file" 2>/dev/null; then
         chmod 666 "$file"
@@ -57,8 +63,18 @@ if [ ! -s "$EXTRA_CA_CERT_FILE" ]; then
     exit 1
 fi
 
-if ! openssl x509 -in /config/ssl/ca.pem -noout -checkhost nginx >/dev/null 2>&1; then
-    echo "[entrypoint] ERRO: o certificado do Studio não contém o SAN DNS:nginx; regenere-o com tools/configure_studio_runtime.py --force" >&2
+if [ ! -s /config/ssl/server.pem ] || [ ! -s /config/ssl/server.key ]; then
+    echo "[entrypoint] ERRO: certificado de servidor ausente em /config/ssl/server.pem; rode tools/configure_studio_runtime.py --force" >&2
+    exit 1
+fi
+
+if [ -e /config/ssl/ca.key ]; then
+    echo "[entrypoint] ERRO: /config/ssl/ca.key ainda presente; rode tools/configure_studio_runtime.py --force para move-la para studio/secrets/authelia/" >&2
+    exit 1
+fi
+
+if ! openssl x509 -in /config/ssl/server.pem -noout -checkhost nginx >/dev/null 2>&1; then
+    echo "[entrypoint] ERRO: o certificado do Studio nao contem o SAN DNS:nginx; regenere-o com tools/configure_studio_runtime.py --force" >&2
     exit 1
 fi
 
@@ -73,23 +89,33 @@ case "${SERVER_DOMAIN:-}" in
         ;;
 esac
 
+if [ -z "${STUDIO_GATEWAY_HMAC_SECRET:-}" ] || [ -z "${PROJECTS_API_HMAC_SECRET:-}" ]; then
+    echo "[entrypoint] ERRO: HMAC interno por servico ausente; rode tools/migrate_internal_hmac_v1.py antes do upgrade" >&2
+    exit 1
+fi
+if [ -z "${STUDIO_ANALYTICS_HMAC_SECRET:-}" ]; then
+    echo "[entrypoint] ERRO: HMAC Studio Analytics ausente; rode tools/migrate_studio_analytics_hmac.py antes do upgrade" >&2
+    exit 1
+fi
+if ! printf '%s' "$STUDIO_ANALYTICS_HMAC_SECRET" | grep -Eq '^[0-9A-Fa-f]{64}$'; then
+    echo "[entrypoint] ERRO: STUDIO_ANALYTICS_HMAC_SECRET deve conter 32 bytes em hexadecimal" >&2
+    exit 1
+fi
+export STUDIO_GATEWAY_HMAC_SECRET PROJECTS_API_HMAC_SECRET STUDIO_ANALYTICS_HMAC_SECRET
+
+if [ "$STUDIO_GATEWAY_HMAC_SECRET" = "$PROJECTS_API_HMAC_SECRET" ]; then
+    echo "[entrypoint] ERRO: STUDIO_GATEWAY_HMAC_SECRET e PROJECTS_API_HMAC_SECRET devem ser distintos" >&2
+    exit 1
+fi
+if [ "$STUDIO_ANALYTICS_HMAC_SECRET" = "$STUDIO_GATEWAY_HMAC_SECRET" ] \
+    || [ "$STUDIO_ANALYTICS_HMAC_SECRET" = "$PROJECTS_API_HMAC_SECRET" ]; then
+    echo "[entrypoint] ERRO: STUDIO_ANALYTICS_HMAC_SECRET deve ser distinto dos segredos de outros servicos" >&2
+    exit 1
+fi
+
 CA_BUNDLE="/var/run/studio-ca-bundle.pem"
 cat /etc/ssl/certs/ca-certificates.crt "$EXTRA_CA_CERT_FILE" > "$CA_BUNDLE"
 chmod 644 "$CA_BUNDLE"
-
-SNIPPETS_DIR="${SNIPPETS_MANAGEMENT_FOLDER:-/app/snippets}"
-if [ -d "$SNIPPETS_DIR" ]; then
-    chown -R 65534:65534 "$SNIPPETS_DIR" 2>/dev/null || true
-
-    if find "$SNIPPETS_DIR" -type d -exec chmod 777 {} + \
-        && find "$SNIPPETS_DIR" -type f -exec chmod 666 {} +; then
-        echo "[entrypoint] snippets preparados para escrita compartilhada em $SNIPPETS_DIR"
-    else
-        echo "[entrypoint] WARN: não consegui preparar $SNIPPETS_DIR; a migração de snippets pode falhar"
-    fi
-else
-    echo "[entrypoint] WARN: diretório de snippets ausente: $SNIPPETS_DIR"
-fi
 
 PROFILE_PICTURES_DIR="/config/profile-pictures"
 mkdir -p "$PROFILE_PICTURES_DIR"
@@ -97,4 +123,4 @@ chown -R 65534:65534 "$PROFILE_PICTURES_DIR" 2>/dev/null || true
 find "$PROFILE_PICTURES_DIR" -type d -exec chmod 700 {} +
 find "$PROFILE_PICTURES_DIR" -type f -exec chmod 600 {} +
 
-exec openresty -g "daemon off;"
+exec openresty -g "env STUDIO_GATEWAY_HMAC_SECRET; env PROJECTS_API_HMAC_SECRET; env STUDIO_ANALYTICS_HMAC_SECRET; daemon off;"

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:seletor_de_projetos/data/project_repository.dart';
 import 'package:seletor_de_projetos/services/project_service.dart';
+import 'package:seletor_de_projetos/services/step_up_authentication_service.dart';
 import 'package:seletor_de_projetos/providers/project_jobs_provider.dart';
 import 'package:seletor_de_projetos/session.dart';
 import 'package:seletor_de_projetos/supabase_colors.dart';
@@ -68,7 +69,7 @@ class _UserProjectsAdminScreenState
   void _onBusyChanged() {
     if (!mounted) return;
 
-    if (!_projects.any((p) => _session.isBusy(p.name))) {
+    if (!_projects.any((p) => _session.isBusy(p.publicRef))) {
       _fetchProjects();
     }
     _safeSetState(() {});
@@ -163,7 +164,9 @@ class _UserProjectsAdminScreenState
   }
 
   String _getProjectUrl(String projectName) {
-    if (_serverDomain == null || _serverDomain!.isEmpty) return projectName;
+    if (_serverDomain == null || _serverDomain!.isEmpty) {
+      throw StateError('URL do servidor indisponivel');
+    }
     return '$_serverDomain/$projectName';
   }
 
@@ -175,7 +178,7 @@ class _UserProjectsAdminScreenState
       final relevantJobFinished = previousJobs.any(
         (job) =>
             !nextIds.contains(job.id) &&
-            _projects.any((project) => project.name == job.project),
+            _projects.any((project) => project.projectUuid == job.projectUuid),
       );
       if (relevantJobFinished) _fetchProjects();
     });
@@ -350,14 +353,14 @@ class _UserProjectsAdminScreenState
   }
 
   Widget _buildProjectCard(ProjectInfo project) {
-    final activeJob = ref.watch(activeProjectJobProvider(project.name));
-    final busy = _session.isBusy(project.name) || activeJob != null;
-    final projectUrl = _getProjectUrl(project.name);
+    final activeJob = ref.watch(activeProjectJobProvider(project.publicRef));
+    final busy = _session.isBusy(project.publicRef) || activeJob != null;
+    final projectUrl = _getProjectUrl(project.publicRef);
 
     if (project.statusFuture == null && !busy) {
       project.statusFuture = ref
           .read(projectRepositoryProvider)
-          .getFullStatus(project.name)
+          .getFullStatus(project.publicRef)
           .then((data) => ProjectDockerStatus.fromJson(data));
     }
 
@@ -412,7 +415,7 @@ class _UserProjectsAdminScreenState
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            project.name,
+                            project.displayName,
                             style: const TextStyle(
                               fontSize: 15,
                               fontWeight: FontWeight.w600,
@@ -537,7 +540,7 @@ class _UserProjectsAdminScreenState
                         label: 'Abrir',
                         color: SupabaseColors.brand,
                         onPressed:
-                            busy ? null : () => _openProject(project.name),
+                            busy ? null : () => _openProject(project.publicRef),
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -548,7 +551,7 @@ class _UserProjectsAdminScreenState
                         color: SupabaseColors.success,
                         onPressed: busy
                             ? null
-                            : () => _doAction(project.name, 'start'),
+                            : () => _doAction(project.publicRef, 'start'),
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -557,8 +560,9 @@ class _UserProjectsAdminScreenState
                         icon: Icons.stop_rounded,
                         label: 'Stop',
                         color: SupabaseColors.error,
-                        onPressed:
-                            busy ? null : () => _doAction(project.name, 'stop'),
+                        onPressed: busy
+                            ? null
+                            : () => _doAction(project.publicRef, 'stop'),
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -569,7 +573,7 @@ class _UserProjectsAdminScreenState
                         color: SupabaseColors.info,
                         onPressed: busy
                             ? null
-                            : () => _doAction(project.name, 'restart'),
+                            : () => _doAction(project.publicRef, 'restart'),
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -580,7 +584,7 @@ class _UserProjectsAdminScreenState
                         color: Colors.purple,
                         onPressed: busy
                             ? null
-                            : () => _showTransferDialog(project.name),
+                            : () => _showTransferDialog(project.publicRef),
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -589,8 +593,9 @@ class _UserProjectsAdminScreenState
                         icon: Icons.delete_outline_rounded,
                         label: 'Excluir',
                         color: SupabaseColors.error,
-                        onPressed:
-                            busy ? null : () => _confirmAndDelete(project.name),
+                        onPressed: busy
+                            ? null
+                            : () => _confirmAndDelete(project.publicRef),
                       ),
                     ),
                   ],
@@ -691,7 +696,8 @@ class _UserProjectsAdminScreenState
     } catch (e) {
       _showSnack(e.toString(), SupabaseColors.error);
     } finally {
-      final proj = _projects.firstWhereOrNull((p) => p.name == projectName);
+      final proj =
+          _projects.firstWhereOrNull((p) => p.publicRef == projectName);
       if (proj != null) proj.statusFuture = null;
       _session.setBusy(projectName, false);
     }
@@ -701,18 +707,20 @@ class _UserProjectsAdminScreenState
     bool sucesso = await ProjectService.confirmAndDeleteProject(
       context,
       projectName,
+      requestStepUpToken:
+          ref.read(stepUpAuthenticationServiceProvider).requestToken,
       submittedJobWaiter: (job) =>
           ref.read(projectJobsProvider.notifier).waitFor(
                 job,
                 project: projectName,
                 action: 'delete',
-                max: 400,
+                timeout: const Duration(minutes: 20),
               ),
     );
 
     if (sucesso) {
       _safeSetState(() {
-        _projects.removeWhere((project) => project.name == projectName);
+        _projects.removeWhere((project) => project.publicRef == projectName);
       });
     }
   }

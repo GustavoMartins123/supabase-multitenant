@@ -1,6 +1,6 @@
 """Contrato do host-agent: comandos fechados, HMAC, paths e sanitizacao.
 
-Fixa as garantias do P0 estrutural: a Projects API nao executa Docker nem
+Verifica o isolamento de execucao: a Projects API nao executa Docker nem
 shell; toda execucao fisica passa pelo host-agent com assinatura HMAC,
 reautorizacao, confinamento de paths e saida sanitizada.
 """
@@ -61,7 +61,14 @@ class ProtocolCopiesAreIdenticalTest(unittest.TestCase):
         )
 
 
+@unittest.skipIf(sys.platform == "win32", "requires POSIX bash (Linux-only)")
 class SystemdInstallerContractTest(unittest.TestCase):
+    def test_external_docker_daemon_does_not_require_a_local_systemd_unit(self) -> None:
+        template = (AGENT_ROOT / "supabase-host-agent.service").read_text(encoding="utf-8")
+        self.assertNotIn("Requires=docker.service", template)
+        installer = (AGENT_ROOT / "install.sh").read_text(encoding="utf-8")
+        self.assertIn("run_as_service_user docker info", installer)
+
     def test_unit_quotes_paths_that_may_contain_spaces(self) -> None:
         template = (
             AGENT_ROOT / "supabase-host-agent.service"
@@ -99,7 +106,8 @@ class SystemdInstallerContractTest(unittest.TestCase):
         self.assertIn("escape_systemd_value", source)
         self.assertIn("escape_sed_replacement", source)
         self.assertIn(
-            'render_unit "$SERVIDOR_DIR" "$AGENT_DIR" "$SERVICE_USER" "$UNIT_PATH"',
+            'render_unit "$SERVIDOR_DIR" "$AGENT_DIR" "$SERVICE_USER"'
+            ' "$SERVICE_HOME" "$UNIT_PATH"',
             source,
         )
         self.assertIn("HOST_AGENT_USER", source)
@@ -110,6 +118,11 @@ class SystemdInstallerContractTest(unittest.TestCase):
         self.assertNotIn("HOST_AGENT_INSTALL_SCHEMA_WAIT_TIMEOUT", source)
         self.assertNotIn("--wait-for-schema", source)
         self.assertNotIn('systemctl restart "$UNIT_NAME"', source)
+        # Nao subir o agent e deliberado (banco/API primeiro), mas um
+        # reinstall derruba quem estava rodando: sem aviso, o proximo
+        # comando cai em host_agent_offline sem explicacao.
+        self.assertIn("WAS_ACTIVE=1", source)
+        self.assertIn("sudo systemctl start $UNIT_NAME", source)
         self.assertNotIn("run_hostagent", source)
 
         with tempfile.TemporaryDirectory(prefix="host agent % & ") as temp_dir:
@@ -122,12 +135,13 @@ class SystemdInstallerContractTest(unittest.TestCase):
                 [
                     bash,
                     "-c",
-                    'source "$1"; render_unit "$2" "$3" "$4" "$5"',
+                    'source "$1"; render_unit "$2" "$3" "$4" "$5" "$6"',
                     "bash",
                     str(installer),
                     str(servidor_dir),
                     str(agent_dir),
                     "hostagent_test",
+                    "/home/hostagent_test",
                     str(rendered),
                 ],
                 check=True,
@@ -146,6 +160,250 @@ class SystemdInstallerContractTest(unittest.TestCase):
             self.assertIn("User=hostagent_test", unit)
             self.assertIn(f'--root "{escaped_servidor}"', unit)
             self.assertIn(f"WorkingDirectory={escaped_workdir}", unit)
+            self.assertIn(
+                'ReadWritePaths=-"/home/hostagent_test/.docker"', unit
+            )
+
+
+class SystemdSandboxContractTest(unittest.TestCase):
+    """A unit do host-agent precisa rodar confinada (REVISAO_ARQUITETURAL #3)."""
+
+    REQUIRED_DIRECTIVES = (
+        "NoNewPrivileges=true",
+        "ProtectSystem=full",
+        "ProtectHome=read-only",
+        "PrivateTmp=true",
+        "CapabilityBoundingSet=",
+        "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6",
+        "RestrictRealtime=true",
+        "RestrictSUIDSGID=true",
+        "LockPersonality=true",
+        "ProtectClock=true",
+        "ProtectHostname=true",
+        "ProtectKernelLogs=true",
+        "ProtectKernelModules=true",
+        "ProtectKernelTunables=true",
+        "ProtectControlGroups=true",
+    )
+
+    def test_unit_declares_the_sandbox_directives(self) -> None:
+        template = (
+            AGENT_ROOT / "supabase-host-agent.service"
+        ).read_text(encoding="utf-8")
+        for directive in self.REQUIRED_DIRECTIVES:
+            with self.subTest(directive=directive):
+                self.assertIn(directive, template)
+
+    def test_read_write_paths_use_placeholders_resolved_by_the_installer(self) -> None:
+        template = (
+            AGENT_ROOT / "supabase-host-agent.service"
+        ).read_text(encoding="utf-8")
+        self.assertIn('ReadWritePaths=-"__SERVIDOR_DIR__"', template)
+        self.assertIn('ReadWritePaths=-"__AGENT_DIR__"', template)
+
+        installer = (AGENT_ROOT / "install.sh").read_text(encoding="utf-8")
+        for placeholder in ("__SERVIDOR_DIR__", "__AGENT_DIR__"):
+            with self.subTest(placeholder=placeholder):
+                self.assertIn(f'"s|{placeholder}|', installer)
+
+    def test_every_path_placeholder_is_quoted_in_the_unit(self) -> None:
+        """Todo placeholder de caminho precisa sobreviver a um espaco.
+
+        `WorkingDirectory=` consome o resto da linha e dispensa aspas; as
+        demais diretivas fazem split por espaco e truncam sem avisar.
+        """
+        template = (
+            AGENT_ROOT / "supabase-host-agent.service"
+        ).read_text(encoding="utf-8")
+        unquoted: list[str] = []
+        for line in template.splitlines():
+            if line.startswith("#") or "__" not in line:
+                continue
+            if line.split("=", 1)[0] == "WorkingDirectory":
+                continue
+            for placeholder in (
+                "__SERVIDOR_DIR__",
+                "__AGENT_DIR__",
+                "__SERVICE_HOME__",
+            ):
+                start = line.find(placeholder)
+                while start != -1:
+                    # Dentro de aspas <=> numero impar de aspas antes.
+                    if line.count('"', 0, start) % 2 == 0:
+                        unquoted.append(line)
+                        break
+                    start = line.find(placeholder, start + 1)
+        self.assertEqual([], unquoted, "placeholder de caminho fora de aspas")
+
+    def test_sandbox_allows_buildx_state_under_the_service_home(self) -> None:
+        """`docker compose build` grava o estado do buildx em ~/.docker.
+
+        Com `ProtectHome=read-only` e sem esse ReadWritePaths, o build do
+        nginx do projeto morre em "read-only file system" — e a falha so
+        aparece a 72% da criacao, depois de banco e tenants ja criados.
+        """
+        template = (
+            AGENT_ROOT / "supabase-host-agent.service"
+        ).read_text(encoding="utf-8")
+        self.assertIn('ReadWritePaths=-"__SERVICE_HOME__/.docker"', template)
+
+        installer = (AGENT_ROOT / "install.sh").read_text(encoding="utf-8")
+        self.assertIn("__SERVICE_HOME__", installer)
+        self.assertIn('getent passwd "$SERVICE_USER"', installer)
+
+    def test_installer_verifies_the_sandbox_after_daemon_reload(self) -> None:
+        """A truncagem so apareceria no primeiro mkdir de um job real."""
+        installer = (AGENT_ROOT / "install.sh").read_text(encoding="utf-8")
+        self.assertIn("assert_sandbox_paths_parsed", installer)
+        self.assertIn(
+            'systemctl show "$UNIT_NAME" -p ReadWritePaths --value', installer
+        )
+        reload_at = installer.index("systemctl daemon-reload")
+        check_at = installer.index("  assert_sandbox_paths_parsed\n")
+        self.assertLess(reload_at, check_at)
+
+    def test_capability_bounding_set_is_empty_not_missing(self) -> None:
+        lines = (
+            (AGENT_ROOT / "supabase-host-agent.service")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        )
+        bounding = [
+            line.split("=", 1)[1]
+            for line in lines
+            if line.startswith("CapabilityBoundingSet=")
+        ]
+        self.assertEqual(bounding, [""], "CapabilityBoundingSet= deve zerar as capabilities.")
+
+
+class HostAgentRoleContractTest(unittest.TestCase):
+    """O agent usa a identidade dedicada host_agent_rw (REVISAO #1)."""
+
+    def test_role_provisioning_grants_only_agent_tables(self) -> None:
+        source = (
+            API_ROOT / "app" / "control_plane_roles.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("host_agent_rw", source)
+        self.assertIn(
+            "GRANT SELECT, INSERT, UPDATE ON host_agent_workers TO host_agent_rw",
+            source,
+        )
+        self.assertIn(
+            "GRANT SELECT, INSERT, UPDATE ON host_agent_commands TO host_agent_rw",
+            source,
+        )
+        self.assertIn("DELETE ON project_container_state", source)
+        self.assertIn("CONNECTION LIMIT 10", source)
+        agent_grants = re.findall(
+            r"GRANT ([^;]*?) ON (?:\s*)([a-z_]+) TO host_agent_rw", source
+        )
+        for privileges, table in agent_grants:
+            if table in {
+                "host_agent_workers",
+                "host_agent_commands",
+                "project_container_state",
+            }:
+                continue
+            self.assertNotIn("INSERT", privileges, table)
+            self.assertNotIn("UPDATE", privileges, table)
+            self.assertNotIn("DELETE", privileges, table)
+        self.assertNotIn("project_api_keys TO host_agent_rw", source)
+        self.assertNotIn("project_api_key_slots TO host_agent_rw", source)
+
+    def test_role_reads_only_the_authorization_columns(self) -> None:
+        """A reautorizacao no agent exige leitura escopada por coluna."""
+        source = (
+            API_ROOT / "app" / "control_plane_roles.py"
+        ).read_text(encoding="utf-8")
+        marker = "async def ensure_host_agent_rw_role"
+        block = source[source.index(marker) :]
+        block = block[: block.index("async def ensure_platform_app_role")]
+
+        expected = {
+            "projects": {
+                "id",
+                "name",
+                "owner_id",
+                "tenant_uuid",
+                "public_ref",
+                "automatic_key_rotation_enabled",
+            },
+            "users": {"id", "is_active"},
+            "user_groups": {"user_id", "group_name"},
+            "project_members": {"project_id", "user_id", "role"},
+        }
+        granted = {
+            table: {column.strip() for column in columns.split(",")}
+            for columns, table in re.findall(
+                r"GRANT SELECT \(([^)]*)\)\s*ON ([a-z_]+) TO host_agent_rw",
+                block,
+            )
+        }
+        self.assertEqual(expected, granted)
+
+        agent_db = (
+            ROOT / "servidor" / "host-agent" / "hostagent" / "db.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn(
+            "to_jsonb(projects)",
+            agent_db,
+            "referencia de linha inteira exige SELECT na tabela toda",
+        )
+        for secret in ("anon_key", "service_role"):
+            self.assertNotIn(secret, granted["projects"])
+
+    def test_migrations_require_and_provision_the_role(self) -> None:
+        source = (API_ROOT / "app" / "schema_migrations.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("HOST_AGENT_DB_PASSWORD", source)
+        self.assertIn("ensure_host_agent_rw_role", source)
+
+    def test_compose_passes_the_password_to_migrations(self) -> None:
+        compose = (
+            ROOT / "servidor" / "docker-compose-api.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "HOST_AGENT_DB_PASSWORD: ${HOST_AGENT_DB_PASSWORD:?defina HOST_AGENT_DB_PASSWORD}",
+            compose,
+        )
+        example = (ROOT / "servidor" / ".env.example").read_text(encoding="utf-8")
+        self.assertRegex(example, r"(?m)^HOST_AGENT_DB_PASSWORD=pass$")
+
+    def test_config_is_fail_closed_without_dedicated_identity(self) -> None:
+        from hostagent import config as agent_config
+
+        base = {
+            "POSTGRES_HOST": "db",
+            "POSTGRES_PORT": "5432",
+            "POSTGRES_USER": "supabase_admin",
+            "POSTGRES_PASSWORD": "legado",
+            "POSTGRES_DB": "postgres",
+            "HOST_AGENT_HMAC_SECRET": "segredo-forte",
+        }
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("HOST_AGENT_DB_DSN", None)
+            os.environ.pop("HOST_AGENT_DB_PASSWORD", None)
+            # Cutover estrito: credenciais globais nao sao mais aceitas.
+            with self.assertRaises(agent_config.ConfigError):
+                agent_config.build_db_dsn_from_env(dict(base))
+            dedicated = agent_config.build_db_dsn_from_env(
+                dict(base, HOST_AGENT_DB_PASSWORD="novo-segredo-32-caracteres-minimo!")
+            )
+        self.assertIn("host_agent_rw:novo-segredo", dedicated)
+
+    def test_config_rejects_placeholder_password(self) -> None:
+        from hostagent import config as agent_config
+
+        env = {
+            "POSTGRES_HOST": "db",
+            "POSTGRES_PORT": "5432",
+            "HOST_AGENT_DB_PASSWORD": "pass",
+        }
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("HOST_AGENT_DB_DSN", None)
+            with self.assertRaises(agent_config.ConfigError):
+                agent_config.build_db_dsn_from_env(env)
 
 
 class SchemaReadinessTest(unittest.IsolatedAsyncioTestCase):
@@ -212,6 +470,7 @@ class ClosedCommandSetTest(unittest.TestCase):
             "create_project",
             "duplicate_project",
             "delete_project_containers",
+            "delete_project_storage",
             "delete_project_files",
             "rotate_keys",
             "rename_project",
@@ -222,17 +481,17 @@ class ClosedCommandSetTest(unittest.TestCase):
         errors = protocol.validate_command_args("run_shell", "meuprojeto", {})
         self.assertEqual(errors, ["unknown_command:run_shell"])
 
-    def test_rotate_keys_accepts_only_the_automatic_system_trigger(self) -> None:
+    def test_rotate_keys_requires_one_explicit_canonical_trigger(self) -> None:
+        for trigger in ("manual", "automatic"):
+            with self.subTest(trigger=trigger):
+                self.assertEqual(
+                    protocol.validate_command_args(
+                        "rotate_keys", "meuprojeto", {"trigger": trigger}
+                    ),
+                    [],
+                )
         self.assertEqual(
-            protocol.validate_command_args(
-                "rotate_keys", "meuprojeto", {"trigger": "automatic"}
-            ),
-            [],
-        )
-        self.assertEqual(
-            protocol.validate_command_args(
-                "rotate_keys", "meuprojeto", {"trigger": "manual"}
-            ),
+            protocol.validate_command_args("rotate_keys", "meuprojeto", {}),
             ["invalid_rotation_trigger"],
         )
 
@@ -270,6 +529,8 @@ class ClosedCommandSetTest(unittest.TestCase):
                 "backup_id": "9c8ce9f0-3b4e-4bcb-a739-2c1e8ad0e9aa",
             }),
             ("delete_restore_point", "meuprojeto", {"backup_id": "x; rm -rf /"}),
+            ("delete_project_storage", "meuprojeto", {"project_uuid": "nao-e-uuid"}),
+            ("delete_project_storage", "meuprojeto", {}),
             ("delete_project_files", "meuprojeto", {"project_uuid": "nao-e-uuid"}),
             ("delete_project_files", "meuprojeto", {
                 "project_uuid": "9c8ce9f0-3b4e-4bcb-a739-2c1e8ad0e9aa",
@@ -285,20 +546,29 @@ class ClosedCommandSetTest(unittest.TestCase):
         cases = [
             ("start_project", "meuprojeto", {}),
             ("recreate_services", "meuprojeto", {"services": ["auth", "nginx"]}),
-            ("create_project", "meuprojeto", {"tenant_uuid": tenant_uuid}),
             ("create_project", "meuprojeto", {
                 "tenant_uuid": tenant_uuid,
+                "public_ref": "abcdefghijklmnopqrst",
+                "recover_stale": False,
+                "stale_tenant_uuids": [],
+            }),
+            ("create_project", "meuprojeto", {
+                "tenant_uuid": tenant_uuid,
+                "public_ref": "abcdefghijklmnopqrst",
                 "recover_stale": True,
                 "stale_tenant_uuids": [
                     "1b671a64-40d5-491e-99b0-da01ff1f3341"
                 ],
             }),
             ("duplicate_project", "copia", {
+                "public_ref": "abcdefghijklmnopqrst",
                 "original_name": "meuprojeto",
+                "original_uuid": "1b671a64-40d5-491e-99b0-da01ff1f3341",
+                "original_tenant_uuid": "1b671a64-40d5-491e-99b0-da01ff1f3341",
                 "copy_mode": "schema-only",
                 "tenant_uuid": tenant_uuid,
             }),
-            ("rename_project", "meuprojeto", {"new_name": "novo_nome"}),
+            ("rename_project", "meuprojeto", {"old_ref": "abcdefghijklmnopqrst", "new_ref": "bcdefghijklmnopqrstu", "tenant_uuid": "9c8ce9f0-3b4e-4bcb-a739-2c1e8ad0e9aa"}),
             ("container_logs", "meuprojeto", {"service": "auth", "lines": 100}),
             ("backup_project", "meuprojeto", {
                 "backup_id": tenant_uuid,
@@ -313,8 +583,7 @@ class ClosedCommandSetTest(unittest.TestCase):
                 "backup_id": tenant_uuid,
                 "tenant_uuid": tenant_uuid,
             }),
-            ("delete_project_files", "meuprojeto", {}),
-            ("delete_project_files", "meuprojeto", {"project_uuid": tenant_uuid}),
+            ("delete_project_storage", "meuprojeto", {"tenant_uuid": tenant_uuid}),
             ("delete_project_files", "meuprojeto", {"tenant_uuid": tenant_uuid}),
         ]
         for command, project, args in cases:
@@ -322,6 +591,38 @@ class ClosedCommandSetTest(unittest.TestCase):
                 self.assertEqual(
                     protocol.validate_command_args(command, project, args), []
                 )
+
+
+class ReferenceRotationHandlerTest(unittest.IsolatedAsyncioTestCase):
+    async def test_completion_requires_marker_and_preserves_signed_identities(self):
+        from hostagent import commands
+
+        with tempfile.TemporaryDirectory() as root:
+            directory = pathlib.Path(root) / "technical_project"
+            directory.mkdir()
+            internal = "11111111-1111-4111-8111-111111111111"
+            args = {"old_ref": "abcdefghijklmnopqrst", "new_ref": "bcdefghijklmnopqrstu", "tenant_uuid": "22222222-2222-4222-8222-222222222222"}
+            ctx = commands.CommandContext(types.SimpleNamespace(projects_root=pathlib.Path(root)), commands.RunningCommandState(), 600, "rename_project", internal)
+            cases = (
+                ("done", None, {"REFERENCE_ROTATED"}, "done", None, False),
+                ("done", None, set(), "failed", "rotation_completion_unconfirmed", False),
+                ("failed", "rename_failed", {"ROLLBACK_COMPLETE"}, "failed", "rename_rolled_back", True),
+                ("failed", "timeout", set(), "failed", "timeout", False),
+            )
+            for status, error, markers, expected_status, expected_error, rolled_back in cases:
+                with self.subTest(status=status, markers=markers):
+                    result = (commands.CommandOutcome(status, error_code=error), commands.ProcessResult(0 if status == "done" else 1, False, markers))
+                    with mock.patch.object(commands, "_run_lifecycle_script", new_callable=mock.AsyncMock, return_value=result) as script:
+                        outcome = await commands.handle_rename_project(ctx, "technical_project", args)
+                    self.assertEqual(script.call_args.args[2], ["technical_project", internal, args["tenant_uuid"], args["old_ref"], args["new_ref"]])
+                    self.assertEqual(outcome.status, expected_status)
+                    self.assertEqual(outcome.error_code, expected_error)
+                    self.assertEqual(outcome.result, {"old_ref": args["old_ref"], "new_ref": args["new_ref"], "rolled_back": rolled_back})
+            ctx.project_uuid = None
+            with mock.patch.object(commands, "_run_lifecycle_script", new_callable=mock.AsyncMock) as script:
+                with self.assertRaisesRegex(ValueError, "Canonical project UUID"):
+                    await commands.handle_rename_project(ctx, "technical_project", args)
+                script.assert_not_called()
 
 
 class LeaseSqlTypingTest(unittest.TestCase):
@@ -346,6 +647,7 @@ class HmacSignatureTest(unittest.TestCase):
         requested_by="2b671a64-40d5-491e-99b0-da01ff1f3342",
         args={},
         issued_at=1_752_000_000,
+        timeout_seconds=600,
     )
 
     def test_roundtrip(self) -> None:
@@ -362,6 +664,7 @@ class HmacSignatureTest(unittest.TestCase):
             "requested_by": "3b671a64-40d5-491e-99b0-da01ff1f3343",
             "args": {"services": ["nginx"]},
             "issued_at": 1_752_000_001,
+            "timeout_seconds": 1,
         }
         for field, value in tampered_cases.items():
             with self.subTest(field=field):
@@ -548,7 +851,7 @@ class PathConfinementTest(unittest.TestCase):
         self.assertEqual(resolved.parent, self.projects_root.resolve())
 
     def test_invalid_names_are_rejected(self) -> None:
-        for name in ("../fora", "a/b", "nome com espaco", "select", "..", "nome.ponto"):
+        for name in ("../fora", "a/b", "nome com espaco", "ab", "..", "nome.ponto"):
             with self.subTest(name=name):
                 with self.assertRaises(PathConfinementError):
                     resolve_project_dir(self.projects_root, name)
@@ -594,7 +897,23 @@ class ApiNoLongerExecutesDockerOrShellTest(unittest.TestCase):
     def test_main_delegates_lifecycle_to_host_agent(self) -> None:
         main_source = (API_ROOT / "app" / "main.py").read_text(encoding="utf-8")
         self.assertIn("run_host_agent_command_for_job", main_source)
-        self.assertIn("ensure_host_agent_schema", main_source)
+
+    def test_agent_tables_belong_to_the_control_plane_migrations(self) -> None:
+        baseline = (
+            API_ROOT / "app" / "migrations" / "0001_control_plane_baseline.sql"
+        ).read_text(encoding="utf-8")
+        app_sources = "".join(
+            path.read_text(encoding="utf-8")
+            for path in sorted((API_ROOT / "app").rglob("*.py"))
+        )
+        for table in (
+            "host_agent_workers",
+            "host_agent_commands",
+            "project_container_state",
+        ):
+            with self.subTest(table=table):
+                self.assertIn(f"CREATE TABLE IF NOT EXISTS {table}", baseline)
+                self.assertNotIn(f"CREATE TABLE IF NOT EXISTS {table}", app_sources)
 
 
 if __name__ == "__main__":

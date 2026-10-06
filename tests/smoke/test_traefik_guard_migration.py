@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import pathlib
+import tempfile
 import unittest
 from unittest import mock
 
@@ -16,14 +17,16 @@ spec.loader.exec_module(module)
 
 class FileProviderRendererTests(unittest.TestCase):
     def test_cli_stages_middlewares_inside_the_dynamic_directory(self) -> None:
-        root = ROOT / ".tmp-traefik-middleware-stage-test"
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = pathlib.Path(temp.name) / "fixture"
         root_env = root / "server.env"
         projects = root / "projects"
         middlewares = root / "middlewares.yml"
         output = root / "dynamic" / "routes.yml"
         projects.mkdir(parents=True, exist_ok=True)
         root_env.write_text(
-            "NGINX_SHARED_TOKEN=test-token\nPROJECTS_API_PORT=18000\n",
+            "PROJECTS_API_PORT=18000\nACCESS_ADMISSION_SECRET=" + "a" * 64 + "\nACCESS_TRUSTED_PROXY_CIDRS=\n",
             encoding="utf-8",
         )
         middlewares.write_text("http:\n  middlewares: {}\n", encoding="utf-8")
@@ -57,20 +60,22 @@ class FileProviderRendererTests(unittest.TestCase):
             root.rmdir()
 
     def test_renderer_discovers_valid_projects_and_uses_uuid_scope(self) -> None:
-        fixture_root = ROOT / ".tmp-traefik-render-test"
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        fixture_root = pathlib.Path(temp.name) / "fixture"
         projects = fixture_root / "projects"
         project = projects / "meu_projeto"
         project.mkdir(parents=True, exist_ok=True)
         root_env = fixture_root / "server.env"
         root_env.write_text(
-            "NGINX_SHARED_TOKEN=test-token\n"
             "PROJECTS_API_PORT=18000\n"
-            "PROJECTS_API_ALLOWED_IP_RANGES=127.0.0.1/32,172.50.0.0/16\n",
+            "PROJECTS_API_ALLOWED_IP_RANGES=127.0.0.1/32,172.50.0.0/16\nACCESS_ADMISSION_SECRET=" + "a" * 64 + "\nACCESS_TRUSTED_PROXY_CIDRS=\n",
             encoding="utf-8",
         )
         (project / ".env").write_text(
             "PROJECT_ID=meu_projeto\n"
-            "PROJECT_UUID=11111111-2222-3333-4444-555555555555\n",
+            "PROJECT_UUID=11111111-2222-3333-4444-555555555555\n"
+            "PROJECT_PUBLIC_REF=abcdefghijklmnopqrst\nAPI_GATEWAY_TOKEN_PROJETO=" + "b" * 64 + "\n",
             encoding="utf-8",
         )
         try:
@@ -91,6 +96,16 @@ class FileProviderRendererTests(unittest.TestCase):
         self.assertIn("PathPrefix(`/api/jobs`)", result)
         self.assertIn("PathPrefix(`/api/admin`)", result)
         self.assertIn("PathPrefix(`/api/internal/analytics`)", result)
+        self.assertIn("PathPrefix(`/config/`)", result)
+        api_router = result.split("    projects-api:", 1)[1].split("    client-configuration:", 1)[0]
+        self.assertIn("projects-api-allowlist", api_router)
+        self.assertIn("api-security-chain", api_router)
+        self.assertNotIn('/config', api_router)
+        public_router = result.split('    client-configuration:', 1)[1].split('    project-meu_projeto:', 1)[0]
+        self.assertIn('service: client-configuration', public_router)
+        self.assertNotIn('projects-api', public_router)
+        self.assertIn('http://client-configuration:18011', result)
+        self.assertNotIn("X-Shared-Token", result)
 
 
 if __name__ == "__main__":

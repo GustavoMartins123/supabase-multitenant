@@ -51,6 +51,16 @@ class OutboundTlsContractTests(unittest.TestCase):
         self.assertIn("NODE_EXTRA_CA_CERTS", compose)
         self.assertIn('"DNS:nginx"', runtime)
 
+    def test_backend_proxy_and_lua_share_the_explicit_certificate_identity(self) -> None:
+        nginx = (ROOT / "studio/nginx/nginx.conf").read_text(encoding="utf-8")
+        helper = (ROOT / "studio/nginx/lua/utils/outbound_tls.lua").read_text(encoding="utf-8")
+        self.assertIn("env STUDIO_BACKEND_TLS_NAME;", nginx)
+        self.assertIn("proxy_ssl_name $backend_tls_name;", nginx)
+        self.assertNotIn("proxy_ssl_name        $server_hostname;", nginx)
+        self.assertIn("options.ssl_server_name = M.backend_name()", helper)
+        self.assertIn('assert(configured_verify == "true"', helper)
+        self.assertIn("STUDIO_BACKEND_TLS_NAME must specify", helper)
+
     def test_google_and_fcm_use_the_public_policy(self) -> None:
         source = (ROOT / "studio/nginx/lua/send_push.lua").read_text(
             encoding="utf-8"

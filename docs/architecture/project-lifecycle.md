@@ -1,40 +1,64 @@
-# Lifecycle dos projetos
+# Project lifecycle
 
-O lifecycle é orquestrado pela Projects API, mas a execução física (Docker e os scripts em `servidor/generateProject/`) acontece no [host-agent](host-agent.md): a API grava a intenção assinada no banco e aguarda o agent executar o comando fechado.
+The lifecycle is orchestrated by the Projects API, but physical execution (Docker and the scripts in `servidor/generateProject/`) happens on the [host-agent](host-agent.md): the API writes the signed intent to the database and waits for the agent to execute the closed command.
 
-Operações longas são representadas por jobs persistentes. O endpoint HTTP normalmente cria o job e retorna seu identificador; a execução continua na fila serializada do projeto.
+The Vector steps embedded in create, duplicate, and restore — S3 buckets/indexes, per-project SigV4 credentials, and FDW wrappers — are specified in [Shared Storage, S3, and Storage Vectors](storage-vectors-lifecycle.md), the canonical source for that topic. This document describes when those steps run, not how they are implemented.
 
-## Identificadores usados
+Long-running operations are represented by persistent jobs. The HTTP endpoint normally creates the job and returns its identifier; execution continues in the project's serialized queue.
 
-Antes de acompanhar qualquer fluxo, diferencie:
+## Identifiers in use
 
-- `project_uuid`: `projects.id`, identidade canônica e imutável;
-- `tenant_uuid`: vínculo persistido com Realtime/JWT/backups; equivale a
-  `projects.id` nos projetos novos e pode preservar o UUID legado;
-- `project_ref`: slug mutável usado em URL e recursos físicos;
-- `_supabase_<project_ref>`: database;
-- Realtime tenant: identificado pelo UUID;
-- Supavisor tenant: identificado pelo project ref;
-- slot principal do CDC: sufixado pelo project ref;
-- slot temporário de broadcast: sufixado por hash derivado do UUID.
+Before following any flow, distinguish:
 
-## Criação
+- `project_uuid`: `projects.id`, canonical and immutable identity;
+- `tenant_uuid`: persisted binding for Realtime/JWT/backups; equals `projects.id` for new projects and may preserve the legacy UUID;
+- `name` / `PROJECT_ID`: stable technical name used by directories, Compose, databases and internal DNS;
+- `display_name`: required editable project title, initially set from the creation name;
+- `public_ref` / `PROJECT_PUBLIC_REF`: 20 random lowercase letters used exclusively by public paths and Studio project selection;
+- `_supabase_<technical_name>`: database;
+- Realtime tenant: identified by UUID;
+- Storage tenant: identified by the immutable `tenant_uuid`;
+- Supavisor tenant: identified by the technical name;
+- main CDC slot: suffixed by the technical name;
+- temporary broadcast slot: suffixed by a UUID-derived hash.
 
-Fluxo resumido:
+Before any mutable Storage operation on an existing project, the lifecycle queries `projects.tenant_uuid` in the control plane and requires it to equal the environment's canonical `PROJECT_UUID`. A mismatch, missing row, or query failure ends the operation before touching the registry, database, or namespace.
 
-1. a API valida usuário e nome;
-2. gera uma única vez `projects.id` e persiste o mesmo valor em `tenant_uuid`;
-3. cria o job já com os dois identificadores duráveis;
-4. o script gera JWT secret, anon key, service role e config token;
-5. cria `_supabase_<project_ref>` a partir de `_supabase_template`;
-6. gera `.env`, compose, Dockerfile e configuração Nginx;
-7. registra o tenant do Realtime com `external_id = tenant_uuid`;
-8. registra o tenant do Supavisor com `external_id = project_ref`;
-9. sobe os containers;
-10. persiste os segredos criptografados no registro do projeto;
-11. atualiza status e auditoria.
+The Studio's project settings expose separate actions: **Rename project** updates only `display_name`, while **Generate new URL** rotates only `public_ref` and derived service URLs. Cards and administrative lists display the editable title. Renaming does not change the public URL, technical name, database, keys or containers. Both changes appear in the identity history.
 
-O JWT usa o UUID como issuer:
+Available-member candidates come from the backend's reconciled canonical directory, not a Lua cache. The endpoint requires a project administrator or a global administrator; `mode=admin` additionally requires global administration. Inactive users and existing project administrators are excluded, and ordinary members are included only when explicitly requested.
+
+The Python identity schemas in `app/identity_schemas.py` define the project and job contracts. `tools/generate_identity_models.py` generates their Flutter models; CI rejects drift. The applications remain independently deployed and communicate through JSON over the authenticated HTTP gateway. Project lists and administrative projections use `project_uuid`, never an `id` alias. Technical names are validated for safe shape and length, not against SQL keywords or root HTTP routes: databases are prefixed and public routes use the random reference.
+
+## Job updates
+
+The selector keeps one long-poll request to `/api/jobs/watch`. The first response contains the visible active jobs and a snapshot cursor. With that cursor, the API waits for a committed change or a 25-second deadline. IDs of jobs already being followed are included explicitly so completion is delivered even after those jobs leave the active set. UI operation waiters share this subscription instead of polling status independently. Hidden tabs allow the pending request to finish, then pause further requests until visible. Focus changes preserve the request and cursor; returning to the tab resumes the same subscription without fetching a separate initial snapshot.
+
+Each API process has one dedicated PostgreSQL `LISTEN` connection, established before reading snapshots. Triggers emit `NOTIFY` after changes to jobs and authorization bindings. The notification has no job data or secrets; SQL remains the durable source. Requests release query-pool connections while waiting, capture the notification generation before reading SQL, and revalidate the current directory and principal before replying. The cursor is derived only from that principal's visible snapshot.
+
+A dead listener, revoked principal, missing watched job, or exceeded subscription limit returns an explicit error. The selector stops and exposes the error until an explicit refresh; it does not switch to periodic polling. Listener recovery requires restarting the API process. No additional Docker service is needed.
+
+References: [PostgreSQL LISTEN and its snapshot ordering](https://www.postgresql.org/docs/current/sql-listen.html), [transactional NOTIFY](https://www.postgresql.org/docs/current/sql-notify.html), and [SSE transport characteristics](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events).
+
+## Creation
+
+Summary:
+
+1. the API validates the user and name;
+2. generates `projects.id`, `tenant_uuid` and an independent cryptographically random `public_ref`;
+3. creates the job with both durable identifiers;
+4. the script generates the JWT secret, internal anon/service-role JWTs, config token, and opaque gateway-exclusive token;
+5. creates `_supabase_<technical_name>` from `_supabase_template`;
+6. registers the Realtime tenant with `external_id = tenant_uuid`;
+7. registers the Supavisor tenant with `external_id = technical_name`;
+8. creates the physical namespace and registers the tenant in global Storage through the Admin API;
+9. creates tenant-exclusive S3/SigV4 credentials;
+10. generates `.env`, compose, Dockerfile, and Nginx configuration without local Storage or imgproxy;
+11. starts only the project's local services: Auth, PostgREST, and Nginx; Postgres-Meta, Storage, imgproxy, Realtime, Supavisor, and Edge Functions remain global;
+12. validates migrations, database, JWT, S3, Vectors, and routing for the real tenant;
+13. persists encrypted secrets in the project record and completes the job.
+
+The JWT uses the UUID as its issuer:
 
 ```json
 {
@@ -43,318 +67,301 @@ O JWT usa o UUID como issuer:
 }
 ```
 
-O nome do database e do slot principal continua usando o project ref. O slot temporário de broadcast usa um hash derivado do UUID do tenant.
+The database name and main slot continue to use the technical name. The temporary broadcast slot uses a hash derived from the tenant UUID.
 
 ### Rollback
 
-O script mantém estado dos recursos criados e tenta remover, na ordem necessária:
+The script tracks created resources and attempts to remove them in the required order:
 
-- diretórios;
+- directories;
+- Storage tenant, credentials, and namespace;
 - database;
-- tenant do Realtime;
-- tenant do Supavisor.
+- Realtime tenant;
+- Supavisor tenant.
 
-O rollback de shell não substitui a validação final da API. Falhas parciais devem aparecer no job.
+Shell rollback does not replace the API's final validation. Partial failures must appear in the job.
 
-## Duplicação
+## Duplication
 
-A duplicação cria outro projeto, com novo UUID, novas chaves e novos tenants.
+Duplication creates another project with a new UUID, new public reference, new keys, and new tenants.
 
-Modos:
+Modes:
 
-- `schema-only`: copia estrutura e históricos de migration necessários;
-- `with-data`: copia schema, dados e storage.
+- `schema-only`: copies the required structure and migration history;
+- `with-data`: copies the schema, data, and storage.
 
-Mesmo quando os dados são copiados, a identidade do projeto novo é independente:
+Even when data is copied, the new project's identity is independent:
 
-- novo UUID;
-- novo issuer JWT;
-- novo tenant Realtime;
-- novo tenant Supavisor;
-- novas API keys;
-- novo config token.
+- new UUID;
+- new JWT issuer;
+- new Realtime tenant;
+- new Supavisor tenant;
+- new Storage tenant and namespace;
+- new S3/SigV4 credentials;
+- new API keys;
+- new config token.
 
-A cópia não deve reutilizar segredos do projeto de origem.
+The copy does not reuse secrets or object references. `schema-only` creates an empty namespace. `with-data` captures the source with its services stopped and the Storage tenant in fail-closed maintenance, copies files to the new UUID, reidentifies Vector's physical tables, and removes copied FDWs/Vault secrets before creating new credentials.
 
-## Rename
+## Public URL rotation
 
-Rename altera o project ref, mas preserva tanto `projects.id` quanto
-`projects.tenant_uuid`.
+`POST /api/projects/{public_ref}/rename` accepts an empty JSON object. The server reserves a new random reference in `project_reference_history` and submits a durable job. The caller cannot select a name or a reference.
 
-Recursos que acompanham o novo nome:
+The host-agent withdraws the Functions projection and stops the project's Auth and Nginx before replacing the public reference and derived URLs. It recreates only those two services that were previously running, then publishes the updated Functions projection. Custom application URLs and redirect entries remain unchanged; only defaults derived from the previous project URL are replaced.
 
-- diretório do projeto;
-- `.env` e templates;
-- nomes dos containers;
-- rota do Traefik;
-- database `_supabase_<project_ref>`;
-- tenant do Supavisor;
-- slot principal do Realtime;
-- referências físicas usadas pelos serviços;
-- diretórios de snippets do Studio.
+The operation does not rename directories, databases, containers, Supavisor tenants or replication slots. Internal UUIDs, JWT secrets, API keys, Storage objects, Vectors, collaboration records and memberships remain unchanged. Studio snippets use a namespace based on the immutable project UUID, so they do not move during rotation.
 
-Recursos que permanecem com a mesma identidade:
+The old URL becomes invalid. There is no name-based alias, UUID route, historical URL resolution or redirect. Application clients must switch their configured project URL; previously issued signed Storage URLs containing the old prefix also become invalid. Existing browser tabs must select the new project URL.
 
-- UUID do projeto;
-- membership;
-- notas, tags, hints e threads;
-- auditoria;
-- Realtime `external_id`;
-- slot temporário de broadcast derivado do UUID;
-- chaves JWT, salvo quando outra operação de rotação for solicitada.
+Each job keeps the public reference captured at submission in `jobs.public_ref`; tracking does not substitute the new reference. Its `project` field remains the technical name. History records bind old and new references to the actor, project and job.
 
-### Histórico
+Failure triggers transactional rollback of the reference, generated files and previous service state. If rollback cannot be confirmed, Auth and Nginx remain stopped and the job requires explicit recovery.
 
-Cada rename cria um registro em `project_name_history` com:
+### Existing installations
 
-- nome anterior;
-- nome novo;
-- path anterior;
-- path novo;
-- job associado;
-- status;
-- erro e timestamps.
+Perform the change in a maintenance window with Projects API, host-agent, Functions supervisor, Studio gateway and project Auth/Nginx stopped. Keep PostgreSQL and the shared services available. Complete or cancel active lifecycle jobs before stopping the control plane. Back up the installation before applying schema migrations.
 
-### Supavisor
+Run the versioned control-plane migration service with the updated code. On the server host, export a private catalog and inspect the dry run:
 
-O tenant antigo do Supavisor precisa ser removido antes da criação do novo para evitar conflito de identidade.
+```bash
+python3 tools/migrate_project_public_refs.py --root "$SERVER_ROOT" --export-catalog project-reference-catalog.json
+python3 tools/migrate_project_public_refs.py --root "$SERVER_ROOT"
+python3 tools/migrate_project_public_refs.py --root "$SERVER_ROOT" --apply
+```
 
-Se houver falha depois da remoção, o rollback tenta restaurar o tenant antigo.
+`SERVER_ROOT` is the absolute path to the installation's `servidor` directory. The tool preserves technical identities and secrets, renders canonical project files and active Functions projections, and refuses running services or divergent identities. Start or recreate project services only after the server and Studio migrations have both succeeded.
 
-### Realtime
+An Auth URL derived from a previous technical name is accepted for this offline migration only when a successful rename in the durable catalog proves that name belongs to the same project. This does not create an alias or retain the old route.
 
-O tenant continua identificado pelo UUID. O rename atualiza os recursos ligados ao database, incluindo slot principal e configuração da extensão CDC, sem trocar o `external_id` canônico.
+Transfer the private catalog to the Studio host when using two machines. Migrate the mounted snippets directory explicitly while its `nginx` container is stopped:
 
-### Snippets
+```bash
+python3 tools/migrate_snippet_namespaces.py --snippets-dir "$SNIPPETS_DIR" --catalog project-reference-catalog.json
+python3 tools/migrate_snippet_namespaces.py --snippets-dir "$SNIPPETS_DIR" --catalog project-reference-catalog.json --apply
+```
 
-O Supabase Studio armazena snippets em diretórios que incluem usuário e slug do projeto.
+`SNIPPETS_DIR` is the host directory mounted as Studio's SQL snippets volume. Conflicting SQL, ambiguous historical ownership or symlinks abort before mutation. Interrupted transactions retain private integrity-checked journals; use the same tool with `--rollback` while services remain stopped. A successful migration removes its journal. Never version catalogs, journals, installation paths or generated environments.
 
-Depois do rename principal, a API chama o endpoint interno do OpenResty para renomear esses diretórios.
+Deploy matching API, host-agent, Functions supervisor and Studio gateway versions together. Use a new Studio image tag; end users pull that image rather than rebuild Flutter.
 
-A migração é best-effort:
+## Opaque API keys
 
-- falha de snippets não invalida o projeto já renomeado;
-- o job registra um aviso;
-- os diretórios podem exigir correção manual ou retry específico.
+New and duplicated projects start with `default-publishable` and `default-secret` slots. Existing projects use explicit preparation, claim, confirmation, and cutover; after cutover, legacy public JWTs are no longer accepted.
 
-## Rotação das API keys
+Each slot has its own rotation, **optional time-based expiration**, service scope, and revocation. `expires_at = NULL` means the key remains valid until revocation, rotation, disabling, or another policy block; it does not mean the key cannot be removed. For timestamped slots, automation can prepare the next version before expiration. Automation can be disabled at the project or slot level.
 
-A rotação padrão gera novos tokens anon e service role usando o JWT secret existente.
+The complete protocol is in [Opaque API key operations](../12-opaque-api-key-operations.md).
 
-Isso evita invalidar imediatamente todas as sessões de usuários finais.
+## Internal JWT rotation
 
-Fluxo:
+Infrastructure rotation generates new internal anon and service-role JWTs using the existing JWT secret. It can recreate a project's Nginx only when the opaque gateway is ready.
 
-1. gera novos tokens;
-2. atualiza arquivos do projeto;
-3. atualiza configuração do Nginx;
-4. persiste os segredos com envelope encryption;
-5. incrementa `project_key_version`;
-6. invalida o cache de service key do Studio;
-7. persiste a nova expiração, conclui o job e grava a auditoria.
+This avoids immediately invalidating all end-user sessions.
 
-A invalidação do cache faz parte do sucesso da operação. Antes de usar qualquer
-entrada, o OpenResty precisa confirmar a versão canônica na Projects API. Se a
-consulta falhar, a requisição é bloqueada; uma chave em cache nunca substitui a
-validação de versão.
+Flow:
 
-### Rotação automática
+1. generates new tokens;
+2. updates project files;
+3. updates Nginx configuration;
+4. persists secrets with envelope encryption;
+5. increments `project_key_version`;
+6. invalidates the Studio service-key cache;
+7. persists the new expiration, completes the job, and records the audit event.
 
-Todo projeto nasce com `automatic_key_rotation_enabled=true`. A Projects API
-calcula a agenda pelo claim `exp`, persiste `key_expires_at` e cria um job no
-mesmo runner da rotação manual sete dias antes do vencimento. O scanner:
+Cache invalidation is part of operation success. Before using any entry, OpenResty must confirm the canonical version in the Projects API. If the query fails, the request is blocked; a cached key never replaces version validation.
 
-- usa advisory lock do PostgreSQL para haver um único líder;
-- bloqueia a linha com `FOR UPDATE SKIP LOCKED`;
-- não cria um segundo job enquanto houver ação ativa no projeto;
-- limita a concorrência global;
-- registra ator de sistema, versão e expiração na auditoria.
+### Automatic rotation
 
-Uma falha automática grava `automatic_key_rotation_blocked_at` e
-`automatic_key_rotation_last_error`. O scanner não repete a operação até um
-admin retomar explicitamente a automação ou concluir uma rotação manual. Não há
-loop silencioso nem uso da chave anterior como caminho secundário.
+Every project starts with `automatic_key_rotation_enabled=true`. The Projects API calculates the schedule from the `exp` claim, persists `key_expires_at`, and creates a job in the same runner as manual rotation seven days before expiration. The scanner:
 
-A opção pode ser desativada no Studio ou por
-`PUT /api/projects/{project_ref}/automatic-key-rotation` com
-`{"enabled": false}`. Os parâmetros globais são:
+- uses a PostgreSQL advisory lock to ensure a single leader;
+- locks the row with `FOR UPDATE SKIP LOCKED`;
+- does not create a second job while an action is active in the project;
+- limits global concurrency;
+- records the system actor, version, and expiration in the audit log.
+
+An automatic failure records `automatic_key_rotation_blocked_at` and `automatic_key_rotation_last_error`. The scanner does not repeat the operation until an admin explicitly resumes automation or completes a manual rotation. There is no silent loop or use of the previous key as a secondary path.
+
+The option can be disabled in Studio or through `PUT /api/projects/{project_ref}/automatic-key-rotation` with `{"enabled": false}`. Global parameters are:
 
 - `AUTOMATIC_KEY_ROTATION_LEAD_DAYS=7`;
 - `AUTOMATIC_KEY_ROTATION_CHECK_INTERVAL_SECONDS=300`;
 - `AUTOMATIC_KEY_ROTATION_MAX_CONCURRENT=3`.
 
-### Expiração
+### Expiration
 
-A API extrai metadata de expiração dos JWTs, agenda a rotação automática e
-avisa o Studio quando as chaves estão expiradas ou próximas do vencimento.
+The API extracts expiration metadata from JWTs, schedules automatic rotation, and notifies Studio when keys are expired or near expiration.
 
-A janela é configurada por `KEY_EXPIRY_WARNING_DAYS`.
+The window is configured by `KEY_EXPIRY_WARNING_DAYS`.
 
-### Rotação do JWT secret
+### JWT-secret rotation
 
-Trocar o JWT secret é uma operação diferente e de impacto maior:
+Changing the JWT secret is a different, higher-impact operation:
 
-- invalida tokens existentes;
-- exige sincronização com Realtime e serviços;
-- encerra sessões de Auth;
-- precisa de janela de manutenção e plano de rollback.
+- invalidates existing tokens;
+- requires synchronization with Realtime and services;
+- ends Auth sessions;
+- requires a maintenance window and rollback plan.
 
-Ela não deve ser confundida com a rotação comum das API keys.
+It must not be confused with ordinary API-key rotation.
 
-## Settings e recriação de serviços
+## Settings and service recreation
 
-A alteração de settings grava o `.env` atomicamente e informa os serviços afetados.
+### Resource limits
 
-Exemplos:
+The profile is the ceiling for the **whole project**, not per container. `PROJECT_RESOURCE_PROFILE` (`small|medium|large|custom`) names a total in the root `.env`. Memory is split 1:2:5 for nginx:auth:rest. CPU first reserves sustained-load floors of 0.40/1.20/0.25 CPU and splits the remainder 1:4:1. PIDs use independent safety floors of 128/256/512 rather than sharing the project reference value. Load tests with real password logins showed that Auth dominates tenant CPU while PostgREST needs the largest memory share.
 
-- Auth para opções do GoTrue;
-- REST para schemas e pool do PostgREST;
-- Storage e Nginx para limite de arquivo;
-- Storage para transformação de imagens.
+| Profile | Project total | nginx | auth | rest |
+| --- | --- | --- | --- | --- |
+| `small` | 256m / 1.85 / 128 | 32m / 0.40 / 128 | 64m / 1.20 / 256 | 160m / 0.25 / 512 |
+| `medium` | 1g / 2.00 / 384 | 128m / 0.42 / 384 | 256m / 1.30 / 384 | 640m / 0.28 / 512 |
+| `large` | 4g / 3.00 / 768 | 512m / 0.59 / 768 | 1024m / 1.96 / 768 | 2560m / 0.45 / 768 |
 
-A recriação é executada como job idempotente conhecido.
+Two ways to go beyond the presets, both without any global ceiling:
 
-## Pontos de restauração
+- **Root slot** — define `PROJECT_RES_CUSTOM_MEMORY/CPUS/PIDS` in the server `.env` and select profile `custom` at creation time.
+- **Per-project capacity** — in the Studio project settings (Recursos section), edit Memória (`256m`/`2g`), CPUs (`1.50`) and PIDs directly and save; the API derives the same weighted split locally, persists the values as `PROJECT_RES_CUSTOM_*` in that project's `.env`, flags the row as `custom` in `projects.resource_profile`, and reports nginx/auth/rest as pending recreate. Partial edits inherit the missing totals from the current file. Duplicate/rename copy these per-project values through `apply_project_resource_limits ... <source-env>` (precedence: local `.env` > source `.env` > root slot), so clones keep the original sizing instead of silently re-falling to a preset.
 
-Um ponto de restauração captura **dados, não identidade**: o dump do
-database `_supabase_<project_ref>` (sem o schema `realtime`, que é
-capturado à parte como no duplicate) e o tar do diretório `storage/`,
-mais um `manifest.json` com UUID, ref na época, versão do Postgres e as
-tabelas da publication do Realtime.
+Minimums are enforced at derivation time (`112m` total memory floor across services, `1.85` CPU floors), returning HTTP 409 with the offending share rather than producing a stack that would OOM-loop.
 
-Ficam fora do ponto: `.env`, JWT secret, anon/service keys, config token,
-tenants do Realtime/Supavisor e configuração de containers. Por isso um
-ponto continua restaurável depois de rotação de chaves e de rename — os
-arquivos vivem em `servidor/backups/<tenant_uuid>/<point_id>/`, chaveados
-pelo `tenant_uuid` persistido no control plane e espelhado em `PROJECT_UUID`
-no `.env` do projeto (imutável no rename).
+Every rendered project Compose pins each service's own share through fail-closed interpolation (`${PROJECT_NGINX_MEM_LIMIT:?...}`, `${PROJECT_AUTH_CPUS:?...}`, …), so a project without limits refuses to start instead of running unconstrained. The shares are written to the project `.env` at create, duplicate, rename, and rotate-key time. Existing projects are migrated idempotently with `tools/migrate_project_resource_limits.py` (dry-run by default, `--apply` to write), which delegates to the same helper, followed by a recreate. Database-level quotas (connection limits per tenant role, statement timeouts) and disk quotas remain open items; disk usage is currently an observability concern only.
 
-### Captura (fria)
+Changing settings writes the `.env` atomically and reports the affected services.
 
-O backup é frio por decisão de produto: o script para os serviços do
-projeto (o Postgres compartilhado continua de pé), encerra os pools do
-tenant no Supavisor, captura banco + storage de forma atômica
-(`<id>.tmp` + rename) e religa somente os containers que estavam rodando.
+Examples:
 
-### Restauração
+- Auth for GoTrue options;
+- REST for PostgREST schemas and pool;
+- Storage tenant and Nginx for the file limit;
+- Storage tenant for image transformations, S3 Protocol, and Vector Buckets.
 
-1. para os serviços do projeto, shutdown do tenant Realtime e terminate
-   dos pools do Supavisor;
-2. captura um **ponto automático de segurança** com o estado atual e emite
-   `SAFETY_BACKUP_COMPLETE`;
-3. dropa os replication slots, renomeia o database atual para
-   `_supabase_<ref>_prerestore` (é o plano de rollback, não um DROP);
-4. cria o database novo, restaura o dump e reaplica as correções
-   conhecidas do duplicate: partições de `realtime.messages`, publications
-   (com as tabelas do manifest), `TRUNCATE realtime.subscription`,
-   `search_path`, override do `supabase_storage_admin`, grants e validação
-   do contrato pgvector;
-5. recria o slot principal, troca o diretório `storage/`
-   (`storage.prerestore` como fallback), religa os containers, espera o
-   Storage ficar healthy e sincroniza os wrappers vetoriais;
-6. só então remove `_supabase_<ref>_prerestore` e `storage.prerestore`.
+The Storage update sends `PATCH /tenants/<tenant_uuid>` and does not restart global Storage or imgproxy. Nginx recreation remains an idempotent job when its local configuration changes.
 
-Falhas disparam rollback compensatório com marker `ROLLBACK_COMPLETE`,
-como no rename. O ponto de segurança sobrevive à falha e vira um ponto
-normal na listagem.
+## Restore points
 
-A restauração reverte também os usuários e sessões do Auth (o schema
-`auth` faz parte do banco). Keys e URL do projeto não mudam.
+A restore point captures **data, not identity**: a dump of the `_supabase_<technical_name>` database (without the `realtime` schema, which is captured separately as in duplication) and a tar containing only `volumes/storage/objects/<tenant_uuid>/`. Format-2 `manifest.json` includes the UUID, Storage tenant ID, layout, ref at capture time, Postgres version, and the tables in the Realtime publication.
+
+The point excludes: `.env`, JWT secret, anon/service keys, config token, Realtime/Supavisor tenants, and container configuration. Therefore a point remains restorable after key rotation and rename — files live in `servidor/backups/<tenant_uuid>/<point_id>/`, keyed by the `tenant_uuid` persisted in the control plane and mirrored in `PROJECT_UUID` in the project `.env` (immutable during rename). A backup never traverses the global root or includes another tenant's namespace.
+
+### Capture (cold)
+
+The backup is cold by product decision: the script stops project services (shared Postgres remains up), terminates the tenant's Supavisor pools, and places only the Storage tenant into fail-closed maintenance. The script confirms through the data plane that the cache no longer accepts operations, closes remaining Storage connections, captures database + namespace atomically (`<id>.tmp` + rename), restores the tenant's canonical URLs, and restarts only containers that were running.
+
+### Restoration
+
+1. stop project services, shut down the Realtime tenant, terminate Supavisor pools, and put the Storage tenant into fail-closed maintenance;
+2. capture an **automatic safety point** with the current state and emit `SAFETY_BACKUP_COMPLETE`;
+3. drop replication slots and rename the current database to `_supabase_<ref>_prerestore` (the rollback plan, not a DROP);
+4. create the new database, restore the dump, and reapply known duplication fixes: `realtime.messages` partitions, publications (with manifest tables), `TRUNCATE realtime.subscription`, `search_path`, `supabase_storage_admin` override, grants, and pgvector contract validation;
+5. recreate the main slot and swap only the UUID namespace through transactional staging; reject the archive if it has an absolute path, `..`, symlink, or special type;
+6. reconnect the tenant, run official migrations, restart containers, validate JWT/S3/Vectors through the real tenant, and synchronize vector wrappers;
+7. only then remove `_supabase_<ref>_prerestore` and namespace staging.
+
+Failures trigger compensating rollback with the `ROLLBACK_COMPLETE` marker, as in rename. The safety point survives the failure and becomes a normal point in the list.
+
+Restoration also reverts Auth users and sessions (the `auth` schema is part of the database). Project keys and URL do not change.
 
 ### Control plane
 
-A tabela `project_restore_points` guarda título (default: data/hora),
-descrição, status (`creating`, `ready`, `restoring`, `deleting`,
-`failed`), flag de ponto automático, tamanho, contadores de restauração e
-o job associado. Limite de 15 pontos ativos por projeto; a restauração
-exige uma vaga livre para o ponto automático. Todas as operações são
-auditadas em `studio_audit_log`. A listagem é acessível a qualquer membro;
-criar ponto exige admin do projeto, enquanto restaurar ou excluir ponto
-exige o dono ou admin global. `backup` e `restore` não são idempotentes: o recovery da
-API religa na intenção existente do host-agent em vez de reexecutar. O
-delete integral do projeto continua exclusivo de admin global, protegido também
-pela senha de exclusão mantida apenas no servidor, e remove
-`servidor/backups/<uuid>/` junto com os arquivos.
+The `project_restore_points` table stores title (default: date/time), description, status (`creating`, `ready`, `restoring`, `deleting`, `failed`), automatic-point flag, size, restore counters, and the associated job. There is a limit of 15 active points per project; restoration requires a free slot for the automatic point. All operations are audited in `studio_audit_log`. Listing is available to any member; creating a point requires a project admin, while restoring or deleting a point requires the owner or global admin. `backup` and `restore` are not idempotent: API recovery reconnects to the existing host-agent intent rather than rerunning it. Full project deletion remains exclusive to global admins, also protected by step-up with the current Authelia account's personal password, and removes `servidor/backups/<uuid>/` with the files.
 
-## Start, stop e restart
+## Start, stop, and restart
 
-Essas operações:
+These operations:
 
-- consultam os containers associados ao projeto;
-- são serializadas na fila do projeto;
-- atualizam status e auditoria;
-- são marcadas como idempotentes e retryable.
+- query the container state associated with the project;
+- are serialized in the project queue;
+- update status and audit records;
+- are marked idempotent and retryable.
 
-## Deleção
+The state displayed by the API comes from the `project_container_state` snapshot maintained by the host-agent; the Projects API does not query Docker directly.
 
-A deleção precisa remover recursos sem permitir que Supavisor ou outros serviços recriem conexões no meio do processo.
+## Deletion
 
-Fluxo atual:
+Deletion must remove resources without allowing Supavisor or other services to recreate connections during the process.
 
-1. valida admin, membership e senha de deleção;
-2. cria job de delete;
-3. remove ou encerra os pools do tenant no Supavisor;
-4. drena conexões ativas do database;
-5. confirma que o pooler não continua reconectando;
-6. remove containers do projeto;
-7. limpa tenant e extensões do Realtime;
-8. remove replication slots;
-9. remove o database;
-10. limpa tenant e usuários do Supavisor;
-11. remove registros do control plane;
-12. remove diretório físico;
-13. valida o resultado e registra auditoria.
+Current flow:
 
-### Proteção do database
+1. validate global admin and consume a one-time step-up grant bound to the session, action, and project;
+2. create the delete job;
+3. remove project containers;
+4. revoke credentials, remove the tenant from the Storage registry, and delete only that UUID's validated namespace;
+5. remove or terminate the tenant's Supavisor pools;
+6. clean the Realtime tenant and extensions and Supavisor metadata;
+7. drain active database connections and confirm the pooler does not reconnect;
+8. remove replication slots and the database;
+9. remove control-plane records;
+10. remove the project directory and backups for the same tenant UUID;
+11. validate the result and record the audit event.
 
-Se o Supavisor continuar abrindo conexões mesmo após a remoção do tenant e drenagem, a deleção deve falhar antes do `DROP DATABASE`.
+### Database protection
 
-Preservar um database ainda referenciado é mais seguro do que concluir uma deleção parcial e inconsistente.
+If Supavisor continues opening connections after tenant removal and draining, deletion must fail before `DROP DATABASE`.
 
-### Resultado parcial
+Preserving a still-referenced database is safer than completing a partial, inconsistent deletion.
 
-Falhas de infraestrutura podem deixar:
+### Partial result
+
+Infrastructure failures may leave:
 
 - containers;
-- tenant;
+- Storage tenant or tenant namespace;
+- Realtime/Supavisor tenants;
 - slot;
-- diretório;
-- registros centrais.
+- directory;
+- central records.
 
-O job deve expor etapa, mensagem, código de erro e tails de saída para permitir recuperação manual.
+The job must expose the stage, message, error code, and output tails to support manual recovery.
 
-## Recovery e retry
+## Recovery and retry
 
-### Ações idempotentes
+Recovery has two different layers, which must not be confused.
 
-Atualmente o sistema trata como idempotentes:
+### API restarted while the host-agent continues executing
+
+The lifecycle intent already exists in `host_agent_commands`. The host-agent can continue executing while the Projects API is down. When the API returns, recovery reconnects the job to the **same persisted intent**, reuses the terminal result if one exists, and does not launch a second script.
+
+This behavior is especially important for distributed operations such as create, duplicate, rename, rotate, backup, restore, and delete.
+
+### Idempotent actions
+
+The system currently treats these as idempotent:
 
 - start;
 - stop;
 - restart;
 - recreate services.
 
-Essas ações podem ser retomadas ou repetidas com controle de tentativa.
+These actions can be resumed or repeated with attempt control.
 
-### Ações não idempotentes
+### Uncertain state or terminal host-agent failure
 
-Create, duplicate, rename, rotate e delete possuem efeitos distribuídos. Quando uma delas é interrompida em estado incerto, a API não deve reiniciar cegamente o processo.
+Create, duplicate, rename, rotate, backup, restore, and delete have distributed effects. If the intent ends in failure, an expired lease, or another state where the physical result cannot be proven, the API **does not blindly rerun** the operation.
 
-O job é marcado com erro de revisão manual, preservando:
+The job preserves:
 
-- etapa atual;
-- progresso;
-- stdout/stderr;
-- histórico de rename, quando aplicável.
+- current stage;
+- progress;
+- sanitized stdout/stderr;
+- error code;
+- rename or restore-point history, when applicable.
 
-## Testes relevantes
+Recovery then proceeds through domain-specific rollback/reconciliation or manual review. Persisting the intent prevents a normal API restart from being mistaken for authorization to repeat a non-idempotent operation.
+
+## Relevant tests
 
 - `tests/smoke/test_tenant_lifecycle.py`
+- `tests/smoke/test_host_agent_contract.py`
 - `tests/smoke/test_jobs_contract.py`
 - `tests/smoke/test_restore_points_contract.py`
 - `tests/smoke/test_project_access_and_deletion_contract.py`
 - `tests/smoke/test_service_key_cache_contract.py`
 - `tests/smoke/test_key_generation_contract.py`
+- `tests/smoke/test_opaque_api_keys.py`
+- `tests/smoke/test_opaque_api_key_optional_expiration.py`
 - `tests/smoke/test_project_telemetry.py`
+- `tests/smoke/test_shared_storage_architecture_contract.py`
+- `tests/smoke/test_shared_storage_tenant_integration.py` (opt-in, disposable installation)
+- `tests/smoke/test_storage_vector_lifecycle_integration.py`
 
-Os nomes dos testes podem evoluir; procure também por contratos de lifecycle em `tests/smoke/`.
+Test names may evolve; also look for lifecycle contracts in `tests/smoke/`.

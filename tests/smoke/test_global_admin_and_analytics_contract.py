@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+import shutil
+import subprocess
 from pathlib import Path
 
 
@@ -35,6 +37,31 @@ class GlobalAdminVisibilityContractTest(unittest.TestCase):
 
 
 class SupabaseAnalyticsContractTest(unittest.TestCase):
+    def test_log_drain_urls_preserve_the_internal_gateway_prefix(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("Node runtime nao esta instalado")
+        subprocess.run([node, str(ROOT / "tests/smoke/test_studio_log_drain_urls.cjs")], check=True)
+
+    def test_analytics_inherits_the_complete_authenticated_identity(self) -> None:
+        nginx = (ROOT / "studio/nginx/nginx.conf").read_text(encoding="utf-8")
+        parent_start = nginx.index("auth_request /authelia;")
+        parent = nginx[parent_start:nginx.index("error_page 401", parent_start)]
+        for variable, header in (
+            ("authelia_email", "remote_email"),
+            ("authelia_username", "remote_user"),
+            ("authelia_groups", "remote_groups"),
+        ):
+            self.assertRegex(
+                parent,
+                rf"auth_request_set\s+\${variable}\s+\$upstream_http_{header};",
+            )
+        start = nginx.index("location ~* ^/api/platform/projects/[^/]+/analytics(?:/|$) {")
+        location = nginx[start:nginx.index("\n        }", start)]
+        self.assertNotIn("auth_request_set", location)
+        self.assertNotIn("auth_request off", location)
+        self.assertIn("security/studio_project_admin_access.lua", location)
+
     def setUp(self) -> None:
         self.server_compose = (ROOT / "servidor" / "docker-compose.yml").read_text(
             encoding="utf-8"
@@ -52,7 +79,7 @@ class SupabaseAnalyticsContractTest(unittest.TestCase):
     def test_analytics_uses_pinned_source_build_and_private_network(self) -> None:
         self.assertIn("dockerfile: volumes/analytics/Dockerfile", self.server_compose)
         self.assertIn("ARG LOGFLARE_VER=v1.47.1", self.analytics_dockerfile)
-        self.assertIn("image: ${VECTOR_IMAGE}", self.server_compose)
+        self.assertIn("image: timberio/vector:0.53.0-alpine", self.server_compose)
         analytics_block = self.server_compose.split("  analytics:", 1)[1].split(
             "\n  vector:", 1
         )[0]
@@ -88,10 +115,24 @@ class SupabaseAnalyticsContractTest(unittest.TestCase):
         nginx = (ROOT / "studio" / "nginx" / "nginx.conf").read_text(
             encoding="utf-8"
         )
-        self.assertIn("LOGFLARE_PUBLIC_ACCESS_TOKEN=$(generate_logflare_api_key)", setup)
-        self.assertIn("LOGFLARE_PRIVATE_ACCESS_TOKEN=$(generate_logflare_api_key)", setup)
+        self.assertIn(
+            "LOGFLARE_PUBLIC_ACCESS_TOKEN=$(env_secret servidor/.analytics.env LOGFLARE_PUBLIC_ACCESS_TOKEN generate_logflare_api_key)",
+            setup,
+        )
+        self.assertIn(
+            "LOGFLARE_PRIVATE_ACCESS_TOKEN=$(env_secret servidor/.analytics.env LOGFLARE_PRIVATE_ACCESS_TOKEN generate_logflare_api_key)",
+            setup,
+        )
         self.assertIn(".analytics.env", self.server_compose)
-        self.assertIn(".analytics.env", self.studio_compose)
+
+        studio_service = self.studio_compose[self.studio_compose.index("  studio:\n") :]
+        self.assertNotIn("- .analytics.env", studio_service)
+        self.assertIn(
+            'LOGFLARE_PRIVATE_ACCESS_TOKEN: "internal-proxy-authenticated"',
+            studio_service,
+        )
+        self.assertIn("STUDIO_ANALYTICS_HMAC_SECRET:", studio_service)
+
         root_env = (ROOT / "servidor" / ".env.example").read_text(
             encoding="utf-8"
         )
@@ -102,14 +143,13 @@ class SupabaseAnalyticsContractTest(unittest.TestCase):
         self.assertIn("LOGFLARE_PUBLIC_ACCESS_TOKEN", analytics_env)
         self.assertIn("LOGFLARE_PRIVATE_ACCESS_TOKEN", analytics_env)
         self.assertIn("LOGFLARE_DB_ENCRYPTION_KEY", analytics_env)
+
         studio_root_env = (ROOT / "studio" / ".env.example").read_text(
             encoding="utf-8"
         )
-        studio_analytics_env = (
-            ROOT / "studio" / ".analytics.env.example"
-        ).read_text(encoding="utf-8")
         self.assertNotIn("LOGFLARE_PRIVATE_ACCESS_TOKEN", studio_root_env)
-        self.assertIn("LOGFLARE_PRIVATE_ACCESS_TOKEN", studio_analytics_env)
+        self.assertIn("STUDIO_ANALYTICS_HMAC_SECRET=", studio_root_env)
+
         self.assertIn("analytics-internal", self.server_compose)
         self.assertNotIn("analytics-internal", self.studio_compose)
         self.assertIn(

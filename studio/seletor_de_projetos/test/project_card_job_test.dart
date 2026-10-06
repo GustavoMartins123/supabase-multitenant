@@ -25,14 +25,16 @@ void main() {
                 width: 380,
                 height: 280,
                 child: ProjectCard(
-                  refKey: 'meu_projeto',
-                  anonKey: '',
+                  refKey: 'abcdefghijklmnopqrst',
+                  technicalName: 'meu_projeto',
+                  displayName: 'Meu projeto',
+                  opaqueApiKeysStatus: 'provisioning',
+                  opaqueApiKeySlotCount: 0,
                   activeJob: job,
                   isFavorite: false,
                   automaticKeyRotationEnabled: true,
                   automaticKeyRotationBlocked: false,
                   automaticKeyRotationLeadDays: 7,
-                  keyMetadataValid: true,
                   onTap: () {},
                   onDeleted: () {},
                   onDuplicate: () {},
@@ -45,7 +47,8 @@ void main() {
       ),
     );
 
-    expect(find.text('meu_projeto'), findsOneWidget);
+    expect(find.text('Meu projeto'), findsOneWidget);
+    expect(find.text('meu_projeto'), findsNothing);
     expect(find.text('CRIANDO PROJETO · EM EXECUÇÃO'), findsOneWidget);
     expect(
       find.text('Provisionando infraestrutura do projeto...'),

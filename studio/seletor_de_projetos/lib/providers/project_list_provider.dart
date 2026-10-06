@@ -42,51 +42,26 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
     }
   }
 
-  Future<bool> createProjectAndWait(String name) async {
+  Future<bool> createProjectAndWait(String name, {String resourceProfile = 'medium'}) async {
     final rep = ref.read(projectRepositoryProvider);
-    final current = state.value ?? [];
-
-    state = AsyncData([
-      ...current,
-      {
-        'name': name,
-        'anon_token': '',
-        'file_size_limit': '',
-        'storage_limit_token': '',
-        'is_loading': true,
-      },
-    ]);
-
     return _submitAndTrack(
       project: name,
       action: 'create',
-      submit: () => rep.createProject(name),
+      submit: () => rep.createProject(name, resourceProfile: resourceProfile),
     );
   }
 
   Future<bool> duplicateProjectAndWait(
     String originalName,
     String newName,
-    bool copyData,
-  ) async {
+    bool copyData, {
+    String resourceProfile = 'medium',
+  }) async {
     final rep = ref.read(projectRepositoryProvider);
-    final current = state.value ?? [];
-
-    state = AsyncData([
-      ...current,
-      {
-        'name': newName,
-        'anon_token': '',
-        'file_size_limit': '',
-        'storage_limit_token': '',
-        'is_loading': true,
-      },
-    ]);
-
     return _submitAndTrack(
       project: newName,
       action: 'duplicate',
-      submit: () => rep.duplicateProject(originalName, newName, copyData),
+      submit: () => rep.duplicateProject(originalName, newName, copyData, resourceProfile: resourceProfile),
     );
   }
 
@@ -97,10 +72,13 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
   }) async {
     try {
       final job = await submit();
+      if (job.project != project || job.publicRef == null || job.projectUuid == null) {
+        throw const FormatException('Identidade do provisionamento divergente');
+      }
 
       final result = await ref.read(projectJobsProvider.notifier).waitFor(
             job,
-            project: project,
+            project: job.publicRef!,
             action: action,
             createdBy: Session().myId,
           );
@@ -128,18 +106,6 @@ class ProjectListNotifier extends AsyncNotifier<List<Map<String, dynamic>>> {
 
   void removeProjectLocal(String name) {
     final current = state.value ?? [];
-    state = AsyncData(current.where((p) => p['name'] != name).toList());
-  }
-
-  void updateProjectKey(String projectRef, String newAnonKey) {
-    final current = state.value ?? [];
-    state = AsyncData(
-      current.map((p) {
-        if (p['name'] == projectRef) {
-          return {...p, 'anon_token': newAnonKey};
-        }
-        return p;
-      }).toList(),
-    );
+    state = AsyncData(current.where((p) => p['public_ref'] != name).toList());
   }
 }

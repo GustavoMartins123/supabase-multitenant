@@ -7,6 +7,121 @@ x-vector-logging: &vector-logging
     fluentd-sub-second-precision: "true"
 
 services:
+  traffic-redis:
+    container_name: traffic-redis
+    image: redis:8.2.2-alpine
+    restart: unless-stopped
+    networks: [traffic-admission]
+    environment:
+      ACCESS_RATE_REDIS_PASSWORD: ${ACCESS_RATE_REDIS_PASSWORD:?defina ACCESS_RATE_REDIS_PASSWORD}
+    entrypoint: ["/bin/sh", "/start-traffic.sh"]
+    volumes:
+      - ./traffic-redis/start.sh:/start-traffic.sh:ro
+      - traffic-rate-data:/data
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 384m
+    memswap_limit: 384m
+    cpus: "0.50"
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$ACCESS_RATE_REDIS_PASSWORD redis-cli ping | grep -qx PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+  control-plane-migrations:
+    container_name: control-plane-migrations
+    build:
+      context: .
+      dockerfile: ./api-internal/Dockerfile
+    restart: "no"
+    logging: *vector-logging
+    networks: [rede-supabase]
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      PYTHONUNBUFFERED: 1
+      PYTHONDONTWRITEBYTECODE: 1
+      DB_DSN: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      KEY_AUTHORIZER_DB_PASSWORD: ${KEY_AUTHORIZER_DB_PASSWORD:?defina KEY_AUTHORIZER_DB_PASSWORD}
+      HOST_AGENT_DB_PASSWORD: ${HOST_AGENT_DB_PASSWORD:?defina HOST_AGENT_DB_PASSWORD}
+      PLATFORM_APP_DB_PASSWORD: ${PLATFORM_APP_DB_PASSWORD:?defina PLATFORM_APP_DB_PASSWORD}
+      META_ADMIN_DB_PASSWORD: ${META_ADMIN_DB_PASSWORD:?defina META_ADMIN_DB_PASSWORD}
+      CLIENT_CONFIGURATION_DB_PASSWORD: ${CLIENT_CONFIGURATION_DB_PASSWORD:?defina CLIENT_CONFIGURATION_DB_PASSWORD}
+      PROJECT_SECRETS_MASTER_KEY: ${PROJECT_SECRETS_MASTER_KEY:?defina PROJECT_SECRETS_MASTER_KEY}
+      PROJECT_SECRETS_MASTER_KEY_ID: ${PROJECT_SECRETS_MASTER_KEY_ID:?defina PROJECT_SECRETS_MASTER_KEY_ID}
+      PROJECT_SECRETS_PREVIOUS_MASTER_KEYS: ${PROJECT_SECRETS_PREVIOUS_MASTER_KEYS}
+    command: ["sh", "-c", "python -m app.schema_migrations apply && python -m app.migrate_client_configuration_material"]
+
+  client-configuration:
+    container_name: client-configuration
+    build:
+      context: .
+      dockerfile: ./client-configuration/Dockerfile
+    restart: unless-stopped
+    logging: *vector-logging
+    networks: [client-configuration-data, traffic-admission]
+    expose: ["18011"]
+    depends_on:
+      control-plane-migrations:
+        condition: service_completed_successfully
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: "0.25"
+    pids_limit: 64
+    environment:
+      PYTHONDONTWRITEBYTECODE: 1
+      DB_DSN: postgres://client_configuration_reader:${CLIENT_CONFIGURATION_DB_PASSWORD:?defina CLIENT_CONFIGURATION_DB_PASSWORD}@supabase-db:${POSTGRES_PORT}/${POSTGRES_DB}
+      SERVER_URL: ${SERVER_URL:?defina SERVER_URL}
+      SERVER_PROTO: ${SERVER_PROTO:?defina SERVER_PROTO}
+      ACCESS_ADMISSION_SECRET: ${ACCESS_ADMISSION_SECRET:?defina ACCESS_ADMISSION_SECRET}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18011/healthz', timeout=2)"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+
+  key-authorizer:
+    container_name: key-authorizer
+    build:
+      context: .
+      dockerfile: ./key-authorizer/Dockerfile
+    restart: unless-stopped
+    logging: *vector-logging
+    networks: [rede-supabase, traffic-admission]
+    expose: ["18010"]
+    depends_on:
+      traffic-redis:
+        condition: service_healthy
+      control-plane-migrations:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      DB_DSN: postgres://key_authorizer:${KEY_AUTHORIZER_DB_PASSWORD:?defina KEY_AUTHORIZER_DB_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      ACCESS_RATE_REDIS_PASSWORD: ${ACCESS_RATE_REDIS_PASSWORD:?defina ACCESS_RATE_REDIS_PASSWORD}
+      ACCESS_ADMISSION_SECRET: ${ACCESS_ADMISSION_SECRET:?defina ACCESS_ADMISSION_SECRET}
+      ACCESS_ADMIN_CIDRS: ${ACCESS_ADMIN_CIDRS:?defina ACCESS_ADMIN_CIDRS}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18010/healthz', timeout=2)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   projects-api:
     container_name: projects-api
     build: 
@@ -19,6 +134,9 @@ services:
       - .analytics.env
     networks: [rede-supabase, analytics-internal]
     expose: ["${PROJECTS_API_PORT}"]
+    depends_on:
+      control-plane-migrations:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18000/healthz', timeout=2)"]
       interval: 30s
@@ -26,7 +144,9 @@ services:
       retries: 3
       start_period: 20s
     environment:
-      DB_DSN: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      DB_DSN: postgres://platform_app:${PLATFORM_APP_DB_PASSWORD:?defina PLATFORM_APP_DB_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      META_ADMIN_DSN: postgres://platform_meta_admin:${META_ADMIN_DB_PASSWORD:?defina META_ADMIN_DB_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      PLATFORM_READER_DB_PASSWORD: ${PLATFORM_READER_DB_PASSWORD:?defina PLATFORM_READER_DB_PASSWORD}
       HOST_AGENT_HMAC_SECRET: ${HOST_AGENT_HMAC_SECRET}
       JWT_SECRET: ${JWT_SECRET}
       PROJECT_SECRETS_MASTER_KEY: ${PROJECT_SECRETS_MASTER_KEY}
@@ -34,15 +154,16 @@ services:
       PROJECT_SECRETS_PREVIOUS_MASTER_KEYS: ${PROJECT_SECRETS_PREVIOUS_MASTER_KEYS}
       PG_META_CRYPTO_KEY: ${PG_META_CRYPTO_KEY}
       STUDIO_SERVICE_KEY_ENCRYPTION_KEY: ${STUDIO_SERVICE_KEY_ENCRYPTION_KEY}
-      PROJECT_DELETE_PASSWORD: ${PROJECT_DELETE_PASSWORD}
-      NGINX_SHARED_TOKEN: ${NGINX_SHARED_TOKEN}
       NGINX_HMAC_SECRET: ${NGINX_HMAC_SECRET}
+      STUDIO_GATEWAY_HMAC_SECRET: ${STUDIO_GATEWAY_HMAC_SECRET:?defina STUDIO_GATEWAY_HMAC_SECRET}
+      PROJECTS_API_HMAC_SECRET: ${PROJECTS_API_HMAC_SECRET:?defina PROJECTS_API_HMAC_SECRET}
+      INTERNAL_HMAC_MAX_SKEW_SECONDS: ${INTERNAL_HMAC_MAX_SKEW_SECONDS:-60}
       USER_TOKEN_MAX_CLOCK_SKEW_SECONDS: ${USER_TOKEN_MAX_CLOCK_SKEW_SECONDS}
       KEY_EXPIRY_WARNING_DAYS: ${KEY_EXPIRY_WARNING_DAYS}
       AUTOMATIC_KEY_ROTATION_LEAD_DAYS: ${AUTOMATIC_KEY_ROTATION_LEAD_DAYS:?defina AUTOMATIC_KEY_ROTATION_LEAD_DAYS}
       AUTOMATIC_KEY_ROTATION_CHECK_INTERVAL_SECONDS: ${AUTOMATIC_KEY_ROTATION_CHECK_INTERVAL_SECONDS:?defina AUTOMATIC_KEY_ROTATION_CHECK_INTERVAL_SECONDS}
       AUTOMATIC_KEY_ROTATION_MAX_CONCURRENT: ${AUTOMATIC_KEY_ROTATION_MAX_CONCURRENT:?defina AUTOMATIC_KEY_ROTATION_MAX_CONCURRENT}
-      STUDIO_CACHE_INVALIDATION_URL: https://nginx:443
+      STUDIO_CACHE_INVALIDATION_URL: ${STUDIO_CACHE_INVALIDATION_URL:?defina a origem HTTPS publica do Studio}
       STUDIO_CACHE_INVALIDATION_VERIFY_TLS: ${STUDIO_CACHE_INVALIDATION_VERIFY_TLS:-true}
       STUDIO_CACHE_INVALIDATION_CA_FILE: ${STUDIO_CACHE_INVALIDATION_CA_FILE:-/docker/push-certs/ca.pem}
       PG_META_INTERNAL_URL: http://postgres-meta-global:8080
@@ -51,10 +172,15 @@ services:
     volumes:
       - ./projects:/docker/projects:rw        # bind-mount relativo  :contentReference[oaicite:0]{index=0}
       - ./certs:/docker/push-certs:ro
-      - ./.env:/docker/.env:ro
+      - type: bind
+        source: ./.resource-profiles.env
+        target: /docker/resource-profiles.env
+        read_only: true
+        bind:
+          create_host_path: false
   postgres-meta-global:
     container_name: postgres-meta-global
-    image: ${PG_META_IMAGE}
+    image: supabase/postgres-meta:v0.96.1
     restart: unless-stopped
     logging: *vector-logging
     networks: [rede-supabase]
@@ -73,22 +199,50 @@ services:
   #     context: .
   #     dockerfile: ./api-internal/Dockerfile
   #   restart: unless-stopped
+  #   logging: *vector-logging
+  #   depends_on:
+  #     control-plane-migrations:
+  #       condition: service_completed_successfully
+  #   read_only: true
+  #   tmpfs:
+  #     - /tmp:rw,noexec,nosuid,size=32m
+  #   security_opt:
+  #     - no-new-privileges:true
+  #   cap_drop:
+  #     - ALL
   #   networks: [rede-supabase]
   #   environment:
   #     PYTHONUNBUFFERED: 1
   #     DB_DSN: postgres://supabase_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/postgres
-  #     PUSH_API_URL: ${PUSH_API_URL}
-  #     INTERNAL_HMAC_SECRET: ${INTERNAL_HMAC_SECRET}
-  #     PUSH_VERIFY_TLS: ${PUSH_VERIFY_TLS}
-  #     PUSH_CA_FILE: ${PUSH_CA_FILE}
+  #     PUSH_API_URL: ${PUSH_API_URL:?defina PUSH_API_URL}
+  #     INTERNAL_HMAC_SECRET: ${INTERNAL_HMAC_SECRET:?defina INTERNAL_HMAC_SECRET}
+  #     PUSH_VERIFY_TLS: ${PUSH_VERIFY_TLS:-true}
+  #     PUSH_CA_FILE: ${PUSH_CA_FILE:-/docker/push-certs/ca.pem}
+  #     PUSH_REQUEST_TIMEOUT: ${PUSH_REQUEST_TIMEOUT:-10}
+  #     PUSH_BATCH_SIZE: ${PUSH_BATCH_SIZE:-10}
+  #     PUSH_MAX_ATTEMPTS: ${PUSH_MAX_ATTEMPTS:-8}
+  #     PUSH_REQUEST_RETRIES: ${PUSH_REQUEST_RETRIES:-2}
+  #     PUSH_RETRY_BASE_SECONDS: ${PUSH_RETRY_BASE_SECONDS:-2}
+  #     PUSH_MAX_RETRY_SECONDS: ${PUSH_MAX_RETRY_SECONDS:-60}
+  #     PUSH_NOTIFICATION_LEASE_SECONDS: ${PUSH_NOTIFICATION_LEASE_SECONDS:-900}
+  #     PUSH_SCHEMA_RETRY_SECONDS: ${PUSH_SCHEMA_RETRY_SECONDS:-60}
+  #     PUSH_DB_CONNECT_TIMEOUT: ${PUSH_DB_CONNECT_TIMEOUT:-10}
+  #     PUSH_MAX_TENANT_CONNECTIONS: ${PUSH_MAX_TENANT_CONNECTIONS:-32}
   #   volumes:
   #     - ./certs:/docker/push-certs:ro
   #   command: ["python", "app/push_worker.py"]
 
 
 networks:
+  traffic-admission:
+    internal: true
+  client-configuration-data:
+    external: true
   rede-supabase:
     external: true
   analytics-internal:
     name: supabase-analytics-internal
     external: true
+
+volumes:
+  traffic-rate-data:

@@ -1,5 +1,6 @@
 """Persistencia criptografada dos segredos de cada projeto."""
 
+import re
 import uuid
 
 import asyncpg
@@ -8,26 +9,11 @@ from app.project_secrets import ProjectKeyEnvelope, ProjectSecretError
 from app.runtime_config import project_secret_manager
 
 
-PROJECT_SECRET_COLUMNS = frozenset({"anon_key", "service_role", "config_token"})
-
-
-async def ensure_project_secrets_schema(pool: asyncpg.Pool) -> None:
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS project_key_envelopes (
-                project_id UUID PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
-                key_id UUID NOT NULL UNIQUE,
-                wrapped_dek TEXT NOT NULL,
-                wrapping_key_id TEXT NOT NULL,
-                algorithm TEXT NOT NULL DEFAULT 'aes-256-gcm',
-                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-            );
-            CREATE INDEX IF NOT EXISTS idx_project_key_envelopes_wrapping_key
-                ON project_key_envelopes(wrapping_key_id);
-            """
-        )
+PROJECT_SECRET_COLUMNS = frozenset({"anon_key", "service_role"})
+PROJECT_MATERIAL_PURPOSE_RE = re.compile(
+    r"^opaque-api-key-reveal:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
+    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
 
 
 def _project_secret_column(column: str) -> str:
@@ -147,19 +133,67 @@ async def decrypt_project_secret(
     )
 
 
+def _project_material_purpose(purpose: str) -> str:
+    """Restrict non-column AAD purposes to explicitly supported material."""
+
+    if purpose != "studio-administrative-key" and not PROJECT_MATERIAL_PURPOSE_RE.fullmatch(purpose):
+        raise ValueError(f"unsupported project material purpose: {purpose}")
+    return purpose
+
+
+async def encrypt_project_material(
+    conn: asyncpg.Connection,
+    *,
+    project_id: uuid.UUID,
+    purpose: str,
+    plaintext: str,
+) -> str:
+    """Encrypt transient project material with the project's existing DEK."""
+
+    purpose = _project_material_purpose(purpose)
+    envelope, dek = await _get_project_key_envelope(conn, project_id)
+    return project_secret_manager.encrypt(
+        project_id=project_id,
+        purpose=purpose,
+        key_id=envelope.key_id,
+        dek=dek,
+        plaintext=plaintext,
+    )
+
+
+async def decrypt_project_material(
+    conn: asyncpg.Connection,
+    *,
+    project_id: uuid.UUID,
+    purpose: str,
+    ciphertext: str,
+) -> str:
+    """Decrypt explicitly supported transient project material."""
+
+    purpose = _project_material_purpose(purpose)
+    if not project_secret_manager.is_v2(ciphertext):
+        raise ProjectSecretError("project material is not a v2 envelope")
+    envelope, dek = await _get_project_key_envelope(conn, project_id)
+    return project_secret_manager.decrypt(
+        project_id=project_id,
+        purpose=purpose,
+        key_id=envelope.key_id,
+        dek=dek,
+        ciphertext=ciphertext,
+    )
+
+
 async def store_project_secrets(
     conn: asyncpg.Connection,
     *,
     project_id: uuid.UUID,
     anon_key: str | None = None,
     service_role: str | None = None,
-    config_token: str | None = None,
 ) -> None:
     values: dict[str, str] = {}
     for column, plaintext in {
         "anon_key": anon_key,
         "service_role": service_role,
-        "config_token": config_token,
     }.items():
         if plaintext is not None:
             values[column] = await encrypt_project_secret(

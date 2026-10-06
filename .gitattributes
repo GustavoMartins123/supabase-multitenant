@@ -22,6 +22,7 @@
 *.json text eol=lf
 *.lock text eol=lf
 *.in text eol=lf
+studio/studio-slug/*.patch whitespace=-blank-at-eol
 *.rockspec text eol=lf
 Dockerfile text eol=lf
 *Dockerfile text eol=lf

@@ -1,0 +1,10 @@
+services:
+  traefik-config-watcher:
+    volumes:
+      - desktop-traefik-dynamic:/dynamic
+  traefik:
+    volumes:
+      - desktop-traefik-dynamic:/etc/traefik/dynamic:ro
+
+volumes:
+  desktop-traefik-dynamic:

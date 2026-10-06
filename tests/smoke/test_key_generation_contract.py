@@ -8,18 +8,26 @@ GENERATE = ROOT / "servidor" / "generateProject"
 
 
 class KeyGenerationContractTest(unittest.TestCase):
-    def test_setup_replaces_shared_transport_secrets_by_key_name(self):
+    def test_gateway_token_is_required_before_physical_creation(self):
+        for name in ('generate_project_impl.sh', 'duplicate_project_impl.sh'):
+            script = (GENERATE / 'lib' / name).read_text(encoding='utf-8')
+            with self.subTest(script=name):
+                self.assertIn('[[ "${API_GATEWAY_TOKEN_PROJETO:-}" =~ ^[0-9a-f]{64}$ ]]', script)
+                self.assertLess(script.index('API_GATEWAY_TOKEN_PROJETO canonico'), script.index('OUT_DIR='))
+                self.assertNotIn('API_GATEWAY_TOKEN_PROJETO="${API_GATEWAY_TOKEN_PROJETO:-$(openssl', script)
+
+    def test_setup_and_runtime_config_require_explicit_internal_hmac_keys(self):
         setup = (ROOT / "setup.sh").read_text(encoding="utf-8")
-        studio_example = (ROOT / "studio" / ".env.example").read_text(
-            encoding="utf-8"
-        )
+        studio_example = (ROOT / "studio" / ".env.example").read_text(encoding="utf-8")
+        server_example = (ROOT / "servidor" / ".env.example").read_text(encoding="utf-8")
+        runtime_tool = (ROOT / "tools" / "configure_studio_runtime.py").read_text(encoding="utf-8")
         self.assertIn("STUDIO_SERVICE_KEY_ENCRYPTION_KEY=pass", studio_example)
-        for key in {
-            "STUDIO_SERVICE_KEY_ENCRYPTION_KEY",
-            "NGINX_SHARED_TOKEN",
-            "NGINX_HMAC_SECRET",
-            "INTERNAL_HMAC_SECRET",
-        }:
+        self.assertNotIn("NGINX_SHARED_TOKEN", setup + studio_example + server_example)
+        for key in {"STUDIO_GATEWAY_HMAC_SECRET", "PROJECTS_API_HMAC_SECRET"}:
+            self.assertIn(f"{key}=", studio_example)
+            self.assertIn(f"{key}=", server_example)
+            self.assertIn(key, runtime_tool)
+        for key in {"STUDIO_SERVICE_KEY_ENCRYPTION_KEY", "NGINX_HMAC_SECRET", "INTERNAL_HMAC_SECRET"}:
             self.assertIn(f"s|^{key}=.*|", setup)
             self.assertIn(f"assert_env_value servidor/.env {key}", setup)
             self.assertIn(f"assert_env_value studio/.env {key}", setup)
@@ -41,7 +49,27 @@ class KeyGenerationContractTest(unittest.TestCase):
         )
         compose = (GENERATE / "dockercomposetemplate").read_text(encoding="utf-8")
         references = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*)", compose))
-        self.assertEqual(sorted(references - root_env - project_env), [])
+        # Limites de recursos nao vivem em template: sao gravados no .env do
+        # projeto pelo helper lib/resource_profiles.sh (fail-closed ':?' no
+        # compose). Contrato dedicado em test_project_resource_limits_contract.py.
+        helper_managed = {
+            "PROJECT_MEM_LIMIT",
+            "PROJECT_CPUS",
+            "PROJECT_PIDS_LIMIT",
+        } | {"PROJECT_REST_GHC_MAX_HEAP"} | {
+            f"PROJECT_{service}_{suffix}"
+            for service in ("NGINX", "AUTH", "REST")
+            for suffix in ("MEM_LIMIT", "CPUS", "PIDS_LIMIT")
+        }
+        self.assertIn("PROJECT_RESOURCE_PROFILE", root_env)
+        self.assertFalse(
+            helper_managed & (root_env | project_env),
+            "limites resolvidos nao devem ter default em template raiz/projeto",
+        )
+        self.assertEqual(
+            sorted(references - root_env - project_env - helper_managed),
+            [],
+        )
 
     def test_every_template_placeholder_is_rendered(self):
         generator = "\n".join(
@@ -73,32 +101,24 @@ class KeyGenerationContractTest(unittest.TestCase):
         ]
         self.assertEqual(sorted(missing), [])
 
-    def test_config_token_is_shared_but_not_used_as_admin_apikey(self):
-        main = (ROOT / "servidor" / "api-internal" / "app" / "main.py").read_text(
-            encoding="utf-8"
-        )
-        config_endpoint = main[
-            main.index("async def get_project_config_token") : main.index(
-                "async def get_project_queue_status"
-            )
-        ]
-        meta_proxy = main[main.index("async def proxy_project_meta") :]
-        self.assertIn("ensure_project_member_access", config_endpoint)
-        self.assertIn('column="service_role"', meta_proxy)
-        self.assertNotIn('column="config_token"', meta_proxy)
+    def test_config_token_is_removed_from_generation_and_runtime(self):
+        for path in (GENERATE / ".envtemplate", GENERATE / "nginxtemplate",
+                     GENERATE / "dockercomposetemplate", GENERATE / "rotate_key.sh"):
+            self.assertNotIn("CONFIG_TOKEN", path.read_text(encoding="utf-8"))
+        rename = (ROOT / "servidor/api-internal/app/routers/project_rename.py").read_text(encoding="utf-8")
+        self.assertNotIn("config-token", rename)
 
-    def test_rotation_preserves_config_token(self):
+    def test_rotation_preserves_only_canonical_internal_credentials(self):
         rotation = (GENERATE / "rotate_key.sh").read_text(encoding="utf-8")
-        self.assertIn('get_env_value "CONFIG_TOKEN_PROJETO"', rotation)
-        self.assertNotRegex(rotation, r"CONFIG_TOKEN(_PROJETO)?=.*openssl rand")
+        self.assertIn('get_env_value "API_GATEWAY_TOKEN_PROJETO"', rotation)
+        self.assertNotIn("CONFIG_TOKEN_PROJETO", rotation)
 
     def test_rotation_fails_closed_and_never_prints_generated_keys(self):
         rotation = (GENERATE / "rotate_key.sh").read_text(encoding="utf-8")
-        self.assertIn(
-            '[[ -z "$PROJECT_UUID" ]] && die "PROJECT_UUID não encontrado',
-            rotation,
-        )
+        self.assertIn('[[ "$PROJECT_UUID" =~ ^[0-9a-fA-F]{8}', rotation)
         self.assertNotIn("usando PROJECT_ID como fallback", rotation)
+        self.assertNotIn("upsert_env_value", rotation)
+        self.assertIn('replace_env_value "ANON_KEY_PROJETO"', rotation)
         self.assertNotIn('echo "ANON_KEY_PROJETO=$NEW_ANON"', rotation)
         self.assertNotIn('echo "SERVICE_ROLE_KEY_PROJETO=$NEW_SERVICE"', rotation)
         self.assertIn(r'\"jti\":\"$anon_jti\"', rotation)
@@ -110,19 +130,37 @@ class KeyGenerationContractTest(unittest.TestCase):
         setup = (ROOT / "setup.sh").read_text(encoding="utf-8")
         self.assertIn(
             "chmod 600 servidor/.env servidor/.analytics.env "
-            "studio/.env studio/.analytics.env",
+            "servidor/.storage.env studio/.env studio/.analytics.env",
             setup,
         )
         for script_name in {
             "lib/generate_project_impl.sh",
             "lib/duplicate_project_impl.sh",
             "rotate_key.sh",
-            "lib/rename_project_impl.sh",
         }:
             source = (GENERATE / script_name).read_text(encoding="utf-8")
             self.assertRegex(source, r'chmod 600 "[^\n]*\.env"', script_name)
             self.assertIn("chmod 644", source, script_name)
             self.assertIn(".dockerignore", source, script_name)
+
+    def test_project_lifecycle_requires_explicit_operational_inputs(self):
+        generate = (GENERATE / "lib/generate_project_impl.sh").read_text(
+            encoding="utf-8"
+        )
+        duplicate = (GENERATE / "lib/duplicate_project_impl.sh").read_text(
+            encoding="utf-8"
+        )
+        rename = (GENERATE / "lib/rename_project_impl.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn('RECOVER_STALE="${3:-false}"', generate)
+        self.assertNotIn('COPY_MODE="${3:-schema-only}"', duplicate)
+        for source in (generate, duplicate):
+            self.assertNotIn('${MAX_CONCURRENT_USERS:-200}', source)
+            self.assertIn(
+                '[[ "$MAX_CONCURRENT_USERS" =~ ^[1-9][0-9]*$ ]]', source
+            )
 
     def test_unprivileged_nginx_can_read_and_render_its_template(self):
         dockerfile = (GENERATE / "Dockerfile").read_text(encoding="utf-8")
@@ -131,7 +169,8 @@ class KeyGenerationContractTest(unittest.TestCase):
         self.assertIn("ENTRYPOINT", dockerfile)
         self.assertIn(
             "envsubst '$FILE_SIZE_LIMIT $SUPABASE_NETWORK_SUBNET "
-            "$ANON_KEY_PROJETO $SERVICE_ROLE_KEY_PROJETO $CONFIG_TOKEN_PROJETO'",
+            "$ANON_KEY_PROJETO $SERVICE_ROLE_KEY_PROJETO "
+            "$API_GATEWAY_TOKEN_PROJETO'",
             dockerfile,
         )
         self.assertNotIn("/etc/nginx/templates/", dockerfile)
@@ -146,7 +185,7 @@ class KeyGenerationContractTest(unittest.TestCase):
         for key in {
             "ANON_KEY_PROJETO",
             "SERVICE_ROLE_KEY_PROJETO",
-            "CONFIG_TOKEN_PROJETO",
+            "API_GATEWAY_TOKEN_PROJETO",
         }:
             self.assertIn(f"${{{key}}}", nginx_template)
             self.assertIn(f"{key}: ${{{key}}}", compose_template)
@@ -156,7 +195,10 @@ class KeyGenerationContractTest(unittest.TestCase):
         self.assertIn("!Dockerfile", dockerignore)
         self.assertIn("!nginx/nginx_*.conf", dockerignore)
 
-    def test_key_expiry_and_collaboration_tabs_are_exposed(self):
+    def test_opaque_key_status_and_collaboration_tabs_are_exposed(self):
+        projects = (
+            ROOT / "servidor" / "api-internal" / "app" / "routers" / "projects.py"
+        ).read_text(encoding="utf-8")
         main = (ROOT / "servidor" / "api-internal" / "app" / "main.py").read_text(
             encoding="utf-8"
         )
@@ -175,11 +217,13 @@ class KeyGenerationContractTest(unittest.TestCase):
             / "widgets"
             / "project_card.dart"
         ).read_text(encoding="utf-8")
-        self.assertIn('"key_expiring_soon"', main)
+        self.assertIn('"opaque_api_keys_status"', projects)
+        self.assertNotIn('"anon_token"', main)
         self.assertIn("length: 5", dialog)
         self.assertIn("text: 'Tags'", dialog)
         self.assertIn("_buildTagsTab(data)", dialog)
-        self.assertIn("Keys expiram", card)
+        self.assertIn("API KEYS OPACAS", card)
+        self.assertNotIn("anonKey", card)
 
 
 if __name__ == "__main__":

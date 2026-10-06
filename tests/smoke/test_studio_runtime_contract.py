@@ -13,7 +13,7 @@ class StudioRuntimeContractTests(unittest.TestCase):
         nginx_start = compose.index("  nginx:\n")
         studio_start = compose.index("\n  studio:\n", nginx_start) + 1
         cls.nginx = compose[nginx_start:studio_start]
-        studio_end = compose.index("  # postgres:", studio_start)
+        studio_end = compose.index("\nvolumes:", studio_start) + 1
         cls.studio = compose[studio_start:studio_end]
 
     def test_studio_listens_on_the_docker_interface(self) -> None:
@@ -36,9 +36,14 @@ class StudioRuntimeContractTests(unittest.TestCase):
         jobs_block = nginx_conf[jobs_start:jobs_end]
 
         self.assertIn("security/check_authenticated.lua", jobs_block)
-        self.assertIn("X-Shared-Token $nginx_shared_token", jobs_block)
+        self.assertNotIn("X-Shared-Token", jobs_block)
         self.assertIn("X-User-Token $auth_user_token", jobs_block)
-        self.assertIn("proxy_pass $server_domain/api/jobs$1;", jobs_block)
+        self.assertIn(
+            "proxy_pass $server_domain/api/jobs$1$is_args$args;", jobs_block
+        )
+        self.assertNotIn("NGINX_SHARED_TOKEN", nginx_conf)
+        signer = (ROOT / "studio/nginx/lua/security/projects_api_signer.lua").read_text(encoding="utf-8")
+        self.assertIn("STUDIO_GATEWAY_HMAC_SECRET", signer)
 
     def test_api_auth_failure_is_json_while_pages_redirect_to_login(self) -> None:
         nginx_conf = (ROOT / "studio/nginx/nginx.conf").read_text(encoding="utf-8")
@@ -51,6 +56,8 @@ class StudioRuntimeContractTests(unittest.TestCase):
         self.assertIn('uri:sub(1, 5) == "/api/"', handler)
         self.assertIn('uri:sub(1, 15) == "/_internal_api/"', handler)
         self.assertIn("ngx.HTTP_UNAUTHORIZED", handler)
+        self.assertIn('ngx.var.request_uri', handler)
+        self.assertNotIn('ngx.var.uri or', handler)
         self.assertIn('content_type = "application/json; charset=utf-8"', handler)
         self.assertIn("ngx.redirect", handler)
 

@@ -33,7 +33,6 @@ from .commands import (
 )
 from .config import AgentConfig
 from .host_agent_protocol import (
-    COMMAND_TIMEOUTS,
     HOST_AGENT_COMMANDS,
     NOTIFY_CHANNEL,
     evaluate_authorization,
@@ -42,10 +41,13 @@ from .host_agent_protocol import (
     validate_command_args,
     verify_command_signature,
 )
-from .security import PathConfinementError
+from .security import PathConfinementError, resolve_project_dir
+from .envfile import read_canonical_env_value
 
 AGENT_VERSION = "1.0.0"
 LEASE_REAP_GRACE_SECONDS = 60
+DB_SHUTDOWN_TIMEOUT = 10.0
+LISTEN_CONNECT_TIMEOUT = 10.0
 
 logger = logging.getLogger("hostagent")
 
@@ -64,7 +66,9 @@ class HostAgent:
         assert set(COMMAND_HANDLERS) == HOST_AGENT_COMMANDS, (
             "registro de handlers divergente do protocolo"
         )
-        self.pool = await db.create_pool(self.config.dsn)
+        self.pool = await db.create_pool(
+            self.config.dsn, command_timeout=self.config.db_command_timeout
+        )
         await db.register_worker(
             self.pool,
             self.config.worker_id,
@@ -94,18 +98,51 @@ class HostAgent:
                 task.cancel()
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
-        if self._listen_conn is not None:
-            await self._listen_conn.close()
-        await db.mark_worker_stopped(self.pool, self.config.worker_id)
-        await self.pool.close()
+        await self._close_listener()
+        await self._close_pool()
         logger.info("host-agent finalizado")
+
+    async def _close_listener(self) -> None:
+        conn = self._listen_conn
+        self._listen_conn = None
+        if conn is None:
+            return
+        try:
+            await asyncio.wait_for(conn.close(), timeout=DB_SHUTDOWN_TIMEOUT)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("LISTEN nao fechou (%s); terminando conexao", exc)
+            conn.terminate()
+
+    async def _close_pool(self) -> None:
+        """Encerra o pool sem consumir o TimeoutStopSec do systemd.
+
+        Com o Postgres inacessivel, ``mark_worker_stopped`` e ``pool.close()``
+        bloqueiam em sockets mortos ate o systemd mandar SIGKILL; o prazo aqui
+        garante que o stop termina, deixando o lease expirar pelo reaper.
+        """
+        if self.pool is None:
+            return
+        try:
+            await asyncio.wait_for(
+                db.mark_worker_stopped(self.pool, self.config.worker_id),
+                timeout=DB_SHUTDOWN_TIMEOUT,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("nao foi possivel marcar o worker como parado: %s", exc)
+        try:
+            await asyncio.wait_for(self.pool.close(), timeout=DB_SHUTDOWN_TIMEOUT)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("pool nao fechou (%s); terminando conexoes", exc)
+            self.pool.terminate()
 
     def request_stop(self) -> None:
         self._stopping.set()
 
     async def _start_listener(self) -> None:
         try:
-            self._listen_conn = await asyncpg.connect(self.config.dsn)
+            self._listen_conn = await asyncpg.connect(
+                self.config.dsn, timeout=LISTEN_CONNECT_TIMEOUT
+            )
             await self._listen_conn.add_listener(
                 NOTIFY_CHANNEL, lambda *_args: self._wakeup.set()
             )
@@ -123,9 +160,11 @@ class HostAgent:
 
     async def _lease_reaper_loop(self) -> None:
         """Marca como failed comandos cujo lease expirou (agent morto)."""
+        pool = self.pool
+        assert pool is not None
         while True:
             try:
-                await self.pool.execute(
+                await pool.execute(
                     """
                     UPDATE host_agent_commands
                     SET status = 'failed',
@@ -234,12 +273,13 @@ class HostAgent:
             return
 
         state = RunningCommandState()
-        timeout_seconds = int(record["timeout_seconds"] or COMMAND_TIMEOUTS[command])
+        timeout_seconds = int(record["timeout_seconds"])
         ctx = CommandContext(
             config=self.config,
             state=state,
             timeout_seconds=timeout_seconds,
             command=command,
+            project_uuid=str(record["project_uuid"]) if record["project_uuid"] else None,
         )
         heartbeat = asyncio.create_task(self._command_heartbeat_loop(command_id, state))
         try:
@@ -264,6 +304,15 @@ class HostAgent:
             except asyncio.CancelledError:
                 pass
 
+        if state.abort.is_set() and outcome.status != "failed":
+            outcome = CommandOutcome(
+                status="failed",
+                error_code="lease_lost",
+                message="Lease perdido durante a execucao; processo interrompido.",
+            )
+        if state.abort.is_set() and outcome.error_code is None:
+            outcome.error_code = "lease_lost"
+
         persisted = await db.finish_command(
             self.pool,
             command_id,
@@ -275,6 +324,8 @@ class HostAgent:
             stderr_tail=state.stderr_tail(),
             result=outcome.result,
             message=outcome.message,
+            progress=state.progress,
+            current_step=state.current_step,
         )
         if not persisted:
             logger.warning(
@@ -297,6 +348,7 @@ class HostAgent:
         logger.info("comando %s finalizado: %s", command_id, outcome.status)
 
     async def _command_heartbeat_loop(self, command_id: uuid.UUID, state: RunningCommandState) -> None:
+        failures = 0
         while True:
             try:
                 await asyncio.wait_for(
@@ -306,8 +358,10 @@ class HostAgent:
             except asyncio.TimeoutError:
                 pass
             state.progress_changed.clear()
+            if state.abort.is_set():
+                return
             try:
-                await db.heartbeat_command(
+                alive = await db.heartbeat_command(
                     self.pool,
                     command_id,
                     self.config.worker_id,
@@ -318,9 +372,17 @@ class HostAgent:
                     current_step=state.current_step,
                     message=state.message,
                 )
+                if not alive:
+                    state.abort.set()
+                    return
                 state.dirty = False
+                failures = 0
             except Exception as exc:  # noqa: BLE001
+                failures += 1
                 logger.warning("heartbeat do comando %s falhou: %s", command_id, exc)
+                if failures >= 3:
+                    state.abort.set()
+                    return
 
     async def _revalidate(
         self,
@@ -340,6 +402,7 @@ class HostAgent:
             requested_by=str(record["requested_by"]) if record["requested_by"] else None,
             args=args,
             issued_at=record["issued_at"],
+            timeout_seconds=int(record["timeout_seconds"]),
         ):
             return ("signature_invalid", "Assinatura HMAC da intencao nao confere.")
 
@@ -353,17 +416,62 @@ class HostAgent:
         if arg_errors:
             return ("invalid_args", "; ".join(arg_errors))
 
+        canonical_user = None
+        if record["requested_by"] is not None:
+            from .directory_transport import read_directory, DirectoryUnavailable
+            try:
+                snapshot = await read_directory(self.config.studio_directory_url, self.config.studio_directory_secret, self.config.studio_directory_ca_file)
+                matches = [u for u in snapshot["users"] if u["id"] == str(record["requested_by"])]
+                if len(matches) != 1 or matches[0].get("is_active") is not True:
+                    return ("authorization_denied:directory_revoked", "Actor revoked in canonical directory.")
+                canonical_user = matches[0]
+            except (DirectoryUnavailable, KeyError, TypeError):
+                return ("authorization_denied:directory_unavailable", "Canonical directory could not be proved.")
+
+        if command == "duplicate_project":
+            source = await db.load_authorization_context(
+                self.pool, project=args["original_name"], requested_by=record["requested_by"], canonical_user=canonical_user
+            )
+            if (
+                not source["project_row_exists"]
+                or str(source["project_id"]) != args["original_uuid"]
+                or str(source["tenant_uuid"]) != args["original_tenant_uuid"]
+            ):
+                return ("authorization_denied:source_identity_mismatch", "Identidade da origem mudou.")
+            if (
+                not source["user_exists"] or not source["user_active"]
+                or not (source["is_global_admin"] or source["member_role"] in {"member", "admin"})
+            ):
+                return ("authorization_denied:source_access_revoked", "Acesso atual a origem negado.")
+
         auth = await db.load_authorization_context(
             self.pool,
             project=project,
             requested_by=record["requested_by"],
+            canonical_user=canonical_user,
         )
         project_uuid_matches = True
         if record["project_uuid"] is not None and auth["project_id"] is not None:
             project_uuid_matches = auth["project_id"] == record["project_uuid"]
         intent_tenant_uuid = args.get("tenant_uuid")
-        if intent_tenant_uuid is None and command == "delete_project_files":
-            intent_tenant_uuid = args.get("project_uuid")
+        if command == "rename_project" and args["old_ref"] != auth["public_ref"]:
+            return ("authorization_denied:public_ref_mismatch", "Referencia publica da rotacao mudou.")
+        if command in {"create_project", "duplicate_project"} and args["public_ref"] != auth["public_ref"]:
+            return (
+                "authorization_denied:public_ref_mismatch",
+                "Referencia publica da intencao diverge do control plane.",
+            )
+        if command in {"recreate_services", "rotate_keys", "restore_project", "rename_project"}:
+            try:
+                directory = resolve_project_dir(self.config.projects_root, project, must_exist=True)
+                physical_ref = read_canonical_env_value(directory / ".env", "PROJECT_PUBLIC_REF")
+                if physical_ref is None or physical_ref != auth["public_ref"]:
+                    raise ValueError("public_ref mismatch")
+            except (OSError, RuntimeError, ValueError, PathConfinementError):
+                return (
+                    "authorization_denied:public_ref_mismatch",
+                    "Referencia publica fisica diverge do control plane.",
+                )
         if (
             intent_tenant_uuid is not None
             and auth.get("tenant_uuid") is not None

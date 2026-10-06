@@ -25,7 +25,7 @@ import re
 import time
 from typing import Any
 
-PROTOCOL_VERSION = "v1"
+PROTOCOL_VERSION = "v2"
 NOTIFY_CHANNEL = "host_agent_commands"
 OUTPUT_TAIL_LIMIT = 8_000
 CONTAINER_LOGS_LIMIT = 256_000
@@ -38,9 +38,12 @@ COMMAND_TIMEOUTS: dict[str, int] = {
     "stop_project": 600,
     "restart_project": 600,
     "recreate_services": 1_800,
+    "ensure_opaque_gateway_token": 120,
+    "stage_opaque_gateway": 600,
     "create_project": 1_800,
     "duplicate_project": 3_600,
     "delete_project_containers": 300,
+    "delete_project_storage": 600,
     "delete_project_files": 300,
     "rotate_keys": 900,
     "rename_project": 3_600,
@@ -67,6 +70,7 @@ DEFAULT_TERM_GRACE = 30
 GLOBAL_ADMIN_COMMANDS = frozenset(
     {
         "delete_project_containers",
+        "delete_project_storage",
         "delete_project_files",
     }
 )
@@ -86,40 +90,20 @@ PROJECT_ROW_OPTIONAL_COMMANDS = frozenset(
     }
 )
 
-# Fonte unica do formato e dos nomes reservados de projeto. app/validation.py
-# importa esta classe em vez de manter sua propria copia. O agent revalida
-# tudo localmente e nao confia na validacao feita pela API.
 class ProjectNameValidator:
     NAME_RE = re.compile(r"^[a-z_][a-z0-9_]{2,39}$")
-    RESERVED_WORDS = frozenset(
-        {
-            "default", "select", "from", "where", "insert", "update", "delete",
-            "table", "create", "drop", "join", "group", "order", "limit", "into",
-            "index", "view", "trigger", "procedure", "function", "database",
-            "schema", "primary", "foreign", "key", "constraint", "unique", "null",
-            "not", "and", "or", "in", "like", "between", "exists", "having",
-            "union", "inner", "left", "right", "outer", "cross", "on", "as",
-            "case", "when", "then", "else", "end", "if", "while", "for", "begin",
-            "commit", "rollback",
-        }
-    )
-    RESERVED_ROUTE_NAMES = frozenset({"admin", "phpmyadmin", "xmlrpc", "actuator"})
 
     @classmethod
     def is_valid(cls, raw: Any) -> bool:
-        if not isinstance(raw, str):
-            return False
-        return (
-            bool(cls.NAME_RE.fullmatch(raw))
-            and raw not in cls.RESERVED_WORDS
-            and raw not in cls.RESERVED_ROUTE_NAMES
-        )
+        return isinstance(raw, str) and bool(cls.NAME_RE.fullmatch(raw))
+
 
 
 RECREATE_SERVICE_NAMES = frozenset(
-    {"auth", "rest", "storage", "imgproxy", "nginx", "meta"}
+    {"auth", "rest", "storage", "nginx", "meta"}
 )
 COPY_MODES = frozenset({"with-data", "schema-only"})
+RESOURCE_PROFILES = frozenset({"small", "medium", "large", "custom"})
 UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
@@ -128,6 +112,10 @@ MAX_LOG_LINES = 1_000
 
 def is_valid_uuid(raw: Any) -> bool:
     return isinstance(raw, str) and bool(UUID_RE.fullmatch(raw.lower()))
+
+
+def is_valid_gateway_token(raw: Any) -> bool:
+    return isinstance(raw, str) and bool(re.fullmatch(r"^[a-f0-9]{64}$", raw))
 
 
 def validate_command_args(command: str, project: str, args: dict[str, Any]) -> list[str]:
@@ -154,25 +142,28 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
         if unknown:
             errors.append("unknown_args:" + ",".join(sorted(unknown)))
 
+    def validate_resource_profile() -> None:
+        value = args.get("resource_profile")
+        if value is not None and value not in RESOURCE_PROFILES:
+            errors.append("invalid_resource_profile")
+
     if command in {
         "start_project",
         "stop_project",
         "restart_project",
         "delete_project_containers",
+        "ensure_opaque_gateway_token",
+        "stage_opaque_gateway",
     }:
         reject_unknown(set())
     elif command == "rotate_keys":
         reject_unknown({"trigger"})
-        if args.get("trigger") not in {None, "automatic"}:
+        if args.get("trigger") not in {"manual", "automatic"}:
             errors.append("invalid_rotation_trigger")
-    elif command == "delete_project_files":
-        reject_unknown({"tenant_uuid", "project_uuid"})
-        if "tenant_uuid" in args and not is_valid_uuid(args.get("tenant_uuid")):
+    elif command in {"delete_project_storage", "delete_project_files"}:
+        reject_unknown({"tenant_uuid"})
+        if not is_valid_uuid(args.get("tenant_uuid")):
             errors.append("invalid_tenant_uuid")
-        if "project_uuid" in args and not is_valid_uuid(args.get("project_uuid")):
-            errors.append("invalid_project_uuid")
-        if "tenant_uuid" in args and "project_uuid" in args:
-            errors.append("duplicate_tenant_identity")
     elif command == "recreate_services":
         reject_unknown({"services"})
         services = args.get("services")
@@ -183,13 +174,17 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
         ):
             errors.append("invalid_services")
     elif command == "create_project":
-        reject_unknown({"tenant_uuid", "recover_stale", "stale_tenant_uuids"})
+        reject_unknown({"tenant_uuid", "public_ref", "recover_stale", "stale_tenant_uuids", "gateway_token", "resource_profile"})
+        if not isinstance(args.get("public_ref"), str) or not re.fullmatch(r"[a-z]{20}", args["public_ref"]):
+            errors.append("invalid_public_ref")
         if not is_valid_uuid(args.get("tenant_uuid")):
             errors.append("invalid_tenant_uuid")
-        recover_stale = args.get("recover_stale", False)
+        if "gateway_token" in args and not is_valid_gateway_token(args.get("gateway_token")):
+            errors.append("invalid_gateway_token")
+        recover_stale = args.get("recover_stale")
         if not isinstance(recover_stale, bool):
             errors.append("invalid_recover_stale")
-        stale_tenant_uuids = args.get("stale_tenant_uuids", [])
+        stale_tenant_uuids = args.get("stale_tenant_uuids")
         if (
             not isinstance(stale_tenant_uuids, list)
             or len(stale_tenant_uuids) > 20
@@ -198,18 +193,34 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
             errors.append("invalid_stale_tenant_uuids")
         elif stale_tenant_uuids and recover_stale is not True:
             errors.append("stale_tenants_require_recovery")
+        validate_resource_profile()
     elif command == "duplicate_project":
-        reject_unknown({"original_name", "copy_mode", "tenant_uuid"})
+        reject_unknown({"original_name", "original_uuid", "original_tenant_uuid", "copy_mode", "tenant_uuid", "public_ref", "gateway_token", "resource_profile"})
+        if not isinstance(args.get("public_ref"), str) or not re.fullmatch(r"[a-z]{20}", args["public_ref"]):
+            errors.append("invalid_public_ref")
         require_project_field("original_name")
+        for source_field in ("original_uuid", "original_tenant_uuid"):
+            if not is_valid_uuid(args.get(source_field)):
+                errors.append("invalid_" + source_field)
+        if args.get("original_name") == project:
+            errors.append("source_equals_destination")
         if args.get("copy_mode") not in COPY_MODES:
             errors.append("invalid_copy_mode")
         if not is_valid_uuid(args.get("tenant_uuid")):
             errors.append("invalid_tenant_uuid")
+        if "gateway_token" in args and not is_valid_gateway_token(args.get("gateway_token")):
+            errors.append("invalid_gateway_token")
+        validate_resource_profile()
     elif command == "rename_project":
-        reject_unknown({"new_name"})
-        require_project_field("new_name")
-        if args.get("new_name") == project:
-            errors.append("new_name_equals_project")
+        reject_unknown({"old_ref", "new_ref", "tenant_uuid"})
+        for field in ("old_ref", "new_ref"):
+            if not isinstance(args.get(field), str) or not re.fullmatch(r"[a-z]{20}", args[field]):
+                errors.append(f"invalid_{field}")
+        if args.get("old_ref") == args.get("new_ref"):
+            errors.append("public_reference_unchanged")
+        if not is_valid_uuid(args.get("tenant_uuid")):
+            errors.append("invalid_tenant_uuid")
+        validate_resource_profile()
     elif command == "backup_project":
         reject_unknown({"backup_id", "tenant_uuid"})
         if not is_valid_uuid(args.get("backup_id")):
@@ -271,6 +282,7 @@ def command_signature(
     requested_by: str | None,
     args: dict[str, Any] | None,
     issued_at: int,
+    timeout_seconds: int,
 ) -> str:
     """Assina os campos imutaveis de uma intencao gravada no banco."""
     message = "\n".join(
@@ -283,6 +295,7 @@ def command_signature(
             str(requested_by or ""),
             canonical_args_hash(args),
             str(int(issued_at)),
+            str(int(timeout_seconds)),
         )
     )
     return hmac.new(
@@ -301,6 +314,7 @@ def verify_command_signature(
     requested_by: str | None,
     args: dict[str, Any] | None,
     issued_at: int,
+    timeout_seconds: int,
 ) -> bool:
     expected = command_signature(
         secret,
@@ -311,6 +325,7 @@ def verify_command_signature(
         requested_by=requested_by,
         args=args,
         issued_at=issued_at,
+        timeout_seconds=timeout_seconds,
     )
     return hmac.compare_digest(expected, provided_signature or "")
 

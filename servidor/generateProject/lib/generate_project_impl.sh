@@ -1,18 +1,41 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+umask 077
+
+MAIN_SHELL_PID="$BASHPID"
 
 die() { echo "❌  $*" >&2; return 1; }
+
+read_canonical_env_value() {
+  local file="$1" key="$2" assignment_count canonical_count value
+  [[ -f "$file" ]] || die "Arquivo de ambiente ausente: $file"
+  assignment_count="$(grep -Ec "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" "$file" || true)"
+  canonical_count="$(grep -c "^${key}=" "$file" || true)"
+  [[ "$assignment_count" == "1" && "$canonical_count" == "1" ]] \
+    || die "$key deve ter exatamente uma atribuicao canonica em $file"
+  value="$(sed -n "s/^${key}=//p" "$file")"
+  [[ "$value" != *$'\r'* ]] || die "$key contem carriage return em $file"
+  printf '%s' "$value"
+}
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 # shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/functions_config.sh"
+# shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
+source "$SCRIPT_DIR/lib/resource_profiles.sh"
+source "$SCRIPT_DIR/lib/realtime_slots.sh"
+source "$SCRIPT_DIR/lib/tenant_reader_role.sh"
+source "$SCRIPT_DIR/lib/tenant_meta_role.sh"
+source "$SCRIPT_DIR/lib/project_public_ref.sh"
 
 TRANSACTION_DIR="$PROJECT_ROOT/.generate_transaction_$$"
 CREATED_DIRS=()
 CREATED_DB=""
 CREATED_REALTIME_TENANT=""
 CREATED_SUPAVISOR_TENANT=""
+CREATED_STORAGE_TENANT=""
 COMPOSE_STARTED=0
 
 init_transaction() {
@@ -24,6 +47,7 @@ register_created_dir() { CREATED_DIRS+=("$1"); }
 register_created_db() { CREATED_DB="$1"; }
 register_realtime_tenant() { CREATED_REALTIME_TENANT="$1"; }
 register_supavisor_tenant() { CREATED_SUPAVISOR_TENANT="$1"; }
+register_storage_tenant() { CREATED_STORAGE_TENANT="$1"; }
 
 commit_transaction() {
   rm -rf "$TRANSACTION_DIR"
@@ -39,13 +63,10 @@ database_exists() {
 }
 
 drop_project_replication_slots() {
-  local project="$1" raw_slot slot
-  local slots=(
-    "supabase_realtime_messages_replication_slot_$project"
-    "supabase_realtime_replication_slot_$project"
-  )
-  for raw_slot in "${slots[@]}"; do
-    slot="${raw_slot:0:63}"
+  local project="$1" slot
+  local slots=()
+  mapfile -t slots < <(realtime_slot_candidates_unique "$project")
+  for slot in "${slots[@]}"; do
     docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
       "SELECT pg_terminate_backend(active_pid) FROM pg_replication_slots WHERE slot_name = '$slot' AND active_pid IS NOT NULL;" \
       >/dev/null || return 1
@@ -101,9 +122,16 @@ delete_tenant_metadata() {
 rollback_transaction() {
   local status="${1:-$?}"
   local rollback_failed=0
+  if [[ "$BASHPID" != "$MAIN_SHELL_PID" ]]; then
+    exit "$status"
+  fi
   trap - ERR TERM INT HUP
   set +e
   echo "❌ Erro detectado! Revertendo alterações..."
+
+  if [[ "$FUNCTIONS_CONFIG_LOCKED" == 1 ]] && [[ "${FUNCTIONS_WITHDRAWN[$PROJECT_ID]:-0}" == 1 ]]; then
+    functions_config_withdraw "$PROJECT_ID" || rollback_failed=1
+  fi
 
   if [[ "$COMPOSE_STARTED" -eq 1 && -n "${OUT_DIR:-}" && -d "$OUT_DIR" ]]; then
     (cd "$OUT_DIR" && docker compose -p "$PROJECT_ID" \
@@ -123,12 +151,21 @@ rollback_transaction() {
     delete_tenant_metadata "$PROJECT_ID" "$CREATED_REALTIME_TENANT" \
       || rollback_failed=1
   fi
-  if [[ -n "$CREATED_DB" ]]; then
+  if [[ -n "$CREATED_STORAGE_TENANT" ]]; then
+    if ! storage_delete_tenant "$CREATED_STORAGE_TENANT"; then
+      rollback_failed=1
+    else
+      CREATED_STORAGE_TENANT=""
+    fi
+  fi
+  if [[ -n "$CREATED_DB" && -z "$CREATED_STORAGE_TENANT" ]]; then
     drop_project_database "$CREATED_DB" || rollback_failed=1
   fi
-  for ((idx=${#CREATED_DIRS[@]}-1; idx>=0; idx--)); do
-    rm -rf "${CREATED_DIRS[idx]}" || rollback_failed=1
-  done
+  if [[ -z "$CREATED_STORAGE_TENANT" ]]; then
+    for ((idx=${#CREATED_DIRS[@]}-1; idx>=0; idx--)); do
+      rm -rf "${CREATED_DIRS[idx]}" || rollback_failed=1
+    done
+  fi
   rm -rf "$TRANSACTION_DIR" || rollback_failed=1
 
   if [[ "$rollback_failed" -eq 0 ]]; then
@@ -149,15 +186,23 @@ set -a
 source "$PROJECT_ROOT/.env"
 set +a
 
-[[ -n "${JWT_SECRET:-}" ]] || die "JWT_SECRET ausente"
-[[ -n "${SERVER_URL:-}" ]] || die "SERVER_URL ausente"
+for variable in POSTGRES_HOST POSTGRES_PASSWORD POSTGRES_PORT MAX_CONCURRENT_USERS \
+  SERVER_URL JWT_SECRET HOST_PROJECT_ROOT; do
+  [[ -n "${!variable:-}" ]] || die "$variable ausente"
+done
+[[ "$MAX_CONCURRENT_USERS" =~ ^[1-9][0-9]*$ ]] \
+  || die "MAX_CONCURRENT_USERS deve ser um inteiro positivo"
+[[ "${API_GATEWAY_TOKEN_PROJETO:-}" =~ ^[0-9a-f]{64}$ ]] \
+  || die "API_GATEWAY_TOKEN_PROJETO canonico deve ser fornecido pelo control plane"
 
 PROJECT_ID="${1:-}"
 PROJECT_UUID="${2:-}"
-RECOVER_STALE="${3:-false}"
-STALE_TENANT_UUIDS=("${@:4}")
-[[ -n "$PROJECT_ID" && -n "$PROJECT_UUID" ]] \
-  || die "Uso: $0 <project_id> <project_uuid> [recover_stale] [stale_tenant_uuid ...]"
+PROJECT_PUBLIC_REF="${3:-}"
+RECOVER_STALE="${4:-}"
+STALE_TENANT_UUIDS=("${@:5}")
+[[ -n "$PROJECT_ID" && -n "$PROJECT_UUID" && -n "$RECOVER_STALE" ]] \
+  || die "Uso: $0 <project_id> <project_uuid> <public_ref> <recover_stale> [stale_tenant_uuid ...]"
+project_public_ref_validate "$PROJECT_PUBLIC_REF" || die "Referencia publica invalida"
 [[ "$PROJECT_UUID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] \
   || die "project_uuid inválido"
 [[ "$RECOVER_STALE" == "true" || "$RECOVER_STALE" == "false" ]] \
@@ -168,21 +213,16 @@ for stale_uuid in "${STALE_TENANT_UUIDS[@]}"; do
 done
 
 PROJECT_ID="$(echo "$PROJECT_ID" | tr '[:upper:]' '[:lower:]')"
+PROJECT_UUID="$(echo "$PROJECT_UUID" | tr '[:upper:]' '[:lower:]')"
 [[ "$PROJECT_ID" =~ ^[a-z_][a-z0-9_]{2,39}$ ]] \
   || die "Nome deve começar com letra minúscula/_ e conter só minúsculas, dígitos ou _ (3–40 chars)"
 [[ "$PROJECT_ID" != *.* ]] || die "Nome não pode conter ponto (.)"
 
-RESERVED=(default select from where insert update delete table create drop join group order limit into index view trigger procedure function database schema primary foreign key constraint unique null not and or in like between exists having union inner left right outer cross on as case when then else end if while for begin commit rollback)
-for word in "${RESERVED[@]}"; do
-  [[ "$PROJECT_ID" != "$word" ]] || die "'$PROJECT_ID' é palavra reservada."
-done
-
-RESERVED_ROUTES=(admin phpmyadmin xmlrpc actuator)
-for word in "${RESERVED_ROUTES[@]}"; do
-  [[ "$PROJECT_ID" != "$word" ]] || die "'$PROJECT_ID' é rota reservada."
-done
 
 OUT_DIR="$PROJECT_ROOT/projects/$PROJECT_ID"
+project_public_ref_assert "$PROJECT_ID" "$PROJECT_UUID" "$PROJECT_PUBLIC_REF" \
+  || die "Referencia publica nao corresponde ao projeto"
+functions_config_lock "$PROJECT_ID"
 
 docker_must_exist() {
   docker inspect "$1" >/dev/null 2>&1 || die "Contêiner $1 não encontrado"
@@ -222,6 +262,7 @@ generate_db() {
     "REVOKE CONNECT, TEMPORARY ON DATABASE $db FROM PUBLIC; GRANT CONNECT, TEMPORARY ON DATABASE $db TO pgbouncer; GRANT CONNECT, TEMPORARY ON DATABASE $db TO authenticator; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $db TO supabase_storage_admin; GRANT CONNECT, TEMPORARY, CREATE ON DATABASE $db TO supabase_auth_admin;"
   docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
     "ALTER ROLE supabase_storage_admin IN DATABASE $db SET search_path = storage, public;"
+  provision_platform_reader_role
   vector_validate_database "$db" || die "Banco do projeto sem suporte a Storage Vectors"
 }
 
@@ -233,15 +274,18 @@ cleanup_stale_state() {
   echo "HOST_AGENT_PROGRESS=create:cleanup_stale"
   if [[ -d "$OUT_DIR" ]]; then
     if [[ -f "$OUT_DIR/.env" ]]; then
-      old_uuid="$(grep -m1 '^PROJECT_UUID=' "$OUT_DIR/.env" | cut -d= -f2- | tr -d '\r' || true)"
-      if [[ -n "$old_uuid" && ! "$old_uuid" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+      old_uuid="$(read_canonical_env_value "$OUT_DIR/.env" PROJECT_UUID)" \
+        || { echo "HOST_AGENT_ROLLBACK_FAILED=stale_project_uuid" >&2; return 1; }
+      if [[ ! "$old_uuid" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
         echo "HOST_AGENT_ROLLBACK_FAILED=stale_project_uuid" >&2
         return 1
       fi
     fi
-    (cd "$OUT_DIR" && docker compose -p "$PROJECT_ID" \
-      --env-file ../../.env --env-file .env down --remove-orphans) >/dev/null 2>&1 \
-      || { echo "HOST_AGENT_ROLLBACK_FAILED=stale_compose" >&2; return 1; }
+    if [[ -f "$OUT_DIR/.env" && -f "$OUT_DIR/docker-compose.yml" ]]; then
+      (cd "$OUT_DIR" && docker compose -p "$PROJECT_ID" \
+        --env-file ../../.env --env-file .env down --remove-orphans) >/dev/null 2>&1 \
+        || { echo "HOST_AGENT_ROLLBACK_FAILED=stale_compose" >&2; return 1; }
+    fi
   elif [[ -e "$OUT_DIR" ]]; then
     echo "HOST_AGENT_ROLLBACK_FAILED=stale_path" >&2
     return 1
@@ -266,6 +310,15 @@ cleanup_stale_state() {
     delete_tenant_metadata "$PROJECT_ID" "$stale_uuid" \
       || { echo "HOST_AGENT_ROLLBACK_FAILED=stale_metadata" >&2; return 1; }
   done
+  if [[ -n "$old_uuid" ]]; then
+    storage_delete_tenant "$(tr '[:upper:]' '[:lower:]' <<<"$old_uuid")" \
+      || { echo "HOST_AGENT_ROLLBACK_FAILED=stale_storage_tenant" >&2; return 1; }
+  fi
+  for stale_uuid in "${STALE_TENANT_UUIDS[@]}"; do
+    [[ "${stale_uuid,,}" == "${old_uuid,,}" ]] && continue
+    storage_delete_tenant "${stale_uuid,,}" \
+      || { echo "HOST_AGENT_ROLLBACK_FAILED=stale_storage_tenant" >&2; return 1; }
+  done
   if database_exists "$db"; then
     drop_project_database "$db" \
       || { echo "HOST_AGENT_ROLLBACK_FAILED=stale_database" >&2; return 1; }
@@ -286,12 +339,14 @@ cleanup_stale_state() {
 normalize_public_base_url() {
   local url="${1%/}" proto="${2:-}"
   if [[ "$url" =~ ^https?:// ]]; then printf '%s' "$url"; return; fi
-  printf '%s://%s' "${proto:-https}" "$url"
+  [[ "$proto" == "http" || "$proto" == "https" ]] \
+    || die "SERVER_PROTO deve ser http ou https quando SERVER_URL nao inclui esquema"
+  printf '%s://%s' "$proto" "$url"
 }
 escape_sed_replacement() { printf '%s' "$1" | sed -e 's/[&|\\]/\\&/g'; }
 
 PUBLIC_BASE_URL="$(normalize_public_base_url "$SERVER_URL" "${SERVER_PROTO:-}")"
-PROJECT_PUBLIC_URL="$PUBLIC_BASE_URL/$PROJECT_ID"
+PROJECT_PUBLIC_URL="$PUBLIC_BASE_URL/$PROJECT_PUBLIC_REF"
 PROJECT_AUTH_EXTERNAL_URL="$PROJECT_PUBLIC_URL/auth/v1"
 
 template_to_file() {
@@ -301,13 +356,15 @@ template_to_file() {
     -e "s|{{service_role_key}}|$(escape_sed_replacement "$SERVICE_TOKEN")|g" \
     -e "s|{{project_id}}|$(escape_sed_replacement "$PROJECT_ID")|g" \
     -e "s|{{project_uuid}}|$(escape_sed_replacement "$PROJECT_UUID")|g" \
-    -e "s|{{config_token}}|$(escape_sed_replacement "$CONFIG_TOKEN_PROJETO")|g" \
+    -e "s|{{project_public_ref}}|$PROJECT_PUBLIC_REF|g" \
     -e "s|{{jwt_secret}}|$(escape_sed_replacement "$JWT_SECRET_PROJETO")|g" \
+    -e "s|{{api_gateway_token}}|$(escape_sed_replacement "$API_GATEWAY_TOKEN_PROJETO")|g" \
     -e "s|{{server_url}}|$(escape_sed_replacement "$SERVER_URL")|g" \
     -e "s|{{public_base_url}}|$(escape_sed_replacement "$PUBLIC_BASE_URL")|g" \
     -e "s|{{project_public_url}}|$(escape_sed_replacement "$PROJECT_PUBLIC_URL")|g" \
     -e "s|{{project_auth_external_url}}|$(escape_sed_replacement "$PROJECT_AUTH_EXTERNAL_URL")|g" \
     -e "s|{{project_root}}|$(escape_sed_replacement "$HOST_PROJECT_ROOT")|g" \
+    -e "s|{{s3_protocol_credential_id}}|$(escape_sed_replacement "$S3_PROTOCOL_CREDENTIAL_ID")|g" \
     -e "s|{{s3_protocol_access_key_id}}|$(escape_sed_replacement "$S3_PROTOCOL_ACCESS_KEY_ID")|g" \
     -e "s|{{s3_protocol_access_key_secret}}|$(escape_sed_replacement "$S3_PROTOCOL_ACCESS_KEY_SECRET")|g" \
     "$template" > "$output"
@@ -323,8 +380,8 @@ realtime_tenant() {
     --arg uuid "$PROJECT_UUID" --arg secret "$JWT_SECRET_PROJETO" \
     --arg db "_supabase_$PROJECT_ID" --arg host "$POSTGRES_HOST" \
     --arg port "$POSTGRES_PORT" --arg password "$POSTGRES_PASSWORD" \
-    --arg slot "supabase_realtime_replication_slot_$PROJECT_ID" \
-    --argjson max_users "${MAX_CONCURRENT_USERS:-200}" \
+    --arg slot "$(realtime_primary_slot "$PROJECT_ID")" \
+    --argjson max_users "$MAX_CONCURRENT_USERS" \
     '{tenant:{name:$uuid,external_id:$uuid,jwt_secret:$secret,max_concurrent_users:$max_users,extensions:[{type:"postgres_cdc_rls",settings:{db_name:$db,db_host:$host,db_user:"supabase_admin",db_password:$password,db_port:$port,region:"us-west-1",poll_interval_ms:100,poll_max_record_bytes:1048576,ssl_enforced:false,slot_name:$slot}}]}}')
   response=$(docker exec realtime-dev.supabase-realtime curl -sS -w '\n%{http_code}' \
     -X POST http://localhost:4000/api/tenants \
@@ -362,9 +419,18 @@ exp=$((now_epoch + (3 * 30 * 24 * 3600)))
 ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now_epoch,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
 SERVICE_TOKEN=$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now_epoch,\"exp\":$exp}" "$JWT_SECRET_PROJETO")
 GLOBAL_ANON_TOKEN=$(generate_jwt "{\"role\":\"anon\",\"iss\":\"$PROJECT_UUID\",\"iat\":$now_epoch,\"exp\":$exp}" "$JWT_SECRET")
-CONFIG_TOKEN_PROJETO=$(openssl rand -hex 32 | tr -d '\n\r')
+
+FILE_SIZE_LIMIT="$(read_canonical_env_value "$SCRIPT_DIR/.envtemplate" FILE_SIZE_LIMIT)"
+ENABLE_IMAGE_TRANSFORMATION="$(read_canonical_env_value "$SCRIPT_DIR/.envtemplate" ENABLE_IMAGE_TRANSFORMATION)"
+S3_PROTOCOL_ENABLED="$(read_canonical_env_value "$SCRIPT_DIR/.envtemplate" S3_PROTOCOL_ENABLED)"
+VECTOR_BUCKETS_ENABLED="$(read_canonical_env_value "$SCRIPT_DIR/.envtemplate" VECTOR_BUCKETS_ENABLED)"
+VECTOR_MAX_BUCKETS="$(read_canonical_env_value "$SCRIPT_DIR/.envtemplate" VECTOR_MAX_BUCKETS)"
+VECTOR_MAX_INDEXES="$(read_canonical_env_value "$SCRIPT_DIR/.envtemplate" VECTOR_MAX_INDEXES)"
+
+storage_wait_global || die "Storage compartilhado indisponivel"
 
 if [[ "$RECOVER_STALE" == "true" ]]; then
+  functions_config_withdraw "$PROJECT_ID"
   cleanup_stale_state || die "Não foi possível limpar resíduos da tentativa anterior"
 else
   stale_db_status=0
@@ -382,13 +448,42 @@ else
   fi
 fi
 
-unset S3_PROTOCOL_ACCESS_KEY_ID S3_PROTOCOL_ACCESS_KEY_SECRET
-vector_ensure_s3_credentials || die "Falha ao gerar credenciais SigV4 do projeto"
-
+functions_config_withdraw "$PROJECT_ID"
 init_transaction
 echo "HOST_AGENT_PROGRESS=create:transaction_initialized"
-mkdir -p "$OUT_DIR/storage/stub/stub" "$OUT_DIR/nginx" "$OUT_DIR/pooler"
+mkdir -p "$OUT_DIR/nginx" "$OUT_DIR/pooler"
 register_created_dir "$OUT_DIR"
+
+echo "HOST_AGENT_PROGRESS=create:database_started"
+generate_db
+echo "HOST_AGENT_PROGRESS=create:database_created"
+echo "HOST_AGENT_PROGRESS=create:realtime_started"
+realtime_tenant
+echo "HOST_AGENT_PROGRESS=create:realtime_created"
+echo "HOST_AGENT_PROGRESS=create:supavisor_started"
+supavisor_tenant
+echo "HOST_AGENT_PROGRESS=create:supavisor_created"
+
+# Registra a intencao antes da chamada: uma falha de transporte pode ocorrer
+# depois de o registry ter persistido o tenant.
+echo "HOST_AGENT_PROGRESS=create:storage_started"
+storage_assert_tenant_absent "$PROJECT_UUID" \
+  || die "Tenant UUID ja existe no Storage compartilhado"
+register_storage_tenant "$PROJECT_UUID"
+storage_create_empty_tenant_namespace "$PROJECT_UUID" \
+  || die "Falha ao criar namespace fisico do tenant"
+storage_provision_tenant "$PROJECT_UUID" "$PROJECT_ID" "$JWT_SECRET_PROJETO" \
+  "$ANON_TOKEN" "$SERVICE_TOKEN" "$FILE_SIZE_LIMIT" \
+  "$ENABLE_IMAGE_TRANSFORMATION" "$S3_PROTOCOL_ENABLED" "$VECTOR_BUCKETS_ENABLED" \
+  "$VECTOR_MAX_BUCKETS" "$VECTOR_MAX_INDEXES" \
+  || die "Falha ao registrar tenant no Storage compartilhado"
+echo "HOST_AGENT_PROGRESS=create:storage_tenant_created"
+
+IFS=$'\t' read -r S3_PROTOCOL_CREDENTIAL_ID S3_PROTOCOL_ACCESS_KEY_ID \
+  S3_PROTOCOL_ACCESS_KEY_SECRET \
+  <<<"$(storage_create_s3_credentials "$PROJECT_UUID")"
+vector_validate_s3_credentials || die "Storage retornou credenciais SigV4 invalidas"
+echo "HOST_AGENT_PROGRESS=create:storage_credentials_created"
 
 template_to_file "$SCRIPT_DIR/nginxtemplate" "$OUT_DIR/nginx/nginx_${PROJECT_ID}.conf"
 template_to_file "$SCRIPT_DIR/.envtemplate" "$OUT_DIR/.env"
@@ -397,24 +492,37 @@ template_to_file "$SCRIPT_DIR/poolertemplate" "$OUT_DIR/pooler/pooler.exs"
 template_to_file "$SCRIPT_DIR/Dockerfile" "$OUT_DIR/Dockerfile"
 template_to_file "$SCRIPT_DIR/.dockerignore" "$OUT_DIR/.dockerignore"
 chmod 600 "$OUT_DIR/.env"
+apply_project_resource_limits "$PROJECT_ROOT/.env" "$OUT_DIR/.env" "${PROJECT_RESOURCE_PROFILE_OVERRIDE:-}"
 chmod 644 "$OUT_DIR/nginx/nginx_${PROJECT_ID}.conf" "$OUT_DIR/.dockerignore"
 echo "HOST_AGENT_PROGRESS=create:files_rendered"
 
-generate_db
-echo "HOST_AGENT_PROGRESS=create:database_created"
-realtime_tenant
-echo "HOST_AGENT_PROGRESS=create:realtime_created"
-supavisor_tenant
-echo "HOST_AGENT_PROGRESS=create:supavisor_created"
-
+echo "HOST_AGENT_PROGRESS=create:services_starting"
 COMPOSE_STARTED=1
 (
   cd "$OUT_DIR"
   docker compose -p "$PROJECT_ID" --env-file ../../.env --env-file .env up --build -d
 )
 echo "HOST_AGENT_PROGRESS=create:services_started"
-vector_validate_storage_api "$PROJECT_ID" || die "Storage Vectors nao iniciou corretamente"
+echo "HOST_AGENT_PROGRESS=create:storage_verifying"
+vector_validate_storage_api "$PROJECT_UUID" "$SERVICE_TOKEN" \
+  "$S3_PROTOCOL_ACCESS_KEY_ID" "$S3_PROTOCOL_ACCESS_KEY_SECRET" \
+  "$S3_PROTOCOL_ENABLED" "$VECTOR_BUCKETS_ENABLED" \
+  || die "Tenant Storage/S3/Vectors nao iniciou corretamente"
+storage_assert_project_gateway "$PROJECT_UUID" "$PROJECT_ID" "$SERVICE_TOKEN" \
+  || die "Nginx do projeto nao resolveu o tenant Storage correto"
 echo "HOST_AGENT_PROGRESS=create:storage_verified"
 
+echo "HOST_AGENT_PROGRESS=create:identity_started"
+grant_platform_reader_on_tenant "_supabase_$PROJECT_ID" \
+  || die "Falha ao conceder leitura de telemetria ao platform_reader"
+provision_tenant_meta_role "_supabase_$PROJECT_ID" "$PROJECT_UUID" \
+  || die "Falha ao provisionar identidade SQL isolada do projeto"
+
+source "$SCRIPT_DIR/lib/platform_capacity.sh"
+platform_apply_shared_limits "$PROJECT_ROOT/.env" \
+  || die "Falha ao aplicar limites da camada compartilhada"
+
 echo "✅  Projeto $PROJECT_ID configurado com Storage Vectors e SigV4"
+echo "HOST_AGENT_PROGRESS=create:configuration_publishing"
+functions_config_publish "$PROJECT_ID"
 commit_transaction

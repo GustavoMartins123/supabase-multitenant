@@ -1,97 +1,33 @@
 from __future__ import annotations
-
 import pathlib
 import unittest
-
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-
-
 class ContentStableProjectIdentityTests(unittest.TestCase):
-    def test_internal_identity_route_returns_project_id_and_history(self) -> None:
-        source = (
-            ROOT / "servidor/api-internal/app/routers/internal.py"
-        ).read_text(encoding="utf-8")
-        start = source.index(
-            '@router.get("/api/projects/internal/content-identity/{project_name}")'
-        )
-        end = source.index(
-            '@router.get("/api/projects/internal/studio-context/{ref}")',
-            start,
-        )
-        route = source[start:end]
-
-        self.assertIn("_require_studio_nginx(request)", route)
-        self.assertIn(
-            'request.headers.get("X-Internal-Service") != "studio-nginx"',
-            source,
-        )
-        self.assertIn('"SELECT id, name FROM projects WHERE name = $1"', route)
-        self.assertIn("FROM project_name_history", route)
-        self.assertIn('"project_id": str(project["id"])', route)
-        self.assertIn('headers={"Cache-Control": "no-store"}', route)
-
-    def test_content_proxy_uses_stable_identity_only_for_content(self) -> None:
-        source = (
-            ROOT / "studio/nginx/lua/studio_compat/content_user_proxy.lua"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn('content_project_identity.resolve(selected_ref)', source)
-        self.assertIn('return identity.project_id', source)
-        self.assertIn('content_namespace_migration.ensure(user_id, identity)', source)
-        self.assertIn('id_namespace = namespace_state.root_folder.id', source)
-        self.assertIn('local legacy_id = virtual_snippet_id(snippet.name, virtual_folder)', source)
-
-    def test_read_routes_do_not_create_namespace_directories(self) -> None:
-        source = (
-            ROOT / "studio/nginx/lua/studio_compat/content_user_proxy.lua"
-        ).read_text(encoding="utf-8")
-
-        content = source[
-            source.index("function _M.handle_content()"):
-            source.index("function _M.handle_folders()")
-        ]
-        folders = source[
-            source.index("function _M.handle_folders()"):
-            source.index("function _M.handle_folder_item()")
-        ]
-        count = source[
-            source.index("function _M.handle_count()"):
-            source.index("function _M.handle_item()")
-        ]
-
-        self.assertIn(
-            "resolve_namespace_root_folder(api_project_ref, user_id, project_scope, false)",
-            content,
-        )
-        self.assertIn(
-            "resolve_namespace_root_folder(api_project_ref, user_id, project_scope, false)",
-            folders,
-        )
-        self.assertIn(
-            "resolve_namespace_root_folder(api_project_ref, user_id, project_scope, false)",
-            count,
-        )
-
-    def test_legacy_migration_preserves_conflicting_sql(self) -> None:
-        source = (
-            ROOT / "studio/nginx/lua/studio_compat/content_namespace_migration.lua"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("cache:add(key, token, exptime_seconds)", source)
-        self.assertIn('"__legacy_" .. safe_label(label)', source)
-        self.assertIn("files_equal(source_path, target_path)", source)
-        self.assertIn("stats.conflicts_preserved", source)
-        self.assertIn("identity.aliases", source)
-
-    def test_rename_endpoint_no_longer_moves_slug_directories(self) -> None:
-        source = (
-            ROOT / "studio/nginx/lua/admin_api/snippets_rename.lua"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("deprecated = true", source)
-        self.assertNotIn("os.rename", source)
-        self.assertNotIn("lfs.dir", source)
-
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_runtime_content_scope_is_authorized_in_python(self):
+        source=(ROOT/'servidor/api-internal/app/routers/studio_content.py').read_text()
+        self.assertIn('resolve_authenticated_user(request, pool)',source)
+        self.assertIn('get_public_project_row(conn, ref)',source)
+        self.assertIn('ensure_project_member_access',source)
+        self.assertIn('user["db_user_id"]',source)
+        self.assertNotIn('project_name_history',source)
+    def test_identity_is_a_persisted_uuid_not_a_name_hash(self):
+        source=(ROOT/'servidor/api-internal/app/studio_content.py').read_text()
+        self.assertIn('self.content.content_id != self.id',source)
+        self.assertIn('body.id, project_id, user_id',source)
+        self.assertNotIn('deterministic_uuid',source)
+        lua=ROOT/'studio/nginx/lua/studio_compat'
+        for name in ('content_namespace.lua','content_virtualization.lua','content_user_proxy.lua','content_studio_client.lua'):
+            self.assertFalse((lua/name).exists())
+    def test_internal_identity_is_ref_only_without_history(self):
+        source=(ROOT/'servidor/api-internal/app/routers/internal.py').read_text()
+        start=source.index('"/api/projects/internal/content-identity/{project_ref}"')
+        end=source.index('"/api/projects/internal/studio-context/{ref}"',start)
+        route=source[start:end]
+        self.assertIn('_require_studio_nginx(request)',route)
+        self.assertIn('get_public_project_row(conn, project_ref)',route)
+        self.assertNotIn('project_name_history',route)
+    def test_gateway_signature_uses_the_original_public_reference(self):
+        source=(ROOT/'studio/nginx/lua/security/projects_api_signer.lua').read_text()
+        self.assertIn('content_ref ~= ngx.ctx.studio_request_project_ref',source)
+        self.assertIn('append_query("/api/projects/" .. content_ref .. "/content" .. resource)',source)
+if __name__ == '__main__': unittest.main()

@@ -15,6 +15,8 @@ PROJECTS_ROOT="$PROJECT_ROOT/projects"
 BACKUPS_ROOT="$PROJECT_ROOT/backups"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/backup_core.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/vector_lifecycle.sh"
 
 NAME_RE='^[a-z_][a-z0-9_]{2,39}$'
 UUID_RE='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
@@ -37,11 +39,28 @@ set -a
 source "$PROJECT_ROOT/.env"
 source "$PROJECT_DIR/.env"
 set +a
-for variable in JWT_SECRET PROJECT_UUID; do
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+for variable in JWT_SECRET PROJECT_UUID SERVICE_ROLE_KEY_PROJETO \
+  S3_PROTOCOL_CREDENTIAL_ID S3_PROTOCOL_ACCESS_KEY_ID \
+  S3_PROTOCOL_ACCESS_KEY_SECRET S3_PROTOCOL_ENABLED VECTOR_BUCKETS_ENABLED; do
   [[ -n "${!variable:-}" ]] || die "$variable ausente"
 done
 PROJECT_UUID="$(echo "$PROJECT_UUID" | tr '[:upper:]' '[:lower:]')"
 [[ "$PROJECT_UUID" =~ $UUID_RE ]] || die "PROJECT_UUID invalido"
+export PROJECT_UUID SERVICE_ROLE_KEY_PROJETO S3_PROTOCOL_CREDENTIAL_ID \
+  S3_PROTOCOL_ACCESS_KEY_ID S3_PROTOCOL_ACCESS_KEY_SECRET VECTOR_BUCKETS_ENABLED
+storage_validate_bool VECTOR_BUCKETS_ENABLED "$VECTOR_BUCKETS_ENABLED" \
+  || die "VECTOR_BUCKETS_ENABLED invalido"
+storage_validate_bool S3_PROTOCOL_ENABLED "$S3_PROTOCOL_ENABLED" \
+  || die "S3_PROTOCOL_ENABLED invalido"
+vector_validate_s3_credentials || die "Credenciais SigV4 invalidas"
+storage_assert_project_identity "$PROJECT" "$PROJECT_UUID" \
+  || die "Identidade Storage diverge do control plane"
+storage_wait_global || die "Storage compartilhado indisponivel"
+storage_validate_tenant "$PROJECT_UUID" "$SERVICE_ROLE_KEY_PROJETO" \
+  "$S3_PROTOCOL_ACCESS_KEY_ID" "$S3_PROTOCOL_ACCESS_KEY_SECRET" \
+  "$S3_PROTOCOL_ENABLED" "$VECTOR_BUCKETS_ENABLED" \
+  || die "Tenant Storage nao esta saudavel"
 
 for container in supabase-db supabase-pooler; do
   docker inspect "$container" >/dev/null 2>&1 || die "Container $container ausente"
@@ -54,10 +73,38 @@ DEST_DIR="$BACKUPS_ROOT/$PROJECT_UUID/$BACKUP_ID"
 mkdir -p "$BACKUPS_ROOT/$PROJECT_UUID"
 
 STOPPED_CONTAINERS=""
+STORAGE_TENANT_QUIESCED=0
+RESUME_MAX_ATTEMPTS=5
+RESUME_RETRY_DELAY_SECONDS=5
 
 restart_stopped() {
   [[ -n "$STOPPED_CONTAINERS" ]] || return 0
-  backup_start_project_containers "$PROJECT" "$STOPPED_CONTAINERS" || return 1
+  local attempt=1
+  while [[ "$attempt" -le "$RESUME_MAX_ATTEMPTS" ]]; do
+    backup_start_project_containers "$PROJECT" "$STOPPED_CONTAINERS" && return 0
+    [[ "$attempt" -lt "$RESUME_MAX_ATTEMPTS" ]] || return 1
+    sleep "$RESUME_RETRY_DELAY_SECONDS"
+    attempt=$((attempt + 1))
+  done
+  return 1
+}
+
+resume_storage_tenant() {
+  [[ "$STORAGE_TENANT_QUIESCED" -eq 1 ]] || return 0
+  local attempt=1
+  while [[ "$attempt" -le "$RESUME_MAX_ATTEMPTS" ]]; do
+    if storage_patch_tenant_connection "$PROJECT_UUID" "$PROJECT" \
+      && storage_validate_tenant "$PROJECT_UUID" "$SERVICE_ROLE_KEY_PROJETO" \
+        "$S3_PROTOCOL_ACCESS_KEY_ID" "$S3_PROTOCOL_ACCESS_KEY_SECRET" \
+        "$S3_PROTOCOL_ENABLED" "$VECTOR_BUCKETS_ENABLED"; then
+      STORAGE_TENANT_QUIESCED=0
+      return 0
+    fi
+    [[ "$attempt" -lt "$RESUME_MAX_ATTEMPTS" ]] || return 1
+    sleep "$RESUME_RETRY_DELAY_SECONDS"
+    attempt=$((attempt + 1))
+  done
+  return 1
 }
 
 on_error() {
@@ -66,7 +113,14 @@ on_error() {
   set +e
   echo "❌ Backup falhou; religando servicos do projeto..." >&2
   rm -rf "${DEST_DIR}.tmp"
-  restart_stopped || echo "⚠️ Nao foi possivel religar todos os servicos de $PROJECT" >&2
+  if ! resume_storage_tenant; then
+    echo "⚠️ Nao foi possivel reativar o tenant Storage de $PROJECT" >&2
+    echo "HOST_AGENT_STORAGE_RESUME_FAILED=1 project=${PROJECT}" >&2
+  fi
+  if ! restart_stopped; then
+    echo "⚠️ Nao foi possivel religar todos os servicos de $PROJECT" >&2
+    echo "HOST_AGENT_SERVICES_RESTART_FAILED=1 project=${PROJECT}" >&2
+  fi
   exit "$status"
 }
 trap on_error ERR
@@ -81,12 +135,19 @@ say "Parando servicos do projeto $PROJECT..."
 STOPPED_CONTAINERS="$(backup_stop_project_containers "$PROJECT")"
 code="$(backup_http_code supabase-pooler GET "/api/tenants/$PROJECT/terminate" "$GLOBAL_ANON_TOKEN")"
 backup_accepted_code "$code" 200 204 404 || die "Supavisor nao encerrou pools (HTTP $code)"
+STORAGE_TENANT_QUIESCED=1
+storage_quiesce_tenant "$PROJECT_UUID" "$PROJECT" "$SERVICE_ROLE_KEY_PROJETO" \
+  || die "Storage nao bloqueou a data plane do tenant"
+docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
+  "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$DB' AND usename = 'supabase_storage_admin' AND pid <> pg_backend_pid();" \
+  >/dev/null
 backup_progress services_stopped
 
 say "Capturando banco e storage..."
-backup_capture "$PROJECT" "$PROJECT_DIR" "$DEST_DIR"
+backup_capture "$PROJECT" "$DEST_DIR"
 
 say "Religando servicos do projeto..."
+resume_storage_tenant || die "Backup concluido, mas falhou ao reativar o tenant Storage"
 restart_stopped || die "Backup concluido, mas falhou ao religar servicos"
 STOPPED_CONTAINERS=""
 backup_progress services_restarted

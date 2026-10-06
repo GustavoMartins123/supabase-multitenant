@@ -7,10 +7,10 @@ if not email or email == "" then
     return ngx.exit(ngx.HTTP_UNAUTHORIZED)
 end
 
+local _, canonical_groups = user_context_headers.apply(email, groups)
+groups = canonical_groups
 local is_admin = admin_groups.is_admin(groups)
 if not is_admin then
     ngx.log(ngx.ERR, "[ALL-USERS] User not admin: ", email, " groups: ", groups)
     return ngx.exit(ngx.HTTP_FORBIDDEN)
 end
-
-user_context_headers.apply(email, groups)

@@ -315,8 +315,9 @@ class _StatusSectionState extends ConsumerState<StatusSection> {
           ],
         ),
         content: const Text(
-          'Todos os containers serão destruídos e recriados (down + up). '
-          'Isso aplica alterações no .env mas causa indisponibilidade temporária.',
+          'Os containers pertencentes ao projeto serão recriados. A configuração '
+          'do tenant Storage será atualizada sem reiniciar o Storage compartilhado. '
+          'O projeto terá indisponibilidade temporária.',
           style: TextStyle(color: SupabaseColors.textSecondary, fontSize: 13),
         ),
         actions: [
@@ -346,7 +347,6 @@ class _StatusSectionState extends ConsumerState<StatusSection> {
         'auth',
         'rest',
         'storage',
-        'imgproxy',
         'nginx',
         'meta',
       ];

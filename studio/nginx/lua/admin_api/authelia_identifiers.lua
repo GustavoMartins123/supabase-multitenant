@@ -1,11 +1,14 @@
 local lyaml = require("lyaml")
 local shell = require("resty.shell")
+local file_store = require("admin_api.authelia_file_store")
 
 local IDS_PATH = "/config/ids.yml"
 local CONFIG_PATH = "/config/configuration.runtime.yml"
 local AUTHELIA_BIN = "/usr/local/bin/authelia"
 local OPENID_SERVICE = "openid"
 local COMMAND_TIMEOUT_MS = 10000
+local IDS_LOCK = "ids.yml"
+local FILE_MODE = 438 -- 0666
 
 local M = {}
 
@@ -14,40 +17,36 @@ local function trim(value)
 end
 
 local function read_document()
-    local handle, err = io.open(IDS_PATH, "r")
+    local handle, err = io.open(IDS_PATH, "rb")
     if not handle then
-        return { identifiers = {} }, nil
+        return nil, "ids.yml indisponivel ou vazio; execute a configuracao canonica"
     end
 
     local content = handle:read("*a") or ""
     handle:close()
 
     if content:gsub("%s+", "") == "" then
-        return { identifiers = {} }, nil
+        return nil, "ids.yml indisponivel ou vazio; execute a configuracao canonica"
     end
 
-    local document = lyaml.load(content)
-    if type(document) ~= "table" then
+    local ok, document = pcall(lyaml.load, content)
+    if not ok or type(document) ~= "table" then
         return nil, "ids.yml invalido"
     end
 
     if type(document.identifiers) ~= "table" then
-        document.identifiers = {}
+        return nil, "ids.yml sem lista de identifiers"
     end
 
     return document, nil
 end
 
 local function write_document(document)
-    local serialized = lyaml.dump({ document })
-    local handle, err = io.open(IDS_PATH, "w")
-    if not handle then
-        return nil, err
+    local ok, serialized = pcall(lyaml.dump, { document })
+    if not ok or type(serialized) ~= "string" then
+        return nil, serialized or "falha ao serializar ids.yml"
     end
-
-    handle:write(serialized)
-    handle:close()
-    return true
+    return file_store.atomic_write(IDS_PATH, serialized, FILE_MODE)
 end
 
 local function is_safe_username(username)
@@ -55,7 +54,8 @@ local function is_safe_username(username)
 end
 
 local function run_authelia_command(args)
-    local ok, stdout, stderr, reason, status = shell.run(args, nil, COMMAND_TIMEOUT_MS, 65536)
+    local ok, stdout, stderr, reason, status =
+        shell.run(args, nil, COMMAND_TIMEOUT_MS, 65536)
     if ok and status == 0 then
         return true, stdout
     end
@@ -70,7 +70,12 @@ local function run_authelia_command(args)
 end
 
 local function export_identifiers()
-    local tmp_path = string.format("%s.tmp.%s.%s", IDS_PATH, tostring(ngx.worker.pid()), tostring(math.random(10000, 99999)))
+    local tmp_path = string.format(
+        "%s.tmp.%s.%s",
+        IDS_PATH,
+        tostring(ngx.worker.pid()),
+        tostring(math.floor(ngx.now() * 1000000))
+    )
     os.remove(tmp_path)
 
     local ok, err = run_authelia_command({
@@ -87,6 +92,12 @@ local function export_identifiers()
     if not ok then
         os.remove(tmp_path)
         return nil, err
+    end
+
+    local mode_ok, mode_err = file_store.chmod(tmp_path, FILE_MODE)
+    if not mode_ok then
+        os.remove(tmp_path)
+        return nil, mode_err
     end
 
     local renamed, rename_err = os.rename(tmp_path, IDS_PATH)
@@ -125,22 +136,42 @@ local function generate_identifier(username)
     return export_identifiers()
 end
 
-function M.list_identifiers_by_username()
-    local document, err = read_document()
-    if not document then
-        return nil, err
-    end
-
-    local identifiers = {}
-    for _, entry in ipairs(document.identifiers or {}) do
-        local username = trim(entry.username)
-        local identifier = trim(entry.identifier)
-        if entry.service == OPENID_SERVICE and username ~= "" and identifier ~= "" then
-            identifiers[username] = identifier
+local function index_document(document)
+    local identifiers, identity_owners = {}, {}
+    local count = 0
+    for index in pairs(document.identifiers) do
+        count = count + 1
+        if type(index) ~= "number" or index % 1 ~= 0 or index < 1 or index > #document.identifiers then
+            return nil, "ids.yml identifiers deve ser uma lista densa"
         end
     end
+    if count ~= #document.identifiers then return nil, "ids.yml identifiers deve ser uma lista densa" end
+    for _, entry in ipairs(document.identifiers) do
+        if type(entry) ~= "table" then return nil, "entrada invalida em ids.yml" end
+        if entry.service == OPENID_SERVICE then
+            if type(entry.username) ~= "string" or type(entry.identifier) ~= "string" then
+                return nil, "identidade openid invalida"
+            end
+            local username, identifier = trim(entry.username), trim(entry.identifier)
+            if username == "" or not is_safe_username(username) or identifier == ""
+                or identifiers[username] or identity_owners[identifier] then
+                return nil, "identidade openid vazia ou duplicada"
+            end
+            identifiers[username] = identifier
+            identity_owners[identifier] = username
+        end
+    end
+    return identifiers
+end
 
-    return identifiers, nil
+local function identifiers_by_username()
+    local document, err = read_document()
+    if not document then return nil, err end
+    return index_document(document)
+end
+
+function M.list_identifiers_by_username()
+    return identifiers_by_username()
 end
 
 function M.find_identifier(username)
@@ -149,7 +180,7 @@ function M.find_identifier(username)
         return nil, "username ausente"
     end
 
-    local identifiers, err = M.list_identifiers_by_username()
+    local identifiers, err = identifiers_by_username()
     if not identifiers then
         return nil, err
     end
@@ -157,36 +188,58 @@ function M.find_identifier(username)
     return identifiers[clean_username], nil
 end
 
-function M.ensure_identifier(username)
-    local clean_username = trim(username)
-    if clean_username == "" then
-        return nil, false, "username ausente"
-    end
-
-    local document, err = read_document()
-    if not document then
-        return nil, false, err
-    end
-
-    for _, entry in ipairs(document.identifiers or {}) do
-        local entry_username = trim(entry.username)
-        local entry_identifier = trim(entry.identifier)
-        if entry.service == OPENID_SERVICE and entry_username == clean_username and entry_identifier ~= "" then
-            return entry_identifier, false, nil
+function M.ensure_identifiers(usernames)
+    if type(usernames) ~= "table" then return nil, nil, "lista de usernames invalida" end
+    local count = 0
+    for index in pairs(usernames) do
+        count = count + 1
+        if type(index) ~= "number" or index % 1 ~= 0 or index < 1 or index > #usernames then
+            return nil, nil, "lista de usernames invalida"
         end
     end
-
-    local ok, generate_err = generate_identifier(clean_username)
-    if not ok then
-        return nil, false, generate_err
+    if count ~= #usernames then return nil, nil, "lista de usernames invalida" end
+    local requested = {}
+    local seen = {}
+    for _, username in ipairs(usernames) do
+        if type(username) ~= "string" or trim(username) == "" then
+            return nil, nil, "username ausente ou invalido"
+        end
+        local clean = trim(username)
+        if seen[clean] then return nil, nil, "username duplicado" end
+        seen[clean] = true
+        requested[#requested + 1] = clean
     end
+    local result, lock_err = file_store.with_lock(IDS_LOCK, function()
+        local identifiers, read_err = identifiers_by_username()
+        if not identifiers then return { error = read_err } end
+        local created = {}
+        for _, username in ipairs(requested) do
+            created[username] = false
+            if not identifiers[username] then
+                local generated, generate_err = generate_identifier(username)
+                if not generated then return { error = generate_err } end
+                identifiers, read_err = identifiers_by_username()
+                if not identifiers then return { error = read_err } end
+                if not identifiers[username] then
+                    return { error = "opaque identifier nao encontrado apos generate/export" }
+                end
+                created[username] = true
+            end
+        end
+        return { identifiers = identifiers, created = created }
+    end)
+    if not result then return nil, nil, lock_err end
+    if result.error then return nil, nil, result.error end
+    return result.identifiers, result.created, nil
+end
 
-    local identifier, find_err = M.find_identifier(clean_username)
-    if not identifier or identifier == "" then
-        return nil, true, find_err or "opaque identifier nao encontrado apos generate/export"
-    end
-
-    return identifier, true, nil
+function M.ensure_identifier(username)
+    if type(username) ~= "string" or trim(username) == "" then return nil, false, "username ausente ou invalido" end
+    local identifiers, created, err = M.ensure_identifiers({ username })
+    if not identifiers then return nil, false, err end
+    local clean = trim(username)
+    if not identifiers[clean] then return nil, false, "username ausente" end
+    return identifiers[clean], created[clean], nil
 end
 
 function M.remove_identifier(username)
@@ -195,29 +248,37 @@ function M.remove_identifier(username)
         return nil, "username ausente"
     end
 
-    local document, err = read_document()
-    if not document then
-        return nil, err
-    end
-
-    local filtered = {}
-    local removed = false
-
-    for _, entry in ipairs(document.identifiers or {}) do
-        local entry_username = trim(entry.username)
-        if entry.service == OPENID_SERVICE and entry_username == clean_username then
-            removed = true
-        else
-            table.insert(filtered, entry)
+    local result, lock_err = file_store.with_lock(IDS_LOCK, function()
+        local document, read_err = read_document()
+        if not document then
+            return nil, read_err
         end
-    end
 
-    if not removed then
-        return true
-    end
+        local filtered = {}
+        local removed = false
+        for _, entry in ipairs(document.identifiers) do
+            local entry_username = trim(entry.username)
+            if entry.service == OPENID_SERVICE
+                and entry_username == clean_username
+            then
+                removed = true
+            else
+                table.insert(filtered, entry)
+            end
+        end
 
-    document.identifiers = filtered
-    return write_document(document)
+        if not removed then
+            return true
+        end
+
+        document.identifiers = filtered
+        return write_document(document)
+    end)
+
+    if result == nil then
+        return nil, lock_err
+    end
+    return result, lock_err
 end
 
 return M

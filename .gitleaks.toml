@@ -1,0 +1,62 @@
+title = "supabase-multitenant gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "supabase-multitenant-publishable-key"
+description = "Opaque publishable API key: sb_publishable_<43 base64url>_<8 checksum> (see app/opaque_keys.py TOKEN_RE)"
+regex = '''sb_publishable_[A-Za-z0-9_-]{43}_[A-Za-z0-9_-]{8}'''
+tags = ["key", "supabase-multitenant", "publishable"]
+
+[[rules]]
+id = "supabase-multitenant-secret-key"
+description = "Opaque secret API key: sb_secret_<43 base64url>_<8 checksum> (see app/opaque_keys.py TOKEN_RE). Highest severity: plaintext secret keys."
+regex = '''sb_secret_[A-Za-z0-9_-]{43}_[A-Za-z0-9_-]{8}'''
+tags = ["key", "supabase-multitenant", "secret"]
+
+[[rules]]
+id = "supabase-multitenant-anon-key-jwt"
+description = "Legacy anon key: HS256 JWT minted by generate_jwt() with payload {\"role\":\"anon\",...}. Internal to the architecture, but a leak lets anyone reach PostgREST/Realtime/Storage of the tenant with RLS-only protection."
+regex = '''eyJ[A-Za-z0-9_-]{10,}\.eyJyb2xlIjoiYW5vbiIs[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{20,}'''
+tags = ["key", "jwt", "supabase-multitenant", "anon"]
+
+[[rules]]
+id = "supabase-multitenant-service-role-key-jwt"
+description = "Legacy service_role key: HS256 JWT minted by generate_jwt() with payload {\"role\":\"service_role\",...}. Highest severity: bypasses RLS on the whole tenant."
+regex = '''eyJ[A-Za-z0-9_-]{10,}\.eyJyb2xlIjoic2VydmljZV9yb2xl[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{20,}'''
+tags = ["key", "jwt", "supabase-multitenant", "service_role"]
+
+[[rules]]
+id = "supabase-multitenant-role-key-assignment"
+description = "JWT assigned to an anon/service_role variable or column (ANON_KEY_PROJETO, SERVICE_ROLE_KEY_PROJETO, FUNCTIONS_SUPABASE_*, anon_key, service_role). Catches claim orders the payload-prefix rules miss, e.g. keys minted outside generate_jwt()."
+regex = '''(?i)\b[a-z0-9_]*(?:anon_key|anon_token|service_role_key|service_role|service_key|service_token)[a-z0-9_]*['"]?\s*[:=>]{1,2}\s*['"]?(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,})'''
+secretGroup = 1
+tags = ["key", "jwt", "supabase-multitenant", "anon", "service_role"]
+
+[[allowlists]]
+description = "placeholder tokens in documentation examples (not real keys)"
+paths = [
+  '''docs/12-opaque-api-key-operations\.md''',
+  '''docs/pt-br/12-chaves-api-opacas\.md''',
+]
+regexes = ['''SB_PUBLISHABLE''']
+
+[[allowlists]]
+description = "vendored test data inside local virtualenvs (never committed)"
+paths = ['''\.venv/''', '''site-packages/''']
+
+[[allowlists]]
+description = "synthetic unsigned JWT fixture for sanitize_output tests"
+paths = ['''tests/smoke/test_host_agent_contract\.py''']
+fingerprint = "tests/smoke/test_host_agent_contract.py:jwt:658"
+
+[[allowlists]]
+description = "synthetic unsigned JWT fixture pinned by the gitleaks rules contract test (decodes to {\"role\":\"anon\"} with literal signature \"signature\")"
+paths = ['''tests/smoke/test_gitleaks_config\.py''']
+regexes = ['''eyJhbGciOiJIUzI1NiJ9\.eyJyb2xlIjoiYW5vbiJ9\.c2lnbmF0dXJl''']
+
+[[allowlists]]
+description = "internal geoip-api service URL, not a credential"
+paths = ['''servidor/key-authorizer/admission\.py''']
+regexes = ['''geoip-api:8000/v1/ip/country''']

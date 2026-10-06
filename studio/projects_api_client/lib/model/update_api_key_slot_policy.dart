@@ -1,0 +1,134 @@
+//
+// AUTO-GENERATED FILE, DO NOT MODIFY!
+//
+// @dart=2.18
+
+// ignore_for_file: unused_element, unused_import
+// ignore_for_file: always_put_required_named_parameters_first
+// ignore_for_file: constant_identifier_names
+// ignore_for_file: lines_longer_than_80_chars
+
+part of openapi.api;
+
+class UpdateApiKeySlotPolicy {
+  /// Returns a new [UpdateApiKeySlotPolicy] instance.
+  UpdateApiKeySlotPolicy({
+    this.allowedServices = const [],
+    this.automaticRotationEnabled,
+    this.rotationIntervalDays,
+  });
+
+  List<String>? allowedServices;
+
+  bool? automaticRotationEnabled;
+
+  /// Minimum value: 1
+  /// Maximum value: 3650
+  int? rotationIntervalDays;
+
+  @override
+  bool operator ==(Object other) => identical(this, other) || other is UpdateApiKeySlotPolicy &&
+    _deepEquality.equals(other.allowedServices, allowedServices) &&
+    other.automaticRotationEnabled == automaticRotationEnabled &&
+    other.rotationIntervalDays == rotationIntervalDays;
+
+  @override
+  int get hashCode =>
+    // ignore: unnecessary_parenthesis
+    (allowedServices == null ? 0 : allowedServices!.hashCode) +
+    (automaticRotationEnabled == null ? 0 : automaticRotationEnabled!.hashCode) +
+    (rotationIntervalDays == null ? 0 : rotationIntervalDays!.hashCode);
+
+  @override
+  String toString() => 'UpdateApiKeySlotPolicy[allowedServices=$allowedServices, automaticRotationEnabled=$automaticRotationEnabled, rotationIntervalDays=$rotationIntervalDays]';
+
+  Map<String, dynamic> toJson() {
+    final json = <String, dynamic>{};
+    if (this.allowedServices != null) {
+      json[r'allowed_services'] = this.allowedServices;
+    } else {
+      json[r'allowed_services'] = null;
+    }
+    if (this.automaticRotationEnabled != null) {
+      json[r'automatic_rotation_enabled'] = this.automaticRotationEnabled;
+    } else {
+      json[r'automatic_rotation_enabled'] = null;
+    }
+    if (this.rotationIntervalDays != null) {
+      json[r'rotation_interval_days'] = this.rotationIntervalDays;
+    } else {
+      json[r'rotation_interval_days'] = null;
+    }
+    return json;
+  }
+
+  /// Returns a new [UpdateApiKeySlotPolicy] instance and imports its values from
+  /// [value] if it's a [Map], null otherwise.
+  // ignore: prefer_constructors_over_static_methods
+  static UpdateApiKeySlotPolicy? fromJson(dynamic value) {
+    if (value is Map) {
+      final json = value.cast<String, dynamic>();
+
+      const nullableKeys = <String>{r'allowed_services', r'automatic_rotation_enabled', r'rotation_interval_days'};
+      for (final key in requiredKeys) {
+        if (!json.containsKey(key) || (json[key] == null && !nullableKeys.contains(key))) {
+          throw FormatException('Invalid required field: $key');
+        }
+      }
+
+      return UpdateApiKeySlotPolicy(
+        allowedServices: json[r'allowed_services'] is Iterable
+            ? (json[r'allowed_services'] as Iterable).cast<String>().toList(growable: false)
+            : const [],
+        automaticRotationEnabled: mapValueOfType<bool>(json, r'automatic_rotation_enabled'),
+        rotationIntervalDays: mapValueOfType<int>(json, r'rotation_interval_days'),
+      );
+    }
+    return null;
+  }
+
+  static List<UpdateApiKeySlotPolicy> listFromJson(dynamic json, {bool growable = false,}) {
+    final result = <UpdateApiKeySlotPolicy>[];
+    if (json is List && json.isNotEmpty) {
+      for (final row in json) {
+        final value = UpdateApiKeySlotPolicy.fromJson(row);
+        if (value != null) {
+          result.add(value);
+        }
+      }
+    }
+    return result.toList(growable: growable);
+  }
+
+  static Map<String, UpdateApiKeySlotPolicy> mapFromJson(dynamic json) {
+    final map = <String, UpdateApiKeySlotPolicy>{};
+    if (json is Map && json.isNotEmpty) {
+      json = json.cast<String, dynamic>(); // ignore: parameter_assignments
+      for (final entry in json.entries) {
+        final value = UpdateApiKeySlotPolicy.fromJson(entry.value);
+        if (value != null) {
+          map[entry.key] = value;
+        }
+      }
+    }
+    return map;
+  }
+
+  // maps a json object with a list of UpdateApiKeySlotPolicy-objects as value to a dart map
+  static Map<String, List<UpdateApiKeySlotPolicy>> mapListFromJson(dynamic json, {bool growable = false,}) {
+    final map = <String, List<UpdateApiKeySlotPolicy>>{};
+    if (json is Map && json.isNotEmpty) {
+      // ignore: parameter_assignments
+      json = json.cast<String, dynamic>();
+      for (final entry in json.entries) {
+        map[entry.key] = UpdateApiKeySlotPolicy.listFromJson(entry.value, growable: growable,);
+      }
+    }
+    return map;
+  }
+
+  /// The list of required keys that must be present in a JSON.
+  static const requiredKeys = <String>{
+  };
+}
+

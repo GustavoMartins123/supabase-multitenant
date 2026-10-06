@@ -1,0 +1,189 @@
+#!/usr/bin/env bash
+RESOURCE_SERVICES=(NGINX AUTH REST)
+RESOURCE_MEM_WEIGHTS=(1 2 5)
+RESOURCE_CPU_WEIGHTS=(1 4 1)
+
+RESOURCE_CPU_FLOORS_CENTI=(40 120 25)
+RESOURCE_PIDS_FLOOR=(128 256 512)
+RESOURCE_MEM_FLOORS_MIB=(16 64 32)
+RESOURCE_GHC_HEAP_PERCENT=80
+
+resource_profiles_error() {
+    echo "Erro: $*" >&2
+    exit 1
+}
+
+resource_env_value() {
+    sed -n "s/^$1=//p" "$2" | head -1 | tr -d '"'"'"''
+}
+
+resource_mem_to_mib() {
+    local raw="${1,,}" number unit
+    number="${raw%[mg]}"
+    unit="${raw#"$number"}"
+    [[ "$number" =~ ^[0-9]+$ && -n "$number" ]] \
+        || resource_profiles_error "memoria invalida: $1 (use 256m ou 1g)"
+    case "$unit" in
+        m) printf '%s' "$number" ;;
+        g) printf '%s' "$((number * 1024))" ;;
+        *) resource_profiles_error "memoria invalida: $1 (use sufixo m ou g)" ;;
+    esac
+}
+
+resource_cpus_to_centi() {
+    local raw="$1" int frac
+    [[ "$raw" =~ ^([0-9]+)(\.([0-9]{1,2}))?$ ]] \
+        || resource_profiles_error "cpus invalido: $raw (use 0.50, 1.50, 3.00)"
+    int="${BASH_REMATCH[1]}"
+    frac="${BASH_REMATCH[3]:-0}"
+    while [ "${#frac}" -lt 2 ]; do frac="${frac}0"; done
+    printf '%s' "$((10#$int * 100 + 10#$frac))"
+}
+
+resource_split() {
+    local total="$1"; shift
+    local -a weights=("$@")
+    local sum=0 weight index used=0 share
+    for weight in "${weights[@]}"; do sum=$((sum + weight)); done
+    local -a shares=()
+    for index in "${!weights[@]}"; do
+        if [ "$index" -eq $((${#weights[@]} - 1)) ]; then
+            share=$((total - used))
+        else
+            share=$((total * weights[index] / sum))
+            used=$((used + share))
+        fi
+        [ "$share" -ge 1 ] \
+            || resource_profiles_error "perfil pequeno demais para ratear: total=$total"
+        shares+=("$share")
+    done
+    printf '%s\n' "${shares[@]}"
+}
+
+resource_split_cpu() {
+    local total="$1" floor_total=0 weight_total=0 index used=0 extra
+    for index in "${!RESOURCE_SERVICES[@]}"; do
+        floor_total=$((floor_total + RESOURCE_CPU_FLOORS_CENTI[index]))
+        weight_total=$((weight_total + RESOURCE_CPU_WEIGHTS[index]))
+    done
+    [ "$total" -ge "$floor_total" ] \
+        || resource_profiles_error "perfil de CPU precisa de pelo menos $floor_total centi-CPU"
+    local remaining=$((total - floor_total))
+    for index in "${!RESOURCE_SERVICES[@]}"; do
+        if [ "$index" -eq $((${#RESOURCE_SERVICES[@]} - 1)) ]; then
+            extra=$((remaining - used))
+        else
+            extra=$((remaining * RESOURCE_CPU_WEIGHTS[index] / weight_total))
+            used=$((used + extra))
+        fi
+        printf '%s\n' "$((RESOURCE_CPU_FLOORS_CENTI[index] + extra))"
+    done
+}
+
+apply_project_resource_limits() {
+    local root_env="$1" project_env="$2" profile_override="${3:-}" source_env="${4:-}"
+    [ -f "$root_env" ] || resource_profiles_error ".env raiz ausente: $root_env"
+    [ -f "$project_env" ] || resource_profiles_error ".env do projeto ausente: $project_env"
+
+    local profile upper mem cpus pids key
+    if [ -n "$profile_override" ]; then
+        profile="$profile_override"
+    else
+        # Perfil proprio do projeto > .env de origem (renomear/duplicar) >
+        # padrao global.
+        profile="$(resource_env_value PROJECT_RESOURCE_PROFILE "$project_env")"
+        if [ -z "$profile" ] && [ -n "$source_env" ] && [ -f "$source_env" ]; then
+            profile="$(resource_env_value PROJECT_RESOURCE_PROFILE "$source_env")"
+        fi
+        profile="${profile:-$(resource_env_value PROJECT_RESOURCE_PROFILE "$root_env")}"
+        profile="${profile:-medium}"
+    fi
+    case "$profile" in
+        small|medium|large|custom) ;;
+        *) resource_profiles_error "PROJECT_RESOURCE_PROFILE invalido: $profile (use small, medium, large ou custom)" ;;
+    esac
+    upper="${profile^^}"
+
+    mem="$(resource_env_value "PROJECT_RES_${upper}_MEMORY" "$root_env")"
+    cpus="$(resource_env_value "PROJECT_RES_${upper}_CPUS" "$root_env")"
+    pids="$(resource_env_value "PROJECT_RES_${upper}_PIDS" "$root_env")"
+    if [ "$upper" = "CUSTOM" ]; then
+        # Precedencia: .env do proprio projeto > ambiente de origem
+        # (duplicar/renomear) > slot global PROJECT_RES_CUSTOM_*.
+        local lmem lcpus lpids smem scpus spids
+        lmem="$(resource_env_value PROJECT_RES_CUSTOM_MEMORY "$project_env")"
+        lcpus="$(resource_env_value PROJECT_RES_CUSTOM_CPUS "$project_env")"
+        lpids="$(resource_env_value PROJECT_RES_CUSTOM_PIDS "$project_env")"
+        if [ -n "$source_env" ] && [ -f "$source_env" ]; then
+            smem="$(resource_env_value PROJECT_RES_CUSTOM_MEMORY "$source_env")"
+            scpus="$(resource_env_value PROJECT_RES_CUSTOM_CPUS "$source_env")"
+            spids="$(resource_env_value PROJECT_RES_CUSTOM_PIDS "$source_env")"
+        fi
+        mem="${lmem:-${smem:-${mem:-}}}"
+        cpus="${lcpus:-${scpus:-${cpus:-}}}"
+        pids="${lpids:-${spids:-${pids:-}}}"
+    fi
+    for pair in "PROJECT_RES_${upper}_MEMORY:$mem" \
+        "PROJECT_RES_${upper}_CPUS:$cpus" \
+        "PROJECT_RES_${upper}_PIDS:$pids"; do
+        key="${pair%%:*}"
+        if [ -z "${pair#*:}" ]; then
+            if [ "$upper" = "CUSTOM" ]; then
+                resource_profiles_error \
+                    "$key ausente: edite a capacidade pelo Studio ou defina PROJECT_RES_CUSTOM_MEMORY/CPUS/PIDS no .env do projeto"
+            fi
+            resource_profiles_error "$key ausente no .env raiz; atualize a partir do .env.example"
+        fi
+    done
+    [[ "$pids" =~ ^[0-9]+$ ]] || resource_profiles_error "PROJECT_RES_${upper}_PIDS invalido: $pids"
+
+    local -a mem_shares cpu_shares pids_shares
+    mapfile -t mem_shares < <(resource_split "$(resource_mem_to_mib "$mem")" "${RESOURCE_MEM_WEIGHTS[@]}")
+    local floor_index
+    for floor_index in "${!RESOURCE_SERVICES[@]}"; do
+        [ "${mem_shares[floor_index]}" -ge "${RESOURCE_MEM_FLOORS_MIB[floor_index]}" ] \
+            || resource_profiles_error \
+                "perfil $profile da apenas ${mem_shares[floor_index]}m ao ${RESOURCE_SERVICES[floor_index],,}; o minimo seguro e ${RESOURCE_MEM_FLOORS_MIB[floor_index]}m. Aumente PROJECT_RES_${upper}_MEMORY."
+    done
+    mapfile -t cpu_shares < <(resource_split_cpu "$(resource_cpus_to_centi "$cpus")")
+    local index_pids
+    pids_shares=()
+    for index_pids in "${!RESOURCE_SERVICES[@]}"; do
+        if [ "$pids" -gt "${RESOURCE_PIDS_FLOOR[index_pids]}" ]; then
+            pids_shares+=("$pids")
+        else
+            pids_shares+=("${RESOURCE_PIDS_FLOOR[index_pids]}")
+        fi
+    done
+
+    local temporary index service
+    temporary="$(mktemp "${project_env}.limits.XXXXXX")"
+    {
+        grep -vE '^PROJECT_(RESOURCE_PROFILE|MEM_LIMIT|CPUS|PIDS_LIMIT|REST_GHC_MAX_HEAP|RES_CUSTOM_(MEMORY|CPUS|PIDS)|(NGINX|AUTH|REST)_(MEM_LIMIT|CPUS|PIDS_LIMIT))=' \
+            "$project_env" || true
+        printf 'PROJECT_RESOURCE_PROFILE=%s\n' "$profile"
+        # Totais do projeto: referencia para a UI e para os limites derivados.
+        printf 'PROJECT_MEM_LIMIT=%s\n' "$mem"
+        printf 'PROJECT_CPUS=%s\n' "$cpus"
+        printf 'PROJECT_PIDS_LIMIT=%s\n' "$pids"
+        if [ "$upper" = "CUSTOM" ]; then
+            # Valores proprios persistidos tornam o perfil autossuficiente
+            # em rotacoes e regeneracoes seguintes deste projeto.
+            printf 'PROJECT_RES_CUSTOM_MEMORY=%s\n' "$mem"
+            printf 'PROJECT_RES_CUSTOM_CPUS=%s\n' "$cpus"
+            printf 'PROJECT_RES_CUSTOM_PIDS=%s\n' "$pids"
+        fi
+        for index in "${!RESOURCE_SERVICES[@]}"; do
+            service="${RESOURCE_SERVICES[index]}"
+            printf 'PROJECT_%s_MEM_LIMIT=%sm\n' "$service" "${mem_shares[index]}"
+            printf 'PROJECT_%s_CPUS=%d.%02d\n' "$service" \
+                "$((cpu_shares[index] / 100))" "$((cpu_shares[index] % 100))"
+            printf 'PROJECT_%s_PIDS_LIMIT=%s\n' "$service" "${pids_shares[index]}"
+        done
+        printf 'PROJECT_REST_GHC_MAX_HEAP=%sm\n' \
+            "$(( mem_shares[2] * RESOURCE_GHC_HEAP_PERCENT / 100 ))"
+    } > "$temporary"
+    # Preserva dono/permissões do arquivo original (600).
+    cat "$temporary" > "$project_env"
+    rm -f "$temporary"
+}

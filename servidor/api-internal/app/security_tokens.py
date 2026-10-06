@@ -5,11 +5,15 @@ import binascii
 import hashlib
 import hmac
 import json
+import re
 import time
 import uuid
 from typing import Any
 
 from fastapi import HTTPException, Request
+
+USER_TOKEN_AUDIENCE = "projects-api"
+_JTI_RE = re.compile(r"^[A-Za-z0-9_-]{22}$")
 
 
 def _decode_base64url_json(raw: str) -> dict[str, Any] | None:
@@ -85,6 +89,14 @@ def resolve_user_id_from_hmac_token(
         raise HTTPException(401, "X-User-Token expirado")
     if issued_at > current_time + max_clock_skew_seconds:
         raise HTTPException(401, "X-User-Token emitido no futuro")
+
+    audience = payload.get("aud")
+    if audience is not None and audience != USER_TOKEN_AUDIENCE:
+        raise HTTPException(401, "X-User-Token destinado a outro servico")
+
+    jti = payload.get("jti")
+    if jti is not None and not _JTI_RE.fullmatch(str(jti)):
+        raise HTTPException(401, "X-User-Token com jti inválido")
 
     try:
         return uuid.UUID(str(payload.get("sub") or ""))

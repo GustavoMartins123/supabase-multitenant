@@ -1,0 +1,925 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
+
+import '../../models/opaque_api_key.dart';
+import '../../models/client_configuration.dart';
+import '../../providers/opaque_api_keys_provider.dart';
+import '../../services/step_up_authentication_service.dart';
+import '../../supabase_colors.dart';
+import '../danger_button.dart';
+import '../secondary_button.dart';
+import '../section_widget.dart';
+import '../step_up_authentication_dialog.dart';
+import 'claimed_opaque_api_key_dialog.dart';
+import 'create_opaque_slot_dialog.dart';
+import 'expiration_policy_dialog.dart';
+import 'access_policy_dialog.dart';
+
+class OpaqueApiKeysSection extends ConsumerStatefulWidget {
+  const OpaqueApiKeysSection({
+    super.key,
+    required this.projectRef,
+    required this.publicBaseUrl,
+    required this.canManage,
+    required this.projectBusy,
+  });
+
+  final String projectRef;
+  final String publicBaseUrl;
+  final bool canManage;
+  final bool projectBusy;
+
+  @override
+  ConsumerState<OpaqueApiKeysSection> createState() =>
+      _OpaqueApiKeysSectionState();
+}
+
+class _OpaqueApiKeysSectionState extends ConsumerState<OpaqueApiKeysSection> {
+  OpaqueApiKeysController get _controller =>
+      ref.read(opaqueApiKeysProvider(widget.projectRef).notifier);
+
+  bool _interactionDisabled(OpaqueApiKeysState state) =>
+      widget.projectBusy || state.actionsLocked;
+
+  bool _managementDisabled(OpaqueApiKeysState state) =>
+      !widget.canManage || _interactionDisabled(state);
+
+  void _snack(String message, Color color) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: color),
+    );
+  }
+
+  void _showError(Object error) {
+    _snack(opaqueApiKeyErrorMessage(error), SupabaseColors.error);
+  }
+
+  Future<void> _runCommand(
+    Future<void> Function() command, {
+    String? successMessage,
+  }) async {
+    try {
+      await command();
+      if (successMessage != null) {
+        _snack(successMessage, SupabaseColors.success);
+      }
+    } catch (error) {
+      _showError(error);
+    }
+  }
+
+  Future<void> _refreshAfterSecret() async {
+    try {
+      await _controller.refresh();
+    } catch (error) {
+      _showError(error);
+    }
+  }
+
+  Future<bool> _confirm(String title, String message) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            backgroundColor: SupabaseColors.bg200,
+            title: Text(title),
+            content: Text(message),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancelar'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Confirmar'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  Future<String?> _requestStepUp({
+    required StepUpAction action,
+    required String resourceId,
+    required String title,
+    required String description,
+  }) {
+    final service = ref.read(stepUpAuthenticationServiceProvider);
+    return showStepUpAuthenticationDialog(
+      context,
+      title: title,
+      description: description,
+      authenticate: (password) => service.requestToken(
+        password: password,
+        action: action,
+        projectRef: widget.projectRef,
+        resourceId: resourceId,
+      ),
+    );
+  }
+
+  Future<void> _prepareMigration() async {
+    final confirmed = await _confirm(
+      'Preparar chaves opacas?',
+      'Duas chaves ainda rejeitadas serao criadas. O gateway legado continua '
+          'ativo ate o corte explicito.',
+    );
+    if (!confirmed) return;
+    await _runCommand(
+      _controller.prepareMigration,
+      successMessage: 'Migracao preparada. Revele e instale as duas chaves.',
+    );
+  }
+
+  Future<void> _cutover() async {
+    final confirmed = await _confirm(
+      'Ativar somente chaves opacas?',
+      'O gateway sera interrompido durante o corte. JWTs anon e service_role '
+          'deixarao de funcionar como API key externa imediatamente.',
+    );
+    if (!confirmed) return;
+    await _runCommand(
+      _controller.cutoverMigration,
+      successMessage: 'Gateway ativado em modo opaque-only.',
+    );
+  }
+
+  Future<void> _abortMigration() async {
+    final confirmed = await _confirm(
+      'Cancelar preparação opaca?',
+      'As duas chaves preparadas serão destruídas. O gateway legado não será '
+          'alterado e uma nova preparação poderá ser iniciada.',
+    );
+    if (!confirmed) return;
+    await _runCommand(
+      _controller.abortMigration,
+      successMessage: 'Preparação opaca cancelada.',
+    );
+  }
+
+  Future<void> _claim(OpaqueApiKeyReveal reveal) async {
+    try {
+      String? stepUpToken;
+      if (reveal.kind == 'secret') {
+        if (!widget.canManage) {
+          throw StateError(
+            'Apenas administradores podem revelar uma secret key.',
+          );
+        }
+        stepUpToken = await _requestStepUp(
+          action: StepUpAction.revealSecretKey,
+          resourceId: reveal.keyId,
+          title: 'Reautenticar para revelar secret key',
+          description: 'A chave possui privilegios de service_role.',
+        );
+        if (stepUpToken == null || !mounted) return;
+      }
+      final secret = await _controller.claimReveal(
+        reveal.keyId,
+        stepUpToken: stepUpToken,
+      );
+      stepUpToken = null;
+      if (!mounted) return;
+
+      var copied = false;
+      String? clipboardError;
+      try {
+        await Clipboard.setData(ClipboardData(text: secret));
+        copied = true;
+      } catch (error) {
+        clipboardError = opaqueApiKeyErrorMessage(error);
+      }
+      if (!mounted) return;
+
+      final copiedBeforeClose = await showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => ClaimedOpaqueApiKeyDialog(
+              secret: secret,
+              reveal: reveal,
+              initiallyCopied: copied,
+              initialClipboardError: clipboardError,
+            ),
+          ) ??
+          copied;
+      if (!mounted) return;
+      _snack(
+        copiedBeforeClose
+            ? 'Chave copiada para a área de transferência.'
+            : 'Chave exibida. O valor não foi copiado.',
+        copiedBeforeClose ? SupabaseColors.success : SupabaseColors.warning,
+      );
+      unawaited(_refreshAfterSecret());
+    } catch (error) {
+      _showError(error);
+    }
+  }
+
+  Future<void> _confirmInstallation(
+    OpaqueApiKeySlot slot,
+    OpaqueApiKeyVersion key,
+  ) async {
+    final confirmed = await _confirm(
+      'Confirmar instalacao?',
+      'Confirme somente depois que o consumidor estiver configurado com a '
+          'nova chave. O corte programado nao sera prorrogado.',
+    );
+    if (!confirmed) return;
+    await _runCommand(
+      () => _controller.confirmInstallation(slot.id, key.id),
+      successMessage: 'Instalacao confirmada.',
+    );
+  }
+
+  Future<void> _rotate(OpaqueApiKeySlot slot) async {
+    final confirmed = await _confirm(
+      'Rotacionar ${slot.name} agora?',
+      'A chave atual sera revogada sem periodo de sobreposicao e deixa de '
+          'ser consultavel.',
+    );
+    if (!confirmed) return;
+    try {
+      String? stepUpToken;
+      if (slot.kind == 'secret') {
+        stepUpToken = await _requestStepUp(
+          action: StepUpAction.rotateSecretKey,
+          resourceId: slot.id,
+          title: 'Reautenticar para rotacionar secret key',
+          description:
+              'A rotacao revogara a chave atual e emitira uma nova secret key.',
+        );
+        if (stepUpToken == null || !mounted) return;
+      }
+      final issued = await _controller.rotateSlot(
+        slot.id,
+        stepUpToken: stepUpToken,
+      );
+      stepUpToken = null;
+      if (!mounted) return;
+      await _showIssuedKey(issued);
+      if (mounted) unawaited(_refreshAfterSecret());
+    } catch (error) {
+      _showError(error);
+    }
+  }
+
+  Future<void> _disable(OpaqueApiKeySlot slot) async {
+    final confirmed = await _confirm(
+      'Revogar ${slot.name}?',
+      'Todas as versoes desse slot serao revogadas. Os demais slots nao serao alterados.',
+    );
+    if (!confirmed) return;
+    try {
+      String? stepUpToken;
+      if (slot.kind == 'secret') {
+        stepUpToken = await _requestStepUp(
+          action: StepUpAction.revokeSecretKey,
+          resourceId: slot.id,
+          title: 'Reautenticar para revogar secret key',
+          description:
+              'A revogacao invalida todas as versoes desta secret key.',
+        );
+        if (stepUpToken == null || !mounted) return;
+      }
+      await _runCommand(
+        () => _controller.disableSlot(
+          slot.id,
+          stepUpToken: stepUpToken,
+        ),
+      );
+    } catch (error) {
+      _showError(error);
+    }
+  }
+
+  Future<void> _toggleAutomatic(OpaqueApiKeySlot slot, bool enabled) async {
+    try {
+      String? stepUpToken;
+      if (slot.kind == 'secret') {
+        stepUpToken = await _requestStepUp(
+          action: StepUpAction.updateSecretKeyPolicy,
+          resourceId: slot.id,
+          title: 'Reautenticar para alterar policy da secret key',
+          description:
+              'A alteracao afeta rotacao automatica e escopo desta secret key.',
+        );
+        if (stepUpToken == null || !mounted) return;
+      }
+      await _runCommand(
+        () => _controller.updateAutomaticRotation(
+          slot.id,
+          enabled,
+          stepUpToken: stepUpToken,
+        ),
+      );
+    } catch (error) {
+      _showError(error);
+    }
+  }
+
+  Future<void> _editExpirationPolicy(OpaqueApiKeySlot slot) async {
+    final selection = await showDialog<ExpirationPolicySelection>(
+      context: context,
+      builder: (context) => ExpirationPolicyDialog(
+        initialDays: slot.rotationIntervalDays,
+      ),
+    );
+    if (selection == null ||
+        selection.days == slot.rotationIntervalDays ||
+        !mounted) {
+      return;
+    }
+    final neverExpires = selection.days == null;
+    final confirmed = await _confirm(
+      neverExpires ? 'Remover expiração temporal?' : 'Alterar expiração?',
+      neverExpires
+          ? 'A chave ativa continuará válida até rotação, revogação ou disable '
+              'do slot. Uma rotação automática pendente ainda não efetiva '
+              'será cancelada.'
+          : 'A chave ativa passará a expirar ${selection.days} dias após esta '
+              'alteração. Uma chave já vencida não será reativada.',
+    );
+    if (!confirmed) return;
+    try {
+      String? stepUpToken;
+      if (slot.kind == 'secret') {
+        stepUpToken = await _requestStepUp(
+          action: StepUpAction.updateSecretKeyPolicy,
+          resourceId: slot.id,
+          title: 'Reautenticar para alterar expiracao da secret key',
+          description:
+              'A alteracao afeta a validade temporal desta secret key.',
+        );
+        if (stepUpToken == null || !mounted) return;
+      }
+      await _runCommand(
+        () => _controller.updateExpirationPolicy(
+          slot.id,
+          selection.days,
+          stepUpToken: stepUpToken,
+        ),
+        successMessage: neverExpires
+            ? 'A chave ativa agora não expira.'
+            : 'Expiração temporal atualizada.',
+      );
+    } catch (error) {
+      _showError(error);
+    }
+  }
+
+  Future<void> _activatePendingKey(OpaqueApiKeySlot slot) async {
+    final confirmed = await _confirm(
+      'Ativar chave pendente agora?',
+      'A chave pendente passa a valer imediatamente, sem aguardar o corte '
+          'programado. A chave ativa atual sera revogada.',
+    );
+    if (!confirmed) return;
+    try {
+      String? stepUpToken;
+      if (slot.kind == 'secret') {
+        stepUpToken = await _requestStepUp(
+          action: StepUpAction.activateSecretKey,
+          resourceId: slot.id,
+          title: 'Reautenticar para ativar secret key',
+          description:
+              'A ativacao revoga a chave atual e emite a pendente como ativa.',
+        );
+        if (stepUpToken == null || !mounted) return;
+      }
+      await _runCommand(
+        () => _controller.activatePendingKey(
+          slot.id,
+          stepUpToken: stepUpToken,
+        ),
+        successMessage: 'Chave pendente ativada.',
+      );
+    } catch (error) {
+      _showError(error);
+    }
+  }
+
+  Future<void> _cancelPendingRotation(OpaqueApiKeySlot slot) async {
+    final confirmed = await _confirm(
+      'Cancelar rotação pendente?',
+      'A chave pendente será revogada. A chave ativa continuará com sua data '
+          'de expiração atual.',
+    );
+    if (!confirmed) return;
+    try {
+      String? stepUpToken;
+      if (slot.kind == 'secret') {
+        stepUpToken = await _requestStepUp(
+          action: StepUpAction.cancelSecretKeyRotation,
+          resourceId: slot.id,
+          title: 'Reautenticar para cancelar rotacao da secret key',
+          description:
+              'O cancelamento revoga a chave pendente desta secret key.',
+        );
+        if (stepUpToken == null || !mounted) return;
+      }
+      await _runCommand(
+        () => _controller.cancelPendingRotation(
+          slot.id,
+          stepUpToken: stepUpToken,
+        ),
+        successMessage: 'Rotação pendente cancelada.',
+      );
+    } catch (error) {
+      _showError(error);
+    }
+  }
+
+  Future<void> _createSlot() async {
+    final draft = await showDialog<CreateOpaqueSlotDraft>(
+      context: context,
+      builder: (context) => const CreateOpaqueSlotDialog(),
+    );
+    if (draft == null || !mounted) return;
+    try {
+      String? stepUpToken;
+      if (draft.kind == 'secret') {
+        stepUpToken = await _requestStepUp(
+          action: StepUpAction.createSecretKey,
+          resourceId: draft.name,
+          title: 'Reautenticar para criar secret key',
+          description: 'A nova secret key tera privilegios de service_role.',
+        );
+        if (stepUpToken == null || !mounted) return;
+      }
+      final issued = await _controller.createSlot(
+        name: draft.name,
+        kind: draft.kind,
+        allowedServices: draft.allowedServices,
+        automaticRotationEnabled: draft.automaticRotationEnabled,
+        rotationIntervalDays: draft.rotationIntervalDays,
+        stepUpToken: stepUpToken,
+      );
+      stepUpToken = null;
+      if (!mounted) return;
+      await _showIssuedKey(issued);
+      if (mounted) unawaited(_refreshAfterSecret());
+    } catch (error) {
+      _showError(error);
+    }
+  }
+
+  Future<void> _showIssuedKey(IssuedOpaqueApiKey issued) async {
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: SupabaseColors.bg200,
+        title: const Text('Copie a API key agora'),
+        content: SizedBox(
+          width: 560,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'O valor completo nao sera armazenado nem mostrado novamente.',
+                style: TextStyle(color: SupabaseColors.warning),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                issued.expiresAt == null
+                    ? 'Lifetime da credencial: Não expira'
+                    : 'Lifetime da credencial: expira em '
+                        '${_date(issued.expiresAt!)}',
+                style: const TextStyle(
+                  color: SupabaseColors.textMuted,
+                  fontSize: 11,
+                ),
+              ),
+              const SizedBox(height: 12),
+              SelectableText(
+                issued.apiKey,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: issued.apiKey));
+              if (context.mounted) Navigator.pop(context);
+            },
+            child: const Text('Copiar e fechar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final asyncState = ref.watch(opaqueApiKeysProvider(widget.projectRef));
+    return SectionWidget(
+      title: 'API KEYS OPACAS',
+      child: asyncState.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (error, _) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              opaqueApiKeyErrorMessage(error),
+              style: const TextStyle(color: SupabaseColors.error),
+            ),
+            const SizedBox(height: 8),
+            SecondaryButton(
+              label: 'Tentar novamente',
+              onPressed: () =>
+                  ref.invalidate(opaqueApiKeysProvider(widget.projectRef)),
+            ),
+          ],
+        ),
+        data: _buildContent,
+      ),
+    );
+  }
+
+  Widget _buildContent(OpaqueApiKeysState state) {
+    final status = state.migration['status'];
+    final disabled = _managementDisabled(state);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _statusBanner(status.toString()),
+        if (state.isRefreshing || state.hasProjectOperation) ...[
+          const SizedBox(height: 8),
+          const LinearProgressIndicator(
+            key: ValueKey('opaque-api-keys-project-progress'),
+            minHeight: 2,
+          ),
+        ],
+        if (state.synchronizationError != null) ...[
+          const SizedBox(height: 8),
+          _synchronizationError(state),
+        ],
+        if (!widget.canManage) ...[
+          const SizedBox(height: 8),
+          const Text(
+            'Membros podem consultar e revelar chaves publishable. Alteracoes '
+            'e rotacoes exigem admin do projeto ou admin global.',
+            style: TextStyle(
+              color: SupabaseColors.textMuted,
+              fontSize: 11,
+            ),
+          ),
+        ],
+        if (widget.canManage && status == 'legacy') ...[
+          const SizedBox(height: 12),
+          SecondaryButton(
+            label: 'Preparar migracao opaca',
+            icon: Icons.security_rounded,
+            onPressed: disabled ? null : _prepareMigration,
+          ),
+        ],
+        if (widget.canManage && status == 'prepared') ...[
+          const SizedBox(height: 8),
+          DangerButton(
+            label: 'Cancelar preparação',
+            icon: Icons.undo_rounded,
+            onPressed: disabled ? null : _abortMigration,
+          ),
+        ],
+        if (state.slots.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          ...state.slots.map((slot) => _slotCard(state, slot)),
+        ],
+        if (widget.canManage &&
+            (status == 'prepared' ||
+                status == 'gateway_recovery_required')) ...[
+          const SizedBox(height: 12),
+          SecondaryButton(
+            label: status == 'gateway_recovery_required'
+                ? 'Recuperar gateway opaco'
+                : 'Executar corte opaco',
+            icon: Icons.swap_horiz_rounded,
+            onPressed: disabled ||
+                    (status == 'prepared' && !_allMigrationKeysConfirmed(state))
+                ? null
+                : _cutover,
+          ),
+        ],
+        if (widget.canManage && status == 'active') ...[
+          const SizedBox(height: 12),
+          SecondaryButton(
+            label: 'Criar slot',
+            icon: Icons.add_rounded,
+            onPressed: disabled ? null : _createSlot,
+          ),
+        ],
+      ],
+    );
+  }
+
+  bool _allMigrationKeysConfirmed(OpaqueApiKeysState state) {
+    final pending = state.migration['pending_key_count'];
+    final confirmed = state.migration['confirmed_pending_key_count'];
+    return pending is int && pending == 2 && confirmed == 2;
+  }
+
+  Widget _synchronizationError(OpaqueApiKeysState state) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: SupabaseColors.error.withValues(alpha: 0.12),
+        border: Border.all(color: SupabaseColors.error),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            state.synchronizationError!,
+            style: const TextStyle(color: SupabaseColors.error, fontSize: 12),
+          ),
+          const SizedBox(height: 8),
+          SecondaryButton(
+            label: state.isRefreshing
+                ? 'Sincronizando...'
+                : 'Sincronizar novamente',
+            icon: Icons.sync_rounded,
+            onPressed: state.isRefreshing
+                ? null
+                : () => unawaited(_refreshAfterSecret()),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statusBanner(String status) {
+    final (label, color) = switch (status) {
+      'active' => ('Gateway opaque-only ativo', SupabaseColors.success),
+      'prepared' => (
+          'Migracao preparada; JWT legado ainda esta ativo',
+          SupabaseColors.warning
+        ),
+      'gateway_recovery_required' => (
+          'Corte incompleto; recuperacao obrigatoria',
+          SupabaseColors.error
+        ),
+      'legacy' => (
+          'Projeto ainda usa API keys JWT legadas',
+          SupabaseColors.warning
+        ),
+      _ => ('Estado de migracao invalido', SupabaseColors.error),
+    };
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        border: Border.all(color: color),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(label, style: TextStyle(color: color, fontSize: 12)),
+    );
+  }
+
+  Widget _keyDetails(
+    OpaqueApiKeysState state,
+    OpaqueApiKeySlot slot,
+    OpaqueApiKeyVersion key,
+  ) {
+    final reveals = state.reveals.where((reveal) =>
+        reveal.slotId == slot.id &&
+        reveal.keyId == key.id &&
+        reveal.kind == slot.kind);
+    final reveal = reveals.isEmpty ? null : reveals.single;
+    final busy = state.isRevealBusy(key.id);
+    return Padding(
+      key: ValueKey('opaque-key-details-${key.id}'),
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${key.tokenHint} · ${key.status} · '
+            '${key.expiresAt == null ? 'Não expira' : 'expira ${_date(key.expiresAt!)}'}'
+            '${key.lastUsedAt == null ? '' : ' · uso ${_date(key.lastUsedAt!)}'}',
+            style: TextStyle(
+              color: key.currentlyAccepted
+                  ? SupabaseColors.success
+                  : SupabaseColors.textSecondary,
+              fontSize: 11,
+              fontFamily: 'monospace',
+            ),
+          ),
+          if (reveal?.revealedAt != null)
+            Text(
+              'Revelada em ${_date(reveal!.revealedAt!)}',
+              style: const TextStyle(
+                  color: SupabaseColors.textMuted, fontSize: 11),
+            ),
+          if (busy) ...[
+            const SizedBox(height: 8),
+            LinearProgressIndicator(
+              key: ValueKey('opaque-reveal-progress-${key.id}'),
+              minHeight: 2,
+            ),
+          ],
+          if (reveal != null) ...[
+            const SizedBox(height: 8),
+            SecondaryButton(
+              key: ValueKey('opaque-key-reveal-${key.id}'),
+              label: busy ? 'Revelando...' : 'Ver e copiar',
+              icon: Icons.copy_rounded,
+              onPressed: _interactionDisabled(state) ||
+                      (!widget.canManage && reveal.kind != 'publishable')
+                  ? null
+                  : () => _claim(reveal),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _slotCard(OpaqueApiKeysState state, OpaqueApiKeySlot slot) {
+    final pending = slot.keys.where((key) => key.status == 'pending').toList();
+    final busy = state.isSlotBusy(slot.id);
+    return Container(
+      key: ValueKey('opaque-slot-card-${slot.id}'),
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: _boxDecoration,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(child: Text(slot.name, style: _titleStyle)),
+              Text(slot.kind,
+                  style: const TextStyle(color: SupabaseColors.brand)),
+            ],
+          ),
+          if (slot.applicationRef != null) ...[
+            const SizedBox(height: 8),
+            const Text('CONFIGURACAO DO APLICATIVO', style: _titleStyle),
+            SelectableText(
+                clientConfigurationUrl(
+                    widget.publicBaseUrl, slot.applicationRef!),
+                key: ValueKey('client-config-url-${slot.id}'),
+                style: const TextStyle(fontSize: 11, fontFamily: 'monospace')),
+            const SizedBox(height: 6),
+            const Text(
+                'Endereco publico e estavel. Retorna somente a chave publishable vigente; '
+                'nao autentica usuarios nem substitui RLS.',
+                style:
+                    TextStyle(color: SupabaseColors.textMuted, fontSize: 11)),
+            const SizedBox(height: 6),
+            SecondaryButton(
+                label: 'Copiar URL de configuracao',
+                icon: Icons.copy_rounded,
+                onPressed: () async {
+                  try {
+                    await Clipboard.setData(ClipboardData(
+                        text: clientConfigurationUrl(
+                            widget.publicBaseUrl, slot.applicationRef!)));
+                    _snack('URL copiada.', SupabaseColors.success);
+                  } catch (error) {
+                    _showError(error);
+                  }
+                }),
+          ],
+          if (busy) ...[
+            const SizedBox(height: 8),
+            LinearProgressIndicator(
+              key: ValueKey('opaque-slot-progress-${slot.id}'),
+              minHeight: 2,
+            ),
+          ],
+          const SizedBox(height: 4),
+          Text(
+            '${slot.allowedServices.join(', ')} · Expiração: '
+            '${expirationLabel(slot.rotationIntervalDays)}',
+            style:
+                const TextStyle(color: SupabaseColors.textMuted, fontSize: 11),
+          ),
+          if (slot.automaticRotationLastError != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              slot.automaticRotationLastError!,
+              style: const TextStyle(color: SupabaseColors.error, fontSize: 11),
+            ),
+          ],
+          const SizedBox(height: 8),
+          ...slot.keys.where((key) => key.status != 'revoked').map(
+                (key) => _keyDetails(state, slot, key),
+              ),
+          if (widget.canManage) ...[
+            SecondaryButton(
+                label: 'Acesso e limites',
+                icon: Icons.public,
+                onPressed: _managementDisabled(state)
+                    ? null
+                    : () => showAccessPolicyDialog(context,
+                        projectRef: widget.projectRef,
+                        slotId: slot.id,
+                        secret: slot.kind == 'secret')),
+            for (final key in pending)
+              if (key.revealedAt != null && key.confirmedAt == null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: SecondaryButton(
+                    label: 'Confirmar instalacao de ${key.tokenHint}',
+                    icon: Icons.check_rounded,
+                    onPressed: _managementDisabled(state)
+                        ? null
+                        : () => _confirmInstallation(slot, key),
+                  ),
+                ),
+            const Divider(color: SupabaseColors.border),
+            Material(
+              type: MaterialType.transparency,
+              child: SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                value: slot.automaticRotationEnabled,
+                onChanged: _managementDisabled(state) ||
+                        slot.rotationIntervalDays == null
+                    ? null
+                    : (value) => _toggleAutomatic(slot, value),
+                title: const Text('Rotacao automatica',
+                    style: TextStyle(fontSize: 12)),
+                subtitle: slot.rotationIntervalDays == null
+                    ? const Text(
+                        'Defina uma expiração temporal para habilitar.',
+                        style: TextStyle(fontSize: 11),
+                      )
+                    : null,
+              ),
+            ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                SecondaryButton(
+                  label: 'Expiração: '
+                      '${expirationLabel(slot.rotationIntervalDays)}',
+                  icon: Icons.timer_outlined,
+                  onPressed: _managementDisabled(state)
+                      ? null
+                      : () => _editExpirationPolicy(slot),
+                ),
+                SecondaryButton(
+                  label: 'Rotacionar agora',
+                  icon: Icons.refresh_rounded,
+                  onPressed: _managementDisabled(state) || pending.isNotEmpty
+                      ? null
+                      : () => _rotate(slot),
+                ),
+                if (pending.isNotEmpty && state.migration['status'] == 'active')
+                  SecondaryButton(
+                    label: 'Ativar agora',
+                    icon: Icons.bolt_rounded,
+                    onPressed: _managementDisabled(state)
+                        ? null
+                        : () => _activatePendingKey(slot),
+                  ),
+                if (pending.isNotEmpty && state.migration['status'] == 'active')
+                  SecondaryButton(
+                    label: 'Cancelar rotação pendente',
+                    icon: Icons.cancel_outlined,
+                    onPressed: _managementDisabled(state)
+                        ? null
+                        : () => _cancelPendingRotation(slot),
+                  ),
+                DangerButton(
+                  label: 'Revogar slot',
+                  icon: Icons.block_rounded,
+                  onPressed:
+                      _managementDisabled(state) ? null : () => _disable(slot),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _date(DateTime value) =>
+      DateFormat('dd/MM/yyyy HH:mm').format(value.toLocal());
+
+  static const _titleStyle = TextStyle(
+    color: SupabaseColors.textPrimary,
+    fontSize: 13,
+    fontWeight: FontWeight.w600,
+  );
+  static final _boxDecoration = BoxDecoration(
+    color: SupabaseColors.bg300,
+    border: Border.all(color: SupabaseColors.border),
+    borderRadius: BorderRadius.circular(6),
+  );
+}

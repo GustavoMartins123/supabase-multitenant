@@ -8,9 +8,27 @@ servidor/docker/volumes/db/data/*
 studio/.env
 studio/.analytics.env
 studio/authelia/profile-pictures/
+studio/authelia/users_database.yml
+studio/authelia/ids.yml
+studio/authelia/notifications.txt
+studio/authelia/db.sqlite3
+studio/authelia/db.sqlite3-shm
+studio/authelia/db.sqlite3-wal
+studio/authelia/db.sqlite3-journal
+studio/authelia/configuration.runtime.yml
+studio/authelia/ssl/
+studio/secrets/
+studio/authelia/.studio-origin
+studio/authelia/.studio-bootstrap-consumed
+studio/authelia/.studio-directory-sequence
 servidor/.env
+servidor/.resource-profiles.env
+servidor/.functions-tenants/
+servidor/.functions-locks/
 servidor/.analytics.env
+servidor/.storage.env
 servidor/.legacy-migration.env
+servidor/storage-migration-reports/
 servidor/projects/**
 !servidor/projects/.gitkeep
 tarefas.md
@@ -19,8 +37,29 @@ tarefas.md
 __pycache__/
 *.py[cod]
 servidor/host-agent/.venv/
+servidor/host-agent/.docker/
 
 # Local runtime logs
 *.log
 
 .tmp-appdata/
+
+servidor/volumes/db/platform-capacity.conf
+
+servidor/docker-compose.capacity.yml
+servidor/docker-compose-api.capacity.yml
+studio/docker-compose.capacity.yml
+servidor/traefik/docker-compose.capacity.yml
+
+servidor/traefik/acme.json
+servidor/traefik/update_geoip.sh
+servidor/traefik/traefik.runtime.yml
+servidor/volumes/storage/objects/
+servidor/traefik/certs/traefik/
+servidor/traefik/plugins-storage/archives/
+servidor/traefik/plugins-storage/sources/
+
+# Private offline migration artifacts
+.public-reference-cutover/
+.snippet-namespace-migration/
+project-reference-catalog*.json

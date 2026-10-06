@@ -15,6 +15,8 @@ from typing import Any
 
 import asyncpg
 
+from app.validation import validate_project_id
+
 
 IDEMPOTENT_ACTIONS = frozenset({"start", "stop", "restart", "recreate_services"})
 TERMINAL_STATUSES = frozenset({"done", "failed", "cancelled"})
@@ -39,123 +41,6 @@ async def _get_pool() -> asyncpg.Pool:
 
 def is_action_idempotent(action: str | None) -> bool:
     return bool(action and action in IDEMPOTENT_ACTIONS)
-
-
-async def ensure_jobs_schema(pool: asyncpg.Pool) -> None:
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS jobs (
-                job_id UUID PRIMARY KEY,
-                project TEXT NOT NULL,
-                project_uuid UUID,
-                owner_id UUID REFERENCES users(id) ON DELETE SET NULL,
-                created_by UUID REFERENCES users(id) ON DELETE SET NULL,
-                status TEXT NOT NULL,
-                message TEXT,
-                action TEXT NOT NULL,
-                payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-                progress SMALLINT NOT NULL DEFAULT 0
-                    CHECK (progress BETWEEN 0 AND 100),
-                current_step TEXT,
-                total_steps INTEGER NOT NULL DEFAULT 1 CHECK (total_steps > 0),
-                started_at TIMESTAMPTZ,
-                finished_at TIMESTAMPTZ,
-                stdout_tail TEXT,
-                stderr_tail TEXT,
-                error_code TEXT,
-                is_idempotent BOOLEAN NOT NULL DEFAULT false,
-                retryable BOOLEAN NOT NULL DEFAULT false,
-                retry_of UUID REFERENCES jobs(job_id) ON DELETE SET NULL,
-                attempt INTEGER NOT NULL DEFAULT 1 CHECK (attempt > 0),
-                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-            );
-
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS project_uuid UUID;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS created_by UUID;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS message TEXT;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS action TEXT;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS payload JSONB NOT NULL DEFAULT '{}'::jsonb;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress SMALLINT NOT NULL DEFAULT 0;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS current_step TEXT;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS total_steps INTEGER NOT NULL DEFAULT 1;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS stdout_tail TEXT;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS stderr_tail TEXT;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS error_code TEXT;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS is_idempotent BOOLEAN NOT NULL DEFAULT false;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS retryable BOOLEAN NOT NULL DEFAULT false;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS retry_of UUID;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS attempt INTEGER NOT NULL DEFAULT 1;
-            ALTER TABLE jobs ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
-            ALTER TABLE jobs ALTER COLUMN owner_id DROP NOT NULL;
-
-            UPDATE jobs j
-            SET project_uuid = p.id
-            FROM projects p
-            WHERE j.project_uuid IS NULL AND p.name = j.project;
-
-            UPDATE jobs SET created_by = owner_id WHERE created_by IS NULL;
-
-            UPDATE jobs
-            SET is_idempotent = action IN ('start', 'stop', 'restart', 'recreate_services'),
-                retryable = action IN ('start', 'stop', 'restart', 'recreate_services');
-
-            CREATE INDEX IF NOT EXISTS idx_jobs_status_updated
-                ON jobs(status, updated_at);
-            CREATE INDEX IF NOT EXISTS idx_jobs_project_status
-                ON jobs(project, status, updated_at);
-            CREATE INDEX IF NOT EXISTS idx_jobs_project_uuid_created
-                ON jobs(project_uuid, created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_jobs_created_by_created
-                ON jobs(created_by, created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_jobs_retry_of
-                ON jobs(retry_of);
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_one_active_retry
-                ON jobs(retry_of)
-                WHERE retry_of IS NOT NULL AND status IN ('queued', 'running');
-            """
-        )
-        # Constraints are added separately so this migration remains safe for
-        # installations whose jobs table predates these columns.
-        await conn.execute(
-            """
-            DO $$
-            BEGIN
-                IF EXISTS (
-                    SELECT 1 FROM pg_constraint WHERE conname = 'jobs_project_uuid_fkey'
-                ) THEN
-                    ALTER TABLE jobs DROP CONSTRAINT jobs_project_uuid_fkey;
-                END IF;
-                IF EXISTS (
-                    SELECT 1 FROM pg_constraint
-                    WHERE conname = 'jobs_owner_id_fkey' AND confdeltype <> 'n'
-                ) THEN
-                    ALTER TABLE jobs DROP CONSTRAINT jobs_owner_id_fkey;
-                END IF;
-                IF NOT EXISTS (
-                    SELECT 1 FROM pg_constraint WHERE conname = 'jobs_owner_id_fkey'
-                ) THEN
-                    ALTER TABLE jobs ADD CONSTRAINT jobs_owner_id_fkey
-                        FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE SET NULL;
-                END IF;
-                IF NOT EXISTS (
-                    SELECT 1 FROM pg_constraint WHERE conname = 'jobs_created_by_fkey'
-                ) THEN
-                    ALTER TABLE jobs ADD CONSTRAINT jobs_created_by_fkey
-                        FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL;
-                END IF;
-                IF NOT EXISTS (
-                    SELECT 1 FROM pg_constraint WHERE conname = 'jobs_retry_of_fkey'
-                ) THEN
-                    ALTER TABLE jobs ADD CONSTRAINT jobs_retry_of_fkey
-                        FOREIGN KEY (retry_of) REFERENCES jobs(job_id) ON DELETE SET NULL;
-                END IF;
-            END $$;
-            """
-        )
 
 
 async def set_job_status(
@@ -239,12 +124,12 @@ async def create_project_job(
         await conn.execute(
             """
             INSERT INTO jobs(
-                job_id, project, project_uuid, owner_id, created_by,
+                job_id, project, project_uuid, owner_id, created_by, public_ref,
                 status, message, action, payload, total_steps, progress,
                 current_step, is_idempotent, retryable, retry_of, attempt
             )
             VALUES(
-                $1, $2, $3, $4, $4, 'queued', $5, $6, $7::jsonb, $8, 0,
+                $1, $2, $3, $4, $4, (SELECT public_ref FROM projects WHERE id=$3 AND name=$2), 'queued', $5, $6, $7::jsonb, $8, 0,
                 'queued', $9, $9, $10, $11
             )
             """,
@@ -267,6 +152,24 @@ async def create_project_job(
         async with pool.acquire() as conn:
             await insert(conn)
     return str(job_id)
+
+
+async def find_active_project_job(
+    conn: asyncpg.Connection,
+    project_name: str,
+    action: str,
+) -> asyncpg.Record | None:
+    return await conn.fetchrow(
+        """
+        SELECT * FROM jobs
+        WHERE project = $1 AND action = $2
+          AND status IN ('queued', 'running')
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        project_name,
+        action,
+    )
 
 
 async def create_retry_job(
@@ -336,6 +239,7 @@ def serialize_job(row: asyncpg.Record, *, include_output: bool = False) -> dict[
     result = {
         "job_id": str(row["job_id"]),
         "project": row["project"],
+        "public_ref": row["public_ref"],
         "project_uuid": str(row["project_uuid"]) if row["project_uuid"] else None,
         "tenant_uuid": str(tenant_uuid) if tenant_uuid else None,
         "created_by": str(row["created_by"]) if row["created_by"] else None,
@@ -362,12 +266,29 @@ def serialize_job(row: asyncpg.Record, *, include_output: bool = False) -> dict[
 
 
 class _QueuedAction:
-    __slots__ = ("job_id", "project_id", "project_name", "submitted_at", "runner")
+    __slots__ = (
+        "job_id",
+        "project_id",
+        "project_name",
+        "lock_project_ids",
+        "submitted_at",
+        "runner",
+    )
 
-    def __init__(self, job_id: str, project_id: uuid.UUID, project_name: str, runner: JobRunner) -> None:
+    def __init__(
+        self,
+        job_id: str,
+        project_id: uuid.UUID,
+        project_name: str,
+        runner: JobRunner,
+        additional_project_ids: tuple[uuid.UUID, ...],
+    ) -> None:
         self.job_id = job_id
         self.project_id = project_id
         self.project_name = project_name
+        self.lock_project_ids = tuple(
+            sorted({project_id, *additional_project_ids}, key=str)
+        )
         self.submitted_at = time.time()
         self.runner = runner
 
@@ -427,12 +348,22 @@ class ProjectActionQueue:
     async def _run_with_project_lock(self, action: _QueuedAction) -> None:
         pool = await _get_pool()
         async with pool.acquire() as conn:
-            lock_key = str(action.project_id)
-            await conn.execute("SELECT pg_advisory_lock(hashtextextended($1, 0))", lock_key)
+            acquired: list[str] = []
             try:
+                for project_id in action.lock_project_ids:
+                    lock_key = str(project_id)
+                    await conn.execute(
+                        "SELECT pg_advisory_lock(hashtextextended($1, 0))",
+                        lock_key,
+                    )
+                    acquired.append(lock_key)
                 await action.runner()
             finally:
-                await conn.execute("SELECT pg_advisory_unlock(hashtextextended($1, 0))", lock_key)
+                for lock_key in reversed(acquired):
+                    await conn.execute(
+                        "SELECT pg_advisory_unlock(hashtextextended($1, 0))",
+                        lock_key,
+                    )
 
     async def submit(
         self,
@@ -440,10 +371,20 @@ class ProjectActionQueue:
         project_id: uuid.UUID,
         job_id: str,
         runner: JobRunner,
+        *,
+        additional_project_ids: tuple[uuid.UUID, ...] = (),
     ) -> int:
         queue = await self._ensure_worker(project_name)
         position = queue.qsize()
-        await queue.put(_QueuedAction(job_id, project_id, project_name, runner))
+        await queue.put(
+            _QueuedAction(
+                job_id,
+                project_id,
+                project_name,
+                runner,
+                additional_project_ids,
+            )
+        )
         return position
 
     def status(self, project_name: str) -> dict[str, Any]:
@@ -476,6 +417,67 @@ class ProjectActionQueue:
 
 
 action_queue = ProjectActionQueue()
+
+
+async def enqueue_project_action(
+    project_name: str,
+    job_id: str,
+    runner: JobRunner,
+) -> int:
+    """Enfileira a acao e inclui a origem no lock de uma duplicacao."""
+    try:
+        pool = await _get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT p.id, j.action, j.payload
+                FROM projects p
+                JOIN jobs j ON j.job_id = $2
+                WHERE p.name = $1
+                """,
+                project_name,
+                uuid.UUID(str(job_id)),
+            )
+            if row is None:
+                raise RuntimeError(
+                    f"projeto ou job ausente ao enfileirar: {project_name}"
+                )
+            additional_project_ids: tuple[uuid.UUID, ...] = ()
+            if row["action"] == "duplicate":
+                payload = row["payload"] or {}
+                if isinstance(payload, str):
+                    payload = json.loads(payload)
+                if not isinstance(payload, dict):
+                    raise RuntimeError("payload do job de duplicacao invalido")
+                original_name = validate_project_id(
+                    str(payload.get("original_name") or "")
+                )
+                original_id = await conn.fetchval(
+                    "SELECT id FROM projects WHERE name = $1 AND id = $2",
+                    original_name,
+                    uuid.UUID(str(payload["original_uuid"])),
+                )
+                if original_id is None:
+                    raise RuntimeError(
+                        "projeto de origem da duplicacao nao existe"
+                    )
+                additional_project_ids = (original_id,)
+        return await action_queue.submit(
+            project_name,
+            row["id"],
+            job_id,
+            runner,
+            additional_project_ids=additional_project_ids,
+        )
+    except Exception as exc:
+        await set_job_status(
+            job_id,
+            "failed",
+            message="Nao foi possivel enfileirar a operacao.",
+            current_step="enqueue_failed",
+            error_code="queue_submit_failed",
+        )
+        raise RuntimeError("falha ao enfileirar operacao do projeto") from exc
 
 
 async def get_action_queue() -> ProjectActionQueue:

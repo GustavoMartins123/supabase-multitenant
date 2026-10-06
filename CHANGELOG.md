@@ -2,9 +2,208 @@
 
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 
-O formato deste arquivo segue as diretrizes do [Keep a Changelog](https://keepachangelog.com/) e este projeto adota [Versionamento Semântico](https://semver.org/).
+O formato segue [Keep a Changelog](https://keepachangelog.com/) e [Versionamento Semântico](https://semver.org/).
 
 ## [Não lançado]
+
+### 2026-09-06
+
+#### Adicionado
+
+- `VERSION` na raiz como fonte única da versão da plataforma.
+- `tools/check-version-parity.py` propagando e travando a versão nos seis pontos derivados, com `--fix`.
+- `COMPATIBILITY_MATRIX.md` com os pins upstream, de infra e de toolchain de cada release.
+- `docs/operations/upgrades.md` e espelho pt-BR: rollout canário→percentual→todos, portão de saúde e rollback por camada.
+- Regras do gitleaks para as chaves legadas `anon` e `service_role` em JWT, por prefixo de payload e por atribuição.
+- Contratos `test_version_contract.py` e cobertura JWT em `test_gitleaks_config.py`.
+
+#### Alterado
+
+- Versão do app Flutter alinhada de `1.0.0+1` para `0.13.0-alpha+1`.
+
+#### Corrigido
+
+- Contrato do endpoint de chaves S3 aceita o decorator com `tags` e `response_model`.
+
+### 2026-08-27
+
+#### Adicionado
+
+- Capacidade personalizada por projeto: Memória, CPUs e PIDs editáveis no Studio.
+- Perfil `custom` definido no `.env` do servidor, selecionável na criação.
+- `tools/platform_bottleneck_probe.py` para carga simultânea de todos os serviços, host, cgroups e SLO de p95.
+- Fixtures descartáveis com lock, recuperação e limpeza automática.
+- Limites de CPU, RAM e PIDs para Traefik, GeoIP, watcher e deny-service.
+
+#### Alterado
+
+- Perfis: `small` 256 MiB/1,85 CPU, `medium` 1 GiB/2,00 CPU e `large` 4 GiB/3,00 CPU.
+- Pisos Nginx/Auth/REST em 0,40/1,20/0,25 CPU e memória rateada em 1:2:5.
+- Reserva padrão do host em 25% e sobrecompromisso padrão de CPU em 100%.
+- Pisos de Postgres e serviços compartilhados recalibrados.
+
+#### Removido
+
+- Limite global de projetos na criação e duplicação.
+- Arquivo de capacidade derivada consumido pela Projects API.
+
+#### Corrigido
+
+- Funções Edge deixam de receber credenciais do banco do cluster.
+- Setup preserva `.env` e segredos existentes em re-execução.
+- Restore valida as tabelas do Realtime declaradas no backup.
+- Backups e arquivos de ciclo de vida criados com permissão restrita.
+- Slots de replicação sem colisão em projetos com nomes longos.
+- Apenas assets estáticos do Studio ficam públicos.
+- Signup do Studio com rate-limit e checagens antes do hash de senha.
+- Cadeia anti-abuso do Traefik passa a cobrir HTTPS.
+- Exclusão de projeto continua a limpeza após falha e mantém o registro para nova tentativa.
+- Headers de identidade do cliente deixam de atravessar os proxies internos do Studio.
+- `extract_token.sh` valida o nome do projeto.
+- Listagem de usuários em modo admin restrita a administradores da plataforma.
+- Hosts pequenos iniciam em modo degradado com aviso, sem abortar o `start.sh`.
+- Valores inválidos de `PLATFORM_*` caem no padrão em vez de travar a inicialização.
+- Memória e disco do host aceitam valores decimais (ex.: `7.7g`).
+- Studio não é mais reconstruído a cada `start.sh`.
+- Capacidade de CPU vira apenas referência informativa.
+- Documentação de chaves opacas alinhada às rotas e migrations reais.
+- Rota Realtime do Nginx monta a URI após `auth_request`.
+- Capacidade de CPU desconta a soma efetiva dos pisos compartilhados.
+
+### 2026-08-26
+
+#### Adicionado
+
+- `tools/platform_load_probe.py` para carga dos perfis e medição de cgroups.
+- Overrides de capacidade para os serviços compartilhados.
+- Configuração do Postgres derivada do host e carregada por `conf.d`.
+- Aplicação dinâmica dos limites compartilhados.
+- Teto de projetos aplicado na criação e duplicação.
+
+#### Alterado
+
+- Memória e PIDs passam a usar picos do cgroup.
+- PIDs usam pisos independentes por serviço.
+- Parâmetros de memória, conexões, WAL, workers e slots do Postgres passam a ser derivados.
+
+#### Corrigido
+
+- Dimensionamento do Nginx do Studio, Realtime, Postgres Meta e PostgREST.
+- Reaplicação dos limites após criação, duplicação e exclusão.
+- Duplicação deixa de contornar o teto de capacidade.
+
+### 2026-08-25
+
+#### Adicionado
+
+- Calculador de capacidade para memória, CPU, disco, conexões, PIDs, workers, WAL e arquivos temporários.
+- Relatório de capacidade com restrição limitante e origem dos baselines.
+- Migração de limites existentes por `tools/migrate_project_resource_limits.py`.
+
+#### Alterado
+
+- Perfis passam a limitar o projeto inteiro e são rateados entre Nginx, Auth e REST.
+- PostgREST recebe limite de heap GHC e pool padrão de 10 conexões.
+- Baselines compartilhados usam memória anônima e picos do cgroup.
+- Realtime, Supavisor e Nginx do Studio escalam com a quantidade de CPUs.
+- Studio organiza configurações em abas.
+
+#### Corrigido
+
+- Persistência de `PROJECT_RESOURCE_PROFILE` no ambiente do projeto.
+- Leitura de valores entre aspas no `.env`.
+- Preservação de proprietário e permissões nas escritas atômicas.
+- Aviso de reinicialização do host-agent após reinstalação.
+
+### 2026-08-24
+
+#### Adicionado
+
+- CI permanente e suíte E2E opt-in.
+- Perfil de recursos persistido no control plane e editável pelo Studio.
+- Identidades dedicadas `platform_app`, `platform_meta_admin`, `platform_reader` e `host_agent_rw`.
+- Limites fail-closed de CPU, RAM e PIDs nos containers de projeto.
+- TLS por arquivo ou ACME no Traefik.
+- Sandbox systemd do host-agent.
+
+#### Corrigido
+
+- Escrita do Docker Buildx dentro do sandbox.
+- Rollback duplicado e recuperação de projetos parcialmente criados.
+- Provisionamento e grants de `platform_reader`.
+- Detecção de host-agent offline sem indicar resíduos inexistentes.
+- Propagação do perfil na criação, duplicação e recuperação.
+- Exclusão privilegiada de projetos pela conexão administrativa.
+- Grants, senhas e geração de segredos das identidades dedicadas.
+- Permissões do volume compartilhado do Storage.
+
+### 2026-08-21
+
+#### Alterado
+
+- Containers deixam de receber o `.env` global e passam a receber apenas variáveis declaradas.
+- Edge Functions deixa de herdar o ambiente completo do runtime.
+- Chaves opacas permanecem reveláveis enquanto a versão estiver ativa.
+- Leitura de chave `secret` exige administrador e step-up.
+
+#### Migração
+
+- Recriar stacks existentes para remover o ambiente global.
+- Aplicar a migration `0004_persistent_api_key_reveals`.
+
+### 2026-08-20
+
+#### Adicionado
+
+- Migrations versionadas do control plane com ledger, checksum, lock e transações.
+- Serviço `control-plane-migrations` como dependência da Projects API e Key Authorizer.
+
+#### Alterado
+
+- Projects API apenas verifica a versão do schema durante o boot.
+- Provisionamento do Key Authorizer passa para as migrations.
+
+### 2026-08-17
+
+#### Alterado
+
+- HMAC interno passa a exigir segredos independentes para Studio Gateway e Projects API.
+- Removidos `NGINX_SHARED_TOKEN`, bearer legado e fallback por derivação.
+
+#### Removido
+
+- Regra inativa de rewrite de `/object/sign`.
+
+#### Migração
+
+- Executar `python3 tools/migrate_internal_hmac_v1.py` antes do rebuild de instalações existentes.
+
+### 2026-08-13
+
+- Storage API e imgproxy passaram de containers por projeto para instâncias
+  globais compartilhadas, usando sem patches o modo multi-tenant oficial do
+  Storage v1.61.12, registry dedicado cifrado, backend file por namespace UUID
+  e proxy de data plane numa rede exclusiva dos Nginx confiáveis, mantendo a
+  Admin API fora das redes alcançáveis pelos projetos.
+- Lifecycle de create, duplicate, rename, delete, settings, backup e restore
+  passou a registrar, validar e remover tenants pela Admin API oficial, com
+  rollback compensatório, quiescência fail-closed por tenant nas operações
+  consistentes, vínculo obrigatório com `projects.tenant_uuid` e sem caminho de
+  runtime para a arquitetura anterior.
+- Credenciais S3/SigV4 e Storage Vectors passaram a ser isolados por tenant;
+  wrappers usam o Nginx do projeto, clones recebem credenciais/namespace novos e
+  rename preserva objetos pela identidade imutável.
+- Adicionada ferramenta transitória, resumível e fail-closed para converter
+  projetos e backups existentes, mantendo Projects API/host-agent quiescentes
+  enquanto houver estado misto e restaurando a mesma topologia Compose detectada.
+- Adicionados contratos estáticos e smoke opt-in de dois tenants cobrindo
+  objetos, opaque keys, S3, Vectors, imagens, limites, clones, rename,
+  backup/restore, delete, headers hostis e indisponibilidade do Storage global.
+
+- Logs do Storage global e do proxy de data plane passaram a carregar tenant,
+  request ID e operacao sem query strings ou credenciais.
+- O proxy de data plane passou a rejeitar com HTTP 421 requests sem host de
+  tenant UUID canonico, antes que alcancem o Storage compartilhado.
 
 ### 2026-08-11
 

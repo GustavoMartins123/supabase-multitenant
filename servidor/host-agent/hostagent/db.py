@@ -1,8 +1,9 @@
 """Acesso do host-agent ao Postgres do control plane.
 
 O agent nao cria schema: as tabelas ``host_agent_commands``,
-``host_agent_workers`` e ``project_container_state`` sao criadas pela
-Projects API no startup (``app/host_agent.py``).
+``host_agent_workers`` e ``project_container_state`` sao criadas pelas
+migrations do control plane, aplicadas por
+``python -m app.schema_migrations apply`` antes de a Projects API subir.
 """
 
 from __future__ import annotations
@@ -13,6 +14,10 @@ import uuid
 from typing import Any
 
 import asyncpg
+
+
+DEFAULT_COMMAND_TIMEOUT = 30.0
+INACTIVE_CONNECTION_LIFETIME = 60.0
 
 
 class HostAgentSchemaTimeout(RuntimeError):
@@ -37,6 +42,11 @@ async def host_agent_schema_ready(dsn: str) -> bool:
                           AND table_name = 'projects'
                           AND column_name = 'tenant_uuid'
                     )
+                    AND EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_schema = current_schema()
+                          AND table_name = 'projects' AND column_name = 'public_ref'
+                    )
                 """
             )
         )
@@ -50,7 +60,7 @@ async def wait_for_host_agent_schema(
     timeout: float,
     poll_interval: float = 2.0,
 ) -> None:
-    """Aguarda a migracao da Projects API antes de iniciar o worker."""
+    """Aguarda as migrations do control plane antes de iniciar o worker."""
     timeout = max(0.0, timeout)
     poll_interval = max(0.1, poll_interval)
     loop = asyncio.get_running_loop()
@@ -83,8 +93,25 @@ async def wait_for_host_agent_schema(
         await asyncio.sleep(min(poll_interval, remaining))
 
 
-async def create_pool(dsn: str) -> asyncpg.Pool:
-    return await asyncpg.create_pool(dsn, min_size=1, max_size=5)
+async def create_pool(
+    dsn: str,
+    command_timeout: float = DEFAULT_COMMAND_TIMEOUT,
+) -> asyncpg.Pool:
+    """Pool com prazo em toda query e reciclagem agressiva de conexao ociosa.
+
+    Sem ``command_timeout`` uma query fica pendurada indefinidamente num
+    socket TCP morto (pooler reiniciado sob o agent) e os loops do agent
+    param de progredir em silencio. ``max_inactive_connection_lifetime``
+    fecha (via ``terminate()``, sem I/O) conexoes ociosas, de modo que o
+    pool nao carrega sockets obsoletos apos o pooler voltar.
+    """
+    return await asyncpg.create_pool(
+        dsn,
+        min_size=1,
+        max_size=5,
+        command_timeout=command_timeout,
+        max_inactive_connection_lifetime=INACTIVE_CONNECTION_LIFETIME,
+    )
 
 
 async def register_worker(pool: asyncpg.Pool, worker_id: str, hostname: str, pid: int, version: str) -> None:
@@ -132,15 +159,14 @@ async def lease_next_command(
         async with conn.transaction():
             row = await conn.fetchrow(
                 """
-                SELECT id
+                SELECT id, project, args
                 FROM host_agent_commands c
                 WHERE c.status = 'queued'
-                  AND NOT (c.project = ANY($1::text[]))
+                  AND NOT (ARRAY[c.project, c.args->>'original_name'] && $1::text[])
                   AND NOT EXISTS (
                       SELECT 1 FROM host_agent_commands r
-                      WHERE r.project = c.project
+                      WHERE ARRAY[r.project, r.args->>'original_name'] && ARRAY[c.project, c.args->>'original_name']
                         AND r.status = 'running'
-                        AND r.lease_expires_at > now()
                   )
                 ORDER BY c.created_at
                 LIMIT 1
@@ -149,6 +175,25 @@ async def lease_next_command(
                 sorted(busy_projects),
             )
             if row is None:
+                return None
+            args = row["args"]
+            if isinstance(args, str):
+                args = json.loads(args)
+            resources = sorted({row["project"], *[args[name] for name in ("original_name",) if isinstance(args.get(name), str)]})
+            for resource in resources:
+                await conn.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    f"host-agent-project:{resource}",
+                )
+            still_running = await conn.fetchval(
+                """
+                SELECT 1 FROM host_agent_commands
+                WHERE ARRAY[project, args->>'original_name'] && $1::text[] AND status = 'running'
+                LIMIT 1
+                """,
+                resources,
+            )
+            if still_running is not None:
                 return None
             return await conn.fetchrow(
                 """
@@ -160,7 +205,7 @@ async def lease_next_command(
                     heartbeat_at = now(),
                     started_at = COALESCE(started_at, now()),
                     updated_at = now()
-                WHERE id = $1
+                WHERE id = $1 AND status = 'queued'
                 RETURNING *
                 """,
                 row["id"],
@@ -180,8 +225,8 @@ async def heartbeat_command(
     progress: int | None = None,
     current_step: str | None = None,
     message: str | None = None,
-) -> None:
-    await pool.execute(
+) -> bool:
+    outcome = await pool.execute(
         """
         UPDATE host_agent_commands
         SET lease_expires_at = now() + make_interval(secs => $3::integer),
@@ -203,6 +248,7 @@ async def heartbeat_command(
         current_step,
         message,
     )
+    return outcome == "UPDATE 1"
 
 
 async def finish_command(
@@ -217,6 +263,8 @@ async def finish_command(
     stderr_tail: str | None = None,
     result: dict[str, Any] | None = None,
     message: str | None = None,
+    progress: int | None = None,
+    current_step: str | None = None,
 ) -> bool:
     """Finaliza o comando; no-op se a API ja o marcou como expirado."""
     outcome = await pool.execute(
@@ -229,7 +277,8 @@ async def finish_command(
             stderr_tail = COALESCE($7, stderr_tail),
             result = COALESCE($8::jsonb, result),
             message = COALESCE($9, message),
-            progress = CASE WHEN $3 = 'done' THEN 100 ELSE progress END,
+            progress = CASE WHEN $3 = 'done' THEN 100 ELSE COALESCE($10, progress) END,
+            current_step = CASE WHEN $3 = 'done' THEN 'completed' ELSE COALESCE($11, current_step) END,
             finished_at = now(),
             updated_at = now()
         WHERE id = $1 AND worker_id = $2 AND status = 'running'
@@ -243,8 +292,10 @@ async def finish_command(
         stderr_tail,
         json.dumps(result) if result is not None else None,
         message,
+        progress,
+        current_step,
     )
-    return outcome.endswith("1")
+    return outcome == "UPDATE 1"
 
 
 async def reject_command(
@@ -276,6 +327,7 @@ async def load_authorization_context(
     *,
     project: str,
     requested_by: uuid.UUID | None,
+    canonical_user: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Carrega do banco os fatos usados pela matriz de autorizacao."""
     context: dict[str, Any] = {
@@ -287,6 +339,7 @@ async def load_authorization_context(
         "project_row_exists": False,
         "project_id": None,
         "tenant_uuid": None,
+        "public_ref": None,
         "automatic_key_rotation_enabled": False,
     }
     async with pool.acquire() as conn:
@@ -304,15 +357,14 @@ async def load_authorization_context(
                 """,
                 requested_by,
             )
-            if user_row:
+            if user_row and canonical_user and canonical_user.get("id") == str(requested_by):
                 context["user_exists"] = True
-                context["user_active"] = bool(user_row["is_active"])
-                context["is_global_admin"] = bool(user_row["is_global_admin"])
+                context["user_active"] = user_row["is_active"] and canonical_user.get("is_active") is True
+                context["is_global_admin"] = "admin" in canonical_user.get("groups", [])
 
         project_row = await conn.fetchrow(
             """
-            SELECT id, owner_id,
-                   to_jsonb(projects)->>'tenant_uuid' AS tenant_uuid,
+            SELECT id, owner_id, tenant_uuid, public_ref,
                    automatic_key_rotation_enabled
             FROM projects WHERE name = $1
             """,
@@ -322,6 +374,7 @@ async def load_authorization_context(
             context["project_row_exists"] = True
             context["project_id"] = project_row["id"]
             context["tenant_uuid"] = project_row["tenant_uuid"]
+            context["public_ref"] = project_row["public_ref"]
             context["automatic_key_rotation_enabled"] = bool(
                 project_row["automatic_key_rotation_enabled"]
             )

@@ -1,5 +1,8 @@
 import 'dart:async';
 
+import 'package:flutter/widgets.dart';
+import '../data/api_client.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/job_repository.dart';
@@ -15,174 +18,214 @@ final projectJobsProvider =
 final activeProjectJobProvider = Provider.family<Job?, String>((ref, project) {
   final jobs = ref.watch(projectJobsProvider).value ?? const <Job>[];
   return preferredActiveJob(
-    jobs.where((job) => job.project == project && job.isInFlight),
+    jobs.where((job) => job.publicRef == project && job.isInFlight),
   );
 });
 
 class ProjectJobsNotifier extends AsyncNotifier<List<Job>> {
-  static const pollInterval = Duration(seconds: 3);
-
-  Timer? _pollTimer;
-  bool _refreshing = false;
+  RequestCancellation? _request;
+  AppLifecycleListener? _lifecycle;
   bool _disposed = false;
+  bool _watching = false;
+  bool _initializing = true;
+  bool _visible = false;
+  bool _failed = false;
+  String? _cursor;
   final Map<String, Job> _trackedJobs = {};
-  final Set<String> _finishedJobIds = {};
+  final Map<String, _JobWaiter> _waiters = {};
 
   @override
   Future<List<Job>> build() async {
     ref.onDispose(() {
       _disposed = true;
-      _pollTimer?.cancel();
+      _request?.cancel();
+      _lifecycle?.dispose();
+      _failWaiters(const ApiException(ApiFailureKind.cancelled,
+          'Acompanhamento de jobs encerrado'), StackTrace.current);
     });
-    try {
-      final jobs = await ref.watch(jobRepositoryProvider).fetchInFlightJobs();
-      return _mergeWithTrackedJobs(jobs);
-    } finally {
-      _startPolling();
-    }
-  }
-
-  void _startPolling() {
-    if (_disposed) return;
-    _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(
-      pollInterval,
-      (_) => unawaited(refresh()),
-    );
-  }
-
-  Future<void> refresh() async {
-    if (_refreshing || _disposed) return;
-    _refreshing = true;
-    try {
-      final jobs = await ref.read(jobRepositoryProvider).fetchInFlightJobs();
-      if (!_disposed) state = AsyncData(_mergeWithTrackedJobs(jobs));
-    } catch (error, stackTrace) {
-      if (!_disposed) {
-        state = AsyncError(error, stackTrace);
+    _visible = _isVisible(WidgetsBinding.instance.lifecycleState);
+    _lifecycle = AppLifecycleListener(onStateChange: (state) {
+      final wasVisible = _visible;
+      _visible = _isVisible(state);
+      if (_visible && !wasVisible && !_failed) {
+        _startWatching();
       }
-    } finally {
-      _refreshing = false;
-    }
-  }
-
-  void track(
-    Job job, {
-    String? project,
-    Iterable<String>? acceptedProjects,
-    String? action,
-    String? createdBy,
-  }) {
-    if (_disposed) return;
-    final tracked = job.verifyContext(
-      project: project,
-      acceptedProjects: acceptedProjects,
-      action: action,
-      createdBy: createdBy,
-    );
-    if (!tracked.isInFlight) return;
-
-    _finishedJobIds.remove(tracked.id);
-    final previous = _trackedJobs[tracked.id];
-    _trackedJobs[tracked.id] =
-        previous == null ? tracked : mergeJobSnapshots(previous, tracked);
-    state = AsyncData(_mergeWithTrackedJobs(state.value ?? const []));
-  }
-
-  void updateFromJson(
-    Map<String, dynamic> json, {
-    String? project,
-    Iterable<String>? acceptedProjects,
-    String? action,
-    String? createdBy,
-  }) {
-    final job = Job.fromJson(json).verifyContext(
-      project: project,
-      acceptedProjects: acceptedProjects,
-      action: action,
-      createdBy: createdBy,
-    );
-    if (job.isInFlight) {
-      track(job);
-    } else {
-      finish(job.id);
-    }
-  }
-
-  void finish(String jobId) {
-    if (_disposed) return;
-    _trackedJobs.remove(jobId);
-    _finishedJobIds.add(jobId);
-    final current = [...?state.value]..removeWhere((job) => job.id == jobId);
-    state = AsyncData(current);
-    unawaited(refresh());
-  }
-
-  List<Job> _mergeWithTrackedJobs(Iterable<Job> remoteJobs) {
-    final merged = <String, Job>{};
-    for (final job in remoteJobs) {
-      if (!job.isInFlight || _finishedJobIds.contains(job.id)) continue;
-      merged[job.id] = job;
-    }
-    for (final tracked in _trackedJobs.values) {
-      if (!tracked.isInFlight || _finishedJobIds.contains(tracked.id)) {
-        continue;
-      }
-      final remote = merged[tracked.id];
-      merged[tracked.id] =
-          remote == null ? tracked : mergeJobSnapshots(remote, tracked);
-    }
-
-    final jobs = merged.values.toList();
-    jobs.sort((a, b) {
-      final aDate = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-      final bDate = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-      return aDate.compareTo(bDate);
     });
+    _request = RequestCancellation();
+    final JobSnapshot snapshot;
+    try {
+      snapshot = await ref.watch(jobRepositoryProvider).watch(cancellation: _request);
+    } catch (_) {
+      _failed = true;
+      rethrow;
+    } finally {
+      _initializing = false;
+    }
+    _cursor = snapshot.cursor;
+    final jobs = _accept(snapshot.jobs);
+    Timer.run(_startWatching);
     return jobs;
   }
 
-  Future<JobWaitResult> waitFor(
-    Job job, {
-    String? project,
-    Iterable<String>? acceptedProjects,
-    String? action,
-    String? createdBy,
-    Duration every = const Duration(seconds: 3),
-    int max = 600,
+  static bool _isVisible(AppLifecycleState? state) =>
+      state == AppLifecycleState.resumed || state == AppLifecycleState.inactive;
+
+  Set<String> get _watchedIds => {
+    ..._trackedJobs.keys, ..._waiters.keys,
+    for (final job in state.value ?? const <Job>[]) job.id,
+  };
+
+  void _startWatching() {
+    if (_initializing || _watching || _disposed || !_visible || _failed) return;
+    unawaited(_watch());
+  }
+
+  Future<void> _watch() async {
+    _watching = true;
+    try {
+      while (!_disposed && _visible && !_failed) {
+        final request = _request = RequestCancellation();
+        try {
+          final snapshot = await ref.read(jobRepositoryProvider).watch(
+            cursor: _cursor, watchedIds: _watchedIds, cancellation: request);
+          if (_disposed || request.isCancelled) continue;
+          _cursor = snapshot.cursor;
+          state = AsyncData(_accept(snapshot.jobs));
+        } catch (error, stack) {
+          if (error is ApiException && error.kind == ApiFailureKind.cancelled &&
+              request.isCancelled) {
+            continue;
+          }
+          _failed = true;
+          if (!_disposed) state = AsyncError(error, stack);
+          _failWaiters(error, stack);
+        }
+      }
+    } finally {
+      _watching = false;
+    }
+  }
+
+  Future<void> refresh() async {
+    if (_disposed) return;
+    _failed = false;
+    _cursor = null;
+    if (!_initializing) _request?.cancel();
+    _startWatching();
+  }
+
+  void track(Job job, {String? project, String? action, String? createdBy}) {
+    if (_disposed) return;
+    if (_failed) throw StateError('Job watch unavailable; refresh required');
+    final tracked = job.verifyContext(
+      project: project, action: action, createdBy: createdBy);
+    if (!tracked.isInFlight) return;
+    final previous = _trackedJobs[tracked.id];
+    _trackedJobs[tracked.id] = previous == null
+        ? tracked : mergeJobSnapshots(previous, tracked);
+    state = AsyncData(_merge(state.value ?? const []));
+    _cursor = null;
+    if (!_initializing) _request?.cancel();
+    _startWatching();
+  }
+
+  List<Job> _accept(List<Job> jobs) {
+    for (final job in jobs) {
+      final waiter = _waiters[job.id];
+      waiter?.update(job);
+      if (!job.isInFlight) {
+        _trackedJobs.remove(job.id);
+        waiter?.complete(job);
+        _waiters.remove(job.id);
+      } else if (_trackedJobs.containsKey(job.id)) {
+        _trackedJobs[job.id] = mergeJobSnapshots(_trackedJobs[job.id]!, job);
+      }
+    }
+    return _merge(jobs.where((job) => job.isInFlight));
+  }
+
+  List<Job> _merge(Iterable<Job> jobs) {
+    final merged = {for (final job in jobs) job.id: job};
+    for (final tracked in _trackedJobs.values) {
+      final remote = merged[tracked.id];
+      merged[tracked.id] = remote == null
+          ? tracked : mergeJobSnapshots(remote, tracked);
+    }
+    final result = merged.values.toList();
+    result.sort((a, b) => (a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0))
+        .compareTo(b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0)));
+    return result;
+  }
+
+  void _failWaiters(Object error, StackTrace stack) {
+    for (final waiter in _waiters.values) {
+      if (!waiter.completer.isCompleted) waiter.completer.completeError(error, stack);
+    }
+  }
+
+  Future<JobWaitResult> waitFor(Job job, {
+    String? project, String? action, String? createdBy,
+    Duration timeout = const Duration(minutes: 30),
     void Function(Map<String, dynamic> data)? onUpdate,
   }) async {
-    final effectiveCreatedBy = createdBy ?? Session().myId;
-    track(
-      job,
-      project: project,
-      acceptedProjects: acceptedProjects,
-      action: action,
-      createdBy: effectiveCreatedBy,
-    );
+    final verified = job.verifyContext(project: project, action: action,
+        createdBy: createdBy ?? Session().myId);
+    if (!verified.isInFlight) return _result(verified);
+    if (_failed || state.hasError) throw state.error ?? StateError('Job watch unavailable');
+    if (_waiters.containsKey(job.id)) throw StateError('Job already being awaited');
+    final waiter = _JobWaiter(project, action, createdBy ?? Session().myId, onUpdate);
+    _waiters[job.id] = waiter;
     try {
-      return await ProjectService.waitForJob(
-        job.id,
-        every: every,
-        max: max,
-        onUpdate: (data) {
-          updateFromJson(
-            data,
-            project: project,
-            acceptedProjects: acceptedProjects,
-            action: action,
-            createdBy: effectiveCreatedBy,
-          );
-          onUpdate?.call(data);
-        },
-      );
+      track(verified);
+      final terminal = await waiter.completer.future.timeout(timeout);
+      return _result(terminal);
     } finally {
-      finish(job.id);
+      _waiters.remove(job.id);
     }
   }
 }
 
+JobWaitResult _result(Job job) => JobWaitResult(
+  ok: job.status == 'done', status: job.status, message: job.message,
+  action: job.action, progress: job.progress, currentStep: job.currentStep);
+
+class _JobWaiter {
+  _JobWaiter(this.project, this.action, this.createdBy, this.onUpdate);
+  final String? project;
+  final String? action;
+  final String? createdBy;
+  final void Function(Map<String, dynamic>)? onUpdate;
+  final completer = Completer<Job>();
+
+  void update(Job job) {
+    job.verifyContext(project: project, action: action, createdBy: createdBy);
+    onUpdate?.call({
+      'job_id': job.id, 'project': job.project, 'public_ref': job.publicRef,
+      'project_uuid': job.projectUuid, 'tenant_uuid': job.tenantUuid,
+      'created_by': job.createdBy, 'action': job.action, 'status': job.status,
+      'message': job.message, 'progress': job.progress, 'current_step': job.currentStep,
+    });
+  }
+
+  void complete(Job job) {
+    if (!completer.isCompleted) completer.complete(job);
+  }
+}
+
 Job mergeJobSnapshots(Job current, Job incoming) {
+  for (final pair in [
+    (current.id, incoming.id),
+    (current.project, incoming.project),
+    (current.projectUuid, incoming.projectUuid),
+    (current.publicRef, incoming.publicRef),
+    (current.tenantUuid, incoming.tenantUuid),
+    (current.createdBy, incoming.createdBy),
+    (current.action, incoming.action),
+  ]) {
+    if (pair.$1 != pair.$2) {
+      throw const FormatException('Identidade imutavel do job divergente');
+    }
+  }
   final currentDate = current.updatedAt ?? current.createdAt;
   final incomingDate = incoming.updatedAt ?? incoming.createdAt;
   final incomingIsNewer = switch ((currentDate, incomingDate)) {
@@ -193,28 +236,28 @@ Job mergeJobSnapshots(Job current, Job incoming) {
       !incomingValue.isBefore(currentValue),
   };
   final newest = incomingIsNewer ? incoming : current;
-  final olderSnapshot = incomingIsNewer ? current : incoming;
-  final progressValues =
-      [current.progress, incoming.progress].whereType<int>().toList();
-  final progress = progressValues.isEmpty
-      ? null
-      : progressValues.reduce((a, b) => a > b ? a : b);
-  final status = current.status == 'running' || incoming.status == 'running'
-      ? 'running'
-      : newest.status;
+  if (incomingIsNewer &&
+      current.progress != null && incoming.progress != null &&
+      incoming.progress! < current.progress!) {
+    throw const FormatException('Progresso do job regrediu');
+  }
+  if (incomingIsNewer && current.status == 'running' && incoming.status == 'queued') {
+    throw const FormatException('Estado do job regrediu');
+  }
 
   return Job(
     current.id,
-    project: newest.project ?? olderSnapshot.project,
-    projectUuid: newest.projectUuid ?? olderSnapshot.projectUuid,
-    tenantUuid: newest.tenantUuid ?? olderSnapshot.tenantUuid,
-    createdBy: newest.createdBy ?? olderSnapshot.createdBy,
-    action: newest.action ?? olderSnapshot.action,
-    status: status,
-    message: newest.message ?? olderSnapshot.message,
-    progress: progress,
-    currentStep: newest.currentStep ?? olderSnapshot.currentStep,
-    totalSteps: newest.totalSteps ?? olderSnapshot.totalSteps,
+    project: newest.project,
+    projectUuid: newest.projectUuid,
+    publicRef: newest.publicRef,
+    tenantUuid: newest.tenantUuid,
+    createdBy: newest.createdBy,
+    action: newest.action,
+    status: newest.status,
+    message: newest.message,
+    progress: newest.progress,
+    currentStep: newest.currentStep,
+    totalSteps: newest.totalSteps,
     createdAt: current.createdAt ?? incoming.createdAt,
     updatedAt: incomingDate == null ||
             (currentDate != null && currentDate.isAfter(incomingDate))
@@ -231,15 +274,15 @@ List<Map<String, dynamic>> mergeProjectsWithJobs({
   final result = projects.map(Map<String, dynamic>.from).toList();
   final indexes = <String, int>{};
   for (var i = 0; i < result.length; i++) {
-    final name = result[i]['name']?.toString();
-    if (name != null) indexes[name] = i;
+    final projectUuid = result[i]['project_uuid'] as String;
+    indexes[projectUuid] = i;
   }
 
   for (final job in jobs.where((job) => job.isInFlight)) {
     final project = job.project;
     if (project == null || project.isEmpty) continue;
 
-    final index = indexes[project];
+    final index = indexes[job.projectUuid];
     if (index != null) {
       final currentJob = result[index]['active_job'] as Job?;
       result[index]['active_job'] = preferredActiveJob([
@@ -254,10 +297,20 @@ List<Map<String, dynamic>> mergeProjectsWithJobs({
             job.createdBy == currentUserId;
     if (!createsVisibleProject) continue;
 
-    indexes[project] = result.length;
+    if (job.projectUuid == null || job.publicRef == null) {
+      throw const FormatException('Job de criacao sem identidade canonica');
+    }
+    indexes[job.projectUuid!] = result.length;
     result.add({
       'name': project,
-      'anon_token': '',
+      'display_name': project,
+      'project_uuid': job.projectUuid!,
+      'public_ref': job.publicRef!,
+      'opaque_api_keys_status': 'provisioning',
+      'opaque_api_key_slot_count': 0,
+      'automatic_key_rotation_enabled': true,
+      'automatic_key_rotation_blocked': false,
+      'automatic_key_rotation_lead_days': 7,
       'file_size_limit': '',
       'storage_limit_token': '',
       'is_loading': true,

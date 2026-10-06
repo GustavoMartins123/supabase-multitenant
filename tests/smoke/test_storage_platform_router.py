@@ -3,6 +3,7 @@ from __future__ import annotations
 import pathlib
 import shutil
 import subprocess
+import sys
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -12,10 +13,17 @@ VECTOR_PLATFORM = ROOT / "studio/nginx/lua/proxy_rewrites/storage_vector_platfor
 HEADER_FILTER = ROOT / "studio/nginx/lua/proxy_rewrites/storage_header_filter.lua"
 BODY_FILTER = ROOT / "studio/nginx/lua/proxy_rewrites/storage_body_filter.lua"
 KEY_INJECTOR = ROOT / "studio/nginx/lua/security/inject_service_key_storage.lua"
+UPLOAD_GUARD = ROOT / "studio/nginx/lua/security/upload_route_guard.lua"
+INTERNAL_HMAC = ROOT / "studio/nginx/lua/security/internal_hmac.lua"
+PROJECTS_API_SIGNER = ROOT / "studio/nginx/lua/security/projects_api_signer.lua"
 NGINX = ROOT / "studio/nginx/nginx.conf"
 
 
 class StoragePlatformRouterTests(unittest.TestCase):
+    def test_dead_object_sign_rewrite_is_removed(self) -> None:
+        nginx = (ROOT / "studio/nginx/nginx.conf").read_text(encoding="utf-8")
+        self.assertNotIn("rewrite ^/object/sign$ /storage/v1/$1 break;", nginx)
+
     def test_vector_buckets_are_mapped_in_lua_not_nginx(self) -> None:
         router = ROUTER.read_text(encoding="utf-8")
         nginx = NGINX.read_text(encoding="utf-8")
@@ -24,6 +32,16 @@ class StoragePlatformRouterTests(unittest.TestCase):
         self.assertIn('/storage/v1/vector/ListVectorBuckets', router)
         self.assertIn('/storage/v1/vector/CreateVectorBucket', router)
         self.assertNotIn('vector-buckets', nginx)
+
+    def test_object_sign_alias_is_rejected_not_normalized(self) -> None:
+        nginx = NGINX.read_text(encoding="utf-8")
+        guard = UPLOAD_GUARD.read_text(encoding="utf-8")
+
+        self.assertIn("server_rewrite_by_lua_file", nginx)
+        self.assertNotIn('ngx.req.set_uri("/storage/v1/object/sign", true)', guard)
+        location = nginx.split('location /object/sign {', 1)[1].split('}', 1)[0]
+        self.assertIn('return 410;', location)
+        self.assertNotIn('proxy_pass', location)
 
     def test_get_is_adapted_to_the_storage_vector_post_contract(self) -> None:
         router = ROUTER.read_text(encoding="utf-8")
@@ -49,7 +67,8 @@ class StoragePlatformRouterTests(unittest.TestCase):
     def test_create_renames_the_studio_bucket_field(self) -> None:
         rewrite = REWRITE.read_text(encoding="utf-8")
 
-        self.assertIn('body.vectorBucketName or body.bucketName', rewrite)
+        self.assertIn('local vector_bucket_name = body.bucketName', rewrite)
+        self.assertIn('if body.vectorBucketName ~= nil then', rewrite)
         self.assertIn('set_json_body({ vectorBucketName = vector_bucket_name })', rewrite)
 
     def test_vector_bucket_detail_uses_get_vector_bucket_and_unwraps_response(self) -> None:
@@ -75,6 +94,7 @@ class StoragePlatformRouterTests(unittest.TestCase):
         self.assertNotIn('^/vector-buckets/([^/]+)$', router)
         self.assertNotIn('^/vector-buckets/([^/]+)/indexes$', router)
 
+    @unittest.skipIf(sys.platform == "win32", "requires a working Lua 5.1 runtime (Linux-only)")
     def test_vector_bucket_patterns_resolve_at_runtime_when_lua_is_available(self) -> None:
         runtime = shutil.which("lua5.1") or shutil.which("lua") or shutil.which("resty")
         if runtime is None:
@@ -127,7 +147,9 @@ assert(indexes.vector_bucket_name == "rrrr", indexes.vector_bucket_name)
         self.assertIn('dataType = body.dataType', rewrite)
         self.assertIn('dimension = body.dimension', rewrite)
         self.assertIn('distanceMetric = body.distanceMetric', rewrite)
-        self.assertIn('nonFilterableMetadataKeys = metadata_keys', rewrite)
+        self.assertIn('nonFilterableMetadataKeys = json_array(metadata_keys)', rewrite)
+        self.assertIn('if metadata_keys ~= nil and #metadata_keys > 0 then', rewrite)
+        self.assertIn('storage_platform_invalid_metadata_keys', rewrite)
 
     def test_delete_routes_use_real_storage_vector_operations(self) -> None:
         router = ROUTER.read_text(encoding="utf-8")
@@ -171,6 +193,9 @@ assert(indexes.vector_bucket_name == "rrrr", indexes.vector_bucket_name)
             HEADER_FILTER,
             BODY_FILTER,
             KEY_INJECTOR,
+            UPLOAD_GUARD,
+            INTERNAL_HMAC,
+            PROJECTS_API_SIGNER,
         ):
             subprocess.run([compiler, "-p", str(path)], check=True)
 

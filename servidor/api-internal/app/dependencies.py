@@ -14,7 +14,8 @@ from app.security_tokens import (
     resolve_user_claims_from_hmac_token as resolve_signed_user_claims,
     resolve_user_id_from_hmac_token as resolve_signed_user_id,
 )
-from app.validation import normalize_groups, parse_uuid_value
+from app.project_public_ref import PublicProjectNotFound, resolve_public_project
+from app.validation import normalize_groups, parse_uuid_value, validate_project_ref
 
 
 def resolve_user_id_from_hmac_token(request: Request) -> uuid.UUID:
@@ -40,6 +41,18 @@ async def resolve_authenticated_user(
     pool: asyncpg.Pool,
 ) -> dict[str, Any]:
     signed_user_id, token_claims = resolve_user_claims_from_hmac_token(request)
+    return await resolve_current_user(pool, signed_user_id, token_claims)
+
+
+async def resolve_current_user(
+    pool: asyncpg.Pool,
+    signed_user_id: uuid.UUID,
+    token_claims: dict[str, Any],
+) -> dict[str, Any]:
+    from app.directory_service import confirm_directory
+    snapshot = await confirm_directory(pool)
+    if token_claims.get("directory_revision") != snapshot.revision:
+        raise HTTPException(403, "User token does not match the canonical directory")
     login_session = str(token_claims.get("login_session") or "")
     if not re.fullmatch(r"[A-Za-z0-9_-]{43}", login_session):
         login_session = ""
@@ -103,6 +116,7 @@ async def resolve_authenticated_user(
         "display_name": user_row["display_name"],
         "groups": groups,
         "is_global_admin": "admin" in groups,
+        "login_session": login_session,
     }
 
 
@@ -144,20 +158,33 @@ async def require_synced_user_record(
     return row
 
 
-async def get_project_row(conn: asyncpg.Connection, project_name: str) -> asyncpg.Record:
+async def get_project_row(
+    conn: asyncpg.Connection, project_name: str, *, for_update: bool = False
+) -> asyncpg.Record:
     row = await conn.fetchrow(
         """
         SELECT id, tenant_uuid, name, display_name, owner_id,
                automatic_key_rotation_enabled,
                automatic_key_rotation_blocked_at,
-               automatic_key_rotation_last_error
+               automatic_key_rotation_last_error,
+               opaque_gateway_ready_at, resource_profile
         FROM projects WHERE name = $1
-        """,
+        """ + (" FOR UPDATE" if for_update else ""),
         project_name,
     )
     if not row:
         raise HTTPException(404, "Project not found")
     return row
+
+
+async def get_public_project_row(
+    conn: asyncpg.Connection, project_ref: str, *, for_update: bool = False
+) -> asyncpg.Record:
+    project_ref = validate_project_ref(project_ref)
+    try:
+        return await resolve_public_project(conn, project_ref, for_update=for_update)
+    except PublicProjectNotFound as exc:
+        raise HTTPException(404, "Project not found") from exc
 
 
 async def get_project_role(
@@ -235,6 +262,36 @@ async def upsert_project_member(
     )
 
     return existing_role
+
+
+async def ensure_member_role_change_allowed(
+    conn: asyncpg.Connection,
+    *,
+    project_row: asyncpg.Record,
+    auth_user: dict[str, Any],
+    target_user_id: uuid.UUID,
+    old_role: str | None,
+    new_role: str | None,
+) -> None:
+    """Shared POST/DELETE policy; caller holds the project row lock until commit."""
+    if old_role == new_role:
+        return
+    if target_user_id == project_row["owner_id"] and new_role != "admin":
+        raise HTTPException(409, "O dono do projeto deve permanecer admin; transfira a posse antes")
+    if old_role != "admin" or new_role == "admin":
+        return
+    if (
+        target_user_id != auth_user["db_user_id"]
+        and project_row["owner_id"] != auth_user["db_user_id"]
+        and not auth_user["is_global_admin"]
+    ):
+        raise HTTPException(403, "Apenas o dono ou administrador global pode rebaixar/remover outro admin")
+    admin_count = await conn.fetchval(
+        "SELECT count(*) FROM project_members WHERE project_id = $1 AND role = 'admin'",
+        project_row["id"],
+    )
+    if admin_count <= 1:
+        raise HTTPException(409, "O projeto ficaria sem admin; promova outro membro antes")
 
 
 async def ensure_project_member_access(

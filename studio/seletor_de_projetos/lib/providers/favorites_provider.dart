@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../models/project_identity.dart';
 
 final favoritesProvider = AsyncNotifierProvider<FavoritesNotifier, Set<String>>(
   FavoritesNotifier.new,
@@ -9,45 +10,50 @@ class FavoritesNotifier extends AsyncNotifier<Set<String>> {
   @override
   Future<Set<String>> build() async {
     final prefs = await SharedPreferences.getInstance();
-    final favList = prefs.getStringList('project_favorites') ?? [];
-    return favList.toSet();
+    final ids = prefs.getStringList('project_favorite_ids');
+    if (ids == null) return <String>{};
+    for (final id in ids) {
+      _validateProjectUuid(id);
+    }
+    return ids.toSet();
   }
 
-  Future<void> toggleFavorite(String projectName) async {
+  void _validateProjectUuid(String projectUuid) {
+    if (!RegExp(canonicalUuidPattern)
+        .hasMatch(projectUuid)) {
+      throw const FormatException('Favorito sem UUID de projeto canonico');
+    }
+  }
+
+  Future<void> toggleFavorite(String projectUuid) async {
+    _validateProjectUuid(projectUuid);
     final prefs = await SharedPreferences.getInstance();
-    final currentFavs = state.value ?? {};
+    final currentFavs = await future;
     final newFavs = Set<String>.from(currentFavs);
 
-    if (newFavs.contains(projectName)) {
-      newFavs.remove(projectName);
+    if (newFavs.contains(projectUuid)) {
+      newFavs.remove(projectUuid);
     } else {
-      newFavs.add(projectName);
+      newFavs.add(projectUuid);
     }
 
+    if (!await prefs.setStringList('project_favorite_ids', newFavs.toList())) {
+      throw StateError('Falha ao salvar favoritos');
+    }
     state = AsyncData(newFavs);
-    await prefs.setStringList('project_favorites', newFavs.toList());
   }
 
-  Future<void> removeFavorite(String projectName) async {
+  Future<void> removeFavorite(String projectUuid) async {
+    _validateProjectUuid(projectUuid);
     final prefs = await SharedPreferences.getInstance();
-    final currentFavs = state.value ?? {};
-    if (!currentFavs.contains(projectName)) return;
+    final currentFavs = await future;
+    if (!currentFavs.contains(projectUuid)) return;
 
     final newFavs = Set<String>.from(currentFavs);
-    newFavs.remove(projectName);
+    newFavs.remove(projectUuid);
+    if (!await prefs.setStringList('project_favorite_ids', newFavs.toList())) {
+      throw StateError('Falha ao salvar favoritos');
+    }
     state = AsyncData(newFavs);
-    await prefs.setStringList('project_favorites', newFavs.toList());
-  }
-
-  Future<void> renameFavorite(String oldName, String newName) async {
-    final currentFavs = await future;
-    if (!currentFavs.contains(oldName)) return;
-
-    final prefs = await SharedPreferences.getInstance();
-    final newFavs = Set<String>.from(currentFavs)
-      ..remove(oldName)
-      ..add(newName);
-    state = AsyncData(newFavs);
-    await prefs.setStringList('project_favorites', newFavs.toList());
   }
 }

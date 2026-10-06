@@ -23,12 +23,12 @@ services:
       context: ./volumes/db
     restart: unless-stopped
     logging: *vector-logging
-    env_file:
-      - .env
     networks:
       rede-supabase:
         ipv4_address: ${POSTGRES_HOST}
       analytics-internal:
+      storage-control:
+      client-configuration-data:
     volumes:
       - ./volumes/db/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql:Z
       # Must be superuser to create event trigger
@@ -48,9 +48,16 @@ services:
       #################################
       # create database template
       - ./volumes/db/create_template.sh://docker-entrypoint-initdb.d/zzz-create_template.sh:Z
+      - type: bind
+        source: ./volumes/db/graphql.sql
+        target: /etc/supabase/graphql.sql
+        read_only: true
+        bind:
+          create_host_path: false
       #################################
       # Use named volume to persist pgsodium decryption key between restarts
       - db-config:/etc/postgresql-custom
+      - ./volumes/db/platform-capacity.conf:/etc/postgresql-custom/conf.d/10-platform-capacity.conf:Z
     healthcheck:
       test:
         [
@@ -65,6 +72,8 @@ services:
       timeout: 5s
       retries: 10
     environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      META_GUEST_PASSWORD: ${META_GUEST_PASSWORD}
       POSTGRES_HOST: /var/run/postgresql
       PGPORT: ${POSTGRES_PORT}
       POSTGRES_PORT: ${POSTGRES_PORT}
@@ -74,8 +83,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXP: ${JWT_EXPIRY}
-    mem_limit: ${POSTGRES_MEM_LIMIT}
-    memswap_limit: ${POSTGRES_MEMSWAP_LIMIT}
     shm_size: ${POSTGRES_SHM_SIZE}
     command:
       - postgres
@@ -84,17 +91,7 @@ services:
       - -c
       - log_min_messages=fatal
       - -c
-      - max_connections=1000
-      - -c
       - superuser_reserved_connections=5
-      - -c
-      - shared_buffers=4GB
-      - -c
-      - effective_cache_size=8GB
-      - -c
-      - maintenance_work_mem=1GB
-      - -c
-      - work_mem=16MB
       - -c
       - wal_buffers=128MB
       - -c
@@ -109,10 +106,6 @@ services:
       - synchronous_commit=on
       - -c
       - checkpoint_timeout=15min
-      - -c
-      - max_wal_size=8GB
-      - -c
-      - min_wal_size=2GB
       - -c
       - wal_level=logical
       - -c
@@ -129,14 +122,6 @@ services:
       - cpu_index_tuple_cost=0.005
       - -c
       - cpu_operator_cost=0.0025
-      - -c
-      - max_worker_processes=8
-      - -c
-      - max_parallel_workers=4
-      - -c
-      - max_parallel_workers_per_gather=2
-      - -c
-      - max_parallel_maintenance_workers=2
       - -c
       - statement_timeout=300000
       - -c
@@ -156,8 +141,6 @@ services:
       - -c
       - 'log_line_prefix=%t [%p]: user=%u,db=%d,app=%a,client=%h'
       - -c
-      - autovacuum_max_workers=4
-      - -c
       - autovacuum_naptime=10s
       - -c
       - autovacuum_vacuum_scale_factor=0.1
@@ -169,10 +152,6 @@ services:
       - archive_timeout=3600
       - -c
       - wal_keep_size=1GB
-      - -c
-      - max_replication_slots=32
-      - -c
-      - max_wal_senders=40
       - -c
       - tcp_keepalives_idle=60
       - -c
@@ -189,10 +168,12 @@ services:
     #image: supabase/realtime:v2.34.41
     restart: unless-stopped
     logging: *vector-logging
-    env_file:
-      - .env
     networks:
       - rede-supabase
+    ulimits:
+      nofile:
+        soft: ${REALTIME_RLIMIT_NOFILE}
+        hard: ${REALTIME_RLIMIT_NOFILE}
     depends_on:
       db:
         # Disable this if you are using an external Postgres database
@@ -233,19 +214,24 @@ services:
 
   supavisor:
     container_name: supabase-pooler
-    image: ${POOLER_IMAGE}
-    env_file:
-      - .env
+    image: supabase/supavisor:2.9.7
     restart: unless-stopped
     logging: *vector-logging
     networks:
-        rede-supabase:
-          ipv4_address: ${POSTGRES_POOLER}
+      rede-supabase:
+        ipv4_address: ${POSTGRES_POOLER}
+      storage-control:
     volumes:
       - ./volumes/pooler/pooler.exs:/etc/pooler/pooler.exs:ro
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--silent", "--show-error", "--output", "/dev/null", "http://localhost:4000"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     ulimits:
       nofile:
         soft: ${POOLER_NOFILE_SOFT}
@@ -281,25 +267,23 @@ services:
         && /app/bin/server
   functions:
     container_name: supabase-edge-functions
-    image: ${FUNCTIONS_IMAGE}
-    env_file:
-      - .env
+    image: supabase/edge-runtime:v1.74.2
     restart: unless-stopped
     logging: *vector-logging
     networks:
       - rede-supabase
     volumes:
-      - ./volumes/functions:/home/deno/functions:Z
-      - ./projects:/home/deno/projects:ro,Z
+      - ./volumes/functions:/home/deno/functions:ro,Z
+      - type: bind
+        source: ./.functions-tenants
+        target: /home/deno/tenant-config
+        read_only: true
+        bind:
+          create_host_path: false
     depends_on:
       db:
         condition: service_healthy  
     environment:
-      JWT_SECRET: ${JWT_SECRET}
-      SUPABASE_URL: ${FUNCTIONS_SUPABASE_URL}
-      SUPABASE_ANON_KEY: ${FUNCTIONS_SUPABASE_ANON_KEY}
-      SUPABASE_SERVICE_ROLE_KEY: ${FUNCTIONS_SUPABASE_SERVICE_ROLE_KEY}
-      SUPABASE_DB_URL: postgresql://${FUNCTIONS_DB_USER}:${POSTGRES_PASSWORD}@${POSTGRES_POOLER}:${POOLER_PROXY_PORT_TRANSACTION}/${POSTGRES_DB}
       VERIFY_JWT: "${FUNCTIONS_VERIFY_JWT}"
     command:
       [
@@ -307,6 +291,135 @@ services:
       "--main-service",
       "/home/deno/functions/main"
       ]
+
+  storage:
+    container_name: supabase-storage-global
+    image: ${STORAGE_IMAGE:?defina STORAGE_IMAGE}
+    restart: unless-stopped
+    logging: *vector-logging
+    user: ${STORAGE_RUN_AS_USER:?defina STORAGE_RUN_AS_USER}
+    env_file:
+      - .storage.env
+    networks:
+      - storage-control
+      - storage-data-plane
+    volumes:
+      - ./volumes/storage:/var/lib/storage:z
+    depends_on:
+      db:
+        condition: service_healthy
+      supavisor:
+        condition: service_healthy
+      imgproxy:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 5000
+      SERVER_REGION: local
+      SERVER_ADMIN_PORT: 5001
+      MULTI_TENANT: "true"
+      DATABASE_MULTITENANT_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:${POSTGRES_PORT}/_supabase_storage
+      ADMIN_RETURN_TENANT_SENSITIVE_DATA: "false"
+      REQUEST_X_FORWARDED_HOST_REGEXP: ${STORAGE_TENANT_HOST_REGEXP:?defina STORAGE_TENANT_HOST_REGEXP}
+      REQUEST_ALLOW_X_FORWARDED_PATH: "true"
+      REQUEST_TRACE_HEADER: x-request-id
+      DB_INSTALL_ROLES: "false"
+      PG_QUEUE_ENABLE: "true"
+      DATABASE_FREE_POOL_AFTER_INACTIVITY: ${STORAGE_TENANT_POOL_IDLE_MS:?defina STORAGE_TENANT_POOL_IDLE_MS}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:?defina STORAGE_BACKEND}
+      STORAGE_FILE_BACKEND_PATH: ${STORAGE_FILE_BACKEND_PATH:?defina STORAGE_FILE_BACKEND_PATH}
+      STORAGE_S3_BUCKET: ${STORAGE_INTERNAL_BUCKET:?defina STORAGE_INTERNAL_BUCKET}
+      STORAGE_S3_REGION: ${STORAGE_S3_REGION:?defina STORAGE_S3_REGION}
+      UPLOAD_FILE_SIZE_LIMIT: ${STORAGE_FILE_SIZE_LIMIT:?defina STORAGE_FILE_SIZE_LIMIT}
+      UPLOAD_FILE_SIZE_LIMIT_STANDARD: ${STORAGE_FILE_SIZE_LIMIT_STANDARD:?defina STORAGE_FILE_SIZE_LIMIT_STANDARD}
+      TUS_URL_PATH: /upload/resumable
+      IMAGE_TRANSFORMATION_ENABLED: ${STORAGE_IMAGE_TRANSFORMATION_ENABLED:?defina STORAGE_IMAGE_TRANSFORMATION_ENABLED}
+      IMGPROXY_URL: http://imgproxy:5001
+      S3_PROTOCOL_ENABLED: "true"
+      # Tenant routing uses X-Forwarded-Host; SigV4 must verify the original
+      # signed Host (including port), preserved by both Storage proxies.
+      S3_PROTOCOL_NON_CANONICAL_HOST_HEADER: host
+      S3_ALLOW_FORWARDED_HEADER: "false"
+      VECTOR_ENABLED: ${STORAGE_VECTOR_ENABLED:?defina STORAGE_VECTOR_ENABLED}
+      VECTOR_BUCKET_PROVIDER: pgvector
+      VECTOR_DATABASE_CREATE: "false"
+      VECTOR_STORE_MIGRATIONS_ENABLED: "true"
+      VECTOR_MAX_BUCKETS: ${STORAGE_VECTOR_MAX_BUCKETS:?defina STORAGE_VECTOR_MAX_BUCKETS}
+      VECTOR_MAX_INDEXES: ${STORAGE_VECTOR_MAX_INDEXES:?defina STORAGE_VECTOR_MAX_INDEXES}
+      LOG_LEVEL: ${STORAGE_LOG_LEVEL:?defina STORAGE_LOG_LEVEL}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5000/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  imgproxy:
+    container_name: supabase-imgproxy-global
+    image: ${IMGPROXY_IMAGE:?defina IMGPROXY_IMAGE}
+    restart: unless-stopped
+    logging: *vector-logging
+    networks:
+      - storage-control
+    volumes:
+      - ./volumes/storage:/var/lib/storage:ro,z
+    environment:
+      IMGPROXY_BIND: ${IMGPROXY_BIND:?defina IMGPROXY_BIND}
+      IMGPROXY_LOCAL_FILESYSTEM_ROOT: ${IMGPROXY_LOCAL_FILESYSTEM_ROOT:?defina IMGPROXY_LOCAL_FILESYSTEM_ROOT}
+      IMGPROXY_USE_ETAG: ${IMGPROXY_USE_ETAG:?defina IMGPROXY_USE_ETAG}
+      IMGPROXY_ENABLE_WEBP_DETECTION: ${IMGPROXY_ENABLE_WEBP_DETECTION:?defina IMGPROXY_ENABLE_WEBP_DETECTION}
+    healthcheck:
+      test: ["CMD", "imgproxy", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  storage-data-plane:
+    container_name: shared-storage-data-plane
+    hostname: supabase-storage-global
+    image: ${STORAGE_DATA_PLANE_PROXY_IMAGE:?defina STORAGE_DATA_PLANE_PROXY_IMAGE}
+    restart: unless-stopped
+    logging: *vector-logging
+    entrypoint: ["nginx"]
+    command: ["-g", "daemon off;", "-c", "/etc/nginx/nginx.conf"]
+    networks:
+      storage-gateways:
+        aliases:
+          - supabase-storage-global
+      storage-data-plane:
+    volumes:
+      - ./volumes/storage-proxy/nginx.conf:/etc/nginx/nginx.conf:ro,z
+    depends_on:
+      storage:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5000/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
   analytics:
     build:
       context: .
@@ -342,7 +455,7 @@ services:
       POSTGRES_BACKEND_SCHEMA: _analytics
 
   vector:
-    image: ${VECTOR_IMAGE}
+    image: timberio/vector:0.53.0-alpine
     container_name: supabase-vector-global
     restart: unless-stopped
     volumes:
@@ -360,12 +473,15 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9001/health"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:9001/health"]
       interval: 5s
       timeout: 5s
       retries: 3
 
 networks:
+  client-configuration-data:
+    name: client-configuration-data
+    internal: true
   rede-supabase:
     name: rede-supabase
     driver: bridge
@@ -376,6 +492,18 @@ networks:
           gateway: ${SUPABASE_NETWORK_GATEWAY}
   analytics-internal:
     name: supabase-analytics-internal
+    driver: bridge
+    internal: true
+  storage-control:
+    name: supabase-storage-control
+    driver: bridge
+    internal: true
+  storage-gateways:
+    name: supabase-storage-gateways
+    driver: bridge
+    internal: true
+  storage-data-plane:
+    name: supabase-storage-data-plane
     driver: bridge
     internal: true
 volumes:

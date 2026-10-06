@@ -1,17 +1,8 @@
-local method = ngx.req.get_method()
 local cjson = require("cjson.safe")
-local request_project_ref = require("project_context.request_context").capture()
+local internal_hmac = require("security.internal_hmac")
+local ref_resolver = require("project_context.project_ref_resolver")
 
-local uri = ngx.var.request_uri
-if method == "GET"
-    and uri:match(
-        "^/api/platform/pg%-meta/[a-z_][a-z0-9_]*/policies%?included_schemas=&excluded_schemas=$"
-    )
-then
-    ngx.req.set_uri("/policies", false)
-    ngx.req.set_uri_args({})
-    return
-end
+local _M = {}
 
 -- O Studio usa camelCase, enquanto postgres-meta recebe snake_case.
 local function convert_fields(value)
@@ -50,11 +41,10 @@ local function convert_fields(value)
     return value
 end
 
--- O SQL gerado pelo Studio self-hosted pressupoe um unico Storage local. Neste
--- projeto o Studio e compartilhado e cada tenant tem seu proprio Storage na
--- rede Docker. O patch e estritamente limitado ao SQL de
--- criacao do S3 Vectors Wrapper e nunca toca consultas SQL comuns.
-local function patch_s3_vectors_wrapper_query(body)
+-- O wrapper assina o Host do endpoint. Cada projeto usa seu proprio Nginx como
+-- fronteira confiavel; ele fixa o tenant UUID e encaminha ao Storage global.
+-- O patch e limitado ao SQL de criacao do S3 Vectors Wrapper.
+local function patch_s3_vectors_wrapper_query(body, context)
     if type(body) ~= "table" or type(body.query) ~= "string" then
         return body
     end
@@ -62,67 +52,87 @@ local function patch_s3_vectors_wrapper_query(body)
     local query = body.query
     if not query:find("s3_vectors_fdw_handler", 1, true)
         or not query:find("s3_vectors_fdw_validator", 1, true)
-        or not query:find("endpoint_url", 1, true)
     then
         return body
     end
 
-    local project_ref = request_project_ref
-    if type(project_ref) ~= "string"
-        or not project_ref:match("^[a-z_][a-z0-9_]*$")
-        or #project_ref < 3 or #project_ref > 40
+    local technical_name = context.technical_name
+    if type(technical_name) ~= "string"
+        or not technical_name:match("^[a-z_][a-z0-9_]*$")
+        or #technical_name < 3 or #technical_name > 40
     then
-        ngx.log(ngx.ERR, "Nao foi possivel resolver o projeto para o S3 Vectors Wrapper")
-        return body
+        return nil, "Canonical technical name is required for the S3 Vectors Wrapper"
     end
 
-    local endpoint = "http://supabase-storage-" .. project_ref .. ":5000/vector"
+    local endpoint = "http://supabase-nginx-" .. technical_name .. ":8081/vector"
     local patched, replacements = query:gsub(
         "(endpoint_url%s+)'[^']*'",
         "%1'" .. endpoint .. "'"
     )
 
-    if replacements == 0 then
-        ngx.log(ngx.WARN, "SQL do S3 Vectors Wrapper sem endpoint_url substituivel")
-        return body
+    if replacements ~= 1 then
+        return nil, "S3 Vectors Wrapper SQL requires exactly one endpoint_url"
     end
 
     body.query = patched
-    ngx.log(ngx.INFO, "Endpoint do S3 Vectors Wrapper ajustado para o projeto: ", project_ref)
     return body
 end
 
-ngx.req.read_body()
-local body_data = ngx.req.get_body_data()
-if body_data and #body_data > 0 then
-    local success, decoded_body = pcall(cjson.decode, body_data)
-    if success and decoded_body then
-        decoded_body = patch_s3_vectors_wrapper_query(convert_fields(decoded_body))
-        local encoded_body, encode_err = cjson.encode(decoded_body)
-        if encoded_body then
-            ngx.req.set_body_data(encoded_body)
-        else
-            ngx.log(ngx.ERR, "Falha ao codificar JSON para pg-meta: ", encode_err)
+function _M.rewrite(context)
+    if type(context) ~= "table" or not ref_resolver.valid_ref(context.ref)
+        or context.ref ~= ngx.ctx.studio_request_project_ref
+    then
+        return nil, "Canonical project context is required"
+    end
+
+    local uri = ngx.var.request_uri
+    if ngx.req.get_method() == "GET"
+        and uri:match("^/api/platform/pg%-meta/[a-z]+/policies%?included_schemas=&excluded_schemas=$")
+    then
+        ngx.var.resource = "/policies"
+        ngx.req.set_uri_args({})
+        return true
+    end
+
+    local body_data, read_err = internal_hmac.read_current_body()
+    if body_data == nil then
+        return nil, read_err
+    end
+    if #body_data > 0 then
+        local decoded_body, decode_err = cjson.decode(body_data)
+        if type(decoded_body) ~= "table" or not body_data:match("^%s*{") then
+            return nil, decode_err or "pg-meta requires a JSON object"
         end
-    else
-        ngx.log(ngx.WARN, "Falha ao processar JSON: ", decoded_body or "formato inválido")
+        local rewritten, rewrite_err = patch_s3_vectors_wrapper_query(convert_fields(decoded_body), context)
+        if not rewritten then
+            return nil, rewrite_err
+        end
+        local encoded_body, encode_err = cjson.encode(rewritten)
+        if not encoded_body then
+            return nil, encode_err
+        end
+        ngx.req.set_body_data(encoded_body)
     end
+
+    local args, args_err = ngx.req.get_uri_args()
+    if args_err then return nil, "Invalid pg-meta query parameters" end
+    local id = args.id
+    if id ~= nil then
+        if type(id) ~= "string" or id == "" or #id > 128 then
+            return nil, "Invalid pg-meta resource id"
+        end
+        args.id = nil
+        local resource = ngx.var.resource
+        if type(resource) ~= "string" then
+            return nil, "pg-meta resource is missing"
+        end
+        if not resource:match("/$") then
+            resource = resource .. "/"
+        end
+        ngx.var.resource = resource .. ngx.escape_uri(id)
+        ngx.req.set_uri_args(args)
+    end
+    return true
 end
 
-local args = ngx.req.get_uri_args()
-local id = args.id
-if id then
-    -- postgres-meta representa recursos individuais no path, não em ?id=.
-    args.id = nil
-    local resource = ngx.var.resource
-
-    if not resource:match("/$") then
-        resource = resource .. "/"
-    end
-    resource = resource .. id
-
-    ngx.var.resource = resource
-    ngx.req.set_uri_args(args)
-
-    ngx.log(ngx.INFO, "URI atualizada: resource=", resource)
-end
+return _M

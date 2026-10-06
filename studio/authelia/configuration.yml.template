@@ -1,8 +1,8 @@
 server:
   address: tcp://0.0.0.0:9091/auth
   tls:
-    certificate: /config/ssl/ca.pem
-    key:         /config/ssl/ca.key
+    certificate: /config/ssl/server.pem
+    key:         /config/ssl/server.key
 
 log:
   level: info
@@ -14,6 +14,12 @@ identity_validation:
     jwt_lifespan: '5 minutes'
     jwt_algorithm: 'HS256'
 session:
+  redis:
+    host: redis-sessions
+    port: 6379
+    database_index: 0
+    timeout: '1s'
+    max_retries: 0
   cookies:
     - name: authelia_session
       domain: __STUDIO_HOST__

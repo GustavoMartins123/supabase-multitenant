@@ -6,6 +6,7 @@ import os
 import pathlib
 import shutil
 import subprocess
+import sys
 import unittest
 
 
@@ -50,7 +51,7 @@ class ConstantTimeHmacTest(unittest.TestCase):
 
         validators = (
             LUA / "security" / "check_push_worker.lua",
-            LUA / "security" / "shared_token.lua",
+            LUA / "security" / "internal_hmac.lua",
             LUA / "resty" / "fernet.lua",
         )
         for validator in validators:
@@ -66,6 +67,7 @@ class ConstantTimeHmacTest(unittest.TestCase):
         fernet = read(LUA / "resty" / "fernet.lua")
         self.assertNotIn("mac_a ~= mac_b", fernet)
 
+    @unittest.skipIf(sys.platform == "win32", "requires a working Lua 5.1 runtime (Linux-only)")
     def test_constant_time_compare_runtime_contract(self) -> None:
         run_lua(
             f'''
@@ -95,6 +97,7 @@ class AdminGroupHardeningTest(unittest.TestCase):
         self.assertIn("env ADMIN_GROUPS;", read(NGINX))
         self.assertIn("ADMIN_GROUPS=admin", read(STUDIO_ENV))
 
+    @unittest.skipIf(sys.platform == "win32", "requires a working Lua 5.1 runtime (Linux-only)")
     def test_admin_group_parser_runtime_contract(self) -> None:
         env = dict(os.environ)
         env["ADMIN_GROUPS"] = "admin,superadmins"
@@ -126,11 +129,23 @@ class InternalServiceKeyHardeningTest(unittest.TestCase):
             nginx,
         )
         self.assertIn(
-            'os.getenv("SERVICE_KEY_VERIFY_TLS") or "true"',
+            'M.verify_internal = true',
             outbound_tls,
         )
         self.assertIn("options.ssl_verify = M.verify_internal", outbound_tls)
         self.assertIn("outbound_tls.apply_internal", client)
+
+    def test_backend_tls_identity_dispatch_runs_in_lua(self) -> None:
+        runtime = lua_runtime()
+        if runtime is None:
+            raise unittest.SkipTest("runtime Lua nao esta instalado")
+        subprocess.run(
+            [runtime, str(ROOT / "tests/smoke/test_backend_tls_identity.lua")],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
     def test_fernet_constructor_and_decrypt_are_both_protected(self) -> None:
         client = read(LUA / "security" / "get_service_key.lua")
@@ -152,6 +167,7 @@ class InternalServiceKeyHardeningTest(unittest.TestCase):
         self.assertIn('increment_metric("stale_fetch")', client)
         self.assertIn("service_key_version.invalidate", invalidation)
 
+    @unittest.skipIf(sys.platform == "win32", "requires a working Lua 5.1 runtime (Linux-only)")
     def test_service_key_version_runtime_contract(self) -> None:
         run_lua(
             f'''
@@ -200,23 +216,27 @@ class UserCacheReloadHardeningTest(unittest.TestCase):
     def test_reload_publishes_snapshot_without_global_flush(self) -> None:
         source = read(LUA / "init" / "init_worker.lua")
         self.assertNotIn("cache:flush_all()", source)
-        self.assertIn("local snapshot = {}", source)
+        self.assertIn("directory.read_locked(false)", source)
         self.assertIn('cache:set("__yaml_user_keys"', source)
         self.assertLess(
-            source.index("for key, value in pairs(snapshot) do"),
-            source.index("for key in pairs(old_keys) do"),
+            source.index("for _, user in ipairs(snapshot.users) do"),
+            source.index("for _, key in ipairs(old) do"),
         )
 
     def test_user_enumerators_ignore_internal_snapshot_keys(self) -> None:
         for relative in (
             "admin_api/all_users.lua",
             "admin_api/users_list.lua",
-            "admin_api/available_users.lua",
         ):
             with self.subTest(relative=relative):
                 source = read(LUA / relative)
                 self.assertIn(':match("^__")', source)
                 self.assertNotIn('~= "__mtime"', source)
+
+    def test_available_users_is_proxied_to_canonical_backend_directory(self) -> None:
+        source = read(ROOT / "studio/nginx/nginx.conf")
+        self.assertIn("proxy_pass $server_domain/api/projects/$slug/available-users$is_args$args;", source)
+        self.assertNotIn("admin_api/available_users.lua", source)
 
 
 if __name__ == "__main__":

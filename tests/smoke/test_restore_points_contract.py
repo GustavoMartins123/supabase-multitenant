@@ -44,57 +44,73 @@ class RestorePointProtocolTest(unittest.TestCase):
 class RestorePointApiSurfaceTest(unittest.TestCase):
     def setUp(self) -> None:
         self.main_source = (API_ROOT / "app" / "main.py").read_text(encoding="utf-8")
+        self.router_source = (
+            API_ROOT / "app" / "routers" / "restore_points.py"
+        ).read_text(encoding="utf-8")
 
     def test_endpoints_exist(self) -> None:
         for route in (
-            '@app.get("/api/projects/{project_name}/restore-points")',
-            '@app.post("/api/projects/{project_name}/restore-points", status_code=202)',
-            '"/api/projects/{project_name}/restore-points/{point_id}/restore"',
-            '"/api/projects/{project_name}/restore-points/{point_id}"',
+            '@router.get("/api/projects/{project_ref}/restore-points"',
+            '@router.post("/api/projects/{project_ref}/restore-points"',
+            '"/api/projects/{project_ref}/restore-points/{point_id}/restore"',
+            '"/api/projects/{project_ref}/restore-points/{point_id}"',
         ):
-            self.assertIn(route, self.main_source)
+            self.assertIn(route, self.router_source)
 
     def test_endpoints_apply_role_matrix_and_serialize_limit(self) -> None:
         self.assertIn("RESTORE_POINT_LIMIT = 15", self.main_source)
-        self.assertIn("_count_active_restore_points", self.main_source)
+        self.assertIn("_count_active_restore_points", self.router_source)
         self.assertIn("ensure_project_admin_access", self.main_source)
         self.assertIn("ensure_project_owner_access", self.main_source)
+        backgrounds = (API_ROOT / "app" / "project_backgrounds.py").read_text(
+            encoding="utf-8"
+        )
         for runner in (
             "_create_restore_point_background",
             "_restore_project_background",
             "_delete_restore_point_background",
         ):
-            self.assertIn(runner, self.main_source)
+            self.assertIn(runner, backgrounds)
 
     def test_schema_declares_restore_points_table(self) -> None:
-        schema_source = (API_ROOT / "app" / "database_schema.py").read_text(
-            encoding="utf-8"
-        )
+        schema_source = (
+            API_ROOT / "app" / "migrations" / "0001_control_plane_baseline.sql"
+        ).read_text(encoding="utf-8")
         self.assertIn("project_restore_points", schema_source)
         self.assertIn(
             "created_by UUID REFERENCES users(id) ON DELETE SET NULL",
             schema_source,
         )
-        self.assertIn("ensure_restore_points_schema", schema_source)
-        self.assertIn("ensure_restore_points_schema", self.main_source)
+        self.assertIn(
+            "idx_project_restore_points_project_created", schema_source
+        )
+        self.assertNotIn("project_restore_points", self.main_source.split(
+            "async def startup()", 1
+        )[1].split("async def shutdown()", 1)[0])
 
     def test_api_exposes_restore_point_creator_name(self) -> None:
-        self.assertIn('"created_by_name": row["created_by_name"]', self.main_source)
+        self.assertIn('"created_by_name": row["created_by_name"]', self.router_source)
         self.assertIn(
             "COALESCE(u.display_name, u.authelia_username, 'Sistema') AS created_by_name",
-            self.main_source,
+            self.router_source,
         )
         self.assertGreaterEqual(
-            self.main_source.count("job_id, created_by, project_ref_at_creation"),
+            self.router_source.count("job_id, created_by, project_ref_at_creation"),
             2,
         )
 
     def test_delete_flow_passes_persisted_tenant_uuid_for_backup_cleanup(self) -> None:
-        self.assertIn('{"tenant_uuid": str(tenant_uuid)}', self.main_source)
+        backgrounds = (API_ROOT / "app" / "project_backgrounds.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('{"tenant_uuid": str(tenant_uuid)}', backgrounds)
 
     def test_restore_commands_carry_persisted_tenant_identity(self) -> None:
+        backgrounds = (API_ROOT / "app" / "project_backgrounds.py").read_text(
+            encoding="utf-8"
+        )
         self.assertGreaterEqual(
-            self.main_source.count('"tenant_uuid": str(tenant_uuid)'),
+            backgrounds.count('"tenant_uuid": str(tenant_uuid)'),
             4,
         )
 
@@ -124,6 +140,20 @@ class RestorePointScriptsTest(unittest.TestCase):
         self.assertIn("--exclude-schema=realtime", source)
         self.assertIn("manifest.json", source)
         self.assertIn("storage.tar.gz", source)
+        self.assertIn('storage_namespace="$(storage_assert_namespace_target "$PROJECT_UUID")"', source)
+        self.assertIn('storage_layout: "tenant-namespace"', source)
+        self.assertNotIn('project_dir/storage', source)
+
+    def test_restore_swaps_only_the_requested_tenant_namespace(self) -> None:
+        source = (SCRIPTS_ROOT / "lib" / "restore_project_impl.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('STORAGE_TARGET="$(storage_assert_namespace_target "$PROJECT_UUID")"', source)
+        self.assertIn(
+            'storage_extract_namespace_archive "$PROJECT_UUID" "$SRC_DIR/storage.tar.gz"',
+            source,
+        )
+        self.assertIn('MANIFEST_UUID" == "$PROJECT_UUID', source)
 
     def test_backup_emits_progress_for_real_capture_stages(self) -> None:
         core = (SCRIPTS_ROOT / "lib" / "backup_core.sh").read_text(encoding="utf-8")
@@ -182,8 +212,12 @@ class RestorePointGatewayAndUiTest(unittest.TestCase):
         dialog = (SELECTOR_LIB / "dialogs" / "restore_points_dialog.dart").read_text(
             encoding="utf-8"
         )
+        card_widget = (SELECTOR_LIB / "dialogs" / "restore_point_card.dart").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("createdByName: json['created_by_name']", model)
-        self.assertIn("Criado por ${point.creatorName}", dialog)
+        self.assertIn("Criado por ${point.creatorName}", card_widget)
+        self.assertIn("restore_point_card.dart", dialog)
         card = (SELECTOR_LIB / "widgets" / "project_card.dart").read_text(
             encoding="utf-8"
         )

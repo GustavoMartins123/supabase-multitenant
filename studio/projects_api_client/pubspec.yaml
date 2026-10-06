@@ -1,0 +1,17 @@
+#
+# AUTO-GENERATED FILE, DO NOT MODIFY!
+#
+
+name: 'projects_api_client'
+version: '0.13.0-alpha'
+description: 'Generated client for the supabase-multitenant Projects API. DO NOT EDIT BY HAND.'
+homepage: 'homepage'
+environment:
+  sdk: '>=2.12.0 <4.0.0'
+dependencies:
+  collection: '>=1.17.0 <2.0.0'
+  http: '>=0.13.0 <2.0.0'
+  intl: any
+  meta: '>=1.1.8 <2.0.0'
+dev_dependencies:
+  test: '>=1.21.6 <1.22.0'

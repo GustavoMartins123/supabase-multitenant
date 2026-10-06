@@ -2,12 +2,9 @@ local cjson = require("cjson.safe")
 local lyaml = require("lyaml")
 local user_identity = require("project_context.user_identity")
 local authelia_identifiers = require("admin_api.authelia_identifiers")
+local user_store = require("admin_api.authelia_user_store")
 
 local M = {}
-
-local YAML_PATH = "/config/users_database.yml"
-local LOCK_KEY = "user-profile:yaml-write"
-local lock_dict = ngx.shared.service_keys
 
 local field_limits = {
     display_name = 120,
@@ -61,88 +58,15 @@ local function trim(value)
     return tostring(value):gsub("^%s+", ""):gsub("%s+$", "")
 end
 
-local function read_file(path)
-    local handle, err = io.open(path, "rb")
-    if not handle then
-        return nil, err
-    end
-    local content = handle:read("*a")
-    handle:close()
-    return content
-end
-
-local function write_raw(content)
-    local suffix = string.format("%s.%s", ngx.worker.pid(), math.floor(ngx.now() * 1000000))
-    local temp_path = YAML_PATH .. ".tmp." .. suffix
-    local handle, err = io.open(temp_path, "wb")
-    if not handle then
-        return nil, err
-    end
-    local ok, write_err = handle:write(content)
-    handle:close()
-    if not ok then
-        os.remove(temp_path)
-        return nil, write_err
-    end
-    local renamed, rename_err = os.rename(temp_path, YAML_PATH)
-    if not renamed then
-        os.remove(temp_path)
-        return nil, rename_err
-    end
-    return true
-end
-
-local function write_data(data)
-    local serialized, err = lyaml.dump({ data })
-    if not serialized then
-        return nil, err or "failed to serialize users database"
-    end
-    return write_raw(serialized)
-end
-
-local function load_data()
-    local content, read_err = read_file(YAML_PATH)
-    if not content then
-        return nil, nil, read_err
-    end
-    local ok, data = pcall(lyaml.load, content)
-    if not ok or type(data) ~= "table" then
-        return nil, nil, "invalid users database"
-    end
-    data.users = data.users or {}
-    return data, content
-end
-
-local function acquire_lock()
-    if not lock_dict then
-        return "unlocked"
-    end
-    local token = string.format("%s:%s", ngx.worker.pid(), math.floor(ngx.now() * 1000000))
-    for _ = 1, 100 do
-        if lock_dict:add(LOCK_KEY, token, 8) then
-            return token
-        end
-        ngx.sleep(0.02)
-    end
-    return nil, "profile store is busy"
-end
-
-local function release_lock(token)
-    if not lock_dict or token == "unlocked" then
-        return
-    end
-    if lock_dict:get(LOCK_KEY) == token then
-        lock_dict:delete(LOCK_KEY)
-    end
-end
-
 local function find_user(data, email)
     local normalized = user_identity.normalize_email(email or "")
     if normalized == "" then
         return nil, nil, "authenticated email is missing"
     end
     for username, user in pairs(data.users or {}) do
-        if type(user) == "table" and user_identity.normalize_email(user.email or "") == normalized then
+        if type(user) == "table"
+            and user_identity.normalize_email(user.email or "") == normalized
+        then
             return username, user
         end
     end
@@ -205,7 +129,9 @@ local function profile_from_user(username, user_id, user)
         groups = user.groups or {},
         is_active = user.disabled ~= true and active_group,
         is_admin = admin,
-        created_at = trim(type(user.extra) == "table" and user.extra.created_at or ""),
+        created_at = trim(
+            type(user.extra) == "table" and user.extra.created_at or ""
+        ),
     }
     if profile.display_name == "" then
         profile.display_name = username
@@ -256,7 +182,10 @@ local function validate_locale(value)
     if value == "" then
         return true
     end
-    if value:sub(1, 1) == "-" or value:sub(-1) == "-" or value:find("--", 1, true) then
+    if value:sub(1, 1) == "-"
+        or value:sub(-1) == "-"
+        or value:find("--", 1, true)
+    then
         return false
     end
     local index = 0
@@ -277,9 +206,13 @@ local function validate_payload(payload)
     if type(payload) ~= "table" then
         return nil, "invalid profile payload"
     end
-    if payload.username ~= nil or payload.email ~= nil or payload.picture ~= nil then
+    if payload.username ~= nil
+        or payload.email ~= nil
+        or payload.picture ~= nil
+    then
         return nil, "username, email and picture are immutable in this endpoint"
     end
+
     local normalized = {}
     for field, limit in pairs(field_limits) do
         if payload[field] ~= nil then
@@ -293,6 +226,7 @@ local function validate_payload(payload)
     if normalized.display_name ~= nil and normalized.display_name == "" then
         return nil, "display_name is required"
     end
+
     local ok, err = validate_url(normalized.website or "", "website")
     if not ok then
         return nil, err
@@ -301,85 +235,101 @@ local function validate_payload(payload)
     if not ok then
         return nil, err
     end
-    if normalized.birthdate and normalized.birthdate ~= "" and not normalized.birthdate:match("^%d%d%d%d%-%d%d%-%d%d$") then
+    if normalized.birthdate
+        and normalized.birthdate ~= ""
+        and not normalized.birthdate:match("^%d%d%d%d%-%d%d%-%d%d$")
+    then
         return nil, "birthdate must use YYYY-MM-DD"
     end
     if normalized.locale and not validate_locale(normalized.locale) then
         return nil, "locale is invalid"
     end
-    if normalized.zoneinfo and normalized.zoneinfo ~= "" and not normalized.zoneinfo:match("^[%w%+%-%._/]+$") then
+    if normalized.zoneinfo
+        and normalized.zoneinfo ~= ""
+        and not normalized.zoneinfo:match("^[%w%+%-%._/]+$")
+    then
         return nil, "zoneinfo is invalid"
     end
     return normalized
 end
 
 local function mutate(email, apply, syncer)
-    local token, lock_err = acquire_lock()
-    if not token then
-        return nil, lock_err
-    end
-
-    local data, original, load_err = load_data()
-    if not data then
-        release_lock(token)
-        return nil, load_err
-    end
-
-    local username, user, find_err = find_user(data, email)
-    if not user then
-        release_lock(token)
-        return nil, find_err
-    end
-
-    local user_id, id_err = resolve_user_id(username, user.email)
-    if not user_id then
-        release_lock(token)
-        return nil, id_err
-    end
-
-    local applied, apply_err = apply(user)
-    if not applied then
-        release_lock(token)
-        return nil, apply_err
-    end
-
-    local profile = profile_from_user(username, user_id, user)
-    local written, write_err = write_data(data)
-    if not written then
-        release_lock(token)
-        return nil, write_err
-    end
-
-    if syncer then
-        local synced, sync_err = syncer(profile)
-        if not synced then
-            local restored, restore_err = write_raw(original)
-            release_lock(token)
-            return nil, "profile synchronization failed: " .. tostring(sync_err or restore_err or "unknown error")
+    return user_store.with_lock(function()
+        -- O snapshot usado para alterar o usuario so e obtido depois que o
+        -- lock global do users_database.yml foi adquirido.
+        local data, original, load_err = user_store.load()
+        if not data then
+            return nil, load_err
         end
-    end
 
-    cache_profile(profile)
-    release_lock(token)
-    return profile
+        local username, user, find_err = find_user(data, email)
+        if not user then
+            return nil, find_err
+        end
+
+        local user_id, id_err = resolve_user_id(username, user.email)
+        if not user_id then
+            return nil, id_err
+        end
+
+        local applied, apply_err = apply(user)
+        if not applied then
+            return nil, apply_err
+        end
+
+        local profile = profile_from_user(username, user_id, user)
+        local written, write_err = user_store.write(data)
+        if not written then
+            return nil, write_err
+        end
+
+        if syncer then
+            local synced, sync_err = syncer(profile)
+            if not synced then
+                local restored, restore_err = user_store.restore(original)
+                if not restored then
+                    ngx.log(
+                        ngx.CRIT,
+                        "[USER-PROFILE] rollback failed after sync error: ",
+                        restore_err
+                    )
+                    return nil,
+                        "profile synchronization failed and Authelia rollback also failed"
+                end
+                return nil,
+                    "profile synchronization failed: "
+                    .. tostring(sync_err or "unknown error")
+            end
+        end
+
+        -- Mantem a publicacao no cache dentro da mesma secao critica.
+        cache_profile(profile)
+        return profile
+    end)
 end
 
 function M.get(email)
-    local data, _, load_err = load_data()
-    if not data then
-        return nil, load_err
-    end
-    local username, user, find_err = find_user(data, email)
-    if not user then
-        return nil, find_err
-    end
-    local user_id, id_err = resolve_user_id(username, user.email)
-    if not user_id then
-        return nil, id_err
-    end
-    local profile = profile_from_user(username, user_id, user)
-    cache_profile(profile)
-    return profile
+    -- A leitura do arquivo em si seria segura sem lock por causa do rename
+    -- atomico, mas este caminho tambem publica no users_cache. Mantemos
+    -- leitura + publicacao na mesma secao critica para um GET atrasado nao
+    -- sobrescrever no cache uma mutacao mais nova.
+    return user_store.with_lock(function()
+        local data, _, load_err = user_store.load()
+        if not data then
+            return nil, load_err
+        end
+        local username, user, find_err = find_user(data, email)
+        if not user then
+            return nil, find_err
+        end
+        local user_id, id_err = resolve_user_id(username, user.email)
+        if not user_id then
+            return nil, id_err
+        end
+        local profile = profile_from_user(username, user_id, user)
+        cache_profile(profile)
+        return profile
+    end)
 end
 
 function M.update(email, payload, syncer)

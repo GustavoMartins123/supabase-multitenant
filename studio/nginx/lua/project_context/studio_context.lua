@@ -1,24 +1,27 @@
 local cjson = require("cjson.safe")
 local http = require("resty.http")
+local internal_hmac = require("security.internal_hmac")
+local outbound_tls = require("utils.outbound_tls")
+local ref_resolver = require("project_context.project_ref_resolver")
 
 local _M = {}
 
 local server_domain = (os.getenv("SERVER_DOMAIN") or ""):gsub("/+$", "")
-local server_hostname = string.match(server_domain, "//([^/:]+)") or "localhost"
-local shared_token = os.getenv("NGINX_SHARED_TOKEN") or ""
-local verify_tls = (os.getenv("SERVICE_KEY_VERIFY_TLS") or "true"):lower() ~= "false"
-local cache_ttl = tonumber(os.getenv("STUDIO_CONTEXT_CACHE_TTL_SECONDS")) or 5
-local cache = ngx.shared.service_keys
-
-cache_ttl = math.max(1, math.min(cache_ttl, 30))
-
-local function cache_key(ref, user_id)
-    return "studio-context:" .. user_id .. ":" .. ref
-end
+local server_hostname = string.match(server_domain, "//([^/:]+)")
+local service_hmac_secret = os.getenv("STUDIO_GATEWAY_HMAC_SECRET") or ""
 
 local function validate_context(context, ref)
     if type(context) ~= "table" or context.ref ~= ref then
         return nil, "invalid Studio context response"
+    end
+    if not ref_resolver.valid_ref(context.ref) then
+        return nil, "Studio context has an invalid public reference"
+    end
+    local name = context.technical_name
+    if type(name) ~= "string" or #name < 3 or #name > 40
+        or not name:match("^[a-z_][a-z0-9_]*$")
+    then
+        return nil, "Studio context has no canonical technical name"
     end
     if type(context.anon_key) ~= "string" or context.anon_key == "" then
         return nil, "Studio context has no anon key"
@@ -29,46 +32,46 @@ local function validate_context(context, ref)
     return context
 end
 
-function _M.load(ref)
+function _M.load(ref, administrative)
+    if not ref_resolver.valid_ref(ref) then
+        return nil, "invalid public project reference", ngx.HTTP_BAD_REQUEST
+    end
     local user_id = ngx.var.auth_user_id or ""
     local user_token = ngx.var.auth_user_token or ""
     if user_id == "" or user_token == "" then
         return nil, "authenticated user context unavailable", ngx.HTTP_UNAUTHORIZED
     end
-    if server_domain == "" or shared_token == "" then
+    if not server_hostname or service_hmac_secret == "" then
         return nil, "Studio context service is not configured", ngx.HTTP_INTERNAL_SERVER_ERROR
     end
 
-    local key = cache_key(ref, user_id)
-    if cache then
-        local cached = cache:get(key)
-        if cached then
-            local decoded = cjson.decode(cached)
-            local context = validate_context(decoded, ref)
-            if context then
-                return context
-            end
-            cache:delete(key)
-        end
+    local target = "/api/projects/internal/studio-context/" .. ref
+    if administrative then
+        target = target .. "?access=admin"
     end
+    local signed_headers, sign_err = internal_hmac.sign_headers(
+        service_hmac_secret,
+        "studio-nginx",
+        "GET",
+        target,
+        ""
+    )
+    if not signed_headers then
+        return nil, sign_err or "failed to sign Studio context request", ngx.HTTP_INTERNAL_SERVER_ERROR
+    end
+    signed_headers["Accept"] = "application/json"
+    signed_headers["Host"] = server_hostname
+    signed_headers["X-User-Token"] = user_token
 
     local httpc = http.new()
     httpc:set_timeout(2000)
     local response, request_err = httpc:request_uri(
-        server_domain .. "/api/projects/internal/studio-context/" .. ref,
-        {
+        server_domain .. target,
+        outbound_tls.apply_internal(server_domain .. target, {
             method = "GET",
-            headers = {
-                ["Accept"] = "application/json",
-                ["Host"] = server_hostname,
-                ["X-Internal-Service"] = "studio-nginx",
-                ["X-Shared-Token"] = shared_token,
-                ["X-User-Token"] = user_token,
-            },
-            ssl_verify = verify_tls,
-            ssl_server_name = server_hostname,
+            headers = signed_headers,
             keepalive = true,
-        }
+        })
     )
 
     if not response then
@@ -108,12 +111,6 @@ function _M.load(ref)
         return nil, "Invalid response from Studio context service", ngx.HTTP_SERVICE_UNAVAILABLE
     end
 
-    if cache then
-        local encoded = cjson.encode(context)
-        if encoded then
-            cache:set(key, encoded, cache_ttl)
-        end
-    end
     return context
 end
 

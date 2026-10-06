@@ -215,24 +215,34 @@ class ProjectIdentityMigrationTest(unittest.IsolatedAsyncioTestCase):
 class ProjectIdentitySourceContractTest(unittest.TestCase):
     def setUp(self) -> None:
         self.main = (API_ROOT / "app" / "main.py").read_text(encoding="utf-8")
-        self.schema = (API_ROOT / "app" / "database_schema.py").read_text(
-            encoding="utf-8"
-        )
+        self.projects = (
+            API_ROOT / "app" / "routers" / "projects.py"
+        ).read_text(encoding="utf-8")
+        self.schema = (
+            API_ROOT / "app" / "migrations" / "0001_control_plane_baseline.sql"
+        ).read_text(encoding="utf-8")
 
     def test_new_projects_use_one_uuid_for_project_and_tenant(self) -> None:
+        # O invariante e id == tenant_uuid vindos do mesmo parametro; a
+        # duplicacao usa INSERT ... SELECT para herdar o resource_profile
+        # do original na mesma transacao.
+        same_uuid_inserts = self.projects.count(
+            "VALUES($1, $1, $2, $2, $3"
+        ) + self.projects.count("SELECT $1, $1, $2, $2, $3")
+        self.assertGreaterEqual(same_uuid_inserts, 2)
+        self.assertIn("owner_id, resource_profile, public_ref)", self.projects)
         self.assertGreaterEqual(
-            self.main.count("VALUES($1, $1, $2, $3)"),
-            2,
-        )
-        self.assertGreaterEqual(
-            self.main.count('"tenant_uuid": str(project_id)'),
+            self.projects.count('"tenant_uuid": str(project_id)'),
             2,
         )
 
     def test_background_workers_never_generate_the_tenant_uuid(self) -> None:
-        duplicate = self.main.split("async def _duplicate_and_store_keys", 1)[1]
+        backgrounds = (API_ROOT / "app" / "project_backgrounds.py").read_text(
+            encoding="utf-8"
+        )
+        duplicate = backgrounds.split("async def _duplicate_and_store_keys", 1)[1]
         duplicate = duplicate.split("def _base64url_no_padding", 1)[0]
-        create = self.main.split("async def _provision_and_store_keys", 1)[1]
+        create = backgrounds.split("async def _provision_and_store_keys", 1)[1]
         create = create.split("async def get_project_containers", 1)[0]
         self.assertNotIn("uuid.uuid4()", duplicate)
         self.assertNotIn("uuid.uuid4()", create)

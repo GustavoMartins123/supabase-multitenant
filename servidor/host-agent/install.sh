@@ -23,9 +23,18 @@ escape_sed_replacement() {
 }
 
 render_unit() {
-  local servidor_dir="$1" agent_dir="$2" service_user="$3" destination="$4"
+  local servidor_dir="$1" agent_dir="$2" service_user="$3" service_home="$4"
+  local destination="$5"
   local servidor_value agent_value service_user_replacement
   local servidor_replacement agent_replacement
+  local service_home_value service_home_replacement
+  local docker_env="" docker_env_replacement
+  if [[ -n "${HOST_AGENT_DOCKER_CONFIG:-}" ]]; then
+    [[ "$HOST_AGENT_DOCKER_CONFIG" == /* && -f "$HOST_AGENT_DOCKER_CONFIG/config.json" ]] \
+      || die "HOST_AGENT_DOCKER_CONFIG exige caminho absoluto e config.json existente."
+    docker_env="Environment=\"DOCKER_CONFIG=$(escape_systemd_value "$HOST_AGENT_DOCKER_CONFIG")\""
+  fi
+  docker_env_replacement="$(escape_sed_replacement "$docker_env")"
 
   [[ "$servidor_dir" != *$'\n'* && "$servidor_dir" != *$'\r'* ]] \
     || die "Caminho do servidor contem quebra de linha."
@@ -34,17 +43,34 @@ render_unit() {
   [[ "$service_user" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] \
     || die "Usuario do host-agent invalido: $service_user"
 
+  [[ "$service_home" == /* ]] \
+    || die "Home invalido para $service_user: $service_home"
+
   servidor_value="$(escape_systemd_value "$servidor_dir")"
   agent_value="$(escape_systemd_value "$agent_dir")"
+  service_home_value="$(escape_systemd_value "$service_home")"
   servidor_replacement="$(escape_sed_replacement "$servidor_value")"
   agent_replacement="$(escape_sed_replacement "$agent_value")"
   service_user_replacement="$(escape_sed_replacement "$service_user")"
+  service_home_replacement="$(escape_sed_replacement "$service_home_value")"
 
   sed \
     -e "s|__SERVIDOR_DIR__|$servidor_replacement|g" \
     -e "s|__AGENT_DIR__|$agent_replacement|g" \
     -e "s|__HOST_AGENT_USER__|$service_user_replacement|g" \
+    -e "s|__SERVICE_HOME__|$service_home_replacement|g" \
+    -e "s|__DOCKER_CONFIG_ENV__|$docker_env_replacement|g" \
     "$AGENT_DIR/supabase-host-agent.service" > "$destination"
+}
+
+assert_sandbox_paths_parsed() {
+  local parsed
+  parsed="$(systemctl show "$UNIT_NAME" -p ReadWritePaths --value)"
+  for required in "$SERVIDOR_DIR" "$AGENT_DIR" "$SERVICE_HOME/.docker"; do
+    [[ "$parsed" == *"$required"* ]] \
+      || die "systemd truncou ReadWritePaths: '$required' nao ficou gravavel (lido: $parsed)."
+  done
+  ok "Sandbox do systemd concede escrita no repositorio."
 }
 
 AGENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -53,6 +79,8 @@ UNIT_NAME="supabase-host-agent.service"
 UNIT_PATH="/etc/systemd/system/$UNIT_NAME"
 SERVICE_USER=""
 SERVICE_GROUP=""
+SERVICE_HOME=""
+WAS_ACTIVE=0
 
 resolve_service_user() {
   local candidate="${HOST_AGENT_USER:-}"
@@ -74,15 +102,31 @@ run_as_service_user() {
 }
 
 migrate_runtime_ownership() {
-  local runtime_dir
+  local runtime_dir storage_run_as storage_uid service_uid
   say "Ajustando arquivos de lifecycle para $SERVICE_USER:$SERVICE_GROUP ..."
-  for runtime_dir in "$SERVIDOR_DIR/projects" "$SERVIDOR_DIR/backups"; do
+  mkdir -p "$SERVIDOR_DIR/.functions-tenants" "$SERVIDOR_DIR/.functions-locks"
+  chmod 700 "$SERVIDOR_DIR/.functions-tenants" "$SERVIDOR_DIR/.functions-locks"
+  for runtime_dir in "$SERVIDOR_DIR/.functions-tenants" "$SERVIDOR_DIR/.functions-locks" \
+    "$SERVIDOR_DIR/projects" "$SERVIDOR_DIR/backups" \
+    "$SERVIDOR_DIR/volumes/storage"; do
     [[ -e "$runtime_dir" ]] || continue
     find "$runtime_dir" -xdev -uid 0 \
       -exec chown "$SERVICE_USER:$SERVICE_GROUP" {} +
   done
   find "$SERVIDOR_DIR/projects" -mindepth 2 -maxdepth 2 -type f -name .env \
     -exec chmod 600 {} +
+  mkdir -p "$SERVIDOR_DIR/volumes/storage/objects"
+  storage_run_as="$(sed -n 's/^STORAGE_RUN_AS_USER=//p' "$SERVIDOR_DIR/.env" | head -1 | tr -d '\"')"
+  storage_uid="${storage_run_as%%:*}"
+  case "$storage_uid" in
+    ''|*[!0-9]*) storage_uid=1000 ;;
+  esac
+  service_uid="$(id -u "$SERVICE_USER")"
+  [[ "$service_uid" == "$storage_uid" ]] \
+    || die "O usuario do host-agent ($SERVICE_USER, UID $service_uid) precisa ter o mesmo UID de STORAGE_RUN_AS_USER ($storage_uid em servidor/.env); o lifecycle faz chown dos namespaces como esse usuario sem root. Ajuste HOST_AGENT_USER ou STORAGE_RUN_AS_USER e reinstale."
+  chown "$storage_uid:$storage_uid" \
+    "$SERVIDOR_DIR/volumes/storage" "$SERVIDOR_DIR/volumes/storage/objects"
+  chmod 2775 "$SERVIDOR_DIR/volumes/storage" "$SERVIDOR_DIR/volumes/storage/objects"
   ok "Ownership do lifecycle alinhado ao usuario do host-agent."
 }
 
@@ -107,8 +151,15 @@ main() {
   if grep -Eq '^HOST_AGENT_HMAC_SECRET=pass$' "$SERVIDOR_DIR/.env"; then
     die "HOST_AGENT_HMAC_SECRET ainda e placeholder em servidor/.env."
   fi
+  if ! grep -Eq '^HOST_AGENT_DB_PASSWORD=[A-Za-z0-9_-]{32,128}$' "$SERVIDOR_DIR/.env"; then
+    die "HOST_AGENT_DB_PASSWORD ausente ou placeholder em servidor/.env; gere com: openssl rand -base64 48 | tr '/+' '_-' | tr -d '=\n' e aplique as migrations antes de reinstalar o agent."
+  fi
 
   SERVICE_USER="$(resolve_service_user)"
+  HOST_AGENT_DOCKER_CONFIG="$(sed -n 's/^HOST_AGENT_DOCKER_CONFIG=//p' "$SERVIDOR_DIR/.env")"
+  if [[ -n "$HOST_AGENT_DOCKER_CONFIG" ]]; then
+    export DOCKER_CONFIG="$HOST_AGENT_DOCKER_CONFIG"
+  fi
   SERVICE_GROUP="$(id -gn "$SERVICE_USER")"
   run_as_service_user test -r "$SERVIDOR_DIR/.env" \
     || die "O usuario $SERVICE_USER nao consegue ler servidor/.env. Rode o setup como esse usuario."
@@ -125,16 +176,25 @@ main() {
   if systemctl is-active --quiet "$UNIT_NAME"; then
     say "Parando a unit antiga antes de migrar o ownership ..."
     systemctl stop "$UNIT_NAME"
+    WAS_ACTIVE=1
   fi
   migrate_runtime_ownership
 
   say "Instalando unit systemd em $UNIT_PATH ..."
-  render_unit "$SERVIDOR_DIR" "$AGENT_DIR" "$SERVICE_USER" "$UNIT_PATH"
+  SERVICE_HOME="$(getent passwd "$SERVICE_USER" | cut -d: -f6)"
+  [[ -n "$SERVICE_HOME" ]] \
+    || die "Nao foi possivel resolver o home de $SERVICE_USER."
+  render_unit "$SERVIDOR_DIR" "$AGENT_DIR" "$SERVICE_USER" "$SERVICE_HOME" "$UNIT_PATH"
   chmod 644 "$UNIT_PATH"
 
   systemctl daemon-reload
+  assert_sandbox_paths_parsed
   systemctl enable "$UNIT_NAME"
   ok "Servico $UNIT_NAME instalado e habilitado."
+  if [[ "$WAS_ACTIVE" -eq 1 ]]; then
+    say "O host-agent estava ATIVO e foi parado por esta reinstalacao."
+    say "Com banco e API no ar, retome com: sudo systemctl start $UNIT_NAME"
+  fi
   say "O start.sh iniciara banco/API e depois ativara o host-agent."
   say "Em reinicializacoes, o ExecStartPre aguardara o schema antes de iniciar o worker."
   say "Logs: journalctl -u $UNIT_NAME -f"

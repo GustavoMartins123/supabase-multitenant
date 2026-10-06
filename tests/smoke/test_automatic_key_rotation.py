@@ -56,12 +56,15 @@ class AutomaticRotationContractTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.main = (API_ROOT / "app" / "main.py").read_text(encoding="utf-8")
+        cls.keys = (API_ROOT / "app" / "routers" / "project_keys.py").read_text(
+            encoding="utf-8"
+        )
         cls.scheduler = (API_ROOT / "app" / "automatic_key_rotation.py").read_text(
             encoding="utf-8"
         )
-        cls.schema = (API_ROOT / "app" / "database_schema.py").read_text(
-            encoding="utf-8"
-        )
+        cls.schema = (
+            API_ROOT / "app" / "migrations" / "0001_control_plane_baseline.sql"
+        ).read_text(encoding="utf-8")
 
     def test_each_project_is_enabled_by_default(self) -> None:
         self.assertIn(
@@ -86,21 +89,25 @@ class AutomaticRotationContractTest(unittest.TestCase):
         self.assertIn("automatic_key_rotation_blocked_at = now()", self.scheduler)
         self.assertIn("automatic_key_rotation_last_error", self.scheduler)
         self.assertIn(
-            '@app.put("/api/projects/{project_name}/automatic-key-rotation")',
-            self.main,
+            '"/api/projects/{project_ref}/automatic-key-rotation"',
+            self.keys,
         )
-        self.assertIn("WHEN $2 THEN NULL", self.main)
+        self.assertIn("WHEN $2 THEN NULL", self.keys)
 
     def test_manual_and_automatic_rotation_share_the_canonical_runner(self) -> None:
+        backgrounds = (API_ROOT / "app" / "project_backgrounds.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn(
             "async def _rotate_project_key_background(",
-            self.main,
+            backgrounds,
         )
         self.assertIn(
-            'args={"trigger": "automatic"} if trigger == "automatic" else {}',
-            self.main,
+            'args={"trigger": trigger}',
+            backgrounds,
         )
-        self.assertIn('action="project_keys_rotated"', self.main)
+        self.assertIn('if trigger not in {"manual", "automatic"}:', backgrounds)
+        self.assertIn('action="project_keys_rotated"', backgrounds)
 
 
 if __name__ == "__main__":

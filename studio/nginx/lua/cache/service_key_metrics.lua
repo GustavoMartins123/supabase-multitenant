@@ -1,14 +1,19 @@
 local cjson = require("cjson.safe")
-local shared_token = require("security.shared_token")
+local internal_hmac = require("security.internal_hmac")
 
-local headers = ngx.req.get_headers()
 if ngx.req.get_method() ~= "GET" then
     return ngx.exit(ngx.HTTP_METHOD_NOT_ALLOWED)
 end
-if headers["X-Internal-Service"] ~= "projects-api"
-    or not shared_token.matches(headers["X-Shared-Token"])
-then
-    return ngx.exit(ngx.HTTP_FORBIDDEN)
+
+local secret = os.getenv("PROJECTS_API_HMAC_SECRET") or ""
+local max_skew = tonumber(os.getenv("INTERNAL_HMAC_MAX_SKEW_SECONDS")) or 60
+local ok, verify_status = internal_hmac.verify_current_request(
+    secret,
+    "projects-api",
+    { max_skew = max_skew }
+)
+if not ok then
+    return ngx.exit(verify_status or ngx.HTTP_FORBIDDEN)
 end
 
 local metrics = ngx.shared.service_key_metrics

@@ -9,8 +9,8 @@ LUA = ROOT / "studio" / "nginx" / "lua"
 
 class ServiceKeyCacheContractTest(unittest.TestCase):
     def test_rotation_versions_key_before_invalidating_cache(self):
-        main = (APP / "main.py").read_text(encoding="utf-8")
-        rotation = main[main.index("async def _rotate_project_key_background"):]
+        backgrounds = (APP / "project_backgrounds.py").read_text(encoding="utf-8")
+        rotation = backgrounds[backgrounds.index("async def _rotate_project_key_background"):]
         store = rotation.index("await store_project_secrets")
         bump = rotation.index("SET project_key_version = project_key_version + 1")
         invalidate = rotation.index("await invalidate_service_key_cache")
@@ -29,11 +29,15 @@ class ServiceKeyCacheContractTest(unittest.TestCase):
             'increment_metric("version_reload")',
             'return nil, "version_check_failed"',
             "Service key bloqueada por falha na verificacao de versao",
+            "STUDIO_GATEWAY_HMAC_SECRET",
+            '"studio-nginx"',
+            "internal_hmac.sign_headers",
         }:
             self.assertIn(contract, source)
         self.assertNotIn("fallback_version", source)
         self.assertNotIn("checked_version", source)
         self.assertNotIn("SERVICE_KEY_VERSION_CHECK_TTL_SECONDS", source)
+        self.assertNotIn('X-Shared-Token', source)
 
     def test_rotation_handler_does_not_invalidate_before_job_finishes(self):
         source = (LUA / "admin_api" / "project_rotate_key.lua").read_text(
@@ -45,10 +49,65 @@ class ServiceKeyCacheContractTest(unittest.TestCase):
         nginx = (ROOT / "studio" / "nginx" / "nginx.conf").read_text(
             encoding="utf-8"
         )
-        schema = (APP / "database_schema.py").read_text(encoding="utf-8")
+        schema = (
+            APP / "migrations" / "0001_control_plane_baseline.sql"
+        ).read_text(encoding="utf-8")
         self.assertIn("/internal/cache/service-key/", nginx)
         self.assertIn("service_key_metrics", nginx)
         self.assertIn("project_key_version BIGINT", schema)
+
+    def test_projects_api_to_studio_calls_use_service_hmac_not_shared_token(self):
+        cache_client = (APP / "service_key_cache.py").read_text(encoding="utf-8")
+        for source in (cache_client,):
+            self.assertIn("PROJECTS_API_HMAC_SECRET", source)
+            self.assertIn("build_internal_hmac_headers", source)
+            self.assertIn('service="projects-api"', source)
+            self.assertNotIn('"X-Shared-Token"', source)
+
+        cache_handler = (LUA / "cache" / "invalidate_service_key.lua").read_text(
+            encoding="utf-8"
+        )
+        for source in (cache_handler,):
+            self.assertIn("PROJECTS_API_HMAC_SECRET", source)
+            self.assertIn("verify_current_request", source)
+            self.assertIn('"projects-api"', source)
+            self.assertNotIn("security.shared_token", source)
+
+    def test_studio_to_projects_api_has_outer_hmac_authentication(self):
+        asgi = (APP / "asgi.py").read_text(encoding="utf-8")
+        auth = (APP / "internal_service_auth.py").read_text(encoding="utf-8")
+        signer = (LUA / "security" / "projects_api_signer.lua").read_text(
+            encoding="utf-8"
+        )
+        auth_guard = (LUA / "security" / "check_authenticated.lua").read_text(
+            encoding="utf-8"
+        )
+        pg_meta_guard = (LUA / "security" / "pg_meta_access.lua").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("InternalServiceAuthenticationMiddleware", asgi)
+        self.assertIn("app.add_middleware", asgi)
+        self.assertIn("X-Internal-Version", auth)
+        self.assertNotIn("X-Internal-Caller", auth)
+        self.assertIn("Replayed internal HMAC signature", auth)
+        self.assertNotIn("INTERNAL_HMAC_ALLOW_LEGACY_SHARED_TOKEN", auth)
+        self.assertNotIn("X-Shared-Token", auth)
+        self.assertIn('SERVICE = "studio-nginx"', signer)
+        self.assertIn("security.projects_api_signer", auth_guard)
+        self.assertIn("security.projects_api_signer", pg_meta_guard)
+        metrics = (LUA / "cache" / "service_key_metrics.lua").read_text(encoding="utf-8")
+        self.assertIn("verify_current_request", metrics)
+        self.assertNotIn("security.shared_token", metrics)
+
+    def test_direct_user_sync_is_hmac_authenticated(self):
+        source = (LUA / "admin_api" / "user_sync.lua").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("STUDIO_GATEWAY_HMAC_SECRET", source)
+        self.assertIn("internal_hmac.sign_headers", source)
+        self.assertIn('"studio-nginx"', source)
+        self.assertNotIn("NGINX_SHARED_TOKEN", source)
 
 
 if __name__ == "__main__":

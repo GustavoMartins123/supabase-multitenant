@@ -1,0 +1,40 @@
+#!/bin/bash
+set -Eeuo pipefail
+
+MMDB_PATH="__MMDB_PATH__"
+BACKUP_DIR="__BACKUP_DIR__"
+GITHUB_API="https://api.github.com/repos/P3TERX/GeoLite.mmdb/releases/latest"
+
+[[ "$MMDB_PATH" = /* && "$BACKUP_DIR" = /* ]] || { echo "Caminhos absolutos devem ser gerados pelo setup.sh." >&2; exit 1; }
+TRAEFIK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MMDB_DIR="$(dirname "$MMDB_PATH")"
+mkdir -p "$MMDB_DIR" "$BACKUP_DIR"
+exec 9>"$MMDB_DIR/.update.lock"
+flock -n 9 || { echo "Atualizacao GeoIP ja esta em execucao." >&2; exit 1; }
+TEMPORARY="$(mktemp "$MMDB_DIR/.update.XXXXXXXX")"
+trap 'rm -f -- "$TEMPORARY"' EXIT
+
+RELEASE="$(curl --fail --silent --show-error --location --max-time 30 "$GITHUB_API")"
+URL="$(printf '%s' "$RELEASE" | python3 -c '
+import json, sys
+assets = [a["browser_download_url"] for a in json.load(sys.stdin)["assets"] if a["name"] == "GeoLite2-Country.mmdb"]
+if len(assets) != 1 or not assets[0].startswith("https://github.com/P3TERX/GeoLite.mmdb/releases/download/"):
+    raise SystemExit("Release GeoIP sem asset canonico")
+print(assets[0])')"
+curl --fail --silent --show-error --location --max-time 120 --output "$TEMPORARY" "$URL"
+docker compose --env-file "$TRAEFIK_DIR/../.env" -f "$TRAEFIK_DIR/docker-compose.yml" \
+    run --rm --no-deps --no-build --entrypoint python geoip-api -c '
+import maxminddb, sys
+with maxminddb.open_database(sys.argv[1]) as reader:
+    if reader.metadata().database_type not in {"GeoLite2-Country", "GeoIP2-Country"}:
+        raise SystemExit("Database GeoIP invalido")
+    if not reader.get("8.8.8.8"):
+        raise SystemExit("Database GeoIP sem registro de validacao")
+' "/data/$(basename "$TEMPORARY")"
+
+if [[ -f "$MMDB_PATH" ]]; then
+    cp -- "$MMDB_PATH" "$BACKUP_DIR/GeoLite2-Country_$(date '+%Y%m%d_%H%M%S').mmdb"
+fi
+chmod 644 "$TEMPORARY"
+mv -f -- "$TEMPORARY" "$MMDB_PATH"
+echo "GeoIP atualizado e validado."

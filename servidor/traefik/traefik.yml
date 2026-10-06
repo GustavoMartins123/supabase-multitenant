@@ -1,13 +1,26 @@
 entryPoints:
   web:
     address: ":80"
+  websecure:
+    address: ":443"
 providers:
   file:
     directory: /etc/traefik/dynamic
     watch: true
 
+# Inerte enquanto nenhum router referencia o resolver; so entra em uso com
+# TRAEFIK_ENABLE_TLS=true e TRAEFIK_TLS_MODE=acme.
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      storage: /acme.json
+      httpChallenge:
+        entryPoint: web
+
 experimental:
   localPlugins:
+    gatewayadmission:
+      moduleName: "github.com/GustavoMartins123/gatewayadmission"
     supabaseguard:
       moduleName: "github.com/GustavoMartins123/supabaseguard"
   plugins:
@@ -25,11 +38,14 @@ log:
 
 accessLog:
   filePath: "/var/log/traefik/access.log"
+  format: json
   bufferingSize: 100
   fields:
     defaultMode: keep
     names:
       ClientUsername: drop
       StartUTC: drop
+    queryParameters:
+      defaultMode: drop
   filters:
     statusCodes: ["400-599"]

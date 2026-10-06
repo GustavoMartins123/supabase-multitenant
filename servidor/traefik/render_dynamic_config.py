@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import os
 import pathlib
 import re
@@ -13,9 +14,71 @@ import uuid
 
 
 PROJECT_RE = re.compile(r"^[a-z_][a-z0-9_]{2,39}$")
+PUBLIC_REF_RE = re.compile(r"[a-z]{20}\Z", re.ASCII)
+
+TRUE_VALUES = {"1", "true", "yes", "on"}
+TLS_MODES = {"file", "acme"}
+TLS_CERT_NAME = "tls.crt"
+TLS_KEY_NAME = "tls.key"
+CONTAINER_CERT_DIR = "/certs/traefik"
 
 
-def read_env(path: pathlib.Path) -> dict[str, str]:
+def parse_bool(key: str, raw: str) -> bool:
+    value = (raw or "").strip().lower()
+    if not value:
+        return False
+    if value in TRUE_VALUES:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(
+        f"{key} deve ser booleano (true/false); recebido: {raw!r}"
+    )
+
+
+def resolve_tls_settings(settings: dict[str, str], cert_dir: pathlib.Path | None) -> dict[str, object]:
+    enable = parse_bool("TRAEFIK_ENABLE_TLS", settings.get("TRAEFIK_ENABLE_TLS", "false"))
+    proto = (settings.get("SERVER_PROTO", "") or "").strip().lower()
+    if proto == "https" and not enable:
+        raise ValueError(
+            "SERVER_PROTO=https exige TRAEFIK_ENABLE_TLS=true; recusando gerar "
+            "configuracao sem routers TLS."
+        )
+    https_port = (settings.get("TRAEFIK_HTTPS_PORT", "443") or "").strip()
+    if not https_port.isdigit():
+        raise ValueError("TRAEFIK_HTTPS_PORT deve ser numerica")
+    mode = (settings.get("TRAEFIK_TLS_MODE", "file") or "file").strip().lower() or "file"
+    if mode not in TLS_MODES:
+        raise ValueError(f"TRAEFIK_TLS_MODE deve ser um de {sorted(TLS_MODES)}; recebido: {mode!r}")
+    tls_block: list[str] = []
+    if enable:
+        if mode == "acme":
+            email = (settings.get("TRAEFIK_ACME_EMAIL", "") or "").strip()
+            if not email or email.lower() == "pass":
+                raise ValueError(
+                    "TRAEFIK_ACME_EMAIL ausente ou placeholder; obrigatorio no modo acme."
+                )
+            tls_block = ["      tls:", "        certResolver: letsencrypt"]
+        else:
+            base = cert_dir if cert_dir is not None else pathlib.Path(CONTAINER_CERT_DIR)
+            cert_file = base / TLS_CERT_NAME
+            key_file = base / TLS_KEY_NAME
+            missing = [str(item) for item in (cert_file, key_file) if not item.is_file()]
+            if missing:
+                raise ValueError(
+                    "TRAEFIK_TLS_MODE=file exige "
+                    f"{TLS_CERT_NAME} e {TLS_KEY_NAME} em {base}; ausentes: {missing}"
+                )
+            tls_block = ["      tls: {}"]
+    return {
+        "enable": enable,
+        "mode": mode,
+        "https_port": https_port,
+        "tls_block": tls_block,
+    }
+
+
+def read_env(path: pathlib.Path, *, strict_identity: bool = False) -> dict[str, str]:
     values: dict[str, str] = {}
     if not path.is_file():
         return values
@@ -24,6 +87,12 @@ def read_env(path: pathlib.Path) -> dict[str, str]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
+        normalized_key = key.strip().removeprefix("export ").strip()
+        if strict_identity and normalized_key in {"PROJECT_ID", "PROJECT_UUID", "PROJECT_PUBLIC_REF"}:
+            if raw_line != f"{normalized_key}={value}" or value != value.strip() or '"' in value or "'" in value:
+                raise ValueError(f"{normalized_key} nao canonico em {path}")
+        if key.strip() in values:
+            raise ValueError(f"Atribuicao duplicada em {path}: {key.strip()}")
         value = value.strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
             value = value[1:-1]
@@ -35,16 +104,26 @@ def yaml_quote(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def render(root_env: pathlib.Path, projects_dir: pathlib.Path) -> str:
+def render(
+    root_env: pathlib.Path,
+    projects_dir: pathlib.Path,
+    cert_dir: pathlib.Path | None = None,
+) -> str:
     settings = read_env(root_env)
+    admission_secret = settings["ACCESS_ADMISSION_SECRET"]
+    if not re.fullmatch(r"[a-f0-9]{64}", admission_secret):
+        raise ValueError("ACCESS_ADMISSION_SECRET invalido")
+    proxy_cidrs = settings["ACCESS_TRUSTED_PROXY_CIDRS"].split(",") if settings["ACCESS_TRUSTED_PROXY_CIDRS"] else []
+    for value in proxy_cidrs:
+        network = ipaddress.ip_network(value, strict=True)
+        if isinstance(network, ipaddress.IPv6Network) and network.network_address.ipv4_mapped:
+            raise ValueError("Proxy IPv4 mapeado exige notacao IPv4")
+        if network.prefixlen == 0:
+            raise ValueError("Proxy trust irrestrito recusado")
+    gateway_tokens: dict[str, str] = {}
     api_port = settings.get("PROJECTS_API_PORT", "18000")
     if not api_port.isdigit():
         raise ValueError("PROJECTS_API_PORT deve ser numerica")
-    shared_token = settings.get("NGINX_SHARED_TOKEN", "")
-    if not shared_token:
-        raise ValueError("NGINX_SHARED_TOKEN ausente")
-    if "`" in shared_token or "\n" in shared_token or "\r" in shared_token:
-        raise ValueError("NGINX_SHARED_TOKEN contem caractere invalido")
     allowed_ranges = [
         item.strip()
         for item in settings.get(
@@ -52,9 +131,13 @@ def render(root_env: pathlib.Path, projects_dir: pathlib.Path) -> str:
         ).split(",")
         if item.strip()
     ]
+    tls = resolve_tls_settings(settings, cert_dir)
+    enable_tls: bool = tls["enable"]
+    tls_block: list[str] = list(tls["tls_block"])  # type: ignore[arg-type]
+    entry_points = ["websecure"] if enable_tls else ["web"]
 
     guard = {
-        "mode": settings.get("TRAEFIK_GUARD_PROJECT_MODE", "observe"),
+        "mode": settings.get("TRAEFIK_GUARD_PROJECT_MODE", "enforce"),
         "maxTrackedClients": settings.get("TRAEFIK_GUARD_MAX_TRACKED_CLIENTS", "10000"),
         "cleanupInterval": settings.get("TRAEFIK_GUARD_CLEANUP_INTERVAL", "5m"),
         "authThreshold": settings.get("TRAEFIK_GUARD_AUTH_THRESHOLD", "12"),
@@ -65,21 +148,36 @@ def render(root_env: pathlib.Path, projects_dir: pathlib.Path) -> str:
         "scannerBanTime": settings.get("TRAEFIK_GUARD_SCANNER_BAN_TIME", "1h"),
     }
 
-    projects: list[tuple[str, str]] = []
+    projects: list[tuple[str, str, str]] = []
+    seen_refs: set[str] = set()
     if projects_dir.is_dir():
         for project_dir in sorted(projects_dir.iterdir(), key=lambda path: path.name):
             if not project_dir.is_dir() or not PROJECT_RE.fullmatch(project_dir.name):
                 continue
-            project_env = read_env(project_dir / ".env")
-            project_id = project_env.get("PROJECT_ID", project_dir.name)
+            env_path = project_dir / ".env"
+            if project_dir.is_symlink() or env_path.is_symlink():
+                raise ValueError(f"Symlink de projeto recusado: {project_dir.name}")
+            if not env_path.exists():
+                continue
+            project_env = read_env(env_path, strict_identity=True)
+            project_id = project_env.get("PROJECT_ID", "")
             project_uuid = project_env.get("PROJECT_UUID", "")
+            public_ref = project_env.get("PROJECT_PUBLIC_REF", "")
             if project_id != project_dir.name or not PROJECT_RE.fullmatch(project_id):
-                continue
+                raise ValueError(f"PROJECT_ID invalido: {project_dir.name}")
             try:
-                project_uuid = str(uuid.UUID(project_uuid))
-            except ValueError:
-                continue
-            projects.append((project_id, project_uuid))
+                if str(uuid.UUID(project_uuid)) != project_uuid:
+                    raise ValueError("UUID nao canonico")
+            except ValueError as exc:
+                raise ValueError(f"PROJECT_UUID invalido: {project_id}") from exc
+            if not PUBLIC_REF_RE.fullmatch(public_ref) or public_ref in seen_refs:
+                raise ValueError(f"PROJECT_PUBLIC_REF invalido ou duplicado: {project_id}")
+            seen_refs.add(public_ref)
+            token = project_env["API_GATEWAY_TOKEN_PROJETO"]
+            if not re.fullmatch(r"[a-f0-9]{64}", token):
+                raise ValueError(f"Gateway token invalido: {project_id}")
+            gateway_tokens[project_id] = token
+            projects.append((project_id, project_uuid, public_ref))
 
     lines = [
         "# Gerado por render_dynamic_config.py. Nao edite manualmente.",
@@ -87,32 +185,74 @@ def render(root_env: pathlib.Path, projects_dir: pathlib.Path) -> str:
         "  routers:",
         "    projects-api:",
         "      rule: " + yaml_quote(
-            "(PathPrefix(`/api/projects`) || PathPrefix(`/api/jobs`) || "
-            "PathPrefix(`/api/admin`) || PathPrefix(`/api/internal/analytics`)) "
-            f"&& Header(`X-Shared-Token`, `{shared_token}`)"
+            "PathPrefix(`/api/projects`) || PathPrefix(`/api/jobs`) || "
+            "PathPrefix(`/api/admin`) || PathPrefix(`/api/internal/analytics`)"
         ),
         "      entryPoints:",
-        "        - web",
+    ]
+    lines.extend(f"        - {item}" for item in entry_points)
+    if enable_tls:
+        lines.extend(tls_block)
+    lines.extend(
+        [
+            "      priority: 1000",
+            "      middlewares:",
+            "        - projects-api-allowlist",
+            "        - api-security-chain",
+            "      service: projects-api",
+            "    client-configuration:",
+            '      rule: "Path(`/config`) || PathPrefix(`/config/`)"',
+            "      entryPoints:",
+        ]
+    )
+    lines.extend(f"        - {item}" for item in entry_points)
+    if enable_tls:
+        lines.extend(tls_block)
+    lines.extend([
         "      priority: 1000",
         "      middlewares:",
-        "        - projects-api-allowlist",
-        "        - api-security-chain",
-        "      service: projects-api",
-    ]
-    for project_id, _ in projects:
+        "        - discovery-admission",
+        "        - security-headers",
+        "      service: client-configuration",
+    ])
+    for project_id, _, public_ref in projects:
         lines.extend(
             [
                 f"    project-{project_id}:",
-                f"      rule: \"Path(`/{project_id}`) || PathPrefix(`/{project_id}/`)\"",
+                f"      rule: \"Path(`/{public_ref}`) || PathPrefix(`/{public_ref}/`)\"",
                 "      entryPoints:",
-                "        - web",
+            ]
+        )
+        lines.extend(f"        - {item}" for item in entry_points)
+        if enable_tls:
+            lines.extend(tls_block)
+        lines.extend(
+            [
                 "      priority: 500",
                 "      middlewares:",
                 "        - rate-limit",
                 f"        - project-guard-{project_id}",
+                f"        - project-admission-{project_id}",
                 "        - security-headers",
                 f"        - project-strip-{project_id}",
                 f"      service: project-{project_id}",
+            ]
+        )
+
+    if enable_tls:
+        # Router de redirecionamento: acima do http-catchall (100) para vencer o
+        # catch-all, abaixo dos routers de scanner (>=1900) que devem continuar
+        # respondendo em HTTP puro antes de qualquer redirecionamento.
+        lines.extend(
+            [
+                "    force-https:",
+                "      rule: \"HostRegexp(`{host:.+}`)\"",
+                "      entryPoints:",
+                "        - web",
+                "      priority: 150",
+                "      middlewares:",
+                "        - force-https-redirect",
+                "      service: noop@internal",
             ]
         )
 
@@ -125,7 +265,17 @@ def render(root_env: pathlib.Path, projects_dir: pathlib.Path) -> str:
         ]
     )
     lines.extend(f"          - {yaml_quote(item)}" for item in allowed_ranges)
-    for project_id, project_uuid in projects:
+    if enable_tls:
+        lines.extend(
+            [
+                "    force-https-redirect:",
+                "      redirectScheme:",
+                "        scheme: https",
+                f"        port: \"{tls['https_port']}\"",
+                "        permanent: true",
+            ]
+        )
+    for project_id, project_uuid, public_ref in projects:
         lines.extend(
             [
                 f"    project-guard-{project_id}:",
@@ -145,9 +295,22 @@ def render(root_env: pathlib.Path, projects_dir: pathlib.Path) -> str:
                 f"    project-strip-{project_id}:",
                 "      stripPrefix:",
                 "        prefixes:",
-                f"          - \"/{project_id}\"",
+                f"          - \"/{public_ref}\"",
             ]
         )
+
+    for name, project_id in [("discovery-admission", None)] + [
+        (f"project-admission-{project_id}", project_id) for project_id, _, _ in projects
+    ]:
+        lines.extend([
+            f"    {name}:", "      plugin:", "        gatewayadmission:",
+            '          evaluatorURL: "http://key-authorizer:18010/v1/admit"',
+            f"          secret: {yaml_quote(admission_secret)}",
+            f"          projectRef: {yaml_quote(project_id if project_id is not None else '')}",
+            f"          gatewayToken: {yaml_quote(gateway_tokens[project_id] if project_id is not None else '')}",
+            "          trustedProxyCIDRs:" + ("" if proxy_cidrs else " []"),
+        ])
+        lines.extend(f"            - {yaml_quote(value)}" for value in proxy_cidrs)
 
     lines.extend(
         [
@@ -156,9 +319,13 @@ def render(root_env: pathlib.Path, projects_dir: pathlib.Path) -> str:
             "      loadBalancer:",
             "        servers:",
             f"          - url: \"http://projects-api:{api_port}\"",
+            "    client-configuration:",
+            "      loadBalancer:",
+            "        servers:",
+            '          - url: "http://client-configuration:18011"',
         ]
     )
-    for project_id, _ in projects:
+    for project_id, _, _ in projects:
         lines.extend(
             [
                 f"    project-{project_id}:",
@@ -167,6 +334,29 @@ def render(root_env: pathlib.Path, projects_dir: pathlib.Path) -> str:
                 f"          - url: \"http://supabase-nginx-{project_id}:8080\"",
             ]
         )
+    if enable_tls and tls["mode"] == "file":
+        try:
+            ipaddress.ip_address(settings.get("SERVER_URL", ""))
+            literal_ip = True
+        except ValueError:
+            literal_ip = False
+        lines.extend([
+            "tls:",
+            "  certificates:",
+            f"    - certFile: {yaml_quote(f'{CONTAINER_CERT_DIR}/{TLS_CERT_NAME}')}",
+            f"      keyFile: {yaml_quote(f'{CONTAINER_CERT_DIR}/{TLS_KEY_NAME}')}",
+            "  options:",
+            "    default:",
+            f"      sniStrict: {'false' if literal_ip else 'true'}",
+        ])
+        if literal_ip:
+            lines.extend([
+                "  stores:",
+                "    default:",
+                "      defaultCertificate:",
+                f"        certFile: {yaml_quote(f'{CONTAINER_CERT_DIR}/{TLS_CERT_NAME}')}",
+                f"        keyFile: {yaml_quote(f'{CONTAINER_CERT_DIR}/{TLS_KEY_NAME}')}",
+            ])
     return "\n".join(lines) + "\n"
 
 
@@ -194,16 +384,22 @@ def main() -> int:
     parser.add_argument("--projects-dir", type=pathlib.Path, required=True)
     parser.add_argument("--middlewares-file", type=pathlib.Path, required=True)
     parser.add_argument("--output", type=pathlib.Path, required=True)
+    parser.add_argument("--tls-cert-dir", type=pathlib.Path, default=None)
     parser.add_argument("--watch", action="store_true")
     parser.add_argument("--interval", type=float, default=2.0)
     args = parser.parse_args()
 
     while True:
-        write_atomic(
-            args.output.parent / "00-middlewares.yml",
-            args.middlewares_file.read_text(encoding="utf-8"),
-        )
-        write_atomic(args.output, render(args.root_env, args.projects_dir))
+        try:
+            content = render(args.root_env, args.projects_dir, args.tls_cert_dir)
+            write_atomic(
+                args.output.parent / "00-middlewares.yml",
+                args.middlewares_file.read_text(encoding="utf-8"),
+            )
+            write_atomic(args.output, content)
+        except (ValueError, OSError, KeyError) as exc:
+            write_atomic(args.output, "http:\n  routers: {}\n  middlewares: {}\n  services: {}\n")
+            raise SystemExit(f"Configuracao de rotas retirada: {exc}") from exc
         if not args.watch:
             return 0
         time.sleep(max(args.interval, 0.5))

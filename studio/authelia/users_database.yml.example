@@ -1,0 +1,32 @@
+---
+# Modelo do file provider do Authelia. O arquivo real (users_database.yml) e
+# runtime: o Authelia roda com watch/write e grava hashes Argon2 reais aqui
+#
+# Para criar um usuario real:
+#   docker run --rm -it authelia/authelia:4.39.20 authelia crypto hash generate argon2
+# e substitua o bloco abaixo pelo seu usuario.
+users:
+  __bootstrap_placeholder__:
+    disabled: true
+    password: $argon2id$v=19$m=65536,t=3,p=4$W4CGddhkzRo9cARHsxdoPA$ly9FEn7cp3lzPsDtCz6JqTIm9XvVpTwVoHKyV4jTjTs
+    address: ~
+    email: bootstrap-placeholder@example.invalid
+    displayname: Bootstrap Placeholder
+    middle_name: ''
+    locale: ''
+    phone_extension: ''
+    extra:
+      created_at: ts:2026-05-06T00:00:00Z
+    family_name: ''
+    given_name: ''
+    nickname: ''
+    gender: ''
+    birthdate: ''
+    website: ''
+    profile: ''
+    zoneinfo: ''
+    phone_number: ''
+    groups:
+    - bootstrap-placeholder
+    picture: ''
+...

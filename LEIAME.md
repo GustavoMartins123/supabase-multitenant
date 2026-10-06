@@ -6,11 +6,17 @@
 
 A stack oficial de auto-hospedagem do Supabase foi projetada para um único projeto. Este repositório estende essa arquitetura para gerenciar múltiplos projetos isolados na mesma infraestrutura.
 
-Cada projeto recebe seu próprio database PostgreSQL, JWT secret, tenant do Realtime, tenant do Supavisor e containers de Auth, REST, Storage, ImgProxy e Nginx. Um control plane em FastAPI gerencia o ciclo de vida dos projetos, enquanto um gateway dinâmico OpenResty/Lua permite que **uma única instância do Supabase Studio** administre todos eles.
+Cada projeto recebe seu próprio database PostgreSQL, JWT secret, tenant do Realtime, tenant do Storage, tenant do Supavisor e serviços dedicados de Nginx/Auth/PostgREST. Serviços que já suportam ou foram adaptados para multi-tenancy — incluindo Storage, ImgProxy, Realtime, Supavisor, Edge Functions e Postgres Meta — são compartilhados. Um control plane em FastAPI gerencia o ciclo de vida dos projetos, enquanto um gateway dinâmico OpenResty/Lua permite que **uma única instância do Supabase Studio** administre todos eles.
 
-As API keys anon/service são rotacionadas automaticamente antes da expiração
-por padrão. Um administrador pode desativar a opção em cada projeto; falhas na
-automação ficam bloqueadas e visíveis até uma retomada explícita.
+Cada projeto possui múltiplos slots de API keys opacas `publishable`/`secret`. A expiração é opcional por chave; slots com expiração podem rotacionar automaticamente antes do vencimento, enquanto os JWTs internos anon/service role permanecem somente no servidor. Um administrador pode desativar a automação no projeto ou no slot, e falhas ficam bloqueadas e visíveis até uma retomada explícita.
+
+Políticas de projeto e slot combinam restrições por países/CIDRs, taxa de
+requisições e quotas diárias ou mensais. Administradores configuram o projeto
+em **Acesso** e cada consumidor em **Acesso e limites** no cartão do slot.
+O Traefik delega a admissão ao autorizador do plano de dados; o consumo do slot
+permanece após rotacionar a chave. Veja o [guia operacional](docs/pt-br/12-chaves-api-opacas.md#geografia-limites-de-taxa-e-quotas-de-requisições).
+
+A URL usa uma referência aleatória independente de 20 letras: `https://<servidor>/<public_ref>` e `/project/<public_ref>` no Studio. O nome técnico não determina a URL. **Gerar nova URL** troca somente a referência; a URL anterior deixa de funcionar, sem alias ou redirecionamento. A migração de instalações existentes está descrita em [Lifecycle dos projetos](docs/pt-br/architecture/project-lifecycle.md).
 
 > Este é um projeto não oficial e ainda está em desenvolvimento ativo.
 
@@ -21,6 +27,9 @@ automação ficam bloqueadas e visíveis até uma retomada explícita.
 - [Visão geral](#visão-geral)
 - [Propósito](#propósito)
 - [Arquitetura](#arquitetura)
+  - [Serviços compartilhados](#serviços-compartilhados)
+  - [Serviços criados por projeto](#serviços-criados-por-projeto)
+  - [Acesso de aplicações externas](#acesso-de-aplicações-externas)
 - [Pré-requisitos](#pré-requisitos)
 - [Como utilizar](#como-utilizar)
   - [1. Clonar o repositório](#1-clonar-o-repositório)
@@ -40,37 +49,51 @@ Simplificar a criação e a gestão de múltiplos projetos Supabase isolados em 
 
 ```mermaid
 flowchart LR
-    User[Usuário] --> StudioGateway[Studio Gateway\nNginx/OpenResty :9091]
+    StudioUser[Usuário do Studio] --> StudioGateway[Studio Gateway\nNginx/OpenResty :9091]
     StudioGateway --> Authelia[Authelia]
     StudioGateway --> Flutter[Seletor Flutter]
     StudioGateway --> Studio[Supabase Studio]
 
-    StudioGateway --> Traefik[Traefik]
-    Traefik --> ProjectsAPI[Projects API\nFastAPI]
-    Traefik --> TenantGateway[Nginx do projeto]
+    StudioGateway -->|transporte administrativo autenticado| Traefik[Traefik]
+    ExternalApp[Aplicação externa] -->|HTTPS público| Traefik
+    Traefik -->|rotas administrativas restritas| ProjectsAPI[Projects API\nFastAPI]
+    Traefik -->|/config/application_ref| ClientConfiguration[client-configuration\ninterno :18011]
+    ClientConfiguration -->|view pública de configuração somente leitura| PostgreSQL
+    Traefik -->|/public_ref/...| TenantGateway[Nginx do projeto]
 
     ProjectsAPI --> PostgreSQL[(PostgreSQL)]
-    ProjectsAPI --> Docker[Docker Socket]
-    ProjectsAPI --> Realtime[Realtime global]
-    ProjectsAPI --> Supavisor[Supavisor global]
+    ProjectsAPI -->|intenções assinadas de lifecycle| PostgreSQL
+    HostAgent[host-agent\nsystemd no host] -->|lease/resultado| PostgreSQL
+    HostAgent --> Docker[Docker daemon]
 
+    TenantGateway --> KeyAuthorizer[key-authorizer]
+    Traefik -->|admissão de geografia, taxa e quota| KeyAuthorizer
+    KeyAuthorizer --> PostgreSQL
+    KeyAuthorizer --> TrafficRedis[Redis de tráfego dedicado]
+    KeyAuthorizer --> GeoIP[GeoIP local]
     TenantGateway --> Auth[GoTrue]
     TenantGateway --> Rest[PostgREST]
-    TenantGateway --> Storage[Storage]
-    TenantGateway --> ImgProxy[ImgProxy]
+    TenantGateway --> StorageDataPlane[Data plane compartilhado do Storage]
+    StorageDataPlane --> Storage[Storage global multi-tenant]
+    Storage --> ImgProxy[ImgProxy global]
     TenantGateway --> Functions[Edge Functions global]
-    TenantGateway --> Realtime
+    TenantGateway --> Realtime[Realtime global]
 
-    Auth --> Supavisor
+    Auth --> Supavisor[Supavisor global]
     Rest --> Supavisor
     Storage --> Supavisor
     Supavisor --> PostgreSQL
+
+    ProjectsAPI --> PostgresMeta[Postgres Meta global]
+    PostgresMeta --> PostgreSQL
 ```
+
+A Projects API **não acessa o Docker socket**. As operações físicas de lifecycle são gravadas no PostgreSQL como intenções assinadas por HMAC. Um serviço systemd no host, o `host-agent`, faz o lease, revalida essas intenções e executa apenas um conjunto fechado de comandos Docker/lifecycle.
 
 A plataforma suporta duas topologias:
 
-- **Uma máquina:** Studio, Traefik, API, PostgreSQL e serviços dos projetos rodam no mesmo host.
-- **Duas máquinas:** Studio, Authelia e OpenResty rodam em uma máquina administrativa local, enquanto Traefik, API e serviços dos projetos rodam no servidor principal.
+- **Uma máquina:** Studio, Traefik, API, PostgreSQL, host-agent e serviços dos projetos rodam no mesmo host. O host-agent continua fora dos containers.
+- **Duas máquinas:** Studio, Authelia e OpenResty rodam em uma máquina administrativa local, enquanto Traefik, API, host-agent e serviços dos projetos rodam no servidor principal.
 
 As aplicações acessam as rotas dos projetos pelo Traefik. O gateway do Studio é uma interface administrativa e não precisa fazer parte do caminho público dos dados.
 
@@ -79,23 +102,43 @@ As aplicações acessam as rotas dos projetos pelo Traefik. O gateway do Studio 
 - PostgreSQL;
 - Supavisor;
 - Realtime modificado;
+- Storage API no modo multi-tenant oficial;
+- ImgProxy;
+- proxy restrito do data plane do Storage;
 - Edge Functions;
 - Postgres Meta;
+- key-authorizer;
+- Redis de tráfego dedicado e GeoIP local;
+- client-configuration;
 - Projects API;
 - Traefik;
 - Supabase Analytics/Logflare e Vector.
+
+O `host-agent` também é um componente global da plataforma, mas roda como serviço systemd no servidor principal em vez de container.
 
 ### Serviços criados por projeto
 
 - Nginx;
 - GoTrue;
 - PostgREST;
-- Storage;
-- ImgProxy;
-- database `_supabase_<project_ref>`;
+- database `_supabase_<technical_name>`;
 - diretório de configuração do projeto.
 
-Para os detalhes de implementação, consulte a [documentação da arquitetura](docs/00-arquitetura.md).
+Storage e ImgProxy não são mais criados por projeto. Os objetos do Storage são namespaced pelo UUID imutável do tenant, e o Nginx de cada projeto injeta a identidade confiável do tenant antes de o tráfego chegar ao data plane compartilhado do Storage.
+
+### Acesso de aplicações externas
+
+Aplicações usam a origem pública do Traefik no servidor principal — nunca a origem administrativa do Studio em `:9091`. Usuários das aplicações autenticam pela API de Auth do projeto; sem conta no Authelia ou sessão do Studio.
+
+| Finalidade | Endereço | Acesso |
+| --- | --- | --- |
+| Administração | `https://<host-do-studio>:9091` | Sessão do Authelia e autorização administrativa |
+| Descoberta do slot publishable | `https://<servidor-publico>/config/<application_ref>` | GET público pelo Traefik |
+| URL base das APIs do projeto | `https://<servidor-publico>/<public_ref>` | API key opaca e, quando aplicável, sessão do usuário da aplicação |
+
+Os paths dos serviços (`/auth/v1`, `/rest/v1`, `/storage/v1`, `/functions/v1`, `/realtime/v1`) são acrescentados à URL base do projeto. Veja [Chaves de API opacas](docs/pt-br/12-chaves-api-opacas.md) para chaves, descoberta, rotação e contratos de requisição, e [HTTPS](docs/pt-br/01-setup-https.md) para confiança de certificados.
+
+Para os detalhes de implementação, consulte a [documentação da arquitetura](docs/pt-br/00-arquitetura.md).
 
 ---
 
@@ -123,10 +166,7 @@ python3 -c 'import sys; assert sys.version_info >= (3, 10), "Python 3.10 ou mais
 python3 -m venv --help >/dev/null
 ```
 
-Na topologia com duas máquinas, o Python precisa estar instalado tanto no
-servidor principal quanto na máquina administrativa do Studio. O servidor usa
-Python para o host-agent e o lifecycle dos projetos; a máquina do Studio usa
-Python para renderizar a configuração runtime e os certificados do Authelia.
+Na topologia com duas máquinas, o Python precisa estar instalado tanto no servidor principal quanto na máquina administrativa do Studio. O servidor usa Python para o host-agent e o lifecycle dos projetos; a máquina do Studio usa Python para renderizar a configuração runtime e os certificados do Authelia.
 
 ---
 
@@ -145,9 +185,21 @@ cd supabase-multitenant
 bash setup.sh single-node
 ```
 
-Para instalar tudo em uma unica maquina, `single-node` usa o IP local detectado para o servidor principal e o Studio, sem perguntar a topologia.
+Para instalar tudo em uma única máquina, `single-node` usa o IP local detectado para o servidor principal e o Studio, sem perguntar a topologia.
 
-Para duas maquinas, use `bash setup.sh split-node <ip-ou-dominio-do-servidor>`. Executar `bash setup.sh` sem perfil mantem o fluxo interativo anterior.
+Com Docker Desktop e WSL, informe o endereço do Windows publicado pelo Docker: `bash setup.sh single-node <ip-do-windows>`. O setup emite certificados do Studio e Traefik com a mesma CA privada e habilita HTTPS. Instale `studio/authelia/ssl/ca.pem` como CA confiável na máquina do navegador; não desative a verificação de certificados.
+
+Para um endpoint por IP literal, o Traefik serve o certificado desse IP explicitamente configurado mesmo quando o cliente não envia SNI DNS. Instalações com domínio mantêm SNI estrito. Certificados ausentes interrompem a configuração; os clientes devem verificar tanto a CA privada quanto a identidade do destino no certificado.
+
+O gateway administrativo continua conectando diretamente nesse IP. Como o verificador de hostname do OpenResty usa identidades DNS no certificado, o setup também emite a identidade do backend `supabase-backend.internal` e configura `STUDIO_BACKEND_TLS_NAME` nas chamadas HTTPS do Lua e nos proxies Nginx. Esse é o nome obrigatório do peer TLS, não um alias DNS, rota alternativa ou destino de failover. A CA privada e a verificação do hostname continuam obrigatórias. A inicialização do Studio reconstrói suas imagens a partir do checkout atual, em vez de reutilizar código antigo do gateway em imagens locais.
+
+Para uma instalação nova no Docker Desktop/WSL, use `SETUP_DOCKER_DESKTOP_WSL_HOST=<ip-da-interface-wsl-do-windows> bash setup.sh single-node <ip-do-windows>`. Isso seleciona um volume Linux do Docker para PostgreSQL e publica sua porta somente na interface privada do WSL para o host-agent. Não use o endereço Wi-Fi/LAN nessa variável. Bancos existentes exigem backup/restore explícito no novo volume antes de selecionar esse perfil; o setup não migra dados.
+
+Esse perfil usa `servidor/host-agent/.docker` tanto na inicialização quanto nos builds não interativos do host-agent, sem modificar as credenciais Docker do operador. A configuração gerada baixa imagens públicas anonimamente. Para registros privados, autentique explicitamente com `docker --config servidor/host-agent/.docker login <registro>`; o serviço Linux não usa o helper de credenciais do Windows.
+
+Nesse perfil, a configuração gravável do Traefik e o diretório/SQLite do Authelia também ficam em volumes Linux do Docker. `studio/authelia` fornece configuração e certificados do setup, não o banco administrativo em uso. A inicialização preenche um volume novo uma única vez, preserva o estado existente no volume e recusa migrar automaticamente um SQLite existente no host. Os snippets SQL do Studio são armazenados pela Projects API no PostgreSQL do control plane, separados por usuário e projeto; seus UUIDs não mudam ao renomear ou mover. Faça backup desses volumes e do banco do control plane antes de qualquer reset; nunca use `down -v` para reiniciar.
+
+Para duas máquinas, use `bash setup.sh split-node <ip-ou-dominio-do-servidor>`. Executar `bash setup.sh` sem perfil mantém o fluxo interativo anterior.
 
 O IP ou domínio solicitado pelo script representa o **servidor principal**, onde rodam Traefik, Projects API e os serviços dos projetos.
 
@@ -164,7 +216,7 @@ No modo interativo:
 - Informe o IP da máquina local para preparar uma instalação em uma máquina.
 - Informe outro IP ou domínio para preparar a topologia com duas máquinas.
 
-O setup gera os arquivos de ambiente do servidor e do Studio, incluindo as credenciais separadas do Analytics em `servidor/.analytics.env` e `studio/.analytics.env`.
+O setup gera os arquivos de ambiente do servidor e do Studio, incluindo as credenciais separadas do Analytics em `servidor/.analytics.env` e `studio/.analytics.env`. Os segredos de infraestrutura do Storage ficam separados em `servidor/.storage.env`.
 
 ### 3. Iniciar a plataforma
 
@@ -174,9 +226,7 @@ O setup gera os arquivos de ambiente do servidor e do Studio, incluindo as crede
 bash start.sh single-node
 ```
 
-`single-node` e o perfil explicito padrao. Para duas maquinas, execute
-`bash start.sh split-node-server` no servidor principal e
-`bash start.sh split-node-studio` na maquina administrativa do Studio.
+`single-node` é o perfil explícito padrão. Para duas máquinas, execute `bash start.sh split-node-server` no servidor principal e `bash start.sh split-node-studio` na máquina administrativa do Studio.
 
 O script inicia os serviços compartilhados e a Projects API, espera PostgreSQL e Supavisor, inicia Traefik e os projetos existentes e, por último, inicia o Studio.
 
@@ -196,6 +246,8 @@ cd servidor
 docker compose -f docker-compose.yml --env-file .env up --build -d
 docker compose -f docker-compose-api.yml -f docker-compose.single-node.yml --env-file .env up --build -d
 ```
+
+O segundo comando executa antes o serviço efêmero `control-plane-migrations`, que aplica as migrations versionadas do schema, provisiona as identidades restritas de banco e preenche o material público publishable existente; `key-authorizer`, `client-configuration` e `projects-api` só sobem depois que ele termina com sucesso. Veja [Migrations do control plane](docs/pt-br/architecture/control-plane-migrations.md).
 
 Inicie o Traefik:
 
@@ -234,6 +286,8 @@ Confira se os containers estão rodando:
 docker ps
 ```
 
+Com vários projetos, deve existir um conjunto Nginx/Auth/PostgREST por projeto, mas apenas um `supabase-storage-global` e um `supabase-imgproxy-global`.
+
 Acesse o Studio:
 
 ```text
@@ -245,27 +299,36 @@ No primeiro acesso, crie o administrador inicial pelo navegador. Depois do boots
 Detalhes importantes do Studio:
 
 - cada aba do navegador mantém seu projeto pela URL (`/project/<ref>`);
-- `9091` é o único endpoint público do Studio e do Authelia;
+- `9091` é o único endpoint administrativo do Studio e do Authelia, não um endpoint das APIs de aplicações;
 - requisições HTTP simples em `:9091` são redirecionadas para HTTPS na mesma porta;
 - integrações entre servidores que acessam o gateway do Studio também devem usar a porta `9091`.
+
+Aplicações externas usam os endereços públicos do Traefik descritos em
+[Acesso de aplicações externas](#acesso-de-aplicações-externas), sem sessão do
+Studio ou do Authelia. Verifique tanto a resposta de `/config/<application_ref>`
+do slot quanto as rotas do projeto usando `supabase_url` e `publishable_key`
+retornados.
 
 ---
 
 ## Documentação
 
-O README é focado em entender e iniciar a plataforma rapidamente. A documentação detalhada está em [`docs/README.md`](docs/README.md).
+O README é focado em entender e iniciar a plataforma rapidamente. A documentação detalhada está em [`docs/README.md`](docs/README.md). Quando detalhes de implementação evoluírem, os documentos de arquitetura são a fonte canônica.
 
 Referências principais:
 
-- [Visão geral da arquitetura](docs/00-arquitetura.md)
+- [Visão geral da arquitetura](docs/pt-br/00-arquitetura.md)
 - [Control plane](docs/architecture/control-plane.md)
+- [Host-agent](docs/architecture/host-agent.md)
 - [Lifecycle dos projetos](docs/architecture/project-lifecycle.md)
+- [Storage compartilhado, S3 e Storage Vectors](docs/architecture/storage-vectors-lifecycle.md)
+- [Chaves de API opacas](docs/pt-br/12-chaves-api-opacas.md)
 - [OpenResty/Lua](docs/architecture/openresty-lua.md)
 - [Supabase Analytics](docs/architecture/supabase-analytics.md)
-- [Realtime multi-tenant](docs/09-autenticacao-multi-tenant-realtime.md)
-- [Hardening do Postgres Meta](docs/10-hardening-postgres-meta.md)
-- [Criptografia e rotação de segredos](docs/11-rotacao-cripto-conexoes.md)
-- [Principais erros](docs/05-principais-erros.md)
+- [Realtime multi-tenant](docs/pt-br/09-autenticacao-multi-tenant-realtime.md)
+- [Hardening do Postgres Meta](docs/pt-br/10-hardening-postgres-meta.md)
+- [Criptografia e rotação de segredos](docs/pt-br/11-rotacao-cripto-conexoes.md)
+- [Principais erros](docs/pt-br/05-principais-erros.md)
 
 ---
 
@@ -275,7 +338,7 @@ Referências principais:
 
 O setup gera um certificado autoassinado para o Authelia e para o gateway do Studio.
 
-Por padrão, o certificado é válido por **um ano**. Gere um novo certificado antes do vencimento para evitar perder o acesso à interface administrativa.
+Por padrão, o certificado é válido por **825 dias**, conforme `tools/configure_studio_runtime.py`. Gere um novo certificado antes do vencimento para evitar perder o acesso à interface administrativa.
 
 ## Licença
 
