@@ -66,6 +66,16 @@ BEGIN
             CASE WHEN (SELECT typtype FROM pg_type WHERE oid=format('public.%I',obj.typname)::regtype)='d' THEN 'DOMAIN' ELSE 'TYPE' END,
             obj.typname, tenant_role);
     END LOOP;
+    -- Public SECURITY DEFINER triggers keep this identity after the ownership
+    -- transfer. Realtime helpers are SECURITY INVOKER and need both schema
+    -- USAGE and INSERT on messages. Realtime creates its tables lazily, using
+    -- the same privileged login as this provisioner, so cover future tables too.
+    CREATE SCHEMA IF NOT EXISTS realtime;
+    EXECUTE format('GRANT USAGE ON SCHEMA realtime TO %I', tenant_role);
+    IF to_regclass('realtime.messages') IS NOT NULL THEN
+        EXECUTE format('GRANT INSERT ON realtime.messages TO %I', tenant_role);
+    END IF;
+    EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA realtime GRANT INSERT ON TABLES TO %I', current_user, tenant_role);
     FOR obj IN SELECT nspname FROM pg_namespace WHERE nspname IN ('auth','storage','extensions') LOOP
         EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', obj.nspname, tenant_role);
         EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO %I', obj.nspname, tenant_role);
