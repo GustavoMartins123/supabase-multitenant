@@ -41,7 +41,7 @@ jobs:
           cp studio/.analytics.env.example studio/.analytics.env
 
       - name: Setup Python for env contract
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
