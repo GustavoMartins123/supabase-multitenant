@@ -6,6 +6,7 @@ platform_capacity_error() {
 }
 
 PLATFORM_BASELINE_REFERENCE_CPUS=20
+PLATFORM_CPU_SCALED_MIN_PERCENT=75
 
 PLATFORM_LIMIT_HEADROOM_PERCENT=100
 
@@ -236,7 +237,8 @@ platform_service_baseline_mib() {
         for entry in "${PLATFORM_CPU_SCALED_SERVICES[@]}"; do
             if [ "$entry" = "$service" ]; then
                 floor=$(( reference * host_cpus / PLATFORM_BASELINE_REFERENCE_CPUS ))
-                [ "$floor" -lt $(( reference / 4 )) ] && floor=$(( reference / 4 ))
+                [ "$floor" -lt $(( reference * PLATFORM_CPU_SCALED_MIN_PERCENT / 100 )) ] \
+                    && floor=$(( reference * PLATFORM_CPU_SCALED_MIN_PERCENT / 100 ))
                 break
             fi
         done
