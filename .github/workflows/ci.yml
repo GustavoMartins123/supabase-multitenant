@@ -143,6 +143,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -152,6 +154,14 @@ jobs:
         run: |
           docker build -t studio-security-ci:local -f studio/Dockerfile studio
           docker pull postgres:15
+      - name: Build production push worker image
+        run: docker build -t push-worker-ci:local -f servidor/api-internal/Dockerfile servidor
+      - name: Required push delivery checks (no skips)
+        env:
+          PUSH_PG_IMAGE: postgres:15
+          PUSH_NGINX_IMAGE: studio-security-ci:local
+          PUSH_PYTHON_IMAGE: push-worker-ci:local
+        run: bash tests/push/run_local.sh
       - name: Required authorization, revocation, directory and tenant SQL checks (no skips)
         run: |
           python tools/run_auth_security_tests.py \

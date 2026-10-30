@@ -65,7 +65,8 @@ class OutboundTlsContractTests(unittest.TestCase):
         source = (ROOT / "studio/nginx/lua/send_push.lua").read_text(
             encoding="utf-8"
         )
-        self.assertEqual(source.count("outbound_tls.apply_public"), 2)
+        oauth = (ROOT / "studio/nginx/lua/push/oauth.lua").read_text(encoding="utf-8")
+        self.assertEqual((source + oauth).count("outbound_tls.apply_public"), 2)
 
 
 if __name__ == "__main__":

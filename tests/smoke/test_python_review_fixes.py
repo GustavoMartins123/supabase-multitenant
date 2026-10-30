@@ -28,7 +28,7 @@ class InternalTlsHardeningTest(unittest.TestCase):
         self.assertIn("verify=build_studio_cache_ssl_context()", cache_client)
 
         self.assertIn('os.getenv("PUSH_VERIFY_TLS", "true")', worker)
-        self.assertIn("ssl.create_default_context(cafile=PUSH_CA_FILE)", worker)
+        self.assertIn("context.load_verify_locations(cafile=PUSH_CA_FILE)", worker)
         self.assertNotIn("ssl._create_unverified_context", worker)
         self.assertNotIn("ssl.CERT_NONE", worker)
         self.assertIn("PUSH_VERIFY_TLS must remain enabled for HTTPS", worker)
@@ -52,7 +52,7 @@ class PushWorkerConfigurationTest(unittest.TestCase):
         self.assertNotIn("<SEU_IP>:4000", worker)
         self.assertGreaterEqual(
             worker.count('removeprefix("_supabase_")'),
-            2,
+            1,
         )
         self.assertNotIn('replace("_supabase_", "")', worker)
 

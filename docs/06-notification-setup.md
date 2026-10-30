@@ -16,10 +16,10 @@ Before continuing, make sure that:
 
 - **Firebase project**: You have a project created in the [Firebase Console](https://console.firebase.google.com/).
 - **Service account**: You generated and downloaded the private key (JSON file) for the Firebase Service Account (Project Settings > Service Accounts > Generate new private key).
-- **Worker enabled**: by default, the `push-worker` service is commented out in `servidor/docker-compose-api.yml`. Uncomment it and start the container before validating the end-to-end flow.
+- **Worker enabled**: by default, the `push-worker` service is commented out in `servidor/docker-compose-api.yml`. Prepare the tenant database with the full setup (new installation) or the migration (existing installation) before enabling the worker.
 - **Internal shared secret**: `INTERNAL_HMAC_SECRET` must have the same value in `studio/.env` and `servidor/.env`. `setup.sh` generates this value automatically.
 - **Correct gateway URL**: `PUSH_API_URL` must point to `https://<STUDIO_IP>:9091/api/internal/push`.
-- **Trusted TLS between machines**: if `PUSH_VERIFY_TLS=true`, the Studio certificate must be trusted by the Python server. `setup.sh` copies `studio/authelia/ssl/ca.pem` to `servidor/certs/ca.pem`, which is mounted in the container as `/docker/push-certs/ca.pem`.
+- **Trusted TLS between machines**: TLS verification is mandatory; the Studio certificate must be trusted by the Python server. `setup.sh` copies `studio/authelia/ssl/ca.pem` to `servidor/certs/ca.pem`, which is mounted in the container as `/docker/push-certs/ca.pem`.
 
 ---
 
@@ -75,6 +75,21 @@ X-Internal-Signature: <hmac_sha256_hex>
 The HMAC signs the method, path, timestamp, nonce, and `sha256` of the request body. Nginx validates the time window and temporarily stores the nonce to reduce replay.
 
 ### Step 2: Structure the project databases
+
+**New tenant / Projeto novo:** create `push_tokens`, `notifications`, trigger and
+RLS first (2.1–2.3), then apply 2.4 in that same tenant database. The migration
+alone does NOT create those base tables. Each project needs its own tables.
+
+Complete psql setup: `psql -X -f servidor/sql/push/setup.sql` after configuring
+PGHOST/PGDATABASE/PGUSER/.pgpass for this tenant. It executes
+[`00_base.sql`](../servidor/sql/push/00_base.sql) followed by the canonical delivery migration.
+In the SQL editor, execute those two SQL files separately in that order; the
+setup wrapper uses psql-specific `\ir`. Supabase Auth must already exist.
+
+**Existing push installation / Projeto existente:** apply only 2.4. Do not
+recreate base tables or restart cron jobs. An already migrated tenant needs no
+schema recreation. The worker never runs DDL automatically.
+
 
 For each project (tenant) that will use notifications, create the Outbox tables, the notification function, and the security policies (RLS).
 
@@ -151,40 +166,17 @@ FOR SELECT
 USING (auth.uid() = user_id);
 ```
 
-**2.4. Add the durable delivery state required by the resilient worker**
+**2.4. Prepare durable deliveries in the tenant database**
 
-Run this block once in every existing project database. The worker does not
-perform DDL at runtime: it refuses an incomplete schema and keeps retrying
-until this migration has been applied.
+After creating the base tables in 2.1–2.3 (new tenant), or on an existing
+installation, stop every old push-worker instance before applying
+[`20261014_01_delivery_fencing.sql`](../servidor/migrations/push/20261014_01_delivery_fencing.sql)
+in each enabled tenant database. It adds durable delivery results, fenced leases,
+retry schedules and token generation snapshots without changing existing states.
+The worker does not execute DDL. The Firebase project remains shared.
 
-```sql
-ALTER TABLE public.notifications
-  ADD COLUMN IF NOT EXISTS available_at timestamp with time zone NOT NULL DEFAULT now(),
-  ADD COLUMN IF NOT EXISTS attempts integer NOT NULL DEFAULT 0,
-  ADD COLUMN IF NOT EXISTS locked_at timestamp with time zone NULL,
-  ADD COLUMN IF NOT EXISTS last_error text NULL;
-
-CREATE TABLE IF NOT EXISTS public.notification_deliveries (
-  notification_id uuid NOT NULL REFERENCES public.notifications (id) ON DELETE CASCADE,
-  token text NOT NULL,
-  platform text NULL,
-  status text NOT NULL DEFAULT 'pendente',
-  attempts integer NOT NULL DEFAULT 0,
-  available_at timestamp with time zone NOT NULL DEFAULT now(),
-  locked_at timestamp with time zone NULL,
-  last_error text NULL,
-  delivered_at timestamp with time zone NULL,
-  CONSTRAINT notification_deliveries_pkey PRIMARY KEY (notification_id, token)
-);
-
-CREATE INDEX IF NOT EXISTS idx_notifications_push_available
-  ON public.notifications (status, available_at, created_at);
-
-CREATE INDEX IF NOT EXISTS idx_notification_deliveries_push_available
-  ON public.notification_deliveries (notification_id, status, available_at);
-
-ALTER TABLE public.notification_deliveries ENABLE ROW LEVEL SECURITY;
-```
+HMAC `push-v2`, fresh nonces and the public TLS policy remain required.
+See [validation, migration sequencing and rollback](07-push-reliability.md).
 
 ### Step 3: Enable the Worker in Docker Compose
 
@@ -202,24 +194,40 @@ Open `docker-compose-api.yml` and remove the `#` characters in front of the `pus
       context: .
       dockerfile: ./api-internal/Dockerfile
     restart: unless-stopped
+    logging: *vector-logging
+    depends_on:
+      control-plane-migrations:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     networks: [rede-supabase]
     environment:
       PYTHONUNBUFFERED: 1
       DB_DSN: postgres://supabase_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/postgres
-      PUSH_API_URL: ${PUSH_API_URL}
-      INTERNAL_HMAC_SECRET: ${INTERNAL_HMAC_SECRET}
-      PUSH_VERIFY_TLS: ${PUSH_VERIFY_TLS}
-      PUSH_CA_FILE: ${PUSH_CA_FILE}
-      PUSH_REQUEST_TIMEOUT: ${PUSH_REQUEST_TIMEOUT:-10}
+      PUSH_API_URL: ${PUSH_API_URL:?defina PUSH_API_URL}
+      INTERNAL_HMAC_SECRET: ${INTERNAL_HMAC_SECRET:?defina INTERNAL_HMAC_SECRET}
+      PUSH_VERIFY_TLS: ${PUSH_VERIFY_TLS:-true}
+      PUSH_CA_FILE: ${PUSH_CA_FILE:-/docker/push-certs/ca.pem}
+      PUSH_REQUEST_TIMEOUT: ${PUSH_REQUEST_TIMEOUT:-75}
       PUSH_BATCH_SIZE: ${PUSH_BATCH_SIZE:-10}
       PUSH_MAX_ATTEMPTS: ${PUSH_MAX_ATTEMPTS:-8}
-      PUSH_REQUEST_RETRIES: ${PUSH_REQUEST_RETRIES:-2}
-      PUSH_RETRY_BASE_SECONDS: ${PUSH_RETRY_BASE_SECONDS:-2}
-      PUSH_MAX_RETRY_SECONDS: ${PUSH_MAX_RETRY_SECONDS:-60}
+      PUSH_REQUEST_RETRIES: ${PUSH_REQUEST_RETRIES:-0}
+      PUSH_RETRY_BASE_SECONDS: ${PUSH_RETRY_BASE_SECONDS:-60}
+      PUSH_MAX_RETRY_SECONDS: ${PUSH_MAX_RETRY_SECONDS:-3600}
       PUSH_NOTIFICATION_LEASE_SECONDS: ${PUSH_NOTIFICATION_LEASE_SECONDS:-900}
       PUSH_SCHEMA_RETRY_SECONDS: ${PUSH_SCHEMA_RETRY_SECONDS:-60}
       PUSH_DB_CONNECT_TIMEOUT: ${PUSH_DB_CONNECT_TIMEOUT:-10}
       PUSH_MAX_TENANT_CONNECTIONS: ${PUSH_MAX_TENANT_CONNECTIONS:-32}
+      PUSH_MAX_RETRY_AFTER_SECONDS: ${PUSH_MAX_RETRY_AFTER_SECONDS:-86400}
+      PUSH_IDLE_WAKEUP_SECONDS: ${PUSH_IDLE_WAKEUP_SECONDS:-30}
+      PUSH_HTTP_CONCURRENCY: ${PUSH_HTTP_CONCURRENCY:-4}
+      PUSH_HTTP_GLOBAL_CONCURRENCY: ${PUSH_HTTP_GLOBAL_CONCURRENCY:-32}
+      PUSH_TENANT_SESSION_SECONDS: ${PUSH_TENANT_SESSION_SECONDS:-300}
     volumes:
       - ./certs:/docker/push-certs:ro
     command: ["python", "app/push_worker.py"]
@@ -245,9 +253,10 @@ VALUES ('user-uuid-here', 'Your new notification arrived!');
 ```
 
 The status automatically changes from `pendente` to `enviado`,
-`enviado_parcial`, `sem_token`, or `erro`. Transient failures return to
-`pendente` with exponential backoff; a
-delivery is moved to error only after the configured attempt limit.
+`enviado_parcial`, `sem_token`, or `erro`. Retryable failures return to
+`pendente` with exponential backoff until the configured attempt limit.
+Permanent failures and unsupported Retry-After values move the delivery directly
+to `erro`.
 
 ### Step 5: Troubleshooting and logs
 

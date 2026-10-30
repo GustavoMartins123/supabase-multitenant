@@ -22,7 +22,7 @@ class PushWorkerResilienceContractTest(unittest.TestCase):
             "status = 'processando'",
             "FOR UPDATE SKIP LOCKED",
             "idempotency_key",
-            "response.close()",
+            "httpx.AsyncClient",
             "PUSH_MAX_TENANT_CONNECTIONS",
         ):
             with self.subTest(fragment=fragment):
@@ -37,7 +37,7 @@ class PushWorkerResilienceContractTest(unittest.TestCase):
 
         self.assertIn("push_idempotency", lua)
         self.assertIn("PUSH_IDEMPOTENCY_TTL_SECONDS", lua)
-        self.assertIn("httpc:set_timeouts", lua)
+        self.assertIn("client:set_timeouts", read("studio/nginx/lua/push/oauth.lua"))
         self.assertIn("lua_shared_dict push_idempotency", nginx)
         self.assertIn("lua_shared_dict push_oauth_tokens", nginx)
 

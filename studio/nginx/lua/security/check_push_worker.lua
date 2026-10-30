@@ -14,7 +14,8 @@ local function respond(status, message)
 end
 
 local function get_header(headers, name)
-    return headers[name] or headers[name:lower()]
+    local value = headers[name] or headers[name:lower()]
+    return type(value) == "string" and value or nil
 end
 
 local function read_body()
@@ -76,7 +77,7 @@ local nonce = get_header(headers, "X-Internal-Nonce")
 local provided_signature = get_header(headers, "X-Internal-Signature")
 
 if service ~= "push-worker" then
-    ngx.log(ngx.WARN, "[PUSH] Servico interno invalido: ", service or "")
+    ngx.log(ngx.WARN, "[PUSH] Servico interno invalido")
     return respond(ngx.HTTP_UNAUTHORIZED, "Invalid internal service")
 end
 
@@ -129,7 +130,10 @@ if not secure_compare.equals(provided_signature, expected_signature) then
 end
 
 local nonce_key = service .. ":" .. nonce
-local nonce_added, nonce_err = nonce_cache:add(nonce_key, true, max_skew)
+-- A timestamp slightly in the future remains valid longer than max_skew
+-- measured from this first request. Keep the nonce for the entire valid window.
+local nonce_ttl = math.max(1, timestamp + max_skew - now + 1)
+local nonce_added, nonce_err = nonce_cache:add(nonce_key, true, nonce_ttl)
 if not nonce_added then
     ngx.log(ngx.WARN, "[PUSH] Nonce HMAC reutilizado ou invalido: ", nonce_err or "exists")
     return respond(ngx.HTTP_UNAUTHORIZED, "Replayed internal signature")
