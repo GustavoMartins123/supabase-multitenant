@@ -232,6 +232,11 @@ jobs:
         run: |
           python tools/run_p1_end_to_end_tests.py --executor-image codex-p1-executor:local \
             --topology '${{ matrix.topology }}' --result '.tmp-appdata/p1-e2e-${{ matrix.topology }}.json'
+      - name: Host memory and OOM-killer evidence
+        if: failure()
+        run: |
+          free -m
+          sudo dmesg -T | grep -iE -B2 -A40 'invoked oom-killer|out of memory|killed process' | tail -250 || true
 
 
   flutter:

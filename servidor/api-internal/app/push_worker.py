@@ -268,7 +268,7 @@ async def send_to_api(token_fcm, body, project_name, delivery_key, client=None):
         )
     except (httpx.RequestError, TimeoutError, OSError) as exc:
         # Certificate failures need intervention. Never silently bypass TLS.
-        cause = exc
+        cause: BaseException | None = exc
         tls_failure = False
         while cause:
             if isinstance(cause, ssl.SSLCertVerificationError):
@@ -717,7 +717,7 @@ async def reconcile_workers(
 
 
 async def worker_manager():
-    active_tasks = {}
+    active_tasks: dict[str, asyncio.Task] = {}
     connection_slots = asyncio.Semaphore(PUSH_MAX_TENANT_CONNECTIONS)
     http_slots = asyncio.Semaphore(PUSH_HTTP_GLOBAL_CONCURRENCY)
     async with http_client() as client:

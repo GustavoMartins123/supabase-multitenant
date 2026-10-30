@@ -416,6 +416,31 @@ http {
             add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, apikey, x-supabase-api-version, Content-Profile' always;
         }
 
+        location = /realtime/v1/api/broadcast {
+            set $opaque_target_service realtime;
+            auth_request /_internal/opaque-key-authorize;
+            if ($request_method = 'OPTIONS') { return 204; }
+            if ($request_method != 'POST') { return 405; }
+
+            proxy_set_header X-Gateway-Admission "";
+            proxy_set_header X-Admission-URI "";
+            proxy_set_header X-Admission-Method "";
+            proxy_set_header X-Admission-Origin-IP "";
+            proxy_pass http://$realtime_upstream/api/broadcast$is_args$args;
+            proxy_http_version 1.1;
+            proxy_set_header Host "{{project_uuid}}.localhost";
+            proxy_set_header apikey $opaque_upstream_apikey;
+            proxy_set_header x-api-key $opaque_upstream_apikey;
+            proxy_set_header Authorization $opaque_upstream_authorization;
+            proxy_set_header X-Api-Key-Id $opaque_key_id;
+            proxy_hide_header Access-Control-Allow-Origin;
+            proxy_hide_header Access-Control-Allow-Methods;
+            proxy_hide_header Access-Control-Allow-Headers;
+            add_header Access-Control-Allow-Origin $cors_origin always;
+            add_header Access-Control-Allow-Methods 'POST, OPTIONS' always;
+            add_header Access-Control-Allow-Headers 'Authorization, Content-Type, apikey, X-Client-Info' always;
+        }
+
         location ^~ /realtime/v1/websocket {
             access_log off;
             set $opaque_target_service realtime;

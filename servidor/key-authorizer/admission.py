@@ -72,6 +72,8 @@ def route(uri: str, public_ref: str | None):
     decoded = urllib.parse.unquote(path)
     if "\\" in decoded or any(p in {".", ".."} for p in decoded.split("/")):
         raise HTTPException(400, "Non-canonical project path")
+    if path == "/realtime/v1/api/broadcast":
+        return "realtime", False, "", parts
     for prefix, service in (
         ("/auth/v1/", "auth"),
         ("/rest/v1/", "rest"),
