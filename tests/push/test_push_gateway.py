@@ -1,5 +1,5 @@
 """Real multi-worker OpenResty/TLS tests, using isolated mocked Google transport.
-Run only with IDR_PUSH_TEST_GATEWAY=https://localhost:8443 and its ephemeral CA.
+Run only with PUSH_TEST_GATEWAY=https://localhost:8443 and its ephemeral CA.
 """
 
 import asyncio
@@ -18,12 +18,12 @@ from app.internal_hmac import build_internal_hmac_headers
 
 
 @unittest.skipUnless(
-    os.getenv("IDR_PUSH_TEST_GATEWAY"), "requires isolated OpenResty test server"
+    os.getenv("PUSH_TEST_GATEWAY"), "requires isolated OpenResty test server"
 )
 class GatewayTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.url = os.environ["IDR_PUSH_TEST_GATEWAY"]
-        ctx = ssl.create_default_context(cafile=os.environ["IDR_PUSH_TEST_CA"])
+        self.url = os.environ["PUSH_TEST_GATEWAY"]
+        ctx = ssl.create_default_context(cafile=os.environ["PUSH_TEST_CA"])
         self.client = httpx.AsyncClient(verify=ctx, trust_env=False, timeout=10)
         await self.client.get(self.url + "/test/reset")
 
@@ -212,7 +212,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         for _ in range(16):
             async with httpx.AsyncClient(
                 verify=ssl.create_default_context(
-                    cafile=os.environ["IDR_PUSH_TEST_CA"]
+                    cafile=os.environ["PUSH_TEST_CA"]
                 ),
                 trust_env=False,
             ) as c:

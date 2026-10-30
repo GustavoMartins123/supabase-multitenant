@@ -644,7 +644,7 @@ async def poll_tenant(db_name, connection_slots, client=None, http_slots=None):
                         tenant_dsn,
                         timeout=PUSH_DB_CONNECT_TIMEOUT,
                         command_timeout=PUSH_DB_CONNECT_TIMEOUT,
-                        server_settings={"application_name": "idr-push-worker"},
+                        server_settings={"application_name": "supabase-push-worker"},
                     )
                     await validate_notification_schema(conn)
                     await conn.add_listener("new_push", listener)

@@ -3,7 +3,7 @@
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '60s';
-SELECT pg_advisory_xact_lock(hashtext('idr.push.20261014_01'));
+SELECT pg_advisory_xact_lock(-426557861);
 
 DO $$
 BEGIN

@@ -1,7 +1,7 @@
 """Unit and isolated PostgreSQL regression tests. No FCM traffic.
 
-IDR_PUSH_TEST_DSN must point ONLY to an ephemeral PostgreSQL server; this suite
-creates/drops databases named idr_push_test_<uuid>, never existing tenant DBs.
+PUSH_TEST_DSN must point ONLY to an ephemeral PostgreSQL server; this suite
+creates/drops databases named push_test_<uuid>, never existing tenant DBs.
 """
 
 import asyncio
@@ -244,10 +244,10 @@ CREATE TRIGGER trigger_new_push AFTER INSERT ON public.notifications FOR EACH ST
 """
 
 
-@unittest.skipUnless(os.getenv("IDR_PUSH_TEST_DSN"), "requires isolated PostgreSQL")
+@unittest.skipUnless(os.getenv("PUSH_TEST_DSN"), "requires isolated PostgreSQL")
 class PostgresTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.admin = await asyncpg.connect(os.environ["IDR_PUSH_TEST_DSN"])
+        self.admin = await asyncpg.connect(os.environ["PUSH_TEST_DSN"])
         self.connections = []
         self.databases = []
         self.a = await self.database()
@@ -263,11 +263,11 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
         self.settings.start()
 
     async def database(self, fresh_setup=False):
-        name = "idr_push_test_" + uuid.uuid4().hex
+        name = "push_test_" + uuid.uuid4().hex
         await self.admin.execute(f'CREATE DATABASE "{name}"')
         self.databases.append(name)
         conn = await asyncpg.connect(
-            w.get_tenant_dsn(os.environ["IDR_PUSH_TEST_DSN"], name)
+            w.get_tenant_dsn(os.environ["PUSH_TEST_DSN"], name)
         )
         self.connections.append(conn)
         if fresh_setup:
@@ -434,7 +434,7 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
     async def test_token_updated_during_send_not_deleted(self):
         db = await self.a.fetchval("SELECT current_database()")
         app_conn = await asyncpg.connect(
-            w.get_tenant_dsn(os.environ["IDR_PUSH_TEST_DSN"], db)
+            w.get_tenant_dsn(os.environ["PUSH_TEST_DSN"], db)
         )
         self.connections.append(app_conn)
         for same_value in (False, True):
@@ -507,7 +507,7 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
         nid = await self.add(self.a)
         db = await self.a.fetchval("SELECT current_database()")
         other = await asyncpg.connect(
-            w.get_tenant_dsn(os.environ["IDR_PUSH_TEST_DSN"], db)
+            w.get_tenant_dsn(os.environ["PUSH_TEST_DSN"], db)
         )
         self.connections.append(other)
         claims = await asyncio.gather(
@@ -657,7 +657,7 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
         await self.add(self.a)
         db = await self.a.fetchval("SELECT current_database()")
         competitor = await asyncpg.connect(
-            w.get_tenant_dsn(os.environ["IDR_PUSH_TEST_DSN"], db)
+            w.get_tenant_dsn(os.environ["PUSH_TEST_DSN"], db)
         )
         self.connections.append(competitor)
 
@@ -717,14 +717,14 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.a.fetchval("SELECT count(*) FROM push_tokens"), 1)
 
     @unittest.skipUnless(
-        os.getenv("IDR_PUSH_TEST_GATEWAY"), "requires isolated OpenResty test server"
+        os.getenv("PUSH_TEST_GATEWAY"), "requires isolated OpenResty test server"
     )
     async def test_worker_to_real_gateway_and_postgres(self):
         nid = await self.add(self.a, ("good", "unregistered"))
-        context = ssl.create_default_context(cafile=os.environ["IDR_PUSH_TEST_CA"])
+        context = ssl.create_default_context(cafile=os.environ["PUSH_TEST_CA"])
         with patch.multiple(
             w,
-            API_URL=os.environ["IDR_PUSH_TEST_GATEWAY"] + "/api/internal/push",
+            API_URL=os.environ["PUSH_TEST_GATEWAY"] + "/api/internal/push",
             SSL_CONTEXT=context,
         ):
             async with w.http_client() as client:
@@ -753,7 +753,7 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             with patch.multiple(
                 w,
-                BASE_DSN=os.environ["IDR_PUSH_TEST_DSN"],
+                BASE_DSN=os.environ["PUSH_TEST_DSN"],
                 PUSH_SCHEMA_RETRY_SECONDS=0.02,
                 PUSH_IDLE_WAKEUP_SECONDS=0.02,
             ):
@@ -769,7 +769,7 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
                         wait_status(self.a, na), wait_status(self.b, nb)
                     )
                     pid = await self.admin.fetchval(
-                        "SELECT pid FROM pg_stat_activity WHERE datname=$1 AND application_name='idr-push-worker'",
+                        "SELECT pid FROM pg_stat_activity WHERE datname=$1 AND application_name='supabase-push-worker'",
                         da,
                     )
                     self.assertIsNotNone(pid)
@@ -777,7 +777,7 @@ class PostgresTests(unittest.IsolatedAsyncioTestCase):
                     na2 = await self.add(self.a, ("after-reconnect",))
                     await wait_status(self.a, na2)
                     newpid = await self.admin.fetchval(
-                        "SELECT pid FROM pg_stat_activity WHERE datname=$1 AND application_name='idr-push-worker'",
+                        "SELECT pid FROM pg_stat_activity WHERE datname=$1 AND application_name='supabase-push-worker'",
                         da,
                     )
                     self.assertNotEqual(pid, newpid)

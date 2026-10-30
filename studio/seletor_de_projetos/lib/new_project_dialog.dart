@@ -141,7 +141,7 @@ class _NewProjectDialogState extends State<NewProjectDialog>
     suggestions.addAll([
       'meu_projeto',
       'projeto_$today',
-      'idr_${_randString(4)}',
+      'projeto_${_randString(4)}',
       'sistema_novo',
       'portal_clientes',
       'loja_online',

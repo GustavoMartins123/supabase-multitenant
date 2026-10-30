@@ -3,11 +3,11 @@
 # Google HTTP is mocked. Internal Docker network blocks external connectivity.
 set -euo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
-PUSH_TEST_ROOT=$(mktemp -d /tmp/idr-push-test.XXXXXX)
+PUSH_TEST_ROOT=$(mktemp -d /tmp/supabase-push-test.XXXXXX)
 PUSH_TEST_SUFFIX="$$"
-PUSH_TEST_NETWORK="idr-push-test-$PUSH_TEST_SUFFIX"
-PUSH_TEST_PG="idr-push-pg-$PUSH_TEST_SUFFIX"
-PUSH_TEST_NGINX="idr-push-nginx-$PUSH_TEST_SUFFIX"
+PUSH_TEST_NETWORK="supabase-push-test-$PUSH_TEST_SUFFIX"
+PUSH_TEST_PG="supabase-push-pg-$PUSH_TEST_SUFFIX"
+PUSH_TEST_NGINX="supabase-push-nginx-$PUSH_TEST_SUFFIX"
 PUSH_PG_IMAGE=${PUSH_PG_IMAGE:-postgres:15}
 PUSH_NGINX_IMAGE=${PUSH_NGINX_IMAGE:-supabase-studio-nginx}
 PUSH_PYTHON_IMAGE=${PUSH_PYTHON_IMAGE:-servidor-projects-api}
@@ -54,8 +54,8 @@ docker run --rm --network none \
   --entrypoint openresty "$PUSH_NGINX_IMAGE" -t -c /usr/local/openresty/nginx/conf/nginx.conf
 # Actual lua-resty-http handshakes are tested through HTTP content handlers.
 docker run --rm -i --network "container:$PUSH_TEST_NGINX" \
-  -e "IDR_PUSH_TEST_DSN=postgres://postgres@$PUSH_TEST_PG/postgres" \
-  -e IDR_PUSH_TEST_GATEWAY=https://localhost:8443 -e IDR_PUSH_TEST_CA=/config/test.crt \
+  -e "PUSH_TEST_DSN=postgres://postgres@$PUSH_TEST_PG/postgres" \
+  -e PUSH_TEST_GATEWAY=https://localhost:8443 -e PUSH_TEST_CA=/config/test.crt \
   -v "$ROOT:/workspace:ro" -v "$PUSH_TEST_ROOT/config:/config:ro" -w /workspace \
   --entrypoint python "$PUSH_PYTHON_IMAGE" - <<'PY'
 import unittest
