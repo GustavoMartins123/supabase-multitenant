@@ -35,7 +35,7 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   http: ^1.4.0
-  web: ^1.1.1
+  web: ^1.1.2
   jwt_decoder: ^2.0.1
   intl: ^0.20.2
   collection: ^1.18.0
