@@ -4,7 +4,7 @@
 ARG SUPABASE_STUDIO_COMMIT=20290c71bdc48bef1720bfe7d292f3b9e6154f7d
 ARG SUPABASE_STUDIO_REPOSITORY=https://github.com/supabase/supabase.git
 
-FROM node:22-slim AS base
+FROM node:26-slim AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 
