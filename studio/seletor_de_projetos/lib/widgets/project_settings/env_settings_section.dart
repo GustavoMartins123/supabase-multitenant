@@ -86,7 +86,7 @@ class _EnvSettingsSectionState extends ConsumerState<EnvSettingsSection> {
 
     final trimmed = value.trim();
     if (trimmed.isEmpty) {
-      return 'Valor obrigatório.';
+      return key == 'FUNCTIONS_ALLOWED_NETWORK_HOSTS' ? null : 'Valor obrigatório.';
     }
 
     if (kEnvBooleanKeys.contains(key)) {

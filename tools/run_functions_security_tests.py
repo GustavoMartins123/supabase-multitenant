@@ -46,7 +46,7 @@ def main() -> None:
         fixture = Path(name)
         scripts = fixture / 'servidor/generateProject'
         (scripts / 'lib').mkdir(parents=True)
-        for path in ('functions_config.py', 'lib/functions_config.sh',
+        for path in ('functions_config.py', 'functions_network.py', 'lib/functions_config.sh',
                      'lib/backup_project_impl.sh', 'lib/restore_project_impl.sh'):
             shutil.copy2(ROOT / 'servidor/generateProject' / path, scripts / path)
         tests = fixture / 'tests/integration'
@@ -76,19 +76,35 @@ sys.exit(0 if result.wasSuccessful() and not result.skipped and result.testsRun 
             user = ['--user', f'{os.getuid()}:{os.getgid()}']
         else:
             raise RuntimeError('this harness supports Windows/Desktop and Linux')
-        print(run('docker', 'run', '--rm', '--pull=never', *user, '--entrypoint', 'python3', *mount(scripts / 'functions_config.py', '/config.py'),
+        print(run('docker', 'run', '--rm', '--pull=never', *user, '--entrypoint', 'python3', *mount(scripts / 'functions_config.py', '/config.py'), *mount(scripts / 'functions_network.py', '/functions_network.py'),
                   *mount(server, '/fixture', readonly=False), args.lifecycle_image, '/config.py', '--root', '/fixture', 'sync'))
         functions = fixture / 'functions'
         for path in ('main', 'hello'):
             shutil.copytree(ROOT / 'servidor/volumes/functions' / path, functions / path)
         shutil.copytree(ROOT / 'tests/integration/fixtures/functions_probe', functions / 'probe')
+        sys.path.insert(0, str(ROOT / 'servidor/api-internal'))
+        from app import edge_functions
+        from app.opaque_keys import generate_opaque_key
+        files = {path.relative_to(functions).as_posix(): path.read_bytes()
+                 for slug in ('hello', 'probe') for path in (functions / slug).rglob('*') if path.is_file()}
+        for index, ref in enumerate(('test_alpha', 'test_beta')):
+            identity = '11111111-1111-4111-8111-11111111111' + str(index)
+            keys = {kind: generate_opaque_key(uuid.UUID(identity), kind).token for kind in ('publishable', 'secret')}
+            state = edge_functions.prepare_context(server, ref, identity, ref + '-synthetic-jwt-secret-for-test-only', {
+                'SUPABASE_URL': 'http://supabase-nginx-' + ref + ':8080',
+                'SUPABASE_PUBLIC_URL': 'https://api.example.com/' + chr(97 + index) * 20,
+                'SUPABASE_ANON_KEY': keys['publishable'], 'SUPABASE_SERVICE_ROLE_KEY': keys['secret'],
+                'SUPABASE_DB_URL': 'postgres://tenant_meta_' + uuid.UUID(identity).hex + ':synthetic@database:5432/_supabase_' + ref,
+            }, files, [])
+            edge_functions.activate_context(server, state)
         container = 'functions-security-' + uuid.uuid4().hex[:12]
         config = server / '.functions-tenants'
         started = False
         try:
-            run('docker', 'run', '-d', '--pull=never', '--name', container, '-p', '127.0.0.1::9000', '-e', 'VERIFY_JWT=true',
-                *mount(functions, '/home/deno/functions'), *mount(config, '/home/deno/tenant-config'),
-                args.edge_image, 'start', '--main-service', '/home/deno/functions/main')
+            run('docker', 'run', '-d', '--pull=never', '--name', container, '-p', '127.0.0.1::9000', '-e', 'VERIFY_JWT=true', '-e', 'DENO_DIR=/tmp/deno', *user, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true', '--tmpfs', '/tmp:rw,nosuid,size=128m',
+                *mount(functions / 'main', '/home/deno/main'), *mount(config, '/home/deno/tenant-config'),
+                *mount(server / '.functions-runtime', '/home/deno/runtime'),
+                args.edge_image, 'start', '--main-service', '/home/deno/main')
             started = True
             port = json.loads(run('docker', 'inspect', container))[0]['NetworkSettings']['Ports']['9000/tcp'][0]['HostPort']
             url = f'http://127.0.0.1:{port}'
@@ -107,7 +123,7 @@ sys.exit(0 if result.wasSuccessful() and not result.skipped and result.testsRun 
                 time.sleep(0.5)
             run('docker', 'exec', container, 'sh', '-ec', 'test ! -e /home/deno/projects; test ! -e /docker/.env')
             mounts = json.loads(run('docker', 'inspect', container))[0]['Mounts']
-            if len(mounts) != 2 or any(m['RW'] for m in mounts):
+            if len(mounts) != 3 or any(m['RW'] for m in mounts):
                 raise RuntimeError('unexpected supervisor mount contract')
             os.environ['FUNCTIONS_TENANT_TEST_URL'] = url
             os.environ['FUNCTIONS_PROJECTION_TEST_DIR'] = str(config)

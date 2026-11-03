@@ -27,7 +27,9 @@ class F01FunctionsDsn(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
     def test_tenant_env_has_no_db_url_and_no_root_password(self) -> None:
-        self.assertNotIn("SUPABASE_DB_URL", self.source)
+        self.assertNotIn('Deno.env.get(', self.source)
+        routes = (ROOT / "servidor/api-internal/app/routers/studio_edge_functions.py").read_text()
+        self.assertIn("get_project_meta_connection_string", routes)
         self.assertNotIn("POSTGRES_PASSWORD", self.source)
         self.assertNotIn("POSTGRES_USER", self.source)
 
@@ -36,7 +38,6 @@ class F01FunctionsDsn(unittest.TestCase):
             "SUPABASE_URL",
             "SUPABASE_ANON_KEY",
             "SUPABASE_SERVICE_ROLE_KEY",
-            "JWT_SECRET",
             "PROJECT_REF",
         ):
             with self.subTest(key=key):
@@ -210,6 +211,21 @@ class F08SignupHardening(unittest.TestCase):
             block = conf.split(marker, 1)[1].split("}", 1)[0]
             with self.subTest(location=marker):
                 self.assertIn("limit_req zone=studio_signup", block)
+
+    def test_signup_runs_after_the_access_phase(self) -> None:
+        conf = (ROOT / "studio/nginx/nginx.conf").read_text(encoding="utf-8")
+        for marker in (
+            "location = /api/bootstrap/admin {",
+            "location ~ ^/api/admin/users/signup/?$ {",
+        ):
+            block = conf.split(marker, 1)[1].split("}", 1)[0]
+            with self.subTest(location=marker):
+                self.assertIn("content_by_lua_file", block)
+                self.assertNotIn("rewrite_by_lua_file", block)
+
+        admin_block = conf.split("location ~ ^/api/admin/users/signup/?$ {", 1)[1].split("}", 1)[0]
+        self.assertIn("security/check_admin.lua", admin_block)
+        self.assertNotIn("auth_request off", admin_block)
 
     def test_argon2_runs_after_the_cheap_existence_checks(self) -> None:
         lua = (

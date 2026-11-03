@@ -267,29 +267,42 @@ services:
         && /app/bin/server
   functions:
     container_name: supabase-edge-functions
+    user: ${STORAGE_RUN_AS_USER:?defina STORAGE_RUN_AS_USER}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp:rw,nosuid,size=128m"]
     image: supabase/edge-runtime:v1.74.2
     restart: unless-stopped
     logging: *vector-logging
     networks:
       - rede-supabase
     volumes:
-      - ./volumes/functions:/home/deno/functions:ro,Z
+      - ./volumes/functions/main:/home/deno/main:ro,Z
+      - ./.functions-runtime:/home/deno/runtime:ro
       - type: bind
         source: ./.functions-tenants
         target: /home/deno/tenant-config
         read_only: true
         bind:
           create_host_path: false
+      - type: bind
+        source: ./.functions-hosts
+        target: /etc/hosts
+        read_only: false
+        bind:
+          create_host_path: false
     depends_on:
       db:
         condition: service_healthy  
     environment:
-      VERIFY_JWT: "${FUNCTIONS_VERIFY_JWT}"
+      VERIFY_JWT: "true"
+      DENO_DIR: /tmp/deno
     command:
       [
       "start",
       "--main-service",
-      "/home/deno/functions/main"
+      "/home/deno/main"
       ]
 
   storage:

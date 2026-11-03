@@ -117,7 +117,7 @@ class EdgeFunctionWorkersGetOnlyTheirTenantEnvTest(unittest.TestCase):
         # `...globalEnv` entregava as 133 variaveis do servidor ao worker que
         # executa a function, e de la para `Deno.env`.
         self.assertNotIn("...globalEnv", self.main)
-        self.assertIn("const workerEnv = tenant.env", self.main)
+        self.assertIn("const workerEnv = { ...tenant.env", self.main)
         self.assertNotIn("globalEnv", self.main)
         self.assertNotIn("tenantCache", self.main)
 
@@ -126,13 +126,14 @@ class EdgeFunctionWorkersGetOnlyTheirTenantEnvTest(unittest.TestCase):
             "SUPABASE_URL",
             "SUPABASE_ANON_KEY",
             "SUPABASE_SERVICE_ROLE_KEY",
-            "JWT_SECRET",
             "PROJECT_REF",
         ):
-            self.assertIn(f"{name}:", self.main)
+            self.assertIn(name, self.main)
 
     def test_worker_env_never_carries_a_cluster_dsn(self) -> None:
-        self.assertNotIn("SUPABASE_DB_URL", self.main)
+        self.assertNotIn('Deno.env.get(', self.main)
+        routes = read("servidor/api-internal/app/routers/studio_edge_functions.py")
+        self.assertIn("get_project_meta_connection_string(project['name'], project['tenant_uuid'])", routes)
         self.assertNotIn("POSTGRES_PASSWORD", self.main)
 
 

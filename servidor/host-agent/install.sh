@@ -107,11 +107,13 @@ migrate_runtime_ownership() {
   mkdir -p "$SERVIDOR_DIR/.functions-tenants" "$SERVIDOR_DIR/.functions-locks"
   chmod 700 "$SERVIDOR_DIR/.functions-tenants" "$SERVIDOR_DIR/.functions-locks"
   for runtime_dir in "$SERVIDOR_DIR/.functions-tenants" "$SERVIDOR_DIR/.functions-locks" \
+    "$SERVIDOR_DIR/.functions-studio" "$SERVIDOR_DIR/.functions-runtime" \
+    "$SERVIDOR_DIR/.functions-hosts" \
     "$SERVIDOR_DIR/projects" "$SERVIDOR_DIR/backups" \
     "$SERVIDOR_DIR/volumes/storage"; do
     [[ -e "$runtime_dir" ]] || continue
     find "$runtime_dir" -xdev -uid 0 \
-      -exec chown "$SERVICE_USER:$SERVICE_GROUP" {} +
+      -exec chown -h "$SERVICE_USER:$SERVICE_GROUP" {} +
   done
   find "$SERVIDOR_DIR/projects" -mindepth 2 -maxdepth 2 -type f -name .env \
     -exec chmod 600 {} +
@@ -127,6 +129,8 @@ migrate_runtime_ownership() {
   chown "$storage_uid:$storage_uid" \
     "$SERVIDOR_DIR/volumes/storage" "$SERVIDOR_DIR/volumes/storage/objects"
   chmod 2775 "$SERVIDOR_DIR/volumes/storage" "$SERVIDOR_DIR/volumes/storage/objects"
+  run_as_service_user python3 "$SERVIDOR_DIR/generateProject/functions_config.py" \
+    --root "$SERVIDOR_DIR" init
   ok "Ownership do lifecycle alinhado ao usuario do host-agent."
 }
 

@@ -39,6 +39,7 @@ const kEnvIntegerRanges = {
 };
 
 const kEnvBooleanKeys = {
+  'EDGE_FUNCTIONS_ENABLED',
   'DISABLE_SIGNUP',
   'ENABLE_EMAIL_SIGNUP',
   'ENABLE_EMAIL_AUTOCONFIRM',
@@ -52,6 +53,21 @@ const kEnvBooleanKeys = {
 };
 
 const kEnvSettings = [
+  SettingMeta(
+    key: 'EDGE_FUNCTIONS_ENABLED',
+    label: 'Habilitar Edge Functions',
+    description: 'Permitir publicação pelo Studio e chamadas às funções deste projeto',
+    type: EnvFieldType.toggle,
+    category: 'Edge Functions',
+  ),
+  SettingMeta(
+    key: 'FUNCTIONS_ALLOWED_NETWORK_HOSTS',
+    label: 'APIs Externas Permitidas',
+    description: 'Destinos exatos separados por vírgula, como api.openai.com:443. '
+        'Vazio permite apenas os serviços do próprio projeto',
+    type: EnvFieldType.text,
+    category: 'Edge Functions',
+  ),
   SettingMeta(
     key: 'DISABLE_SIGNUP',
     label: 'Bloquear Novos Cadastros',

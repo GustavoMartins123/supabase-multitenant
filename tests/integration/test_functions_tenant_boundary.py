@@ -31,6 +31,7 @@ class FunctionsTenantBoundaryTest(unittest.TestCase):
         if ref is not None:
             headers['X-Project-Ref'] = PUBLIC_REFS[ref] if ref in PUBLIC_REFS else ref
             headers['X-Project-Name'] = ref
+            headers['apikey'] = 'synthetic-anon-' + ref
         if jwt is not None:
             headers['Authorization'] = 'Bearer '+jwt
         try:
@@ -67,10 +68,11 @@ class FunctionsTenantBoundaryTest(unittest.TestCase):
             self.assertEqual(status, 200, body)
             data = json.loads(body)
             self.assertEqual(data['env']['PROJECT_REF'], PUBLIC_REFS[ref])
-            self.assertEqual(data['env']['SUPABASE_ANON_KEY'], 'synthetic-anon-' + ref)
-            self.assertEqual(data['env']['SUPABASE_SERVICE_ROLE_KEY'], 'synthetic-service-' + ref)
-            self.assertEqual(data['env']['JWT_SECRET'], ref + '-synthetic-jwt-secret-for-test-only')
-            for secret in ('POSTGRES_PASSWORD', 'SUPABASE_DB_URL', 'JWT_SECRET_PROJETO'):
+            self.assertTrue(data['env']['SUPABASE_ANON_KEY'].startswith('sb_publishable_'))
+            self.assertTrue(data['env']['SUPABASE_SERVICE_ROLE_KEY'].startswith('sb_secret_'))
+            self.assertIn('tenant_meta_', data['env']['SUPABASE_DB_URL'])
+            self.assertTrue(data['env']['SUPABASE_DB_URL'].endswith('/_supabase_' + ref))
+            for secret in ('POSTGRES_PASSWORD', 'JWT_SECRET', 'JWT_SECRET_PROJETO'):
                 self.assertNotIn(secret, data['env'])
             self.assertFalse(any(data['reads'].values()), data)
 
@@ -93,8 +95,9 @@ class FunctionsTenantBoundaryTest(unittest.TestCase):
             config['anon_key'] = 'synthetic-anon-rotated'
             replace(json.dumps(config).encode())
             status, body = self.call('test_alpha', token('test_alpha'), path='/probe')
-            self.assertEqual(status, 200, body)
-            self.assertEqual(json.loads(body)['env']['SUPABASE_ANON_KEY'], 'synthetic-anon-rotated')
+            self.assertEqual(status, 403, body)
+            config['anon_key'] = 'synthetic-anon-test_alpha'
+            replace(json.dumps(config).encode())
             path.unlink()
             self.assertEqual(self.call('test_alpha', token('test_alpha'))[0], 503)
             config['project_ref'] = PUBLIC_REFS['test_beta']

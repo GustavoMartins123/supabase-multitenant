@@ -129,6 +129,9 @@ jobs:
           - name: studio-assistant
             context: studio/assistant
             file: studio/assistant/Dockerfile
+          - name: postgres-meta
+            context: servidor/postgres-meta
+            file: servidor/postgres-meta/Dockerfile
           - name: patched-studio
             context: studio/studio-slug
             file: studio/studio-slug/Dockerfile

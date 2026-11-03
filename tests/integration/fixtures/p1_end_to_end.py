@@ -24,7 +24,7 @@ def validate(root: Path, suffix: str, topology: str, values: dict[str, str], ben
     server = root / 'servidor'
     labels = {'codex.p1.run': suffix}
     for image in ('studio-nginx:latest', 'authelia/authelia:4.39.20', 'redis:8.2.2-alpine', 'codex-p1-browser:local',
-                  'ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v11', 'traefik:v3.7.6',
+                  'ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v12', 'traefik:v3.7.6',
                   'servidor-projects-api:latest', 'supabase/postgres-meta:v0.96.1'):
         assert run('docker', 'image', 'inspect', image, '--format', '{{.Os}}') == 'linux', image
     wire = 'p1-https-link-' + suffix
@@ -114,7 +114,7 @@ def validate(root: Path, suffix: str, topology: str, values: dict[str, str], ben
            '-e', 'AUTHELIA_SESSION_REDIS_HOST=redis-sessions',
            command=('authelia', '--config=/config/configuration.runtime.yml'))
     run('docker', 'network', 'connect', '--alias', 'authelia', front, 'p1-authelia-' + suffix)
-    create('p1-ui-' + suffix, 'ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v11', front,
+    create('p1-ui-' + suffix, 'ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v12', front,
            '--network-alias', 'studio', '--network-alias', 'studio-assistant', '-e', 'HOSTNAME=0.0.0.0')
     nginx_config = root / 'studio/nginx/nginx.conf'
     text = nginx_config.read_text(encoding='utf-8').replace('worker_processes auto;', 'worker_processes 2;')
@@ -193,6 +193,7 @@ def validate(root: Path, suffix: str, topology: str, values: dict[str, str], ben
     api.update(image='servidor-projects-api:latest', labels=labels, logging={'driver': 'json-file'}, restart='no',
                networks=['rede-supabase', 'p1-link'])
     api.pop('depends_on')
+    api['user'] = str(os.getuid()) + ':' + str(os.getgid())
     api['volumes'] += [str(server / 'api-internal/app') + ':/docker/app:ro']
     model['services'] = {'projects-api': api}
     model['networks']['p1-link'] = {'external': True, 'name': wire}
@@ -288,17 +289,14 @@ def validate(root: Path, suffix: str, topology: str, values: dict[str, str], ben
         assert record == {'project_ref': env['PROJECT_PUBLIC_REF'], 'technical_name': ref,
                           'project_uuid': env['PROJECT_UUID'],
                           'anon_key': env['ANON_KEY_PROJETO'], 'service_role_key': env['SERVICE_ROLE_KEY_PROJETO'],
-                          'jwt_secret': env['JWT_SECRET_PROJETO']}
+                          'jwt_secret': env['JWT_SECRET_PROJETO'], 'network_allowlist': []}
         assert path.stat().st_mode & 0o777 == 0o600
-        worker = json.loads(run('curl', '--fail', '--silent', '--show-error',
-                              '-H', 'X-Project-Ref: ' + env['PROJECT_PUBLIC_REF'],
-                              '-H', 'X-Project-Name: ' + ref,
-                              '-H', 'Authorization: Bearer ' + record['service_role_key'],
-                              'http://supabase-edge-functions:9000/p1_probe'))['env']
-        assert worker['SUPABASE_SERVICE_ROLE_KEY'] == record['service_role_key']
-        assert worker['SUPABASE_ANON_KEY'] == record['anon_key']
-        assert worker['JWT_SECRET'] == record['jwt_secret']
-        assert not {'POSTGRES_PASSWORD', 'DATABASE_URL', 'HOST_AGENT_HMAC_SECRET'} & worker.keys()
+        status = run('curl', '--silent', '--show-error', '--output', '/dev/null', '--write-out', '%{http_code}',
+                     '-H', 'X-Project-Ref: ' + env['PROJECT_PUBLIC_REF'], '-H', 'X-Project-Name: ' + ref,
+                     '-H', 'apikey: ' + record['service_role_key'],
+                     '-H', 'Authorization: Bearer ' + record['service_role_key'],
+                     'http://supabase-edge-functions:9000/p1_probe')
+        assert status == '404', status
         return record
 
     def storage_seed(ref, method, path, body):
@@ -480,11 +478,13 @@ if(!response.ok){console.error(response.status+': '+await response.text());proce
     print('PASS API + signed agent duplicate / rename / JWT renewal / backup / restore', flush=True)
 
     api_inventory = json.loads(run('docker', 'inspect', 'projects-api'))[0]
-    assert {m['Destination'] for m in api_inventory['Mounts']} == {'/docker/projects', '/docker/push-certs', '/docker/resource-profiles.env', '/docker/app'}
+    assert {m['Destination'] for m in api_inventory['Mounts']} == {'/docker/projects', '/docker/push-certs', '/docker/resource-profiles.env', '/docker/app',
+        '/docker/.functions-studio', '/docker/.functions-runtime', '/docker/.functions-locks', '/docker/.functions-tenants'}
     assert not any(e.startswith(('POSTGRES_PASSWORD=', 'SERVER_ADMIN_API_KEYS=', 'API_GATEWAY_TOKEN_PROJETO=')) for e in api_inventory['Config']['Env'])
     edge_inventory = json.loads(run('docker', 'inspect', 'supabase-edge-functions'))[0]
-    assert {m['Destination'] for m in edge_inventory['Mounts']} == {'/home/deno/functions', '/home/deno/tenant-config'}
-    assert all(m['RW'] is False for m in edge_inventory['Mounts'])
+    assert {m['Destination'] for m in edge_inventory['Mounts']} == {'/home/deno/main', '/home/deno/tenant-config', '/home/deno/runtime', '/etc/hosts'}
+    assert all(m['RW'] is False for m in edge_inventory['Mounts'] if m['Destination'] != '/etc/hosts')
+    assert edge_inventory['HostConfig']['ReadonlyRootfs'] and edge_inventory['HostConfig']['CapDrop'] == ['ALL']
     assert not any(e.startswith(('POSTGRES_PASSWORD=', 'JWT_SECRET=', 'SUPABASE_SERVICE_ROLE_KEY=')) for e in edge_inventory['Config']['Env'])
     if topology == 'split':
         nginx_inventory = json.loads(run('docker', 'inspect', nginx))[0]

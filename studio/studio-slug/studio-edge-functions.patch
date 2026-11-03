@@ -1,0 +1,506 @@
+diff --git a/apps/studio/components/interfaces/Functions/SelfHostedEdgeFunctions.tsx b/apps/studio/components/interfaces/Functions/SelfHostedEdgeFunctions.tsx
+new file mode 100644
+--- /dev/null
++++ b/apps/studio/components/interfaces/Functions/SelfHostedEdgeFunctions.tsx
+@@ -0,0 +1,216 @@
++// Local Studio management uses the authenticated gateway, never project API keys.
++import { useQuery } from '@tanstack/react-query'
++import { useParams } from 'common'
++import Link from 'next/link'
++import { useRouter } from 'next/router'
++import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
++import { toast } from 'sonner'
++import { Button, Input, Label } from 'ui'
++
++import DefaultLayout from '@/components/layouts/DefaultLayout'
++import EdgeFunctionsLayout from '@/components/layouts/EdgeFunctionsLayout/EdgeFunctionsLayout'
++import { DiscardChangesConfirmationDialog } from '@/components/ui-patterns/Dialogs/DiscardChangesConfirmationDialog'
++import { FileExplorerAndEditor } from '@/components/ui/FileExplorerAndEditor'
++import type { FileData } from '@/components/ui/FileExplorerAndEditor/FileExplorerAndEditor.types'
++import { usePreventNavigationOnUnsavedChanges } from '@/hooks/ui/usePreventNavigationOnUnsavedChanges'
++import { BASE_PATH } from '@/lib/constants'
++import type { NextPageWithLayout } from '@/types'
++
++type FunctionInfo = {
++  name: string
++  revision: string | null
++  published_revision: string | null
++}
++type FunctionList = { enabled: boolean; functions: FunctionInfo[] }
++type FunctionBody = FunctionInfo & { enabled: boolean; files: { name: string; content: string }[] }
++
++async function management<T>(ref: string, suffix = '', options: RequestInit = {}): Promise<T> {
++  const response = await fetch(
++    `${BASE_PATH}/api/platform/projects/${encodeURIComponent(ref)}/edge-functions${suffix}`,
++    {
++      ...options,
++      credentials: 'same-origin',
++      redirect: 'manual',
++      cache: 'no-store',
++      headers: { 'Content-Type': 'application/json', 'X-Studio-Project-Ref': ref },
++    }
++  )
++  if (response.redirected || !response.headers.get('content-type')?.includes('application/json')) {
++    throw new Error('Your Studio session must be renewed.')
++  }
++  const data = await response.json()
++  if (!response.ok) {
++    throw new Error(typeof data.detail === 'string' ? data.detail : data.message || 'Function request denied')
++  }
++  return data as T
++}
++
++function BlockedNotice({ enabled }: { enabled: boolean }) {
++  if (enabled) return null
++  return (
++    <p role="status" className="rounded border border-warning p-3 text-sm">
++      Edge Functions are disabled for this project. Drafts can be saved; publication and public
++      invocation remain blocked until a project administrator enables the service in project settings.
++    </p>
++  )
++}
++
++function FunctionsList({ projectRef }: { projectRef: string }) {
++  const query = useQuery({
++    queryKey: ['local-edge-functions', projectRef],
++    queryFn: ({ signal }) => management<FunctionList>(projectRef, '', { signal }),
++    retry: false,
++    gcTime: 0,
++  })
++  return (
++    <div className="p-6 space-y-5 w-full max-w-6xl mx-auto">
++      <div className="flex items-center justify-between">
++        <h1 className="text-xl">Edge Functions</h1>
++        {query.data && (
++          <Button asChild><Link href={`/project/${projectRef}/functions/new`}>Create function</Link></Button>
++        )}
++      </div>
++      {query.isPending && <p role="status">Loading functions…</p>}
++      {query.error && <p role="alert">{query.error.message}</p>}
++      {query.data && <>
++        <BlockedNotice enabled={query.data.enabled} />
++        <p className="text-sm text-foreground-light">Project: {projectRef}</p>
++        {query.data.functions.length === 0 && <p>No functions yet.</p>}
++        <ul className="divide-y border rounded">
++          {query.data.functions.map((item) => (
++            <li key={item.name} className="flex justify-between p-4">
++              <Link className="text-brand" href={`/project/${projectRef}/functions/${item.name}/code`}>
++                {item.name}
++              </Link>
++              <span className="text-sm text-foreground-light">
++                {!item.published_revision ? 'Draft' : item.revision !== item.published_revision ? 'Unpublished changes' : 'Published'}
++              </span>
++            </li>
++          ))}
++        </ul>
++      </>}
++    </div>
++  )
++}
++
++const STARTER = 'Deno.serve((_request) => Response.json({ message: "Hello from your project" }))\n'
++const asFiles = (data: FunctionBody): FileData[] =>
++  data.files.map((file, id) => ({ ...file, id, state: 'unchanged' }))
++const fingerprint = (files: FileData[]) => JSON.stringify(files.map(({ name, content }) => ({ name, content })))
++
++function FunctionEditor({ projectRef, slug }: { projectRef: string; slug?: string }) {
++  const [name, setName] = useState(slug ?? '')
++  const [info, setInfo] = useState<FunctionBody>()
++  const [files, setFiles] = useState<FileData[]>([{ id: 0, name: 'index.ts', content: STARTER, state: 'new' }])
++  const [saved, setSaved] = useState(slug ? '' : fingerprint(files))
++  const [busy, setBusy] = useState(false)
++  const [failure, setFailure] = useState('')
++  const [selected, setSelected] = useState(0)
++  const mounted = useRef(true)
++  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
++  const query = useQuery<FunctionList | FunctionBody>({
++    queryKey: ['local-edge-function', projectRef, slug],
++    queryFn: ({ signal }) => slug
++      ? management<FunctionBody>(projectRef, `/${encodeURIComponent(slug)}`, { signal })
++      : management<FunctionList>(projectRef, '', { signal }),
++    retry: false,
++    gcTime: 0,
++    refetchOnWindowFocus: false,
++    refetchOnReconnect: false,
++  })
++  useEffect(() => {
++    if (slug && query.data && 'files' in query.data && !info) {
++      setInfo(query.data)
++      const loaded = asFiles(query.data)
++      setFiles(loaded)
++      setSaved(fingerprint(loaded))
++    }
++  }, [slug, query.data, info])
++  const dirty = fingerprint(files) !== saved
++  const navigation = usePreventNavigationOnUnsavedChanges({ hasChanges: dirty || busy })
++  const enabled = info?.enabled ?? query.data?.enabled ?? false
++  const loaded = !!query.data && (!slug || !!info)
++  const validName = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(name) && name !== 'main'
++
++  async function save() {
++    setBusy(true)
++    setFailure('')
++    try {
++      const result = await management<FunctionBody>(projectRef, `/${encodeURIComponent(name)}`, {
++        method: 'PUT',
++        body: JSON.stringify({
++          expected_revision: info?.revision ?? null,
++          files: files.map(({ name, content }) => ({ name, content })),
++        }),
++      })
++      if (!mounted.current) return
++      setInfo(result)
++      setSaved(fingerprint(files))
++      toast.success('Draft saved. Public code has not changed.')
++    } catch (error) {
++      if (mounted.current) setFailure(error instanceof Error ? error.message : 'Draft save failed')
++    } finally { if (mounted.current) setBusy(false) }
++  }
++
++  async function publish() {
++    if (!info?.revision || dirty) return
++    setBusy(true)
++    setFailure('')
++    try {
++      const result = await management<FunctionBody>(projectRef, `/${encodeURIComponent(name)}/publish`, {
++        method: 'POST',
++        body: JSON.stringify({ revision: info.revision, expected_published_revision: info.published_revision }),
++      })
++      if (!mounted.current) return
++      setInfo(result)
++      toast.success('Function published for this project.')
++    } catch (error) {
++      if (mounted.current) setFailure(error instanceof Error ? error.message : 'Publication failed')
++    } finally { if (mounted.current) setBusy(false) }
++  }
++
++  return (
++    <div className="w-full flex flex-col min-h-[70vh]">
++      <div className="p-5 space-y-3 border-b">
++        <Link className="text-brand text-sm" href={`/project/${projectRef}/functions`}>Back to functions</Link>
++        <h1 className="text-xl">{slug || info ? name : 'Create function'}</h1>
++        <p className="text-sm text-foreground-light">Project: {projectRef}</p>
++        {loaded && <BlockedNotice enabled={enabled} />}
++        {query.error && <p role="alert">{query.error.message}</p>}
++        {failure && <p role="alert">{failure}</p>}
++        {info?.published_revision && <p className="text-sm">
++          {info.revision === info.published_revision ? 'Published version' : 'Unpublished draft'}
++          {' · '}Public path: /{projectRef}/functions/v1/{name}
++        </p>}
++      </div>
++      {!loaded && !query.error && <p role="status" className="p-5">Loading editor…</p>}
++      {loaded && <>
++        <div inert={busy} className="flex flex-col flex-1 min-h-[450px]">
++          <FileExplorerAndEditor editable files={files} onFilesChange={setFiles} selectedFileId={selected} setSelectedFileId={setSelected} />
++        </div>
++        <div className="flex items-center justify-end gap-4 p-4 border-t">
++          <Label htmlFor="local-function-name">Function name</Label>
++          <Input id="local-function-name" className="w-64" value={name} disabled={!!slug || !!info || busy}
++            onChange={(event: ChangeEvent<HTMLInputElement>) => setName(event.target.value)} placeholder="my-function" />
++          <Button variant="default" loading={busy} disabled={busy || !validName || !files.length} onClick={save}>Save draft</Button>
++          <Button disabled={busy || !enabled || !info?.revision || dirty || info.revision === info.published_revision} onClick={publish}>Publish function</Button>
++        </div>
++      </>}
++      <DiscardChangesConfirmationDialog visible={navigation.shouldConfirmNavigation}
++        onCancel={navigation.handleCancelNavigation} onClose={navigation.handleConfirmNavigation} />
++    </div>
++  )
++}
++
++export const SelfHostedEdgeFunctionsPage: NextPageWithLayout = () => {
++  const { ref, functionSlug } = useParams()
++  const router = useRouter()
++  if (!ref) return <p role="alert">A project context is required.</p>
++  const isEditor = router.pathname !== '/project/[ref]/functions'
++  return isEditor
++    ? <FunctionEditor key={`${ref}:${functionSlug ?? 'new'}`} projectRef={ref} slug={functionSlug} />
++    : <FunctionsList key={ref} projectRef={ref} />
++}
++SelfHostedEdgeFunctionsPage.getLayout = (page: ReactNode) => (
++  <DefaultLayout><EdgeFunctionsLayout title="Edge Functions">{page}</EdgeFunctionsLayout></DefaultLayout>
++)
+diff --git a/apps/studio/pages/project/[ref]/functions/index.tsx b/apps/studio/pages/project/[ref]/functions/index.tsx
+--- a/apps/studio/pages/project/[ref]/functions/index.tsx
++++ b/apps/studio/pages/project/[ref]/functions/index.tsx
+@@ -1,3 +1,4 @@
++import { SelfHostedEdgeFunctionsPage } from '@/components/interfaces/Functions/SelfHostedEdgeFunctions'
+ import { useFlag, useParams } from 'common'
+ import { ExternalLink, RefreshCw, Search, X } from 'lucide-react'
+ import { useRouter } from 'next/router'
+@@ -268,4 +269,4 @@
+   )
+ }
+
+-export default EdgeFunctionsPage
++export default IS_PLATFORM ? EdgeFunctionsPage : SelfHostedEdgeFunctionsPage
+diff --git a/apps/studio/pages/project/[ref]/functions/new.tsx b/apps/studio/pages/project/[ref]/functions/new.tsx
+--- a/apps/studio/pages/project/[ref]/functions/new.tsx
++++ b/apps/studio/pages/project/[ref]/functions/new.tsx
+@@ -1,3 +1,5 @@
++import { SelfHostedEdgeFunctionsPage } from '@/components/interfaces/Functions/SelfHostedEdgeFunctions'
++import { IS_PLATFORM } from 'common'
+ import { zodResolver } from '@hookform/resolvers/zod'
+ import { useParams } from 'common'
+ import { isEqual } from 'lodash'
+@@ -435,4 +437,4 @@
+   )
+ }
+
+-export default NewFunctionPage
++export default IS_PLATFORM ? NewFunctionPage : SelfHostedEdgeFunctionsPage
+diff --git a/apps/studio/pages/project/[ref]/functions/[functionSlug]/index.tsx b/apps/studio/pages/project/[ref]/functions/[functionSlug]/index.tsx
+--- a/apps/studio/pages/project/[ref]/functions/[functionSlug]/index.tsx
++++ b/apps/studio/pages/project/[ref]/functions/[functionSlug]/index.tsx
+@@ -1,3 +1,4 @@
++import { SelfHostedEdgeFunctionsPage } from '@/components/interfaces/Functions/SelfHostedEdgeFunctions'
+ import { PermissionAction } from '@supabase/shared-types/out/constants'
+ import { IS_PLATFORM, useFeatureFlags, useFlag, useParams } from 'common'
+ import dayjs, { Dayjs } from 'dayjs'
+@@ -446,4 +447,4 @@
+   </DefaultLayout>
+ )
+
+-export default PageLayout
++export default IS_PLATFORM ? PageLayout : SelfHostedEdgeFunctionsPage
+diff --git a/apps/studio/pages/project/[ref]/functions/[functionSlug]/code.tsx b/apps/studio/pages/project/[ref]/functions/[functionSlug]/code.tsx
+--- a/apps/studio/pages/project/[ref]/functions/[functionSlug]/code.tsx
++++ b/apps/studio/pages/project/[ref]/functions/[functionSlug]/code.tsx
+@@ -1,3 +1,4 @@
++import { SelfHostedEdgeFunctionsPage } from '@/components/interfaces/Functions/SelfHostedEdgeFunctions'
+ import { PermissionAction } from '@supabase/shared-types/out/constants'
+ import { IS_PLATFORM, useParams } from 'common'
+ import { isEqual } from 'lodash'
+@@ -266,4 +267,4 @@
+   )
+ }
+
+-export default CodePage
++export default IS_PLATFORM ? CodePage : SelfHostedEdgeFunctionsPage
+diff --git a/apps/studio/pages/project/[ref]/functions/[functionSlug]/details.tsx b/apps/studio/pages/project/[ref]/functions/[functionSlug]/details.tsx
+--- a/apps/studio/pages/project/[ref]/functions/[functionSlug]/details.tsx
++++ b/apps/studio/pages/project/[ref]/functions/[functionSlug]/details.tsx
+@@ -1,3 +1,5 @@
++import { SelfHostedEdgeFunctionsPage } from '@/components/interfaces/Functions/SelfHostedEdgeFunctions'
++import { IS_PLATFORM } from 'common'
+ import { EdgeFunctionDetails } from '@/components/interfaces/Functions/EdgeFunctionDetails/EdgeFunctionDetails'
+ import DefaultLayout from '@/components/layouts/DefaultLayout'
+ import EdgeFunctionDetailsLayout from '@/components/layouts/EdgeFunctionsLayout/EdgeFunctionDetailsLayout'
+@@ -11,4 +13,4 @@
+   </DefaultLayout>
+ )
+
+-export default PageLayout
++export default IS_PLATFORM ? PageLayout : SelfHostedEdgeFunctionsPage
+diff --git a/apps/studio/components/ui/FileExplorerAndEditor/index.tsx b/apps/studio/components/ui/FileExplorerAndEditor/index.tsx
+--- a/apps/studio/components/ui/FileExplorerAndEditor/index.tsx
++++ b/apps/studio/components/ui/FileExplorerAndEditor/index.tsx
+@@ -18,6 +18,7 @@
+
+ interface FileExplorerAndEditorProps {
+   files: FileData[]
++  editable?: boolean
+   onFilesChange: (files: FileData[]) => void
+   aiEndpoint?: string
+   aiMetadata?: {
+@@ -34,6 +35,7 @@
+
+ export const FileExplorerAndEditor = ({
+   files,
++  editable = IS_PLATFORM,
+   onFilesChange,
+   aiEndpoint,
+   aiMetadata,
+@@ -310,6 +312,7 @@
+     e.preventDefault()
+     setIsDragOver(false)
+
++    if (!editable) return
+     const droppedFiles = e.dataTransfer.files
+     if (droppedFiles.length > 0) {
+       await addDroppedFiles(droppedFiles)
+@@ -339,6 +342,7 @@
+     (props: INodeRendererProps) => (
+       <FileExplorerAndEditorRow
+         {...props}
++        editable={editable}
+         files={files}
+         selectedFileId={selectedFileId}
+         setSelectedFileId={setSelectedFileId}
+@@ -348,6 +352,7 @@
+       />
+     ),
+     [
++      editable,
+       files,
+       selectedFileId,
+       setSelectedFileId,
+@@ -397,7 +402,7 @@
+           <h3 className="text-sm font-normal font-mono uppercase text-lighter tracking-wide">
+             Files
+           </h3>
+-          {IS_PLATFORM && (
++          {editable && (
+             <Button size="tiny" variant="default" icon={<Plus size={14} />} onClick={addNewFile}>
+               Add File
+             </Button>
+@@ -425,6 +430,7 @@
+           </div>
+         ) : (
+           <AIEditor
++            readOnly={!editable}
+             language={getLanguageFromFileName(selectedFile?.name || 'index.ts')}
+             value={selectedFile?.content}
+             onChange={handleChange}
+@@ -440,7 +446,7 @@
+               padding: { top: 20, bottom: 20 },
+               lineNumbersMinChars: 3,
+               fixedOverflowWidgets: true,
+-              readOnly: !IS_PLATFORM,
++              readOnly: !editable,
+             }}
+           />
+         )}
+diff --git a/apps/studio/components/ui/FileExplorerAndEditor/FileExplorerAndEditorRow.tsx b/apps/studio/components/ui/FileExplorerAndEditor/FileExplorerAndEditorRow.tsx
+--- a/apps/studio/components/ui/FileExplorerAndEditor/FileExplorerAndEditorRow.tsx
++++ b/apps/studio/components/ui/FileExplorerAndEditor/FileExplorerAndEditorRow.tsx
+@@ -18,6 +18,7 @@
+
+ type FileExplorerAndEditorRowProps = INodeRendererProps & {
+   files: FileData[]
++  editable?: boolean
+   selectedFileId: number
+   setSelectedFileId: (id: number) => void
+   handleFileNameChange: (id: number, newName: string) => void
+@@ -32,6 +33,7 @@
+   getNodeProps,
+   level,
+   files,
++  editable = IS_PLATFORM,
+   selectedFileId,
+   setSelectedFileId,
+   handleFileNameChange,
+@@ -68,7 +70,7 @@
+             icon={<File size={14} className="text-foreground-light shrink-0" />}
+             isEditing={isEditing}
+             onEditSubmit={(value) => {
+-              if (IS_PLATFORM && originalId !== null) {
++              if (editable && originalId !== null) {
+                 handleFileNameChange(originalId, value)
+               }
+             }}
+@@ -78,7 +80,7 @@
+               }
+             }}
+             onDoubleClick={() => {
+-              if (IS_PLATFORM && originalId !== null) {
++              if (editable && originalId !== null) {
+                 handleStartRename(originalId)
+               }
+             }}
+@@ -99,7 +101,7 @@
+           />
+         </div>
+       </ContextMenuTrigger>
+-      {IS_PLATFORM && (
++      {editable && (
+         <ContextMenuContent onCloseAutoFocus={(e) => e.stopPropagation()}>
+           <ContextMenuItem
+             className="gap-x-2"
+diff --git a/apps/studio/next.config.ts b/apps/studio/next.config.ts
+--- a/apps/studio/next.config.ts
++++ b/apps/studio/next.config.ts
+@@ -55,6 +55,8 @@
+   assetPrefix: getAssetPrefix(),
+   output: 'standalone',
+   experimental: {
++    cpus: 2,
++    webpackMemoryOptimizations: true,
+     clientRouterFilter: false,
+   },
+   async rewrites() {
+@@ -184,6 +186,14 @@
+   },
+   transpilePackages: ['ui', 'ui-patterns', 'common', 'shared-data', 'api-types', 'icons'],
+   serverExternalPackages: ['libpg-query'],
++  webpack(config) {
++    // Keep the raw text imports supported by the Turbopack rules below.
++    config.module.rules.push({
++      test: /\.md$|(?:edge-runtime|lib\.deno)\.d\.ts$/,
++      type: 'asset/source',
++    })
++    return config
++  },
+   turbopack: {
+     rules: {
+       '*.md': {
+diff --git a/apps/studio/components/ui/AIEditor/index.tsx b/apps/studio/components/ui/AIEditor/index.tsx
+--- a/apps/studio/components/ui/AIEditor/index.tsx
++++ b/apps/studio/components/ui/AIEditor/index.tsx
+@@ -218,14 +218,14 @@
+       // Monaco editor. The @vite-ignore stops Vite/Rolldown's dep scanner from following the dynamic import and
+       // trying to parse the .d.ts declarations as runtime modules — that crashes the scan in vite 8.0.13+ and
+       // cascades into SSR pre-bundling breakage.
+-      import(/* @vite-ignore */ '@/public/deno/edge-runtime.d.ts' as string)
++      import(/* @vite-ignore */ '../../../public/deno/edge-runtime.d.ts' as string)
+         .then((module) => {
+           monaco.languages.typescript.typescriptDefaults.addExtraLib(module.default)
+         })
+         .catch((error) => {
+           console.error('Failed to load Deno edge-runtime typings:', error)
+         })
+-      import(/* @vite-ignore */ '@/public/deno/lib.deno.d.ts' as string)
++      import(/* @vite-ignore */ '../../../public/deno/lib.deno.d.ts' as string)
+         .then((module) => {
+           monaco.languages.typescript.typescriptDefaults.addExtraLib(module.default)
+         })
+diff --git a/apps/studio/components/ui/CodeEditor/CodeEditor.tsx b/apps/studio/components/ui/CodeEditor/CodeEditor.tsx
+--- a/apps/studio/components/ui/CodeEditor/CodeEditor.tsx
++++ b/apps/studio/components/ui/CodeEditor/CodeEditor.tsx
+@@ -1,4 +1,4 @@
+-import Editor, { EditorProps, Monaco, OnChange, OnMount, useMonaco } from '@monaco-editor/react'
++import Editor, { EditorProps, Monaco, OnChange, OnMount, loader } from '@monaco-editor/react'
+ import { merge, noop } from 'lodash'
+ import { Loader2 } from 'lucide-react'
+ import type { editor } from 'monaco-editor'
+@@ -62,6 +62,32 @@
+   onMount?: OnMount
+ }
+
++// The upstream useMonaco hook leaves its canceled initialization promise
++// unhandled when an editor unmounts during loading. Handle that lifecycle here
++// and surface genuine initialization failures through the error boundary.
++function useEditorMonaco() {
++  const [instance, setInstance] = useState<Monaco | null>(() => loader.__getMonacoInstance())
++  const [failure, setFailure] = useState<Error | null>(null)
++  useEffect(() => {
++    if (instance) return
++    let mounted = true
++    const initialization = loader.init()
++    initialization.then((loaded) => {
++      if (mounted) setInstance(loaded)
++    }).catch((error) => {
++      if (mounted && error?.type !== 'cancelation') {
++        setFailure(error instanceof Error ? error : new Error('Monaco initialization failed', { cause: error }))
++      }
++    })
++    return () => {
++      mounted = false
++      initialization.cancel()
++    }
++  }, [instance])
++  if (failure) throw failure
++  return instance
++}
++
+ export const CodeEditor = ({
+   id,
+   language,
+@@ -81,7 +107,7 @@
+   onInputChange = noop,
+   onMount: onMountProps,
+ }: CodeEditorProps) => {
+-  const monaco = useMonaco()
++  const monaco = useEditorMonaco()
+   const { data: project } = useSelectedProjectQuery()
+
+   const hasValue = useRef<editor.IContextKey<boolean>>(null)

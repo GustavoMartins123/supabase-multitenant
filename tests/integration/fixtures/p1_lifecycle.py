@@ -99,6 +99,7 @@ def main() -> None:
     os.chmod(server / '.functions-tenants', 0o700)
     run('python', str(root / 'tools/configure_api_resource_profiles.py'), '--source', str(env_file),
         '--output', str(server / '.resource-profiles.env'))
+    run('python', str(server / 'generateProject/functions_config.py'), '--root', str(server), 'init')
     services = ('db', 'realtime', 'supavisor', 'functions', 'storage', 'imgproxy', 'storage-data-plane')
     model = yaml.safe_load((server / 'docker-compose.yml').read_text())
     model['services'] = {name: model['services'][name] for name in services}
@@ -106,6 +107,8 @@ def main() -> None:
         if 'build' in service:
             service.pop('build')
             service['image'] = {'db': 'servidor-db:latest', 'realtime': 'servidor-realtime:latest'}[name]
+        if name == 'functions':
+            service['user'] = str(os.getuid()) + ':' + str(os.getgid())
         service['logging'] = {'driver': 'json-file'}
         service['labels'] = labels.copy()
         service['restart'] = 'no'
@@ -331,17 +334,15 @@ def main() -> None:
         env = environment(server / 'projects' / ref / '.env')
         assert result == {'project_ref': public_refs[ref], 'technical_name': ref, 'project_uuid': tenant,
                           'anon_key': env['ANON_KEY_PROJETO'], 'service_role_key': env['SERVICE_ROLE_KEY_PROJETO'],
-                          'jwt_secret': env['JWT_SECRET_PROJETO']}
+                          'jwt_secret': env['JWT_SECRET_PROJETO'], 'network_allowlist': []}
         assert path.stat().st_mode & 0o777 == 0o600
-        data = run('curl', '--fail', '--silent', '--show-error', '-H', 'X-Project-Ref: ' + public_refs[ref], '-H', 'X-Project-Name: ' + ref,
-                   '-H', 'Authorization: Bearer ' + result['service_role_key'],
-                   'http://supabase-edge-functions:9000/p1_probe')
-        returned = json.loads(data)['env']
-        assert returned['SUPABASE_SERVICE_ROLE_KEY'] == result['service_role_key']
-        assert returned['SUPABASE_ANON_KEY'] == result['anon_key']
-        assert returned['JWT_SECRET'] == result['jwt_secret']
-        assert not {'POSTGRES_PASSWORD', 'DATABASE_URL', 'HOST_AGENT_HMAC_SECRET'} & returned.keys()
-        print('Projection and real Edge worker verified:', ref, flush=True)
+        status = run('curl', '--silent', '--show-error', '--output', '/dev/null', '--write-out', '%{http_code}',
+                     '-H', 'X-Project-Ref: ' + public_refs[ref], '-H', 'X-Project-Name: ' + ref,
+                     '-H', 'apikey: ' + result['service_role_key'],
+                     '-H', 'Authorization: Bearer ' + result['service_role_key'],
+                     'http://supabase-edge-functions:9000/p1_probe')
+        assert status == '404', status
+        print('Lifecycle projection and default Functions block verified:', ref, flush=True)
         return result
 
     def admission_headers(ref: str, uri: str, method: str = 'GET', api_key: str = '') -> dict[str, str]:

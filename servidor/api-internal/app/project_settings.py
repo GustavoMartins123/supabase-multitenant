@@ -34,6 +34,8 @@ SETTINGS_WHITELIST = {
     "VECTOR_MAX_BUCKETS",
     "VECTOR_MAX_INDEXES",
     "PROJECT_RESOURCE_PROFILE",
+    "EDGE_FUNCTIONS_ENABLED",
+    "FUNCTIONS_ALLOWED_NETWORK_HOSTS",
 }
 
 CUSTOM_TOTAL_INPUTS = (
@@ -73,6 +75,7 @@ DERIVED_LIMIT_KEYS = {
 }
 
 BOOLEAN_SETTINGS = {
+    "EDGE_FUNCTIONS_ENABLED",
     "DISABLE_SIGNUP",
     "ENABLE_EMAIL_SIGNUP",
     "ENABLE_EMAIL_AUTOCONFIRM",
@@ -408,7 +411,7 @@ def _normalize_setting_value(key: str, raw_value: str) -> str:
         raise HTTPException(
             400, f"{key}: valor não pode conter quebra de linha ou byte nulo"
         )
-    if not value:
+    if not value and key != "FUNCTIONS_ALLOWED_NETWORK_HOSTS":
         raise HTTPException(400, f"{key}: valor obrigatório")
 
     if key == "PROJECT_RESOURCE_PROFILE":
@@ -451,6 +454,13 @@ def _normalize_setting_value(key: str, raw_value: str) -> str:
                 f"{key}: use um valor entre {min_value} e {max_value}",
             )
         return str(parsed)
+
+    if key == "FUNCTIONS_ALLOWED_NETWORK_HOSTS":
+        from app.functions_network import network_hosts
+        try:
+            return ",".join(network_hosts(value))
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
 
     if key == "PGRST_DB_SCHEMAS":
         schemas = [part.strip() for part in value.split(",")]

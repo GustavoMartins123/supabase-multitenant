@@ -27,6 +27,13 @@ local function resolve_target(uri)
         end
         return append_query("/api/projects/" .. content_ref .. "/content" .. resource)
     end
+    local edge_ref, edge_resource = uri:match("^/api/platform/projects/([a-z]+)/edge%-functions(.*)$")
+    if edge_ref then
+        if not ref_resolver.valid_ref(edge_ref) or edge_ref ~= ngx.ctx.studio_request_project_ref then
+            return nil, "Canonical function target is unavailable"
+        end
+        return append_query("/api/projects/" .. edge_ref .. "/edge-functions" .. edge_resource)
+    end
     if uri == "/api/projects" or uri:find("^/api/projects/") then
         return append_query(uri)
     end

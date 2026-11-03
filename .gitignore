@@ -63,3 +63,9 @@ servidor/traefik/plugins-storage/sources/
 .public-reference-cutover/
 .snippet-namespace-migration/
 project-reference-catalog*.json
+
+servidor/.functions-hosts
+
+# Private function drafts, encrypted-material projections and published code
+servidor/.functions-runtime/
+servidor/.functions-studio/

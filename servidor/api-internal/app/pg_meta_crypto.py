@@ -2,9 +2,18 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import os
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+
+def postgres_meta_authorization(passphrase: str) -> str:
+    """Derive the private metadata HTTP credential without exposing its cipher key."""
+    if not isinstance(passphrase, str) or len(passphrase.encode()) < 16:
+        raise RuntimeError("A private metadata transport key of at least 16 bytes is required")
+    token = hmac.new(passphrase.encode(), b"postgres-meta-http-auth-v1", hashlib.sha256).hexdigest()
+    return "Bearer " + token
 
 
 def encrypt_postgres_meta_uri(uri: str, passphrase: str) -> str:

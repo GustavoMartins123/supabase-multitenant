@@ -45,6 +45,7 @@ from app.project_settings import (
 )
 from app.schemas import RecreateServices, UpdateSettings
 from app.validation import validate_project_ref
+from app.routers.studio_edge_functions import SETTINGS as FUNCTION_SETTINGS, configure_project, settings_values
 
 router = APIRouter(tags=["lifecycle-ops"])
 
@@ -420,6 +421,8 @@ async def get_project_settings(
         raise HTTPException(404, f"Arquivo .env não encontrado para o projeto '{project_ref}'")
 
     settings = _read_env_whitelisted(env_path)
+    async with pool.acquire() as conn:
+        settings.update(await settings_values(conn, project_row["id"]))
     pending = _read_project_pending_settings(project_name)
 
     return {
@@ -445,6 +448,8 @@ async def update_project_settings(
         await ensure_project_admin_access(conn, project_id=project_row["id"], auth_user=auth_user)
 
     updates = _normalize_settings_updates(body.settings)
+    functions_updates = {key: updates.pop(key) for key in list(updates) if key in FUNCTION_SETTINGS}
+    updated_keys = [*updates, *functions_updates]
 
     env_path = _get_project_env_path(project_name)
     if not env_path.exists():
@@ -460,7 +465,9 @@ async def update_project_settings(
             **resolved_limits,
         }
 
-    _write_env_whitelisted(env_path, {**updates, **resolved_limits})
+    await configure_project(project_ref, functions_updates, request, pool)
+    if updates or resolved_limits:
+        _write_env_whitelisted(env_path, {**updates, **resolved_limits})
 
     final_profile = (
         resolved_limits.get("PROJECT_RESOURCE_PROFILE")
@@ -474,19 +481,21 @@ async def update_project_settings(
             project_row["id"],
         )
 
-    affected = _get_affected_services(list(updates.keys()))
+    affected = (_get_affected_services(list(updates.keys())) if updates else
+                _read_project_pending_settings(project_name).get("affected_services", []))
     if affected:
         _write_project_pending_settings(project_name, affected)
-    else:
+    elif updates:
         _clear_project_pending_settings(project_name)
 
     return {
         "status": "updated",
-        "updated_keys": list(updates.keys()),
+        "updated_keys": updated_keys,
         "affected_services": affected,
         "file_size_limit": _get_project_file_size_limit(project_name),
         "storage_limit_token": _get_project_storage_limit_token(project_name),
-        "message": f"Configurações salvas. Serviços afetados: {', '.join(affected)}. Recrie-os para aplicar.",
+        "message": (f"Configurações salvas. Serviços afetados: {', '.join(affected)}. Recrie-os para aplicar."
+                    if affected else "Configurações salvas e aplicadas."),
     }
 
 

@@ -15,7 +15,7 @@ from app.dependencies import audit_project_member_change, ensure_project_admin_a
 from app.main import AI_TOOL_MAX_ROWS, AI_TOOL_TIMEOUT_MS, _extract_project_admin_apikey, get_project_conn
 from app.project_backgrounds import _get_project_file_size_limit, _get_project_storage_limit_token
 from app.meta_connections import get_project_meta_connection_string, get_project_reader_connection_string
-from app.pg_meta_crypto import encrypt_postgres_meta_uri
+from app.pg_meta_crypto import encrypt_postgres_meta_uri, postgres_meta_authorization
 from app.project_secret_service import decrypt_project_secret
 from app.project_telemetry import TelemetryValidationError, fetch_project_user_telemetry, resolve_telemetry_period
 from app.routers.lifecycle import get_project_status
@@ -429,6 +429,7 @@ async def proxy_project_meta(
     target_path = meta_path.lstrip("/")
     target_url = f"{PG_META_INTERNAL_URL}/{target_path}" if target_path else PG_META_INTERNAL_URL
     upstream_headers = {
+        "Authorization": postgres_meta_authorization(PG_META_CRYPTO_KEY),
         "x-connection-encrypted": encrypt_postgres_meta_uri(
             project_connection_string,
             PG_META_CRYPTO_KEY,

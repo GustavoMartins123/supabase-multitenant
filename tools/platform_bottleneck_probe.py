@@ -1258,7 +1258,8 @@ def build_functional_endpoints(
         {
             "name": "postgres-meta-tables",
             "url": f"http://{meta_ip}:8080/tables",
-            "headers": {"x-connection-encrypted": fixture.meta_header()},
+            "headers": {"x-connection-encrypted": fixture.meta_header(),
+                        "Authorization": "Bearer " + hmac.new(fixture.root_env["PG_META_CRYPTO_KEY"].encode(), b"postgres-meta-http-auth-v1", hashlib.sha256).hexdigest()},
         }
     )
     analytics_ip = probe.target_ip(targets, "shared/analytics", "analytics-internal")

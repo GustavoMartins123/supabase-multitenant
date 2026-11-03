@@ -14,6 +14,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / 'servidor/generateProject/functions_config.py'
+sys.path.insert(0, str(SCRIPT.parent))
 spec = importlib.util.spec_from_file_location('functions_config_test', SCRIPT)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
@@ -29,6 +30,7 @@ class FunctionsProjectionLifecycleTest(unittest.TestCase):
         (self.scripts / 'lib').mkdir(parents=True)
         (self.root / 'projects').mkdir()
         shutil.copy2(SCRIPT, self.scripts / SCRIPT.name)
+        shutil.copy2(SCRIPT.with_name("functions_network.py"), self.scripts / "functions_network.py")
         shutil.copy2(ROOT / 'servidor/generateProject/lib/functions_config.sh', self.scripts / 'lib')
         self.seed('test_alpha')
         self.seed('test_beta')
@@ -51,7 +53,7 @@ class FunctionsProjectionLifecycleTest(unittest.TestCase):
     def test_exact_projection_and_private_permissions(self):
         module.sync(self.root)
         data = self.read('test_alpha')
-        self.assertEqual(set(data), {'project_ref', 'technical_name', 'project_uuid', 'anon_key', 'service_role_key', 'jwt_secret'})
+        self.assertEqual(set(data), {'project_ref', 'technical_name', 'project_uuid', 'anon_key', 'service_role_key', 'jwt_secret', 'network_allowlist'})
         self.assertNotIn('cluster-secret', json.dumps(data))
         self.assertNotIn('storage-secret', json.dumps(data))
         self.assertEqual((self.root / '.functions-tenants/test_alpha.json').stat().st_mode & 0o777, 0o600)

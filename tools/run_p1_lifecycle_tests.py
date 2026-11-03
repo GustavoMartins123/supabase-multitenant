@@ -33,7 +33,7 @@ RESERVED_NETWORKS = {'rede-supabase', 'supabase-storage-control', 'supabase-stor
 
 def archive(extra_sources: tuple[str, ...] = ()) -> bytes:
     allowed = ('servidor/generateProject/', 'servidor/volumes/db/', 'servidor/volumes/functions/',
-               'servidor/volumes/pooler/', 'servidor/volumes/storage-proxy/', 'servidor/api-internal/app/',
+               'servidor/volumes/pooler/', 'servidor/volumes/storage-proxy/', 'servidor/postgres-meta/', 'servidor/api-internal/app/',
                'servidor/auth_template/', 'servidor/host-agent/hostagent/', 'servidor/traffic-redis/')
     exact = {'servidor/.env.example', 'servidor/docker-compose.yml', 'servidor/docker-compose-api.yml',
              'servidor/docker-compose.single-node.yml', 'servidor/docker-compose.split-node.yml',

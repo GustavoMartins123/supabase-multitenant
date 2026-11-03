@@ -17,6 +17,7 @@ from pydantic import ValidationError
 
 from opaque_keys import ALLOWED_SERVICES, OpaqueKeyError, parse_opaque_key, should_preserve_authorization
 from admission import AdmissionEngine, AdmissionRequest, query_key, route
+from access_policy import AccessPolicy
 
 PROJECT_RE = re.compile(r'^[a-z_][a-z0-9_]{2,39}$')
 GATEWAY_TOKEN_RE = re.compile(r'^[a-f0-9]{64}$')
@@ -154,7 +155,15 @@ async def project_identity(conn, name, token):
     return project
 
 
+async def ensure_functions_enabled(conn, project, service):
+    if service == 'functions' and not await conn.fetchval(
+        'SELECT enabled FROM project_edge_functions WHERE project_id=$1', project['id']
+    ):
+        raise HTTPException(404, 'Edge Functions are disabled')
+
+
 async def key_identity(conn, project, body, service, missing, required):
+    await ensure_functions_enabled(conn, project, service)
     _, _, _, parts = route(body.uri, project['public_ref'])
     try:
         api_key = _candidate_key(body.api_key, query_key(parts.query), parts.query, allow_missing=missing)
@@ -174,7 +183,7 @@ async def key_identity(conn, project, body, service, missing, required):
             preserve = should_preserve_authorization(api_key, authorization)
     except OpaqueKeyError:
         raise _forbidden() from None
-    key = await conn.fetchrow('''                SELECT k.id, s.id AS slot_id, false AS administrative, s.kind, s.allowed_services
+    key = await conn.fetchrow('''                SELECT k.id, s.id AS slot_id, false AS administrative, false AS functions_internal, s.kind, s.allowed_services
                 FROM project_api_keys k
                 JOIN project_api_key_slots s ON s.id = k.slot_id
                 WHERE s.project_id = $1
@@ -201,10 +210,15 @@ async def key_identity(conn, project, body, service, missing, required):
                       )
                   )
                 UNION ALL
-                SELECT sk.project_id AS id, NULL::uuid AS slot_id, true AS administrative, 'secret' AS kind,
+                SELECT sk.project_id AS id, NULL::uuid AS slot_id, true AS administrative, false AS functions_internal, 'secret' AS kind,
                        ARRAY['rest','graphql','storage']::text[] AS allowed_services
                 FROM project_studio_keys sk
                 WHERE sk.project_id = $1 AND sk.secret_hash = $2 AND sk.is_active
+                UNION ALL
+                SELECT fk.id, NULL::uuid AS slot_id, true AS administrative, true AS functions_internal, fk.kind,
+                       ARRAY['auth','rest','graphql','storage','realtime','functions']::text[] AS allowed_services
+                FROM project_function_keys fk JOIN project_edge_functions ef ON ef.project_id=fk.project_id
+                WHERE fk.project_id=$1 AND fk.secret_hash=$2 AND fk.is_active AND ef.enabled
 ''', project['id'], parsed.digest)
     if key is None or key['kind'] != parsed.kind or service not in key['allowed_services'] or (required and parsed.role != required):
         raise _forbidden()
@@ -238,7 +252,10 @@ async def admit(body: AdmissionRequest, x_admission_secret: str = Header()):
         else:
             project = await project_identity(conn, body.project_ref, body.gateway_token)
             service, missing, required, _ = route(body.uri, project['public_ref'])
+            await ensure_functions_enabled(conn, project, service)
             identity, _, _ = await key_identity(conn, project, body, service, missing, required) if body.method != 'OPTIONS' else (None,None,True)
+            if identity and identity['functions_internal']:
+                raise _forbidden()
             discovery = False
     ticket = await _engine.issue(body, identity, project, service, discovery)
     return Response(status_code=204, headers={'X-Gateway-Admission':ticket} if ticket else {})
@@ -262,6 +279,8 @@ async def authorize(request: Request):
         if h.get('x-target-service') == 'callback' and not missing:
             raise _forbidden()
         key, parsed, preserve = await key_identity(conn, project, body, service, missing, required)
+        if key and key['functions_internal']:
+            raise _forbidden()
         await _engine.redeem(h.get('x-gateway-admission',''), body, project, key)
         if key and not key['administrative']:
             await conn.execute("UPDATE project_api_keys SET last_used_at=now() WHERE id=$1 AND (last_used_at IS NULL OR last_used_at < now()-interval '5 minutes')", key['id'])
@@ -280,3 +299,33 @@ async def check_discovery(body: AdmissionRequest, x_admission_secret: str = Head
         project, key, _ = await discovery_identity(conn, body)
     await _engine.redeem(x_gateway_admission, body, project, key)
     return Response(status_code=204)
+
+
+@app.get('/v1/functions-authorize', status_code=204)
+async def functions_authorize(request: Request):
+    # This transport accepts only the private runtime key namespace. Ordinary
+    # keys still require the single-use public admission ticket.
+    h = request.headers
+    if h.get('x-gateway-admission'):
+        raise _forbidden()
+    method, uri = h.get('x-gateway-request-method', ''), h.get('x-gateway-request-uri', '')
+    if method not in {'GET','HEAD','POST','PUT','PATCH','DELETE'} or not uri.startswith('/'):
+        raise _forbidden()
+    async with _pool.acquire() as conn:
+        project = await project_identity(conn, h.get('x-project-ref', ''), h.get('x-project-gateway-token', ''))
+        body = AdmissionRequest(project_ref=h['x-project-ref'], gateway_token=h['x-project-gateway-token'],
+            uri='/' + project['public_ref'] + uri, method=method, client_ip='127.0.0.1',
+            api_key=h.get('x-api-key-header', ''), authorization=h.get('x-original-authorization', ''))
+        service, missing, required, _ = route(body.uri, project['public_ref'])
+        if h.get('x-target-service') != service:
+            raise _forbidden()
+        key, parsed, preserve = await key_identity(conn, project, body, service, missing, required)
+        if not key or not key['functions_internal']:
+            raise _forbidden()
+    await _engine.rate([str(project['id']) + ':functions-internal'], [AccessPolicy(
+        geo_mode='unrestricted', allowed_countries=None, allowed_networks=[],
+        rate_limit={'requests_per_second':20, 'burst':40}, request_quota=None)])
+    return Response(status_code=204, headers={'Cache-Control':'no-store', 'X-Opaque-Key-Present':'1',
+        'X-Opaque-Preserve-Authorization':'1' if preserve else '0',
+        'X-Opaque-Keyset-Version':str(project['api_keyset_version']),
+        'X-Opaque-Key-Role':parsed.role, 'X-Opaque-Key-Id':str(key['id'])})

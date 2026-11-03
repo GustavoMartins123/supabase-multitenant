@@ -9,6 +9,7 @@ import re
 import stat
 import tempfile
 import uuid
+from functions_network import ensure_network_hosts_file, network_hosts
 
 REF = re.compile(r"[a-z_][a-z0-9_]{2,39}\Z")
 FIELDS = ("PROJECT_ID", "PROJECT_UUID", "PROJECT_PUBLIC_REF", "ANON_KEY_PROJETO", "SERVICE_ROLE_KEY_PROJETO", "JWT_SECRET_PROJETO")
@@ -41,14 +42,14 @@ def projection(root: Path, ref: str) -> dict[str, str]:
         values: dict[str, str] = {}
         for line in stream.read().splitlines():
             match = re.match(r"\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=", line)
-            if not match or match[1] not in FIELDS:
+            if not match or match[1] not in (*FIELDS, "FUNCTIONS_ALLOWED_NETWORK_HOSTS"):
                 continue
             key = match[1]
             value = line[len(key) + 1:]
-            if key in values or not line.startswith(key + "=") or not value or value != value.strip() or any(c in value for c in "\"'\x00"):
+            if key in values or not line.startswith(key + "=") or (not value and key != "FUNCTIONS_ALLOWED_NETWORK_HOSTS") or value != value.strip() or any(c in value for c in "\"'\x00"):
                 raise ValueError("noncanonical Functions credential")
             values[key] = value
-    if set(values) != set(FIELDS) or values["PROJECT_ID"] != ref:
+    if set(values) - {"FUNCTIONS_ALLOWED_NETWORK_HOSTS"} != set(FIELDS) or values["PROJECT_ID"] != ref:
         raise ValueError("incomplete or divergent project identity")
     if str(uuid.UUID(values["PROJECT_UUID"])) != values["PROJECT_UUID"]:
         raise ValueError("noncanonical project UUID")
@@ -56,7 +57,8 @@ def projection(root: Path, ref: str) -> dict[str, str]:
         raise ValueError("noncanonical public project reference")
     return {"project_ref": values["PROJECT_PUBLIC_REF"], "technical_name": ref, "project_uuid": values["PROJECT_UUID"],
             "anon_key": values["ANON_KEY_PROJETO"], "service_role_key": values["SERVICE_ROLE_KEY_PROJETO"],
-            "jwt_secret": values["JWT_SECRET_PROJETO"]}
+            "jwt_secret": values["JWT_SECRET_PROJETO"],
+            "network_allowlist": network_hosts(values.get("FUNCTIONS_ALLOWED_NETWORK_HOSTS", ""))}
 
 
 def fsync_directory(path: Path) -> None:
@@ -84,6 +86,7 @@ def withdraw(root: Path, ref: str) -> None:
 
 
 def publish(root: Path, ref: str) -> None:
+    ensure_network_hosts_file(root / ".functions-hosts")
     data = projection(root, ref)
     directory = plain_directory(root / ".functions-tenants")
     fd, name = tempfile.mkstemp(prefix=".publish-", dir=directory)
@@ -112,7 +115,15 @@ def validate_lock(fd: int | None, path: Path) -> None:
     fcntl.flock(fd, (fcntl.LOCK_SH if path.name == "global" else fcntl.LOCK_EX) | fcntl.LOCK_NB)
 
 
+def initialize(root: Path) -> None:
+    for name in (".functions-runtime", ".functions-runtime/tenants", ".functions-runtime/code",
+                 ".functions-studio", ".functions-tenants", ".functions-locks"):
+        plain_directory(root / name).chmod(0o700)
+    ensure_network_hosts_file(root / ".functions-hosts")
+
+
 def sync(root: Path) -> None:
+    initialize(root)
     import fcntl
     locks = plain_directory(root / ".functions-locks")
     with os.fdopen(os.open(locks / "global", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600), "r+") as lock:
@@ -151,14 +162,14 @@ def main() -> None:
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--lock-fd", type=int)
     parser.add_argument("--tenant-lock-fd", type=int)
-    parser.add_argument("action", choices=("sync", "publish", "withdraw"))
+    parser.add_argument("action", choices=("init", "sync", "publish", "withdraw"))
     parser.add_argument("ref", nargs="?")
     args = parser.parse_args()
     root = args.root.resolve(strict=True)
-    if args.action == "sync":
+    if args.action in {"init", "sync"}:
         if args.ref is not None:
-            parser.error("sync does not accept a tenant")
-        sync(root)
+            parser.error("initialization does not accept a tenant")
+        {"init": initialize, "sync": sync}[args.action](root)
     else:
         ref = canonical_ref(args.ref or "")
         validate_lock(args.lock_fd, root / ".functions-locks/global")

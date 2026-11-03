@@ -34,6 +34,10 @@ COPY studio-project-context.patch /tmp/studio-project-context.patch
 RUN git -C /src apply --check /tmp/studio-project-context.patch && \
     git -C /src apply /tmp/studio-project-context.patch
 
+COPY studio-edge-functions.patch /tmp/studio-edge-functions.patch
+RUN git -C /src apply --check /tmp/studio-edge-functions.patch && \
+    git -C /src apply /tmp/studio-edge-functions.patch
+
 FROM base AS turbo
 COPY --from=source /src .
 RUN pnpm dlx turbo@2.9.14 prune studio --docker
@@ -45,8 +49,12 @@ COPY --from=source /src/patches ./patches
 RUN pnpm install --frozen-lockfile
 
 FROM deps AS builder
+ARG STUDIO_BUILD_NODE_OPTIONS=--max-old-space-size=8192
 COPY --from=turbo /app/out/full ./
-RUN pnpm --filter studio exec next build
+COPY --from=source /src/apps/studio/public/deno ./apps/studio/public/deno
+RUN test -s apps/studio/public/deno/edge-runtime.d.ts && \
+    test -s apps/studio/public/deno/lib.deno.d.ts && \
+    NODE_OPTIONS="$STUDIO_BUILD_NODE_OPTIONS" pnpm --filter studio exec next build --webpack
 
 FROM base AS production
 ARG SUPABASE_STUDIO_COMMIT
@@ -60,7 +68,7 @@ ARG SUPABASE_STUDIO_REPOSITORY
 # sponsored by, or endorsed by Supabase. Do not add the Supabase name/logo in a
 # way that implies endorsement.
 COPY LICENSE /usr/share/doc/multitenant-studio/LICENSE
-COPY studio-project-context.patch README.md /usr/share/doc/multitenant-studio/
+COPY studio-project-context.patch studio-edge-functions.patch README.md /usr/share/doc/multitenant-studio/
 
 LABEL org.opencontainers.image.title="multitenant-studio" \
       org.opencontainers.image.description="UNOFFICIAL derivative of Supabase Studio with a per-tab project-context patch. Not affiliated with, sponsored by, or endorsed by Supabase." \
