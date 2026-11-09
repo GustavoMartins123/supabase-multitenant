@@ -106,6 +106,145 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
     async def publish(self,draft,project=0,user=0):
         return await self.request('POST','/my-function/publish',{'revision':draft['revision'],'expected_published_revision':draft['published_revision']},project,user)
 
+    async def remove(self, current, unpublish=False, project=0, user=0):
+        return await self.request('POST' if unpublish else 'DELETE',
+            '/my-function/unpublish' if unpublish else '/my-function',
+            {'revision':current['revision'],'expected_published_revision':current['published_revision']},project,user)
+
+    async def test_unpublish_and_delete_preserve_other_project_and_require_current_version(self):
+        current=[]
+        for i in (0,1):
+            draft=await self.save(project=i,user=i)
+            await self.configure(True,project=i,user=i)
+            current.append((await self.publish(draft,project=i,user=i)).json())
+        other=(self.root/'.functions-runtime/tenants/test_beta.json').read_bytes()
+        response=await self.remove(current[0],unpublish=True)
+        self.assertEqual(response.status_code,200,response.text)
+        draft=response.json();self.assertIsNone(draft['published_revision'])
+        self.assertEqual(draft['files'],current[0]['files'])
+        self.assertEqual((self.root/'.functions-runtime/tenants/test_beta.json').read_bytes(),other)
+        self.assertEqual((await self.publish(draft)).status_code,200)
+        published=(await self.request('GET','/my-function')).json()
+        newer=await self.save('two',expected=published['revision'])
+        for action in (True,False):
+            self.assertEqual((await self.remove(published,unpublish=action)).status_code,409)
+        response=await self.remove(newer)
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual((await self.request('GET','/my-function')).status_code,404)
+        self.assertEqual((await self.request('GET')).json()['functions'],[])
+        self.assertEqual((self.root/'.functions-runtime/tenants/test_beta.json').read_bytes(),other)
+        self.assertEqual(await self.pool.fetchval("SELECT count(*) FROM studio_edge_audit WHERE action IN ('unpublish','delete') AND outcome='completed'"),2)
+
+    async def test_disabled_project_accepts_delete_and_unpublish_without_enabling_runtime(self):
+        draft=await self.save();await self.configure(True)
+        first=(await self.publish(draft)).json()
+        await self.configure(False)
+        response=await self.remove(first,unpublish=True)
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual((await self.remove(response.json())).status_code,200)
+        self.assertFalse((self.root/'.functions-runtime/tenants/test_alpha.json').exists())
+        self.assertIs(await self.pool.fetchval('SELECT enabled FROM project_edge_functions WHERE project_id=$1',self.projects[0]),False)
+
+    async def test_interrupted_removal_recovers_only_the_activated_operation(self):
+        import copy
+        from app import edge_function_store as store, edge_functions
+
+        other = await self.save(project=1, user=1)
+        await self.configure(True, project=1, user=1)
+        self.assertEqual((await self.publish(other, project=1, user=1)).status_code, 200)
+        other_path = self.root / '.functions-runtime/tenants/test_beta.json'
+        other_context = other_path.read_bytes()
+        for action in ('unpublish', 'delete'):
+            for activated in (False, True):
+                with self.subTest(action=action, activated=activated):
+                    current = await self.request('GET', '/my-function')
+                    expected = current.json()['revision'] if current.status_code == 200 else None
+                    draft = await self.save(f'{action}-{activated}', expected=expected)
+                    self.assertEqual((await self.configure(True)).status_code, 200)
+                    self.assertEqual((await self.publish(draft)).status_code, 200)
+                    async with self.pool.acquire() as conn:
+                        project = await self.routes.get_public_project_row(conn, self.refs[0])
+                        previous = self.routes.load(project)
+                        proposed = copy.deepcopy(previous)
+                        if action == 'unpublish':
+                            proposed['functions']['my-function']['published'] = None
+                        else:
+                            proposed['functions'].pop('my-function')
+                        context = await self.routes.prepare(conn, project, proposed,
+                            {'enabled': True, 'network_allowlist': []})
+                        store.begin_publication(self.root, previous, proposed, context, action=action)
+                        if activated:
+                            edge_functions.activate_context(self.root, context)
+                    response = await self.request('GET', '/my-function')
+                    self.assertEqual(response.status_code, 404 if activated and action == 'delete' else 200)
+                    recovered = store.read_state(self.root, self.names[0], str(self.projects[0]))
+                    self.assertEqual(recovered, proposed if activated else previous)
+                    runtime = edge_functions.read_context(self.root, self.names[0], str(self.projects[0]))
+                    files = store.published_files(self.root, self.names[0], str(self.projects[0]), state=recovered)
+                    edge_functions.verify_generation(self.root, runtime, files)
+                    self.assertFalse((self.root / '.functions-studio' / str(self.projects[0]) / 'publication.json').exists())
+                    self.assertEqual(other_path.read_bytes(), other_context)
+
+    async def test_failed_removal_preserves_state_and_reconfiguration_restores_publication(self):
+        from app import edge_function_store as store
+
+        state_path = self.root / '.functions-studio' / str(self.projects[0]) / 'state.json'
+        original_atomic = store.atomic_json
+        for action in ('unpublish', 'delete'):
+            with self.subTest(action=action):
+                current = await self.request('GET', '/my-function')
+                expected = current.json()['revision'] if current.status_code == 200 else None
+                draft = await self.save(action, expected=expected)
+                await self.configure(True)
+                published = (await self.publish(draft)).json()
+                previous_state = state_path.read_bytes()
+                context_path = self.root / '.functions-runtime/tenants/test_alpha.json'
+                previous_context = context_path.read_bytes()
+                failed = False
+
+                def fail_state_once(path, value):
+                    nonlocal failed
+                    if path == state_path and not failed:
+                        failed = True
+                        raise OSError('synthetic interrupted state write')
+                    return original_atomic(path, value)
+
+                with patch.object(store, 'atomic_json', side_effect=fail_state_once):
+                    result = await self.remove(published, unpublish=action == 'unpublish')
+                self.assertEqual(result.status_code, 503, result.text)
+                self.assertTrue(failed)
+                self.assertEqual(state_path.read_bytes(), previous_state)
+                self.assertFalse(context_path.exists())
+                self.assertFalse(state_path.with_name('publication.json').exists())
+                self.assertEqual((await self.request('GET', '/my-function')).json(), published)
+                self.assertEqual((await self.configure(True)).status_code, 200)
+                self.assertEqual(context_path.read_bytes(), previous_context)
+                self.assertEqual(await self.pool.fetchval(
+                    "SELECT count(*) FROM studio_edge_audit WHERE action=$1 AND outcome='failed'", action), 1)
+
+    async def test_removing_while_disabled_cannot_republish_on_reenable(self):
+        from app import edge_function_store as store
+
+        for action in ('unpublish', 'delete'):
+            with self.subTest(action=action):
+                current = await self.request('GET', '/my-function')
+                expected = current.json()['revision'] if current.status_code == 200 else None
+                draft = await self.save(action, expected=expected)
+                await self.configure(True)
+                published = (await self.publish(draft)).json()
+                self.assertEqual((await self.configure(False)).status_code, 200)
+                result = await self.remove(published, unpublish=action == 'unpublish')
+                self.assertEqual(result.status_code, 200, result.text)
+                self.assertEqual((await self.configure(True)).status_code, 200)
+                self.assertEqual(store.published_files(self.root, self.names[0], str(self.projects[0])), {})
+                current = await self.request('GET', '/my-function')
+                if action == 'unpublish':
+                    self.assertEqual(current.status_code, 200)
+                    self.assertEqual(current.json()['revision'], published['revision'])
+                    self.assertIsNone(current.json()['published_revision'])
+                else:
+                    self.assertEqual(current.status_code, 404)
+
     async def test_activation_drafts_publication_and_disable_are_independent(self):
         listing=await self.request('GET');self.assertEqual(listing.json(),{'enabled':False,'functions':[]})
         draft=await self.save()
@@ -141,7 +280,7 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((self.root/'.functions-runtime/tenants/test_beta.json').exists())
 
     async def test_member_other_project_and_unsigned_gateway_cannot_manage(self):
-        for method,path,body in [('GET','',None),('PUT','/my-function',{'expected_revision':None,'files':[{'name':'index.ts','content':''}]}),('POST','/my-function/publish',{'revision':'a'*64,'expected_published_revision':None})]:
+        for method,path,body in [('GET','',None),('PUT','/my-function',{'expected_revision':None,'files':[{'name':'index.ts','content':''}]}),('POST','/my-function/publish',{'revision':'a'*64,'expected_published_revision':None}),('POST','/my-function/unpublish',{'revision':'a'*64,'expected_published_revision':None}),('DELETE','/my-function',{'revision':'a'*64,'expected_published_revision':None})]:
             self.assertEqual((await self.request(method,path,body,user=2)).status_code,403)
             self.assertEqual((await self.request(method,path,body,user=1)).status_code,403)
             self.assertEqual((await self.request(method,path,body,service='forged')).status_code,403)

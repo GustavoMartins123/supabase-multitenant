@@ -71,7 +71,7 @@ def main():
         options=[]
         for key,value in env.items():options+=['-e',key+'='+value]
         api=start('api','--network-alias','functions-api','--user',str(os.getuid())+':'+str(os.getgid()),'-p','127.0.0.1::18000',*options,
-            *mount(ROOT,'/workspace'),*mount(fixture,'/fixture',True),'--entrypoint','uvicorn',args.api_image,'functions_management_api:app','--host','0.0.0.0','--port','18000','--no-access-log')
+            *mount(ROOT,'/workspace'),*mount(fixture,'/fixture',True),'--entrypoint','uvicorn',args.api_image,'functions_management_api:app','--app-dir','/workspace/servidor/api-internal','--host','0.0.0.0','--port','18000','--no-access-log')
         with httpx.Client(trust_env=False,verify=False,timeout=25) as client:
             api_origin='http://127.0.0.1:'+port(api,18000);wait(api_origin+'/healthz',client)
             state=json.loads((fixture/'state.json').read_text());projects=state['projects']
@@ -183,6 +183,41 @@ def main():
             assert publish(changed).status_code==200
             assert invoke().json()['version']=='alpha-v2' and invoke('test_beta').json()['version']=='beta-v1'
             record('draft_save_does_not_change_runtime_and_publication_affects_only_selected_project')
+            current=management('GET','/my-function').json()
+            payload={'revision':current['revision'],'expected_published_revision':current['published_revision']}
+            unpublished=management('POST','/my-function/unpublish',payload)
+            assert unpublished.status_code==200,unpublished.text
+            assert unpublished.json()['published_revision'] is None
+            assert invoke().status_code==404 and invoke('test_beta').json()['version']=='beta-v1'
+            assert configure(False).status_code==200 and configure(True).status_code==200
+            docker('restart',runtime)
+            wait('http://127.0.0.1:'+port(runtime,9000)+'/__health',client)
+            assert invoke().status_code==404 and invoke('test_beta').json()['version']=='beta-v1'
+            record('unpublished_function_stays_off_after_reenable_and_runtime_restart')
+            assert publish(unpublished.json()).status_code==200
+            assert invoke().json()['version']=='alpha-v2'
+            record('unpublish_stops_cached_runtime_keeps_draft_and_can_publish_again')
+            current=management('GET','/my-function').json()
+            deleted=management('DELETE','/my-function',{'revision':current['revision'],'expected_published_revision':current['published_revision']})
+            assert deleted.status_code==200,deleted.text
+            assert invoke().status_code==404 and invoke('test_beta').status_code==200
+            assert management('GET').json()['functions']==[]
+            assert management('GET','/my-function').status_code==404
+            assert configure(False).status_code==200 and configure(True).status_code==200
+            docker('restart',runtime)
+            wait('http://127.0.0.1:'+port(runtime,9000)+'/__health',client)
+            assert invoke().status_code==404 and invoke('test_beta').json()['version']=='beta-v1'
+            record('deleted_function_stays_off_after_reenable_and_runtime_restart')
+            recreated=save('alpha-v3')
+            assert invoke().status_code==404
+            assert publish(recreated).status_code==200 and invoke().json()['version']=='alpha-v3'
+            current=management('GET','/my-function').json()
+            save('alpha-v4',current['revision'])
+            for method,suffix in [('POST','/my-function/unpublish'),('DELETE','/my-function')]:
+                response=management(method,suffix,{'revision':current['revision'],'expected_published_revision':current['published_revision']})
+                assert response.status_code==409,response.text
+            assert invoke().json()['version']=='alpha-v3'
+            record('delete_stops_invocation_preserves_other_project_and_stale_removal_is_rejected')
             assert invoke(key=projects['test_beta']['publishable']).status_code==403
             assert invoke(headers={'X-Project-Ref':projects['test_beta']['ref'],'X-Project-Name':'test_beta','X-Project-UUID':projects['test_beta']['id']}).json()['ref']==projects['test_alpha']['ref']
             for user in ('member','outsider'):
@@ -204,7 +239,7 @@ def main():
             assert invoke().status_code==404 and invoke('test_beta').status_code==200
             assert publish(changed).status_code==409
             assert client.get(gateways['test_alpha']+'/rest/v1/counter',headers={'apikey':internal,'Authorization':'Bearer '+internal}).status_code==403
-            assert configure(True).status_code==200 and invoke().json()['version']=='alpha-v2'
+            assert configure(True).status_code==200 and invoke().json()['version']=='alpha-v3'
             record('disable_revokes_invocation_publication_and_internal_credentials_only_for_selected_project')
             projection=server/'.functions-tenants/test_alpha.json';original=projection.read_bytes();projection.unlink()
             assert invoke().status_code==503 and invoke('test_beta').status_code==200

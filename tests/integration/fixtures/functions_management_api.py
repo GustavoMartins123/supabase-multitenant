@@ -18,6 +18,8 @@ from fastapi import FastAPI,Depends,Request
 from app import database
 from app.internal_service_auth import InternalServiceAuthenticationMiddleware
 from app.routers import studio_edge_functions as routes
+if not Path(routes.__file__).resolve().is_relative_to(Path('/workspace/servidor/api-internal')):
+    raise RuntimeError('Function fixture must load the mounted API source')
 from app.project_settings import _normalize_settings_updates
 from app.schemas import UpdateSettings
 

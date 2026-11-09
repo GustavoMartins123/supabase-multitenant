@@ -264,6 +264,41 @@ async def function_save(ref: str, slug: str, body: DraftBody, request: Request, 
         return detail(project, state, slug, config['enabled'])
 
 
+async def commit_change(conn, project, actor, config, state, proposed, slug, revision, action):
+    name, tenant = project['name'], identity(project)
+    store.validate_transition(ROOT, state, proposed, action)
+    context = await prepare(conn, project, proposed, config) if config['enabled'] else None
+    previous = edge_functions.read_context(ROOT, name, tenant) if context else None
+    audit_id = await audit(conn, project, actor, action, slug, revision)
+    try:
+        if context:
+            store.begin_publication(ROOT, state, proposed, context, action=action)
+            edge_functions.activate_context(ROOT, context)
+        else:
+            edge_functions.withdraw(ROOT, name)
+        store.atomic_json(store.directory(ROOT, name, tenant) / 'state.json', proposed)
+    except Exception:
+        if context:
+            if previous is None:
+                edge_functions.withdraw(ROOT, name)
+            else:
+                edge_functions.activate_context(ROOT, previous)
+            store.atomic_json(store.directory(ROOT, name, tenant) / 'state.json', state)
+            store.finish_publication(ROOT, name, tenant)
+        await outcome(conn, audit_id, 'failed')
+        raise
+    if context:
+        store.finish_publication(ROOT, name, tenant)
+    await outcome(conn, audit_id, 'completed')
+
+
+def current_version(project, state, slug, enabled, body):
+    current = detail(project, state, slug, enabled)
+    if body.revision != current['revision'] or body.expected_published_revision != current['published_revision']:
+        raise HTTPException(409, 'Function version changed; reload before changing publication')
+    return current
+
+
 @router.post('/{slug}/publish')
 async def function_publish(ref: str, slug: str, body: PublishBody, request: Request, response: Response, pool=Depends(get_pool)):
     validate_slug(slug)
@@ -271,27 +306,36 @@ async def function_publish(ref: str, slug: str, body: PublishBody, request: Requ
         if not config['enabled']:
             raise HTTPException(409, 'Edge Functions are disabled by the project administrator')
         state = load(project)
-        current = detail(project, state, slug, True)
-        if body.revision != current['revision'] or body.expected_published_revision != current['published_revision']:
-            raise HTTPException(409, 'Function version changed; reload before publishing')
+        current = current_version(project, state, slug, True, body)
+        if current['published_revision'] == body.revision:
+            return current
         proposed = copy.deepcopy(state)
         proposed['functions'][slug]['published'] = body.revision
-        context = await prepare(conn, project, proposed, config)
-        previous = edge_functions.read_context(ROOT, project['name'], identity(project))
-        audit_id = await audit(conn, project, actor, 'publish', slug, body.revision)
-        try:
-            store.begin_publication(ROOT, state, proposed, context)
-            edge_functions.activate_context(ROOT, context)
-            store.atomic_json(store.directory(ROOT, project['name'], identity(project)) / 'state.json', proposed)
-        except Exception:
-            if previous is None:
-                edge_functions.withdraw(ROOT, project['name'])
-            else:
-                edge_functions.activate_context(ROOT, previous)
-            store.atomic_json(store.directory(ROOT, project['name'], identity(project)) / 'state.json', state)
-            store.finish_publication(ROOT, project['name'], identity(project))
-            await outcome(conn, audit_id, 'failed')
-            raise
-        store.finish_publication(ROOT, project['name'], identity(project))
-        await outcome(conn, audit_id, 'completed')
+        await commit_change(conn, project, actor, config, state, proposed, slug, body.revision, 'publish')
         return detail(project, proposed, slug, True)
+
+
+@router.post('/{slug}/unpublish')
+async def function_unpublish(ref: str, slug: str, body: PublishBody, request: Request, response: Response, pool=Depends(get_pool)):
+    validate_slug(slug)
+    async with management_context(ref, request, response, pool) as (conn, project, actor, config):
+        state = load(project)
+        current = current_version(project, state, slug, config['enabled'], body)
+        if current['published_revision'] is None:
+            return current
+        proposed = copy.deepcopy(state)
+        proposed['functions'][slug]['published'] = None
+        await commit_change(conn, project, actor, config, state, proposed, slug, current['revision'], 'unpublish')
+        return detail(project, proposed, slug, config['enabled'])
+
+
+@router.delete('/{slug}')
+async def function_delete(ref: str, slug: str, body: PublishBody, request: Request, response: Response, pool=Depends(get_pool)):
+    validate_slug(slug)
+    async with management_context(ref, request, response, pool) as (conn, project, actor, config):
+        state = load(project)
+        current = current_version(project, state, slug, config['enabled'], body)
+        proposed = copy.deepcopy(state)
+        proposed['functions'].pop(slug)
+        await commit_change(conn, project, actor, config, state, proposed, slug, current['revision'], 'delete')
+        return {'name': slug, 'deleted': True}

@@ -103,15 +103,19 @@ def atomic_json(path: Path, value: dict) -> None:
 def validate_state(state: dict, name: str, identity: str) -> dict:
     if (not isinstance(state, dict) or set(state) != {"project", "uuid", "functions"}
             or state["project"] != name or state["uuid"] != identity
-            or not isinstance(state["functions"], dict) or len(state["functions"]) > MAX_FUNCTIONS):
+            or not isinstance(state["functions"], dict) or len(state["functions"]) > MAX_FUNCTIONS * 2):
         raise RuntimeError("Function storage project identity mismatch")
     for slug, item in state["functions"].items():
         function_name(slug)
         if (not isinstance(item, dict) or set(item) != {"draft", "published"}
-                or not isinstance(item["draft"], str) or not REVISION.fullmatch(item["draft"])
+                or (item["draft"] is None and item["published"] is not None)
+                or (item["draft"] is not None and
+                    (not isinstance(item["draft"], str) or not REVISION.fullmatch(item["draft"])))
                 or (item["published"] is not None and
                     (not isinstance(item["published"], str) or not REVISION.fullmatch(item["published"])))):
             raise RuntimeError("Invalid function revision pointers")
+    if sum(item["draft"] is not None for item in state["functions"].values()) > MAX_FUNCTIONS:
+        raise RuntimeError("Too many saved functions")
     return state
 
 
@@ -135,12 +139,36 @@ def finish_publication(root: Path, name: str, identity: str) -> None:
     edge_functions.sync_directory(path.parent)
 
 
-def begin_publication(root: Path, previous: dict, proposed: dict, context: dict) -> None:
+def begin_publication(root: Path, previous: dict, proposed: dict, context: dict, *, action: str = "publish") -> None:
     # A durable intent bridges the two atomic files. A process killed after
     # runtime activation can be recovered without publishing any later draft.
     atomic_json(directory(root, previous["project"], previous["uuid"]) / "publication.json", {
-        "previous": previous, "proposed": proposed, "runtime_revision": context["revision"],
+        "previous": previous, "proposed": proposed, "runtime_revision": context["revision"], "action": action,
     })
+
+
+def validate_transition(root: Path, previous: dict, proposed: dict, action: str) -> None:
+    before, after = previous["functions"], proposed["functions"]
+    changes = [slug for slug in set(before) | set(after) if before.get(slug) != after.get(slug)]
+    if len(changes) != 1:
+        raise RuntimeError("Function operation must change exactly one function")
+    slug = changes[0]
+    old, new = before.get(slug), after.get(slug)
+    if action == "publish":
+        valid = old and new and old["draft"] is not None and old["draft"] == new["draft"] and new["published"] == new["draft"]
+    else:
+        legacy = legacy_functions(root, previous["project"])
+        if action == "unpublish":
+            valid = new and new["draft"] is not None and new["published"] is None and (
+                old and old["draft"] == new["draft"] or not old and slug in legacy and
+                version(previous["project"], previous["uuid"], slug, legacy[slug])[0] == new["draft"])
+        elif action == "delete":
+            valid = (old or slug in legacy) and (
+                new == {"draft": None, "published": None} if slug in legacy else new is None)
+        else:
+            valid = False
+    if not valid:
+        raise RuntimeError("Invalid function publication transition")
 
 
 def recover_publication(root: Path, name: str, identity: str) -> None:
@@ -154,17 +182,13 @@ def recover_publication(root: Path, name: str, identity: str) -> None:
         raise
     try:
         intent = json.loads(data)
-        if (not isinstance(intent, dict) or set(intent) != {"previous", "proposed", "runtime_revision"}
+        if (not isinstance(intent, dict) or set(intent) not in ({"previous", "proposed", "runtime_revision"},
+                {"previous", "proposed", "runtime_revision", "action"})
                 or not isinstance(intent["runtime_revision"], str) or not REVISION.fullmatch(intent["runtime_revision"])):
             raise RuntimeError("Invalid function publication intent")
         previous = validate_state(intent["previous"], name, identity)
         proposed = validate_state(intent["proposed"], name, identity)
-        if set(previous["functions"]) != set(proposed["functions"]):
-            raise RuntimeError("Publication intent changed function names")
-        changes = [slug for slug in previous["functions"] if previous["functions"][slug] != proposed["functions"][slug]]
-        if (len(changes) != 1 or any(previous["functions"][slug]["draft"] != proposed["functions"][slug]["draft"] for slug in previous["functions"])
-                or proposed["functions"][changes[0]]["published"] != proposed["functions"][changes[0]]["draft"]):
-            raise RuntimeError("Publication intent must activate one saved draft")
+        validate_transition(root, previous, proposed, intent.get("action", "publish"))
         current = read_state(root, name, identity)
         if current != previous and current != proposed:
             raise RuntimeError("Function state changed during interrupted publication")
@@ -228,6 +252,8 @@ def legacy_functions(root: Path, name: str) -> dict[str, list[dict]]:
 def item(root: Path, state: dict, slug: str, legacy: dict) -> dict | None:
     pointers = state["functions"].get(slug)
     if pointers:
+        if pointers["draft"] is None:
+            return None
         files = read_version(root, state, slug, pointers["draft"])
         return {"name": slug, "revision": pointers["draft"], "published_revision": pointers["published"], "files": files}
     if slug in legacy:
@@ -236,12 +262,20 @@ def item(root: Path, state: dict, slug: str, legacy: dict) -> dict | None:
     return None
 
 
+def function_names(state: dict, legacy: dict) -> list[str]:
+    return sorted(slug for slug in set(legacy) | set(state["functions"])
+                  if state["functions"].get(slug, {}).get("draft", "legacy") is not None)
+
+
 def published_files(root: Path, name: str, identity: str, *, state: dict | None = None) -> dict[str, bytes]:
     state = load(root, name, identity) if state is None else state
     functions = legacy_functions(root, name)
     for slug, pointers in state["functions"].items():
         if pointers["published"]:
             functions[slug] = read_version(root, state, slug, pointers["published"])
+        else:
+            # Explicit draft/unpublish/delete state masks files from the old layout.
+            functions.pop(slug, None)
     if len(functions) > MAX_FUNCTIONS:
         raise RuntimeError("Too many published functions")
     return {slug + "/" + file["name"]: file["content"].encode()

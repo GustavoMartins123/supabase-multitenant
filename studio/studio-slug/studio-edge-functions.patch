@@ -2,9 +2,9 @@ diff --git a/apps/studio/components/interfaces/Functions/SelfHostedEdgeFunctions
 new file mode 100644
 --- /dev/null
 +++ b/apps/studio/components/interfaces/Functions/SelfHostedEdgeFunctions.tsx
-@@ -0,0 +1,216 @@
+@@ -0,0 +1,266 @@
 +// Local Studio management uses the authenticated gateway, never project API keys.
-+import { useQuery } from '@tanstack/react-query'
++import { useQuery, useQueryClient } from '@tanstack/react-query'
 +import { useParams } from 'common'
 +import Link from 'next/link'
 +import { useRouter } from 'next/router'
@@ -104,6 +104,8 @@ new file mode 100644
 +const fingerprint = (files: FileData[]) => JSON.stringify(files.map(({ name, content }) => ({ name, content })))
 +
 +function FunctionEditor({ projectRef, slug }: { projectRef: string; slug?: string }) {
++  const router = useRouter()
++  const queryClient = useQueryClient()
 +  const [name, setName] = useState(slug ?? '')
 +  const [info, setInfo] = useState<FunctionBody>()
 +  const [files, setFiles] = useState<FileData[]>([{ id: 0, name: 'index.ts', content: STARTER, state: 'new' }])
@@ -111,6 +113,8 @@ new file mode 100644
 +  const [busy, setBusy] = useState(false)
 +  const [failure, setFailure] = useState('')
 +  const [selected, setSelected] = useState(0)
++  const [pendingAction, setPendingAction] = useState<'unpublish' | 'delete' | null>(null)
++  const [deleted, setDeleted] = useState(false)
 +  const mounted = useRef(true)
 +  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
 +  const query = useQuery<FunctionList | FunctionBody>({
@@ -132,7 +136,10 @@ new file mode 100644
 +    }
 +  }, [slug, query.data, info])
 +  const dirty = fingerprint(files) !== saved
-+  const navigation = usePreventNavigationOnUnsavedChanges({ hasChanges: dirty || busy })
++  const navigation = usePreventNavigationOnUnsavedChanges({ hasChanges: !deleted && (dirty || busy) })
++  useEffect(() => {
++    if (deleted) void router.replace(`/project/${projectRef}/functions`)
++  }, [deleted, projectRef, router])
 +  const enabled = info?.enabled ?? query.data?.enabled ?? false
 +  const loaded = !!query.data && (!slug || !!info)
 +  const validName = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(name) && name !== 'main'
@@ -174,6 +181,34 @@ new file mode 100644
 +    } finally { if (mounted.current) setBusy(false) }
 +  }
 +
++  async function removeFunction(action: 'unpublish' | 'delete') {
++    if (!info) return
++    setBusy(true)
++    setFailure('')
++    const options = {
++      method: action === 'delete' ? 'DELETE' : 'POST',
++      body: JSON.stringify({ revision: info.revision, expected_published_revision: info.published_revision }),
++    }
++    try {
++      if (action === 'delete') {
++        await management<{ deleted: boolean }>(projectRef, `/${encodeURIComponent(name)}`, options)
++        if (!mounted.current) return
++        setDeleted(true)
++        toast.success('Function deleted from this project.')
++      } else {
++        const result = await management<FunctionBody>(projectRef, `/${encodeURIComponent(name)}/unpublish`, options)
++        if (!mounted.current) return
++        setInfo(result)
++        toast.success('Function unpublished. The saved draft is preserved.')
++      }
++      void queryClient.invalidateQueries({ queryKey: ['local-edge-functions', projectRef] })
++    } catch (error) {
++      if (mounted.current) setFailure(error instanceof Error ? error.message : 'Function removal failed')
++    } finally { if (mounted.current) setBusy(false) }
++  }
++
++  if (deleted) return <p role="status" className="p-6">Function deleted. Returning to the function list…</p>
++
 +  return (
 +    <div className="w-full flex flex-col min-h-[70vh]">
 +      <div className="p-5 space-y-3 border-b">
@@ -193,7 +228,11 @@ new file mode 100644
 +        <div inert={busy} className="flex flex-col flex-1 min-h-[450px]">
 +          <FileExplorerAndEditor editable files={files} onFilesChange={setFiles} selectedFileId={selected} setSelectedFileId={setSelected} />
 +        </div>
-+        <div className="flex items-center justify-end gap-4 p-4 border-t">
++        <div className="flex flex-wrap items-center justify-end gap-4 p-4 border-t">
++          {info && <>
++            <Button variant="danger" disabled={busy} onClick={() => setPendingAction('delete')}>Delete function</Button>
++            <Button variant="default" disabled={busy || !info.published_revision} onClick={() => setPendingAction('unpublish')}>Unpublish function</Button>
++          </>}
 +          <Label htmlFor="local-function-name">Function name</Label>
 +          <Input id="local-function-name" className="w-64" value={name} disabled={!!slug || !!info || busy}
 +            onChange={(event: ChangeEvent<HTMLInputElement>) => setName(event.target.value)} placeholder="my-function" />
@@ -201,6 +240,17 @@ new file mode 100644
 +          <Button disabled={busy || !enabled || !info?.revision || dirty || info.revision === info.published_revision} onClick={publish}>Publish function</Button>
 +        </div>
 +      </>}
++      <DiscardChangesConfirmationDialog visible={pendingAction !== null}
++        title={`${pendingAction === 'delete' ? 'Delete' : 'Unpublish'} function "${name}"?`}
++        description={pendingAction === 'delete'
++          ? `This removes the saved function and stops its public endpoint. Other functions are preserved.${dirty ? ' Unsaved changes in this editor will be discarded.' : ''}`
++          : 'The public endpoint will stop serving this function. Your saved draft and unsaved editor changes are preserved.'}
++        confirmLabel={pendingAction === 'delete' ? 'Delete function' : 'Unpublish function'} cancelLabel="Cancel"
++        onCancel={() => setPendingAction(null)} onClose={() => {
++          const action = pendingAction
++          setPendingAction(null)
++          if (action) void removeFunction(action)
++        }} />
 +      <DiscardChangesConfirmationDialog visible={navigation.shouldConfirmNavigation}
 +        onCancel={navigation.handleCancelNavigation} onClose={navigation.handleConfirmNavigation} />
 +    </div>
@@ -219,6 +269,7 @@ new file mode 100644
 +SelfHostedEdgeFunctionsPage.getLayout = (page: ReactNode) => (
 +  <DefaultLayout><EdgeFunctionsLayout title="Edge Functions">{page}</EdgeFunctionsLayout></DefaultLayout>
 +)
+
 diff --git a/apps/studio/pages/project/[ref]/functions/index.tsx b/apps/studio/pages/project/[ref]/functions/index.tsx
 --- a/apps/studio/pages/project/[ref]/functions/index.tsx
 +++ b/apps/studio/pages/project/[ref]/functions/index.tsx
