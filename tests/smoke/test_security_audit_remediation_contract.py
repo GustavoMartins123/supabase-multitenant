@@ -290,12 +290,17 @@ class StepUpCoverageTest(unittest.TestCase):
         self.assertEqual(python_actions, lua_actions)
 
         # O CHECK do banco precisa aceitar exatamente as mesmas acoes, senao o
-        # consumo do grant falha com violacao de constraint em runtime.
+        # consumo do grant falha com violacao de constraint em runtime. Outras
+        # tabelas (ex.: studio_edge_audit) tem CHECKs de `action IN` propios,
+        # entao so a constraint nomeada do step-up conta; a ultima definicao
+        # vence, como em runtime.
         migrations = sorted((APP / "migrations").glob("*.sql"))
         allowed: set[str] = set()
         for migration in migrations:
             for match in re.finditer(
-                r"action IN \((.*?)\)", read(migration), re.S
+                r"studio_step_up_grant_consumptions_action_check CHECK \(action IN \((.*?)\)\)",
+                read(migration),
+                re.S,
             ):
                 allowed = set(re.findall(r"'([a-z_]+)'", match.group(1)))
         self.assertEqual(

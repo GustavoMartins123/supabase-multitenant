@@ -479,6 +479,28 @@
         "title": "AvailableProjectUser",
         "type": "object"
       },
+      "CodeFile": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "maxLength": 1000000,
+            "title": "Content",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "content"
+        ],
+        "title": "CodeFile",
+        "type": "object"
+      },
       "CollaborationHintItem": {
         "additionalProperties": true,
         "properties": {
@@ -1651,6 +1673,38 @@
           "source"
         ],
         "title": "DirectoryUser",
+        "type": "object"
+      },
+      "DraftBody": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_revision": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Revision"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/CodeFile"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "files"
+        ],
+        "title": "DraftBody",
         "type": "object"
       },
       "DuplicateProject": {
@@ -3622,6 +3676,34 @@
           "projects"
         ],
         "title": "ProjectsInfoResponse",
+        "type": "object"
+      },
+      "PublishBody": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_published_revision": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Published Revision"
+          },
+          "revision": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Revision",
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision",
+          "expected_published_revision"
+        ],
+        "title": "PublishBody",
         "type": "object"
       },
       "QueuedJobResponse": {
@@ -11913,6 +11995,327 @@
         "summary": "Content Item",
         "tags": [
           "studio-content"
+        ]
+      }
+    },
+    "/api/projects/{ref}/edge-functions": {
+      "get": {
+        "operationId": "function_list_api_projects__ref__edge_functions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Function List",
+        "tags": [
+          "studio-edge-functions"
+        ]
+      }
+    },
+    "/api/projects/{ref}/edge-functions/{slug}": {
+      "delete": {
+        "operationId": "function_delete_api_projects__ref__edge_functions__slug__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Function Delete",
+        "tags": [
+          "studio-edge-functions"
+        ]
+      },
+      "get": {
+        "operationId": "function_get_api_projects__ref__edge_functions__slug__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Function Get",
+        "tags": [
+          "studio-edge-functions"
+        ]
+      },
+      "put": {
+        "operationId": "function_save_api_projects__ref__edge_functions__slug__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Function Save",
+        "tags": [
+          "studio-edge-functions"
+        ]
+      }
+    },
+    "/api/projects/{ref}/edge-functions/{slug}/publish": {
+      "post": {
+        "operationId": "function_publish_api_projects__ref__edge_functions__slug__publish_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Function Publish",
+        "tags": [
+          "studio-edge-functions"
+        ]
+      }
+    },
+    "/api/projects/{ref}/edge-functions/{slug}/unpublish": {
+      "post": {
+        "operationId": "function_unpublish_api_projects__ref__edge_functions__slug__unpublish_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Function Unpublish",
+        "tags": [
+          "studio-edge-functions"
         ]
       }
     },

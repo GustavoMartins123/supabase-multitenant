@@ -12,15 +12,16 @@ class FunctionsProjectionContractTest(unittest.TestCase):
         self.assertIn('source: ./.functions-tenants', block)
         self.assertIn('read_only: true', block)
         self.assertIn('create_host_path: false', block)
-        self.assertIn('/home/deno/functions:ro,Z', block)
+        self.assertIn('./volumes/functions/main:/home/deno/main:ro,Z', block)
+        self.assertIn('./.functions-runtime:/home/deno/runtime:ro', block)
 
     def test_one_canonical_projection_and_fresh_worker_per_decision(self):
         source = (ROOT / 'servidor/volumes/functions/main/index.ts').read_text(encoding='utf-8')
-        self.assertIn("'/home/deno/tenant-config'", source)
+        self.assertIn('/home/deno/tenant-config', source)
         self.assertNotIn('/home/deno/projects', source)
         self.assertNotIn('parseDotenv', source)
         self.assertIn('forceCreate: true', source)
-        self.assertIn('parsed.project_ref !== ref', source)
+        self.assertIn('value.project_ref !== ref', source)
 
     def test_all_lifecycle_implementations_hold_locks_and_publish_after_success(self):
         for name in ('generate', 'duplicate', 'restore'):
