@@ -626,7 +626,7 @@ process.stdout.write(body);});'''
     lifecycle('operations/setup_vector_bucket_wrapper.sh', schema_only, 'fresh-vectors')
     check_signed_gateway(schema_only, copied, 403)
     config = json.loads(run('docker', 'inspect', 'supabase-edge-functions'))[0]
-    assert {m['Destination'] for m in config['Mounts']} == {'/home/deno/functions', '/home/deno/tenant-config'}
+    assert {m['Destination'] for m in config['Mounts']} == {'/home/deno/main', '/home/deno/runtime', '/home/deno/tenant-config', '/etc/hosts'}
     assert config['Config']['Env'] and not any(e.startswith(('POSTGRES_PASSWORD=', 'JWT_SECRET=', 'SUPABASE_SERVICE_ROLE_KEY=')) for e in config['Config']['Env'])
     print('PASS physical create / duplicate / rename / rotate / backup / restore / delete-files + Edge inventory', flush=True)
 

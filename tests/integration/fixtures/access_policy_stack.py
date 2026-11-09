@@ -91,6 +91,11 @@ async def seed():
             owner,
             member,
         )
+        await conn.execute(
+            "INSERT INTO project_edge_functions(project_id,enabled,updated_by) VALUES($1,true,$2)",
+            pid,
+            owner,
+        )
         project = dict(id=str(pid), name=name, ref=ref, gateway=gateway, slots=[])
         for kind in ("publishable", "secret"):
             sid, kid, token = uuid.uuid4(), uuid.uuid4(), generate_opaque_key(pid, kind)
