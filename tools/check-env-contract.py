@@ -71,6 +71,7 @@ ENV_ASSIGN_RE = re.compile(r"^\s*(?:-\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*[:=]")
 PLACEHOLDER_TOKEN_RE = re.compile(r"<[^<>\s]+>")
 
 KNOWN_OPTIONAL = {
+    "MAILER_TEMPLATE_URL": "default interno http://template-service:18020 no adapter de templates",
     "FUNCTIONS_TENANT_TEST_URL": "harness sintetico obrigatorio em run_functions_security_tests.py, nunca runtime",
     "FUNCTIONS_PROJECTION_TEST_DIR": "diretorio sintetico do mesmo harness, nunca runtime",
     "CONTROL_PLANE_TEST_DSN": "DSN descartavel gerado pelo runner obrigatorio de seguranca, nunca runtime",

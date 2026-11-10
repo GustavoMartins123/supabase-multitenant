@@ -133,8 +133,11 @@ class BrowserLoadsObjectsFromTheStudioOriginTest(unittest.TestCase):
 package.path = "{LUA.as_posix()}/?.lua;{LUA.as_posix()}/?/init.lua;" .. package.path
 local resolver = require("project_context.project_ref_resolver")
 
-assert(resolver.ref_from_path("/storage/v1/meu_projeto/object/sign/efdf/a.JPG") == "meu_projeto")
-assert(resolver.ref_from_path("/storage/v1/meu_projeto/object/public/efdf/a.png") == "meu_projeto")
+assert(resolver.ref_from_path("/storage/v1/aaaaaaaaaaaaaaaaaaaa/object/sign/efdf/a.JPG") == "aaaaaaaaaaaaaaaaaaaa")
+assert(resolver.ref_from_path("/storage/v1/aaaaaaaaaaaaaaaaaaaa/object/public/efdf/a.png") == "aaaaaaaaaaaaaaaaaaaa")
+
+-- Nomes de projeto nao sao refs validos no path de objetos.
+assert(resolver.ref_from_path("/storage/v1/meu_projeto/object/sign/efdf/a.JPG") == nil)
 
 -- O tus resolve o projeto pelo header; o path nao pode virar um ref falso.
 assert(resolver.ref_from_path("/storage/v1/upload/resumable") == nil)

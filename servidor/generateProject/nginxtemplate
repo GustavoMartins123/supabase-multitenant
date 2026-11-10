@@ -139,56 +139,6 @@ http {
             proxy_set_header X-Gateway-Request-Method $admission_request_method;
         }
        
-        location /recovery.html {
-            set $opaque_target_service auth;
-            allow ${SUPABASE_NETWORK_SUBNET};
-            deny all;
-            root /usr/share/nginx/html;
-            add_header Content-Type text/html;
-            add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
-            expires off;
-        }
-
-        location /invite.html {
-            set $opaque_target_service auth;
-            allow ${SUPABASE_NETWORK_SUBNET};
-            deny all;
-            root /usr/share/nginx/html;
-            add_header Content-Type text/html;
-            add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
-            expires off;
-        }
-
-        location /magiclink.html {
-            set $opaque_target_service auth;
-            allow ${SUPABASE_NETWORK_SUBNET};
-            deny all;
-            root /usr/share/nginx/html;
-            add_header Content-Type text/html;
-            add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
-            expires off;
-        }
-
-        location /confirmation.html {
-            set $opaque_target_service auth;
-            allow ${SUPABASE_NETWORK_SUBNET};
-            deny all;
-            root /usr/share/nginx/html;
-            add_header Content-Type text/html;
-            add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
-            expires off;
-        }
-
-        location /email_change.html {
-            set $opaque_target_service auth;
-            allow ${SUPABASE_NETWORK_SUBNET};
-            deny all;
-            root /usr/share/nginx/html;
-            add_header Content-Type text/html;
-            add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate";
-            expires off;
-        }
-
         location = /verify-success.html {
             set $opaque_target_service auth;
             root /usr/share/nginx/html;

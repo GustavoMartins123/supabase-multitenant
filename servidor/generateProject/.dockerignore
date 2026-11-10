@@ -2,3 +2,6 @@
 !Dockerfile
 !nginx/
 !nginx/nginx_*.conf
+
+!nginx/public/
+!nginx/public/**

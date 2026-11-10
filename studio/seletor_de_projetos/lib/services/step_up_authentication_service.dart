@@ -12,6 +12,7 @@ enum StepUpAction {
   activateSecretKey('activate_secret_key'),
   updateSecretKeyPolicy('update_secret_key_policy'),
   updateAccessPolicy('update_access_policy'),
+  publishMailerTemplate('publish_mailer_template'),
   cancelSecretKeyRotation('cancel_secret_key_rotation'),
   revokeSecretKey('revoke_secret_key');
 

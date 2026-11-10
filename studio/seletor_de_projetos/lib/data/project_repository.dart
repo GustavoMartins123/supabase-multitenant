@@ -10,6 +10,7 @@ import '../models/user_models.dart';
 import '../models/project_user_telemetry.dart';
 import '../models/opaque_api_key.dart';
 import '../session.dart';
+import '../services/step_up_authentication_service.dart';
 import 'api_client.dart';
 
 final projectRepositoryProvider = Provider((ref) {
@@ -60,6 +61,28 @@ class ProjectSettingsData {
 }
 
 class ProjectRepository {
+
+  Future<String> confirmMailerPublication(String projectRef, String kind,
+      int version, String digest, String password) async {
+    final service = StepUpAuthenticationService();
+    try {
+      return await service.requestToken(password: password, action: StepUpAction.publishMailerTemplate,
+        projectRef: projectRef, resourceId: '$kind:$version:$digest');
+    } finally { service.close(); }
+  }
+
+  Future<Map<String, dynamic>> mailerTemplatesRequest(String projectRef, {
+    String? kind, String? operation, String method = 'GET', Map<String, dynamic>? body, String? stepUpToken,
+  }) async {
+    final suffix = '${kind == null ? '' : '/$kind'}${operation == null ? '' : '/$operation'}';
+    final response = await _client.send(method,
+      Uri.parse('/api/projects/$projectRef/mailer-templates$suffix'),
+      headers: {if (body != null) 'Content-Type': 'application/json', if (stepUpToken != null) 'X-Step-Up-Token': stepUpToken},
+      body: body == null ? null : jsonEncode(body));
+    _ensureCommandSucceeded(response);
+    return decodeJsonObject(response, context: 'Templates de e-mail');
+  }
+
   ProjectRepository({ApiClient? client}) : _client = client ?? ApiClient();
 
   final ApiClient _client;

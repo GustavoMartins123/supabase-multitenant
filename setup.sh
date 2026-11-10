@@ -573,6 +573,7 @@ atomic_write(path, content, mode=0o600, replace=True)
 PYEOF
     PLATFORM_READER_DB_PASSWORD=$(env_secret servidor/.env PLATFORM_READER_DB_PASSWORD generate_key_authorizer_password)
     safe_sed "s|PLATFORM_READER_DB_PASSWORD=pass|PLATFORM_READER_DB_PASSWORD=$PLATFORM_READER_DB_PASSWORD|g" servidor/.env
+    python3 servidor/generateProject/configure_mailer_runtime.py
     PLATFORM_APP_DB_PASSWORD=$(env_secret servidor/.env PLATFORM_APP_DB_PASSWORD generate_key_authorizer_password)
     safe_sed "s|PLATFORM_APP_DB_PASSWORD=pass|PLATFORM_APP_DB_PASSWORD=$PLATFORM_APP_DB_PASSWORD|g" servidor/.env
     META_ADMIN_DB_PASSWORD=$(env_secret servidor/.env META_ADMIN_DB_PASSWORD generate_key_authorizer_password)

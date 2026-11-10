@@ -357,6 +357,10 @@ async def _command_apply(*, wait_timeout: float, skip_roles: bool) -> int:
                 pool, password=meta_admin_password
             )
             print("[migrations] identidade platform_meta_admin provisionada")
+            from app.control_plane_roles import ensure_mailer_template_role
+            password_file = pathlib.Path(os.getenv("MAILER_TEMPLATE_DB_PASSWORD_FILE", "/run/secrets/mailer/DB_PASSWORD"))
+            await ensure_mailer_template_role(pool, password=password_file.read_text().strip())
+            print("[migrations] identidade mailer_template_service provisionada")
             await ensure_tenant_meta_roles(pool, admin_dsn=_require_dsn(), password=meta_admin_password)
             print("[migrations] identidades SQL por tenant provisionadas")
     finally:

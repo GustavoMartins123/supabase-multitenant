@@ -15,6 +15,7 @@ local ACTIONS = {
     activate_secret_key = true,
     update_secret_key_policy = true,
     update_access_policy = true,
+    publish_mailer_template = true,
     cancel_secret_key_rotation = true,
     revoke_secret_key = true,
 }
@@ -93,6 +94,12 @@ end
 if action == "create_secret_key" then
     if #resource < 3 or #resource > 40 or not resource:match(SLOT_PATTERN) then
         return respond(ngx.HTTP_BAD_REQUEST, "Invalid API key slot name")
+    end
+elseif action == "publish_mailer_template" then
+    local kind, revision, digest = resource:match("^([a-z_]+):([1-9]%d*):([0-9a-f]+)$")
+    local kinds = {confirmation=true,invite=true,magic_link=true,recovery=true,email_change=true,reauthentication=true}
+    if not kind or not kinds[kind] or #revision > 10 or tonumber(revision)>2147483646 or #digest~=64 then
+        return respond(ngx.HTTP_BAD_REQUEST, "Invalid mailer publication resource")
     end
 elseif action == "update_access_policy" then
     local identity, revision = resource:match("^([^:]+):([1-9]%d*)$")

@@ -32,6 +32,7 @@ STEP_UP_ACTIONS = frozenset(
         "activate_secret_key",
         "update_secret_key_policy",
         "update_access_policy",
+        "publish_mailer_template",
         "cancel_secret_key_rotation",
         "revoke_secret_key",
     }
@@ -174,6 +175,9 @@ def resolve_step_up_grant(
             _forbidden()
     elif action == "create_secret_key":
         if not _SLOT_NAME_PATTERN.fullmatch(resource):
+            _forbidden()
+    elif action == "publish_mailer_template":
+        if not re.fullmatch(r"(?:confirmation|invite|magic_link|recovery|email_change|reauthentication):[1-9][0-9]{0,9}:[0-9a-f]{64}",resource):
             _forbidden()
     elif action == "update_access_policy":
         scope_id, separator, revision = resource.partition(":")

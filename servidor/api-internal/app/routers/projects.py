@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 import asyncpg
 
 from app.database import get_pool
+from app.mailer_templates import copy_project as copy_mailer_templates
 from app.access_policy import copy_project_access_policy
 from app.identity_schemas import ProjectIdentity, JobIdentity
 from app.dependencies import (
@@ -363,6 +364,7 @@ async def duplicate_project(
                 )
 
                 await copy_project_access_policy(conn, project_row["id"], project_id, auth_user["db_user_id"])
+                await copy_mailer_templates(conn, project_row["id"], project_id, auth_user["db_user_id"])
 
                 await conn.execute("""
                     INSERT INTO project_members(project_id, user_id, role)

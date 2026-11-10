@@ -12,7 +12,6 @@ GOTRUE_JWT_ADMIN_ROLES=service_role
 GOTRUE_JWT_AUD=authenticated
 GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated
 AUTH_DB_USER=supabase_auth_admin
-GOTRUE_MAILER_TEMPLATES_BASE_URL=http://supabase-nginx-{{project_id}}:8080
 POSTGREST_IMAGE=postgrest/postgrest:v14.14
 POSTGREST_DB_USER=authenticator
 PGRST_DB_SCHEMA_CACHE_DURATION=20

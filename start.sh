@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+python3 "$ROOT_DIR/servidor/generateProject/configure_mailer_runtime.py"
 DEPLOYMENT_PROFILE="${1:-${DEPLOYMENT_PROFILE:-single-node}}"
 HOST_AGENT_UNIT="/etc/systemd/system/supabase-host-agent.service"
 HOST_AGENT_DIR="$ROOT_DIR/servidor/host-agent"
@@ -216,6 +217,9 @@ if [ -n "$desktop_wsl_host" ]; then
     TRAEFIK_COMPOSE+=(-f traefik/docker-compose.desktop-wsl.yml)
 fi
 "${TRAEFIK_COMPOSE[@]}" --env-file .env up -d --force-recreate
+
+echo "Migrando templates de e-mail dos projetos existentes..."
+python3 "$ROOT_DIR/servidor/generateProject/migrate_mailer_templates.py" --apply
 
 echo "Iniciando projetos Supabase..."
 # shellcheck disable=SC1091

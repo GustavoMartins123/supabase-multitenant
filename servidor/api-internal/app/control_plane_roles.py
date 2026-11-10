@@ -395,3 +395,10 @@ async def ensure_platform_meta_admin_role(
                 """
             )
             await conn.execute(grant_connect)
+
+
+async def ensure_mailer_template_role(pool, *, password):
+    from app.mailer_db_role import role_sql
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(role_sql(password))

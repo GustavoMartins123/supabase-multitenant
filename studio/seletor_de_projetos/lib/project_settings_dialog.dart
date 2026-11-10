@@ -24,6 +24,7 @@ import 'widgets/section_widget.dart';
 import 'widgets/project_settings/status_section.dart';
 import 'widgets/project_settings/members_section.dart';
 import 'widgets/project_settings/env_settings_section.dart';
+import 'widgets/project_settings/mailer_templates_section.dart';
 import 'widgets/project_settings/user_telemetry_section.dart';
 import 'widgets/project_settings/opaque_api_keys_section.dart';
 import 'widgets/project_settings/access_policy_dialog.dart';
@@ -34,6 +35,7 @@ const _kTabs = <({String label, IconData icon})>[
   (label: 'Chaves', icon: Icons.key_outlined),
   (label: 'Ambiente', icon: Icons.tune),
   (label: 'Acesso', icon: Icons.people_outline),
+  (label: 'E-mails', icon: Icons.mail_outline),
 ];
 
 class ProjectSettingsDialog extends ConsumerStatefulWidget {
@@ -279,6 +281,8 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
                         myRole, projectBusy, isAdmin, serverDomain as String),
                     _buildEnvironmentTab(isAdmin),
                     _buildAccessTab(isAdmin),
+                    _buildTabBody([if (isAdmin) MailerTemplatesSection(projectRef: widget.ref)
+                      else const Text('Apenas administradores podem gerenciar templates de e-mail.')]),
                   ],
                 ),
               ),

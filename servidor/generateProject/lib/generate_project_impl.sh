@@ -491,6 +491,8 @@ template_to_file "$SCRIPT_DIR/dockercomposetemplate" "$OUT_DIR/docker-compose.ym
 template_to_file "$SCRIPT_DIR/poolertemplate" "$OUT_DIR/pooler/pooler.exs"
 template_to_file "$SCRIPT_DIR/Dockerfile" "$OUT_DIR/Dockerfile"
 template_to_file "$SCRIPT_DIR/.dockerignore" "$OUT_DIR/.dockerignore"
+cp -R "$SCRIPT_DIR/public" "$OUT_DIR/nginx/public"
+python3 "$SCRIPT_DIR/configure_mailer_templates.py" "$OUT_DIR" "$PROJECT_UUID"
 chmod 600 "$OUT_DIR/.env"
 apply_project_resource_limits "$PROJECT_ROOT/.env" "$OUT_DIR/.env" "${PROJECT_RESOURCE_PROFILE_OVERRIDE:-}"
 chmod 644 "$OUT_DIR/nginx/nginx_${PROJECT_ID}.conf" "$OUT_DIR/.dockerignore"

@@ -177,6 +177,8 @@ app.include_router(lifecycle_router)
 app.include_router(opaque_keys_router)
 app.include_router(access_policy_router)
 app.include_router(platform_auth_router)
+from app.routers.mailer_templates import router as mailer_templates_router
+app.include_router(mailer_templates_router)
 app.include_router(studio_content_router)
 
 # ``create`` nao e repetivel, mas e retomavel: o runner se religa ao mesmo
