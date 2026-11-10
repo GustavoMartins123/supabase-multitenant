@@ -1,8 +1,10 @@
 import datetime as dt
+import json
 import hmac
 import re
 import asyncpg
 import httpx
+from app import storage_policies
 from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
@@ -444,6 +446,23 @@ async def proxy_project_meta(
     if x_pg_application_name:
         upstream_headers["x-pg-application-name"] = x_pg_application_name
 
+    upstream_body = await request.body()
+    if target_path == "query" and request.method == "POST":
+        try:
+            query_body = json.loads(upstream_body)
+        except (ValueError, UnicodeError):
+            query_body = None
+        if isinstance(query_body, dict) and isinstance(query_body.get("query"), str):
+            try:
+                prepared = storage_policies.prepare_policy_statements(query_body["query"])
+                if prepared is not None:
+                    query_body["query"] = storage_policies.rewrite_policy_statements(prepared, project_row["tenant_uuid"])
+                    upstream_body = json.dumps(query_body).encode()
+            except storage_policies.StoragePolicyError as error:
+                raise HTTPException(400, str(error)) from None
+            except (RuntimeError, OSError):
+                raise HTTPException(503, "Delegação de políticas do Storage indisponível") from None
+
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0)) as client:
             upstream_response = await client.request(
@@ -451,7 +470,7 @@ async def proxy_project_meta(
                 target_url,
                 params=list(request.query_params.multi_items()),
                 headers=upstream_headers,
-                content=await request.body(),
+                content=upstream_body,
             )
     except httpx.HTTPError as exc:
         print(f"[postgres_meta_proxy] {ref}: {exc}")

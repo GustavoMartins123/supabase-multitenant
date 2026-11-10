@@ -109,6 +109,7 @@ migrate_runtime_ownership() {
   for runtime_dir in "$SERVIDOR_DIR/.functions-tenants" "$SERVIDOR_DIR/.functions-locks" \
     "$SERVIDOR_DIR/.functions-studio" "$SERVIDOR_DIR/.functions-runtime" \
     "$SERVIDOR_DIR/.functions-hosts" \
+    "$SERVIDOR_DIR/secrets/mailer" \
     "$SERVIDOR_DIR/projects" "$SERVIDOR_DIR/backups" \
     "$SERVIDOR_DIR/volumes/storage"; do
     [[ -e "$runtime_dir" ]] || continue

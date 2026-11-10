@@ -3,6 +3,7 @@
 import hashlib
 import ipaddress
 import json
+import re
 import secrets
 import urllib.parse
 
@@ -100,7 +101,10 @@ def route(uri: str, public_ref: str | None):
         "/verify-success.html/",
         "/verify-success.js",
         "/verify-success.html/verify-success.js",
-    }:
+    } or re.fullmatch(
+        r"/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\.(?:html|js|css|png|jpg|jpeg|gif|svg|webp|ico|woff2?)",
+        path,
+    ):
         return "auth", True, "", parts
     raise HTTPException(404, "Project route not found")
 

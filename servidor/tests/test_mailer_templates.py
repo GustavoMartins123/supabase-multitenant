@@ -769,6 +769,20 @@ class MailerIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertIn("123456 enviado para pessoa@example.com", response.json()["html"])
 
+    async def test_preview_renders_signed_legacy_but_does_not_exempt_new_edits(self):
+        payload = self.legacy_payload()
+        await self.import_active_legacy(payload)
+        original = payload["projects"][0]["templates"]["magic_link"]
+        response = await self.client.post(self.base + "/magic_link/preview", headers=self.headers, json={"body": original})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("IDR Campo legado", response.json()["html"])
+        edited = original.replace("IDR Campo legado", "Outra edição")
+        response = await self.client.post(self.base + "/magic_link/preview", headers=self.headers, json={"body": edited})
+        self.assertEqual(response.status_code, 422, response.text)
+        other = f"/internal/projects/{self.other}/mailer-templates/magic_link/preview"
+        response = await self.client.post(other, headers=self.headers, json={"body": original})
+        self.assertEqual(response.status_code, 422, response.text)
+
     async def test_new_studio_edits_still_need_publication_after_migration(self):
         payload = self.legacy_payload()
         await self.import_active_legacy(payload)

@@ -35,6 +35,8 @@ class PublicRefRenderingTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
+        (self.root / "secrets/mailer").mkdir(parents=True)
+        (self.root / "secrets/mailer/URL_SECRET").write_text("a" * 64)
         self.project = self.root / "projects" / NAME
         self.project.mkdir(parents=True)
         (self.root / ".env").write_text(

@@ -19,6 +19,8 @@ GATEWAY_TOKEN = "b" * 64
 
 
 def prepare(directory: Path) -> None:
+    (directory / "secrets/mailer").mkdir(parents=True)
+    (directory / "secrets/mailer/URL_SECRET").write_text("a" * 64)
     project = directory / "projects" / NAME
     project.mkdir(parents=True)
     (directory / ".env").write_text(

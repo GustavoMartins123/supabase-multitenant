@@ -24,3 +24,9 @@ def tenant_assistant_reader_credentials(tenant_uuid: object, master_password: st
     meta_role, meta_password = tenant_meta_credentials(tenant_uuid, master_password)
     password = hashlib.sha256(f"assistant-reader-v1:{meta_password}".encode()).hexdigest()
     return meta_role.replace("tenant_meta_", "tenant_ai_reader_", 1), password
+
+
+def tenant_storage_policy_key(tenant_uuid: object, master_password: str) -> bytes:
+    tenant_meta_credentials(tenant_uuid, master_password)
+    identity = uuid.UUID(str(tenant_uuid))
+    return hmac.new(master_password.encode(), f"studio-storage-policies-v1:{identity}".encode(), hashlib.sha256).digest()

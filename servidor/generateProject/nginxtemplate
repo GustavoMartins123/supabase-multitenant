@@ -139,6 +139,9 @@ http {
             proxy_set_header X-Gateway-Request-Method $admission_request_method;
         }
        
+        # HOST_AGENT_PUBLIC_ASSETS
+        location / { return 404; }
+
         location = /verify-success.html {
             set $opaque_target_service auth;
             root /usr/share/nginx/html;

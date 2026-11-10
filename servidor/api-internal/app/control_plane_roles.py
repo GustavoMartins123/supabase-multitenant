@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit, quote
 
 import asyncpg
-from app.tenant_meta_identity import tenant_meta_credentials
+from app.tenant_meta_identity import tenant_meta_credentials, tenant_storage_policy_key
 
 
 async def ensure_tenant_meta_roles(pool: asyncpg.Pool, *, admin_dsn: str, password: str) -> None:
@@ -49,6 +49,9 @@ async def ensure_tenant_meta_roles(pool: asyncpg.Pool, *, admin_dsn: str, passwo
         try:
             async with conn.transaction():
                 await conn.execute(sql)
+                if await conn.fetchval("SELECT to_regclass('storage.objects') IS NOT NULL"):
+                    await conn.execute("SELECT set_config('platform.storage_policy_key',$1,true)", tenant_storage_policy_key(row["tenant_uuid"], password).hex())
+                    await conn.execute(Path(__file__).with_name("studio_storage_policies.sql").read_text())
         finally:
             await conn.close()
 

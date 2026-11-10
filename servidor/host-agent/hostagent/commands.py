@@ -37,6 +37,7 @@ from .security import (
     resolve_project_dir,
 )
 from .templates import sync_project_generated_files
+from .mailer_runtime import ensure_mailer_key
 from .progress import (
     DUPLICATE_PROGRESS_EVENTS, ROTATE_PROGRESS_EVENTS, REFERENCE_PROGRESS_EVENTS,
     RESTORE_PROGRESS_EVENTS, DELETE_FILES_PROGRESS_EVENTS, DELETE_STORAGE_PROGRESS_EVENTS,
@@ -615,6 +616,9 @@ async def handle_recreate_services(ctx: CommandContext, project: str, args: dict
             project_dir=project_dir,
             project=project,
         )
+
+    if not touches_nginx and "auth" in compose_services and "${MAILER_TEMPLATE_KEY" in (project_dir / "docker-compose.yml").read_text():
+        ensure_mailer_key(ctx.config.root, project_dir)
 
     ctx.state.report(progress=30, step="compose_up", message=f"Recriando servicos: {', '.join(compose_services)}")
     argv = [

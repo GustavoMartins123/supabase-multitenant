@@ -1,10 +1,10 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/project_repository.dart';
 import '../../supabase_colors.dart';
-import 'mailer_preview_stub.dart'
-    if (dart.library.html) 'mailer_preview_web.dart';
+import 'mailer_preview_panel.dart';
 import 'mailer_file_picker_stub.dart'
     if (dart.library.html) 'mailer_file_picker_web.dart';
 
@@ -32,8 +32,10 @@ const _historyLabels = {
 };
 
 class MailerTemplatesSection extends ConsumerStatefulWidget {
-  const MailerTemplatesSection({super.key, required this.projectRef});
+  const MailerTemplatesSection(
+      {super.key, required this.projectRef, this.onPreviewChanged});
   final String projectRef;
+  final ValueChanged<MailerPreviewData?>? onPreviewChanged;
 
   @override
   ConsumerState<MailerTemplatesSection> createState() =>
@@ -46,7 +48,13 @@ class _MailerTemplatesState extends ConsumerState<MailerTemplatesSection> {
   String _kind = 'magic_link';
   String? _error;
   String? _message;
-  String? _preview;
+  String? _previewHtml;
+  final _previewData = ValueNotifier<MailerPreviewData?>(null);
+  Timer? _previewTimer;
+  Timer? _previewCooldown;
+  bool _previewPending = false;
+  int _previewRevision = 0;
+  bool _previewOpen = false;
   List<String> _allowedOrigins = [];
   bool _busy = true;
   bool _dirty = false;
@@ -57,11 +65,17 @@ class _MailerTemplatesState extends ConsumerState<MailerTemplatesSection> {
   @override
   void initState() {
     super.initState();
+    _previewOpen = widget.onPreviewChanged != null;
     _load();
   }
 
   @override
   void dispose() {
+    _previewOpen = false;
+    _previewRevision++;
+    _previewTimer?.cancel();
+    _previewCooldown?.cancel();
+    _previewData.dispose();
     _editor.dispose();
     super.dispose();
   }
@@ -94,10 +108,110 @@ class _MailerTemplatesState extends ConsumerState<MailerTemplatesSection> {
       _kind = kind;
       _editor.text = _current['body'] as String;
       _dirty = false;
-      _preview = null;
+      _previewHtml = null;
       _error = null;
       _message = null;
     });
+    _schedulePreview(immediate: true);
+  }
+
+  void _setPreview({bool loading = false, String? error}) {
+    if (!mounted) return;
+    final data = _previewOpen
+        ? MailerPreviewData(
+            title: _labels[_kind]!,
+            html: _previewHtml,
+            loading: loading,
+            error: error,
+            allowedOrigins: _allowedOrigins,
+            onClose: _closePreview,
+            onRefresh: () => _schedulePreview(immediate: true),
+          )
+        : null;
+    _previewData.value = data;
+    widget.onPreviewChanged?.call(data);
+  }
+
+  void _closePreview() {
+    _previewOpen = false;
+    _previewTimer?.cancel();
+    _previewCooldown?.cancel();
+    _previewPending = false;
+    _previewRevision++;
+    _setPreview();
+  }
+
+  void _schedulePreview({bool immediate = false}) {
+    if (!_previewOpen || !mounted || _templates.isEmpty) return;
+    _previewTimer?.cancel();
+    _previewPending = false;
+    final revision = ++_previewRevision;
+    _setPreview(loading: true);
+    _previewTimer = Timer(
+        immediate ? Duration.zero : const Duration(milliseconds: 450), () {
+      if (!immediate && (_previewCooldown?.isActive ?? false)) {
+        _previewPending = true;
+      } else {
+        _renderPreview(revision);
+      }
+    });
+  }
+
+  Future<void> _renderPreview(int revision) async {
+    _previewCooldown?.cancel();
+    // Automatic updates stay below the service's 30 previews/minute limit.
+    _previewCooldown = Timer(const Duration(milliseconds: 2200), () {
+      if (_previewPending && mounted && _previewOpen) {
+        _previewPending = false;
+        _renderPreview(_previewRevision);
+      }
+    });
+    final kind = _kind;
+    final body = _editor.text;
+    try {
+      if (utf8.encode(body).length > 1024 * 1024) {
+        throw Exception('O HTML deve ter no máximo 1 MB.');
+      }
+      final data =
+          await ref.read(projectRepositoryProvider).mailerTemplatesRequest(
+        widget.projectRef,
+        kind: kind,
+        operation: 'preview',
+        method: 'POST',
+        body: {'body': body, 'version': _current['version']},
+      );
+      if (!mounted || !_previewOpen || revision != _previewRevision) return;
+      _previewHtml = data['html'] as String;
+      _setPreview();
+    } catch (error) {
+      if (mounted && _previewOpen && revision == _previewRevision) {
+        _setPreview(error: error.toString());
+      }
+    }
+  }
+
+  Future<void> _openPreview() async {
+    _previewOpen = true;
+    _schedulePreview(immediate: true);
+    if (widget.onPreviewChanged != null) return;
+    await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => Dialog(
+              backgroundColor: Colors.transparent,
+              child: SizedBox(
+                width: 680,
+                height: MediaQuery.sizeOf(dialogContext).height * .85,
+                child: ValueListenableBuilder<MailerPreviewData?>(
+                  valueListenable: _previewData,
+                  builder: (context, data, _) => data == null
+                      ? const SizedBox.shrink()
+                      : MailerPreviewPanel(
+                          data: data,
+                          onClose: () => Navigator.pop(dialogContext)),
+                ),
+              ),
+            ));
+    if (mounted) _closePreview();
   }
 
   Future<bool> _confirm(String title, String message) async =>
@@ -127,6 +241,10 @@ class _MailerTemplatesState extends ConsumerState<MailerTemplatesSection> {
   }
 
   Future<void> _act(String action) async {
+    if (action == 'preview') {
+      await _openPreview();
+      return;
+    }
     if (action == 'reset' &&
         !await _confirm('Restaurar padrão?',
             'Será criado um rascunho com o padrão da plataforma. Confirme a publicação para alterar os envios.')) {
@@ -146,12 +264,7 @@ class _MailerTemplatesState extends ConsumerState<MailerTemplatesSection> {
       final repository = ref.read(projectRepositoryProvider);
       final data = await repository.mailerTemplatesRequest(widget.projectRef,
           kind: _kind,
-          operation: action == 'preview' ? 'preview' : null,
-          method: action == 'preview'
-              ? 'POST'
-              : action == 'reset'
-                  ? 'DELETE'
-                  : 'PUT',
+          method: action == 'reset' ? 'DELETE' : 'PUT',
           body: action == 'reset'
               ? {'version': _current['version']}
               : {
@@ -160,18 +273,14 @@ class _MailerTemplatesState extends ConsumerState<MailerTemplatesSection> {
                 });
       if (!mounted) return;
       setState(() {
-        if (action == 'preview') {
-          _preview = data['html'] as String;
-        } else {
-          final index = _templates.indexWhere((row) => row['kind'] == _kind);
-          _templates[index] = data;
-          _editor.text = data['body'] as String;
-          _dirty = false;
-          _preview = null;
-          _message =
-              'Rascunho salvo. Os envios continuam usando a versão publicada.';
-        }
+        final index = _templates.indexWhere((row) => row['kind'] == _kind);
+        _templates[index] = data;
+        _editor.text = data['body'] as String;
+        _dirty = false;
+        _message =
+            'Rascunho salvo. Os envios continuam usando a versão publicada.';
       });
+      _schedulePreview(immediate: true);
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     } finally {
@@ -281,10 +390,10 @@ class _MailerTemplatesState extends ConsumerState<MailerTemplatesSection> {
         _templates[_templates.indexWhere((row) => row['kind'] == kind)] = data;
         _editor.text = data['body'] as String;
         _dirty = false;
-        _preview = null;
         _message =
             'Template publicado. Os próximos envios usarão a alteração após a renovação do cache (até 1 minuto).';
       });
+      _schedulePreview(immediate: true);
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     } finally {
@@ -352,10 +461,10 @@ class _MailerTemplatesState extends ConsumerState<MailerTemplatesSection> {
         _editor.text =
             (historical['body'] ?? _current['default_body']) as String;
         _dirty = true;
-        _preview = null;
         _message =
             'Versão ${selected['version']} carregada. Revise e salve para publicar.';
       });
+      _schedulePreview(immediate: true);
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     } finally {
@@ -376,10 +485,10 @@ class _MailerTemplatesState extends ConsumerState<MailerTemplatesSection> {
       setState(() {
         _editor.text = body;
         _dirty = true;
-        _preview = null;
         _error = null;
         _message = 'HTML importado. Confira a prévia e salve para publicar.';
       });
+      _schedulePreview(immediate: true);
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     }
@@ -423,7 +532,7 @@ class _MailerTemplatesState extends ConsumerState<MailerTemplatesSection> {
         Text('Domínios aprovados: ${_allowedOrigins.join(', ')}'),
       const SizedBox(height: 12),
       const SelectableText(
-          'Variáveis no texto: .Token, .Email, .NewEmail, .Data. Para o link de autenticação, use {{ .ConfirmationURL }}. Imagens precisam de HTTPS em um domínio aprovado e não podem conter variáveis.'),
+          'Variáveis no texto: .Token, .Email, .NewEmail, .SendingTo, .Data. Para o link de autenticação, use {{ .ConfirmationURL }}. Imagens precisam de HTTPS em um domínio aprovado e não podem conter variáveis.'),
       const SizedBox(height: 12),
       TextField(
         controller: _editor,
@@ -435,11 +544,13 @@ class _MailerTemplatesState extends ConsumerState<MailerTemplatesSection> {
         decoration: const InputDecoration(
             labelText: 'HTML do e-mail (até 1 MB)',
             border: OutlineInputBorder()),
-        onChanged: (_) => setState(() {
-          _dirty = true;
-          _preview = null;
-          _message = null;
-        }),
+        onChanged: (_) {
+          setState(() {
+            _dirty = true;
+            _message = null;
+          });
+          _schedulePreview();
+        },
       ),
       const SizedBox(height: 12),
       Wrap(spacing: 8, runSpacing: 8, children: [
@@ -492,12 +603,6 @@ class _MailerTemplatesState extends ConsumerState<MailerTemplatesSection> {
       if (_message != null)
         Padding(
             padding: const EdgeInsets.only(top: 12), child: Text(_message!)),
-      if (_preview != null) ...[
-        const SizedBox(height: 16),
-        const Text('Prévia com dados de exemplo'),
-        const SizedBox(height: 8),
-        SizedBox(height: 400, child: MailerPreview(html: _preview!)),
-      ],
     ]);
   }
 }

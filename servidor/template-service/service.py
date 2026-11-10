@@ -305,7 +305,20 @@ class Templates:
                 422, "O conteúdo migrado não corresponde ao legado registrado"
             )
         if cached is None or cached[1] != body:
-            await self.engine.render(kind, body)
+            return await self.engine.render(kind, body)
+
+    async def preview(self, tenant, kind, body, approved):
+        async with self.pool.acquire() as conn:
+            project = await self.project(conn, tenant)
+            row = await conn.fetchrow(
+                "SELECT * FROM mailer_template WHERE project_id=$1 AND kind=$2", project, kind
+            )
+            if row and row["body"] == body and row["migration_signature"] and row["policy_version"] == POLICY_VERSION:
+                return await self.check_migration(tenant, kind, body, row["published_version"], row["migration_signature"])
+            default = await conn.fetchrow("SELECT * FROM mailer_template_default WHERE kind=$1", kind)
+            if default and default["body"] == body:
+                return await self.check_migration("platform", kind, body, default["version"], default["migration_signature"])
+        return await self.engine.preview(kind, body, approved)
 
     async def default_for(self, conn, kind):
         row = await conn.fetchrow(
@@ -733,8 +746,8 @@ def create_app(templates=None):
         service = await admin(request, tenant, kind)
         data = await payload(request)
         return {
-            "html": await service.engine.preview(
-                kind, data.get("body"), request_origins(request)
+            "html": await service.preview(
+                tenant, kind, data.get("body"), request_origins(request)
             )
         }
 

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .envfile import read_canonical_env_value
 from .security import ensure_inside
+from .mailer_runtime import prepare_mailer_files
 
 
 def _normalize_public_base_url(url: str, proto: str | None = None) -> str:
@@ -30,6 +31,7 @@ def _normalize_public_base_url(url: str, proto: str | None = None) -> str:
 
 def _render_template(template_path: Path, output_path: Path, replacements: dict[str, str]) -> None:
     content = template_path.read_text(encoding="utf-8")
+    content = content.replace("        # HOST_AGENT_PUBLIC_ASSETS", replacements.get("host_agent_public_assets", ""))
     for key, value in replacements.items():
         content = content.replace(f"{{{{{key}}}}}", value)
     unresolved = sorted(set(re.findall(r"\{\{[a-z0-9_]+\}\}", content)))
@@ -144,6 +146,7 @@ def sync_project_generated_files(
 ) -> None:
     """Regenera nginx.conf, Dockerfile e docker-compose.yml do projeto."""
     replacements = _build_replacements(root, project_dir, project)
+    replacements["host_agent_public_assets"] = prepare_mailer_files(root, scripts_dir, project_dir)
 
     nginx_config_path = ensure_inside(
         project_dir, project_dir / "nginx" / f"nginx_{project}.conf"

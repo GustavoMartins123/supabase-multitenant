@@ -32,6 +32,8 @@ class RotationTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
+        (self.root / "secrets/mailer").mkdir(parents=True)
+        (self.root / "secrets/mailer/URL_SECRET").write_text("a" * 64)
         self.project = self.root / "projects" / NAME
         self.project.mkdir(parents=True)
         shutil.copytree(
@@ -59,6 +61,7 @@ class RotationTest(unittest.TestCase):
         sync_project_generated_files(
             root=self.root, scripts_dir=SCRIPTS, project_dir=self.project, project=NAME
         )
+        self.env = (self.project / ".env").read_text()
         shutil.copyfile(SCRIPTS / ".dockerignore", self.project / ".dockerignore")
         (self.project / "data.bin").write_bytes(b"immutable data")
         self.rotation = module.ReferenceRotation(self.root, NAME, INTERNAL, TENANT, OLD, NEW, 3, 4)

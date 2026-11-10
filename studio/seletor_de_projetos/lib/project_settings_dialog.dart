@@ -25,6 +25,7 @@ import 'widgets/project_settings/status_section.dart';
 import 'widgets/project_settings/members_section.dart';
 import 'widgets/project_settings/env_settings_section.dart';
 import 'widgets/project_settings/mailer_templates_section.dart';
+import 'widgets/project_settings/mailer_preview_panel.dart';
 import 'widgets/project_settings/user_telemetry_section.dart';
 import 'widgets/project_settings/opaque_api_keys_section.dart';
 import 'widgets/project_settings/access_policy_dialog.dart';
@@ -74,6 +75,21 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
   String? _automaticKeyRotationLastError;
   bool _updatingAutomaticKeyRotation = false;
   bool _savingDisplayName = false;
+  final _settingsCardKey = GlobalKey();
+  MailerPreviewData? _mailerPreview;
+  int _selectedTab = 0;
+
+  void _previewChanged(MailerPreviewData? data) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() => _mailerPreview = data);
+    });
+  }
+
+  void _previewTabChanged() {
+    if (mounted && _selectedTab != _tabController.index) {
+      setState(() => _selectedTab = _tabController.index);
+    }
+  }
 
   @override
   void initState() {
@@ -88,6 +104,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     );
     _animController.forward();
     _tabController = TabController(length: _kTabs.length, vsync: this);
+    _tabController.addListener(_previewTabChanged);
 
     _automaticKeyRotationEnabled = widget.automaticKeyRotationEnabled;
     _automaticKeyRotationBlocked = widget.automaticKeyRotationBlocked;
@@ -101,6 +118,7 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
   @override
   void dispose() {
     _displayNameController.dispose();
+    _tabController.removeListener(_previewTabChanged);
     _tabController.dispose();
     _animController.dispose();
     super.dispose();
@@ -252,43 +270,59 @@ class _ProjectSettingsDialogState extends ConsumerState<ProjectSettingsDialog>
     }
 
     final isAdmin = myRole == 'admin' || Session().isSysAdmin;
+    final preview = isAdmin && _selectedTab == 4 ? _mailerPreview : null;
 
     return Dialog(
       backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.all(24),
       child: FadeTransition(
         opacity: _fadeAnimation,
-        child: Container(
-          constraints: BoxConstraints(
-            maxWidth: 720,
-            maxHeight: MediaQuery.of(context).size.height * 0.9,
-          ),
-          decoration: BoxDecoration(
-            color: SupabaseColors.bg200,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: SupabaseColors.border),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildHeader(),
-              _buildTabBar(),
-              Expanded(
-                child: TabBarView(
-                  controller: _tabController,
+        child: SizedBox(
+          width: preview == null ? 720 : 1320,
+          height: MediaQuery.sizeOf(context).height * .9,
+          child: MailerPreviewLayout(
+              preview: preview,
+              editor: Container(
+                key: _settingsCardKey,
+                constraints: BoxConstraints(
+                  maxWidth: 720,
+                  maxHeight: MediaQuery.of(context).size.height * 0.9,
+                ),
+                decoration: BoxDecoration(
+                  color: SupabaseColors.bg200,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: SupabaseColors.border),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    _buildGeneralTab(projectUrl, myRole, projectBusy),
-                    _buildKeysTab(
-                        myRole, projectBusy, isAdmin, serverDomain as String),
-                    _buildEnvironmentTab(isAdmin),
-                    _buildAccessTab(isAdmin),
-                    _buildTabBody([if (isAdmin) MailerTemplatesSection(projectRef: widget.ref)
-                      else const Text('Apenas administradores podem gerenciar templates de e-mail.')]),
+                    _buildHeader(),
+                    _buildTabBar(),
+                    Expanded(
+                      child: TabBarView(
+                        controller: _tabController,
+                        children: [
+                          _buildGeneralTab(projectUrl, myRole, projectBusy),
+                          _buildKeysTab(myRole, projectBusy, isAdmin,
+                              serverDomain as String),
+                          _buildEnvironmentTab(isAdmin),
+                          _buildAccessTab(isAdmin),
+                          _buildTabBody([
+                            if (isAdmin)
+                              MailerTemplatesSection(
+                                  projectRef: widget.ref,
+                                  onPreviewChanged: _previewChanged)
+                            else
+                              const Text(
+                                  'Apenas administradores podem gerenciar templates de e-mail.')
+                          ]),
+                        ],
+                      ),
+                    ),
+                    _buildFooter(myRole, projectBusy),
                   ],
                 ),
-              ),
-              _buildFooter(myRole, projectBusy),
-            ],
-          ),
+              )),
         ),
       ),
     );

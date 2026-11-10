@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:seletor_de_projetos/data/project_repository.dart';
 import 'package:seletor_de_projetos/widgets/project_settings/mailer_templates_section.dart';
+import 'package:seletor_de_projetos/widgets/project_settings/mailer_preview_panel.dart';
 
 class FakeMailerRepository extends ProjectRepository {
   final calls = <String>[];
@@ -14,6 +16,20 @@ class FakeMailerRepository extends ProjectRepository {
   int publishedVersion = 0;
   bool hasDraft = false;
   String? confirmation;
+  final previewBodies = <String>[];
+  bool deferPreview = false;
+  final previews = <Completer<Map<String, dynamic>>>[];
+
+  @override
+  Future<Map<String, dynamic>> fetchConfig() async =>
+      {'server_domain': 'https://example.com'};
+  @override
+  Future<List<Map<String, dynamic>>> getMembers(String projectRef) async => [
+        {'user_id': 'admin', 'role': 'admin'}
+      ];
+  @override
+  Future<Map<String, dynamic>> getFullStatus(String projectRef) async =>
+      {'containers': []};
 
   Map<String, dynamic> row() => {
         'kind': 'magic_link',
@@ -48,7 +64,15 @@ class FakeMailerRepository extends ProjectRepository {
     String? stepUpToken,
   }) async {
     calls.add('$method ${operation ?? kind ?? 'list'}');
-    if (operation == 'preview') return {'html': '<p>123456</p>'};
+    if (operation == 'preview') {
+      previewBodies.add(body!['body'] as String);
+      if (deferPreview) {
+        final request = Completer<Map<String, dynamic>>();
+        previews.add(request);
+        return request.future;
+      }
+      return {'html': '<p>123456</p>'};
+    }
     if (operation == 'history/1') {
       return {'version': 1, 'body': '<p>Anterior {{ .Token }}</p>'};
     }
@@ -128,6 +152,8 @@ void main() {
         find.byType(TextField), '<h1>Novo {{ .Token }}</h1>');
     await tapVisible(tester, 'Prévia');
     expect(find.text('Prévia com dados de exemplo'), findsOneWidget);
+    await tester.tap(find.byTooltip('Fechar prévia'));
+    await tester.pumpAndSettle();
     await tapVisible(tester, 'Salvar rascunho');
     expect(repository.body, '<h1>Novo {{ .Token }}</h1>');
     expect(repository.publishedBody, '<p>{{ .Token }}</p>');
@@ -188,4 +214,136 @@ void main() {
     expect(repository.version, 0);
     expect(repository.publishedVersion, 0);
   });
+  testWidgets(
+      'desktop preview stays beside the editable HTML and refreshes without saving',
+      (tester) async {
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = FakeMailerRepository();
+    await tester.pumpWidget(ProviderScope(
+      overrides: [projectRepositoryProvider.overrideWithValue(repository)],
+      child: const MaterialApp(home: PreviewHarness()),
+    ));
+    await tester.pumpAndSettle();
+    final panel = find.byKey(const ValueKey('mailer-preview-panel'));
+    expect(panel, findsOneWidget);
+    expect(tester.getRect(panel).left,
+        greaterThan(tester.getRect(find.byType(TextField)).right));
+    await tester.enterText(
+        find.byType(TextField), '<h1>Sem salvar {{ .Token }}</h1>');
+    await tester.pump(const Duration(milliseconds: 2300));
+    await tester.pumpAndSettle();
+    expect(repository.previewBodies.last, '<h1>Sem salvar {{ .Token }}</h1>');
+    expect(repository.version, 0);
+    expect(repository.publishedVersion, 0);
+    await tester.tap(find.byTooltip('Fechar prévia'));
+    await tester.pumpAndSettle();
+    expect(panel, findsNothing);
+    expect(tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        '<h1>Sem salvar {{ .Token }}</h1>');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('small screen preview closes back to the same unsaved editor',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = FakeMailerRepository();
+    await tester.pumpWidget(ProviderScope(
+      overrides: [projectRepositoryProvider.overrideWithValue(repository)],
+      child: const MaterialApp(home: PreviewHarness()),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('mailer-preview-panel')), findsOneWidget);
+    await tester.tap(find.byTooltip('Fechar prévia'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.byType(TextField), '<p>Continuar {{ .Token }}</p>');
+    await tapVisible(tester, 'Prévia');
+    await tester.tap(find.byTooltip('Fechar prévia'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        '<p>Continuar {{ .Token }}</p>');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a late preview response cannot replace newer HTML',
+      (tester) async {
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = FakeMailerRepository()..deferPreview = true;
+    await tester.pumpWidget(ProviderScope(
+      overrides: [projectRepositoryProvider.overrideWithValue(repository)],
+      child: const MaterialApp(home: PreviewHarness()),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
+    await tester.enterText(
+        find.byType(TextField), '<h1>Atual {{ .Token }}</h1>');
+    await tester.pump(const Duration(milliseconds: 2300));
+    expect(repository.previews.length, 2);
+    repository.previews.last.complete({'html': '<p>Atual 123456</p>'});
+    await tester.pumpAndSettle();
+    repository.previews.first.complete({'html': '<p>Antigo 123456</p>'});
+    await tester.pumpAndSettle();
+    expect(find.text('<p>Atual 123456</p>'), findsOneWidget);
+    expect(find.text('<p>Antigo 123456</p>'), findsNothing);
+  });
+
+  testWidgets('preview controls fit a narrow screen with enlarged text',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        projectRepositoryProvider.overrideWithValue(FakeMailerRepository())
+      ],
+      child: MaterialApp(
+        builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context)
+                .copyWith(textScaler: TextScaler.linear(2)),
+            child: child!),
+        home: const PreviewHarness(),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('mailer-preview-panel')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+}
+
+class PreviewHarness extends StatefulWidget {
+  const PreviewHarness({super.key});
+  @override
+  State<PreviewHarness> createState() => _PreviewHarnessState();
+}
+
+class _PreviewHarnessState extends State<PreviewHarness> {
+  final _editorKey = GlobalKey();
+  MailerPreviewData? _preview;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+          body: MailerPreviewLayout(
+        preview: _preview,
+        editor: SingleChildScrollView(
+          key: _editorKey,
+          padding: const EdgeInsets.all(20),
+          child: MailerTemplatesSection(
+              projectRef: 'alpha',
+              onPreviewChanged: (data) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) setState(() => _preview = data);
+                });
+              }),
+        ),
+      ));
 }
