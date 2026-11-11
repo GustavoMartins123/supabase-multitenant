@@ -1,4 +1,4 @@
-local context = require("security.project_access").enforce_admin()
+local context = require("security.project_access").enforce_storage()
 if type(context) ~= "table" then
     return
 end

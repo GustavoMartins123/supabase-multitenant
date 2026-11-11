@@ -29,9 +29,11 @@ void updateMailerPreviewFrame(
   final policy = const HtmlEscape(HtmlEscapeMode.attribute).convert(
       "default-src 'none'; style-src 'unsafe-inline'; img-src data: $approved; "
       "base-uri 'none'; form-action 'none'; connect-src 'none';");
+  // Sandbox still allows links to navigate this frame. Keep the email inert
+  // so previewing it preserves the layout without activating its controls.
   frame.srcdoc = '<!doctype html><html><head><meta charset="utf-8">'
       '<meta http-equiv="Content-Security-Policy" content="$policy">'
-      '</head><body style="margin:0">$body</body></html>';
+      '</head><body inert style="margin:0">$body</body></html>';
 }
 
 class MailerPreview extends StatefulWidget {
@@ -77,5 +79,11 @@ class _MailerPreviewState extends State<MailerPreview> {
   }
 
   @override
-  Widget build(BuildContext context) => HtmlElementView(viewType: _viewType);
+  Widget build(BuildContext context) {
+    // Native iframe surfaces can intercept clicks on Flutter dialogs above
+    // them. Only the current route may capture events inside the preview.
+    _frame.style.pointerEvents =
+        (ModalRoute.isCurrentOf(context) ?? true) ? 'auto' : 'none';
+    return HtmlElementView(viewType: _viewType);
+  }
 }

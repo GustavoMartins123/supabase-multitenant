@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import pathlib
+import shutil
+import subprocess
 import sys
 import unittest
 from unittest import mock
@@ -71,7 +73,11 @@ class StudioSlugContextContractTest(unittest.TestCase):
                     source.index('require("security.project_access").enforce'),
                     source.index('require("security.get_service_key")' if name == "inject_service_key_apikey.lua" else 'require("security.studio_administrative_key")'),
                 )
-                self.assertIn("enforce()" if name == "inject_service_key_apikey.lua" else "enforce_admin()", source)
+                gate = {
+                    "inject_service_key_apikey.lua": "enforce()",
+                    "inject_service_key_storage.lua": "enforce_storage()",
+                }.get(name, "enforce_admin()")
+                self.assertIn(gate, source)
                 self.assertIn("get_service_key(context.ref)" if name == "inject_service_key_apikey.lua" else ".load(context)", source)
                 self.assertNotIn("project_ref = context.ref", source)
 
@@ -221,6 +227,51 @@ class StudioSlugContextContractTest(unittest.TestCase):
                 unavailable = source.index("project_service_unavailable")
                 self.assertLess(gate, key)
                 self.assertLess(key, unavailable)
+
+
+class StorageMemberAccessTest(unittest.TestCase):
+    def test_storage_context_cannot_be_reused_for_administrator_access(self) -> None:
+        runtime = shutil.which("lua5.1") or shutil.which("lua")
+        if runtime is None:
+            self.skipTest("runtime Lua nao esta instalado")
+        script = r"""
+local root = arg[1]
+package.path = root .. "/?.lua;" .. package.path
+package.preload["cjson.safe"] = function()
+    return {encode = function() return "{}" end}
+end
+package.preload["project_context.request_context"] = function()
+    return {capture = function() return "abcdefghijklmnopqrst" end}
+end
+package.preload["project_context.user_context_headers"] = function()
+    return {apply = function() end}
+end
+local calls = {}
+package.preload["project_context.studio_context"] = function()
+    return {load = function(ref, mode)
+        calls[#calls + 1] = mode
+        if mode == "storage" then
+            return {ref = ref, role = "member", enc_admin_key = "encrypted"}
+        end
+        return nil, "Project access denied", 403
+    end}
+end
+ngx = {
+    ctx = {}, var = {authelia_email = "member@example.test"}, header = {},
+    say = function() end, exit = function() end,
+}
+local access = require("security.project_access")
+local storage = access.enforce_storage()
+assert(storage.role == "member")
+assert(storage.enc_admin_key == "encrypted")
+assert(access.enforce_storage() == storage)
+assert(#calls == 1)
+assert(access.enforce_admin() == nil)
+assert(ngx.status == 403)
+assert(#calls == 2 and calls[2] == true)
+assert(access.enforce() == storage)
+"""
+        subprocess.run([runtime, "-", str(LUA)], input=script, text=True, check=True)
 
 
 class ProjectFileSizeLimitTest(unittest.TestCase):

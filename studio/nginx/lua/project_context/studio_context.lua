@@ -46,7 +46,9 @@ function _M.load(ref, administrative)
     end
 
     local target = "/api/projects/internal/studio-context/" .. ref
-    if administrative then
+    if administrative == "storage" then
+        target = target .. "?access=storage"
+    elseif administrative then
         target = target .. "?access=admin"
     end
     local signed_headers, sign_err = internal_hmac.sign_headers(

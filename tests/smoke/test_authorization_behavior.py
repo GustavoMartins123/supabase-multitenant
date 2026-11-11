@@ -526,6 +526,49 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 403, response.text)
         self.assertEqual(await self.pool.fetchval("SELECT count(*) FROM project_studio_keys"), 0)
 
+    async def test_member_can_manage_storage_without_administrator_access(self):
+        from app.project_secret_service import encrypt_project_secret
+        from app.runtime_config import service_key_transport_fernet
+
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                ciphertext = await encrypt_project_secret(
+                    conn, project_id=self.project_a, column="anon_key",
+                    plaintext="test-anon-key",
+                )
+                await conn.execute(
+                    "UPDATE projects SET anon_key=$1 WHERE id=$2",
+                    ciphertext, self.project_a,
+                )
+        path = "/api/projects/internal/studio-context/abcdefghijklmnopqrst"
+        with mock.patch("app.routers.internal.get_project_file_size_limit", return_value=5000):
+            storage = await self.request("GET", path + "?access=storage", actor=self.ex_member)
+            ordinary = await self.request("GET", path, actor=self.ex_member)
+        self.assertEqual(storage.status_code, 200, storage.text)
+        self.assertEqual(storage.json()["role"], "member")
+        self.assertIn("no-store", storage.headers["cache-control"])
+        key = service_key_transport_fernet.decrypt(storage.json()["enc_admin_key"].encode())
+        self.assertTrue(key.startswith(b"sb_secret_"))
+        self.assertNotIn(key.decode(), storage.text)
+        self.assertEqual(ordinary.status_code, 200, ordinary.text)
+        self.assertIsNone(ordinary.json()["enc_admin_key"])
+        denied = await self.request("GET", path + "?access=admin", actor=self.ex_member)
+        self.assertEqual(denied.status_code, 403, denied.text)
+
+    async def test_storage_context_rejects_outsiders_and_removed_members(self):
+        path = "/api/projects/internal/studio-context/abcdefghijklmnopqrst?access=storage"
+        for actor, status in ((self.outsider, 403), (None, 401)):
+            with self.subTest(actor=actor):
+                response = await self.request("GET", path, actor=actor)
+                self.assertEqual(response.status_code, status, response.text)
+        await self.pool.execute(
+            "DELETE FROM project_members WHERE project_id=$1 AND user_id=$2",
+            self.project_a, self.ex_member,
+        )
+        removed = await self.request("GET", path, actor=self.ex_member)
+        self.assertEqual(removed.status_code, 403, removed.text)
+        self.assertEqual(await self.pool.fetchval("SELECT count(*) FROM project_studio_keys"), 0)
+
     async def reserve_reference_rotation(self):
         with mock.patch("app.routers.project_rename._enqueue_project_action", new_callable=mock.AsyncMock, return_value=0):
             response = await self.request("POST", "/api/projects/abcdefghijklmnopqrst/rename", actor=self.owner, body=b"{}")
