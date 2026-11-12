@@ -369,9 +369,12 @@ if(!response.ok){console.error(response.status+': '+await response.text());proce
         expect(actor, 'GET', buckets, 200)
         expect(actor, 'GET', vectors, 200)
     for actor in ('member', 'outsider'):
-        for method, path, body in [('GET', rest, None), ('POST', graphql, {'query': '{ __typename }'}),
-                                   ('GET', buckets, None), ('GET', vectors, None)]:
+        for method, path, body in [('GET', rest, None), ('POST', graphql, {'query': '{ __typename }'})]:
             expect(actor, method, path, 404, body)
+    expect('member', 'GET', buckets, 200)
+    expect('member', 'GET', vectors, 200)
+    expect('outsider', 'GET', buckets, 404)
+    expect('outsider', 'GET', vectors, 404)
     expect('member', 'POST', '/api/projects/' + ref_of(alpha) + '/members', 403, {'user_id': ids['outsider'], 'role': 'admin'})
     expect('admin', 'POST', '/api/projects/' + ref_of(alpha) + '/members', 403, {'user_id': ids['exmember'], 'role': 'member'})
     expect('admin', 'POST', '/api/projects/' + ref_of(alpha) + '/members', 409, {'user_id': ids['owner'], 'role': 'member'})
@@ -479,7 +482,8 @@ if(!response.ok){console.error(response.status+': '+await response.text());proce
 
     api_inventory = json.loads(run('docker', 'inspect', 'projects-api'))[0]
     assert {m['Destination'] for m in api_inventory['Mounts']} == {'/docker/projects', '/docker/push-certs', '/docker/resource-profiles.env', '/docker/app',
-        '/docker/.functions-studio', '/docker/.functions-runtime', '/docker/.functions-locks', '/docker/.functions-tenants'}
+        '/docker/.functions-studio', '/docker/.functions-runtime', '/docker/.functions-locks', '/docker/.functions-tenants',
+        '/run/secrets/mailer/ADMIN_KEY', '/run/secrets/mailer/PUBLISH_KEY'}
     assert not any(e.startswith(('POSTGRES_PASSWORD=', 'SERVER_ADMIN_API_KEYS=', 'API_GATEWAY_TOKEN_PROJETO=')) for e in api_inventory['Config']['Env'])
     edge_inventory = json.loads(run('docker', 'inspect', 'supabase-edge-functions'))[0]
     assert {m['Destination'] for m in edge_inventory['Mounts']} == {'/home/deno/main', '/home/deno/tenant-config', '/home/deno/runtime', '/etc/hosts'}
