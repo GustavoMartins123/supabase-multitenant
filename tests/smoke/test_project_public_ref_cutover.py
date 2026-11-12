@@ -97,6 +97,8 @@ class ServerCutoverTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.directory = self.root / "projects/technical_project"
+        (self.root / "secrets/mailer").mkdir(parents=True)
+        (self.root / "secrets/mailer/URL_SECRET").write_text("a" * 64)
         (self.directory / "nginx").mkdir(parents=True)
         shutil.copytree(ROOT / "servidor/generateProject", self.root / "generateProject")
         (self.root / ".env").write_text("SERVER_URL=api.example.test\nSERVER_PROTO=https\nHOST_PROJECT_ROOT=/srv/example\n")

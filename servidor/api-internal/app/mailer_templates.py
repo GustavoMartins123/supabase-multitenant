@@ -92,7 +92,7 @@ def project_origins(directory):
     values = dotenv_values(path, interpolate=False)
     result = set()
     for key in ("SITE_URL", "API_EXTERNAL_URL"):
-        raw = values.get(key, "")
+        raw = values.get(key) or ""
         parsed = urlsplit(raw)
         if (
             parsed.scheme != "https"
@@ -254,10 +254,14 @@ def build_router(get_pool, authorize, confirm=confirm_idr):
     ):
         return await forward(project_ref, request, pool)
 
-    @router.api_route(
-        "/api/projects/{project_ref}/mailer-templates/{kind}", methods=["PUT", "DELETE"]
-    )
+    @router.put("/api/projects/{project_ref}/mailer-templates/{kind}")
     async def save_template(
+        project_ref: str, kind: str, request: Request, pool=Depends(get_pool)
+    ):
+        return await forward(project_ref, request, pool, kind)
+
+    @router.delete("/api/projects/{project_ref}/mailer-templates/{kind}")
+    async def delete_template(
         project_ref: str, kind: str, request: Request, pool=Depends(get_pool)
     ):
         return await forward(project_ref, request, pool, kind)

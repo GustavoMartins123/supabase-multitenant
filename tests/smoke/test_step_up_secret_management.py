@@ -97,14 +97,15 @@ def lua_actions() -> set[str]:
 
 
 def migration_actions() -> set[str]:
-    sql = (
-        API_ROOT
-        / "app"
-        / "migrations"
-        / "0020_access_policies.sql"
-    ).read_text(encoding="utf-8")
-    block = sql.split("studio_step_up_grant_consumptions_action_check CHECK (action IN (", 1)[1].split("));", 1)[0]
-    return set(re.findall(r"'([a-z_]+)'", block))
+    allowed: set[str] = set()
+    for path in sorted((API_ROOT / "app" / "migrations").glob("*.sql")):
+        for match in re.finditer(
+            r"studio_step_up_grant_consumptions_action_check CHECK \(action IN \((.*?)\)\)",
+            path.read_text(encoding="utf-8"),
+            re.S,
+        ):
+            allowed = set(re.findall(r"'([a-z_]+)'", match.group(1)))
+    return allowed
 
 
 def flutter_actions() -> set[str]:

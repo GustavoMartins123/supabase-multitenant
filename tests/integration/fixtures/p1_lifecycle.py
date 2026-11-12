@@ -116,10 +116,15 @@ def main() -> None:
         network['labels'] = labels.copy()
     assert model['volumes']['db-config'] is None
     model['volumes']['db-config'] = {'name': 'p1-db-config-' + suffix, 'labels': labels.copy()}
+    mailer_secret = server / 'secrets/mailer/DB_PASSWORD'
+    mailer_secret.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    mailer_secret.write_text(secrets.token_hex(32) + '\n')
+    (server / 'secrets/mailer/URL_SECRET').write_text(secrets.token_hex(32) + '\n')
     migrations = yaml.safe_load((server / 'docker-compose-api.yml').read_text())['services']['control-plane-migrations']
     migrations.pop('build')
     migrations.update(image='servidor-control-plane-migrations:latest', logging={'driver': 'json-file'}, labels=labels.copy())
-    migrations['volumes'] = [str(server / 'api-internal/app') + ':/docker/app:ro']
+    migrations['volumes'] = [str(server / 'api-internal/app') + ':/docker/app:ro',
+                             str(mailer_secret) + ':/run/secrets/mailer/DB_PASSWORD:ro']
     model['services']['control-plane-migrations'] = migrations
     authorizer = yaml.safe_load((server / 'docker-compose-api.yml').read_text())['services']['key-authorizer']
     authorizer.pop('build')

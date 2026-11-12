@@ -31,8 +31,7 @@ REVOKE ALL ON public.mailer_template_publication_grant, public.mailer_template_s
 DO $$ BEGIN
     IF to_regclass('public.studio_step_up_grant_consumptions') IS NOT NULL THEN
         ALTER TABLE public.studio_step_up_grant_consumptions DROP CONSTRAINT IF EXISTS studio_step_up_grant_consumptions_action_check;
-        ALTER TABLE public.studio_step_up_grant_consumptions ADD CONSTRAINT studio_step_up_grant_consumptions_action_check
-            CHECK (action IN ('delete_project','reveal_secret_key','create_secret_key','rotate_secret_key',
+        ALTER TABLE public.studio_step_up_grant_consumptions ADD CONSTRAINT studio_step_up_grant_consumptions_action_check CHECK (action IN ('delete_project','reveal_secret_key','create_secret_key','rotate_secret_key',
                 'activate_secret_key','update_secret_key_policy','cancel_secret_key_rotation','revoke_secret_key',
                 'update_access_policy','publish_mailer_template'));
     END IF;

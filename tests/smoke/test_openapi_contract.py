@@ -36,6 +36,7 @@ EXPECTED_TAGS = {
     "jobs",
     "lifecycle",
     "lifecycle-ops",
+    "mailer-templates",
     "opaque-api-keys",
     "platform-auth",
     "project-insights",

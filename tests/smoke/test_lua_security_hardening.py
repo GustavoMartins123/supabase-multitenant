@@ -69,6 +69,11 @@ class ConstantTimeHmacTest(unittest.TestCase):
 
     @unittest.skipIf(sys.platform == "win32", "requires a working Lua 5.1 runtime (Linux-only)")
     def test_constant_time_compare_runtime_contract(self) -> None:
+        runtime = lua_runtime()
+        if runtime is None or subprocess.run(
+            [runtime, "-e", 'require("bit")'], capture_output=True
+        ).returncode:
+            raise unittest.SkipTest("runtime LuaJIT/OpenResty (bit) nao esta disponivel")
         run_lua(
             f'''
 package.path = "{LUA.as_posix()}/?.lua;{LUA.as_posix()}/?/init.lua;" .. package.path

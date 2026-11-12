@@ -66,8 +66,11 @@ class KeyGenerationContractTest(unittest.TestCase):
             helper_managed & (root_env | project_env),
             "limites resolvidos nao devem ter default em template raiz/projeto",
         )
+        # A chave do mailer e derivada do segredo do host e gravada no .env do
+        # projeto por configure_mailer_templates.py (e pelo host agent).
+        runtime_managed = {"MAILER_TEMPLATE_KEY"}
         self.assertEqual(
-            sorted(references - root_env - project_env - helper_managed),
+            sorted(references - root_env - project_env - helper_managed - runtime_managed),
             [],
         )
 

@@ -61,7 +61,7 @@ def _files(root: Path, directory: Path) -> dict[str, bytes]:
     _confined(root, directory)
     if not directory.is_dir():
         raise RuntimeError("Arquivos publicos do mailer ausentes: " + str(directory))
-    files = {}
+    files: dict[str, bytes] = {}
     total = 0
     for base, dirs, names in os.walk(directory, followlinks=False):
         for name in dirs + names:
