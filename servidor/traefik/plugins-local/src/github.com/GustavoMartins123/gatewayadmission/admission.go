@@ -25,6 +25,20 @@ type Config struct {
 
 func CreateConfig() *Config { return &Config{} }
 
+// evaluatorTransport e compartilhado por todas as instancias do middleware:
+// todas falam com o mesmo avaliador, e manter conexoes ociosas evita abrir um
+// TCP novo por requisicao. IdleConnTimeout fica abaixo do keep-alive de 5s do
+// uvicorn do key-authorizer: um POST enviado numa conexao que o servidor ja
+// fechou nao e repetido pelo cliente e viraria 503. O literal usa apenas
+// campos de valor: o interpretador Yaegi do Traefik recusa method values
+// (como net.Dialer.DialContext) em struct literal e desativa todos os plugins.
+var evaluatorTransport = &http.Transport{
+	MaxIdleConns:          256,
+	MaxIdleConnsPerHost:   128,
+	IdleConnTimeout:       4 * time.Second,
+	ResponseHeaderTimeout: 4 * time.Second,
+}
+
 type Middleware struct {
 	next    http.Handler
 	config  Config
@@ -43,7 +57,7 @@ func New(_ context.Context, next http.Handler, config *Config, _ string) (http.H
 	if err != nil || target.Scheme != "http" || target.Host != "key-authorizer:18010" || target.Path != "/v1/admit" || target.RawQuery != "" {
 		return nil, errors.New("invalid admission evaluator")
 	}
-	m := &Middleware{next: next, config: *config, client: &http.Client{Timeout: 4 * time.Second,
+	m := &Middleware{next: next, config: *config, client: &http.Client{Timeout: 4 * time.Second, Transport: evaluatorTransport,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}}
 	for _, value := range config.TrustedProxyCIDRs {
 		address, network, err := net.ParseCIDR(value)
@@ -107,6 +121,14 @@ func (m *Middleware) clientIP(r *http.Request) (string, error) {
 	return peer.String(), nil
 }
 
+func preflight(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, apikey, X-Client-Info, X-Supabase-Auth, x-supabase-api-version, tus-resumable, upload-length, upload-metadata, upload-offset, x-upsert")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(204)
+}
+
 func deny(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -136,6 +158,12 @@ func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		deny(w, 403, "Client origin could not be verified")
+		return
+	}
+	if r.Method == http.MethodOptions {
+		// Preflight CORS nunca chega ao upstream nem recebe ticket; responder
+		// aqui nao consome conexao do avaliador nem do PostgreSQL.
+		preflight(w)
 		return
 	}
 	keys := r.Header.Values("Apikey")
@@ -191,14 +219,6 @@ func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(response.StatusCode)
 		_, _ = w.Write(data)
-		return
-	}
-	if r.Method == "OPTIONS" {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, apikey, X-Client-Info, X-Supabase-Auth, x-supabase-api-version, tus-resumable, upload-length, upload-metadata, upload-offset, x-upsert")
-		w.Header().Set("Cache-Control", "no-store")
-		w.WriteHeader(204)
 		return
 	}
 	ticket := response.Header.Get("X-Gateway-Admission")

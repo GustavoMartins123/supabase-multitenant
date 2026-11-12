@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 type roundTrip func(*http.Request) (*http.Response, error)
@@ -22,6 +23,51 @@ func middleware(t *testing.T, next http.Handler) *Middleware {
 		t.Fatal(err)
 	}
 	return h.(*Middleware)
+}
+
+func TestPreflightNeverReachesEvaluatorOrUpstream(t *testing.T) {
+	m := middleware(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("preflight reached upstream")
+	}))
+	m.client.Transport = roundTrip(func(r *http.Request) (*http.Response, error) {
+		t.Fatal("preflight reached the admission evaluator")
+		return nil, nil
+	})
+	r := httptest.NewRequest("OPTIONS", "/abc/rest/v1/items", nil)
+	r.RemoteAddr = "198.51.100.7:4321"
+	r.Header.Set("Access-Control-Request-Method", "POST")
+	w := httptest.NewRecorder()
+	m.ServeHTTP(w, r)
+	if w.Code != 204 || w.Header().Get("Access-Control-Allow-Origin") != "*" ||
+		!strings.Contains(w.Header().Get("Access-Control-Allow-Methods"), "POST") ||
+		w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("unexpected preflight response: %d %v", w.Code, w.Header())
+	}
+
+	r = httptest.NewRequest("OPTIONS", "/abc/rest/v1/items", nil)
+	r.RemoteAddr = "10.0.0.1:12"
+	w = httptest.NewRecorder()
+	m.ServeHTTP(w, r)
+	if w.Code != 403 {
+		t.Fatalf("preflight skipped the proxy chain validation: %d", w.Code)
+	}
+}
+
+func TestEvaluatorTransportReusesConnections(t *testing.T) {
+	m := middleware(t, http.NotFoundHandler())
+	transport, ok := m.client.Transport.(*http.Transport)
+	if !ok || transport != evaluatorTransport {
+		t.Fatal("middleware must use the shared evaluator transport")
+	}
+	if transport.MaxIdleConnsPerHost < 64 || transport.MaxIdleConns < transport.MaxIdleConnsPerHost {
+		t.Fatalf("idle pool too small: %d/%d", transport.MaxIdleConnsPerHost, transport.MaxIdleConns)
+	}
+	if transport.IdleConnTimeout <= 0 || transport.IdleConnTimeout >= 5*time.Second {
+		t.Fatalf("idle timeout must stay below the evaluator keep-alive: %s", transport.IdleConnTimeout)
+	}
+	if transport.Proxy != nil {
+		t.Fatal("evaluator traffic must not follow environment proxies")
+	}
 }
 
 func TestInvalidProxyNetworks(t *testing.T) {
