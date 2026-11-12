@@ -27,6 +27,7 @@ source "$SCRIPT_DIR/lib/realtime_slots.sh"
 source "$SCRIPT_DIR/lib/tenant_reader_role.sh"
 source "$SCRIPT_DIR/lib/tenant_meta_role.sh"
 source "$SCRIPT_DIR/lib/project_public_ref.sh"
+source "$SCRIPT_DIR/lib/protected_databases.sh"
 
 NAME_RE='^[a-z_][a-z0-9_]{2,39}$'
 UUID_RE='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
@@ -46,6 +47,8 @@ functions_config_lock "$PROJECT"
 PROJECT_DIR="$PROJECTS_ROOT/$PROJECT"
 DB="_supabase_$PROJECT"
 PRERESTORE_DB="${DB}_prerestore"
+protected_database_assert_droppable "$DB" \
+  || die "Projeto aponta para um banco interno da plataforma"
 [[ -d "$PROJECT_DIR" ]] || die "Projeto nao encontrado: $PROJECT_DIR"
 [[ -f "$PROJECT_ROOT/.env" ]] || die "Arquivo $PROJECT_ROOT/.env ausente"
 [[ -f "$PROJECT_DIR/.env" ]] || die "Arquivo .env do projeto ausente"

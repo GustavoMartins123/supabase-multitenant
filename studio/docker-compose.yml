@@ -1,4 +1,7 @@
 #docker compose up --build -d
+# Nome de projeto Compose fixo do Studio; reservado na validacao de nomes de
+# projeto (ProjectNameValidator.RESERVED_NAMES).
+name: studio
 x-vector-logging: &vector-logging
   driver: fluentd
   options:

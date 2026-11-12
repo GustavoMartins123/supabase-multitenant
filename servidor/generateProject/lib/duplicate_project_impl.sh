@@ -15,6 +15,7 @@ source "$SCRIPT_DIR/lib/realtime_slots.sh"
 source "$SCRIPT_DIR/lib/tenant_reader_role.sh"
 source "$SCRIPT_DIR/lib/tenant_meta_role.sh"
 source "$SCRIPT_DIR/lib/project_public_ref.sh"
+source "$SCRIPT_DIR/lib/protected_databases.sh"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/backup_core.sh"
 
@@ -63,6 +64,8 @@ done
 
 ORIGINAL_DB="_supabase_$ORIGINAL_PROJECT"
 NEW_DB="_supabase_$NEW_PROJECT"
+protected_database_assert_droppable "$NEW_DB" \
+  || die "Nome do clone colide com um banco interno da plataforma"
 OUT_DIR="$PROJECT_ROOT/projects/$NEW_PROJECT"
 ORIGINAL_DIR="$PROJECT_ROOT/projects/$ORIGINAL_PROJECT"
 project_public_ref_assert "$NEW_PROJECT" "$PROJECT_UUID" "$PROJECT_PUBLIC_REF" \
@@ -157,7 +160,8 @@ rollback() {
        DELETE FROM _supavisor.tenants WHERE external_id = '$NEW_PROJECT';" \
       >/dev/null || rollback_failed=1
   fi
-  if [[ "$CREATED_DB" -eq 1 && "$CREATED_STORAGE" -eq 0 ]]; then
+  if [[ "$CREATED_DB" -eq 1 && "$CREATED_STORAGE" -eq 0 ]] \
+    && protected_database_assert_droppable "$NEW_DB"; then
     docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
       "ALTER DATABASE \"$NEW_DB\" ALLOW_CONNECTIONS false;" \
       >/dev/null || rollback_failed=1

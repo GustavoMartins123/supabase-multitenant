@@ -1,4 +1,7 @@
 # docker compose -f docker-compose-api.yml -f docker-compose.single-node.yml --env-file .env up --build -d
+# Nome de projeto Compose fixo da stack compartilhada; reservado na validacao
+# de nomes de projeto (ProjectNameValidator.RESERVED_NAMES).
+name: servidor
 x-vector-logging: &vector-logging
   driver: fluentd
   options:

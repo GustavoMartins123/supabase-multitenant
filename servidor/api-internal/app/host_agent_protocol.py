@@ -93,9 +93,31 @@ PROJECT_ROW_OPTIONAL_COMMANDS = frozenset(
 class ProjectNameValidator:
     NAME_RE = re.compile(r"^[a-z_][a-z0-9_]{2,39}$")
 
+    # O nome do projeto vira namespace fisico: projeto do Compose (``-p``),
+    # sufixo de container (``supabase-<servico>-<nome>``), banco
+    # ``_supabase_<nome>`` e tenant do Supavisor. Estes nomes colidem com a
+    # infraestrutura compartilhada ou com bancos internos e nunca podem ser
+    # atribuidos a um projeto novo.
+    RESERVED_NAMES = frozenset(
+        {
+            "analytics", "api", "auth", "control_plane", "deny", "functions",
+            "geoip", "global", "host_agent", "imgproxy", "mailer", "meta",
+            "nginx", "pooler", "postgres", "realtime", "redis", "rest",
+            "router", "servidor", "storage", "studio", "supabase", "supavisor",
+            "template", "traefik", "trap", "vector", "watcher",
+        }
+    )
+    RESERVED_PREFIXES = ("_supabase", "supabase_")
+
     @classmethod
     def is_valid(cls, raw: Any) -> bool:
         return isinstance(raw, str) and bool(cls.NAME_RE.fullmatch(raw))
+
+    @classmethod
+    def is_reserved(cls, raw: Any) -> bool:
+        if not isinstance(raw, str):
+            return False
+        return raw in cls.RESERVED_NAMES or raw.startswith(cls.RESERVED_PREFIXES)
 
 
 
@@ -130,6 +152,8 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
         return [f"unknown_command:{command}"]
     if not ProjectNameValidator.is_valid(project):
         errors.append("invalid_project_name")
+    elif command in {"create_project", "duplicate_project"} and ProjectNameValidator.is_reserved(project):
+        errors.append("reserved_project_name")
     if not isinstance(args, dict):
         return errors + ["args_must_be_object"]
 

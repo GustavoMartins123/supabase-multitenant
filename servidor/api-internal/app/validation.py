@@ -11,6 +11,19 @@ from app.project_public_ref import validate_public_ref
 
 SERVICE_NAME_RE = re.compile(r"^[a-z][a-z0-9\-]{0,39}$")
 
+# Bancos internos do cluster compartilhado. O banco de um projeto e
+# ``_supabase_<nome>``; nenhum fluxo de projeto pode remover estes bancos.
+PROTECTED_DATABASES = frozenset(
+    {
+        "postgres", "template0", "template1", "_supabase",
+        "_supabase_storage", "_supabase_template", "meta_trap",
+    }
+)
+
+
+def is_protected_database(db_name: str) -> bool:
+    return db_name in PROTECTED_DATABASES or not db_name.startswith("_supabase_")
+
 
 def normalize_groups(raw_groups: list[str] | tuple[str, ...] | str | None) -> list[str]:
     values = raw_groups.split(",") if isinstance(raw_groups, str) else raw_groups or []
@@ -41,6 +54,21 @@ def validate_project_id(raw: str) -> str:
             400,
             "Nome invalido: use letras minusculas, numeros ou '_', "
             "(3-40 caracteres, comecando por letra ou '_').",
+        )
+    return name
+
+
+def validate_new_project_name(raw: str) -> str:
+    """Valida o nome de um projeto que ainda sera provisionado.
+
+    Projetos existentes continuam enderecaveis por ``validate_project_id``;
+    apenas a atribuicao de um nome novo recusa namespaces reservados.
+    """
+    name = validate_project_id(raw)
+    if ProjectNameValidator.is_reserved(name):
+        raise HTTPException(
+            400,
+            f"Nome reservado pela plataforma: '{name}'. Escolha outro nome.",
         )
     return name
 

@@ -24,6 +24,7 @@ import httpx
 from dotenv import dotenv_values
 
 from app.runtime_config import REALTIME_INTERNAL_URL, SUPAVISOR_INTERNAL_URL
+from app.validation import is_protected_database
 
 
 @contextlib.asynccontextmanager
@@ -189,6 +190,18 @@ async def terminate_supavisor_pools(tenant_id: str, token: str) -> None:
         )
 
 
+def assert_project_database_droppable(db_name: str) -> None:
+    """Recusa encerrar conexoes ou remover bancos internos da plataforma.
+
+    O banco de um projeto e ``_supabase_<nome>``; um nome como ``storage``
+    apontaria para o banco do servico Storage compartilhado.
+    """
+    if is_protected_database(db_name):
+        raise ProjectDeletionError(
+            f"Banco interno da plataforma protegido: {db_name}"
+        )
+
+
 async def drain_database_connections(
     conn: asyncpg.Connection,
     db_name: str,
@@ -197,6 +210,7 @@ async def drain_database_connections(
 ) -> None:
     """Encerra conexões e falha se um pool continuar reconectando."""
 
+    assert_project_database_droppable(db_name)
     deadline = time.monotonic() + timeout_seconds
     quiet_since: float | None = None
     while True:
@@ -290,5 +304,6 @@ async def drop_supabase_replication_slots(
 
 
 async def drop_database_force(conn: asyncpg.Connection, db_name: str) -> None:
+    assert_project_database_droppable(db_name)
     quoted_db = '"' + db_name.replace('"', '""') + '"'
     await conn.execute(f"DROP DATABASE IF EXISTS {quoted_db} WITH (FORCE)")
