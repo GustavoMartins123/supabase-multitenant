@@ -164,7 +164,7 @@ async def usage(project_ref: str, request: Request, pool: asyncpg.Pool = Depends
         project = await get_public_project_row(conn, validate_project_ref(project_ref))
         await ensure_project_admin_access(conn, project_id=project["id"], auth_user=actor)
         rows = await conn.fetch(
-            "SELECT scope_id,scope_type,period,period_start,admitted,((period_start AT TIME ZONE 'UTC') + CASE WHEN period='day' THEN interval '1 day' ELSE interval '1 month' END) AT TIME ZONE 'UTC' AS period_end FROM access_quota_usage WHERE project_id=$1 AND period_start=date_trunc(period, now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' ORDER BY scope_type,scope_id,period",
+            "SELECT scope_id,scope_type,period,period_start,sum(admitted)::bigint AS admitted,((period_start AT TIME ZONE 'UTC') + CASE WHEN period='day' THEN interval '1 day' ELSE interval '1 month' END) AT TIME ZONE 'UTC' AS period_end FROM access_quota_usage WHERE project_id=$1 AND period_start=date_trunc(period, now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' GROUP BY scope_id,scope_type,period,period_start ORDER BY scope_type,scope_id,period",
             project["id"],
         )
     values = [dict(row) for row in rows]
