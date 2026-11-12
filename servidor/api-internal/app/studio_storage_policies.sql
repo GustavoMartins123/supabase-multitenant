@@ -1,7 +1,16 @@
 -- Policy DDL is delegated inside the caller's transaction. Storage ownership
 -- and its migration role stay unchanged; tenant SQL logins gain no memberships.
 DO $guard_schema$
+DECLARE
+    tenant_role TEXT := current_setting('platform.meta_role');
+    helper_role TEXT := replace(tenant_role,'tenant_meta_','tenant_storage_policy_');
+    inherited RECORD;
+    previous_tenant TEXT;
+    grantee TEXT;
 BEGIN
+    IF tenant_role !~ '^tenant_meta_[0-9a-f]{32}$' THEN
+        RAISE EXCEPTION 'Invalid tenant policy identity';
+    END IF;
     IF EXISTS (
         SELECT FROM pg_namespace n JOIN pg_roles r ON r.oid=n.nspowner
         WHERE n.nspname='studio_storage_guard' AND NOT r.rolsuper
@@ -9,14 +18,39 @@ BEGIN
         SELECT FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
         JOIN pg_roles r ON r.oid=c.relowner
         WHERE n.nspname='studio_storage_guard' AND NOT r.rolsuper
-    ) OR EXISTS (
-        SELECT FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-        JOIN pg_roles r ON r.oid=p.proowner
-        WHERE n.nspname='studio_storage_guard' AND NOT r.rolsuper
-          AND NOT (p.proname='execute_policy' AND r.rolname=replace(current_setting('platform.meta_role'),'tenant_meta_','tenant_storage_policy_'))
     ) THEN
         RAISE EXCEPTION 'Untrusted Storage policy delegation schema';
     END IF;
+    FOR inherited IN
+        SELECT p.oid, r.rolname, r.rolcanlogin, r.rolcreatedb, r.rolcreaterole,
+               r.rolreplication, r.rolbypassrls
+        FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+        JOIN pg_roles r ON r.oid=p.proowner
+        WHERE n.nspname='studio_storage_guard' AND NOT r.rolsuper
+    LOOP
+        IF inherited.oid IS DISTINCT FROM to_regprocedure('studio_storage_guard.execute_policy(text,bigint,text)') THEN
+            RAISE EXCEPTION 'Untrusted Storage policy delegation schema';
+        END IF;
+        IF inherited.rolname<>helper_role THEN
+            IF inherited.rolname !~ '^tenant_storage_policy_[0-9a-f]{32}$'
+               OR inherited.rolcanlogin OR inherited.rolcreatedb OR inherited.rolcreaterole
+               OR inherited.rolreplication OR inherited.rolbypassrls
+               OR to_regclass('studio_storage_guard.authorities') IS NULL THEN
+                RAISE EXCEPTION 'Untrusted Storage policy delegation schema';
+            END IF;
+            previous_tenant := replace(inherited.rolname,'tenant_storage_policy_','tenant_meta_');
+            IF NOT EXISTS(SELECT FROM studio_storage_guard.authorities WHERE role_name=previous_tenant) THEN
+                RAISE EXCEPTION 'Untrusted Storage policy delegation schema';
+            END IF;
+            EXECUTE format('ALTER FUNCTION studio_storage_guard.execute_policy(TEXT,BIGINT,TEXT) OWNER TO %I',current_user);
+            FOR grantee IN SELECT rolname FROM pg_roles WHERE rolname IN (previous_tenant,inherited.rolname)
+            LOOP
+                EXECUTE format('REVOKE ALL ON ALL FUNCTIONS IN SCHEMA studio_storage_guard FROM %I',grantee);
+                EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA studio_storage_guard FROM %I',grantee);
+                EXECUTE format('REVOKE ALL ON SCHEMA studio_storage_guard FROM %I',grantee);
+            END LOOP;
+        END IF;
+    END LOOP;
 END
 $guard_schema$;
 CREATE SCHEMA IF NOT EXISTS studio_storage_guard;

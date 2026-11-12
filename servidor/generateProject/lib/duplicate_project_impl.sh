@@ -343,13 +343,14 @@ if [[ "$COPY_MODE" == "with-data" ]]; then
     >/dev/null
   echo "HOST_AGENT_PROGRESS=duplicate:export_database"
   docker exec supabase-db pg_dump -U supabase_admin -d "$ORIGINAL_DB" \
-    --exclude-schema=realtime > "$DUMP_FILE"
+    --exclude-schema=realtime --exclude-schema=studio_storage_guard > "$DUMP_FILE"
 else
   echo "HOST_AGENT_PROGRESS=duplicate:export_database"
   docker exec supabase-db pg_dump -U supabase_admin -d "$ORIGINAL_DB" \
     --schema=auth --schema=storage --schema-only > "$DUMP_FILE"
   docker exec supabase-db pg_dump -U supabase_admin -d "$ORIGINAL_DB" \
     --exclude-schema=auth --exclude-schema=storage --exclude-schema=realtime \
+    --exclude-schema=studio_storage_guard \
     --exclude-table='storage_vectors.*' --schema-only >> "$DUMP_FILE"
   docker exec supabase-db pg_dump -U supabase_admin -d "$ORIGINAL_DB" --data-only \
     -t 'auth.schema_migrations' -t 'storage.migrations' >> "$DUMP_FILE"
