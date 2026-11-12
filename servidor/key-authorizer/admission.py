@@ -226,8 +226,6 @@ class AdmissionEngine:
         slot_id = identity["slot_id"] if identity else None
         admin = bool(identity and identity["administrative"])
         ip = str(canonical_ip(body.client_ip))
-        # Nenhuma conexao do PostgreSQL fica retida durante GeoIP ou Redis:
-        # uma lentidao externa nao pode esgotar o pool do data plane.
         async with self.pool.acquire() as conn:
             policies, revisions = await self.policies(conn, project["id"], slot_id)
         if admin:
@@ -288,12 +286,6 @@ class AdmissionEngine:
         return ticket
 
     async def redeem(self, ticket, body, project, identity, revisions):
-        """Consome o ticket e confere a ligacao com a admissao.
-
-        ``revisions`` sao as revisoes de politica lidas pelo chamador na mesma
-        conexao da identidade; o resgate nao adquire conexao do pool, entao
-        nunca espera uma segunda conexao enquanto o chamador segura a primeira.
-        """
         if len(ticket) != 43 or any(
             c not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
             for c in ticket

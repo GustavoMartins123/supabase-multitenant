@@ -25,13 +25,6 @@ type Config struct {
 
 func CreateConfig() *Config { return &Config{} }
 
-// evaluatorTransport e compartilhado por todas as instancias do middleware:
-// todas falam com o mesmo avaliador, e manter conexoes ociosas evita abrir um
-// TCP novo por requisicao. IdleConnTimeout fica abaixo do keep-alive de 5s do
-// uvicorn do key-authorizer: um POST enviado numa conexao que o servidor ja
-// fechou nao e repetido pelo cliente e viraria 503. O literal usa apenas
-// campos de valor: o interpretador Yaegi do Traefik recusa method values
-// (como net.Dialer.DialContext) em struct literal e desativa todos os plugins.
 var evaluatorTransport = &http.Transport{
 	MaxIdleConns:          256,
 	MaxIdleConnsPerHost:   128,
@@ -161,8 +154,6 @@ func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodOptions {
-		// Preflight CORS nunca chega ao upstream nem recebe ticket; responder
-		// aqui nao consome conexao do avaliador nem do PostgreSQL.
 		preflight(w)
 		return
 	}

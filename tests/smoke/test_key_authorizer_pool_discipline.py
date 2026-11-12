@@ -1,10 +1,3 @@
-"""Disciplina de pool do key-authorizer.
-
-Nenhum handler segura uma conexao do PostgreSQL enquanto espera outra do
-mesmo pool, nem enquanto faz I/O externo (GeoIP, Redis). Com o pool cheio,
-uma aquisicao aninhada trava todas as requisicoes para sempre.
-"""
-
 import asyncio
 import importlib.util
 import json
@@ -86,8 +79,6 @@ class FakeConnection:
 
 
 class FakePool:
-    """Pool limitado: ``acquire`` espera indefinidamente, como o asyncpg."""
-
     def __init__(self, size):
         self.slots = asyncio.Semaphore(size)
         self.held = 0

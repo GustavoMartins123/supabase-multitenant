@@ -244,8 +244,6 @@ async def admit(body: AdmissionRequest, x_admission_secret: str = Header()):
     if body.method not in {'GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'}:
         raise HTTPException(405, 'Method not permitted')
     if body.method == 'OPTIONS':
-        # Preflight CORS nao carrega credencial nem recebe ticket: responder
-        # sem tocar no PostgreSQL ou no GeoIP impede exaustao barata do pool.
         return Response(status_code=204)
     async with _pool.acquire() as conn:
         if body.project_ref == '' and body.gateway_token == '':
@@ -286,8 +284,6 @@ async def authorize(request: Request):
         if key and key['functions_internal']:
             raise _forbidden()
         _, revisions = await _engine.policies(conn, project['id'], key['slot_id'] if key else None)
-    # A conexao volta ao pool antes do Redis: o resgate nunca espera uma
-    # segunda conexao enquanto segura a primeira.
     await _engine.redeem(h.get('x-gateway-admission',''), body, project, key, revisions)
     if key and not key['administrative']:
         async with _pool.acquire() as conn:
