@@ -48,6 +48,18 @@ def resolve_project_dir(
     return resolved
 
 
+def resolve_new_project_dir(projects_root: Path, project: str) -> Path:
+    """Resolve o diretorio de um projeto que sera provisionado.
+
+    Alem do confinamento de ``resolve_project_dir``, recusa nomes reservados:
+    o nome vira projeto do Compose, sufixo de container e banco
+    ``_supabase_<nome>``, e um nome reservado colide com a infraestrutura.
+    """
+    if ProjectNameValidator.is_reserved(project):
+        raise PathConfinementError("reserved_project_name", project)
+    return resolve_project_dir(projects_root, project)
+
+
 def ensure_inside(root: Path, target: Path) -> Path:
     """Garante que ``target`` (apos resolver) permanece sob ``root``."""
     resolved_root = root.resolve(strict=True)

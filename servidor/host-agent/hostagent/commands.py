@@ -34,6 +34,7 @@ from .security import (
     ensure_inside,
     resolve_backup_dir,
     resolve_backup_project_dir,
+    resolve_new_project_dir,
     resolve_project_dir,
 )
 from .templates import sync_project_generated_files
@@ -445,9 +446,49 @@ def container_names(entry: Mapping[str, Any]) -> list[str]:
     return list(names)
 
 
+COMPOSE_PROJECT_LABEL = "com.docker.compose.project"
+
+
+def compose_project_label(entry: Mapping[str, Any]) -> str | None:
+    """Le o label do projeto Compose de uma linha de ``docker ps``.
+
+    ``docker ps --format '{{json .}}'`` entrega os labels como uma string
+    ``k=v,k2=v2``. Retorna ``None`` quando o label nao existe.
+    """
+    labels = entry.get("Labels", "")
+    if isinstance(labels, Mapping):
+        value = labels.get(COMPOSE_PROJECT_LABEL)
+        return str(value) if value is not None else None
+    if not isinstance(labels, str):
+        return None
+    values = {
+        item.split("=", 1)[1]
+        for item in labels.split(",")
+        if item.startswith(COMPOSE_PROJECT_LABEL + "=")
+    }
+    if len(values) == 1:
+        return values.pop()
+    return "" if values else None
+
+
 def match_project(entry: Mapping[str, Any], project: str) -> bool:
-    pattern = re.compile(rf"-{re.escape(project)}$")
-    return any(pattern.search(name) for name in container_names(entry))
+    """Casa somente containers do proprio projeto.
+
+    O nome precisa seguir exatamente o formato gerado para o projeto
+    (``supabase-<servico>-<projeto>`` ou ``<projeto>-<servico do tenant>-<n>``)
+    e, se o container pertence a um projeto Compose, o label precisa ser o
+    proprio projeto. Assim ``global`` nao alcanca ``supabase-storage-global``
+    e um nome igual a uma stack da plataforma nao alcanca seus containers.
+    """
+    escaped = re.escape(project)
+    services = "|".join(PROJECT_SERVICE_ORDER)
+    pattern = re.compile(
+        rf"^(supabase-[a-z0-9]+-{escaped}|{escaped}-({services})-[0-9]+)$"
+    )
+    if not any(pattern.fullmatch(name) for name in container_names(entry)):
+        return False
+    label = compose_project_label(entry)
+    return label is None or label == project
 
 
 async def list_project_containers(project: str) -> list[dict[str, Any]]:
@@ -836,7 +877,7 @@ async def _run_lifecycle_script(
 
 
 async def handle_create_project(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
-    resolve_project_dir(ctx.config.projects_root, project)
+    resolve_new_project_dir(ctx.config.projects_root, project)
     ctx.state.report(progress=10, step="provision_infrastructure", message="Provisionando infraestrutura do projeto...")
     recover_stale = args["recover_stale"]
     stale_tenant_uuids = [str(item) for item in args["stale_tenant_uuids"]]
@@ -891,7 +932,7 @@ async def handle_duplicate_project(ctx: CommandContext, project: str, args: dict
     physical_uuid = read_canonical_env_value(source_dir / ".env", "PROJECT_UUID")
     if not isinstance(physical_uuid, str) or physical_uuid.lower() != args["original_tenant_uuid"].lower():
         return CommandOutcome(status="failed", error_code="source_identity_mismatch", message="UUID fisico da origem diverge da intencao assinada.")
-    resolve_project_dir(ctx.config.projects_root, project)
+    resolve_new_project_dir(ctx.config.projects_root, project)
     ctx.state.report(progress=10, step="duplicate_infrastructure", message="Duplicando infraestrutura e banco...")
     env = os.environ.copy()
     gateway_token = args.get("gateway_token")
@@ -1200,9 +1241,22 @@ async def handle_container_logs(ctx: CommandContext, project: str, args: dict[st
         )
     container_state = "unknown"
     try:
-        container_state = json.loads(stdout)[0].get("State", {}).get("Status", "unknown")
-    except (ValueError, IndexError, AttributeError):
-        pass
+        inspected = json.loads(stdout)[0]
+    except (ValueError, IndexError):
+        inspected = {}
+    if not isinstance(inspected, dict):
+        inspected = {}
+    labels = (inspected.get("Config") or {}).get("Labels") or {}
+    owner = labels.get(COMPOSE_PROJECT_LABEL) if isinstance(labels, dict) else None
+    if owner is not None and owner != project:
+        return CommandOutcome(
+            status="failed",
+            error_code="container_not_found",
+            message=f"Container {container} nao encontrado.",
+        )
+    state = inspected.get("State") or {}
+    if isinstance(state, dict):
+        container_state = state.get("Status", "unknown")
 
     code, logs, _ = await _run_short(
         ["docker", "logs", "--tail", str(lines), "--timestamps", container],

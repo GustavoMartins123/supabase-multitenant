@@ -29,7 +29,7 @@ for path in (str(AGENT_ROOT), str(API_ROOT)):
 
 from hostagent import host_agent_protocol as protocol
 from hostagent.commands import COMMAND_HANDLERS
-from hostagent.security import PathConfinementError, resolve_project_dir
+from hostagent.security import PathConfinementError, resolve_new_project_dir, resolve_project_dir
 
 try:
     import asyncpg as _asyncpg  # noqa: F401
@@ -867,6 +867,190 @@ class PathConfinementTest(unittest.TestCase):
         with self.assertRaises(PathConfinementError) as ctx:
             resolve_project_dir(self.projects_root, "linkado")
         self.assertEqual(ctx.exception.code, "symlink_rejected")
+
+    def test_new_project_dir_rejects_reserved_names(self) -> None:
+        for name in sorted(protocol.ProjectNameValidator.RESERVED_NAMES) + ["_supabase_x", "supabase_x"]:
+            with self.subTest(name=name):
+                with self.assertRaises(PathConfinementError) as ctx:
+                    resolve_new_project_dir(self.projects_root, name)
+                self.assertEqual(ctx.exception.code, "reserved_project_name")
+        resolved = resolve_new_project_dir(self.projects_root, "novo_projeto")
+        self.assertEqual(resolved.parent, self.projects_root.resolve())
+
+
+class ReservedProjectNamesTest(unittest.TestCase):
+    TENANT_UUID = "9c8ce9f0-3b4e-4bcb-a739-2c1e8ad0e9aa"
+    ORIGINAL_UUID = "1b671a64-40d5-491e-99b0-da01ff1f3341"
+
+    def reserved_names(self) -> list[str]:
+        return sorted(protocol.ProjectNameValidator.RESERVED_NAMES) + [
+            "_supabase", "_supabase_storage", "supabase_studio",
+        ]
+
+    def create_args(self) -> dict:
+        return {
+            "tenant_uuid": self.TENANT_UUID,
+            "public_ref": "abcdefghijklmnopqrst",
+            "recover_stale": True,
+            "stale_tenant_uuids": [],
+        }
+
+    def duplicate_args(self) -> dict:
+        return {
+            "public_ref": "abcdefghijklmnopqrst",
+            "original_name": "meuprojeto",
+            "original_uuid": self.ORIGINAL_UUID,
+            "original_tenant_uuid": self.ORIGINAL_UUID,
+            "copy_mode": "schema-only",
+            "tenant_uuid": self.TENANT_UUID,
+        }
+
+    def test_reserved_names_fit_the_name_shape(self) -> None:
+        # A blocklist so tem efeito se o nome passaria pela regex.
+        for name in protocol.ProjectNameValidator.RESERVED_NAMES:
+            with self.subTest(name=name):
+                self.assertTrue(protocol.ProjectNameValidator.is_valid(name))
+
+    def test_shared_stack_namespaces_are_reserved(self) -> None:
+        for name in (
+            "servidor", "studio", "traefik", "storage", "template", "pooler",
+            "realtime", "functions", "global", "analytics", "api", "redis",
+        ):
+            with self.subTest(name=name):
+                self.assertTrue(protocol.ProjectNameValidator.is_reserved(name))
+        for name in ("meuprojeto", "default", "storage_app", "my_supabase"):
+            with self.subTest(name=name):
+                self.assertFalse(protocol.ProjectNameValidator.is_reserved(name))
+
+    def test_create_and_duplicate_reject_reserved_destinations(self) -> None:
+        for name in self.reserved_names():
+            with self.subTest(command="create_project", name=name):
+                self.assertIn(
+                    "reserved_project_name",
+                    protocol.validate_command_args("create_project", name, self.create_args()),
+                )
+            with self.subTest(command="duplicate_project", name=name):
+                self.assertIn(
+                    "reserved_project_name",
+                    protocol.validate_command_args("duplicate_project", name, self.duplicate_args()),
+                )
+
+    def test_existing_projects_with_reserved_names_stay_manageable(self) -> None:
+        for command in ("stop_project", "start_project", "delete_project_containers"):
+            with self.subTest(command=command):
+                self.assertEqual(protocol.validate_command_args(command, "api", {}), [])
+        self.assertEqual(
+            protocol.validate_command_args(
+                "delete_project_files", "storage", {"tenant_uuid": self.TENANT_UUID}
+            ),
+            [],
+        )
+
+
+class ProjectContainerMatchingTest(unittest.TestCase):
+    SHARED_CONTAINERS = [
+        ("supabase-db", "servidor"),
+        ("supabase-pooler", "servidor"),
+        ("realtime-dev.supabase-realtime", "servidor"),
+        ("supabase-edge-functions", "servidor"),
+        ("supabase-edge-functions-global", "servidor"),
+        ("supabase-storage-global", "servidor"),
+        ("supabase-imgproxy-global", "servidor"),
+        ("supabase-vector-global", "servidor"),
+        ("supabase-analytics", "servidor"),
+        ("supabase-storage-router", "servidor"),
+        ("postgres-meta-global", "servidor"),
+        ("servidor-projects-api-1", "servidor"),
+        ("traffic-redis", "servidor"),
+        ("key-authorizer", "servidor"),
+        ("supabase-traefik-config-watcher", "traefik"),
+        ("traefik-traefik-1", "traefik"),
+        ("supabase-studio", "studio"),
+        ("studio-studio-identity-1", "studio"),
+        ("nginx", "studio"),
+    ]
+
+    @staticmethod
+    def entry(name: str, project: str | None) -> dict:
+        labels = "" if project is None else (
+            f"com.docker.compose.config-hash=abc,com.docker.compose.project={project},"
+            "com.docker.compose.service=svc"
+        )
+        return {"Names": name, "Labels": labels}
+
+    def test_shared_containers_never_match_any_project_name(self) -> None:
+        from hostagent.commands import match_project
+
+        candidates = sorted(protocol.ProjectNameValidator.RESERVED_NAMES) + [
+            "db", "edge", "router", "authorizer", "watcher", "identity",
+        ]
+        for name, owner in self.SHARED_CONTAINERS:
+            for project in candidates:
+                with self.subTest(container=name, project=project):
+                    self.assertFalse(match_project(self.entry(name, owner), project))
+
+    def test_tenant_containers_match_only_their_project(self) -> None:
+        from hostagent.commands import match_project
+
+        for name in ("supabase-nginx-demo", "supabase-auth-demo", "supabase-rest-demo", "demo-meta-1"):
+            with self.subTest(name=name):
+                self.assertTrue(match_project(self.entry(name, "demo"), "demo"))
+                self.assertTrue(match_project({"Names": name}, "demo"))
+                self.assertFalse(match_project(self.entry(name, "other"), "demo"))
+                self.assertFalse(match_project(self.entry(name, "demo"), "emo"))
+        self.assertFalse(match_project(self.entry("supabase-nginx-meu_demo", "meu_demo"), "demo"))
+        self.assertFalse(match_project(self.entry("x-supabase-nginx-demo", "demo"), "demo"))
+
+    def test_compose_label_parsing(self) -> None:
+        from hostagent.commands import compose_project_label
+
+        self.assertEqual(compose_project_label(self.entry("a", "demo")), "demo")
+        self.assertIsNone(compose_project_label({"Names": "a", "Labels": ""}))
+        self.assertIsNone(compose_project_label({"Names": "a"}))
+        self.assertEqual(
+            compose_project_label({"Labels": {"com.docker.compose.project": "demo"}}),
+            "demo",
+        )
+        conflicting = {
+            "Labels": "com.docker.compose.project=a,com.docker.compose.project=b"
+        }
+        self.assertEqual(compose_project_label(conflicting), "")
+
+
+class ContainerLogsOwnershipTest(unittest.IsolatedAsyncioTestCase):
+    async def run_logs(self, project: str, service: str, owner: str | None):
+        import json as _json
+        from hostagent import commands
+
+        labels = {} if owner is None else {"com.docker.compose.project": owner}
+        inspect_payload = _json.dumps(
+            [{"State": {"Status": "running"}, "Config": {"Labels": labels}}]
+        )
+        calls: list[list[str]] = []
+
+        async def fake_run_short(argv, timeout=30.0):
+            calls.append(argv)
+            if argv[1] == "inspect":
+                return 0, inspect_payload, ""
+            return 0, "linha de log\n", ""
+
+        with mock.patch.object(commands, "_run_short", fake_run_short):
+            outcome = await commands.handle_container_logs(
+                None, project, {"service": service, "lines": 10}
+            )
+        return outcome, calls
+
+    async def test_shared_container_logs_are_not_reachable(self) -> None:
+        outcome, calls = await self.run_logs("global", "storage", "servidor")
+        self.assertEqual(outcome.status, "failed")
+        self.assertEqual(outcome.error_code, "container_not_found")
+        self.assertEqual([argv[1] for argv in calls], ["inspect"])
+
+    async def test_own_container_logs_are_returned(self) -> None:
+        outcome, calls = await self.run_logs("demo", "auth", "demo")
+        self.assertEqual(outcome.status, "done")
+        self.assertEqual(outcome.result["container"], "supabase-auth-demo")
+        self.assertEqual([argv[1] for argv in calls], ["inspect", "logs"])
 
 
 class ApiNoLongerExecutesDockerOrShellTest(unittest.TestCase):

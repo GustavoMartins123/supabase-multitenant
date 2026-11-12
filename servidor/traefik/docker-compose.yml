@@ -1,3 +1,6 @@
+# Nome de projeto Compose fixo do gateway; reservado na validacao de nomes de
+# projeto (ProjectNameValidator.RESERVED_NAMES).
+name: traefik
 x-vector-logging: &vector-logging
   driver: fluentd
   options:

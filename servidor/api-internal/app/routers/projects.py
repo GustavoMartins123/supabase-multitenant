@@ -73,7 +73,7 @@ from app.runtime_config import (
 )
 from app.schemas import DuplicateProject, NewProject
 from app.step_up_auth import consume_step_up_grant
-from app.validation import validate_project_id, validate_project_ref
+from app.validation import validate_new_project_name, validate_project_ref
 
 router = APIRouter(tags=["projects"])
 
@@ -230,7 +230,7 @@ async def create_project(
     request: Request,
     pool=Depends(get_pool),
 ):
-    name = validate_project_id(body.name)
+    name = validate_new_project_name(body.name)
 
     if not name:
         raise HTTPException(400, "name required")
@@ -322,7 +322,7 @@ async def duplicate_project(
     - Dispara job em background para executar script de duplicação
     """
     original_ref = validate_project_ref(body.original_public_ref)
-    new_name = validate_project_id(body.new_name)
+    new_name = validate_new_project_name(body.new_name)
     auth_user = await resolve_authenticated_user(request, pool)
 
     async with pool.acquire() as conn:

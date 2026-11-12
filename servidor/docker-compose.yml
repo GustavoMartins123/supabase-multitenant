@@ -1,4 +1,7 @@
 #docker compose --env-file .env up --build -d
+# Nome de projeto Compose fixo da stack compartilhada; reservado na validacao
+# de nomes de projeto (ProjectNameValidator.RESERVED_NAMES).
+name: servidor
 
 #Caso for usar wal arquives descomente essa linha:
 #- archive_command=/bin/cp %p /wal-archive/%f

@@ -29,6 +29,7 @@ source "$SCRIPT_DIR/lib/realtime_slots.sh"
 source "$SCRIPT_DIR/lib/tenant_reader_role.sh"
 source "$SCRIPT_DIR/lib/tenant_meta_role.sh"
 source "$SCRIPT_DIR/lib/project_public_ref.sh"
+source "$SCRIPT_DIR/lib/protected_databases.sh"
 
 TRANSACTION_DIR="$PROJECT_ROOT/.generate_transaction_$$"
 CREATED_DIRS=()
@@ -80,6 +81,7 @@ drop_project_replication_slots() {
 drop_project_database() {
   local db="$1" remaining
 
+  protected_database_assert_droppable "$db" || return 1
   # Bloqueia reconexoes do Supavisor entre o terminate e o DROP.
   docker exec supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d postgres -c \
     "ALTER DATABASE \"$db\" ALLOW_CONNECTIONS false;" >/dev/null || return 1
@@ -217,6 +219,8 @@ PROJECT_UUID="$(echo "$PROJECT_UUID" | tr '[:upper:]' '[:lower:]')"
 [[ "$PROJECT_ID" =~ ^[a-z_][a-z0-9_]{2,39}$ ]] \
   || die "Nome deve começar com letra minúscula/_ e conter só minúsculas, dígitos ou _ (3–40 chars)"
 [[ "$PROJECT_ID" != *.* ]] || die "Nome não pode conter ponto (.)"
+protected_database_assert_droppable "_supabase_$PROJECT_ID" \
+  || die "Nome do projeto colide com um banco interno da plataforma"
 
 
 OUT_DIR="$PROJECT_ROOT/projects/$PROJECT_ID"
