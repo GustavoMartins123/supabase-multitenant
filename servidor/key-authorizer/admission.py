@@ -228,47 +228,46 @@ class AdmissionEngine:
         ip = str(canonical_ip(body.client_ip))
         async with self.pool.acquire() as conn:
             policies, revisions = await self.policies(conn, project["id"], slot_id)
-            if admin:
-                if not any(canonical_ip(ip) in net for net in self.admin_networks):
-                    raise HTTPException(403, "Administrative transport origin denied")
-                policies = [
-                    AccessPolicy(
-                        geo_mode="unrestricted",
-                        allowed_countries=None,
-                        allowed_networks=[],
-                        rate_limit={"requests_per_second": 20, "burst": 40},
-                        request_quota=None,
-                    )
-                ]
-                scopes = [str(project["id"]) + ":admin"]
-            elif discovery:
-                await self.geographic(policies, ip)
-                policies = [
-                    AccessPolicy(
-                        geo_mode="unrestricted",
-                        allowed_countries=None,
-                        allowed_networks=[],
-                        rate_limit={"requests_per_second": 10, "burst": 20},
-                        request_quota=None,
-                    )
-                ]
-                scopes = ["discovery:" + hashlib.sha256(ip.encode()).hexdigest()]
-            else:
-                await self.geographic(policies, ip)
-                scopes = [str(project["id"]) + ":project"] + (
-                    [str(project["id"]) + ":" + str(slot_id)] if slot_id else []
+        if admin:
+            if not any(canonical_ip(ip) in net for net in self.admin_networks):
+                raise HTTPException(403, "Administrative transport origin denied")
+            policies = [
+                AccessPolicy(
+                    geo_mode="unrestricted",
+                    allowed_countries=None,
+                    allowed_networks=[],
+                    rate_limit={"requests_per_second": 20, "burst": 40},
+                    request_quota=None,
                 )
-            if body.method == "OPTIONS":
-                return None
-            await self.rate(scopes, policies)
-            if not discovery:
+            ]
+            scopes = [str(project["id"]) + ":admin"]
+        elif discovery:
+            await self.geographic(policies, ip)
+            policies = [
+                AccessPolicy(
+                    geo_mode="unrestricted",
+                    allowed_countries=None,
+                    allowed_networks=[],
+                    rate_limit={"requests_per_second": 10, "burst": 20},
+                    request_quota=None,
+                )
+            ]
+            scopes = ["discovery:" + hashlib.sha256(ip.encode()).hexdigest()]
+        else:
+            await self.geographic(policies, ip)
+            scopes = [str(project["id"]) + ":project"] + (
+                [str(project["id"]) + ":" + str(slot_id)] if slot_id else []
+            )
+        await self.rate(scopes, policies)
+        if not discovery:
+            async with self.pool.acquire() as conn:
                 wait = await conn.fetchval(
                     "SELECT consume_access_quota($1,$2,$3)", project["id"], slot_id, admin
                 )
-                if wait:
-                    raise HTTPException(
-                        429, "Request quota exhausted", headers={"Retry-After": str(wait)}
-                    )
+            if wait:
+                raise HTTPException(
+                    429, "Request quota exhausted", headers={"Retry-After": str(wait)}
+                )
         key_id = str(identity["id"]) if identity else None
         ticket = secrets.token_urlsafe(32)
         value = ticket_binding(body, project["id"], key_id)
@@ -286,7 +285,7 @@ class AdmissionEngine:
             raise HTTPException(503, "Admission ticket unavailable")
         return ticket
 
-    async def redeem(self, ticket, body, project, identity):
+    async def redeem(self, ticket, body, project, identity, revisions):
         if len(ticket) != 43 or any(
             c not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
             for c in ticket
@@ -301,8 +300,5 @@ class AdmissionEngine:
         expected = ticket_binding(body, project["id"], str(identity["id"]) if identity else None)
         if any(value[k] != v for k, v in expected.items()) or value["epoch"] != self.epoch:
             raise HTTPException(403, "Admission binding mismatch")
-        slot_id = identity["slot_id"] if identity else None
-        async with self.pool.acquire() as conn:
-            _, revisions = await self.policies(conn, project["id"], slot_id)
         if value["revisions"] != revisions:
             raise HTTPException(403, "Access policy changed after admission")

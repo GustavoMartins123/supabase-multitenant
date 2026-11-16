@@ -243,9 +243,11 @@ async def admit(body: AdmissionRequest, x_admission_secret: str = Header()):
         raise _forbidden()
     if body.method not in {'GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'}:
         raise HTTPException(405, 'Method not permitted')
+    if body.method == 'OPTIONS':
+        return Response(status_code=204)
     async with _pool.acquire() as conn:
         if body.project_ref == '' and body.gateway_token == '':
-            if body.method not in {'GET','OPTIONS'}:
+            if body.method != 'GET':
                 raise HTTPException(405, 'Only GET and OPTIONS are supported')
             project, identity, service = await discovery_identity(conn, body)
             discovery = True
@@ -253,7 +255,7 @@ async def admit(body: AdmissionRequest, x_admission_secret: str = Header()):
             project = await project_identity(conn, body.project_ref, body.gateway_token)
             service, missing, required, _ = route(body.uri, project['public_ref'])
             await ensure_functions_enabled(conn, project, service)
-            identity, _, _ = await key_identity(conn, project, body, service, missing, required) if body.method != 'OPTIONS' else (None,None,True)
+            identity, _, _ = await key_identity(conn, project, body, service, missing, required)
             if identity and identity['functions_internal']:
                 raise _forbidden()
             discovery = False
@@ -281,8 +283,10 @@ async def authorize(request: Request):
         key, parsed, preserve = await key_identity(conn, project, body, service, missing, required)
         if key and key['functions_internal']:
             raise _forbidden()
-        await _engine.redeem(h.get('x-gateway-admission',''), body, project, key)
-        if key and not key['administrative']:
+        _, revisions = await _engine.policies(conn, project['id'], key['slot_id'] if key else None)
+    await _engine.redeem(h.get('x-gateway-admission',''), body, project, key, revisions)
+    if key and not key['administrative']:
+        async with _pool.acquire() as conn:
             await conn.execute("UPDATE project_api_keys SET last_used_at=now() WHERE id=$1 AND (last_used_at IS NULL OR last_used_at < now()-interval '5 minutes')", key['id'])
     headers = {'Cache-Control':'no-store','X-Opaque-Key-Present':'1' if key else '0',
         'X-Opaque-Preserve-Authorization':'1' if preserve else '0','X-Opaque-Keyset-Version':str(project['api_keyset_version'])}
@@ -297,7 +301,8 @@ async def check_discovery(body: AdmissionRequest, x_admission_secret: str = Head
         raise _forbidden()
     async with _pool.acquire() as conn:
         project, key, _ = await discovery_identity(conn, body)
-    await _engine.redeem(x_gateway_admission, body, project, key)
+        _, revisions = await _engine.policies(conn, project['id'], key['slot_id'])
+    await _engine.redeem(x_gateway_admission, body, project, key, revisions)
     return Response(status_code=204)
 
 
