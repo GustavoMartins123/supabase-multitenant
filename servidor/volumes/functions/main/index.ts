@@ -132,9 +132,264 @@ async function authorized(request: Request, tenant: Tenant): Promise<boolean> {
   } catch { return false }
 }
 
+const MAX_LOGS_PER_PROJECT = 200
+const MAX_LOG_PROJECTS = 200
+const MAX_LOG_MESSAGE_LEN = 1024
+
+interface LogEntry {
+  id: string
+  timestamp: string
+  function_name: string
+  level: string
+  source: string
+  message: string
+  status?: number
+  duration_ms?: number
+}
+
+const projectLogs = new Map<string, LogEntry[]>()
+const projectSensitiveValues = new Map<string, string[]>()
+const uuidToProject = new Map<string, string>()
+
+const tokenBytes = crypto.getRandomValues(new Uint8Array(32))
+const eventIngestToken = Array.from(tokenBytes, (b) => b.toString(16).padStart(2, '0')).join('')
+try {
+  Deno.writeTextFileSync('/dev/shm/.edge-event-key', eventIngestToken)
+} catch {
+  // Event worker token delivery unavailable if /dev/shm is not writable.
+}
+
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length || a.length === 0) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
+}
+
+async function hmacHex(secret: string, message: string): Promise<string> {
+  const enc = new TextEncoder()
+  const key = await crypto.subtle.importKey(
+    'raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
+  )
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(message))
+  return Array.from(new Uint8Array(sig), (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+function registerTenantRedaction(project: string, uuid: string, tenant: Tenant, canonical?: Projection): void {
+  uuidToProject.set(uuid, project)
+  const values = new Set<string>()
+  const collect = (val: unknown) => {
+    if (typeof val === 'string' && val.length >= 4 && val !== project && val !== uuid) values.add(val)
+  }
+  collect(tenant.jwt_secret)
+  if (canonical) {
+    collect(canonical.jwt_secret)
+    collect(canonical.anon_key)
+    collect(canonical.service_role_key)
+  }
+  for (const val of Object.values(tenant.secrets ?? {})) collect(val)
+  for (const [key, val] of Object.entries(tenant.env ?? {})) {
+    if (/SECRET|KEY|TOKEN|PASS/i.test(key)) collect(val)
+    if (typeof val === 'string') {
+      const m = val.match(/:\/\/[^:@\s]+:([^@\s]+)@/)
+      if (m?.[1]) collect(m[1])
+    }
+  }
+  projectSensitiveValues.set(project, Array.from(values).sort((a, b) => b.length - a.length))
+  if (projectSensitiveValues.size > MAX_LOG_PROJECTS) {
+    const oldest = projectSensitiveValues.keys().next().value
+    if (oldest && oldest !== project) projectSensitiveValues.delete(oldest)
+  }
+}
+
+function redactMessage(project: string, raw: string): string {
+  let out = raw.replace(/[\r\n\t]+/g, ' ').trim()
+  for (const secret of projectSensitiveValues.get(project) ?? []) {
+    if (secret && out.includes(secret)) out = out.split(secret).join('[REDACTED]')
+  }
+  out = out
+    .replace(/(postgres(?:ql)?:\/\/[^:@\s]+:)([^@\s]+)(@)/gi, '$1[REDACTED]$3')
+    .replace(/(?<![A-Za-z0-9_-])Bearer\s+(?!Bearer(?:\s|$))\S+/gi, 'Bearer [REDACTED]')
+    .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '[REDACTED_JWT]')
+    .replace(/\bsb_(?:secret|publishable)_[A-Za-z0-9_-]+\b/g, '[REDACTED_KEY]')
+  if (out.length > MAX_LOG_MESSAGE_LEN) out = `${out.slice(0, MAX_LOG_MESSAGE_LEN - 3)}...`
+  return out
+}
+
+function recordLog(
+  project: string,
+  functionName: string,
+  level: string,
+  source: string,
+  rawMessage: string,
+  extra?: { status?: number; duration_ms?: number },
+): void {
+  const message = redactMessage(project, rawMessage)
+  if (!message) return
+  let entries = projectLogs.get(project)
+  if (!entries) {
+    entries = []
+    projectLogs.set(project, entries)
+    if (projectLogs.size > MAX_LOG_PROJECTS) {
+      const oldest = projectLogs.keys().next().value
+      if (oldest && oldest !== project) projectLogs.delete(oldest)
+    }
+  } else {
+    projectLogs.delete(project)
+    projectLogs.set(project, entries)
+  }
+  entries.push({
+    id: crypto.randomUUID(),
+    timestamp: new Date().toISOString(),
+    function_name: functionName,
+    level,
+    source,
+    message,
+    ...extra,
+  })
+  if (entries.length > MAX_LOGS_PER_PROJECT) {
+    entries.splice(0, entries.length - MAX_LOGS_PER_PROJECT)
+  }
+}
+
+function parseEventTarget(rawPath: unknown): { project: string; functionName: string } | null {
+  if (typeof rawPath !== 'string' || !rawPath) return null
+  const match = rawPath.match(/\/code\/([^/]+)\/[0-9a-f]{64}\/([^/]+)/)
+  if (!match) return null
+  const key = match[1]
+  const functionName = match[2]
+  if (!functionNamePattern.test(functionName) || reservedFunctionNames.has(functionName)) return null
+  const project = uuidToProject.get(key) ?? (projectPattern.test(key) ? key : '')
+  if (!project) return null
+  return { project, functionName }
+}
+
+async function handleEventIngest(request: Request): Promise<Response> {
+  if (request.method !== 'POST') return new Response(null, { status: 405 })
+  const forbiddenHeaders = [
+    'x-forwarded-for', 'x-real-ip', 'x-project-name', 'x-project-uuid',
+    'x-project-ref', 'x-gateway-admission', 'x-shared-token', 'authorization', 'apikey',
+  ]
+  if (forbiddenHeaders.some((name) => request.headers.has(name))) {
+    return response('forbidden', 403)
+  }
+  if (!constantTimeEqual(request.headers.get('x-event-token') ?? '', eventIngestToken)) {
+    return response('forbidden', 403)
+  }
+  let rawText = ''
+  try {
+    rawText = await request.text()
+  } catch {
+    return response('invalid_event_payload', 400)
+  }
+  if (rawText.length > 32768) return response('payload_too_large', 413)
+  let payload: Record<string, unknown>
+  try {
+    const parsed = JSON.parse(rawText)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return response('invalid_event_payload', 400)
+    }
+    payload = parsed as Record<string, unknown>
+  } catch {
+    return response('invalid_event_payload', 400)
+  }
+  const metadata = (payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {}) as Record<string, unknown>
+  const body = (payload.event && typeof payload.event === 'object' ? payload.event : payload) as Record<string, unknown>
+  const eventType = String(payload.event_type ?? payload.type ?? '')
+  const target = parseEventTarget(metadata.service_path ?? payload.service_path)
+  if (!target) return new Response(null, { status: 204 })
+
+  if (eventType === 'Log') {
+    const rawLevel = String(body.level ?? 'info').toLowerCase()
+    const level = rawLevel.startsWith('warn') ? 'warn' : rawLevel.startsWith('err') ? 'error' : 'info'
+    const msg = typeof body.msg === 'string' ? body.msg : JSON.stringify(body.msg ?? body)
+    recordLog(target.project, target.functionName, level, 'worker', msg)
+  } else if (eventType === 'Boot') {
+    const bootTime = typeof body.boot_time === 'number' ? body.boot_time : '?'
+    recordLog(target.project, target.functionName, 'info', 'boot', `Worker booted (${bootTime}ms)`)
+  } else if (eventType === 'BootFailure') {
+    recordLog(target.project, target.functionName, 'error', 'boot', String(body.msg ?? 'Worker boot failed'))
+  } else if (eventType === 'UncaughtException') {
+    recordLog(target.project, target.functionName, 'error', 'worker', String(body.exception ?? 'Uncaught exception'))
+  } else if (eventType === 'Shutdown') {
+    const reason = String(body.reason ?? 'Shutdown')
+    if (reason !== 'EventLoopCompleted') {
+      recordLog(target.project, target.functionName, 'warn', 'boot', `Worker shutdown: ${reason}`)
+    }
+  }
+  return new Response(null, { status: 204 })
+}
+
+async function handleLogsRequest(request: Request, url: URL): Promise<Response> {
+  if (request.method !== 'GET') return new Response(null, { status: 405 })
+  const rejectedProxyHeaders = ['x-forwarded-for', 'x-real-ip', 'x-gateway-admission', 'authorization', 'apikey']
+  if (rejectedProxyHeaders.some((name) => request.headers.has(name))) {
+    return response('forbidden', 403)
+  }
+  const project = request.headers.get('x-project-name') ?? ''
+  const ref = request.headers.get('x-project-ref') ?? ''
+  if (!projectPattern.test(project) || !/^[a-z]{20}$/.test(ref) || url.searchParams.has('ref') || url.searchParams.has('name')) {
+    return response('invalid_project_context', 400)
+  }
+  const tsHeader = request.headers.get('x-logs-timestamp') ?? ''
+  const sigHeader = (request.headers.get('x-logs-signature') ?? '').toLowerCase()
+  const ts = Number(tsHeader)
+  if (!/^\d+$/.test(tsHeader) || !Number.isInteger(ts) || !/^[0-9a-f]{64}$/.test(sigHeader)) {
+    return response('forbidden', 403)
+  }
+  const nowSec = Math.floor(Date.now() / 1000)
+  if (Math.abs(nowSec - ts) > 30) return response('forbidden', 403)
+  let canonical: Projection
+  try {
+    canonical = await canonicalProjection(project, ref)
+  } catch {
+    return response('tenant_configuration_unavailable', 503)
+  }
+  const uuid = canonical.project_uuid
+  let tenant: Tenant | null
+  try {
+    tenant = await tenantContext(project, uuid)
+  } catch {
+    return response('tenant_configuration_unavailable', 503)
+  }
+  if (!tenant) return response('service_disabled', 404)
+  const expectedSig = await hmacHex(canonical.jwt_secret, `edge-logs-v1\n${project}\n${uuid}\n${ref}\n${tsHeader}`)
+  if (!constantTimeEqual(sigHeader, expectedSig)) return response('forbidden', 403)
+
+  registerTenantRedaction(project, uuid, tenant, canonical)
+
+  const fnFilter = url.searchParams.get('function') ?? ''
+  if (fnFilter && (!functionNamePattern.test(fnFilter) || reservedFunctionNames.has(fnFilter))) {
+    return response('invalid_function_name', 400)
+  }
+  const levelFilter = url.searchParams.get('level') ?? ''
+  if (levelFilter && !['info', 'warn', 'error'].includes(levelFilter)) {
+    return response('invalid_log_level', 400)
+  }
+  const limitRaw = url.searchParams.get('limit')
+  let limit = 50
+  if (limitRaw !== null && limitRaw !== '') {
+    const parsed = Number(limitRaw)
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 200) return response('invalid_limit', 400)
+    limit = parsed
+  }
+
+  const all = projectLogs.get(project) ?? []
+  const logs: LogEntry[] = []
+  for (let i = all.length - 1; i >= 0 && logs.length < limit; i--) {
+    const entry = all[i]
+    if (fnFilter && entry.function_name !== fnFilter) continue
+    if (levelFilter && entry.level !== levelFilter) continue
+    logs.push({ ...entry, message: redactMessage(project, entry.message) })
+  }
+  return Response.json({ logs }, { headers: { 'cache-control': 'no-store' } })
+}
+
 Deno.serve(async (request: Request) => {
   const url = new URL(request.url)
   if (url.pathname === '/__health') return Response.json({ status: 'ok' })
+  if (url.pathname === '/__event-ingest') return await handleEventIngest(request)
+  if (url.pathname === '/__logs') return await handleLogsRequest(request, url)
   const project = request.headers.get('x-project-name') ?? ''
   const ref = request.headers.get('x-project-ref') ?? ''
   if (!projectPattern.test(project) || !/^[a-z]{20}$/.test(ref) || url.searchParams.has('ref') || url.searchParams.has('name')) {
@@ -189,6 +444,8 @@ Deno.serve(async (request: Request) => {
     clearTimeout(timer)
   }
   const timer = setTimeout(release, 65000)
+  registerTenantRedaction(project, uuid, tenant, canonical)
+  const startedAt = Date.now()
   try {
     const permissions = await workerPermissions(project, tenant.network_allowlist ?? [], tenant.env.SUPABASE_DB_URL)
     // DNS resolution may await I/O. Recheck both publication and lifecycle only after it completes.
@@ -206,6 +463,12 @@ Deno.serve(async (request: Request) => {
       permissions,
     })
     const result = await worker.fetch(request)
+    const durationMs = Date.now() - startedAt
+    const level = result.status >= 500 ? 'error' : result.status >= 400 ? 'warn' : 'info'
+    recordLog(project, name, level, 'invocation', `${request.method} ${url.pathname} -> ${result.status}`, {
+      status: result.status,
+      duration_ms: durationMs,
+    })
     if (!result.body) { release(); return result }
     const headers = new Headers(result.headers)
     if (headers.get('content-type')?.toLowerCase().includes('text/event-stream') && !headers.has('x-accel-buffering')) {
@@ -222,13 +485,19 @@ Deno.serve(async (request: Request) => {
           const chunk = await reader.read()
           if (chunk.done) { release(); controller.close() }
           else controller.enqueue(chunk.value)
-        } catch (error) { release(); controller.error(error) }
+        } catch (error) {
+          recordLog(project, name, 'error', 'worker', error instanceof Error ? error.message : 'Stream read error')
+          release()
+          controller.error(error)
+        }
       },
       async cancel(reason) { try { await reader.cancel(reason) } finally { release() } },
     })
     return new Response(body, { status: result.status, statusText: result.statusText, headers })
-  } catch {
+  } catch (error) {
     release()
+    const message = error instanceof Error ? error.message : 'Edge function failed to start or complete'
+    recordLog(project, name, 'error', 'boot', message, { status: 500, duration_ms: Date.now() - startedAt })
     console.error('Edge function failed to start or complete')
     return response('function_execution_failed', 500)
   }

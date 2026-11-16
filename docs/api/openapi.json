@@ -1964,6 +1964,52 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "InvokeBody": {
+        "additionalProperties": false,
+        "properties": {
+          "auth_mode": {
+            "default": "anon",
+            "maxLength": 16,
+            "minLength": 1,
+            "title": "Auth Mode",
+            "type": "string"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "maxLength": 1048576,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Headers",
+            "type": "object"
+          },
+          "method": {
+            "default": "POST",
+            "maxLength": 16,
+            "minLength": 1,
+            "title": "Method",
+            "type": "string"
+          },
+          "path": {
+            "default": "/",
+            "maxLength": 2048,
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "title": "InvokeBody",
+        "type": "object"
+      },
       "IssuedKeyResponse": {
         "additionalProperties": true,
         "properties": {
@@ -12435,6 +12481,46 @@
         ]
       }
     },
+    "/api/projects/{ref}/edge-functions/logs": {
+      "get": {
+        "operationId": "logs_list_api_projects__ref__edge_functions_logs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Logs List",
+        "tags": [
+          "studio-edge-functions"
+        ]
+      }
+    },
     "/api/projects/{ref}/edge-functions/secrets": {
       "get": {
         "operationId": "secrets_list_api_projects__ref__edge_functions_secrets_get",
@@ -12789,6 +12875,114 @@
           }
         },
         "summary": "Function Configure",
+        "tags": [
+          "studio-edge-functions"
+        ]
+      }
+    },
+    "/api/projects/{ref}/edge-functions/{slug}/invoke": {
+      "post": {
+        "operationId": "function_invoke_api_projects__ref__edge_functions__slug__invoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvokeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Function Invoke",
+        "tags": [
+          "studio-edge-functions"
+        ]
+      }
+    },
+    "/api/projects/{ref}/edge-functions/{slug}/logs": {
+      "get": {
+        "operationId": "function_logs_api_projects__ref__edge_functions__slug__logs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Function Logs",
         "tags": [
           "studio-edge-functions"
         ]

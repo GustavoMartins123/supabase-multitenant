@@ -560,3 +560,186 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
                     os.environ[k] = v
         self.assertEqual((await self.request('DELETE', '/my-function', {'revision': pub2['revision'], 'expected_published_revision': pub2['published_revision']})).status_code, 200)
         self.assertIsNone(await self.pool.fetchrow('SELECT 1 FROM project_edge_function_configs WHERE project_id=$1 AND function_name=$2', self.projects[0], 'my-function'))
+
+    async def test_logs_redaction_and_live_function_invoke(self):
+        import base64
+        import hashlib
+        import hmac
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        name = self.names[0]
+        ref = self.refs[0]
+        tenant_id = str(self.projects[0])
+        (self.root / 'projects' / name / '.env').write_text(
+            f'PROJECT_ID={name}\nPROJECT_UUID={tenant_id}\nPROJECT_PUBLIC_REF={ref}\n'
+            f'JWT_SECRET_PROJETO=synthetic-{name}\nANON_KEY_PROJETO=anon-jwt-{name}\n'
+            f'SERVICE_ROLE_KEY_PROJETO=svc-jwt-{name}\nAPI_EXTERNAL_URL=https://api.example.com/{ref}\n'
+        )
+        (self.root / '.functions-tenants' / f'{name}.json').write_text(json.dumps({
+            'technical_name': name,
+            'project_ref': ref,
+            'project_uuid': tenant_id,
+            'jwt_secret': f'synthetic-{name}',
+            'anon_key': f'anon-jwt-{name}',
+            'service_role_key': f'svc-jwt-{name}',
+        }))
+
+        captured: list[dict] = []
+        runtime_logs = [
+            {
+                'id': 'rt-1',
+                'timestamp': '2099-01-01T00:00:05.000Z',
+                'function_name': 'my-function',
+                'level': 'info',
+                'source': 'worker',
+                'message': f'worker saw sk_mt_secret_999 and Bearer bearer-mt-secret and synthetic-{name}',
+            },
+            {
+                'id': 'rt-2',
+                'timestamp': '2099-01-01T00:00:06.000Z',
+                'function_name': 'my-function',
+                'level': 'error',
+                'source': 'boot',
+                'message': f'postgresql://u:dbpass_mt@db:5432/postgres anon-jwt-{name}',
+            },
+        ]
+
+        class _StubRuntime(BaseHTTPRequestHandler):
+            def log_message(self, format, *args):
+                return
+
+            def do_GET(self):
+                if self.path.startswith('/__logs'):
+                    ts = self.headers.get('X-Logs-Timestamp', '')
+                    sig = self.headers.get('X-Logs-Signature', '')
+                    expected = hmac.new(
+                        f'synthetic-{name}'.encode('utf-8'),
+                        f'edge-logs-v1\n{name}\n{tenant_id}\n{ref}\n{ts}'.encode('utf-8'),
+                        hashlib.sha256,
+                    ).hexdigest()
+                    if not hmac.compare_digest(sig, expected):
+                        self.send_response(403)
+                        self.end_headers()
+                        return
+                    payload = json.dumps({'logs': runtime_logs}).encode('utf-8')
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Content-Length', str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                    return
+                self._handle_invoke()
+
+            def do_POST(self):
+                self._handle_invoke()
+
+            def _handle_invoke(self):
+                length = int(self.headers.get('Content-Length', '0') or '0')
+                raw = self.rfile.read(length) if length else b''
+                captured.append({
+                    'method': self.command,
+                    'path': self.path,
+                    'headers': {k.lower(): v for k, v in self.headers.items()},
+                    'body': raw.decode('utf-8'),
+                })
+                resp = json.dumps({'ok': True, 'echo': raw.decode('utf-8')}).encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('X-Request-ID', self.headers.get('X-Request-ID', 'none'))
+                self.send_header('Set-Cookie', 'should-not-leak=1')
+                self.send_header('Content-Length', str(len(resp)))
+                self.end_headers()
+                self.wfile.write(resp)
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), _StubRuntime)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with patch.dict(os.environ, {'EDGE_FUNCTIONS_RUNTIME_URL': f'http://127.0.0.1:{server.server_address[1]}'}):
+                self.assertEqual((await self.request('GET', '/logs', user=2)).status_code, 403)
+                self.assertEqual((await self.request('GET', '/logs', user=1, project=0)).status_code, 403)
+                self.assertEqual((await self.request('GET', '/logs?unknown=1')).status_code, 400)
+                self.assertEqual((await self.request('GET', '/logs?limit=999')).status_code, 400)
+                self.assertEqual((await self.request('GET', '/logs?level=trace')).status_code, 400)
+                self.assertEqual((await self.request('POST', '/my-function/invoke', {'method': 'POST'}, user=2)).status_code, 403)
+
+                await self.configure(True)
+                draft = await self.save()
+                self.assertEqual((await self.request('POST', '/my-function/invoke', {'method': 'POST'})).status_code, 409)
+                self.assertEqual((await self.request('POST', '/my-function/invoke', {'method': 'TRACE'})).status_code, 400)
+                self.assertEqual((await self.request('POST', '/my-function/invoke', {'path': '/../secret'})).status_code, 400)
+                self.assertEqual((await self.request('POST', '/my-function/invoke', {'headers': {'X-Project-Ref': 'evil'}})).status_code, 400)
+                self.assertEqual((await self.request('POST', '/my-function/invoke', {'headers': {'Authorization': 'Bearer x'}, 'auth_mode': 'anon'})).status_code, 400)
+
+                self.assertEqual((await self.request('PUT', '/secrets', {'secrets': [{'name': 'WEBHOOK_SECRET', 'value': 'sk_mt_secret_999'}]})).status_code, 200)
+                pub = (await self.publish(draft)).json()
+                v2 = await self.save('two', draft['revision'])
+
+                res_anon = await self.request('POST', '/my-function/invoke', {
+                    'method': 'POST',
+                    'path': '/items?ok=1',
+                    'headers': {'X-Custom': 'mt'},
+                    'body': '{"ping":2}',
+                    'auth_mode': 'anon',
+                })
+                self.assertEqual(res_anon.status_code, 200, res_anon.text)
+                body_anon = res_anon.json()
+                self.assertTrue(body_anon['stale_draft_warning'])
+                self.assertEqual(body_anon['executed_revision'], pub['published_revision'])
+                self.assertEqual(body_anon['draft_revision'], v2['revision'])
+                self.assertNotIn('set-cookie', body_anon['headers'])
+
+                sent = captured[-1]
+                self.assertEqual(sent['path'], '/my-function/items?ok=1')
+                self.assertEqual(sent['headers']['x-project-name'], name)
+                self.assertEqual(sent['headers']['x-project-ref'], ref)
+                self.assertEqual(sent['headers']['apikey'], f'anon-jwt-{name}')
+                claims = json.loads(base64.urlsafe_b64decode(sent['headers']['authorization'].split(' ')[1].split('.')[1] + '=='))
+                self.assertEqual(claims['role'], 'anon')
+
+                res_svc = await self.request('POST', '/my-function/invoke', {'method': 'GET', 'auth_mode': 'service_role'})
+                self.assertEqual(res_svc.status_code, 200)
+                svc_claims = json.loads(base64.urlsafe_b64decode(captured[-1]['headers']['authorization'].split(' ')[1].split('.')[1] + '=='))
+                self.assertEqual(svc_claims['role'], 'service_role')
+                self.assertEqual(captured[-1]['headers']['apikey'], f'svc-jwt-{name}')
+
+                res_none = await self.request('POST', '/my-function/invoke', {'method': 'GET', 'auth_mode': 'none'})
+                self.assertEqual(res_none.status_code, 200)
+                self.assertNotIn('authorization', captured[-1]['headers'])
+                self.assertNotIn('apikey', captured[-1]['headers'])
+
+                res_custom = await self.request('POST', '/my-function/invoke', {
+                    'method': 'GET',
+                    'headers': {'Authorization': 'Bearer ext-mt-token'},
+                    'auth_mode': 'custom',
+                })
+                self.assertEqual(res_custom.status_code, 200)
+                self.assertEqual(captured[-1]['headers']['authorization'], 'Bearer ext-mt-token')
+
+                logs_resp = await self.request('GET', '/logs?function=my-function&limit=20')
+                self.assertEqual(logs_resp.status_code, 200, logs_resp.text)
+                logs_data = logs_resp.json()
+                self.assertTrue(logs_data['runtime_connected'])
+                joined = json.dumps(logs_data['logs'])
+                for secret_val in ('sk_mt_secret_999', 'bearer-mt-secret', f'synthetic-{name}', f'anon-jwt-{name}', 'dbpass_mt'):
+                    self.assertNotIn(secret_val, joined)
+                self.assertIn('[REDACTED]', joined)
+                self.assertTrue(any(item['source'] == 'studio_test' for item in logs_data['logs']))
+                self.assertTrue(any(item['source'] == 'worker' for item in logs_data['logs']))
+
+                fn_logs = await self.request('GET', '/my-function/logs?level=error&limit=10')
+                self.assertEqual(fn_logs.status_code, 200)
+                self.assertTrue(all(item['level'] == 'error' for item in fn_logs.json()['logs']))
+                self.assertGreaterEqual(await self.pool.fetchval("SELECT count(*) FROM studio_edge_audit WHERE action='test_invoke' AND outcome='completed'"), 4)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+        with patch.dict(os.environ, {'EDGE_FUNCTIONS_RUNTIME_URL': 'http://127.0.0.1:9'}):
+            down = await self.request('POST', '/my-function/invoke', {'method': 'GET'})
+            self.assertEqual(down.status_code, 502)
+            degraded_logs = await self.request('GET', '/my-function/logs')
+            self.assertEqual(degraded_logs.status_code, 200)
+            self.assertFalse(degraded_logs.json()['runtime_connected'])
+            self.assertTrue(any(item['status'] == 502 for item in degraded_logs.json()['logs']))

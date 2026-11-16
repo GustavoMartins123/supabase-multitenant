@@ -2,14 +2,22 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import base64
 import copy
 import hashlib
+import hmac
 import json
 import logging
-from pathlib import Path
+import os
+from pathlib import Path, PurePosixPath
+import re
+import time
+from urllib.parse import urlsplit
+import uuid
 
 from dotenv import dotenv_values
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+import httpx
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
 
 from app import edge_function_store as store, edge_functions
@@ -61,6 +69,149 @@ class FunctionConfigBody(BaseModel):
     verify_jwt: StrictBool
 
 
+ALLOWED_INVOKE_METHODS = frozenset({'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'})
+ALLOWED_AUTH_MODES = frozenset({'anon', 'service_role', 'none', 'custom'})
+MAX_INVOKE_BODY_BYTES = 1048576
+MAX_RESPONSE_BODY_BYTES = 262144
+MAX_LOG_ROWS_PER_PROJECT = 200
+MAX_LOG_MESSAGE_LEN = 1024
+HEADER_NAME_RE = re.compile(r'^[A-Za-z0-9-]+$')
+BEARER_RE = re.compile(r'(?<![A-Za-z0-9_-])Bearer\s+(?!Bearer(?:\s|$))\S+', re.IGNORECASE)
+JWT_RE = re.compile(r'\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b')
+OPAQUE_KEY_RE = re.compile(r'\bsb_(?:secret|publishable)_[A-Za-z0-9_-]+\b')
+DSN_PASS_RE = re.compile(r'(postgres(?:ql)?://[^:@\s]+:)([^@\s]+)(@)', re.IGNORECASE)
+FORBIDDEN_INVOKE_HEADERS = frozenset({
+    'host', 'connection', 'content-length', 'transfer-encoding', 'keep-alive',
+    'upgrade', 'te', 'trailer', 'proxy-authorization', 'proxy-connection', 'cookie',
+})
+FORBIDDEN_INVOKE_PREFIXES = (
+    'x-project-', 'x-gateway-', 'x-admission-', 'x-opaque-', 'x-api-key-',
+    'x-internal-', 'x-user-', 'remote-', 'x-shared-token', 'x-logs-',
+    'x-event-', 'x-forwarded-', 'x-real-ip',
+)
+OMITTED_RESPONSE_HEADERS = frozenset({
+    'set-cookie', 'connection', 'keep-alive', 'transfer-encoding', 'te', 'trailer', 'upgrade',
+})
+
+
+class InvokeBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    method: StrictStr = Field(default='POST', min_length=1, max_length=16)
+    path: StrictStr = Field(default='/', max_length=2048)
+    headers: dict[StrictStr, StrictStr] = Field(default_factory=dict)
+    body: StrictStr | None = Field(default=None, max_length=MAX_INVOKE_BODY_BYTES)
+    auth_mode: StrictStr = Field(default='anon', min_length=1, max_length=16)
+
+
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
+
+
+def _mint_hs256_jwt(secret: str, role: str, ttl_seconds: int = 300) -> str:
+    now = int(time.time())
+    header = _b64url(json.dumps({'alg': 'HS256', 'typ': 'JWT'}, separators=(',', ':')).encode('utf-8'))
+    payload = _b64url(json.dumps({
+        'iss': 'supabase',
+        'role': role,
+        'iat': now,
+        'exp': now + ttl_seconds,
+    }, separators=(',', ':')).encode('utf-8'))
+    signing_input = f'{header}.{payload}'.encode('ascii')
+    sig = _b64url(hmac.new(secret.encode('utf-8'), signing_input, hashlib.sha256).digest())
+    return f'{header}.{payload}.{sig}'
+
+
+def _redact_log_message(message: str, sensitive: list[str]) -> str:
+    cleaned = re.sub(r'[\r\n\t]+', ' ', message or '').strip()
+    for secret in sorted((s for s in set(sensitive) if isinstance(s, str) and len(s) >= 4), key=len, reverse=True):
+        if secret in cleaned:
+            cleaned = cleaned.replace(secret, '[REDACTED]')
+    cleaned = DSN_PASS_RE.sub(r'\1[REDACTED]\3', cleaned)
+    cleaned = BEARER_RE.sub('Bearer [REDACTED]', cleaned)
+    cleaned = JWT_RE.sub('[REDACTED_JWT]', cleaned)
+    cleaned = OPAQUE_KEY_RE.sub('[REDACTED_KEY]', cleaned)
+    if len(cleaned) > MAX_LOG_MESSAGE_LEN:
+        cleaned = cleaned[: MAX_LOG_MESSAGE_LEN - 3] + '...'
+    return cleaned
+
+
+def _validate_invoke_request(body: InvokeBody) -> tuple[str, str, str, dict[str, str], bytes | None]:
+    method = body.method.upper()
+    if method not in ALLOWED_INVOKE_METHODS:
+        raise HTTPException(400, f'Unsupported HTTP method: {body.method}')
+    auth_mode = body.auth_mode.lower()
+    if auth_mode not in ALLOWED_AUTH_MODES:
+        raise HTTPException(400, f'Unsupported auth_mode: {body.auth_mode}')
+    raw_path = body.path if body.path != '' else '/'
+    if any(bad in raw_path for bad in ('\r', '\n', '\x00', '\\', '://')):
+        raise HTTPException(400, 'Invalid function invocation path')
+    parts = urlsplit(raw_path)
+    if parts.scheme or parts.netloc or parts.fragment:
+        raise HTTPException(400, 'Invalid function invocation path')
+    posix_path = parts.path or '/'
+    if '..' in PurePosixPath(posix_path).parts:
+        raise HTTPException(400, 'Path traversal is not permitted')
+    normalized_path = '/' + posix_path.lstrip('/') if posix_path != '/' else ''
+    path_with_query = f'{normalized_path}?{parts.query}' if parts.query else normalized_path
+
+    if len(body.headers) > 32:
+        raise HTTPException(400, 'Too many request headers')
+    safe_headers: dict[str, str] = {}
+    for key, val in body.headers.items():
+        if len(key) > 128 or not HEADER_NAME_RE.fullmatch(key):
+            raise HTTPException(400, f'Invalid header name: {key}')
+        if len(val) > 4096 or any(c in val for c in ('\r', '\n', '\x00')):
+            raise HTTPException(400, f'Invalid header value for {key}')
+        lower = key.lower()
+        if lower in FORBIDDEN_INVOKE_HEADERS or lower.startswith(FORBIDDEN_INVOKE_PREFIXES):
+            raise HTTPException(400, f'Disallowed header: {key}')
+        if auth_mode != 'custom' and lower in {'authorization', 'apikey'}:
+            raise HTTPException(400, f"Header '{key}' requires auth_mode='custom'")
+        safe_headers[lower] = val
+
+    body_bytes: bytes | None = None
+    if body.body is not None:
+        encoded = body.body.encode('utf-8')
+        if len(encoded) > MAX_INVOKE_BODY_BYTES:
+            raise HTTPException(400, 'Request body exceeds maximum size')
+        if method in {'GET', 'HEAD'} and encoded:
+            raise HTTPException(400, f'{method} requests cannot include a body')
+        body_bytes = encoded
+    return method, auth_mode, path_with_query, safe_headers, body_bytes
+
+
+def _parse_log_query(request: Request, *, allow_function: bool) -> tuple[str | None, str | None, int]:
+    allowed = {'level', 'limit'} | ({'function'} if allow_function else set())
+    unknown = set(request.query_params.keys()) - allowed
+    if unknown:
+        raise HTTPException(400, f"Unsupported query parameters: {', '.join(sorted(unknown))}")
+    fn_filter: str | None = None
+    if allow_function and request.query_params.get('function'):
+        fn_filter = request.query_params['function']
+        try:
+            store.function_name(fn_filter)
+        except ValueError as error:
+            raise HTTPException(400, 'Invalid function filter') from error
+    level_filter: str | None = None
+    if request.query_params.get('level'):
+        level_filter = request.query_params['level']
+        if level_filter not in {'info', 'warn', 'error'}:
+            raise HTTPException(400, 'Invalid log level filter')
+    limit = 50
+    limit_raw = request.query_params.get('limit')
+    if limit_raw is not None and limit_raw != '':
+        if not limit_raw.isdigit():
+            raise HTTPException(400, 'Invalid log limit')
+        limit = int(limit_raw)
+        if limit < 1 or limit > 200:
+            raise HTTPException(400, 'Log limit must be between 1 and 200')
+    return fn_filter, level_filter, limit
+
+
+def _runtime_base_url() -> str:
+    return os.environ.get('EDGE_FUNCTIONS_RUNTIME_URL', 'http://functions:9000').rstrip('/')
+
+
 async def configuration(conn, project_id):
     row = await conn.fetchrow('SELECT enabled,network_allowlist FROM project_edge_functions WHERE project_id=$1', project_id)
     if row is None:
@@ -78,11 +229,11 @@ async def settings_values(conn, project_id):
 
 
 @asynccontextmanager
-async def management_context(ref, request, response, pool):
+async def management_context(ref, request, response, pool, *, allow_query: bool = False):
     ref = validate_project_ref(ref)
     if getattr(request.state, 'internal_service', None) != 'studio-nginx':
         raise HTTPException(403, 'Function management requires the authenticated Studio gateway')
-    if request.query_params:
+    if not allow_query and request.query_params:
         raise HTTPException(400, 'Function management does not accept query parameters')
     if response is not None:
         response.headers['Cache-Control'] = 'no-store'
@@ -184,7 +335,7 @@ async def internal_keys(conn, project):
     return result
 
 
-def canonical_environment(project):
+def canonical_projection_credentials(project) -> dict[str, str]:
     name, tenant_id = project['name'], identity(project)
     path = ROOT / 'projects' / name / '.env'
     if any(parent.is_symlink() for parent in (path, *path.parents)):
@@ -201,7 +352,146 @@ def canonical_environment(project):
     url = (env.get('API_EXTERNAL_URL') or '').removesuffix('/auth/v1').rstrip('/')
     if not url:
         raise RuntimeError('Project public API URL unavailable')
-    return env['JWT_SECRET_PROJETO'], url
+    return {
+        'jwt_secret': env['JWT_SECRET_PROJETO'],
+        'public_url': url,
+        'anon_key': str(projected.get('anon_key') or env.get('ANON_KEY_PROJETO') or ''),
+        'service_role_key': str(projected.get('service_role_key') or env.get('SERVICE_ROLE_KEY_PROJETO') or ''),
+        'postgres_password': str(env.get('POSTGRES_PASSWORD') or ''),
+    }
+
+
+def canonical_environment(project):
+    creds = canonical_projection_credentials(project)
+    return creds['jwt_secret'], creds['public_url']
+
+
+def _collect_sensitive_values(project: dict, creds: dict[str, str], secrets: dict[str, str]) -> list[str]:
+    excluded = {project['name'], project['public_ref'], identity(project)}
+    values = [v for v in secrets.values() if isinstance(v, str) and len(v) >= 4 and v not in excluded]
+    for field in ('jwt_secret', 'anon_key', 'service_role_key', 'postgres_password'):
+        val = creds.get(field, '')
+        if isinstance(val, str) and len(val) >= 4 and val not in excluded:
+            values.append(val)
+    return values
+
+
+async def _persist_invocation_log(
+    conn, project_id, function_name: str, request_id: str, method: str,
+    path: str, status: int, duration_ms: int, source: str, level: str,
+    published: bool, message: str, sensitive: list[str],
+) -> None:
+    redacted = _redact_log_message(message, sensitive)
+    await conn.execute(
+        '''INSERT INTO studio_edge_invocation_logs
+           (project_id, function_name, request_id, method, path, status, duration_ms, source, level, published, message)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)''',
+        project_id, function_name, request_id, method, path or '/',
+        status, duration_ms, source, level, published, redacted,
+    )
+    await conn.execute(
+        f'''DELETE FROM studio_edge_invocation_logs
+            WHERE project_id=$1 AND id NOT IN (
+                SELECT id FROM studio_edge_invocation_logs
+                WHERE project_id=$1
+                ORDER BY created_at DESC, id DESC
+                LIMIT {MAX_LOG_ROWS_PER_PROJECT}
+            )''',
+        project_id,
+    )
+
+
+async def _fetch_merged_logs(
+    conn, project: dict, creds: dict[str, str], secrets: dict[str, str],
+    *, function_name: str | None, level: str | None, limit: int,
+) -> dict:
+    sensitive = _collect_sensitive_values(project, creds, secrets)
+    runtime_logs: list[dict] = []
+    runtime_connected = False
+    jwt_secret = creds.get('jwt_secret', '')
+    if jwt_secret:
+        ts = str(int(time.time()))
+        tenant_id = identity(project)
+        sig_payload = f"edge-logs-v1\n{project['name']}\n{tenant_id}\n{project['public_ref']}\n{ts}".encode('utf-8')
+        sig = hmac.new(jwt_secret.encode('utf-8'), sig_payload, hashlib.sha256).hexdigest()
+        params: dict[str, str] = {'limit': str(limit)}
+        if function_name:
+            params['function'] = function_name
+        if level:
+            params['level'] = level
+        try:
+            async with httpx.AsyncClient(timeout=2.0, trust_env=False) as client:
+                resp = await client.get(
+                    f'{_runtime_base_url()}/__logs',
+                    headers={
+                        'X-Project-Name': project['name'],
+                        'X-Project-Ref': project['public_ref'],
+                        'X-Logs-Timestamp': ts,
+                        'X-Logs-Signature': sig,
+                    },
+                    params=params,
+                )
+            if resp.status_code in {200, 404}:
+                runtime_connected = True
+            if resp.status_code == 200:
+                data = resp.json()
+                for entry in data.get('logs', []):
+                    if not isinstance(entry, dict):
+                        continue
+                    entry_fn = str(entry.get('function_name', ''))
+                    entry_lvl = str(entry.get('level', 'info'))
+                    if function_name and entry_fn != function_name:
+                        continue
+                    if level and entry_lvl != level:
+                        continue
+                    runtime_logs.append({
+                        'id': str(entry.get('id', '')),
+                        'timestamp': str(entry.get('timestamp', '')),
+                        'function_name': entry_fn,
+                        'level': entry_lvl,
+                        'source': str(entry.get('source', 'runtime')),
+                        'message': _redact_log_message(str(entry.get('message', '')), sensitive),
+                        'status': entry.get('status'),
+                        'duration_ms': entry.get('duration_ms'),
+                    })
+        except (httpx.HTTPError, ValueError):
+            runtime_connected = False
+
+    clauses = ['project_id=$1']
+    args: list[object] = [project['id']]
+    if function_name:
+        args.append(function_name)
+        clauses.append(f'function_name=${len(args)}')
+    if level:
+        args.append(level)
+        clauses.append(f'level=${len(args)}')
+    args.append(limit)
+    rows = await conn.fetch(
+        f'''SELECT id, function_name, request_id, method, path, status, duration_ms,
+                   source, level, published, message, created_at
+            FROM studio_edge_invocation_logs
+            WHERE {' AND '.join(clauses)}
+            ORDER BY created_at DESC, id DESC
+            LIMIT ${len(args)}''',
+        *args,
+    )
+    db_logs = []
+    if isinstance(rows, (list, tuple)):
+        for row in rows:
+            db_logs.append({
+                'id': f"db-{row['id']}",
+                'timestamp': row['created_at'].isoformat(),
+                'function_name': row['function_name'],
+                'level': row['level'],
+                'source': row['source'],
+                'message': _redact_log_message(row['message'], sensitive),
+                'status': row['status'],
+                'duration_ms': row['duration_ms'],
+                'request_id': row['request_id'],
+            })
+
+    combined = sorted(runtime_logs + db_logs, key=lambda item: item.get('timestamp', ''), reverse=True)[:limit]
+    return {'logs': combined, 'runtime_connected': runtime_connected}
 
 
 async def load_project_secrets(conn, project) -> dict[str, str]:
@@ -324,6 +614,21 @@ async def function_list(ref: str, request: Request, response: Response, pool=Dep
         return {'enabled': config['enabled'], 'functions': [
             {**{key: item[key] for key in ('name', 'revision', 'published_revision')},
              'verify_jwt': configs.get(item['name'], True)} for item in values]}
+
+
+@router.get('/logs')
+async def logs_list(ref: str, request: Request, response: Response, pool=Depends(get_pool)):
+    async with management_context(ref, request, response, pool, allow_query=True) as (conn, project, _, _):
+        fn_filter, level_filter, limit = _parse_log_query(request, allow_function=True)
+        secrets = await load_project_secrets(conn, project)
+        try:
+            creds = canonical_projection_credentials(project)
+        except RuntimeError:
+            creds = {'jwt_secret': '', 'public_url': '', 'anon_key': '', 'service_role_key': '', 'postgres_password': ''}
+        return await _fetch_merged_logs(
+            conn, project, creds, secrets,
+            function_name=fn_filter, level=level_filter, limit=limit,
+        )
 
 
 @router.get('/secrets')
@@ -584,6 +889,128 @@ async def function_configure(ref: str, slug: str, body: FunctionConfigBody, requ
             raise
         await outcome(conn, audit_id, 'completed')
         return detail(project, state, slug, config['enabled'], verify_jwt=bool(body.verify_jwt))
+
+
+@router.get('/{slug}/logs')
+async def function_logs(ref: str, slug: str, request: Request, response: Response, pool=Depends(get_pool)):
+    validate_slug(slug)
+    async with management_context(ref, request, response, pool, allow_query=True) as (conn, project, _, _):
+        state = load(project)
+        if store.item(ROOT, state, slug, {}) is None:
+            raise HTTPException(404, 'Function not found')
+        _, level_filter, limit = _parse_log_query(request, allow_function=False)
+        secrets = await load_project_secrets(conn, project)
+        try:
+            creds = canonical_projection_credentials(project)
+        except RuntimeError:
+            creds = {'jwt_secret': '', 'public_url': '', 'anon_key': '', 'service_role_key': '', 'postgres_password': ''}
+        return await _fetch_merged_logs(
+            conn, project, creds, secrets,
+            function_name=slug, level=level_filter, limit=limit,
+        )
+
+
+@router.post('/{slug}/invoke')
+async def function_invoke(ref: str, slug: str, body: InvokeBody, request: Request, response: Response, pool=Depends(get_pool)):
+    validate_slug(slug)
+    method, auth_mode, path_with_query, req_headers, req_body = _validate_invoke_request(body)
+    async with management_context(ref, request, response, pool) as (conn, project, actor, config):
+        if not config['enabled']:
+            raise HTTPException(409, 'Edge Functions are disabled by the project administrator')
+        state = load(project)
+        current = store.item(ROOT, state, slug, {})
+        if current is None:
+            raise HTTPException(404, 'Function not found')
+        published_rev = current['published_revision']
+        if published_rev is None:
+            raise HTTPException(409, 'Function has no published revision; publish it before invoking')
+        draft_rev = current['revision']
+        creds = canonical_projection_credentials(project)
+        keys = await internal_keys(conn, project)
+        secrets = await load_project_secrets(conn, project)
+        sensitive = _collect_sensitive_values(project, creds, secrets)
+        project_snapshot = dict(project)
+        secrets_snapshot = dict(secrets)
+        audit_id = await audit(conn, project, actor, 'test_invoke', slug, published_rev)
+
+    request_id = str(uuid.uuid4())
+    target_url = f'{_runtime_base_url()}/{slug}{path_with_query}'
+    req_headers['x-project-name'] = project_snapshot['name']
+    req_headers['x-project-ref'] = project_snapshot['public_ref']
+    req_headers['x-request-id'] = request_id
+    if auth_mode == 'anon':
+        req_headers['apikey'] = creds['anon_key'] or keys['publishable']
+        req_headers['authorization'] = f"Bearer {_mint_hs256_jwt(creds['jwt_secret'], 'anon')}"
+    elif auth_mode == 'service_role':
+        req_headers['apikey'] = creds['service_role_key'] or keys['secret']
+        req_headers['authorization'] = f"Bearer {_mint_hs256_jwt(creds['jwt_secret'], 'service_role')}"
+
+    started = time.monotonic()
+    resp_status = 502
+    resp_headers: dict[str, str] = {}
+    resp_body_bytes = bytearray()
+    truncated = False
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(65.0, connect=5.0),
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
+            async with client.stream(method, target_url, headers=req_headers, content=req_body) as upstream:
+                resp_status = upstream.status_code
+                for k, v in upstream.headers.multi_items():
+                    kl = k.lower()
+                    if kl not in OMITTED_RESPONSE_HEADERS and len(resp_headers) < 64:
+                        resp_headers[kl] = v[:4096]
+                async for chunk in upstream.aiter_bytes():
+                    remaining = (MAX_RESPONSE_BODY_BYTES + 1) - len(resp_body_bytes)
+                    if remaining <= 0:
+                        truncated = True
+                        break
+                    resp_body_bytes.extend(chunk[:remaining])
+                    if len(resp_body_bytes) > MAX_RESPONSE_BODY_BYTES:
+                        del resp_body_bytes[MAX_RESPONSE_BODY_BYTES:]
+                        truncated = True
+                        break
+    except httpx.HTTPError as error:
+        duration_ms = int((time.monotonic() - started) * 1000)
+        async with pool.acquire() as conn:
+            await _persist_invocation_log(
+                conn, project_snapshot['id'], slug, request_id, method,
+                path_with_query or '/', 502, duration_ms, 'studio_test', 'error', True,
+                f'{method} /{slug}{path_with_query} -> upstream unavailable ({type(error).__name__})',
+                sensitive,
+            )
+            await outcome(conn, audit_id, 'failed')
+        raise HTTPException(502, 'Edge Function runtime unavailable') from error
+
+    duration_ms = int((time.monotonic() - started) * 1000)
+    level = 'error' if resp_status >= 500 else 'warn' if resp_status >= 400 else 'info'
+    async with pool.acquire() as conn:
+        await _persist_invocation_log(
+            conn, project_snapshot['id'], slug, request_id, method,
+            path_with_query or '/', resp_status, duration_ms, 'studio_test', level, True,
+            f'{method} /{slug}{path_with_query} -> {resp_status}',
+            sensitive,
+        )
+        await outcome(conn, audit_id, 'completed')
+        recent = await _fetch_merged_logs(
+            conn, project_snapshot, creds, secrets_snapshot,
+            function_name=slug, level=None, limit=20,
+        )
+
+    return {
+        'status': resp_status,
+        'headers': resp_headers,
+        'body': bytes(resp_body_bytes).decode('utf-8', errors='replace'),
+        'truncated': truncated,
+        'duration_ms': duration_ms,
+        'request_id': resp_headers.get('x-request-id', request_id),
+        'executed_revision': published_rev,
+        'draft_revision': draft_rev,
+        'stale_draft_warning': draft_rev != published_rev,
+        'logs': recent['logs'],
+    }
 
 
 @router.delete('/{slug}')

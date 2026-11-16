@@ -220,6 +220,14 @@ Deno.serve(async (req) => {
   })
 })
 ''',
+    'log_test/index.ts': '''
+Deno.serve(() => {
+  console.log('worker-log-entry', Deno.env.get('WEBHOOK_SECRET') ?? '')
+  console.warn('worker-warn-bearer Bearer live-bearer-secret-999')
+  console.error('worker-error-secret', 'sec_alpha_999', 'token', Deno.env.get('CUSTOM_API_TOKEN') ?? '')
+  return Response.json({ logged: true })
+})
+''',
 }
 
 
@@ -330,7 +338,7 @@ def main() -> None:
                 env_srv = toks['service_role']
                 code_root = runtime / 'code' / project / ('1' * 64)
             code_root.mkdir(parents=True, exist_ok=True)
-            for fn in ('stream', 'slow', 'wait_until', 'internal_calls', 'imported', 'remote_import', 'check_env', 'webhook'):
+            for fn in ('stream', 'slow', 'wait_until', 'internal_calls', 'imported', 'remote_import', 'check_env', 'webhook', 'log_test'):
                 shutil.copytree(code / fn, code_root / fn)
             tenant_doc = {
                 'project': project, 'uuid': identity, 'jwt_secret': f'{project}-synthetic-secret',
@@ -402,7 +410,7 @@ def main() -> None:
             ]
             if args.contract == 'projected':
                 rt_cmd += ['-v', f'{config}:/home/deno/tenant-config:ro']
-            rt_cmd += [args.edge_image, 'start', '--main-service', '/home/deno/main']
+            rt_cmd += [args.edge_image, 'start', '--main-service', '/home/deno/main', '--event-worker', '/home/deno/main/event-worker']
             docker(*rt_cmd)
             names.append(runtime_c)
 
@@ -610,6 +618,54 @@ def main() -> None:
                 })
                 assert beta_anon.status_code in {401, 403}, beta_anon.text
                 record('per_function_verify_jwt_webhook_and_isolation')
+
+                # 10. Event worker console/boot capture, HMAC logs endpoint & redaction
+                def logs_headers(project: str) -> dict[str, str]:
+                    ts = str(int(time.time()))
+                    ident = identities[project]
+                    ref = refs[project]
+                    secret = f'{project}-synthetic-secret'
+                    if args.contract == 'projected':
+                        payload = f'edge-logs-v1\n{project}\n{ident}\n{ref}\n{ts}'.encode('utf-8')
+                        hdrs = {'X-Project-Name': project, 'X-Project-Ref': ref}
+                    else:
+                        payload = f'edge-logs-v1\n{project}\n{ident}\n{ts}'.encode('utf-8')
+                        hdrs = {'X-Project-Name': project, 'X-Project-UUID': ident}
+                    sig = hmac.new(secret.encode('utf-8'), payload, hashlib.sha256).hexdigest()
+                    hdrs['X-Logs-Timestamp'] = ts
+                    hdrs['X-Logs-Signature'] = sig
+                    return hdrs
+
+                logged = client.get(f'{nginx_origin}/functions/v1/log_test', headers=gw_headers('/functions/v1/log_test'))
+                assert logged.status_code == 200 and logged.json().get('logged') is True, logged.text
+
+                alpha_logs: list[dict] = []
+                deadline = time.time() + 5.0
+                while time.time() < deadline:
+                    lr = client.get(f'{rt_origin}/__logs', params={'function': 'log_test', 'limit': '50'}, headers=logs_headers('test_alpha'))
+                    assert lr.status_code == 200, lr.text
+                    alpha_logs = lr.json()['logs']
+                    if any(e.get('source') == 'worker' and 'worker-log-entry' in e.get('message', '') for e in alpha_logs):
+                        break
+                    time.sleep(0.2)
+
+                worker_msgs = [e for e in alpha_logs if e.get('source') == 'worker']
+                assert any('worker-log-entry' in e.get('message', '') for e in worker_msgs), alpha_logs
+                assert any(e.get('level') == 'warn' and 'worker-warn-bearer' in e.get('message', '') for e in worker_msgs), alpha_logs
+                assert any(e.get('level') == 'error' and 'worker-error-secret' in e.get('message', '') for e in worker_msgs), alpha_logs
+                joined_msgs = '\n'.join(e.get('message', '') for e in alpha_logs)
+                for secret_val in ('sec_alpha_999', 'tok_alpha_123', 'live-bearer-secret-999', 'test_alpha-synthetic-secret'):
+                    assert secret_val not in joined_msgs, f'Secret {secret_val} leaked in logs: {joined_msgs}'
+                assert '[REDACTED]' in joined_msgs, joined_msgs
+
+                # Reject forged /__logs signature, forwarded headers, external /__event-ingest, and keep beta isolated
+                bad_sig = logs_headers('test_alpha')
+                bad_sig['X-Logs-Signature'] = '0' * 64
+                assert client.get(f'{rt_origin}/__logs', headers=bad_sig).status_code == 403
+                assert client.get(f'{rt_origin}/__logs', headers={**logs_headers('test_alpha'), 'X-Forwarded-For': '1.2.3.4'}).status_code == 403
+                assert client.post(f'{rt_origin}/__event-ingest', json={'event_type': 'Log'}, headers={'X-Event-Token': '0' * 64}).status_code == 403
+                assert client.get(f'{rt_origin}/__logs', params={'function': 'log_test'}, headers=logs_headers('test_beta')).json()['logs'] == []
+                record('event_worker_logs_and_redaction')
 
             if args.result:
                 args.result.write_text(json.dumps({'contract': args.contract, 'image': args.edge_image, 'checks': checks}, indent=2))
