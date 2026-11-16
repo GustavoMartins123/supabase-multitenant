@@ -576,7 +576,7 @@ async def check():
         await request(key=p["slots"][1]["key"])
         await set_policy(conn, p, policy("inherit"), slot["id"])
         before = await conn.fetchval(
-            "SELECT admitted FROM access_quota_usage WHERE scope_id=$1 AND period='day' AND scope_type='slot' ORDER BY period_start DESC LIMIT 1",
+            "SELECT sum(admitted)::bigint FROM access_quota_usage WHERE scope_id=$1 AND period='day' AND scope_type='slot' AND period_start=date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'",
             uuid.UUID(slot["id"]),
         )
         await set_policy(
@@ -595,7 +595,7 @@ async def check():
             (r.status_code, r.text[:90]) for r in results
         ]
         after = await conn.fetchval(
-            "SELECT admitted FROM access_quota_usage WHERE scope_id=$1 AND period='day' AND scope_type='slot' ORDER BY period_start DESC LIMIT 1",
+            "SELECT sum(admitted)::bigint FROM access_quota_usage WHERE scope_id=$1 AND period='day' AND scope_type='slot' AND period_start=date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'",
             uuid.UUID(slot["id"]),
         )
         assert after == before + 3
