@@ -51,6 +51,7 @@ docker run --rm --network none \
   -v "$ROOT/studio/nginx/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro" \
   -v "$ROOT/studio/nginx/lua/send_push.lua:/usr/local/openresty/lualib/send_push.lua:ro" \
   -v "$ROOT/studio/nginx/lua/push:/usr/local/openresty/lualib/push:ro" \
+  -v "$ROOT/studio/nginx/lua/snippets:/usr/local/openresty/lualib/snippets:ro" \
   --entrypoint openresty "$PUSH_NGINX_IMAGE" -t -c /usr/local/openresty/nginx/conf/nginx.conf
 # Actual lua-resty-http handshakes are tested through HTTP content handlers.
 docker run --rm -i --network "container:$PUSH_TEST_NGINX" \

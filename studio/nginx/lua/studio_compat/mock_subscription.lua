@@ -1,3 +1,4 @@
+require("api.check_get_method").enforce()
 local cjson = require("cjson.safe")
 
 local mock_subscription = {
@@ -23,5 +24,4 @@ local mock_subscription = {
 ngx.header.content_type = "application/json; charset=utf-8"
 ngx.status = ngx.HTTP_OK
 ngx.say(cjson.encode(mock_subscription))
-ngx.log(ngx.INFO, "[MOCK-SUBSCRIPTION] Mock subscription returned for: ", ngx.var.authelia_email)
 return ngx.exit(ngx.HTTP_OK)

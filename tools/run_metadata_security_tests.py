@@ -28,10 +28,13 @@ try:
  docker('network','create','--label','studio.metadata-security=true',network)
  docker('run','-d','--name',db,'--label','studio.metadata-security=true','--network',network,
         '--network-alias','db','-e','POSTGRES_PASSWORD='+password,args.postgres_image);names.append(db)
- for attempt in range(50):
-  r=subprocess.run(['docker','exec',db,'pg_isready','-U','postgres'],capture_output=True)
+ for attempt in range(120):
+  # Wait for TCP readiness so the transient initdb Unix-socket server is not mistaken for the final server.
+  r=subprocess.run(['docker','exec',db,'pg_isready','-h','127.0.0.1','-U','postgres','-d','postgres'],capture_output=True)
   if r.returncode==0:break
-  time.sleep(0.2)
+  time.sleep(0.5)
+ else:
+  raise RuntimeError('PostgreSQL startup timeout: '+subprocess.run(['docker','logs',db],capture_output=True,text=True).stdout)
  sql="""CREATE ROLE meta_guest LOGIN PASSWORD 'synthetic-meta';
  CREATE ROLE alpha LOGIN PASSWORD 'synthetic-alpha';
  CREATE ROLE beta LOGIN PASSWORD 'synthetic-beta';
@@ -42,7 +45,7 @@ try:
  GRANT CONNECT ON DATABASE alpha TO alpha;
  GRANT CONNECT ON DATABASE beta TO beta;
  GRANT CONNECT ON DATABASE meta_trap TO meta_guest;"""
- subprocess.run(['docker','exec','-i',db,'psql','-U','postgres','-v','ON_ERROR_STOP=1'],input=sql,text=True,check=True,capture_output=True)
+ subprocess.run(['docker','exec','-i','-e','PGPASSWORD='+password,db,'psql','-h','127.0.0.1','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1'],input=sql,text=True,check=True,capture_output=True)
  for version in args.metadata_image:
   name=prefix+'-meta-'+str(len(names))
   docker('run','-d','--name',name,'--label','studio.metadata-security=true','--network',network,

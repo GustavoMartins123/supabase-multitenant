@@ -33,26 +33,26 @@ if [ ! -s /config/configuration.runtime.yml ]; then
     echo "[entrypoint] ERRO: configuration.runtime.yml ausente" >&2
     exit 1
 fi
-chmod 644 /config/configuration.runtime.yml
+chmod 644 /config/configuration.runtime.yml 2>/dev/null || true
 
 chown 65534:65534 /config 2>/dev/null || true
-chmod 777 /config || true
+chmod 750 /config 2>/dev/null || true
 
 for file in /config/users_database.yml /config/ids.yml /config/db.sqlite3 /config/.studio-directory-sequence; do
     [ -e "$file" ] || continue
     if chown 65534:65534 "$file" 2>/dev/null; then
-        chmod 666 "$file"
-        echo "[entrypoint] $(basename "$file") preparado para escrita pelos workers (mode 666)"
+        chmod 600 "$file"
+        echo "[entrypoint] $(basename "$file") preparado para escrita pelos workers (mode 600)"
     else
         echo "[entrypoint] WARN: não consegui alterar owner de $(basename "$file"); volume pode estar RO"
-        chmod 666 "$file" 2>/dev/null || true
+        chmod 600 "$file" 2>/dev/null || true
     fi
 done
 
 for file in /config/db.sqlite3-shm /config/db.sqlite3-wal /config/db.sqlite3-journal; do
     [ -e "$file" ] || continue
     chown 65534:65534 "$file" 2>/dev/null || true
-    chmod 666 "$file" 2>/dev/null || true
+    chmod 600 "$file" 2>/dev/null || true
 done
 
 chmod 755 /config/ssl 2>/dev/null || true

@@ -1,11 +1,11 @@
-local cjson = require("cjson.safe")
-local cjson_raw = require("cjson")
+local cjson = require("utils.json")
+local internal_hmac = require("security.internal_hmac")
 local platform_router = require("proxy_rewrites.storage_platform_router")
 
 local storage_prefix = "/storage/v1"
 
 local function json_array(items)
-    return setmetatable(items or {}, cjson_raw.array_mt)
+    return setmetatable(items or {}, cjson.array_mt)
 end
 
 local function reject(problem)
@@ -26,10 +26,11 @@ local function reject(problem)
 end
 
 local function read_json_body()
-    ngx.req.read_body()
-
-    local body_data = ngx.req.get_body_data()
-    if not body_data or body_data == "" then
+    local body_data, read_err = internal_hmac.read_current_body()
+    if body_data == nil then
+        return nil, read_err or "falha ao ler corpo da requisicao"
+    end
+    if body_data == "" then
         return {}
     end
 
@@ -188,16 +189,39 @@ elseif route_error then
 end
 
 local path = ngx.re.sub(ngx.var.uri, "^" .. storage_prefix, "", "jo")
+local method = ngx.req.get_method()
 
-ngx.req.read_body()
-local body_data = ngx.req.get_body_data()
+-- A API Storage aceita PUT para atualizacao; o Studio envia PATCH.
+if method == "PATCH" and ngx.re.match(path, "^/bucket/[^/]+$") then
+    ngx.req.set_method(ngx.HTTP_PUT)
+end
 
-if body_data then
+local is_json_rewrite_route = (
+    (method == "POST" and (
+        path == "/bucket"
+        or ngx.re.match(path, "^/object/list/")
+        or ngx.re.match(path, "^/object/sign/")
+        or ngx.re.match(path, "^/object/move")
+    ))
+    or (method == "DELETE" and ngx.re.match(path, "^/object/[a-zA-Z0-9_-]+$"))
+)
+
+if not is_json_rewrite_route then
+    return
+end
+
+local body_data, read_err = internal_hmac.read_current_body()
+if body_data == nil then
+    ngx.log(ngx.ERR, "Falha ao ler o corpo da requisicao do Storage: ", tostring(read_err))
+    return
+end
+
+if body_data ~= "" then
     local body, decode_err = cjson.decode(body_data)
     if body and type(body) == "table" then
         local body_changed = false
 
-        if ngx.var.request_method == "POST" and path == "/bucket" then
+        if method == "POST" and path == "/bucket" then
             if body.id then
                 body.name = body.id
                 body.id = nil
@@ -205,7 +229,7 @@ if body_data then
             end
         end
 
-        if ngx.var.request_method == "POST" and ngx.re.match(path, "^/object/list/") then
+        if method == "POST" and ngx.re.match(path, "^/object/list/") then
             if body.path then
                 body.prefix = body.path
                 body.path = nil
@@ -213,7 +237,7 @@ if body_data then
             end
         end
 
-        if ngx.var.request_method == "DELETE" and ngx.re.match(path, "^/object/[a-zA-Z0-9_-]+$") then
+        if method == "DELETE" and ngx.re.match(path, "^/object/[a-zA-Z0-9_-]+$") then
             if body.paths then
                 body.prefixes = body.paths
                 body.paths = nil
@@ -221,7 +245,7 @@ if body_data then
             end
         end
 
-        if ngx.var.request_method == "POST" and ngx.re.match(path, "^/object/sign/") then
+        if method == "POST" and ngx.re.match(path, "^/object/sign/") then
             if type(body.path) == "string" then
                 body.paths = json_array({ ngx.re.gsub(body.path, "^/", "", "jo") })
                 body.path = nil
@@ -239,12 +263,7 @@ if body_data then
             end
         end
 
-        -- A API Storage aceita PUT para atualizacao; o Studio envia PATCH.
-        if ngx.var.request_method == "PATCH" and ngx.re.match(path, "^/bucket/[^/]+$") then
-            ngx.req.set_method(ngx.HTTP_PUT)
-        end
-
-        if ngx.var.request_method == "POST" and ngx.re.match(path, "^/object/move") then
+        if method == "POST" and ngx.re.match(path, "^/object/move") then
             if body.from and body.to then
                 -- O bucket esta no path do Studio, mas no payload do upstream.
                 local path_match = ngx.re.match(path, "^/object/move/([^/]+)")
@@ -260,7 +279,7 @@ if body_data then
                     body_changed = true
                     ngx.req.set_uri("/storage/v1/object/move", false)
                 else
-                    ngx.log(ngx.ERR, "Nao foi possivel extrair bucketId da URL: ", ngx.var.request_uri)
+                    ngx.log(ngx.ERR, "Nao foi possivel extrair bucketId da URL")
                 end
             end
         end

@@ -28,7 +28,6 @@ if ngx.var.request_method == "GET" then
     ngx.header.content_type = "application/json; charset=utf-8"
     ngx.status = ngx.HTTP_OK
     ngx.say(cjson.encode(response_array))
-    ngx.log(ngx.INFO, "[MOCK-ORGANIZATIONS] GET for: ", email)
     return ngx.exit(ngx.HTTP_OK)
 
 elseif ngx.var.request_method == "PATCH" then
@@ -53,7 +52,6 @@ elseif ngx.var.request_method == "PATCH" then
     ngx.header.content_type = "application/json; charset=utf-8"
     ngx.status = ngx.HTTP_OK
     ngx.say(cjson.encode(org_data))
-    ngx.log(ngx.INFO, "[MOCK-ORGANIZATIONS] PATCH. Tags: ", cjson.encode(opt_in_tags))
     return ngx.exit(ngx.HTTP_OK)
 
 else

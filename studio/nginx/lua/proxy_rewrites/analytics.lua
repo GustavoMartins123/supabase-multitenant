@@ -12,7 +12,7 @@ local prefix, suffix = uri:match(
 )
 
 if not prefix then
-    ngx.log(ngx.ERR, "Rota de Analytics inesperada: ", uri)
+    ngx.log(ngx.ERR, "Rota de Analytics inesperada")
     return ngx.exit(ngx.HTTP_NOT_FOUND)
 end
 

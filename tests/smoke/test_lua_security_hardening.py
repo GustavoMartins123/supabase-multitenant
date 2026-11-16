@@ -244,5 +244,111 @@ class UserCacheReloadHardeningTest(unittest.TestCase):
         self.assertNotIn("admin_api/available_users.lua", source)
 
 
+class GatewayOptimizationAndHardeningContractTest(unittest.TestCase):
+    def test_entrypoint_avoids_world_writable_and_world_readable_state_modes(self) -> None:
+        entrypoint = read(ROOT / "studio" / "nginx" / "docker-entrypoint.sh")
+        self.assertIn("chmod 750 /config", entrypoint)
+        self.assertIn('chmod 600 "$file"', entrypoint)
+        self.assertIn("chmod 644 /config/configuration.runtime.yml", entrypoint)
+        self.assertNotIn("chmod 777", entrypoint)
+        self.assertNotIn("chmod 666", entrypoint)
+
+    def test_argon2_hashing_uses_bounded_ngx_pipe_stdin_with_ffi_fallback(self) -> None:
+        argon2 = read(LUA / "security" / "argon2_password.lua")
+        self.assertIn('pcall(require, "ngx.pipe")', argon2)
+        self.assertIn("local MAX_ARGON2_CONCURRENCY = 4", argon2)
+        self.assertIn("argon2_inflight", argon2)
+        self.assertIn("proc:write(plain_password)", argon2)
+        self.assertIn("function M.hash_password_ffi(plain_password, salt)", argon2)
+
+    def test_proxy_rewrites_use_isolated_json_instance_and_spooled_body_reader(self) -> None:
+        json_mod = read(LUA / "utils" / "json.lua")
+        self.assertIn("cjson_safe.new()", json_mod)
+        self.assertIn("decode_array_with_array_mt(true)", json_mod)
+        self.assertIn("encode_empty_table_as_object(true)", json_mod)
+        self.assertIn("encode_escape_forward_slash(false)", json_mod)
+
+        for rel in (
+            "proxy_rewrites/pg_meta.lua",
+            "proxy_rewrites/storage.lua",
+            "proxy_rewrites/storage_public_url.lua",
+            "proxy_rewrites/storage_body_filter.lua",
+        ):
+            src = read(LUA / rel)
+            self.assertIn('require("utils.json")', src, rel)
+            self.assertNotIn("encode_escape_forward_slash", src, rel)
+
+        for rel in (
+            "proxy_rewrites/storage.lua",
+            "proxy_rewrites/storage_public_url.lua",
+        ):
+            src = read(LUA / rel)
+            self.assertIn("internal_hmac.read_current_body()", src, rel)
+            self.assertNotIn("ngx.req.get_body_data", src, rel)
+
+    def test_logs_sanitize_pii_and_configure_studio_safe_format(self) -> None:
+        nginx_src = read(NGINX)
+        self.assertIn("log_format studio_safe ", nginx_src)
+        self.assertGreaterEqual(nginx_src.count("access_log /var/log/studio_access.log studio_safe;"), 2)
+
+        for rel in (
+            "admin_api/all_users.lua",
+            "security/check_admin_with_email.lua",
+            "security/check_admin.lua",
+            "security/studio_project_admin_access.lua",
+            "studio_compat/mock_organizations.lua",
+            "studio_compat/mock_subscription.lua",
+            "proxy_rewrites/analytics.lua",
+        ):
+            src = read(LUA / rel)
+            self.assertNotIn("ngx.INFO", src, rel)
+            for line in src.splitlines():
+                if "ngx.log(" not in line:
+                    continue
+                lower = line.lower()
+                self.assertNotIn("email", lower, f"{rel}: {line}")
+                self.assertNotIn("cookie", lower, f"{rel}: {line}")
+                self.assertNotIn("request_uri", lower, f"{rel}: {line}")
+
+    def test_dockerfile_pins_used_deps_and_removes_unused_rocks_and_packages(self) -> None:
+        dockerfile = read(ROOT / "studio" / "Dockerfile")
+        for removed in (
+            "inotify-tools",
+            "jkeys089/lua-resty-hmac",
+            "lua-resty-string-0.09",
+            "lua-erento-hmac",
+            "lua-resty-fernet",
+            "lua-resty-crypto",
+            "luaossl",
+            "pgmoon",
+        ):
+            self.assertNotIn(removed, dockerfile)
+
+        for kept in (
+            "ledgetech/lua-resty-http=0.17.1",
+            "luafilesystem-1.8.0-1.rockspec",
+            "lyaml-6.2.8-1.rockspec",
+            "lua-resty-openssl-1.7.1-1.rockspec",
+            "libargon2-1",
+            "libvips-tools",
+        ):
+            self.assertIn(kept, dockerfile)
+
+        self.assertFalse((LUA / "security" / "inject_service_key_apikey.lua").exists())
+
+    def test_nginx_rewrite_phase_runs_before_access_and_method_checks_stay_in_lua(self) -> None:
+        nginx_src = read(NGINX)
+        expected_pairs = (
+            ("proxy_rewrites/rest_v1.lua", "security/inject_service_key.lua"),
+            ("proxy_rewrites/graphql.lua", "security/inject_service_key_graphql.lua"),
+            ("proxy_rewrites/analytics.lua", "security/studio_project_admin_access.lua"),
+            ("proxy_rewrites/storage.lua", "security/inject_service_key_storage.lua"),
+        )
+        rewrite_lines = [line for line in nginx_src.splitlines() if "rewrite_by_lua_file" in line and "server_rewrite_by_lua_file" not in line]
+        self.assertEqual(len(rewrite_lines), len(expected_pairs))
+        for rewrite_mod, access_mod in expected_pairs:
+            self.assertLess(nginx_src.index(rewrite_mod), nginx_src.index(access_mod), rewrite_mod)
+
+
 if __name__ == "__main__":
     unittest.main()

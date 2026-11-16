@@ -1,5 +1,5 @@
-local cjson = require("cjson.safe")
-local cjson_raw = require("cjson")
+local cjson = require("utils.json")
+local internal_hmac = require("security.internal_hmac")
 
 local _M = {}
 
@@ -16,8 +16,15 @@ function _M.handle(context)
         return
     end
 
-    ngx.req.read_body()
-    local body = cjson.decode(ngx.req.get_body_data() or "")
+    local raw_body, read_err = internal_hmac.read_current_body()
+    if raw_body == nil then
+        return reject(
+            ngx.HTTP_BAD_REQUEST,
+            "storage_platform_body_unreadable",
+            read_err or "Nao foi possivel ler o corpo da requisicao"
+        )
+    end
+    local body = cjson.decode(raw_body)
     if type(body) ~= "table" or type(body.path) ~= "string" or body.path == "" then
         return reject(
             ngx.HTTP_BAD_REQUEST,
@@ -37,7 +44,6 @@ function _M.handle(context)
 
     local object_path = ngx.re.gsub(body.path, "^/+", "", "jo")
 
-    cjson_raw.encode_escape_forward_slash(false)
     ngx.status = ngx.HTTP_OK
     ngx.header["Content-Type"] = "application/json; charset=utf-8"
     ngx.header["Cache-Control"] = "no-store"

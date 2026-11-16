@@ -37,7 +37,6 @@ if members_res.status == 200 then
             end
         end
     end
-    ngx.log(ngx.ERR, "[ALL-USERS] Found ", #current_members, " current members")
 else
     ngx.log(ngx.ERR, "[ALL-USERS] Failed to fetch members, status: ", members_res.status)
 end
@@ -49,8 +48,6 @@ if not keys then
     ngx.log(ngx.ERR, "[ALL-USERS] cache:get_keys error: ", err)
     return ngx.exit(500)
 end
-
-ngx.log(ngx.ERR, "[ALL-USERS] Cache has ", #keys, " user keys")
 
 local all_users = {}
 local users_found = 0
@@ -92,10 +89,8 @@ for _, user_key in ipairs(keys) do
                             user_info.status = "member"
                             user_info.project_role = member_info.role
                             members_found = members_found + 1
-                            ngx.log(ngx.ERR, "[ALL-USERS] Including non-admin member: ", user_data.display_name, " role: ", member_info.role)
                         else
                             available_found = available_found + 1
-                            ngx.log(ngx.ERR, "[ALL-USERS] Including available user: ", user_data.display_name)
                         end
 
                         table.insert(all_users, user_info)
@@ -160,8 +155,6 @@ local response = {
     },
     users = all_users
 }
-
-ngx.log(ngx.ERR, "[ALL-USERS] Response summary: ", cjson.encode(response.summary))
 
 ngx.header.content_type = "application/json"
 ngx.say(cjson.encode(response))

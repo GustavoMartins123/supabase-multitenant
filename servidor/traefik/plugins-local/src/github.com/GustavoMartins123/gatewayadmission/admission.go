@@ -25,6 +25,13 @@ type Config struct {
 
 func CreateConfig() *Config { return &Config{} }
 
+var evaluatorTransport = &http.Transport{
+	MaxIdleConns:          256,
+	MaxIdleConnsPerHost:   128,
+	IdleConnTimeout:       4 * time.Second,
+	ResponseHeaderTimeout: 4 * time.Second,
+}
+
 type Middleware struct {
 	next    http.Handler
 	config  Config
@@ -43,7 +50,7 @@ func New(_ context.Context, next http.Handler, config *Config, _ string) (http.H
 	if err != nil || target.Scheme != "http" || target.Host != "key-authorizer:18010" || target.Path != "/v1/admit" || target.RawQuery != "" {
 		return nil, errors.New("invalid admission evaluator")
 	}
-	m := &Middleware{next: next, config: *config, client: &http.Client{Timeout: 4 * time.Second,
+	m := &Middleware{next: next, config: *config, client: &http.Client{Timeout: 4 * time.Second, Transport: evaluatorTransport,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}}
 	for _, value := range config.TrustedProxyCIDRs {
 		address, network, err := net.ParseCIDR(value)
@@ -107,6 +114,14 @@ func (m *Middleware) clientIP(r *http.Request) (string, error) {
 	return peer.String(), nil
 }
 
+func preflight(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, apikey, X-Client-Info, X-Supabase-Auth, x-supabase-api-version, tus-resumable, upload-length, upload-metadata, upload-offset, x-upsert")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(204)
+}
+
 func deny(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -136,6 +151,10 @@ func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		deny(w, 403, "Client origin could not be verified")
+		return
+	}
+	if r.Method == http.MethodOptions {
+		preflight(w)
 		return
 	}
 	keys := r.Header.Values("Apikey")
@@ -191,14 +210,6 @@ func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(response.StatusCode)
 		_, _ = w.Write(data)
-		return
-	}
-	if r.Method == "OPTIONS" {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, apikey, X-Client-Info, X-Supabase-Auth, x-supabase-api-version, tus-resumable, upload-length, upload-metadata, upload-offset, x-upsert")
-		w.Header().Set("Cache-Control", "no-store")
-		w.WriteHeader(204)
 		return
 	}
 	ticket := response.Header.Get("X-Gateway-Admission")

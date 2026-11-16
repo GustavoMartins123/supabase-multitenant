@@ -61,9 +61,9 @@ class StudioSlugContextContractTest(unittest.TestCase):
         self.assertNotIn("service_role", endpoint)
 
     def test_service_role_is_loaded_only_after_the_membership_gate(self) -> None:
+        self.assertFalse((LUA / "security" / "inject_service_key_apikey.lua").exists())
         for name in (
             "inject_service_key.lua",
-            "inject_service_key_apikey.lua",
             "inject_service_key_storage.lua",
             "inject_service_key_graphql.lua",
         ):
@@ -71,14 +71,15 @@ class StudioSlugContextContractTest(unittest.TestCase):
                 source = (LUA / "security" / name).read_text(encoding="utf-8")
                 self.assertLess(
                     source.index('require("security.project_access").enforce'),
-                    source.index('require("security.get_service_key")' if name == "inject_service_key_apikey.lua" else 'require("security.studio_administrative_key")'),
+                    source.index('require("security.studio_administrative_key")'),
                 )
-                gate = {
-                    "inject_service_key_apikey.lua": "enforce()",
-                    "inject_service_key_storage.lua": "enforce_storage()",
-                }.get(name, "enforce_admin()")
+                gate = (
+                    "enforce_storage()"
+                    if name == "inject_service_key_storage.lua"
+                    else "enforce_admin()"
+                )
                 self.assertIn(gate, source)
-                self.assertIn("get_service_key(context.ref)" if name == "inject_service_key_apikey.lua" else ".load(context)", source)
+                self.assertIn(".load(context)", source)
                 self.assertNotIn("project_ref = context.ref", source)
 
     def test_access_gate_captures_context_once_without_repair_fallbacks(self) -> None:

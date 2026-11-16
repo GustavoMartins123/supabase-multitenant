@@ -6,7 +6,13 @@ local cache = ngx.shared.users_cache
 
 local function reconcile(premature)
     if premature then return end
-    local ok, err = store.with_lock(function()
+    if type(store.flush_republish) == "function" then
+        local flushed, flush_err = store.flush_republish(false)
+        if flushed == nil and flush_err then
+            ngx.log(ngx.ERR, "[DIRECTORY] Republish pending: ", flush_err)
+        end
+    end
+    local cached, cache_err = store.with_lock(function()
         local snapshot, read_err = directory.read_locked(false)
         if not snapshot then return nil, read_err end
         -- Cache is a projection for UI only, never authorization evidence.
@@ -33,10 +39,15 @@ local function reconcile(premature)
         for _, key in ipairs(keys) do current[key] = true end
         for _, key in ipairs(old) do if not current[key] then cache:delete(key) end end
         assert(cache:set("__yaml_user_keys", cjson.encode(keys)))
-        -- YAML is the durable outbox. Every cycle rereads it, including disabled
-        -- entries and removals, retrying indefinitely after restart/outages.
-        return sync.sync_directory()
+        return true
     end)
+    if not cached then
+        ngx.log(ngx.ERR, "[DIRECTORY] Reconciliation pending: ", cache_err)
+        return
+    end
+    -- YAML is the durable outbox. Release the file lock before any network I/O
+    -- so backend outages or slow DNS never block directory reads or mutations.
+    local ok, err = sync.sync_directory()
     if not ok then ngx.log(ngx.ERR, "[DIRECTORY] Reconciliation pending: ", err) end
 end
 

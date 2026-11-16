@@ -19,7 +19,10 @@ def main() -> None:
     parser.add_argument('--benchmark', action='store_true', help='Measure only after every validation passes')
     parser.add_argument('--result', type=Path, required=True, help='Local result JSON, contains no credentials')
     args = parser.parse_args()
-    extra = [p for p in run('git', '-C', str(ROOT), 'ls-files').splitlines()
+    extra = [p for p in run(
+                 'git', '-C', str(ROOT), 'ls-files', '--cached', '--others', '--exclude-standard',
+                 '--', 'studio/nginx/lua', 'servidor/host-agent/hostagent', 'servidor/traefik/plugins-local',
+             ).splitlines()
              if p.startswith(('studio/nginx/lua/', 'servidor/host-agent/hostagent/',
                               'servidor/traefik/plugins-local/'))]
     extra += ['studio/nginx/nginx.conf', 'studio/nginx/docker-entrypoint.sh',

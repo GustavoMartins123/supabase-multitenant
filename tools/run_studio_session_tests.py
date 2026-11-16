@@ -37,7 +37,13 @@ def fixture_archive() -> bytes:
              'tests/integration/test_studio_real_session.py',
              'studio/redis/start-sessions.sh', 'studio/redis/healthcheck.sh',
              'tests/integration/fixtures/studio_session_probe.conf']
-    paths += run('git', '-C', str(ROOT), 'ls-files', 'studio/nginx/lua').splitlines()
+    paths += run(
+        'git', '-C', str(ROOT), 'ls-files', '--cached', '--others', '--exclude-standard', '--', 'studio/nginx/lua'
+    ).splitlines()
+    for snippet in sorted((ROOT / 'studio/nginx/lua/snippets').glob('*.conf')):
+        relative = snippet.relative_to(ROOT).as_posix()
+        if relative not in paths:
+            paths.append(relative)
     payload = io.BytesIO()
     with tarfile.open(fileobj=payload, mode='w') as archive:
         for name in paths:

@@ -48,9 +48,15 @@ local function request_sync(body)
     )
 end
 
-function M.sync_directory()
-    -- All callers hold users_database.yml's lock through the API transaction.
-    local snapshot, snapshot_err = require("admin_api.directory_snapshot").read_locked(true)
+function M.sync_directory(locked)
+    local snapshot, snapshot_err
+    if locked then
+        snapshot, snapshot_err = require("admin_api.directory_snapshot").read_locked(true)
+    else
+        snapshot, snapshot_err = require("admin_api.authelia_user_store").with_lock(function()
+            return require("admin_api.directory_snapshot").read_locked(true)
+        end)
+    end
     if not snapshot then return nil, snapshot_err end
     local body, encode_err = cjson.encode(snapshot)
     if not body then return nil, encode_err end
@@ -63,7 +69,7 @@ function M.sync_directory()
 end
 
 function M.sync_user(payload)
-    local directory, err = M.sync_directory()
+    local directory, err = M.sync_directory(true)
     if not directory then return nil, err end
     for _, user in ipairs(directory.users or {}) do
         if user.id == payload.id then return user end

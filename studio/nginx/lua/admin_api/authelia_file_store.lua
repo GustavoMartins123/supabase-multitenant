@@ -18,7 +18,7 @@ local LOCK_DIR = "/config"
 local LOCK_WAIT_SECONDS = 10
 local LOCK_RETRY_SECONDS = 0.02
 local LOCK_FILE_MODE = 384 -- 0600
-local DEFAULT_MODE = 438 -- 0666; /config e compartilhado com o container Authelia.
+local DEFAULT_MODE = 384 -- 0600; arquivo privado de runtime em /config.
 
 -- Linux flags usados pela imagem Debian do OpenResty.
 local O_RDONLY = 0

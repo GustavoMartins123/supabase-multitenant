@@ -11,6 +11,6 @@ local _, canonical_groups = user_context_headers.apply(email, groups)
 groups = canonical_groups
 local is_admin = admin_groups.is_admin(groups)
 if not is_admin then
-    ngx.log(ngx.ERR, "[ALL-USERS] User not admin: ", email, " groups: ", groups)
+    ngx.log(ngx.WARN, "[ALL-USERS] Access denied - not admin")
     return ngx.exit(ngx.HTTP_FORBIDDEN)
 end

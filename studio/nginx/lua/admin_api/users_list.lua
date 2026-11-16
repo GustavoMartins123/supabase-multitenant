@@ -1,3 +1,4 @@
+require("admin_api.users_method").enforce()
 local cjson = require("cjson.safe")
 local cache = ngx.shared.users_cache
 local keys, err = cache:get_keys(0)

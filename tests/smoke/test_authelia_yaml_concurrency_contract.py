@@ -145,6 +145,74 @@ class AutheliaYamlConcurrencyContractTests(unittest.TestCase):
                 offenders.append(path.name)
         self.assertEqual(offenders, [])
 
+    def test_directory_files_use_owner_only_mode_0600(self) -> None:
+        self.assertIn("local FILE_MODE = 384", (ADMIN / "authelia_user_store.lua").read_text(encoding="utf-8"))
+        self.assertIn("local FILE_MODE = 384", (ADMIN / "authelia_identifiers.lua").read_text(encoding="utf-8"))
+        self.assertIn("local DEFAULT_MODE = 384", (ADMIN / "authelia_file_store.lua").read_text(encoding="utf-8"))
+        self.assertIn("local SEQUENCE_MODE = 384", (ADMIN / "directory_snapshot.lua").read_text(encoding="utf-8"))
+
+    def test_background_reconcile_and_sync_release_lock_before_http_io(self) -> None:
+        init_source = INIT_WORKER.read_text(encoding="utf-8")
+        self.assertIn("store.flush_republish(false)", init_source)
+        lock_pos = init_source.index("store.with_lock(function()")
+        sync_pos = init_source.index("sync.sync_directory()")
+        self.assertLess(lock_pos, sync_pos)
+        between = init_source[lock_pos:sync_pos]
+        self.assertIn("end)", between)
+
+        sync_source = (ADMIN / "user_sync.lua").read_text(encoding="utf-8")
+        sync_fn = sync_source[sync_source.index("function M.sync_directory(locked)") :]
+        self.assertLess(sync_fn.index("authelia_user_store\").with_lock"), sync_fn.index("request_sync(body)"))
+        self.assertIn("end)", sync_fn[: sync_fn.index("request_sync(body)")])
+
+    def test_directory_snapshot_and_identifiers_memoize_on_raw_state(self) -> None:
+        snap_source = (ADMIN / "directory_snapshot.lua").read_text(encoding="utf-8")
+        self.assertIn("local cached_users_raw", snap_source)
+        self.assertIn("local cached_by_email", snap_source)
+        for_email = snap_source[snap_source.index("function M.for_email(email)") :]
+        self.assertIn("store.read_raw()", for_email)
+        self.assertIn("identifiers.raw_state()", for_email)
+        self.assertIn("cached_by_email[normalized]", for_email)
+        self.assertIn("return store.with_lock(function()", for_email)
+
+        id_source = (ADMIN / "authelia_identifiers.lua").read_text(encoding="utf-8")
+        self.assertIn("local cached_raw", id_source)
+        self.assertIn("local cached_identifiers", id_source)
+        self.assertIn("function M.raw_state()", id_source)
+
+    def test_user_store_schedules_cooldown_republish_for_mtime_granularity(self) -> None:
+        store_source = (ADMIN / "authelia_user_store.lua").read_text(encoding="utf-8")
+        self.assertIn('local REPUBLISH_CACHE_KEY = "__yaml_republish_after"', store_source)
+        self.assertIn("function M.schedule_republish()", store_source)
+        self.assertIn("function M.flush_republish(force)", store_source)
+        self.assertIn("M.schedule_republish()", store_source[store_source.index("function M.write(data)") :])
+        self.assertIn("M.schedule_republish()", store_source[store_source.index("function M.restore(original)") :])
+
+    def test_password_mutations_serialize_through_locked_proxy_and_ro_mounts(self) -> None:
+        proxy_source = (ADMIN / "authelia_password_proxy.lua").read_text(encoding="utf-8")
+        self.assertIn("user_store.with_lock(function()", proxy_source)
+        self.assertIn("/internal/authelia-password-mutation", proxy_source)
+        self.assertIn("function M.reconcile_password_change(before_data, after_data)", proxy_source)
+        self.assertIn("is_valid_argon2_hash", proxy_source)
+        self.assertIn("user_store.restore(before_raw)", proxy_source)
+
+        nginx_source = (ROOT / "studio/nginx/nginx.conf").read_text(encoding="utf-8")
+        for route in ("/auth/api/change-password", "/auth/api/reset-password"):
+            self.assertIn(f"location = {route}", nginx_source)
+            self.assertIn("authelia_password_proxy.lua", nginx_source)
+        self.assertIn("location = /internal/authelia-password-mutation", nginx_source)
+
+        compose_source = (ROOT / "studio/docker-compose.yml").read_text(encoding="utf-8")
+        self.assertGreaterEqual(
+            compose_source.count("./authelia/configuration.runtime.yml:/config/configuration.runtime.yml:ro"),
+            2,
+        )
+        self.assertGreaterEqual(
+            compose_source.count("./authelia/ssl:/config/ssl:ro"),
+            2,
+        )
+        self.assertIn("    environment:\n      - TZ=${TZ}", compose_source)
+
 
 if __name__ == "__main__":
     unittest.main()
