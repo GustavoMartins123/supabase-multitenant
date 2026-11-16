@@ -92,13 +92,30 @@ backup_capture() {
   storage_validate_namespace_archive "$tmp_dir/storage.tar.gz"
   backup_progress storage_archived
 
+  local functions_studio_dir functions_studio_included="false"
+  functions_studio_dir="$PROJECT_ROOT/.functions-studio/$PROJECT_UUID"
+  if [[ -L "$functions_studio_dir" ]]; then
+    echo "Diretorio .functions-studio do tenant e symlink" >&2
+    return 1
+  fi
+  if [[ -d "$functions_studio_dir" ]]; then
+    if [[ -n "$(find "$functions_studio_dir" \( -type l -o \( ! -type d -a ! -type f \) \))" ]]; then
+      echo "Arvore .functions-studio contem entradas inseguras" >&2
+      return 1
+    fi
+    (cd "$functions_studio_dir" && tar --no-acls --numeric-owner -cpf - .) \
+      | gzip > "$tmp_dir/functions-studio.tar.gz"
+    functions_studio_included="true"
+  fi
+
   jq -n \
     --arg uuid "$PROJECT_UUID" \
     --arg ref "$project" \
     --arg pg "$pg_version" \
     --arg tables "${realtime_tables:-}" \
     --argjson created "$created_at" \
-    '{format: 2, project_uuid: $uuid, storage_tenant_id: $uuid, storage_layout: "tenant-namespace", project_ref: $ref, pg_version: $pg, realtime_tables: $tables, created_at: $created}' \
+    --argjson functions_studio_included "$functions_studio_included" \
+    '{format: 2, project_uuid: $uuid, storage_tenant_id: $uuid, storage_layout: "tenant-namespace", project_ref: $ref, pg_version: $pg, realtime_tables: $tables, created_at: $created, functions_studio_included: $functions_studio_included}' \
     > "$tmp_dir/manifest.json"
 
   mv "$tmp_dir" "$dest_dir"

@@ -1844,6 +1844,20 @@
         "title": "FunctionConfigBody",
         "type": "object"
       },
+      "GcBody": {
+        "additionalProperties": false,
+        "properties": {
+          "min_age_seconds": {
+            "default": 3600,
+            "maximum": 31536000.0,
+            "minimum": 0.0,
+            "title": "Min Age Seconds",
+            "type": "integer"
+          }
+        },
+        "title": "GcBody",
+        "type": "object"
+      },
       "GetProjectCollaborationResponse": {
         "additionalProperties": true,
         "properties": {
@@ -5438,6 +5452,34 @@
           "reveals"
         ],
         "title": "RevealListResponse",
+        "type": "object"
+      },
+      "RollbackBody": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_revision": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Revision"
+          },
+          "revision": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Revision",
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision",
+          "expected_revision"
+        ],
+        "title": "RollbackBody",
         "type": "object"
       },
       "RotateApiKeySlot": {
@@ -12481,6 +12523,63 @@
         ]
       }
     },
+    "/api/projects/{ref}/edge-functions/gc": {
+      "post": {
+        "operationId": "versions_gc_api_projects__ref__edge_functions_gc_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/GcBody"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Versions Gc",
+        "tags": [
+          "studio-edge-functions"
+        ]
+      }
+    },
     "/api/projects/{ref}/edge-functions/logs": {
       "get": {
         "operationId": "logs_list_api_projects__ref__edge_functions_logs_get",
@@ -12880,6 +12979,55 @@
         ]
       }
     },
+    "/api/projects/{ref}/edge-functions/{slug}/download": {
+      "get": {
+        "operationId": "function_download_api_projects__ref__edge_functions__slug__download_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Function Download",
+        "tags": [
+          "studio-edge-functions"
+        ]
+      }
+    },
     "/api/projects/{ref}/edge-functions/{slug}/invoke": {
       "post": {
         "operationId": "function_invoke_api_projects__ref__edge_functions__slug__invoke_post",
@@ -13047,6 +13195,65 @@
         ]
       }
     },
+    "/api/projects/{ref}/edge-functions/{slug}/rollback": {
+      "post": {
+        "operationId": "function_rollback_api_projects__ref__edge_functions__slug__rollback_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RollbackBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Function Rollback",
+        "tags": [
+          "studio-edge-functions"
+        ]
+      }
+    },
     "/api/projects/{ref}/edge-functions/{slug}/unpublish": {
       "post": {
         "operationId": "function_unpublish_api_projects__ref__edge_functions__slug__unpublish_post",
@@ -13101,6 +13308,55 @@
           }
         },
         "summary": "Function Unpublish",
+        "tags": [
+          "studio-edge-functions"
+        ]
+      }
+    },
+    "/api/projects/{ref}/edge-functions/{slug}/versions": {
+      "get": {
+        "operationId": "function_versions_api_projects__ref__edge_functions__slug__versions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Function Versions",
         "tags": [
           "studio-edge-functions"
         ]

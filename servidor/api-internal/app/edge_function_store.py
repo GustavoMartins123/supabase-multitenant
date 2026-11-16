@@ -5,6 +5,7 @@ edge_functions.configuration_lock for the entire read/modify/publish operation.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -12,6 +13,7 @@ from pathlib import Path
 import re
 import stat
 import tempfile
+import time
 
 from app import edge_functions
 
@@ -281,3 +283,89 @@ def published_files(root: Path, name: str, identity: str, *, state: dict | None 
         raise RuntimeError("Too many published functions")
     return {slug + "/" + file["name"]: file["content"].encode()
             for slug, files in functions.items() for file in files}
+
+
+DEFAULT_ORPHAN_RETENTION_SECONDS = 3600
+
+
+def list_versions(root: Path, state: dict, slug: str) -> list[dict]:
+    function_name(slug)
+    versions_dir = directory(root, state["project"], state["uuid"]) / "versions" / slug
+    if any(parent.is_symlink() for parent in (versions_dir, *versions_dir.parents)):
+        raise RuntimeError("Refusing symlinked version history directory")
+    if versions_dir.is_symlink():
+        raise RuntimeError("Refusing symlinked version history directory")
+    if not versions_dir.exists():
+        return []
+    pointers = state["functions"].get(slug)
+    entries: list[dict] = []
+    for entry in sorted(versions_dir.iterdir()):
+        if entry.name.startswith("."):
+            continue
+        info = entry.lstat()
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+            raise RuntimeError("Invalid entry in function versions directory")
+        revision = entry.stem
+        if entry.suffix != ".json" or not REVISION.fullmatch(revision):
+            continue
+        files = read_version(root, state, slug, revision)
+        entries.append({
+            "revision": revision,
+            "created_at": datetime.fromtimestamp(info.st_mtime, tz=timezone.utc).isoformat(),
+            "file_count": len(files),
+            "total_bytes": sum(len(f["content"].encode("utf-8")) for f in files),
+            "is_draft": bool(pointers and pointers.get("draft") == revision),
+            "is_published": bool(pointers and pointers.get("published") == revision),
+        })
+    entries.sort(key=lambda item: (item["created_at"], item["is_published"], item["is_draft"], item["revision"]), reverse=True)
+    return entries
+
+
+def purge_orphan_versions(
+    root: Path, state: dict, *,
+    min_age_seconds: int = DEFAULT_ORPHAN_RETENTION_SECONDS,
+    now: float | None = None,
+) -> dict[str, int]:
+    if min_age_seconds < 0:
+        raise ValueError("min_age_seconds must be non-negative")
+    versions_root = directory(root, state["project"], state["uuid"]) / "versions"
+    if any(parent.is_symlink() for parent in (versions_root, *versions_root.parents)):
+        raise RuntimeError("Refusing symlinked versions root")
+    if versions_root.is_symlink():
+        raise RuntimeError("Refusing symlinked versions root")
+    if not versions_root.exists():
+        return {"removed_count": 0, "reclaimed_bytes": 0, "kept_count": 0}
+    current_time = time.time() if now is None else float(now)
+    removed_count = 0
+    reclaimed_bytes = 0
+    kept_count = 0
+    for fn_dir in sorted(versions_root.iterdir()):
+        if fn_dir.name.startswith("."):
+            continue
+        fn_info = fn_dir.lstat()
+        if stat.S_ISLNK(fn_info.st_mode) or not stat.S_ISDIR(fn_info.st_mode):
+            raise RuntimeError("Invalid entry inside versions root")
+        slug = function_name(fn_dir.name)
+        pointers = state["functions"].get(slug) or {}
+        referenced = {rev for rev in (pointers.get("draft"), pointers.get("published")) if rev}
+        for entry in sorted(fn_dir.iterdir()):
+            if entry.name.startswith("."):
+                continue
+            info = entry.lstat()
+            if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+                raise RuntimeError("Invalid file inside function version directory")
+            if entry.suffix != ".json" or not REVISION.fullmatch(entry.stem):
+                continue
+            age = max(0.0, current_time - info.st_mtime)
+            if entry.stem in referenced or age < min_age_seconds:
+                kept_count += 1
+                continue
+            entry.chmod(0o600)
+            entry.unlink()
+            removed_count += 1
+            reclaimed_bytes += info.st_size
+        remaining = [p for p in fn_dir.iterdir() if not p.name.startswith(".")]
+        if not remaining and slug not in state["functions"]:
+            fn_dir.rmdir()
+    edge_functions.sync_directory(versions_root)
+    return {"removed_count": removed_count, "reclaimed_bytes": reclaimed_bytes, "kept_count": kept_count}

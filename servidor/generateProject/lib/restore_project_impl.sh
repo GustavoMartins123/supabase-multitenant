@@ -122,6 +122,11 @@ STORAGE_PRERESTORE="${STORAGE_TARGET}.prerestore.$$"
 [[ -d "$STORAGE_TARGET" ]] || die "Namespace Storage atual ausente"
 [[ ! -e "$STORAGE_PRERESTORE" ]] || die "Staging anterior de Storage ainda existe"
 
+FUNCTIONS_STUDIO_DIR="$PROJECT_ROOT/.functions-studio/$PROJECT_UUID"
+FUNCTIONS_PRERESTORE="${FUNCTIONS_STUDIO_DIR}.prerestore.$$"
+[[ ! -L "$FUNCTIONS_STUDIO_DIR" ]] || die "Diretorio .functions-studio do tenant e symlink"
+[[ ! -e "$FUNCTIONS_PRERESTORE" ]] || die "Staging anterior de Edge Functions ainda existe"
+
 SLOT="$(realtime_primary_slot "$PROJECT")"
 # shellcheck disable=SC2034
 MSG_SLOT="$(realtime_slot_candidate "supabase_realtime_messages_replication_slot_" "$PROJECT")"
@@ -132,6 +137,7 @@ SLOT_DROPPED=0
 DB_RENAMED=0
 NEW_DB_CREATED=0
 STORAGE_SWAPPED=0
+FUNCTIONS_SWAPPED=0
 STORAGE_TENANT_QUIESCED=0
 
 terminate_db_conns() {
@@ -169,6 +175,14 @@ rollback_on_error() {
 
   backup_stop_project_containers "$PROJECT" >/dev/null 2>&1
 
+  if [[ "$FUNCTIONS_SWAPPED" -eq 1 && -d "$FUNCTIONS_PRERESTORE" ]]; then
+    if [[ ! -L "$FUNCTIONS_STUDIO_DIR" ]]; then
+      rm -rf -- "$FUNCTIONS_STUDIO_DIR" || rollback_failed=1
+      mv "$FUNCTIONS_PRERESTORE" "$FUNCTIONS_STUDIO_DIR" || rollback_failed=1
+    else
+      rollback_failed=1
+    fi
+  fi
   if [[ "$STORAGE_SWAPPED" -eq 1 && -d "$STORAGE_PRERESTORE" ]]; then
     storage_remove_tenant_namespace "$PROJECT_UUID" >/dev/null 2>&1 \
       || rollback_failed=1
@@ -341,6 +355,46 @@ STORAGE_SWAPPED=1
 storage_extract_namespace_archive "$PROJECT_UUID" "$SRC_DIR/storage.tar.gz" \
   || die "Falha ao restaurar namespace Storage do tenant"
 
+if [[ -L "$SRC_DIR/functions-studio.tar.gz" ]]; then
+  die "Arquivo functions-studio.tar.gz do ponto de backup e symlink"
+fi
+if [[ -f "$SRC_DIR/functions-studio.tar.gz" ]]; then
+  say "Restaurando drafts de Edge Functions sem republicacao automatica..."
+  mkdir -p -m 700 "$PROJECT_ROOT/.functions-studio"
+  FUNCTIONS_STAGE="$(mktemp -d "${FUNCTIONS_STUDIO_DIR}.stage.XXXXXX")"
+  python3 - "$SRC_DIR/functions-studio.tar.gz" "$FUNCTIONS_STAGE" "$PROJECT" "$PROJECT_UUID" <<'PY' \
+    || { rm -rf -- "$FUNCTIONS_STAGE"; die "Falha ao restaurar drafts de Edge Functions"; }
+import json, pathlib, stat, sys, tarfile
+archive_path, stage_dir, project_name, project_uuid = sys.argv[1:5]
+stage = pathlib.Path(stage_dir)
+with tarfile.open(archive_path, "r:gz") as tf:
+    for member in tf.getmembers():
+        if member.issym() or member.islnk() or member.isdev() or not (member.isdir() or member.isreg()):
+            raise RuntimeError(f"Unsupported entry in functions archive: {member.name}")
+        rel = pathlib.PurePosixPath(member.name)
+        if rel.is_absolute() or ".." in rel.parts:
+            raise RuntimeError(f"Unsafe path in functions archive: {member.name}")
+    tf.extractall(stage, filter="data")
+(stage / "publication.json").unlink(missing_ok=True)
+state_file = stage / "state.json"
+if state_file.is_file() and not state_file.is_symlink():
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    if state.get("uuid") != project_uuid:
+        raise RuntimeError("Functions state uuid mismatch")
+    state["project"] = project_name
+    for slug, ptrs in list(state.get("functions", {}).items()):
+        if isinstance(ptrs, dict):
+            ptrs["published"] = None
+    state_file.write_text(json.dumps(state, sort_keys=True, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+PY
+  if [[ -d "$FUNCTIONS_STUDIO_DIR" ]]; then
+    mv "$FUNCTIONS_STUDIO_DIR" "$FUNCTIONS_PRERESTORE"
+    FUNCTIONS_SWAPPED=1
+  fi
+  chmod 700 "$FUNCTIONS_STAGE"
+  mv "$FUNCTIONS_STAGE" "$FUNCTIONS_STUDIO_DIR"
+fi
+
 echo "HOST_AGENT_PROGRESS=restore:migrate_storage"
 storage_patch_tenant_connection "$PROJECT_UUID" "$PROJECT" \
   || die "Storage nao reconectou ao banco restaurado"
@@ -375,7 +429,7 @@ terminate_db_conns "$PRERESTORE_DB" 2>/dev/null || cleanup_failed=1
 docker exec supabase-db psql -U supabase_admin -d postgres -c \
   "DROP DATABASE IF EXISTS \"$PRERESTORE_DB\";" >/dev/null 2>&1 \
   || cleanup_failed=1
-rm -rf -- "$STORAGE_PRERESTORE" || cleanup_failed=1
+rm -rf -- "$STORAGE_PRERESTORE" "$FUNCTIONS_PRERESTORE" || cleanup_failed=1
 if [[ "$cleanup_failed" -ne 0 ]]; then
   echo "RESTORE_CLEANUP_INCOMPLETE ${PROJECT}=${BACKUP_ID}" >&2
   die "Restore validado, mas a limpeza transacional ficou incompleta"

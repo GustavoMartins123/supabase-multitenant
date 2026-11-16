@@ -25,7 +25,16 @@ if [ -d "$PROJECT_DIR" ]; then
   [[ -z "$leftover" ]] \
     || { echo "containers do projeto ainda existem; remova-os antes dos arquivos: $(printf '%s' "$leftover" | tr '\n' ' ')" >&2; exit 1; }
   echo "HOST_AGENT_PROGRESS=delete_files:remove_configuration"
+  project_uuid="$(grep -E '^PROJECT_UUID=' "$PROJECT_DIR/.env" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d "\r\"'[:space:]" | tr '[:upper:]' '[:lower:]' || true)"
   functions_config_withdraw "$PROJECT_ID"
+  if [[ "$project_uuid" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+    if [[ -d "$PROJECT_ROOT/.functions-studio/$project_uuid" && ! -L "$PROJECT_ROOT/.functions-studio/$project_uuid" ]]; then
+      rm -rf -- "$PROJECT_ROOT/.functions-studio/$project_uuid"
+    fi
+    if [[ -d "$PROJECT_ROOT/.functions-runtime/code/$project_uuid" && ! -L "$PROJECT_ROOT/.functions-runtime/code/$project_uuid" ]]; then
+      rm -rf -- "$PROJECT_ROOT/.functions-runtime/code/$project_uuid"
+    fi
+  fi
   rm -rf "$PROJECT_DIR"
   echo "✅ Diretório $PROJECT_DIR removido com sucesso."
 else

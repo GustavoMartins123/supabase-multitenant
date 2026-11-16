@@ -4,8 +4,10 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import base64
 import copy
+from datetime import datetime, timezone
 import hashlib
 import hmac
+import io
 import json
 import logging
 import os
@@ -14,11 +16,12 @@ import re
 import time
 from urllib.parse import urlsplit
 import uuid
+import zipfile
 
 from dotenv import dotenv_values
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 
 from app import edge_function_store as store, edge_functions
 from app.database import get_pool
@@ -101,6 +104,54 @@ class InvokeBody(BaseModel):
     headers: dict[StrictStr, StrictStr] = Field(default_factory=dict)
     body: StrictStr | None = Field(default=None, max_length=MAX_INVOKE_BODY_BYTES)
     auth_mode: StrictStr = Field(default='anon', min_length=1, max_length=16)
+
+
+class RollbackBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    revision: StrictStr = Field(pattern=r'^[0-9a-f]{64}$')
+    expected_revision: StrictStr | None = Field(..., max_length=64)
+
+
+class GcBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    min_age_seconds: StrictInt = Field(default=store.DEFAULT_ORPHAN_RETENTION_SECONDS, ge=0, le=31536000)
+
+
+def governance_limits() -> dict[str, int]:
+    return {
+        'max_functions': store.MAX_FUNCTIONS,
+        'max_files': store.MAX_FILES,
+        'max_bytes': store.MAX_BYTES,
+        'memory_limit_mb': 150,
+        'worker_timeout_ms': 60000,
+        'max_concurrent_global': 4,
+        'max_concurrent_project': 2,
+        'max_secrets': edge_functions.MAX_SECRETS,
+        'max_secret_value_bytes': edge_functions.MAX_SECRET_VALUE_BYTES,
+        'max_secrets_total_bytes': edge_functions.MAX_SECRETS_TOTAL_BYTES,
+    }
+
+
+def _build_function_bundle_zip(slug: str, revision: str, files: list[dict], *, verify_jwt: bool) -> bytes:
+    validated = store.validate_files(files)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        for file_entry in validated:
+            info = zipfile.ZipInfo(f"{slug}/{file_entry['name']}", date_time=(2024, 1, 1, 0, 0, 0))
+            info.external_attr = 0o644 << 16
+            archive.writestr(info, file_entry['content'].encode('utf-8'))
+        manifest = {
+            'name': slug,
+            'revision': revision,
+            'verify_jwt': verify_jwt,
+            'runtime': {'deno_entrypoint': 'index.ts'},
+            'files': [file_entry['name'] for file_entry in validated],
+            'exported_at': datetime.now(timezone.utc).isoformat(),
+        }
+        m_info = zipfile.ZipInfo(f'{slug}/manifest.json', date_time=(2024, 1, 1, 0, 0, 0))
+        m_info.external_attr = 0o644 << 16
+        archive.writestr(m_info, json.dumps(manifest, indent=2).encode('utf-8'))
+    return buf.getvalue()
 
 
 def _b64url(data: bytes) -> str:
@@ -269,7 +320,7 @@ def detail(project, state, slug, enabled, *, verify_jwt: bool = True):
     value = store.item(ROOT, state, slug, {})
     if value is None:
         raise HTTPException(404, 'Function not found')
-    return {**value, 'enabled': enabled, 'verify_jwt': verify_jwt}
+    return {**value, 'enabled': enabled, 'verify_jwt': verify_jwt, 'limits': governance_limits()}
 
 
 async def load_function_configs(conn, project_id) -> dict[str, bool]:
@@ -613,7 +664,15 @@ async def function_list(ref: str, request: Request, response: Response, pool=Dep
         values = [store.item(ROOT, state, slug, {}) for slug in sorted(state['functions'])]
         return {'enabled': config['enabled'], 'functions': [
             {**{key: item[key] for key in ('name', 'revision', 'published_revision')},
-             'verify_jwt': configs.get(item['name'], True)} for item in values]}
+             'verify_jwt': configs.get(item['name'], True)} for item in values], 'limits': governance_limits()}
+
+
+@router.post('/gc')
+async def versions_gc(ref: str, request: Request, response: Response, body: GcBody | None = None, pool=Depends(get_pool)):
+    min_age = body.min_age_seconds if body is not None else store.DEFAULT_ORPHAN_RETENTION_SECONDS
+    async with management_context(ref, request, response, pool) as (_, project, _, _):
+        state = load(project)
+        return store.purge_orphan_versions(ROOT, state, min_age_seconds=min_age)
 
 
 @router.get('/logs')
@@ -1011,6 +1070,89 @@ async def function_invoke(ref: str, slug: str, body: InvokeBody, request: Reques
         'stale_draft_warning': draft_rev != published_rev,
         'logs': recent['logs'],
     }
+
+
+@router.get('/{slug}/versions')
+async def function_versions(ref: str, slug: str, request: Request, response: Response, pool=Depends(get_pool)):
+    validate_slug(slug)
+    async with management_context(ref, request, response, pool) as (_, project, _, _):
+        state = load(project)
+        current = store.item(ROOT, state, slug, {})
+        if current is None:
+            raise HTTPException(404, 'Function not found')
+        return {
+            'name': slug,
+            'draft_revision': current['revision'],
+            'published_revision': current['published_revision'],
+            'versions': store.list_versions(ROOT, state, slug),
+        }
+
+
+@router.get('/{slug}/download')
+async def function_download(ref: str, slug: str, request: Request, response: Response, pool=Depends(get_pool)):
+    validate_slug(slug)
+    async with management_context(ref, request, response, pool, allow_query=True) as (conn, project, _, _):
+        unknown = set(request.query_params.keys()) - {'version'}
+        if unknown:
+            raise HTTPException(400, f"Unsupported query parameters: {', '.join(sorted(unknown))}")
+        selector = request.query_params.get('version') or 'draft'
+        state = load(project)
+        current = store.item(ROOT, state, slug, {})
+        if current is None:
+            raise HTTPException(404, 'Function not found')
+        if selector == 'draft':
+            target_rev = current['revision']
+            files = current['files']
+        elif selector == 'published':
+            if current['published_revision'] is None:
+                raise HTTPException(409, 'Function has no published revision')
+            target_rev = current['published_revision']
+            files = store.read_version(ROOT, state, slug, target_rev)
+        elif store.REVISION.fullmatch(selector):
+            target_rev = selector
+            try:
+                files = store.read_version(ROOT, state, slug, selector)
+            except FileNotFoundError as error:
+                raise HTTPException(404, 'Function version not found') from error
+        else:
+            raise HTTPException(400, 'Invalid version selector')
+        configs = await load_function_configs(conn, project['id'])
+        zip_bytes = _build_function_bundle_zip(slug, target_rev, files, verify_jwt=configs.get(slug, True))
+        return Response(
+            content=zip_bytes,
+            media_type='application/zip',
+            headers={
+                'Content-Disposition': f'attachment; filename="{slug}-{target_rev[:12]}.zip"',
+                'Cache-Control': 'no-store',
+                'X-Content-Type-Options': 'nosniff',
+            },
+        )
+
+
+@router.post('/{slug}/rollback')
+async def function_rollback(ref: str, slug: str, body: RollbackBody, request: Request, response: Response, pool=Depends(get_pool)):
+    validate_slug(slug)
+    async with management_context(ref, request, response, pool) as (conn, project, actor, config):
+        state = load(project)
+        current = store.item(ROOT, state, slug, {})
+        if current is None:
+            raise HTTPException(404, 'Function not found')
+        if body.expected_revision != current['revision']:
+            raise HTTPException(409, 'Function draft changed; reload before rolling back')
+        try:
+            store.read_version(ROOT, state, slug, body.revision)
+        except FileNotFoundError as error:
+            raise HTTPException(404, 'Function version not found') from error
+        state['functions'][slug] = {'draft': body.revision, 'published': current['published_revision']}
+        audit_id = await audit(conn, project, actor, 'rollback', slug, body.revision)
+        try:
+            store.atomic_json(store.directory(ROOT, project['name'], identity(project)) / 'state.json', state)
+        except Exception:
+            await outcome(conn, audit_id, 'failed')
+            raise
+        await outcome(conn, audit_id, 'completed')
+        configs = await load_function_configs(conn, project['id'])
+        return detail(project, state, slug, config['enabled'], verify_jwt=configs.get(slug, True))
 
 
 @router.delete('/{slug}')

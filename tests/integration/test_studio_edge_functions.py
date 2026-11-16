@@ -246,7 +246,7 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(current.status_code, 404)
 
     async def test_activation_drafts_publication_and_disable_are_independent(self):
-        listing=await self.request('GET');self.assertEqual(listing.json(),{'enabled':False,'functions':[]})
+        listing=await self.request('GET');body=listing.json();self.assertFalse(body['enabled']);self.assertEqual(body['functions'],[]);self.assertIn('limits',body)
         draft=await self.save()
         self.assertEqual((await self.publish(draft)).status_code,409)
         self.assertFalse((self.root/'.functions-runtime/tenants/test_alpha.json').exists())
@@ -401,7 +401,7 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
         await self.pool.execute('INSERT INTO projects(id,name,display_name,public_ref,owner_id) VALUES($1,$2,$2,$3,$4)',replacement,self.names[0],self.refs[0],self.users[0])
         await self.pool.execute("INSERT INTO project_members(project_id,user_id,role) VALUES($1,$2,'admin')",replacement,self.users[0])
         listing=await self.request('GET')
-        self.assertEqual(listing.json(),{'enabled':False,'functions':[]})
+        body=listing.json();self.assertFalse(body['enabled']);self.assertEqual(body['functions'],[]);self.assertIn('limits',body)
         self.assertEqual((await self.publish(draft)).status_code,409)
 
     async def test_project_secrets_are_encrypted_scoped_injected_and_never_returned(self):
@@ -743,3 +743,131 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(degraded_logs.status_code, 200)
             self.assertFalse(degraded_logs.json()['runtime_connected'])
             self.assertTrue(any(item['status'] == 502 for item in degraded_logs.json()['logs']))
+
+    async def test_versions_rollback_bundle_download_limits_and_orphan_gc(self):
+        import io
+        import zipfile
+        from app import edge_functions, edge_function_store as store
+
+        self.assertEqual((await self.request('PUT', '/secrets', {'secrets': [{'name': 'EXPORT_BLOCKED', 'value': 'never-export-this-secret'}]})).status_code, 200)
+        await self.configure(True)
+        v1 = await self.save('version-1')
+        self.assertIn('limits', v1)
+        self.assertEqual(v1['limits']['memory_limit_mb'], 150)
+        self.assertEqual(v1['limits']['max_concurrent_global'], 4)
+        self.assertEqual(v1['limits']['max_concurrent_project'], 2)
+
+        listed = (await self.request('GET', '')).json()
+        self.assertEqual(listed['limits']['max_functions'], store.MAX_FUNCTIONS)
+
+        self.assertEqual((await self.publish(v1)).status_code, 200)
+        v2 = await self.save('version-2-orphan', v1['revision'])
+        v3 = await self.save('version-3-draft', v2['revision'])
+
+        self.assertEqual((await self.request('GET', '/my-function/versions', user=2)).status_code, 403)
+        self.assertEqual((await self.request('GET', '/missing/versions')).status_code, 404)
+        hist = (await self.request('GET', '/my-function/versions')).json()
+        self.assertEqual(hist['draft_revision'], v3['revision'])
+        self.assertEqual(hist['published_revision'], v1['revision'])
+        revs = {item['revision']: item for item in hist['versions']}
+        self.assertEqual(set(revs), {v1['revision'], v2['revision'], v3['revision']})
+        self.assertTrue(revs[v1['revision']]['is_published'])
+        self.assertTrue(revs[v3['revision']]['is_draft'])
+
+        self.assertEqual((await self.request('GET', '/my-function/download', user=2)).status_code, 403)
+        self.assertEqual((await self.request('GET', '/my-function/download?extra=1')).status_code, 400)
+        self.assertEqual((await self.request('GET', '/my-function/download?version=invalid')).status_code, 400)
+        dl_draft = await self.request('GET', '/my-function/download?version=draft')
+        self.assertEqual(dl_draft.status_code, 200, dl_draft.text)
+        self.assertEqual(dl_draft.headers['content-type'], 'application/zip')
+        self.assertNotIn(b'never-export-this-secret', dl_draft.content)
+        self.assertNotIn(b'synthetic-', dl_draft.content)
+        with zipfile.ZipFile(io.BytesIO(dl_draft.content), 'r') as zf:
+            self.assertEqual(set(zf.namelist()), {'my-function/index.ts', 'my-function/manifest.json'})
+            self.assertIn('version-3-draft', zf.read('my-function/index.ts').decode('utf-8'))
+            manifest = json.loads(zf.read('my-function/manifest.json'))
+            self.assertEqual(manifest['revision'], v3['revision'])
+
+        dl_pub = await self.request('GET', '/my-function/download?version=published')
+        with zipfile.ZipFile(io.BytesIO(dl_pub.content), 'r') as zf:
+            self.assertIn('version-1', zf.read('my-function/index.ts').decode('utf-8'))
+
+        self.assertEqual((await self.request('POST', '/my-function/rollback', {'revision': v2['revision'], 'expected_revision': v2['revision']}, user=2)).status_code, 403)
+        self.assertEqual((await self.request('POST', '/my-function/rollback', {'revision': v2['revision'], 'expected_revision': v1['revision']})).status_code, 409)
+        self.assertEqual((await self.request('POST', '/my-function/rollback', {'revision': 'f' * 64, 'expected_revision': v3['revision']})).status_code, 404)
+        runtime_before = edge_functions.read_context(self.root, self.names[0], str(self.projects[0]))
+        rb = await self.request('POST', '/my-function/rollback', {'revision': v2['revision'], 'expected_revision': v3['revision']})
+        self.assertEqual(rb.status_code, 200, rb.text)
+        rb_data = rb.json()
+        self.assertEqual(rb_data['revision'], v2['revision'])
+        self.assertEqual(rb_data['published_revision'], v1['revision'])
+        self.assertEqual(edge_functions.read_context(self.root, self.names[0], str(self.projects[0])), runtime_before)
+        self.assertEqual(await self.pool.fetchval("SELECT count(*) FROM studio_edge_audit WHERE action='rollback' AND outcome='completed'"), 1)
+
+        self.assertEqual((await self.request('POST', '/gc', {}, user=2)).status_code, 403)
+        kept_recent = (await self.request('POST', '/gc', {'min_age_seconds': 3600})).json()
+        self.assertEqual(kept_recent['removed_count'], 0)
+        cleaned = (await self.request('POST', '/gc', {'min_age_seconds': 0})).json()
+        self.assertEqual(cleaned['removed_count'], 1)
+        self.assertGreater(cleaned['reclaimed_bytes'], 0)
+        hist_after = (await self.request('GET', '/my-function/versions')).json()
+        self.assertEqual({item['revision'] for item in hist_after['versions']}, {v1['revision'], v2['revision']})
+
+    async def test_backup_restore_and_delete_hygiene_never_auto_republishes_drafts(self):
+        import subprocess, tarfile
+        # Verify backup, restore, and delete scripts enforce functions archive safety and cleanup.
+        backup_core = (ROOT / 'servidor/generateProject/lib/backup_core.sh').read_text(encoding='utf-8')
+        restore_impl = (ROOT / 'servidor/generateProject/lib/restore_project_impl.sh').read_text(encoding='utf-8')
+        delete_sh = (ROOT / 'servidor/generateProject/delete_project.sh').read_text(encoding='utf-8')
+        self.assertIn('functions-studio.tar.gz', backup_core)
+        self.assertIn('functions-studio.tar.gz', restore_impl)
+        self.assertIn('ptrs["published"] = None', restore_impl)
+        self.assertIn('.functions-studio/$project_uuid', delete_sh)
+        self.assertIn('.functions-runtime/code/$project_uuid', delete_sh)
+
+        # Simulate backup tar creation of .functions-studio and restore sanitization without auto-publishing.
+        await self.configure(True)
+        draft = await self.save('restored-draft')
+        await self.publish(draft)
+        studio_dir = self.root / '.functions-studio' / str(self.projects[0])
+        self.assertTrue((studio_dir / 'state.json').is_file())
+        with tempfile.TemporaryDirectory(prefix='fn-restore-test-') as tmp:
+            tmp_root = Path(tmp)
+            archive = tmp_root / 'functions-studio.tar.gz'
+            with tarfile.open(archive, 'w:gz') as tf:
+                for p in studio_dir.rglob('*'):
+                    tf.add(p, arcname=p.relative_to(studio_dir).as_posix(), recursive=False)
+            stage = tmp_root / 'restored'
+            stage.mkdir()
+            with tarfile.open(archive, 'r:gz') as tf:
+                for member in tf.getmembers():
+                    self.assertFalse(member.issym() or member.islnk())
+                tf.extractall(stage, filter='data')
+            (stage / 'publication.json').write_text('{"stale":true}')
+            (stage / 'publication.json').unlink()
+            state = json.loads((stage / 'state.json').read_text(encoding='utf-8'))
+            for ptrs in state['functions'].values():
+                ptrs['published'] = None
+            (stage / 'state.json').write_text(json.dumps(state))
+            sanitized = json.loads((stage / 'state.json').read_text(encoding='utf-8'))
+            self.assertEqual(sanitized['functions']['my-function']['draft'], draft['revision'])
+            self.assertIsNone(sanitized['functions']['my-function']['published'])
+
+        # Symlink in archive must be rejected when validating restore archive.
+        with tempfile.TemporaryDirectory(prefix='fn-sym-test-') as tmp:
+            bad_tar = Path(tmp) / 'bad.tar.gz'
+            with tarfile.open(bad_tar, 'w:gz') as tf:
+                info = tarfile.TarInfo('state.json')
+                info.type = tarfile.SYMTYPE
+                info.linkname = '/etc/passwd'
+                tf.addfile(info)
+            with tarfile.open(bad_tar, 'r:gz') as tf:
+                self.assertTrue(any(m.issym() for m in tf.getmembers()))
+
+        proc = subprocess.run(
+            ['bash', '-n', str(ROOT / 'servidor/generateProject/lib/backup_core.sh'),
+             str(ROOT / 'servidor/generateProject/lib/restore_project_impl.sh'),
+             str(ROOT / 'servidor/generateProject/delete_project.sh')],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
