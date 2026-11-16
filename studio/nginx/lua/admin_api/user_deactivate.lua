@@ -1,3 +1,4 @@
+require("admin_api.user_deactivate_check").enforce()
 local user_id = ngx.var[1]
 
 local cjson = require("cjson.safe")

@@ -71,6 +71,8 @@ services:
       - --config=/config/configuration.runtime.yml
     volumes:
       - ./authelia:/config
+      - ./authelia/configuration.runtime.yml:/config/configuration.runtime.yml:ro
+      - ./authelia/ssl:/config/ssl:ro
     environment:
       - TZ=${TZ}
       - AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE=/run/secrets/JWT_SECRET
@@ -129,6 +131,8 @@ services:
     volumes:
       - ./nginx/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ./authelia:/config
+      - ./authelia/configuration.runtime.yml:/config/configuration.runtime.yml:ro
+      - ./authelia/ssl:/config/ssl:ro
       - ${STUDIO_CA_CERT_PATH:-./authelia/ssl/ca.pem}:/etc/studio/extra-ca.pem:ro
     tmpfs:
       - /tmp:size=256m,mode=1777

@@ -1,4 +1,4 @@
-local cjson = require("cjson")
+local cjson = require("utils.json")
 
 local function process_platform_response()
     local mode = ngx.ctx.storage_platform_response_mode
@@ -26,9 +26,9 @@ local function process_platform_response()
         return true
     end
 
-    local success, response_data = pcall(cjson.decode, raw_body)
-    if not success or type(response_data) ~= "table" then
-        ngx.log(ngx.ERR, "Resposta JSON invalida do Storage API em ", tostring(mode))
+    local response_data, decode_err = cjson.decode(raw_body)
+    if type(response_data) ~= "table" then
+        ngx.log(ngx.ERR, "Resposta JSON invalida do Storage API em ", tostring(mode), ": ", tostring(decode_err or ""))
         ngx.arg[1] = raw_body
         return true
     end
@@ -66,9 +66,9 @@ if ngx.ctx.process_sign_response and not ngx.ctx.sign_response_processed then
 
     ngx.ctx.sign_response_processed = true
     local raw_body = ngx.ctx.response_body
-    local success, response_data = pcall(cjson.decode, raw_body)
+    local response_data = cjson.decode(raw_body)
 
-    if not success or type(response_data) ~= "table" or #response_data == 0 then
+    if type(response_data) ~= "table" or (#response_data == 0 and ngx.ctx.sign_response_mode ~= "multi") then
         ngx.log(ngx.ERR, "signedURL is missing or null")
         ngx.arg[1] = raw_body
         return
@@ -86,8 +86,6 @@ if ngx.ctx.process_sign_response and not ngx.ctx.sign_response_processed then
     local function absolute(signed_url)
         return prefix .. ngx.re.gsub(signed_url, "^/", "", "jo")
     end
-
-    cjson.encode_escape_forward_slash(false)
 
     if ngx.ctx.sign_response_mode == "multi" then
         local items = setmetatable({}, cjson.array_mt)

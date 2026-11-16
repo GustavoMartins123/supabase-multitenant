@@ -11,7 +11,7 @@ if email ~= "" then
 end
 
 if not is_admin then
-    ngx.log(ngx.ERR, "[ADMIN] Access denied - not admin. Groups: ", groups)
+    ngx.log(ngx.WARN, "[ADMIN] Access denied - not admin")
     local method = ngx.var.request_method
     if method == "GET" then
         return ngx.exit(ngx.HTTP_FORBIDDEN)
@@ -20,6 +20,15 @@ if not is_admin then
         ngx.say('{"error": "Access denied"}')
         return ngx.exit(ngx.HTTP_FORBIDDEN)
     end
+end
+
+local uri = ngx.var.uri or ""
+if uri == "/api/admin/projects-info" then
+    require("admin_api.projects_info_method").enforce()
+elseif uri:match("^/api/admin/projects/[^/]+/transfer/?$") then
+    require("admin_api.projects_transfer_check").enforce()
+elseif uri:match("^/api/admin/projects/[^/]+/?$") then
+    require("admin_api.projects_delete_check").enforce()
 end
 
 require("security.projects_api_signer").enforce()

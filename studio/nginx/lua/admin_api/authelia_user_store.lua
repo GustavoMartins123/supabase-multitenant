@@ -5,7 +5,9 @@ local M = {}
 
 local YAML_PATH = "/config/users_database.yml"
 local LOCK_RESOURCE = "users_database.yml"
-local FILE_MODE = 438 -- 0666; compartilhado com o container Authelia.
+local FILE_MODE = 384 -- 0600; arquivo gerenciado por uid compartilhado (nobody/65534).
+local REPUBLISH_DELAY_SECONDS = 1.1
+local REPUBLISH_CACHE_KEY = "__yaml_republish_after"
 
 local function read_raw()
     local handle, err = io.open(YAML_PATH, "rb")
@@ -16,6 +18,8 @@ local function read_raw()
     handle:close()
     return content
 end
+
+M.read_raw = read_raw
 
 local function parse(content)
     local ok, data = pcall(lyaml.load, content)
@@ -57,7 +61,11 @@ function M.write(data)
         return nil, parse_err
     end
 
-    return file_store.atomic_write(YAML_PATH, serialized, FILE_MODE)
+    local ok, write_err, dir_err = file_store.atomic_write(YAML_PATH, serialized, FILE_MODE)
+    if ok then
+        M.schedule_republish()
+    end
+    return ok, write_err, dir_err
 end
 
 function M.restore(original)
@@ -69,7 +77,56 @@ function M.restore(original)
         return nil,
             "refusing to restore invalid users database snapshot: " .. parse_err
     end
-    return file_store.atomic_write(YAML_PATH, original, FILE_MODE)
+    local ok, write_err, dir_err = file_store.atomic_write(YAML_PATH, original, FILE_MODE)
+    if ok then
+        M.schedule_republish()
+    end
+    return ok, write_err, dir_err
+end
+
+function M.flush_republish(force)
+    local cache = ngx and ngx.shared and ngx.shared.users_cache
+    if not force and cache then
+        local pending = tonumber(cache:get(REPUBLISH_CACHE_KEY))
+        if not pending or pending > ngx.now() then
+            return false
+        end
+    end
+    return file_store.with_lock(LOCK_RESOURCE, function()
+        if cache and not force then
+            local pending = tonumber(cache:get(REPUBLISH_CACHE_KEY))
+            if not pending or pending > ngx.now() then
+                return false
+            end
+        end
+        local current, raw = M.load()
+        if current and raw then
+            local ok, write_err = file_store.atomic_write(YAML_PATH, raw, FILE_MODE)
+            if not ok then
+                return nil, write_err
+            end
+        end
+        if cache then
+            cache:delete(REPUBLISH_CACHE_KEY)
+        end
+        return true
+    end)
+end
+
+function M.schedule_republish()
+    local cache = ngx and ngx.shared and ngx.shared.users_cache
+    if not cache or not ngx or type(ngx.now) ~= "function" then
+        return
+    end
+    cache:set(REPUBLISH_CACHE_KEY, ngx.now() + REPUBLISH_DELAY_SECONDS)
+    if ngx.timer and type(ngx.timer.at) == "function" then
+        ngx.timer.at(REPUBLISH_DELAY_SECONDS, function(premature)
+            if premature then
+                return
+            end
+            M.flush_republish(false)
+        end)
+    end
 end
 
 function M.with_lock(callback)

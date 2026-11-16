@@ -8,12 +8,36 @@ local AUTHELIA_BIN = "/usr/local/bin/authelia"
 local OPENID_SERVICE = "openid"
 local COMMAND_TIMEOUT_MS = 10000
 local IDS_LOCK = "ids.yml"
-local FILE_MODE = 438 -- 0666
+local FILE_MODE = 384 -- 0600
 
 local M = {}
+local cached_raw = nil
+local cached_identifiers = nil
 
 local function trim(value)
     return tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function copy_map(source)
+    local copy = {}
+    for key, value in pairs(source) do
+        copy[key] = value
+    end
+    return copy
+end
+
+local function read_raw()
+    local handle = io.open(IDS_PATH, "rb")
+    if not handle then
+        return nil
+    end
+    local content = handle:read("*a") or ""
+    handle:close()
+    return content
+end
+
+function M.raw_state()
+    return read_raw()
 end
 
 local function read_document()
@@ -38,7 +62,7 @@ local function read_document()
         return nil, "ids.yml sem lista de identifiers"
     end
 
-    return document, nil
+    return document, nil, content
 end
 
 local function write_document(document)
@@ -165,9 +189,19 @@ local function index_document(document)
 end
 
 local function identifiers_by_username()
-    local document, err = read_document()
+    local raw = read_raw()
+    if raw and cached_raw == raw and cached_identifiers then
+        return copy_map(cached_identifiers)
+    end
+    local document, err, content = read_document()
     if not document then return nil, err end
-    return index_document(document)
+    local identifiers, index_err = index_document(document)
+    if not identifiers then
+        return nil, index_err
+    end
+    cached_raw = content
+    cached_identifiers = identifiers
+    return copy_map(identifiers)
 end
 
 function M.list_identifiers_by_username()

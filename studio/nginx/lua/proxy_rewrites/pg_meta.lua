@@ -1,4 +1,4 @@
-local cjson = require("cjson.safe")
+local cjson = require("utils.json")
 local internal_hmac = require("security.internal_hmac")
 local ref_resolver = require("project_context.project_ref_resolver")
 

@@ -29,7 +29,6 @@ RUN apt-get update \
         argon2 \
         openssl \
         git \
-        inotify-tools \
         libvips-tools \
         luarocks \
     && rm -rf /var/lib/apt/lists/*
@@ -37,18 +36,11 @@ RUN apt-get update \
 RUN luarocks install https://luarocks.org/manifests/hisham/luafilesystem-1.8.0-1.rockspec
 COPY lyaml-6.2.8-1.src /tmp/lyaml-6.2.8-1.src
 RUN cd /tmp/lyaml-6.2.8-1.src && \
-    luarocks install lyaml-6.2.8-1.rockspec
+    luarocks install lyaml-6.2.8-1.rockspec && \
+    rm -rf /tmp/lyaml-6.2.8-1.src
 
 RUN luarocks install https://luarocks.org/manifests/fffonion/lua-resty-openssl-1.7.1-1.rockspec \
-&& opm get jkeys089/lua-resty-hmac \
- && opm get ledgetech/lua-resty-http
-
-RUN luarocks install https://luarocks.org/manifests/rsander/lua-resty-string-0.09-0.rockspec \
-    && luarocks install https://luarocks.org/manifests/erento/lua-erento-hmac-1.0-0.rockspec \
-    && luarocks install https://luarocks.org/manifests/megalord/lua-resty-fernet-1.0-0.rockspec \
-    && luarocks install https://luarocks.org/manifests/moorefu/lua-resty-crypto-master-0.rockspec \
-    && luarocks install https://luarocks.org/manifests/daurnimator/luaossl-20250929-0.rockspec \
-    && luarocks install https://luarocks.org/manifests/leafo/pgmoon-1.16.0-1.rockspec
+    && opm get ledgetech/lua-resty-http=0.17.1
 
 COPY --from=authelia-cli /app/authelia /usr/local/bin/authelia
 
