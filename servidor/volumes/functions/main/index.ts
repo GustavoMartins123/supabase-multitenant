@@ -145,7 +145,15 @@ Deno.serve(async (request: Request) => {
     })
     const result = await worker.fetch(request)
     if (!result.body) { release(); return result }
+    const headers = new Headers(result.headers)
+    if (headers.get('content-type')?.toLowerCase().includes('text/event-stream') && !headers.has('x-accel-buffering')) {
+      headers.set('x-accel-buffering', 'no')
+    }
     const reader = result.body.getReader()
+    request.signal?.addEventListener('abort', () => {
+      release()
+      void reader.cancel().catch(() => {})
+    }, { once: true })
     const body = new ReadableStream({
       async pull(controller) {
         try {
@@ -156,7 +164,7 @@ Deno.serve(async (request: Request) => {
       },
       async cancel(reason) { try { await reader.cancel(reason) } finally { release() } },
     })
-    return new Response(body, { status: result.status, statusText: result.statusText, headers: result.headers })
+    return new Response(body, { status: result.status, statusText: result.statusText, headers })
   } catch {
     release()
     console.error('Edge function failed to start or complete')
