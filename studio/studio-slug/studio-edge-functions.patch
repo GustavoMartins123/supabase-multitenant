@@ -2,7 +2,7 @@ diff --git a/apps/studio/components/interfaces/Functions/SelfHostedEdgeFunctions
 new file mode 100644
 --- /dev/null
 +++ b/apps/studio/components/interfaces/Functions/SelfHostedEdgeFunctions.tsx
-@@ -0,0 +1,266 @@
+@@ -0,0 +1,1011 @@
 +// Local Studio management uses the authenticated gateway, never project API keys.
 +import { useQuery, useQueryClient } from '@tanstack/react-query'
 +import { useParams } from 'common'
@@ -21,13 +21,95 @@ new file mode 100644
 +import { BASE_PATH } from '@/lib/constants'
 +import type { NextPageWithLayout } from '@/types'
 +
++type GovernanceLimits = {
++  max_functions: number
++  max_files: number
++  max_bytes: number
++  memory_limit_mb: number
++  worker_timeout_ms: number
++  max_concurrent_global: number
++  max_concurrent_project: number
++  max_secrets: number
++  max_secret_value_bytes: number
++  max_secrets_total_bytes: number
++}
++
 +type FunctionInfo = {
 +  name: string
 +  revision: string | null
 +  published_revision: string | null
++  verify_jwt?: boolean
 +}
-+type FunctionList = { enabled: boolean; functions: FunctionInfo[] }
-+type FunctionBody = FunctionInfo & { enabled: boolean; files: { name: string; content: string }[] }
++
++type FunctionList = {
++  enabled: boolean
++  functions: FunctionInfo[]
++  limits?: GovernanceLimits
++}
++
++type FunctionBody = FunctionInfo & {
++  enabled: boolean
++  files: { name: string; content: string }[]
++  limits?: GovernanceLimits
++}
++
++type SecretMeta = {
++  name: string
++  created_at: string
++  updated_at: string
++  updated_by: string
++}
++
++type SecretsResponse = {
++  secrets: SecretMeta[]
++  limits: { max_secrets: number; max_value_bytes: number; max_total_bytes: number }
++}
++
++type LogEntry = {
++  id: string
++  timestamp: string
++  function_name: string
++  level: string
++  source: string
++  message: string
++  status?: number | null
++  duration_ms?: number | null
++  request_id?: string
++}
++
++type LogsResponse = {
++  logs: LogEntry[]
++  runtime_connected: boolean
++}
++
++type InvokeResponse = {
++  status: number
++  headers: Record<string, string>
++  body: string
++  truncated: boolean
++  duration_ms: number
++  request_id: string
++  executed_revision: string
++  draft_revision: string
++  stale_draft_warning: boolean
++  logs: LogEntry[]
++}
++
++type FunctionVersion = {
++  revision: string
++  created_at: string | null
++  file_count: number
++  total_bytes: number
++  is_draft: boolean
++  is_published: boolean
++}
++
++type VersionsResponse = {
++  name: string
++  draft_revision: string | null
++  published_revision: string | null
++  versions: FunctionVersion[]
++}
 +
 +async function management<T>(ref: string, suffix = '', options: RequestInit = {}): Promise<T> {
 +  const response = await fetch(
@@ -37,7 +119,11 @@ new file mode 100644
 +      credentials: 'same-origin',
 +      redirect: 'manual',
 +      cache: 'no-store',
-+      headers: { 'Content-Type': 'application/json', 'X-Studio-Project-Ref': ref },
++      headers: {
++        'Content-Type': 'application/json',
++        'X-Studio-Project-Ref': ref,
++        ...(options.headers ?? {}),
++      },
 +    }
 +  )
 +  if (response.redirected || !response.headers.get('content-type')?.includes('application/json')) {
@@ -50,6 +136,42 @@ new file mode 100644
 +  return data as T
 +}
 +
++async function downloadBundle(ref: string, slug: string, versionSelector: string): Promise<void> {
++  const response = await fetch(
++    `${BASE_PATH}/api/platform/projects/${encodeURIComponent(ref)}/edge-functions/${encodeURIComponent(slug)}/download?version=${encodeURIComponent(versionSelector)}`,
++    {
++      method: 'GET',
++      credentials: 'same-origin',
++      redirect: 'manual',
++      cache: 'no-store',
++      headers: { 'X-Studio-Project-Ref': ref },
++    }
++  )
++  if (response.redirected) {
++    throw new Error('Your Studio session must be renewed.')
++  }
++  if (!response.ok) {
++    let message = 'Bundle download failed'
++    try {
++      const data = await response.json()
++      if (typeof data?.detail === 'string') message = data.detail
++    } catch {}
++    throw new Error(message)
++  }
++  const blob = await response.blob()
++  const objectUrl = URL.createObjectURL(blob)
++  try {
++    const link = document.createElement('a')
++    link.href = objectUrl
++    link.download = `${slug}-${versionSelector.slice(0, 12)}.zip`
++    document.body.appendChild(link)
++    link.click()
++    link.remove()
++  } finally {
++    URL.revokeObjectURL(objectUrl)
++  }
++}
++
 +function BlockedNotice({ enabled }: { enabled: boolean }) {
 +  if (enabled) return null
 +  return (
@@ -60,7 +182,273 @@ new file mode 100644
 +  )
 +}
 +
++function LimitsSummary({ limits, projectRef }: { limits?: GovernanceLimits; projectRef: string }) {
++  const [gcBusy, setGcBusy] = useState(false)
++  if (!limits) return null
++
++  async function runGc() {
++    setGcBusy(true)
++    try {
++      const res = await management<{ removed_count: number; reclaimed_bytes: number; kept_count: number }>(
++        projectRef,
++        '/gc',
++        { method: 'POST', body: JSON.stringify({}) }
++      )
++      toast.success(`Version cleanup complete: ${res.removed_count} removed, ${res.kept_count} retained.`)
++    } catch (error) {
++      toast.error(error instanceof Error ? error.message : 'Version cleanup failed')
++    } finally {
++      setGcBusy(false)
++    }
++  }
++
++  return (
++    <div className="rounded border p-4 space-y-3 text-sm">
++      <div className="flex flex-wrap items-center justify-between gap-2">
++        <h2 className="font-medium">Runtime & Storage Quotas</h2>
++        <Button size="tiny" variant="default" loading={gcBusy} disabled={gcBusy} onClick={runGc}>
++          Prune old snapshots
++        </Button>
++      </div>
++      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-foreground-light">
++        <div>Max functions: {limits.max_functions}</div>
++        <div>Max files / fn: {limits.max_files}</div>
++        <div>Max file size: {Math.round(limits.max_bytes / 1000)} KB</div>
++        <div>Memory / worker: {limits.memory_limit_mb} MB</div>
++        <div>Timeout: {Math.round(limits.worker_timeout_ms / 1000)}s</div>
++        <div>Concurrency (project): {limits.max_concurrent_project}</div>
++        <div>Concurrency (global): {limits.max_concurrent_global}</div>
++        <div>Max secrets: {limits.max_secrets}</div>
++      </div>
++    </div>
++  )
++}
++
++function SecretsPanel({ projectRef }: { projectRef: string }) {
++  const queryClient = useQueryClient()
++  const [secretName, setSecretName] = useState('')
++  const [secretValue, setSecretValue] = useState('')
++  const [saving, setSaving] = useState(false)
++  const [deletingName, setDeletingName] = useState<string | null>(null)
++  const [errorMsg, setErrorMsg] = useState('')
++
++  const query = useQuery({
++    queryKey: ['local-edge-secrets', projectRef],
++    queryFn: ({ signal }) => management<SecretsResponse>(projectRef, '/secrets', { signal }),
++    retry: false,
++    gcTime: 0,
++  })
++
++  async function saveSecret() {
++    if (!secretName.trim() || !secretValue) return
++    setSaving(true)
++    setErrorMsg('')
++    try {
++      const res = await management<SecretsResponse & { runtime_synced?: boolean }>(projectRef, '/secrets', {
++        method: 'PUT',
++        body: JSON.stringify({ secrets: [{ name: secretName.trim(), value: secretValue }] }),
++      })
++      setSecretName('')
++      setSecretValue('')
++      toast.success(res.runtime_synced ? 'Secret saved and synced to runtime.' : 'Secret encrypted and saved.')
++      void queryClient.invalidateQueries({ queryKey: ['local-edge-secrets', projectRef] })
++    } catch (error) {
++      setErrorMsg(error instanceof Error ? error.message : 'Failed to save secret')
++    } finally {
++      setSaving(false)
++    }
++  }
++
++  async function removeSecret(name: string) {
++    setDeletingName(name)
++    setErrorMsg('')
++    try {
++      await management(projectRef, `/secrets/${encodeURIComponent(name)}`, { method: 'DELETE' })
++      toast.success(`Secret ${name} deleted.`)
++      void queryClient.invalidateQueries({ queryKey: ['local-edge-secrets', projectRef] })
++    } catch (error) {
++      setErrorMsg(error instanceof Error ? error.message : 'Failed to delete secret')
++    } finally {
++      setDeletingName(null)
++    }
++  }
++
++  return (
++    <div className="space-y-4">
++      <div className="rounded border p-4 space-y-3">
++        <h2 className="font-medium">Project Edge Secrets</h2>
++        <p className="text-sm text-foreground-light">
++          Secrets are encrypted per project and injected into Deno.env at runtime. Existing values are never displayed again after saving.
++        </p>
++        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
++          <div>
++            <Label htmlFor="edge-secret-name">Name</Label>
++            <Input
++              id="edge-secret-name"
++              placeholder="STRIPE_WEBHOOK_SECRET"
++              value={secretName}
++              disabled={saving}
++              onChange={(event: ChangeEvent<HTMLInputElement>) => setSecretName(event.target.value)}
++            />
++          </div>
++          <div>
++            <Label htmlFor="edge-secret-value">Value</Label>
++            <Input
++              id="edge-secret-value"
++              type="password"
++              autoComplete="new-password"
++              placeholder="Enter secret value"
++              value={secretValue}
++              disabled={saving}
++              onChange={(event: ChangeEvent<HTMLInputElement>) => setSecretValue(event.target.value)}
++            />
++          </div>
++          <div>
++            <Button
++              loading={saving}
++              disabled={saving || !secretName.trim() || !secretValue}
++              onClick={saveSecret}
++            >
++              Save / Rotate secret
++            </Button>
++          </div>
++        </div>
++        {errorMsg && <p role="alert" className="text-sm text-destructive">{errorMsg}</p>}
++      </div>
++      {query.isPending && <p role="status">Loading secrets…</p>}
++      {query.error && <p role="alert">{query.error.message}</p>}
++      {query.data && (
++        <div className="rounded border divide-y">
++          {query.data.secrets.length === 0 ? (
++            <p className="p-4 text-sm text-foreground-light">No custom secrets configured for this project.</p>
++          ) : (
++            query.data.secrets.map((secret) => (
++              <div key={secret.name} className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm">
++                <div>
++                  <span className="font-mono font-medium">{secret.name}</span>
++                  <span className="ml-3 text-foreground-light">
++                    Updated: {new Date(secret.updated_at).toLocaleString()}
++                  </span>
++                </div>
++                <Button
++                  size="tiny"
++                  variant="danger"
++                  disabled={deletingName === secret.name}
++                  loading={deletingName === secret.name}
++                  onClick={() => removeSecret(secret.name)}
++                >
++                  Delete
++                </Button>
++              </div>
++            ))
++          )}
++        </div>
++      )}
++    </div>
++  )
++}
++
++function LogsPanel({ projectRef, slug }: { projectRef: string; slug?: string }) {
++  const [level, setLevel] = useState('')
++  const [fnFilter, setFnFilter] = useState(slug ?? '')
++  const [limit, setLimit] = useState('50')
++
++  const params = new URLSearchParams()
++  if (level) params.set('level', level)
++  if (!slug && fnFilter.trim()) params.set('function', fnFilter.trim())
++  if (limit) params.set('limit', limit)
++  const path = slug
++    ? `/${encodeURIComponent(slug)}/logs?${params.toString()}`
++    : `/logs?${params.toString()}`
++
++  const query = useQuery({
++    queryKey: ['local-edge-logs', projectRef, slug ?? '', level, fnFilter, limit],
++    queryFn: ({ signal }) => management<LogsResponse>(projectRef, path, { signal }),
++    retry: false,
++    gcTime: 0,
++  })
++
++  return (
++    <div className="space-y-4">
++      <div className="flex flex-wrap items-end gap-3 rounded border p-3 text-sm">
++        {!slug && (
++          <div>
++            <Label htmlFor="log-fn-filter">Function</Label>
++            <Input
++              id="log-fn-filter"
++              className="w-44"
++              placeholder="All functions"
++              value={fnFilter}
++              onChange={(event: ChangeEvent<HTMLInputElement>) => setFnFilter(event.target.value)}
++            />
++          </div>
++        )}
++        <div>
++          <Label htmlFor="log-level-filter">Level</Label>
++          <select
++            id="log-level-filter"
++            className="block rounded border bg-background px-2 py-1.5"
++            value={level}
++            onChange={(event: ChangeEvent<HTMLSelectElement>) => setLevel(event.target.value)}
++          >
++            <option value="">All levels</option>
++            <option value="info">info</option>
++            <option value="warn">warn</option>
++            <option value="error">error</option>
++          </select>
++        </div>
++        <div>
++          <Label htmlFor="log-limit-filter">Limit</Label>
++          <select
++            id="log-limit-filter"
++            className="block rounded border bg-background px-2 py-1.5"
++            value={limit}
++            onChange={(event: ChangeEvent<HTMLSelectElement>) => setLimit(event.target.value)}
++          >
++            <option value="25">25</option>
++            <option value="50">50</option>
++            <option value="100">100</option>
++            <option value="200">200</option>
++          </select>
++        </div>
++        <Button size="tiny" variant="default" onClick={() => void query.refetch()}>
++          Refresh logs
++        </Button>
++        {query.data && (
++          <span className="ml-auto text-xs text-foreground-light">
++            Runtime stream: {query.data.runtime_connected ? 'Connected' : 'Unavailable (showing persisted history)'}
++          </span>
++        )}
++      </div>
++      {query.isPending && <p role="status">Loading logs…</p>}
++      {query.error && <p role="alert">{query.error.message}</p>}
++      {query.data && (
++        <div className="rounded border divide-y font-mono text-xs">
++          {query.data.logs.length === 0 ? (
++            <p className="p-4 font-sans text-sm text-foreground-light">No logs recorded yet.</p>
++          ) : (
++            query.data.logs.map((entry, idx) => (
++              <div key={`${entry.id}:${idx}`} className="p-2.5 flex flex-col gap-1">
++                <div className="flex flex-wrap items-center gap-2 text-foreground-light">
++                  <span>{entry.timestamp ? new Date(entry.timestamp).toLocaleString() : '-'}</span>
++                  <span className="font-semibold text-foreground">{entry.function_name}</span>
++                  <span className="uppercase">[{entry.level}]</span>
++                  <span>({entry.source})</span>
++                  {typeof entry.status === 'number' && <span>HTTP {entry.status}</span>}
++                  {typeof entry.duration_ms === 'number' && <span>{entry.duration_ms}ms</span>}
++                </div>
++                <div className="whitespace-pre-wrap break-all">{entry.message}</div>
++              </div>
++            ))
++          )}
++        </div>
++      )}
++    </div>
++  )
++}
++
 +function FunctionsList({ projectRef }: { projectRef: string }) {
++  const [tab, setTab] = useState<'functions' | 'secrets' | 'logs' | 'quotas'>('functions')
 +  const query = useQuery({
 +    queryKey: ['local-edge-functions', projectRef],
 +    queryFn: ({ signal }) => management<FunctionList>(projectRef, '', { signal }),
@@ -69,24 +457,41 @@ new file mode 100644
 +  })
 +  return (
 +    <div className="p-6 space-y-5 w-full max-w-6xl mx-auto">
-+      <div className="flex items-center justify-between">
++      <div className="flex flex-wrap items-center justify-between gap-3">
 +        <h1 className="text-xl">Edge Functions</h1>
 +        {query.data && (
 +          <Button asChild><Link href={`/project/${projectRef}/functions/new`}>Create function</Link></Button>
 +        )}
 +      </div>
++      <div className="flex flex-wrap gap-2 border-b pb-2 text-sm">
++        {(['functions', 'secrets', 'logs', 'quotas'] as const).map((item) => (
++          <Button
++            key={item}
++            size="tiny"
++            variant={tab === item ? undefined : 'default'}
++            onClick={() => setTab(item)}
++          >
++            {item === 'functions' ? 'Functions' : item === 'secrets' ? 'Secrets' : item === 'logs' ? 'Logs' : 'Limits & GC'}
++          </Button>
++        ))}
++      </div>
 +      {query.isPending && <p role="status">Loading functions…</p>}
 +      {query.error && <p role="alert">{query.error.message}</p>}
-+      {query.data && <>
++      {query.data && tab === 'functions' && <>
 +        <BlockedNotice enabled={query.data.enabled} />
 +        <p className="text-sm text-foreground-light">Project: {projectRef}</p>
 +        {query.data.functions.length === 0 && <p>No functions yet.</p>}
 +        <ul className="divide-y border rounded">
 +          {query.data.functions.map((item) => (
-+            <li key={item.name} className="flex justify-between p-4">
-+              <Link className="text-brand" href={`/project/${projectRef}/functions/${item.name}/code`}>
-+                {item.name}
-+              </Link>
++            <li key={item.name} className="flex flex-wrap items-center justify-between gap-2 p-4">
++              <div className="flex items-center gap-3">
++                <Link className="text-brand" href={`/project/${projectRef}/functions/${item.name}/code`}>
++                  {item.name}
++                </Link>
++                {item.verify_jwt === false && (
++                  <span className="rounded border px-2 py-0.5 text-xs">Webhook (verify_jwt=false)</span>
++                )}
++              </div>
 +              <span className="text-sm text-foreground-light">
 +                {!item.published_revision ? 'Draft' : item.revision !== item.published_revision ? 'Unpublished changes' : 'Published'}
 +              </span>
@@ -94,6 +499,9 @@ new file mode 100644
 +          ))}
 +        </ul>
 +      </>}
++      {tab === 'secrets' && <SecretsPanel projectRef={projectRef} />}
++      {tab === 'logs' && <LogsPanel projectRef={projectRef} />}
++      {query.data && tab === 'quotas' && <LimitsSummary limits={query.data.limits} projectRef={projectRef} />}
 +    </div>
 +  )
 +}
@@ -106,6 +514,7 @@ new file mode 100644
 +function FunctionEditor({ projectRef, slug }: { projectRef: string; slug?: string }) {
 +  const router = useRouter()
 +  const queryClient = useQueryClient()
++  const [tab, setTab] = useState<'code' | 'test' | 'logs' | 'versions' | 'settings'>('code')
 +  const [name, setName] = useState(slug ?? '')
 +  const [info, setInfo] = useState<FunctionBody>()
 +  const [files, setFiles] = useState<FileData[]>([{ id: 0, name: 'index.ts', content: STARTER, state: 'new' }])
@@ -115,6 +524,21 @@ new file mode 100644
 +  const [selected, setSelected] = useState(0)
 +  const [pendingAction, setPendingAction] = useState<'unpublish' | 'delete' | null>(null)
 +  const [deleted, setDeleted] = useState(false)
++
++  // Live invoke runner state
++  const [invokeMethod, setInvokeMethod] = useState('POST')
++  const [invokePath, setInvokePath] = useState('/')
++  const [invokeAuthMode, setInvokeAuthMode] = useState('anon')
++  const [invokeHeadersText, setInvokeHeadersText] = useState('{\n  "Content-Type": "application/json"\n}')
++  const [invokeBodyText, setInvokeBodyText] = useState('{"hello":"world"}')
++  const [invoking, setInvoking] = useState(false)
++  const [invokeResult, setInvokeResult] = useState<InvokeResponse | null>(null)
++  const [invokeError, setInvokeError] = useState('')
++
++  const [configBusy, setConfigBusy] = useState(false)
++  const [downloading, setDownloading] = useState(false)
++  const [rollingBackRev, setRollingBackRev] = useState<string | null>(null)
++
 +  const mounted = useRef(true)
 +  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
 +  const query = useQuery<FunctionList | FunctionBody>({
@@ -126,6 +550,17 @@ new file mode 100644
 +    gcTime: 0,
 +    refetchOnWindowFocus: false,
 +    refetchOnReconnect: false,
++  })
++  const versionsQuery = useQuery<VersionsResponse>({
++    queryKey: ['local-edge-function-versions', projectRef, info?.name ?? slug ?? ''],
++    queryFn: ({ signal }) => management<VersionsResponse>(
++      projectRef,
++      `/${encodeURIComponent(info?.name ?? slug ?? '')}/versions`,
++      { signal }
++    ),
++    enabled: tab === 'versions' && !!(info?.name ?? slug),
++    retry: false,
++    gcTime: 0,
 +  })
 +  useEffect(() => {
 +    if (slug && query.data && 'files' in query.data && !info) {
@@ -158,6 +593,7 @@ new file mode 100644
 +      if (!mounted.current) return
 +      setInfo(result)
 +      setSaved(fingerprint(files))
++      void queryClient.invalidateQueries({ queryKey: ['local-edge-function-versions', projectRef, result.name] })
 +      toast.success('Draft saved. Public code has not changed.')
 +    } catch (error) {
 +      if (mounted.current) setFailure(error instanceof Error ? error.message : 'Draft save failed')
@@ -175,6 +611,7 @@ new file mode 100644
 +      })
 +      if (!mounted.current) return
 +      setInfo(result)
++      void queryClient.invalidateQueries({ queryKey: ['local-edge-function-versions', projectRef, result.name] })
 +      toast.success('Function published for this project.')
 +    } catch (error) {
 +      if (mounted.current) setFailure(error instanceof Error ? error.message : 'Publication failed')
@@ -207,14 +644,125 @@ new file mode 100644
 +    } finally { if (mounted.current) setBusy(false) }
 +  }
 +
++  async function toggleVerifyJwt(nextValue: boolean) {
++    if (!info) return
++    setConfigBusy(true)
++    setFailure('')
++    try {
++      const result = await management<FunctionBody>(projectRef, `/${encodeURIComponent(name)}/config`, {
++        method: 'PUT',
++        body: JSON.stringify({ verify_jwt: nextValue }),
++      })
++      if (!mounted.current) return
++      setInfo(result)
++      void queryClient.invalidateQueries({ queryKey: ['local-edge-functions', projectRef] })
++      toast.success(nextValue ? 'JWT verification enabled.' : 'JWT verification disabled (public webhook mode).')
++    } catch (error) {
++      if (mounted.current) setFailure(error instanceof Error ? error.message : 'Configuration update failed')
++    } finally { if (mounted.current) setConfigBusy(false) }
++  }
++
++  async function runInvoke() {
++    if (!info) return
++    setInvoking(true)
++    setInvokeError('')
++    try {
++      let parsedHeaders: Record<string, string> = {}
++      if (invokeHeadersText.trim()) {
++        const raw = JSON.parse(invokeHeadersText)
++        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
++          throw new Error('Headers must be a JSON object')
++        }
++        for (const [k, v] of Object.entries(raw)) {
++          parsedHeaders[k] = String(v)
++        }
++      }
++      const noBody = invokeMethod === 'GET' || invokeMethod === 'HEAD'
++      const res = await management<InvokeResponse>(projectRef, `/${encodeURIComponent(name)}/invoke`, {
++        method: 'POST',
++        body: JSON.stringify({
++          method: invokeMethod,
++          path: invokePath || '/',
++          headers: parsedHeaders,
++          body: noBody ? null : invokeBodyText,
++          auth_mode: invokeAuthMode,
++        }),
++      })
++      if (!mounted.current) return
++      setInvokeResult(res)
++      void queryClient.invalidateQueries({ queryKey: ['local-edge-logs', projectRef, name] })
++    } catch (error) {
++      if (mounted.current) setInvokeError(error instanceof Error ? error.message : 'Invocation failed')
++    } finally { if (mounted.current) setInvoking(false) }
++  }
++
++  async function rollbackRevision(targetRevision: string) {
++    if (!info) return
++    setRollingBackRev(targetRevision)
++    setFailure('')
++    try {
++      const result = await management<FunctionBody>(projectRef, `/${encodeURIComponent(name)}/rollback`, {
++        method: 'POST',
++        body: JSON.stringify({ revision: targetRevision, expected_revision: info.revision }),
++      })
++      if (!mounted.current) return
++      setInfo(result)
++      const reloaded = asFiles(result)
++      setFiles(reloaded)
++      setSaved(fingerprint(reloaded))
++      setSelected(0)
++      void queryClient.invalidateQueries({ queryKey: ['local-edge-function-versions', projectRef, name] })
++      toast.success('Snapshot restored to draft. Review and publish explicitly when ready.')
++    } catch (error) {
++      if (mounted.current) setFailure(error instanceof Error ? error.message : 'Rollback failed')
++    } finally { if (mounted.current) setRollingBackRev(null) }
++  }
++
++  async function exportZip(versionSelector: string) {
++    if (!info) return
++    setDownloading(true)
++    try {
++      await downloadBundle(projectRef, info.name, versionSelector)
++    } catch (error) {
++      toast.error(error instanceof Error ? error.message : 'Bundle download failed')
++    } finally {
++      if (mounted.current) setDownloading(false)
++    }
++  }
++
 +  if (deleted) return <p role="status" className="p-6">Function deleted. Returning to the function list…</p>
++
++  const activeLimits = info?.limits ?? (query.data && 'limits' in query.data ? query.data.limits : undefined)
++  const verifyJwt = info?.verify_jwt ?? true
 +
 +  return (
 +    <div className="w-full flex flex-col min-h-[70vh]">
 +      <div className="p-5 space-y-3 border-b">
 +        <Link className="text-brand text-sm" href={`/project/${projectRef}/functions`}>Back to functions</Link>
-+        <h1 className="text-xl">{slug || info ? name : 'Create function'}</h1>
-+        <p className="text-sm text-foreground-light">Project: {projectRef}</p>
++        <div className="flex flex-wrap items-center justify-between gap-2">
++          <h1 className="text-xl">{slug || info ? name : 'Create function'}</h1>
++          {info && (
++            <div className="flex flex-wrap gap-2">
++              <Button size="tiny" variant="default" disabled={downloading} onClick={() => void exportZip('draft')}>
++                Export Draft ZIP
++              </Button>
++              {info.published_revision && (
++                <Button size="tiny" variant="default" disabled={downloading} onClick={() => void exportZip('published')}>
++                  Export Published ZIP
++                </Button>
++              )}
++            </div>
++          )}
++        </div>
++        <p className="text-sm text-foreground-light">
++          Project: {projectRef}
++          {info && (
++            <>
++              {' · '}
++              {verifyJwt ? 'JWT verification: required' : 'JWT verification: disabled (public webhook)'}
++            </>
++          )}
++        </p>
 +        {loaded && <BlockedNotice enabled={enabled} />}
 +        {query.error && <p role="alert">{query.error.message}</p>}
 +        {failure && <p role="alert">{failure}</p>}
@@ -222,9 +770,31 @@ new file mode 100644
 +          {info.revision === info.published_revision ? 'Published version' : 'Unpublished draft'}
 +          {' · '}Public path: /{projectRef}/functions/v1/{name}
 +        </p>}
++        {info && (
++          <div className="flex flex-wrap gap-2 pt-1">
++            {(['code', 'test', 'logs', 'versions', 'settings'] as const).map((item) => (
++              <Button
++                key={item}
++                size="tiny"
++                variant={tab === item ? undefined : 'default'}
++                onClick={() => setTab(item)}
++              >
++                {item === 'code'
++                  ? 'Code'
++                  : item === 'test'
++                    ? 'Test Runner'
++                    : item === 'logs'
++                      ? 'Logs'
++                      : item === 'versions'
++                        ? 'Versions'
++                        : 'Settings & Limits'}
++              </Button>
++            ))}
++          </div>
++        )}
 +      </div>
 +      {!loaded && !query.error && <p role="status" className="p-5">Loading editor…</p>}
-+      {loaded && <>
++      {loaded && (!info || tab === 'code') && <>
 +        <div inert={busy} className="flex flex-col flex-1 min-h-[450px]">
 +          <FileExplorerAndEditor editable files={files} onFilesChange={setFiles} selectedFileId={selected} setSelectedFileId={setSelected} />
 +        </div>
@@ -240,6 +810,181 @@ new file mode 100644
 +          <Button disabled={busy || !enabled || !info?.revision || dirty || info.revision === info.published_revision} onClick={publish}>Publish function</Button>
 +        </div>
 +      </>}
++      {loaded && info && tab === 'test' && (
++        <div className="p-5 space-y-4">
++          {!info.published_revision && (
++            <p role="status" className="rounded border border-warning p-3 text-sm">
++              This function has no published revision yet. Publish it before invoking via the test runner.
++            </p>
++          )}
++          {info.published_revision && info.revision !== info.published_revision && (
++            <p role="status" className="rounded border border-warning p-3 text-sm">
++              Your saved draft ({info.revision?.slice(0, 12)}) differs from the published version ({info.published_revision.slice(0, 12)}). Live invocations execute the published version.
++            </p>
++          )}
++          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
++            <div>
++              <Label htmlFor="invoke-method">Method</Label>
++              <select
++                id="invoke-method"
++                className="block w-full rounded border bg-background px-2 py-2 text-sm"
++                value={invokeMethod}
++                onChange={(event: ChangeEvent<HTMLSelectElement>) => setInvokeMethod(event.target.value)}
++              >
++                {['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].map((m) => (
++                  <option key={m} value={m}>{m}</option>
++                ))}
++              </select>
++            </div>
++            <div>
++              <Label htmlFor="invoke-path">Path & Query</Label>
++              <Input
++                id="invoke-path"
++                value={invokePath}
++                onChange={(event: ChangeEvent<HTMLInputElement>) => setInvokePath(event.target.value)}
++                placeholder="/items?filter=active"
++              />
++            </div>
++            <div>
++              <Label htmlFor="invoke-auth">Authentication Mode</Label>
++              <select
++                id="invoke-auth"
++                className="block w-full rounded border bg-background px-2 py-2 text-sm"
++                value={invokeAuthMode}
++                onChange={(event: ChangeEvent<HTMLSelectElement>) => setInvokeAuthMode(event.target.value)}
++              >
++                <option value="anon">Project Anon Role</option>
++                <option value="service_role">Project Service Role</option>
++                <option value="none">Unauthenticated (Webhook / Public)</option>
++                <option value="custom">Custom Headers Only</option>
++              </select>
++            </div>
++          </div>
++          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
++            <div>
++              <Label htmlFor="invoke-headers">Headers (JSON)</Label>
++              <textarea
++                id="invoke-headers"
++                rows={5}
++                className="mt-1 w-full rounded border bg-background p-2 font-mono text-xs"
++                value={invokeHeadersText}
++                onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setInvokeHeadersText(event.target.value)}
++              />
++            </div>
++            <div>
++              <Label htmlFor="invoke-body">Request Body</Label>
++              <textarea
++                id="invoke-body"
++                rows={5}
++                disabled={invokeMethod === 'GET' || invokeMethod === 'HEAD'}
++                className="mt-1 w-full rounded border bg-background p-2 font-mono text-xs"
++                value={invokeBodyText}
++                onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setInvokeBodyText(event.target.value)}
++              />
++            </div>
++          </div>
++          <div className="flex justify-end">
++            <Button
++              loading={invoking}
++              disabled={invoking || !enabled || !info.published_revision}
++              onClick={() => void runInvoke()}
++            >
++              Invoke Published Function
++            </Button>
++          </div>
++          {invokeError && <p role="alert" className="text-sm text-destructive">{invokeError}</p>}
++          {invokeResult && (
++            <div className="rounded border p-4 space-y-3 text-sm">
++              <div className="flex flex-wrap items-center gap-3">
++                <span className="font-mono font-semibold">HTTP {invokeResult.status}</span>
++                <span>{invokeResult.duration_ms}ms</span>
++                <span className="font-mono text-xs text-foreground-light">Request ID: {invokeResult.request_id}</span>
++                {invokeResult.stale_draft_warning && (
++                  <span className="rounded border border-warning px-2 py-0.5 text-xs">Executed published revision</span>
++                )}
++                {invokeResult.truncated && (
++                  <span className="rounded border px-2 py-0.5 text-xs">Response body truncated to 256 KB</span>
++                )}
++              </div>
++              <pre className="max-h-80 overflow-auto rounded bg-surface-200 p-3 font-mono text-xs">{invokeResult.body}</pre>
++            </div>
++          )}
++        </div>
++      )}
++      {loaded && info && tab === 'logs' && (
++        <div className="p-5">
++          <LogsPanel projectRef={projectRef} slug={info.name} />
++        </div>
++      )}
++      {loaded && info && tab === 'versions' && (
++        <div className="p-5 space-y-4">
++          {versionsQuery.isPending && <p role="status">Loading versions…</p>}
++          {versionsQuery.error && <p role="alert">{versionsQuery.error.message}</p>}
++          {versionsQuery.data && (
++            <div className="rounded border divide-y text-sm">
++              {versionsQuery.data.versions.map((ver) => (
++                <div key={ver.revision} className="flex flex-wrap items-center justify-between gap-2 p-3">
++                  <div className="space-y-0.5">
++                    <div className="flex flex-wrap items-center gap-2">
++                      <span className="font-mono font-medium">{ver.revision.slice(0, 12)}</span>
++                      {ver.is_published && <span className="rounded border px-2 py-0.5 text-xs">Published</span>}
++                      {ver.is_draft && <span className="rounded border px-2 py-0.5 text-xs">Current Draft</span>}
++                    </div>
++                    <div className="text-xs text-foreground-light">
++                      {ver.created_at ? new Date(ver.created_at).toLocaleString() : 'Legacy'} · {ver.file_count} files · {ver.total_bytes} bytes
++                    </div>
++                  </div>
++                  <div className="flex gap-2">
++                    <Button
++                      size="tiny"
++                      variant="default"
++                      disabled={downloading}
++                      onClick={() => void exportZip(ver.revision)}
++                    >
++                      Download ZIP
++                    </Button>
++                    {!ver.is_draft && (
++                      <Button
++                        size="tiny"
++                        variant="default"
++                        loading={rollingBackRev === ver.revision}
++                        disabled={rollingBackRev !== null || dirty}
++                        onClick={() => void rollbackRevision(ver.revision)}
++                      >
++                        Restore to draft
++                      </Button>
++                    )}
++                  </div>
++                </div>
++              ))}
++            </div>
++          )}
++        </div>
++      )}
++      {loaded && info && tab === 'settings' && (
++        <div className="p-5 space-y-5">
++          <div className="rounded border p-4 space-y-3 text-sm">
++            <div className="flex flex-wrap items-center justify-between gap-3">
++              <div>
++                <h2 className="font-medium">JWT & Webhook Authentication</h2>
++                <p className="text-foreground-light">
++                  Disable JWT enforcement only for webhooks or public endpoints that verify provider signatures in function code.
++                </p>
++              </div>
++              <Button
++                variant={verifyJwt ? 'default' : 'danger'}
++                loading={configBusy}
++                disabled={configBusy}
++                onClick={() => void toggleVerifyJwt(!verifyJwt)}
++              >
++                {verifyJwt ? 'Disable JWT Verification' : 'Enable JWT Verification'}
++              </Button>
++            </div>
++            <p className="font-mono text-xs">Endpoint path: /{projectRef}/functions/v1/{info.name}</p>
++          </div>
++          <LimitsSummary limits={activeLimits} projectRef={projectRef} />
++        </div>
++      )}
 +      <DiscardChangesConfirmationDialog visible={pendingAction !== null}
 +        title={`${pendingAction === 'delete' ? 'Delete' : 'Unpublish'} function "${name}"?`}
 +        description={pendingAction === 'delete'
