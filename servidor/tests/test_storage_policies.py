@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 import os
 from pathlib import Path
 import sys
@@ -16,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "api-internal"))
 from app import storage_policies as policies
 from app.control_plane_roles import ensure_tenant_meta_roles
-from app.tenant_meta_identity import tenant_meta_credentials
+from app.tenant_meta_identity import tenant_meta_credentials, tenant_storage_policy_key
 
 
 MANUAL_SQL = """BEGIN;
@@ -242,6 +243,92 @@ class PolicyDatabaseTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaises(asyncpg.InsufficientPrivilegeError):
                 await self.tenant.execute(sql)
+
+    @asynccontextmanager
+    async def legacy_clone(self):
+        clone = {"name": "legacy_" + uuid.uuid4().hex[:12], "tenant_uuid": uuid.uuid4()}
+        database = "_supabase_" + clone["name"]
+        await self.tenant.close()
+        await self.owner.close()
+        await self.admin.execute(f'CREATE DATABASE "{database}" TEMPLATE "{self.database}"')
+        self.owner = await asyncpg.connect(self.dsn, database=self.database)
+        _, password = tenant_meta_credentials(self.project["tenant_uuid"], self.master)
+        self.tenant = await asyncpg.connect(self.dsn, database=self.database, user=self.role, password=password)
+        await self.control.execute("INSERT INTO projects VALUES($1,$2)", clone["name"], clone["tenant_uuid"])
+        try:
+            yield clone, database
+        finally:
+            await self.control.execute("DELETE FROM projects WHERE name=$1", clone["name"])
+            await self.admin.execute(f'DROP DATABASE "{database}" WITH (FORCE)')
+            for prefix in ("tenant_storage_policy_", "tenant_ai_reader_", "tenant_meta_"):
+                await self.admin.execute(f'DROP ROLE IF EXISTS "{prefix}{clone["tenant_uuid"].hex}"')
+
+    async def source_delegation(self):
+        return await self.owner.fetchrow("""SELECT role_name, signing_key,
+            (SELECT proowner FROM pg_proc WHERE oid='studio_storage_guard.execute_policy(text,bigint,text)'::regprocedure) AS owner
+            FROM studio_storage_guard.authorities""")
+
+    async def test_legacy_clone_rebinds_storage_delegation_without_changing_source(self):
+        original = await self.source_delegation()
+        source_helper = self.role.replace("tenant_meta_", "tenant_storage_policy_")
+        async with self.legacy_clone() as (clone, database):
+            await self.provision()
+            await self.provision()
+            role, password = tenant_meta_credentials(clone["tenant_uuid"], self.master)
+            tenant = await asyncpg.connect(self.dsn, database=database, user=role, password=password)
+            owner = await asyncpg.connect(self.dsn, database=database)
+            try:
+                authority = await owner.fetchrow("SELECT role_name, signing_key FROM studio_storage_guard.authorities")
+                self.assertEqual(authority["role_name"], role)
+                self.assertEqual(authority["signing_key"], tenant_storage_policy_key(clone["tenant_uuid"], self.master))
+                self.assertNotEqual(authority["signing_key"], original["signing_key"])
+                await tenant.execute(policies.rewrite_policy_statements(policies.prepare_policy_statements(MANUAL_SQL), clone["tenant_uuid"]))
+                self.assertEqual(await owner.fetchval("SELECT count(*) FROM storage.objects"), 4)
+                self.assertEqual(await owner.fetchval("SELECT count(*) FROM pg_policies WHERE schemaname='storage' AND policyname='generic_access'"), 1)
+                self.assertEqual(
+                    await owner.fetchval("SELECT proowner::regrole::text FROM pg_proc WHERE oid='studio_storage_guard.execute_policy(text,bigint,text)'::regprocedure"),
+                    role.replace("tenant_meta_", "tenant_storage_policy_"),
+                )
+                for old_role in (self.role, source_helper):
+                    self.assertFalse(await owner.fetchval("SELECT has_schema_privilege($1,'studio_storage_guard','USAGE')", old_role))
+                    self.assertFalse(await owner.fetchval("SELECT has_function_privilege($1,'studio_storage_guard.execute_policy(text,bigint,text)','EXECUTE')", old_role))
+                with self.assertRaises(asyncpg.InsufficientPrivilegeError):
+                    await tenant.execute(self.rewritten())
+                await tenant.execute("ROLLBACK")
+            finally:
+                await tenant.close()
+                await owner.close()
+        self.assertEqual(await self.source_delegation(), original)
+
+    async def test_legacy_clone_rejects_login_enabled_delegation_owner(self):
+        helper = self.role.replace("tenant_meta_", "tenant_storage_policy_")
+        async with self.legacy_clone() as (clone, database):
+            await self.admin.execute(f'ALTER ROLE "{helper}" LOGIN')
+            try:
+                with self.assertRaisesRegex(asyncpg.RaiseError, "Untrusted Storage policy delegation schema"):
+                    await self.provision()
+                owner = await asyncpg.connect(self.dsn, database=database)
+                try:
+                    self.assertEqual(await owner.fetchval("SELECT role_name FROM studio_storage_guard.authorities"), self.role)
+                finally:
+                    await owner.close()
+            finally:
+                await self.admin.execute(f'ALTER ROLE "{helper}" NOLOGIN')
+
+    async def test_legacy_clone_rejects_other_functions_owned_by_source_helper(self):
+        helper = self.role.replace("tenant_meta_", "tenant_storage_policy_")
+        async with self.legacy_clone() as (clone, database):
+            owner = await asyncpg.connect(self.dsn, database=database)
+            try:
+                await owner.execute(
+                    "CREATE FUNCTION studio_storage_guard.execute_policy(text) RETURNS void LANGUAGE plpgsql AS 'BEGIN RETURN; END'; "
+                    f'ALTER FUNCTION studio_storage_guard.execute_policy(text) OWNER TO "{helper}"'
+                )
+                with self.assertRaisesRegex(asyncpg.RaiseError, "Untrusted Storage policy delegation schema"):
+                    await self.provision()
+                self.assertEqual(await owner.fetchval("SELECT role_name FROM studio_storage_guard.authorities"), self.role)
+            finally:
+                await owner.close()
 
     async def test_storage_owner_and_migrations_stay_unchanged(self):
         await self.provision()
