@@ -20,6 +20,54 @@ from app.functions_network import network_hosts
 PROJECT = re.compile(r"[a-z_][a-z0-9_]{2,39}\Z")
 ENVIRONMENT = {"SUPABASE_URL", "SUPABASE_PUBLIC_URL", "SUPABASE_ANON_KEY",
                "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_DB_URL"}
+SECRET_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}\Z")
+MAX_SECRETS = 64
+MAX_SECRET_VALUE_BYTES = 8192
+MAX_SECRETS_TOTAL_BYTES = 65536
+CONTEXT_MAX_BYTES = 262144
+RESERVED_SECRET_NAMES = frozenset({
+    "PATH", "HOME", "USER", "SHELL", "PWD", "LANG", "LC_ALL", "TZ", "HOST", "PORT", "HOSTNAME", "VERIFY_JWT",
+})
+RESERVED_SECRET_PREFIXES = (
+    "SUPABASE_", "PROJECT_", "TECHNICAL_", "JWT_", "POSTGRES_", "PG_", "DENO_",
+    "EDGE_RUNTIME_", "TMP", "XDG_", "NODE_", "LD_", "HOST_AGENT_", "KEY_AUTHORIZER_",
+    "FERNET_", "ENCRYPTION_", "ALLOCATOR_",
+)
+
+
+def validate_secret_name(name: str) -> str:
+    if not isinstance(name, str) or not SECRET_NAME.fullmatch(name):
+        raise ValueError("Invalid secret name")
+    upper = name.upper()
+    if upper in RESERVED_SECRET_NAMES or upper.startswith(RESERVED_SECRET_PREFIXES):
+        raise ValueError(f"Secret name '{name}' is reserved by the platform")
+    return name
+
+
+def validate_secret_value(value: str) -> str:
+    if not isinstance(value, str) or "\0" in value:
+        raise ValueError("Invalid secret value")
+    encoded = value.encode("utf-8")
+    if not encoded or len(encoded) > MAX_SECRET_VALUE_BYTES:
+        raise ValueError(f"Secret value must be 1 to {MAX_SECRET_VALUE_BYTES} bytes")
+    return value
+
+
+def validate_secrets(secrets: dict[str, str] | None) -> dict[str, str]:
+    if not secrets:
+        return {}
+    if not isinstance(secrets, dict) or len(secrets) > MAX_SECRETS:
+        raise ValueError(f"A project may configure at most {MAX_SECRETS} secrets")
+    total_bytes = 0
+    cleaned: dict[str, str] = {}
+    for key in sorted(secrets):
+        name = validate_secret_name(key)
+        value = validate_secret_value(secrets[key])
+        total_bytes += len(name.encode("utf-8")) + len(value.encode("utf-8"))
+        if total_bytes > MAX_SECRETS_TOTAL_BYTES:
+            raise ValueError("Total Edge Function secrets size exceeds project limit")
+        cleaned[name] = value
+    return cleaned
 
 
 def project_name(name: str) -> str:
@@ -111,15 +159,19 @@ def sync_directory(path: Path) -> None:
 
 
 def context_value(name: str, identity: str, secret: str, environment: dict[str, str],
-                  files: dict[str, bytes], network_allowlist: list[str] | None = None) -> dict:
+                  files: dict[str, bytes], network_allowlist: list[str] | None = None,
+                  secrets: dict[str, str] | None = None) -> dict:
     name = project_name(name)
     if (str(UUID(identity)) != identity or set(environment) != ENVIRONMENT
             or not isinstance(secret, str) or not secret
             or not all(isinstance(value, str) and value for value in environment.values())):
         raise ValueError("Incomplete tenant Functions credentials")
-    state = {"project": name, "uuid": identity, "jwt_secret": secret, "env": environment}
+    state: dict = {"project": name, "uuid": identity, "jwt_secret": secret, "env": environment}
     if network_allowlist is not None:
         state["network_allowlist"] = network_hosts(network_allowlist)
+    validated_secrets = validate_secrets(secrets)
+    if validated_secrets:
+        state["secrets"] = validated_secrets
     digest = hashlib.sha256(json.dumps(state, sort_keys=True).encode())
     for relative, data in sorted(files.items()):
         if Path(relative).is_absolute() or any(part in {"", ".", ".."} for part in relative.split("/")):
@@ -131,11 +183,13 @@ def context_value(name: str, identity: str, secret: str, environment: dict[str, 
 def read_context(root: Path, name: str, identity: str) -> dict | None:
     from app.edge_function_store import regular_bytes
     try:
-        state = json.loads(regular_bytes(runtime_directory(root) / "tenants" / (project_name(name) + ".json"), 65536))
+        state = json.loads(regular_bytes(runtime_directory(root) / "tenants" / (project_name(name) + ".json"), CONTEXT_MAX_BYTES))
     except FileNotFoundError:
         return None
-    if (not isinstance(state, dict) or set(state) not in ({"project", "uuid", "jwt_secret", "env", "revision"},
-            {"project", "uuid", "jwt_secret", "env", "revision", "network_allowlist"})
+    required_keys = {"project", "uuid", "jwt_secret", "env", "revision"}
+    allowed_keys = required_keys | {"network_allowlist", "secrets"}
+    if (not isinstance(state, dict) or not required_keys.issubset(state)
+            or not set(state).issubset(allowed_keys)
             or state["project"] != name or state["uuid"] != identity
             or not isinstance(state["jwt_secret"], str) or not state["jwt_secret"]
             or not isinstance(state["env"], dict) or set(state["env"]) != ENVIRONMENT
@@ -144,6 +198,13 @@ def read_context(root: Path, name: str, identity: str) -> dict | None:
         raise RuntimeError("Invalid runtime project context")
     if "network_allowlist" in state and network_hosts(state["network_allowlist"]) != state["network_allowlist"]:
         raise RuntimeError("Invalid runtime network policy")
+    if "secrets" in state:
+        try:
+            if (not isinstance(state["secrets"], dict) or not state["secrets"]
+                    or validate_secrets(state["secrets"]) != state["secrets"]):
+                raise RuntimeError("Invalid runtime secrets")
+        except ValueError as error:
+            raise RuntimeError("Invalid runtime secrets") from error
     return state
 
 
@@ -159,8 +220,9 @@ def verify_generation(root: Path, context: dict, files: dict[str, bytes]) -> Non
 
 
 def prepare_context(root: Path, name: str, identity: str, secret: str, environment: dict[str, str],
-                    files: dict[str, bytes], network_allowlist: list[str] | None = None) -> dict:
-    state = context_value(name, identity, secret, environment, files, network_allowlist)
+                    files: dict[str, bytes], network_allowlist: list[str] | None = None,
+                    secrets: dict[str, str] | None = None) -> dict:
+    state = context_value(name, identity, secret, environment, files, network_allowlist, secrets=secrets)
     revision = state["revision"]
     code = private_directory(runtime_directory(root) / "code" / project_uuid(identity))
     target = code / revision
@@ -208,14 +270,15 @@ def activate_context(root: Path, state: dict) -> None:
 
 
 def publish(root: Path, name: str, identity: str, secret: str, environment: dict[str, str],
-            *, files: dict[str, bytes] | None = None, network_allowlist: list[str] | None = None) -> None:
+            *, files: dict[str, bytes] | None = None, network_allowlist: list[str] | None = None,
+            secrets: dict[str, str] | None = None) -> None:
     if files is None:
         from app.edge_function_store import published_files
         files = published_files(root, name, identity)
     if not files:
         withdraw(root, name)
         return
-    state = prepare_context(root, name, identity, secret, environment, files, network_allowlist)
+    state = prepare_context(root, name, identity, secret, environment, files, network_allowlist, secrets=secrets)
     activate_context(root, state)
 
 

@@ -8,6 +8,16 @@ const envFields = ['SUPABASE_URL', 'SUPABASE_PUBLIC_URL', 'SUPABASE_ANON_KEY',
   'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_DB_URL']
 const running = new Map<string, number>()
 let totalRunning = 0
+const secretNamePattern = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/
+const reservedSecretNames = new Set([
+  'PATH', 'HOME', 'USER', 'SHELL', 'PWD', 'LANG', 'LC_ALL', 'TZ', 'HOST', 'PORT', 'HOSTNAME', 'VERIFY_JWT',
+])
+const reservedSecretPrefixes = [
+  'SUPABASE_', 'PROJECT_', 'TECHNICAL_', 'JWT_', 'POSTGRES_', 'PG_', 'DENO_',
+  'EDGE_RUNTIME_', 'TMP', 'XDG_', 'NODE_', 'LD_', 'HOST_AGENT_', 'KEY_AUTHORIZER_',
+  'FERNET_', 'ENCRYPTION_', 'ALLOCATOR_',
+]
+const textEncoder = new TextEncoder()
 
 type Projection = { project_ref: string; technical_name: string; project_uuid: string;
   anon_key: string; service_role_key: string; jwt_secret: string; network_allowlist?: string[] }
@@ -28,7 +38,30 @@ async function canonicalProjection(name: string, ref: string): Promise<Projectio
   return value
 }
 
-type Tenant = { project: string; uuid: string; jwt_secret: string; revision: string; env: Record<string, string>; network_allowlist?: string[] }
+type Tenant = { project: string; uuid: string; jwt_secret: string; revision: string; env: Record<string, string>; network_allowlist?: string[]; secrets?: Record<string, string> }
+
+function validateSecrets(raw: unknown): Record<string, string> {
+  if (raw === undefined) return {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Invalid context')
+  const entries = Object.entries(raw as Record<string, unknown>)
+  if (entries.length === 0 || entries.length > 64) throw new Error('Invalid context')
+  let totalBytes = 0
+  const result: Record<string, string> = {}
+  for (const [key, value] of entries) {
+    const upper = key.toUpperCase()
+    if (!secretNamePattern.test(key) || reservedSecretNames.has(upper) ||
+        reservedSecretPrefixes.some((prefix) => upper.startsWith(prefix))) {
+      throw new Error('Invalid context')
+    }
+    if (typeof value !== 'string' || !value || value.includes('\0')) throw new Error('Invalid context')
+    const byteLen = textEncoder.encode(value).length
+    if (byteLen > 8192) throw new Error('Invalid context')
+    totalBytes += textEncoder.encode(key).length + byteLen
+    if (totalBytes > 65536) throw new Error('Invalid context')
+    result[key] = value
+  }
+  return result
+}
 
 function response(code: string, status: number): Response {
   return Response.json({ code, ...(code === 'service_disabled' ? { service: 'edge_functions' } : {}) }, { status })
@@ -42,15 +75,17 @@ async function tenantContext(name: string, uuid: string): Promise<Tenant | null>
     if (error instanceof Deno.errors.NotFound) return null
     throw error
   }
-  if (!info.isFile || info.isSymlink || info.size > 65536) throw new Error('Invalid context')
+  if (!info.isFile || info.isSymlink || info.size > 262144) throw new Error('Invalid context')
   const data = JSON.parse(await Deno.readTextFile(path))
-  if (!data || ![fields.length, fields.length + 1].includes(Object.keys(data).length) ||
-    Object.keys(data).some((key) => ![...fields, 'network_allowlist'].includes(key)) || fields.some((key) => !(key in data)) ||
+  const allowedKeys = new Set([...fields, 'network_allowlist', 'secrets'])
+  if (!data || typeof data !== 'object' || Array.isArray(data) ||
+    Object.keys(data).some((key) => !allowedKeys.has(key)) || fields.some((key) => !(key in data)) ||
     data.project !== name || data.uuid !== uuid || typeof data.jwt_secret !== 'string' || !data.jwt_secret ||
     typeof data.revision !== 'string' || !/^[0-9a-f]{64}$/.test(data.revision) ||
     !data.env || Object.keys(data.env).length !== envFields.length ||
     envFields.some((key) => typeof data.env[key] !== 'string' || !data.env[key])) throw new Error('Invalid context')
   externalNetworkHosts(data.network_allowlist ?? [])
+  validateSecrets(data.secrets)
   return data
 }
 
@@ -136,8 +171,9 @@ Deno.serve(async (request: Request) => {
       release()
       return response('service_disabled', 404)
     }
-    const workerEnv = { ...tenant.env, PROJECT_REF: ref, TECHNICAL_PROJECT_NAME: project,
+    const baseEnv = { ...tenant.env, PROJECT_REF: ref, TECHNICAL_PROJECT_NAME: project,
       SUPABASE_PUBLIC_URL: new URL(tenant.env.SUPABASE_PUBLIC_URL).origin + '/' + ref }
+    const workerEnv = { ...tenant.env, ...(tenant.secrets ?? {}), ...baseEnv }
     const worker = await EdgeRuntime.userWorkers.create({
       servicePath, memoryLimitMb: 150, workerTimeoutMs: 60000,
       noModuleCache: false, forceCreate: true, importMapPath, envVars: Object.entries(workerEnv),

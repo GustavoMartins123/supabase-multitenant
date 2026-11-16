@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 import copy
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -42,6 +43,17 @@ class PublishBody(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     revision: StrictStr = Field(pattern=r'^[0-9a-f]{64}$')
     expected_published_revision: StrictStr | None = Field(..., max_length=64)
+
+
+class SecretEntry(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    name: StrictStr = Field(min_length=1, max_length=128)
+    value: StrictStr = Field(min_length=1, max_length=edge_functions.MAX_SECRET_VALUE_BYTES)
+
+
+class SecretsUpdateBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    secrets: list[SecretEntry] = Field(min_length=1, max_length=edge_functions.MAX_SECRETS)
 
 
 async def configuration(conn, project_id):
@@ -160,7 +172,53 @@ def canonical_environment(project):
     return env['JWT_SECRET_PROJETO'], url
 
 
-async def prepare(conn, project, state, config):
+async def load_project_secrets(conn, project) -> dict[str, str]:
+    rows = await conn.fetch(
+        'SELECT name, secret_ciphertext FROM project_function_secrets WHERE project_id=$1 ORDER BY name',
+        project['id'],
+    )
+    if not isinstance(rows, (list, tuple)) or not rows:
+        return {}
+    secrets: dict[str, str] = {}
+    for row in rows:
+        name = edge_functions.validate_secret_name(row['name'])
+        value = await decrypt_project_material(
+            conn,
+            project_id=project['id'],
+            purpose=f'functions-env-secret:{name}',
+            ciphertext=row['secret_ciphertext'],
+        )
+        secrets[name] = edge_functions.validate_secret_value(value)
+    return edge_functions.validate_secrets(secrets)
+
+
+async def list_secret_metadata(conn, project_id) -> list[dict]:
+    rows = await conn.fetch(
+        'SELECT name, created_at, updated_at FROM project_function_secrets WHERE project_id=$1 ORDER BY name',
+        project_id,
+    )
+    if not isinstance(rows, (list, tuple)):
+        return []
+    return [
+        {
+            'name': row['name'],
+            'created_at': row['created_at'].isoformat(),
+            'updated_at': row['updated_at'].isoformat(),
+            'has_value': True,
+        }
+        for row in rows
+    ]
+
+
+def secret_limits() -> dict[str, int]:
+    return {
+        'max_secrets': edge_functions.MAX_SECRETS,
+        'max_value_bytes': edge_functions.MAX_SECRET_VALUE_BYTES,
+        'max_total_bytes': edge_functions.MAX_SECRETS_TOTAL_BYTES,
+    }
+
+
+async def prepare(conn, project, state, config, *, secrets_override: dict[str, str] | None = None):
     secret, public_url = canonical_environment(project)
     keys = await internal_keys(conn, project)
     env = {
@@ -170,8 +228,12 @@ async def prepare(conn, project, state, config):
         'SUPABASE_SERVICE_ROLE_KEY': keys['secret'],
         'SUPABASE_DB_URL': get_project_meta_connection_string(project['name'], project['tenant_uuid']),
     }
+    secrets = secrets_override if secrets_override is not None else await load_project_secrets(conn, project)
     files = store.published_files(ROOT, project['name'], identity(project), state=state)
-    return edge_functions.prepare_context(ROOT, project['name'], identity(project), secret, env, files, config['network_allowlist'])
+    kwargs = {}
+    if secrets:
+        kwargs['secrets'] = secrets
+    return edge_functions.prepare_context(ROOT, project['name'], identity(project), secret, env, files, config['network_allowlist'], **kwargs)
 
 
 async def configure_project(ref, updates, request, pool):
@@ -222,6 +284,116 @@ async def function_list(ref: str, request: Request, response: Response, pool=Dep
         values = [store.item(ROOT, state, slug, {}) for slug in sorted(state['functions'])]
         return {'enabled': config['enabled'], 'functions': [
             {key: item[key] for key in ('name', 'revision', 'published_revision')} for item in values]}
+
+
+@router.get('/secrets')
+async def secrets_list(ref: str, request: Request, response: Response, pool=Depends(get_pool)):
+    async with management_context(ref, request, response, pool) as (conn, project, _, _):
+        return {'secrets': await list_secret_metadata(conn, project['id']), 'limits': secret_limits()}
+
+
+@router.put('/secrets')
+async def secrets_upsert(ref: str, body: SecretsUpdateBody, request: Request, response: Response, pool=Depends(get_pool)):
+    updates: dict[str, str] = {}
+    try:
+        for item in body.secrets:
+            name = edge_functions.validate_secret_name(item.name)
+            if name in updates:
+                raise ValueError(f"Duplicate secret '{name}' in request")
+            updates[name] = edge_functions.validate_secret_value(item.value)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+    async with management_context(ref, request, response, pool) as (conn, project, actor, config):
+        current_secrets = await load_project_secrets(conn, project)
+        proposed_secrets = {**current_secrets, **updates}
+        try:
+            validated = edge_functions.validate_secrets(proposed_secrets)
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        audit_target = next(iter(updates)) if len(updates) == 1 else ','.join(sorted(updates))[:120]
+        audit_rev = hashlib.sha256(json.dumps({'action': 'set_secret', 'names': sorted(updates)}).encode()).hexdigest()
+        audit_id = await audit(conn, project, actor, 'set_secret', audit_target, audit_rev)
+        state = load(project)
+        has_published = bool(store.published_files(ROOT, project['name'], identity(project), state=state))
+        runtime_synced = False
+        previous = edge_functions.read_context(ROOT, project['name'], identity(project)) if config['enabled'] and has_published else None
+        try:
+            async with conn.transaction():
+                for name, value in sorted(updates.items()):
+                    ciphertext = await encrypt_project_material(
+                        conn,
+                        project_id=project['id'],
+                        purpose=f'functions-env-secret:{name}',
+                        plaintext=value,
+                    )
+                    await conn.execute(
+                        '''INSERT INTO project_function_secrets(project_id,name,secret_ciphertext,created_by,updated_by)
+                           VALUES($1,$2,$3,$4,$4)
+                           ON CONFLICT (project_id, name) DO UPDATE
+                           SET secret_ciphertext=EXCLUDED.secret_ciphertext,updated_by=EXCLUDED.updated_by,updated_at=now()''',
+                        project['id'], name, ciphertext, actor,
+                    )
+                if config['enabled'] and has_published:
+                    context = await prepare(conn, project, state, config, secrets_override=validated)
+                    edge_functions.activate_context(ROOT, context)
+                    runtime_synced = True
+        except Exception:
+            if config['enabled'] and has_published:
+                if previous is None:
+                    edge_functions.withdraw(ROOT, project['name'])
+                else:
+                    edge_functions.activate_context(ROOT, previous)
+            await outcome(conn, audit_id, 'failed')
+            raise
+        await outcome(conn, audit_id, 'completed')
+        return {'secrets': await list_secret_metadata(conn, project['id']), 'limits': secret_limits(), 'runtime_synced': runtime_synced}
+
+
+@router.delete('/secrets/{secret_name}')
+async def secret_delete(ref: str, secret_name: str, request: Request, response: Response, pool=Depends(get_pool)):
+    try:
+        secret_name = edge_functions.validate_secret_name(secret_name)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+    async with management_context(ref, request, response, pool) as (conn, project, actor, config):
+        current_secrets = await load_project_secrets(conn, project)
+        if secret_name not in current_secrets:
+            row = await conn.fetchval(
+                'SELECT 1 FROM project_function_secrets WHERE project_id=$1 AND name=$2',
+                project['id'], secret_name,
+            )
+            if not row:
+                raise HTTPException(404, 'Secret not found')
+        proposed_secrets = {k: v for k, v in current_secrets.items() if k != secret_name}
+        audit_rev = hashlib.sha256(json.dumps({'action': 'delete_secret', 'name': secret_name}).encode()).hexdigest()
+        audit_id = await audit(conn, project, actor, 'delete_secret', secret_name, audit_rev)
+        state = load(project)
+        has_published = bool(store.published_files(ROOT, project['name'], identity(project), state=state))
+        runtime_synced = False
+        previous = edge_functions.read_context(ROOT, project['name'], identity(project)) if config['enabled'] and has_published else None
+        try:
+            async with conn.transaction():
+                removed = await conn.fetchval(
+                    'DELETE FROM project_function_secrets WHERE project_id=$1 AND name=$2 RETURNING name',
+                    project['id'], secret_name,
+                )
+                if not removed:
+                    raise HTTPException(404, 'Secret not found')
+                if config['enabled'] and has_published:
+                    context = await prepare(conn, project, state, config, secrets_override=proposed_secrets)
+                    edge_functions.activate_context(ROOT, context)
+                    runtime_synced = True
+        except Exception:
+            if config['enabled'] and has_published:
+                if previous is None:
+                    edge_functions.withdraw(ROOT, project['name'])
+                else:
+                    edge_functions.activate_context(ROOT, previous)
+            await outcome(conn, audit_id, 'failed')
+            raise
+        await outcome(conn, audit_id, 'completed')
+        return {'deleted': True, 'name': secret_name, 'secrets': await list_secret_metadata(conn, project['id']),
+                'limits': secret_limits(), 'runtime_synced': runtime_synced}
 
 
 @router.get('/{slug}')

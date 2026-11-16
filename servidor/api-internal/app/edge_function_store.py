@@ -21,10 +21,11 @@ SEGMENT = re.compile(r"[A-Za-z0-9_@][A-Za-z0-9_@.\-]{0,99}\Z")
 MAX_FILES = 64
 MAX_BYTES = 1_000_000
 MAX_FUNCTIONS = 128
+RESERVED_SLUGS = frozenset({"main", "secrets", "logs", "gc", "config", "health", "versions"})
 
 
 def function_name(value: str) -> str:
-    if not SLUG.fullmatch(value) or value == "main":
+    if not SLUG.fullmatch(value) or value in RESERVED_SLUGS:
         raise ValueError("Invalid function name")
     return value
 

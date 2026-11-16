@@ -5604,6 +5604,48 @@
         "title": "RotateProjectKeyResponse",
         "type": "object"
       },
+      "SecretEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "value": {
+            "maxLength": 8192,
+            "minLength": 1,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ],
+        "title": "SecretEntry",
+        "type": "object"
+      },
+      "SecretsUpdateBody": {
+        "additionalProperties": false,
+        "properties": {
+          "secrets": {
+            "items": {
+              "$ref": "#/components/schemas/SecretEntry"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Secrets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "secrets"
+        ],
+        "title": "SecretsUpdateBody",
+        "type": "object"
+      },
       "SecurityBody": {
         "additionalProperties": false,
         "properties": {
@@ -12374,6 +12416,143 @@
           }
         },
         "summary": "Function List",
+        "tags": [
+          "studio-edge-functions"
+        ]
+      }
+    },
+    "/api/projects/{ref}/edge-functions/secrets": {
+      "get": {
+        "operationId": "secrets_list_api_projects__ref__edge_functions_secrets_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Secrets List",
+        "tags": [
+          "studio-edge-functions"
+        ]
+      },
+      "put": {
+        "operationId": "secrets_upsert_api_projects__ref__edge_functions_secrets_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecretsUpdateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Secrets Upsert",
+        "tags": [
+          "studio-edge-functions"
+        ]
+      }
+    },
+    "/api/projects/{ref}/edge-functions/secrets/{secret_name}": {
+      "delete": {
+        "operationId": "secret_delete_api_projects__ref__edge_functions_secrets__secret_name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "secret_name",
+            "required": true,
+            "schema": {
+              "title": "Secret Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Secret Delete",
         "tags": [
           "studio-edge-functions"
         ]

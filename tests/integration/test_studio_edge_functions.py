@@ -403,3 +403,47 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
         listing=await self.request('GET')
         self.assertEqual(listing.json(),{'enabled':False,'functions':[]})
         self.assertEqual((await self.publish(draft)).status_code,409)
+
+    async def test_project_secrets_are_encrypted_scoped_injected_and_never_returned(self):
+        from app import edge_functions, edge_function_store as store
+        for bad_slug in ('secrets', 'logs', 'gc', 'config', 'health', 'versions'):
+            with self.assertRaises(ValueError):
+                store.function_name(bad_slug)
+        for reserved in ('SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'JWT_SECRET', 'POSTGRES_PASSWORD', 'PATH', 'VERIFY_JWT', 'PROJECT_REF'):
+            resp = await self.request('PUT', '/secrets', {'secrets': [{'name': reserved, 'value': 'blocked'}]})
+            self.assertEqual(resp.status_code, 400, reserved)
+        # Member and wrong-project admin cannot read or write secrets.
+        self.assertEqual((await self.request('GET', '/secrets', user=2)).status_code, 403)
+        self.assertEqual((await self.request('PUT', '/secrets', {'secrets': [{'name': 'STRIPE_KEY', 'value': 'sk_1'}]}, user=2)).status_code, 403)
+        self.assertEqual((await self.request('GET', '/secrets', user=1, project=0)).status_code, 403)
+        # Managing secrets before enabling or publishing persists encrypted ciphertext only.
+        res = await self.request('PUT', '/secrets', {'secrets': [{'name': 'STRIPE_KEY', 'value': 'sk_alpha_1'}]})
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertFalse(res.json()['runtime_synced'])
+        self.assertNotIn('sk_alpha_1', res.text)
+        listed = await self.request('GET', '/secrets')
+        self.assertEqual([item['name'] for item in listed.json()['secrets']], ['STRIPE_KEY'])
+        self.assertNotIn('sk_alpha_1', listed.text)
+        raw_ct = await self.pool.fetchval('SELECT secret_ciphertext FROM project_function_secrets WHERE project_id=$1 AND name=$2', self.projects[0], 'STRIPE_KEY')
+        self.assertTrue(raw_ct and 'sk_alpha_1' not in raw_ct)
+        # Enabling and publishing includes project secrets in runtime context, isolated from beta.
+        draft = await self.save()
+        await self.configure(True)
+        await self.publish(draft)
+        ctx = edge_functions.read_context(self.root, self.names[0], str(self.projects[0]))
+        self.assertEqual(ctx['secrets'], {'STRIPE_KEY': 'sk_alpha_1'})
+        self.assertEqual((await self.request('GET', '/secrets', user=1, project=1)).json()['secrets'], [])
+        # Rotating while active immediately updates runtime revision and context.
+        rot = await self.request('PUT', '/secrets', {'secrets': [{'name': 'STRIPE_KEY', 'value': 'sk_alpha_2'}]})
+        self.assertEqual(rot.status_code, 200)
+        self.assertTrue(rot.json()['runtime_synced'])
+        ctx2 = edge_functions.read_context(self.root, self.names[0], str(self.projects[0]))
+        self.assertEqual(ctx2['secrets'], {'STRIPE_KEY': 'sk_alpha_2'})
+        self.assertNotEqual(ctx2['revision'], ctx['revision'])
+        # Deleting removes secret from DB and runtime context while keeping function alive.
+        deleted = await self.request('DELETE', '/secrets/STRIPE_KEY')
+        self.assertEqual(deleted.status_code, 200)
+        self.assertTrue(deleted.json()['runtime_synced'])
+        ctx3 = edge_functions.read_context(self.root, self.names[0], str(self.projects[0]))
+        self.assertNotIn('secrets', ctx3)
+        self.assertEqual(await self.pool.fetchval("SELECT count(*) FROM studio_edge_audit WHERE action IN ('set_secret','delete_secret') AND outcome='completed'"), 3)

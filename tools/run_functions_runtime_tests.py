@@ -189,6 +189,14 @@ Deno.serve(() => Response.json({ marker }))
 import { serve } from 'https://unapproved.example.com/mod.ts'
 serve(() => Response.json({ ok: true }))
 ''',
+    'check_env/index.ts': '''
+Deno.serve(() => Response.json({
+  webhookSecret: Deno.env.get('WEBHOOK_SECRET') ?? null,
+  customToken: Deno.env.get('CUSTOM_API_TOKEN') ?? null,
+  projectRef: Deno.env.get('PROJECT_REF') ?? null,
+  supabaseUrl: Deno.env.get('SUPABASE_URL') ?? null,
+}))
+''',
 }
 
 
@@ -299,9 +307,9 @@ def main() -> None:
                 env_srv = toks['service_role']
                 code_root = runtime / 'code' / project / ('1' * 64)
             code_root.mkdir(parents=True, exist_ok=True)
-            for fn in ('stream', 'slow', 'wait_until', 'internal_calls', 'imported', 'remote_import'):
+            for fn in ('stream', 'slow', 'wait_until', 'internal_calls', 'imported', 'remote_import', 'check_env'):
                 shutil.copytree(code / fn, code_root / fn)
-            (runtime / 'tenants' / f'{project}.json').write_text(json.dumps({
+            tenant_doc = {
                 'project': project, 'uuid': identity, 'jwt_secret': f'{project}-synthetic-secret',
                 'revision': '1' * 64, 'network_allowlist': [],
                 'env': {
@@ -311,7 +319,10 @@ def main() -> None:
                     'SUPABASE_SERVICE_ROLE_KEY': env_srv,
                     'SUPABASE_DB_URL': f'postgres://synthetic:synthetic@database:5432/_supabase_{project}',
                 },
-            }))
+            }
+            if project == 'test_alpha':
+                tenant_doc['secrets'] = {'WEBHOOK_SECRET': 'sec_alpha_999', 'CUSTOM_API_TOKEN': 'tok_alpha_123'}
+            (runtime / 'tenants' / f'{project}.json').write_text(json.dumps(tenant_doc))
 
         try:
             docker('network', 'create', '--label', 'functions.runtime-fixture=true', network)
@@ -524,6 +535,28 @@ def main() -> None:
                 recovered = client.get(f'{nginx_origin}/functions/v1/imported', headers=gw_headers('/functions/v1/imported'))
                 assert recovered.status_code == 200, recovered.text
                 record('concurrency_limits_and_slot_recovery')
+
+                # 8. Project-scoped secrets injection & cross-tenant isolation
+                env_alpha = client.get(f'{nginx_origin}/functions/v1/check_env', headers=gw_headers('/functions/v1/check_env'))
+                assert env_alpha.status_code == 200, env_alpha.text
+                ea = env_alpha.json()
+                assert ea['webhookSecret'] == 'sec_alpha_999' and ea['customToken'] == 'tok_alpha_123', ea
+                assert ea['supabaseUrl'] == 'http://supabase-nginx-test_alpha:8080', ea
+                env_beta = client.get(f'{rt_origin}/check_env', headers=beta_hdrs)
+                assert env_beta.status_code == 200, env_beta.text
+                eb = env_beta.json()
+                assert eb['webhookSecret'] is None and eb['customToken'] is None, eb
+                beta_ctx = runtime / 'tenants/test_beta.json'
+                saved_beta = beta_ctx.read_text()
+                try:
+                    tampered = json.loads(saved_beta)
+                    tampered['secrets'] = {'SUPABASE_URL': 'http://evil'}
+                    beta_ctx.write_text(json.dumps(tampered))
+                    bad_env = client.get(f'{rt_origin}/check_env', headers=beta_hdrs)
+                    assert bad_env.status_code == 503, bad_env.text
+                finally:
+                    beta_ctx.write_text(saved_beta)
+                record('project_secrets_injection_and_isolation')
 
             if args.result:
                 args.result.write_text(json.dumps({'contract': args.contract, 'image': args.edge_image, 'checks': checks}, indent=2))
