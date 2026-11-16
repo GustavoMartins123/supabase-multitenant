@@ -61,6 +61,17 @@ class Handler(BaseHTTPRequestHandler):
                 expected.get('fn_anon'), expected.get('fn_service_role'),
             }:
                 valid = False
+            uri = self.headers.get('X-Gateway-Request-URI', '') or self.headers.get('X-Admission-URI', '')
+            is_public_webhook = target == 'functions' and (
+                uri == '/functions/v1/webhook' or uri.startswith('/functions/v1/webhook/') or '/functions/v1/webhook' in uri
+            )
+            if not api_key and is_public_webhook and not self.path.startswith('/v1/functions-authorize'):
+                self.send_response(204)
+                self.send_header('X-Opaque-Key-Present', '0')
+                self.send_header('X-Opaque-Preserve-Authorization', '1')
+                self.send_header('X-Opaque-Keyset-Version', '1')
+                self.end_headers()
+                return
             if not valid:
                 self.send_response(403)
                 self.end_headers()
@@ -197,6 +208,18 @@ Deno.serve(() => Response.json({
   supabaseUrl: Deno.env.get('SUPABASE_URL') ?? null,
 }))
 ''',
+    'webhook/index.ts': '''
+Deno.serve(async (req) => {
+  const payload = req.method === 'POST' ? await req.text() : ''
+  return Response.json({
+    ok: true,
+    method: req.method,
+    sig: req.headers.get('stripe-signature'),
+    auth: req.headers.get('authorization'),
+    payload,
+  })
+})
+''',
 }
 
 
@@ -307,7 +330,7 @@ def main() -> None:
                 env_srv = toks['service_role']
                 code_root = runtime / 'code' / project / ('1' * 64)
             code_root.mkdir(parents=True, exist_ok=True)
-            for fn in ('stream', 'slow', 'wait_until', 'internal_calls', 'imported', 'remote_import', 'check_env'):
+            for fn in ('stream', 'slow', 'wait_until', 'internal_calls', 'imported', 'remote_import', 'check_env', 'webhook'):
                 shutil.copytree(code / fn, code_root / fn)
             tenant_doc = {
                 'project': project, 'uuid': identity, 'jwt_secret': f'{project}-synthetic-secret',
@@ -322,6 +345,7 @@ def main() -> None:
             }
             if project == 'test_alpha':
                 tenant_doc['secrets'] = {'WEBHOOK_SECRET': 'sec_alpha_999', 'CUSTOM_API_TOKEN': 'tok_alpha_123'}
+                tenant_doc['public_functions'] = ['webhook']
             (runtime / 'tenants' / f'{project}.json').write_text(json.dumps(tenant_doc))
 
         try:
@@ -557,6 +581,35 @@ def main() -> None:
                 finally:
                     beta_ctx.write_text(saved_beta)
                 record('project_secrets_injection_and_isolation')
+
+                # 9. Per-function verify_jwt=false webhook admission & protected isolation
+                wh_hdrs = {'Stripe-Signature': 't=1,v1=sig123'}
+                if args.contract == 'projected':
+                    wh_hdrs.update({
+                        'X-Gateway-Admission': 'a' * 43,
+                        'X-Admission-URI': f'/{refs["test_alpha"]}/functions/v1/webhook',
+                        'X-Admission-Method': 'POST',
+                    })
+                wh = client.post(f'{nginx_origin}/functions/v1/webhook', content='{"event":"paid"}', headers=wh_hdrs)
+                assert wh.status_code == 200, wh.text
+                assert wh.json()['sig'] == 't=1,v1=sig123' and wh.json()['payload'] == '{"event":"paid"}', wh.json()
+                wh_custom = client.post(
+                    f'{nginx_origin}/functions/v1/webhook',
+                    content='ok',
+                    headers={**gw_headers('/functions/v1/webhook', method='POST'), 'Authorization': 'Bearer external-provider-token'},
+                )
+                assert wh_custom.status_code == 200 and wh_custom.json()['auth'] == 'Bearer external-provider-token', wh_custom.text
+                forged = client.post(f'{nginx_origin}/functions/v1/webhook', headers={**wh_hdrs, 'apikey': 'forged-bad-key'})
+                assert forged.status_code == 403, forged.text
+                prot = client.get(f'{nginx_origin}/functions/v1/imported', headers={
+                    k: v for k, v in gw_headers('/functions/v1/imported').items() if k not in {'apikey', 'Authorization'}
+                })
+                assert prot.status_code in {401, 403}, prot.text
+                beta_anon = client.post(f'{rt_origin}/webhook', headers={
+                    'X-Project-Name': 'test_beta', 'X-Project-Ref': refs['test_beta'], 'X-Project-UUID': identities['test_beta'],
+                })
+                assert beta_anon.status_code in {401, 403}, beta_anon.text
+                record('per_function_verify_jwt_webhook_and_isolation')
 
             if args.result:
                 args.result.write_text(json.dumps({'contract': args.contract, 'image': args.edge_image, 'checks': checks}, indent=2))

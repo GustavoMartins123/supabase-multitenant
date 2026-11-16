@@ -10,7 +10,7 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
 
 from app import edge_function_store as store, edge_functions
 from app.database import get_pool
@@ -54,6 +54,11 @@ class SecretEntry(BaseModel):
 class SecretsUpdateBody(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     secrets: list[SecretEntry] = Field(min_length=1, max_length=edge_functions.MAX_SECRETS)
+
+
+class FunctionConfigBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    verify_jwt: StrictBool
 
 
 async def configuration(conn, project_id):
@@ -109,11 +114,38 @@ def load(project):
     return store.load(ROOT, project['name'], identity(project))
 
 
-def detail(project, state, slug, enabled):
+def detail(project, state, slug, enabled, *, verify_jwt: bool = True):
     value = store.item(ROOT, state, slug, {})
     if value is None:
         raise HTTPException(404, 'Function not found')
-    return {**value, 'enabled': enabled}
+    return {**value, 'enabled': enabled, 'verify_jwt': verify_jwt}
+
+
+async def load_function_configs(conn, project_id) -> dict[str, bool]:
+    rows = await conn.fetch(
+        'SELECT function_name, verify_jwt FROM project_edge_function_configs WHERE project_id=$1',
+        project_id,
+    )
+    if not isinstance(rows, (list, tuple)):
+        return {}
+    return {row['function_name']: bool(row['verify_jwt']) for row in rows}
+
+
+async def sync_function_config_publication(conn, project_id, slug: str, action: str, actor) -> None:
+    if action == 'delete':
+        await conn.execute(
+            'DELETE FROM project_edge_function_configs WHERE project_id=$1 AND function_name=$2',
+            project_id, slug,
+        )
+    elif action in {'publish', 'unpublish'}:
+        published = action == 'publish'
+        await conn.execute(
+            '''INSERT INTO project_edge_function_configs(project_id,function_name,verify_jwt,published,updated_by)
+               VALUES($1,$2,true,$3,$4)
+               ON CONFLICT (project_id, function_name) DO UPDATE
+               SET published=EXCLUDED.published,updated_by=EXCLUDED.updated_by,updated_at=now()''',
+            project_id, slug, published, actor,
+        )
 
 
 async def audit(conn, project, actor, action, slug=None, revision=None):
@@ -218,7 +250,8 @@ def secret_limits() -> dict[str, int]:
     }
 
 
-async def prepare(conn, project, state, config, *, secrets_override: dict[str, str] | None = None):
+async def prepare(conn, project, state, config, *, secrets_override: dict[str, str] | None = None,
+                  configs_override: dict[str, bool] | None = None):
     secret, public_url = canonical_environment(project)
     keys = await internal_keys(conn, project)
     env = {
@@ -229,10 +262,15 @@ async def prepare(conn, project, state, config, *, secrets_override: dict[str, s
         'SUPABASE_DB_URL': get_project_meta_connection_string(project['name'], project['tenant_uuid']),
     }
     secrets = secrets_override if secrets_override is not None else await load_project_secrets(conn, project)
+    configs = configs_override if configs_override is not None else await load_function_configs(conn, project['id'])
     files = store.published_files(ROOT, project['name'], identity(project), state=state)
+    published_slugs = {path.split('/', 1)[0] for path in files}
+    public_functions = sorted(slug for slug, verify in configs.items() if not verify and slug in published_slugs)
     kwargs = {}
     if secrets:
         kwargs['secrets'] = secrets
+    if public_functions:
+        kwargs['public_functions'] = public_functions
     return edge_functions.prepare_context(ROOT, project['name'], identity(project), secret, env, files, config['network_allowlist'], **kwargs)
 
 
@@ -279,11 +317,13 @@ async def configure_project(ref, updates, request, pool):
 
 @router.get('')
 async def function_list(ref: str, request: Request, response: Response, pool=Depends(get_pool)):
-    async with management_context(ref, request, response, pool) as (_, project, _, config):
+    async with management_context(ref, request, response, pool) as (conn, project, _, config):
         state = load(project)
+        configs = await load_function_configs(conn, project['id'])
         values = [store.item(ROOT, state, slug, {}) for slug in sorted(state['functions'])]
         return {'enabled': config['enabled'], 'functions': [
-            {key: item[key] for key in ('name', 'revision', 'published_revision')} for item in values]}
+            {**{key: item[key] for key in ('name', 'revision', 'published_revision')},
+             'verify_jwt': configs.get(item['name'], True)} for item in values]}
 
 
 @router.get('/secrets')
@@ -399,8 +439,9 @@ async def secret_delete(ref: str, secret_name: str, request: Request, response: 
 @router.get('/{slug}')
 async def function_get(ref: str, slug: str, request: Request, response: Response, pool=Depends(get_pool)):
     validate_slug(slug)
-    async with management_context(ref, request, response, pool) as (_, project, _, config):
-        return detail(project, load(project), slug, config['enabled'])
+    async with management_context(ref, request, response, pool) as (conn, project, _, config):
+        configs = await load_function_configs(conn, project['id'])
+        return detail(project, load(project), slug, config['enabled'], verify_jwt=configs.get(slug, True))
 
 
 def validate_slug(slug):
@@ -433,7 +474,8 @@ async def function_save(ref: str, slug: str, body: DraftBody, request: Request, 
             await outcome(conn, audit_id, 'failed')
             raise
         await outcome(conn, audit_id, 'completed')
-        return detail(project, state, slug, config['enabled'])
+        configs = await load_function_configs(conn, project['id'])
+        return detail(project, state, slug, config['enabled'], verify_jwt=configs.get(slug, True))
 
 
 async def commit_change(conn, project, actor, config, state, proposed, slug, revision, action):
@@ -461,6 +503,7 @@ async def commit_change(conn, project, actor, config, state, proposed, slug, rev
         raise
     if context:
         store.finish_publication(ROOT, name, tenant)
+    await sync_function_config_publication(conn, project['id'], slug, action, actor)
     await outcome(conn, audit_id, 'completed')
 
 
@@ -478,13 +521,16 @@ async def function_publish(ref: str, slug: str, body: PublishBody, request: Requ
         if not config['enabled']:
             raise HTTPException(409, 'Edge Functions are disabled by the project administrator')
         state = load(project)
+        configs = await load_function_configs(conn, project['id'])
         current = current_version(project, state, slug, True, body)
+        verify_jwt = configs.get(slug, True)
         if current['published_revision'] == body.revision:
-            return current
+            await sync_function_config_publication(conn, project['id'], slug, 'publish', actor)
+            return {**current, 'verify_jwt': verify_jwt}
         proposed = copy.deepcopy(state)
         proposed['functions'][slug]['published'] = body.revision
         await commit_change(conn, project, actor, config, state, proposed, slug, body.revision, 'publish')
-        return detail(project, proposed, slug, True)
+        return detail(project, proposed, slug, True, verify_jwt=verify_jwt)
 
 
 @router.post('/{slug}/unpublish')
@@ -492,13 +538,52 @@ async def function_unpublish(ref: str, slug: str, body: PublishBody, request: Re
     validate_slug(slug)
     async with management_context(ref, request, response, pool) as (conn, project, actor, config):
         state = load(project)
+        configs = await load_function_configs(conn, project['id'])
         current = current_version(project, state, slug, config['enabled'], body)
+        verify_jwt = configs.get(slug, True)
         if current['published_revision'] is None:
-            return current
+            await sync_function_config_publication(conn, project['id'], slug, 'unpublish', actor)
+            return {**current, 'verify_jwt': verify_jwt}
         proposed = copy.deepcopy(state)
         proposed['functions'][slug]['published'] = None
         await commit_change(conn, project, actor, config, state, proposed, slug, current['revision'], 'unpublish')
-        return detail(project, proposed, slug, config['enabled'])
+        return detail(project, proposed, slug, config['enabled'], verify_jwt=verify_jwt)
+
+
+@router.put('/{slug}/config')
+async def function_configure(ref: str, slug: str, body: FunctionConfigBody, request: Request, response: Response, pool=Depends(get_pool)):
+    validate_slug(slug)
+    async with management_context(ref, request, response, pool) as (conn, project, actor, config):
+        state = load(project)
+        current = detail(project, state, slug, config['enabled'])
+        is_published = current['published_revision'] is not None
+        configs = await load_function_configs(conn, project['id'])
+        proposed_configs = {**configs, slug: bool(body.verify_jwt)}
+        audit_rev = hashlib.sha256(json.dumps({'action': 'configure_function', 'slug': slug, 'verify_jwt': bool(body.verify_jwt)}).encode()).hexdigest()
+        audit_id = await audit(conn, project, actor, 'configure_function', slug, audit_rev)
+        previous = edge_functions.read_context(ROOT, project['name'], identity(project)) if config['enabled'] and is_published else None
+        try:
+            async with conn.transaction():
+                await conn.execute(
+                    '''INSERT INTO project_edge_function_configs(project_id,function_name,verify_jwt,published,updated_by)
+                       VALUES($1,$2,$3,$4,$5)
+                       ON CONFLICT (project_id, function_name) DO UPDATE
+                       SET verify_jwt=EXCLUDED.verify_jwt,published=EXCLUDED.published,updated_by=EXCLUDED.updated_by,updated_at=now()''',
+                    project['id'], slug, bool(body.verify_jwt), is_published, actor,
+                )
+                if config['enabled'] and is_published:
+                    context = await prepare(conn, project, state, config, configs_override=proposed_configs)
+                    edge_functions.activate_context(ROOT, context)
+        except Exception:
+            if config['enabled'] and is_published:
+                if previous is None:
+                    edge_functions.withdraw(ROOT, project['name'])
+                else:
+                    edge_functions.activate_context(ROOT, previous)
+            await outcome(conn, audit_id, 'failed')
+            raise
+        await outcome(conn, audit_id, 'completed')
+        return detail(project, state, slug, config['enabled'], verify_jwt=bool(body.verify_jwt))
 
 
 @router.delete('/{slug}')

@@ -158,9 +158,27 @@ def sync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
+def validate_public_functions(values: list[str] | tuple[str, ...] | None, *, files: dict[str, bytes] | None = None) -> list[str]:
+    if not values:
+        return []
+    if not isinstance(values, (list, tuple)) or len(values) > 128:
+        raise ValueError("Invalid public functions list")
+    cleaned: list[str] = []
+    for item in values:
+        if not isinstance(item, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", item) or item in {"main", "secrets", "logs", "gc", "config", "health", "versions"}:
+            raise ValueError("Invalid public function name")
+        if files is not None and f"{item}/index.ts" not in files:
+            raise ValueError("Unpublished function cannot bypass JWT verification")
+        cleaned.append(item)
+    if len(set(cleaned)) != len(cleaned) or cleaned != sorted(cleaned):
+        return sorted(set(cleaned))
+    return list(cleaned)
+
+
 def context_value(name: str, identity: str, secret: str, environment: dict[str, str],
                   files: dict[str, bytes], network_allowlist: list[str] | None = None,
-                  secrets: dict[str, str] | None = None) -> dict:
+                  secrets: dict[str, str] | None = None,
+                  public_functions: list[str] | tuple[str, ...] | None = None) -> dict:
     name = project_name(name)
     if (str(UUID(identity)) != identity or set(environment) != ENVIRONMENT
             or not isinstance(secret, str) or not secret
@@ -172,6 +190,9 @@ def context_value(name: str, identity: str, secret: str, environment: dict[str, 
     validated_secrets = validate_secrets(secrets)
     if validated_secrets:
         state["secrets"] = validated_secrets
+    validated_public = validate_public_functions(public_functions, files=files)
+    if validated_public:
+        state["public_functions"] = validated_public
     digest = hashlib.sha256(json.dumps(state, sort_keys=True).encode())
     for relative, data in sorted(files.items()):
         if Path(relative).is_absolute() or any(part in {"", ".", ".."} for part in relative.split("/")):
@@ -187,7 +208,7 @@ def read_context(root: Path, name: str, identity: str) -> dict | None:
     except FileNotFoundError:
         return None
     required_keys = {"project", "uuid", "jwt_secret", "env", "revision"}
-    allowed_keys = required_keys | {"network_allowlist", "secrets"}
+    allowed_keys = required_keys | {"network_allowlist", "secrets", "public_functions"}
     if (not isinstance(state, dict) or not required_keys.issubset(state)
             or not set(state).issubset(allowed_keys)
             or state["project"] != name or state["uuid"] != identity
@@ -205,6 +226,13 @@ def read_context(root: Path, name: str, identity: str) -> dict | None:
                 raise RuntimeError("Invalid runtime secrets")
         except ValueError as error:
             raise RuntimeError("Invalid runtime secrets") from error
+    if "public_functions" in state:
+        try:
+            if (not isinstance(state["public_functions"], list) or not state["public_functions"]
+                    or validate_public_functions(state["public_functions"]) != state["public_functions"]):
+                raise RuntimeError("Invalid runtime public functions")
+        except ValueError as error:
+            raise RuntimeError("Invalid runtime public functions") from error
     return state
 
 
@@ -221,8 +249,9 @@ def verify_generation(root: Path, context: dict, files: dict[str, bytes]) -> Non
 
 def prepare_context(root: Path, name: str, identity: str, secret: str, environment: dict[str, str],
                     files: dict[str, bytes], network_allowlist: list[str] | None = None,
-                    secrets: dict[str, str] | None = None) -> dict:
-    state = context_value(name, identity, secret, environment, files, network_allowlist, secrets=secrets)
+                    secrets: dict[str, str] | None = None,
+                    public_functions: list[str] | tuple[str, ...] | None = None) -> dict:
+    state = context_value(name, identity, secret, environment, files, network_allowlist, secrets=secrets, public_functions=public_functions)
     revision = state["revision"]
     code = private_directory(runtime_directory(root) / "code" / project_uuid(identity))
     target = code / revision
@@ -271,14 +300,15 @@ def activate_context(root: Path, state: dict) -> None:
 
 def publish(root: Path, name: str, identity: str, secret: str, environment: dict[str, str],
             *, files: dict[str, bytes] | None = None, network_allowlist: list[str] | None = None,
-            secrets: dict[str, str] | None = None) -> None:
+            secrets: dict[str, str] | None = None,
+            public_functions: list[str] | tuple[str, ...] | None = None) -> None:
     if files is None:
         from app.edge_function_store import published_files
         files = published_files(root, name, identity)
     if not files:
         withdraw(root, name)
         return
-    state = prepare_context(root, name, identity, secret, environment, files, network_allowlist, secrets=secrets)
+    state = prepare_context(root, name, identity, secret, environment, files, network_allowlist, secrets=secrets, public_functions=public_functions)
     activate_context(root, state)
 
 

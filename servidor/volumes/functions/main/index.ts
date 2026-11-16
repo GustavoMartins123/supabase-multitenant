@@ -38,7 +38,25 @@ async function canonicalProjection(name: string, ref: string): Promise<Projectio
   return value
 }
 
-type Tenant = { project: string; uuid: string; jwt_secret: string; revision: string; env: Record<string, string>; network_allowlist?: string[]; secrets?: Record<string, string> }
+const reservedFunctionNames = new Set(['main', 'secrets', 'logs', 'gc', 'config', 'health', 'versions'])
+const functionNamePattern = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/
+
+type Tenant = { project: string; uuid: string; jwt_secret: string; revision: string; env: Record<string, string>; network_allowlist?: string[]; secrets?: Record<string, string>; public_functions?: string[] }
+
+function validatePublicFunctions(raw: unknown): string[] {
+  if (raw === undefined) return []
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > 128) throw new Error('Invalid context')
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const item of raw) {
+    if (typeof item !== 'string' || !functionNamePattern.test(item) || reservedFunctionNames.has(item) || seen.has(item)) {
+      throw new Error('Invalid context')
+    }
+    seen.add(item)
+    result.push(item)
+  }
+  return result
+}
 
 function validateSecrets(raw: unknown): Record<string, string> {
   if (raw === undefined) return {}
@@ -77,7 +95,7 @@ async function tenantContext(name: string, uuid: string): Promise<Tenant | null>
   }
   if (!info.isFile || info.isSymlink || info.size > 262144) throw new Error('Invalid context')
   const data = JSON.parse(await Deno.readTextFile(path))
-  const allowedKeys = new Set([...fields, 'network_allowlist', 'secrets'])
+  const allowedKeys = new Set([...fields, 'network_allowlist', 'secrets', 'public_functions'])
   if (!data || typeof data !== 'object' || Array.isArray(data) ||
     Object.keys(data).some((key) => !allowedKeys.has(key)) || fields.some((key) => !(key in data)) ||
     data.project !== name || data.uuid !== uuid || typeof data.jwt_secret !== 'string' || !data.jwt_secret ||
@@ -86,6 +104,7 @@ async function tenantContext(name: string, uuid: string): Promise<Tenant | null>
     envFields.some((key) => typeof data.env[key] !== 'string' || !data.env[key])) throw new Error('Invalid context')
   externalNetworkHosts(data.network_allowlist ?? [])
   validateSecrets(data.secrets)
+  validatePublicFunctions(data.public_functions)
   return data
 }
 
@@ -129,15 +148,22 @@ Deno.serve(async (request: Request) => {
   try { tenant = await tenantContext(project, uuid) }
   catch { return response('tenant_configuration_unavailable', 503) }
   if (!tenant) return response('service_disabled', 404)
-  const apiKey = request.headers.get('apikey')
-  if (apiKey !== canonical.anon_key && apiKey !== canonical.service_role_key) {
-    return response('invalid_api_key', 403)
-  }
-  if (!await authorized(request, { ...tenant, jwt_secret: canonical.jwt_secret })) return response('invalid_jwt', 401)
   let name: string
   try { name = decodeURIComponent(url.pathname.split('/')[1]) }
   catch { return response('invalid_function_name', 400) }
-  if (!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(name) || name === 'main') return response('invalid_function_name', 400)
+  if (!functionNamePattern.test(name) || reservedFunctionNames.has(name)) return response('invalid_function_name', 400)
+  const isPublic = Array.isArray(tenant.public_functions) && tenant.public_functions.includes(name)
+  const apiKey = request.headers.get('apikey') ?? ''
+  if (isPublic) {
+    if (apiKey !== '' && apiKey !== canonical.anon_key && apiKey !== canonical.service_role_key) {
+      return response('invalid_api_key', 403)
+    }
+  } else {
+    if (apiKey !== canonical.anon_key && apiKey !== canonical.service_role_key) {
+      return response('invalid_api_key', 403)
+    }
+    if (!await authorized(request, { ...tenant, jwt_secret: canonical.jwt_secret })) return response('invalid_jwt', 401)
+  }
   const servicePath = `/home/deno/runtime/code/${uuid}/${tenant.revision}/${name}`
   try { await Deno.stat(`${servicePath}/index.ts`) }
   catch { return response('function_not_found', 404) }

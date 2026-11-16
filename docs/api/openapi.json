@@ -1830,6 +1830,20 @@
         "title": "FolderBody",
         "type": "object"
       },
+      "FunctionConfigBody": {
+        "additionalProperties": false,
+        "properties": {
+          "verify_jwt": {
+            "title": "Verify Jwt",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "verify_jwt"
+        ],
+        "title": "FunctionConfigBody",
+        "type": "object"
+      },
       "GetProjectCollaborationResponse": {
         "additionalProperties": true,
         "properties": {
@@ -12716,6 +12730,65 @@
           }
         },
         "summary": "Function Save",
+        "tags": [
+          "studio-edge-functions"
+        ]
+      }
+    },
+    "/api/projects/{ref}/edge-functions/{slug}/config": {
+      "put": {
+        "operationId": "function_configure_api_projects__ref__edge_functions__slug__config_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FunctionConfigBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Function Configure",
         "tags": [
           "studio-edge-functions"
         ]

@@ -21,6 +21,8 @@ from access_policy import AccessPolicy
 
 PROJECT_RE = re.compile(r'^[a-z_][a-z0-9_]{2,39}$')
 GATEWAY_TOKEN_RE = re.compile(r'^[a-f0-9]{64}$')
+FUNCTION_SLUG_RE = re.compile(r'^[A-Za-z][A-Za-z0-9_-]{0,63}$')
+RESERVED_FUNCTION_SLUGS = frozenset({'main', 'secrets', 'logs', 'gc', 'config', 'health', 'versions'})
 DB_DSN = os.environ['DB_DSN']
 ADMISSION_SECRET = os.environ['ACCESS_ADMISSION_SECRET']
 if not GATEWAY_TOKEN_RE.fullmatch(ADMISSION_SECRET):
@@ -162,11 +164,32 @@ async def ensure_functions_enabled(conn, project, service):
         raise HTTPException(404, 'Edge Functions are disabled')
 
 
-async def key_identity(conn, project, body, service, missing, required):
+def extract_function_slug(uri_path: str, public_ref: str | None) -> str | None:
+    if not public_ref:
+        return None
+    prefix = f'/{public_ref}/functions/v1/'
+    if not uri_path.startswith(prefix):
+        return None
+    slug = uri_path[len(prefix):].split('/', 1)[0]
+    if not FUNCTION_SLUG_RE.fullmatch(slug) or slug in RESERVED_FUNCTION_SLUGS:
+        return None
+    return slug
+
+
+async def key_identity(conn, project, body, service, missing, required, *, internal_only: bool = False):
     await ensure_functions_enabled(conn, project, service)
     _, _, _, parts = route(body.uri, project['public_ref'])
+    allow_missing = missing
+    if service == 'functions' and not allow_missing and not internal_only:
+        slug = extract_function_slug(parts.path, project['public_ref'])
+        if slug and await conn.fetchval(
+            '''SELECT 1 FROM project_edge_function_configs
+               WHERE project_id=$1 AND function_name=$2 AND published=true AND verify_jwt=false''',
+            project['id'], slug,
+        ):
+            allow_missing = True
     try:
-        api_key = _candidate_key(body.api_key, query_key(parts.query), parts.query, allow_missing=missing)
+        api_key = _candidate_key(body.api_key, query_key(parts.query), parts.query, allow_missing=allow_missing)
     except OpaqueKeyError:
         raise _forbidden() from None
     authorization = body.authorization
@@ -324,7 +347,7 @@ async def functions_authorize(request: Request):
         service, missing, required, _ = route(body.uri, project['public_ref'])
         if h.get('x-target-service') != service:
             raise _forbidden()
-        key, parsed, preserve = await key_identity(conn, project, body, service, missing, required)
+        key, parsed, preserve = await key_identity(conn, project, body, service, missing, required, internal_only=True)
         if not key or not key['functions_internal']:
             raise _forbidden()
     await _engine.rate([str(project['id']) + ':functions-internal'], [AccessPolicy(

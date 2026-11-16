@@ -447,3 +447,116 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
         ctx3 = edge_functions.read_context(self.root, self.names[0], str(self.projects[0]))
         self.assertNotIn('secrets', ctx3)
         self.assertEqual(await self.pool.fetchval("SELECT count(*) FROM studio_edge_audit WHERE action IN ('set_secret','delete_secret') AND outcome='completed'"), 3)
+
+    async def test_per_function_verify_jwt_and_key_authorizer_admission(self):
+        from app import edge_functions
+        self.assertEqual((await self.request('PUT', '/my-function/config', {'verify_jwt': False})).status_code, 404)
+        draft = await self.save()
+        self.assertTrue(draft['verify_jwt'])
+        self.assertEqual((await self.request('PUT', '/my-function/config', {'verify_jwt': False}, user=2)).status_code, 403)
+        # Configuring before enablement/publish stores intent with published=false.
+        cfg = await self.request('PUT', '/my-function/config', {'verify_jwt': False})
+        self.assertEqual(cfg.status_code, 200, cfg.text)
+        self.assertFalse(cfg.json()['verify_jwt'])
+        row = await self.pool.fetchrow('SELECT verify_jwt, published FROM project_edge_function_configs WHERE project_id=$1 AND function_name=$2', self.projects[0], 'my-function')
+        self.assertFalse(row['verify_jwt'])
+        self.assertFalse(row['published'])
+        # Enabling and publishing activates public_functions and marks published=true cleanly.
+        await self.configure(True)
+        pub_resp = await self.publish(draft)
+        self.assertEqual(pub_resp.status_code, 200, pub_resp.text)
+        pub = pub_resp.json()
+        self.assertFalse(pub['verify_jwt'])
+        ctx = edge_functions.read_context(self.root, self.names[0], str(self.projects[0]))
+        self.assertEqual(ctx['public_functions'], ['my-function'])
+        row = await self.pool.fetchrow('SELECT verify_jwt, published FROM project_edge_function_configs WHERE project_id=$1 AND function_name=$2', self.projects[0], 'my-function')
+        self.assertFalse(row['verify_jwt'])
+        self.assertTrue(row['published'])
+        # Unpublishing keeps verify_jwt=False preference while blocking published exposure.
+        unpub_resp = await self.request('POST', '/my-function/unpublish', {'revision': pub['revision'], 'expected_published_revision': pub['published_revision']})
+        self.assertEqual(unpub_resp.status_code, 200, unpub_resp.text)
+        unpub = unpub_resp.json()
+        self.assertFalse(unpub['verify_jwt'])
+        row = await self.pool.fetchrow('SELECT verify_jwt, published FROM project_edge_function_configs WHERE project_id=$1 AND function_name=$2', self.projects[0], 'my-function')
+        self.assertFalse(row['verify_jwt'])
+        self.assertFalse(row['published'])
+        # Re-publish and verify toggle back to True + delete cleanup.
+        pub2_resp = await self.publish(unpub)
+        self.assertEqual(pub2_resp.status_code, 200, pub2_resp.text)
+        pub2 = pub2_resp.json()
+        toggle_on = await self.request('PUT', '/my-function/config', {'verify_jwt': True})
+        self.assertTrue(toggle_on.json()['verify_jwt'])
+        self.assertNotIn('public_functions', edge_functions.read_context(self.root, self.names[0], str(self.projects[0])))
+        self.assertEqual((await self.request('PUT', '/my-function/config', {'verify_jwt': False})).status_code, 200)
+        # Verify real key-authorizer app allows anonymous calls ONLY for published verify_jwt=false slugs.
+        import importlib.util, types
+        from fastapi import HTTPException
+        old_ka_env = {k: os.environ.get(k) for k in ('ACCESS_ADMISSION_SECRET',)}
+        os.environ['ACCESS_ADMISSION_SECRET'] = 'a' * 64
+        ka_dir = str(ROOT / 'servidor/key-authorizer')
+        app_pkg_dir = str(ROOT / 'servidor/api-internal/app')
+        sys.path.insert(0, app_pkg_dir)
+        sys.path.insert(0, ka_dir)
+        injected_mods = {}
+        try:
+            try:
+                import redis.asyncio  # noqa: F401
+            except ModuleNotFoundError:
+                class _DummyRedisError(Exception): pass
+                class _DummyRedis: pass
+                for mod_name, attrs in (
+                    ('redis', {}),
+                    ('redis.asyncio', {'Redis': _DummyRedis}),
+                    ('redis.exceptions', {'RedisError': _DummyRedisError}),
+                ):
+                    if mod_name not in sys.modules:
+                        m = types.ModuleType(mod_name)
+                        for k, v in attrs.items():
+                            setattr(m, k, v)
+                        injected_mods[mod_name] = m
+                        sys.modules[mod_name] = m
+            spec = importlib.util.spec_from_file_location('ka_app_test', ROOT / 'servidor/key-authorizer/app.py')
+            ka_app = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(ka_app)
+            self.assertEqual(ka_app.extract_function_slug(f'/{self.refs[0]}/functions/v1/my-function/sub', self.refs[0]), 'my-function')
+            self.assertIsNone(ka_app.extract_function_slug(f'/{self.refs[0]}/functions/v1/my-function%2fother', self.refs[0]))
+            self.assertIsNone(ka_app.extract_function_slug(f'/{self.refs[0]}/functions/v1/main', self.refs[0]))
+            async with self.pool.acquire() as ka_conn:
+                proj_row = await ka_conn.fetchrow('SELECT id,public_ref,api_keyset_version FROM projects WHERE id=$1', self.projects[0])
+                req_pub = ka_app.AdmissionRequest(project_ref=self.names[0], gateway_token='0'*64,
+                    uri=f'/{self.refs[0]}/functions/v1/my-function', method='POST', client_ip='127.0.0.1',
+                    api_key='', authorization='Stripe-Signature t=1')
+                k, p, preserve = await ka_app.key_identity(ka_conn, proj_row, req_pub, 'functions', False, '')
+                self.assertIsNone(k); self.assertIsNone(p); self.assertTrue(preserve)
+                # Another slug defaults to protected -> fails 401 when missing apikey.
+                req_priv = ka_app.AdmissionRequest(project_ref=self.names[0], gateway_token='0'*64,
+                    uri=f'/{self.refs[0]}/functions/v1/other-fn', method='POST', client_ip='127.0.0.1',
+                    api_key='', authorization='')
+                with self.assertRaises(HTTPException) as ctx_err:
+                    await ka_app.key_identity(ka_conn, proj_row, req_priv, 'functions', False, '')
+                self.assertEqual(ctx_err.exception.status_code, 401)
+                # Unpublish blocks anonymous admission immediately even with verify_jwt=false saved.
+                await ka_conn.execute('UPDATE project_edge_function_configs SET published=false WHERE project_id=$1', self.projects[0])
+                with self.assertRaises(HTTPException) as ctx_err2:
+                    await ka_app.key_identity(ka_conn, proj_row, req_pub, 'functions', False, '')
+                self.assertEqual(ctx_err2.exception.status_code, 401)
+                await ka_conn.execute('UPDATE project_edge_function_configs SET published=true WHERE project_id=$1', self.projects[0])
+                # Disabling service blocks even public webhooks with 404.
+                await ka_conn.execute('UPDATE project_edge_functions SET enabled=false WHERE project_id=$1', self.projects[0])
+                with self.assertRaises(HTTPException) as ctx_err3:
+                    await ka_app.key_identity(ka_conn, proj_row, req_pub, 'functions', False, '')
+                self.assertEqual(ctx_err3.exception.status_code, 404)
+                await ka_conn.execute('UPDATE project_edge_functions SET enabled=true WHERE project_id=$1', self.projects[0])
+        finally:
+            for mod_name in injected_mods:
+                sys.modules.pop(mod_name, None)
+            for d in (ka_dir, app_pkg_dir):
+                if d in sys.path:
+                    sys.path.remove(d)
+            for k, v in old_ka_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        self.assertEqual((await self.request('DELETE', '/my-function', {'revision': pub2['revision'], 'expected_published_revision': pub2['published_revision']})).status_code, 200)
+        self.assertIsNone(await self.pool.fetchrow('SELECT 1 FROM project_edge_function_configs WHERE project_id=$1 AND function_name=$2', self.projects[0], 'my-function'))
