@@ -1094,3 +1094,68 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reset.status_code, 200, reset.text)
         ctx_after = edge_functions.read_context(self.root, 'test_alpha', str(self.projects[0]))
         self.assertNotIn('limits', ctx_after)
+
+    async def test_wasm_binary_artifacts_validation_publish_diff_and_zip(self):
+        import base64, io, zipfile
+        await self.configure(True)
+        wasm_bytes = bytes([
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            0x01, 0x07, 0x01, 0x60, 0x02, 0x7F, 0x7F, 0x01, 0x7F,
+            0x03, 0x02, 0x01, 0x00,
+            0x07, 0x07, 0x01, 0x03, 0x61, 0x64, 0x64, 0x00, 0x00,
+            0x0A, 0x09, 0x01, 0x07, 0x00, 0x20, 0x00, 0x20, 0x01, 0x6A, 0x0B,
+        ])
+        wasm_b64 = base64.b64encode(wasm_bytes).decode('ascii')
+
+        # Non-.wasm filenames and non-WASM binaries are rejected cleanly.
+        bad_ext = await self.request('PUT', '/wasm-fn', {
+            'expected_revision': None,
+            'files': [
+                {'name': 'index.ts', 'content': 'export {};'},
+                {'name': 'evil.bin', 'content': wasm_b64, 'encoding': 'base64'},
+            ],
+        })
+        self.assertEqual(bad_ext.status_code, 400)
+        bad_magic = await self.request('PUT', '/wasm-fn', {
+            'expected_revision': None,
+            'files': [
+                {'name': 'index.ts', 'content': 'export {};'},
+                {'name': 'fake.wasm', 'content': base64.b64encode(b'NOT_WASM_HEADER').decode('ascii'), 'encoding': 'base64'},
+            ],
+        })
+        self.assertEqual(bad_magic.status_code, 400)
+
+        v1 = await self.request('PUT', '/wasm-fn', {
+            'expected_revision': None,
+            'files': [
+                {'name': 'index.ts', 'content': 'import * as mod from "./add.wasm";\nDeno.serve(()=>Response.json({s:mod.add(1,2)}));\n'},
+                {'name': 'add.wasm', 'content': wasm_b64, 'encoding': 'base64'},
+            ],
+        })
+        self.assertEqual(v1.status_code, 200, v1.text)
+        rev1 = v1.json()['revision']
+        pub = await self.request('POST', '/wasm-fn/publish', {'revision': rev1, 'expected_published_revision': None})
+        self.assertEqual(pub.status_code, 200, pub.text)
+
+        from app import edge_functions
+        ctx = edge_functions.read_context(self.root, 'test_alpha', str(self.projects[0]))
+        mat_path = self.root / '.functions-runtime/code' / str(self.projects[0]) / ctx['revision'] / 'wasm-fn/add.wasm'
+        self.assertEqual(mat_path.read_bytes(), wasm_bytes)
+
+        zip_resp = await self.request('GET', '/wasm-fn/download?version=published')
+        self.assertEqual(zip_resp.status_code, 200)
+        with zipfile.ZipFile(io.BytesIO(zip_resp.content), 'r') as zf:
+            self.assertEqual(zf.read('wasm-fn/add.wasm'), wasm_bytes)
+
+        v2 = (await self.request('PUT', '/wasm-fn', {
+            'expected_revision': rev1,
+            'files': [
+                {'name': 'index.ts', 'content': 'import * as mod from "./add.wasm";\nDeno.serve(()=>Response.json({s:mod.add(1,2)}));\n'},
+                {'name': 'add.wasm', 'content': base64.b64encode(wasm_bytes + b'\x00\x02').decode('ascii'), 'encoding': 'base64'},
+            ],
+        })).json()
+        diff = (await self.request('GET', f"/wasm-fn/diff?from={rev1}&to={v2['revision']}")).json()
+        wasm_diff = next(f for f in diff['files'] if f['name'] == 'add.wasm')
+        self.assertTrue(wasm_diff['binary'])
+        self.assertEqual(wasm_diff['status'], 'modified')
+        self.assertIn('binary wasm file', wasm_diff['hunks'][0])

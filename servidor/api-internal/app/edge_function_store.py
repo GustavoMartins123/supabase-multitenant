@@ -5,6 +5,8 @@ edge_functions.configuration_lock for the entire read/modify/publish operation.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import copy
 from datetime import datetime, timezone
 import difflib
@@ -29,6 +31,14 @@ MAX_FILES_CEILING = edge_functions.QUOTA_SPECS["max_files"]["max"]
 MAX_BYTES_CEILING = edge_functions.QUOTA_SPECS["max_bytes"]["max"]
 MAX_FUNCTIONS_CEILING = edge_functions.QUOTA_SPECS["max_functions"]["max"]
 RESERVED_SLUGS = edge_functions.RESERVED_SLUGS
+WASM_MAGIC = b"\x00asm\x01\x00\x00\x00"
+
+
+def file_bytes(item: dict) -> bytes:
+    """Return raw bytes for either a UTF-8 source file or a base64-encoded .wasm artifact."""
+    if item.get("encoding") == "base64":
+        return base64.b64decode(item["content"], validate=True)
+    return item["content"].encode("utf-8")
 
 
 def function_name(value: str) -> str:
@@ -42,16 +52,38 @@ def validate_files(files: list[dict], *, max_files: int = MAX_FILES, max_bytes: 
         raise ValueError(f"A function requires 1 to {max_files} files")
     result, names, size = [], set(), 0
     for item in files:
-        if not isinstance(item, dict) or set(item) != {"name", "content"}:
+        if not isinstance(item, dict) or not {"name", "content"}.issubset(item) or set(item) - {"name", "content", "encoding"}:
             raise ValueError("Invalid function file")
         name, content = item["name"], item["content"]
+        encoding = item.get("encoding")
+        if encoding is None:
+            encoding = "utf-8"
+        if encoding not in {"utf-8", "base64"}:
+            raise ValueError("Unsupported file encoding")
         if (not isinstance(name, str) or len(name) > 240 or len(name.split("/")) > 8
                 or any(not SEGMENT.fullmatch(part) for part in name.split("/"))
-                or not isinstance(content, str) or "\0" in content or name in names):
+                or not isinstance(content, str) or name in names):
             raise ValueError("File paths must be unique, relative and contain no traversal or hidden segments")
+        if encoding == "base64":
+            if not name.lower().endswith(".wasm"):
+                raise ValueError("Base64 binary files are restricted to .wasm modules")
+            try:
+                raw = base64.b64decode(content.encode("ascii"), validate=True)
+            except (binascii.Error, UnicodeEncodeError, ValueError) as error:
+                raise ValueError("Invalid base64 payload for .wasm artifact") from error
+            if len(raw) < len(WASM_MAGIC) or not raw.startswith(WASM_MAGIC):
+                raise ValueError("Binary .wasm artifact must contain a valid WebAssembly header")
+            normalized_content = base64.b64encode(raw).decode("ascii")
+            entry = {"name": name, "content": normalized_content, "encoding": "base64"}
+            byte_len = len(raw)
+        else:
+            if "\0" in content:
+                raise ValueError("Text source files cannot contain null bytes")
+            byte_len = len(content.encode("utf-8"))
+            entry = {"name": name, "content": content}
         names.add(name)
-        size += len(content.encode("utf-8")) + len(name)
-        result.append({"name": name, "content": content})
+        size += byte_len + len(name)
+        result.append(entry)
     if "index.ts" not in names:
         raise ValueError("The function entrypoint must be index.ts")
     if size > max_bytes:
@@ -296,7 +328,7 @@ def published_files(root: Path, name: str, identity: str, *, state: dict | None 
             functions.pop(slug, None)
     if len(functions) > MAX_FUNCTIONS_CEILING:
         raise RuntimeError("Too many published functions")
-    return {slug + "/" + file["name"]: file["content"].encode()
+    return {slug + "/" + file["name"]: file_bytes(file)
             for slug, files in functions.items() for file in files}
 
 
@@ -328,7 +360,7 @@ def list_versions(root: Path, state: dict, slug: str) -> list[dict]:
             "revision": revision,
             "created_at": datetime.fromtimestamp(info.st_mtime, tz=timezone.utc).isoformat(),
             "file_count": len(files),
-            "total_bytes": sum(len(f["content"].encode("utf-8")) for f in files),
+            "total_bytes": sum(len(file_bytes(f)) for f in files),
             "is_draft": bool(pointers and pointers.get("draft") == revision),
             "is_published": bool(pointers and pointers.get("published") == revision),
         })
@@ -697,7 +729,7 @@ def compute_quota_status(
             continue
         if fn.get("published_revision"):
             published_count += 1
-        fn_bytes = sum(len(f["content"].encode("utf-8")) + len(f["name"]) for f in fn["files"])
+        fn_bytes = sum(len(file_bytes(f)) + len(f["name"]) for f in fn["files"])
         total_bytes_all += fn_bytes
         if fn_bytes >= largest_bytes:
             largest_bytes = fn_bytes

@@ -228,6 +228,24 @@ Deno.serve(() => {
   return Response.json({ logged: true })
 })
 ''',
+    'ws_wasm/add.wasm': bytes([
+        0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x07, 0x01, 0x60, 0x02, 0x7F, 0x7F, 0x01, 0x7F,
+        0x03, 0x02, 0x01, 0x00,
+        0x07, 0x07, 0x01, 0x03, 0x61, 0x64, 0x64, 0x00, 0x00,
+        0x0A, 0x09, 0x01, 0x07, 0x00, 0x20, 0x00, 0x20, 0x01, 0x6A, 0x0B,
+    ]),
+    'ws_wasm/index.ts': '''
+import * as mod from './add.wasm'
+Deno.serve((req) => {
+  if (req.headers.get('upgrade')?.toLowerCase() === 'websocket') {
+    const { socket, response } = Deno.upgradeWebSocket(req)
+    socket.onmessage = (ev) => socket.send(`ws-wasm:${ev.data}:${mod.add(20, 22)}`)
+    return response
+  }
+  return Response.json({ wasmSum: mod.add(20, 22) })
+})
+''',
 }
 
 
@@ -306,7 +324,10 @@ def main() -> None:
         for rel, content in FUNCTIONS.items():
             target = code / rel
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content, encoding='utf-8')
+            if isinstance(content, bytes):
+                target.write_bytes(content)
+            else:
+                target.write_text(content, encoding='utf-8')
 
         (fixture / 'canary.py').write_text(CANARY_AND_AUTH, encoding='utf-8')
         (fixture / 'auth_tokens.json').write_text(json.dumps(internal_tokens), encoding='utf-8')
@@ -338,7 +359,7 @@ def main() -> None:
                 env_srv = toks['service_role']
                 code_root = runtime / 'code' / project / ('1' * 64)
             code_root.mkdir(parents=True, exist_ok=True)
-            for fn in ('stream', 'slow', 'wait_until', 'internal_calls', 'imported', 'remote_import', 'check_env', 'webhook', 'log_test'):
+            for fn in ('stream', 'slow', 'wait_until', 'internal_calls', 'imported', 'remote_import', 'check_env', 'webhook', 'log_test', 'ws_wasm'):
                 shutil.copytree(code / fn, code_root / fn)
             tenant_doc = {
                 'project': project, 'uuid': identity, 'jwt_secret': f'{project}-synthetic-secret',
@@ -669,6 +690,27 @@ def main() -> None:
                 assert client.post(f'{rt_origin}/__event-ingest', json={'event_type': 'Log'}, headers={'X-Event-Token': '0' * 64}).status_code == 403
                 assert client.get(f'{rt_origin}/__logs', params={'function': 'log_test'}, headers=logs_headers('test_beta')).json()['logs'] == []
                 record('event_worker_logs_and_redaction')
+
+                # 11. WebSocket upgrade through Project Nginx + ESM .wasm module execution
+                wasm_http = client.get(f'{nginx_origin}/functions/v1/ws_wasm', headers=gw_headers('/functions/v1/ws_wasm'))
+                assert wasm_http.status_code == 200 and wasm_http.json().get('wasmSum') == 42, wasm_http.text
+
+                import asyncio
+                import inspect
+                import websockets
+
+                ws_url = nginx_origin.replace('http://', 'ws://', 1) + '/functions/v1/ws_wasm'
+                ws_headers = gw_headers('/functions/v1/ws_wasm')
+                hdr_kw = 'additional_headers' if 'additional_headers' in inspect.signature(websockets.connect).parameters else 'extra_headers'
+
+                async def run_ws_echo() -> str:
+                    async with websockets.connect(ws_url, **{hdr_kw: ws_headers}) as ws:
+                        await ws.send('hello')
+                        return str(await asyncio.wait_for(ws.recv(), timeout=5))
+
+                ws_reply = asyncio.run(run_ws_echo())
+                assert ws_reply == 'ws-wasm:hello:42', ws_reply
+                record('websocket_gateway_and_wasm_module_execution')
 
             if args.result:
                 args.result.write_text(json.dumps({'contract': args.contract, 'image': args.edge_image, 'checks': checks}, indent=2))

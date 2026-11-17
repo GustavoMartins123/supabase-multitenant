@@ -483,9 +483,24 @@
         "additionalProperties": false,
         "properties": {
           "content": {
-            "maxLength": 5000000,
+            "maxLength": 6666682,
             "title": "Content",
             "type": "string"
+          },
+          "encoding": {
+            "anyOf": [
+              {
+                "enum": [
+                  "utf-8",
+                  "base64"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Encoding"
           },
           "name": {
             "maxLength": 240,

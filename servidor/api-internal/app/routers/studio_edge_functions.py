@@ -14,6 +14,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import time
+from typing import Literal
 from urllib.parse import urlsplit
 import uuid
 import zipfile
@@ -41,7 +42,8 @@ SETTINGS = {'EDGE_FUNCTIONS_ENABLED', 'FUNCTIONS_ALLOWED_NETWORK_HOSTS'}
 class CodeFile(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     name: StrictStr = Field(min_length=1, max_length=240)
-    content: StrictStr = Field(max_length=store.MAX_BYTES_CEILING)
+    content: StrictStr = Field(max_length=(store.MAX_BYTES_CEILING * 4) // 3 + 16)
+    encoding: Literal['utf-8', 'base64'] | None = None
 
 
 class DraftBody(BaseModel):
@@ -141,13 +143,13 @@ def governance_limits(quotas: dict[str, int] | None = None) -> dict[str, int]:
 
 
 def _build_function_bundle_zip(slug: str, revision: str, files: list[dict], *, verify_jwt: bool) -> bytes:
-    validated = store.validate_files(files)
+    validated = store.validate_files(files, max_files=store.MAX_FILES_CEILING, max_bytes=store.MAX_BYTES_CEILING)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
         for file_entry in validated:
             info = zipfile.ZipInfo(f"{slug}/{file_entry['name']}", date_time=(2024, 1, 1, 0, 0, 0))
             info.external_attr = 0o644 << 16
-            archive.writestr(info, file_entry['content'].encode('utf-8'))
+            archive.writestr(info, store.file_bytes(file_entry))
         manifest = {
             'name': slug,
             'revision': revision,
@@ -1145,7 +1147,7 @@ def validate_slug(slug):
 @router.put('/{slug}')
 async def function_save(ref: str, slug: str, body: DraftBody, request: Request, response: Response, pool=Depends(get_pool)):
     validate_slug(slug)
-    raw_files = [file.model_dump() for file in body.files]
+    raw_files = [file.model_dump(exclude_none=True) for file in body.files]
     async with management_context(ref, request, response, pool) as (conn, project, actor, config):
         quotas, _ = await load_project_quotas(conn, project['id'])
         try:
