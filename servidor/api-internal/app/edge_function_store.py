@@ -198,7 +198,9 @@ def recover_publication(root: Path, name: str, identity: str) -> None:
         context = edge_functions.read_context(root, name, identity)
         if context and context["revision"] == intent["runtime_revision"]:
             files = published_files(root, name, identity, state=proposed)
-            expected = edge_functions.context_value(name, identity, context["jwt_secret"], context["env"], files, context.get("network_allowlist"))
+            expected = edge_functions.context_value(
+                name, identity, context["jwt_secret"], context["env"], files, context.get("network_allowlist"),
+                secrets=context.get("secrets"), public_functions=context.get("public_functions"))
             if expected != context:
                 raise RuntimeError("Publication context does not match saved versions")
             edge_functions.verify_generation(root, context, files)

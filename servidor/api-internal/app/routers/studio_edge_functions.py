@@ -545,7 +545,7 @@ async def _fetch_merged_logs(
     return {'logs': combined, 'runtime_connected': runtime_connected}
 
 
-async def load_project_secrets(conn, project) -> dict[str, str]:
+async def load_project_secrets(conn, project, *, tolerate: frozenset[str] | bool = frozenset()) -> dict[str, str]:
     rows = await conn.fetch(
         'SELECT name, secret_ciphertext FROM project_function_secrets WHERE project_id=$1 ORDER BY name',
         project['id'],
@@ -553,15 +553,26 @@ async def load_project_secrets(conn, project) -> dict[str, str]:
     if not isinstance(rows, (list, tuple)) or not rows:
         return {}
     secrets: dict[str, str] = {}
+    broken: list[str] = []
     for row in rows:
         name = edge_functions.validate_secret_name(row['name'])
-        value = await decrypt_project_material(
-            conn,
-            project_id=project['id'],
-            purpose=f'functions-env-secret:{name}',
-            ciphertext=row['secret_ciphertext'],
+        try:
+            value = await decrypt_project_material(
+                conn,
+                project_id=project['id'],
+                purpose=f'functions-env-secret:{name}',
+                ciphertext=row['secret_ciphertext'],
+            )
+            secrets[name] = edge_functions.validate_secret_value(value)
+        except (ValueError, UnicodeError, TypeError):
+            broken.append(name)
+    unresolved = [] if tolerate is True else sorted(name for name in broken if name not in tolerate)
+    if unresolved:
+        raise HTTPException(
+            409,
+            'Edge Function secrets cannot be decrypted: ' + ', '.join(unresolved)
+            + '. Set new values for these secrets or delete them.',
         )
-        secrets[name] = edge_functions.validate_secret_value(value)
     return edge_functions.validate_secrets(secrets)
 
 
@@ -679,7 +690,7 @@ async def versions_gc(ref: str, request: Request, response: Response, body: GcBo
 async def logs_list(ref: str, request: Request, response: Response, pool=Depends(get_pool)):
     async with management_context(ref, request, response, pool, allow_query=True) as (conn, project, _, _):
         fn_filter, level_filter, limit = _parse_log_query(request, allow_function=True)
-        secrets = await load_project_secrets(conn, project)
+        secrets = await load_project_secrets(conn, project, tolerate=True)
         try:
             creds = canonical_projection_credentials(project)
         except RuntimeError:
@@ -708,7 +719,7 @@ async def secrets_upsert(ref: str, body: SecretsUpdateBody, request: Request, re
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
     async with management_context(ref, request, response, pool) as (conn, project, actor, config):
-        current_secrets = await load_project_secrets(conn, project)
+        current_secrets = await load_project_secrets(conn, project, tolerate=frozenset(updates))
         proposed_secrets = {**current_secrets, **updates}
         try:
             validated = edge_functions.validate_secrets(proposed_secrets)
@@ -760,7 +771,7 @@ async def secret_delete(ref: str, secret_name: str, request: Request, response: 
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
     async with management_context(ref, request, response, pool) as (conn, project, actor, config):
-        current_secrets = await load_project_secrets(conn, project)
+        current_secrets = await load_project_secrets(conn, project, tolerate=frozenset({secret_name}))
         if secret_name not in current_secrets:
             row = await conn.fetchval(
                 'SELECT 1 FROM project_function_secrets WHERE project_id=$1 AND name=$2',
@@ -958,7 +969,7 @@ async def function_logs(ref: str, slug: str, request: Request, response: Respons
         if store.item(ROOT, state, slug, {}) is None:
             raise HTTPException(404, 'Function not found')
         _, level_filter, limit = _parse_log_query(request, allow_function=False)
-        secrets = await load_project_secrets(conn, project)
+        secrets = await load_project_secrets(conn, project, tolerate=True)
         try:
             creds = canonical_projection_credentials(project)
         except RuntimeError:
@@ -986,7 +997,7 @@ async def function_invoke(ref: str, slug: str, body: InvokeBody, request: Reques
         draft_rev = current['revision']
         creds = canonical_projection_credentials(project)
         keys = await internal_keys(conn, project)
-        secrets = await load_project_secrets(conn, project)
+        secrets = await load_project_secrets(conn, project, tolerate=True)
         sensitive = _collect_sensitive_values(project, creds, secrets)
         project_snapshot = dict(project)
         secrets_snapshot = dict(secrets)

@@ -351,6 +351,77 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(recovered.json()['published_revision'],draft['revision'])
         self.assertFalse((self.root/'.functions-studio'/str(self.projects[0])/'publication.json').exists())
 
+    async def test_interrupted_publication_with_secrets_and_public_functions_keeps_runtime(self):
+        from app import edge_function_store as store,edge_functions
+        self.assertEqual((await self.request('PUT','/secrets',{'secrets':[{'name':'API_TOKEN','value':'value-1234'}]})).status_code,200)
+        draft=await self.save()
+        self.assertEqual((await self.request('PUT','/my-function/config',{'verify_jwt':False})).status_code,200)
+        await self.configure(True)
+        async with self.pool.acquire() as conn:
+            project=await self.routes.get_public_project_row(conn,self.refs[0])
+            state=self.routes.load(project)
+            import copy
+            proposed=copy.deepcopy(state);proposed['functions']['my-function']['published']=draft['revision']
+            context=await self.routes.prepare(conn,project,proposed,{'enabled':True,'network_allowlist':[]})
+            self.assertEqual(context['secrets'],{'API_TOKEN':'value-1234'})
+            self.assertEqual(context['public_functions'],['my-function'])
+            store.begin_publication(self.root,state,proposed,context)
+            edge_functions.activate_context(self.root,context)
+        recovered=await self.request('GET','/my-function')
+        self.assertEqual(recovered.status_code,200,recovered.text)
+        self.assertEqual(recovered.json()['published_revision'],draft['revision'])
+        self.assertEqual(edge_functions.read_context(self.root,self.names[0],str(self.projects[0])),context)
+        self.assertFalse((self.root/'.functions-studio'/str(self.projects[0])/'publication.json').exists())
+
+    async def test_large_secret_context_still_starts_retention_of_replaced_generation(self):
+        import time
+        from app import edge_functions
+        many=[{'name':f'S{index}','value':'v'*1015} for index in range(64)]
+        self.assertEqual((await self.request('PUT','/secrets',{'secrets':many})).status_code,200)
+        await self.configure(True)
+        first=await self.save('one')
+        self.assertEqual((await self.publish(first)).status_code,200)
+        context=edge_functions.read_context(self.root,self.names[0],str(self.projects[0]))
+        tenant=next((self.root/'.functions-runtime'/'tenants').glob(self.names[0]+'.json'))
+        self.assertGreater(tenant.stat().st_size,65536)
+        old=next(path for path in (self.root/'.functions-runtime'/'code').glob('*/'+context['revision']))
+        os.utime(old,(time.time()-3600,time.time()-3600))
+        second=await self.save('two',first['revision'])
+        self.assertEqual((await self.publish(second)).status_code,200)
+        self.assertTrue(old.is_dir())
+        self.assertLess(time.time()-old.stat().st_mtime,60)
+
+    async def test_undecryptable_secret_blocks_publish_with_conflict_and_can_be_replaced_or_deleted(self):
+        from app import edge_functions
+        self.assertEqual((await self.request('PUT','/secrets',{'secrets':[{'name':'STALE_A','value':'seed-a'},{'name':'STALE_B','value':'seed-b'}]})).status_code,200)
+        async def corrupt(name):
+            async with self.pool.acquire() as conn:
+                foreign=await self.routes.encrypt_project_material(conn,project_id=self.projects[0],purpose='functions-env-secret:OTHER',plaintext='old-value')
+                await conn.execute('UPDATE project_function_secrets SET secret_ciphertext=$3 WHERE project_id=$1 AND name=$2',self.projects[0],name,foreign)
+        await self.configure(True)
+        first=await self.save()
+        self.assertEqual((await self.publish(first)).status_code,200)
+        await corrupt('STALE_A');await corrupt('STALE_B')
+        draft=await self.save('two',first['revision'])
+        blocked=await self.publish(draft)
+        self.assertEqual(blocked.status_code,409,blocked.text)
+        self.assertIn('STALE_A',blocked.text)
+        self.assertNotIn('old-value',blocked.text)
+        self.assertEqual((await self.request('GET','/logs')).status_code,200)
+        self.assertEqual((await self.request('DELETE','/secrets/STALE_A')).status_code,409)
+        partial=await self.request('PUT','/secrets',{'secrets':[{'name':'STALE_A','value':'new-value-a'}]})
+        self.assertEqual(partial.status_code,409,partial.text)
+        self.assertIn('STALE_B',partial.text)
+        fixed=await self.request('PUT','/secrets',{'secrets':[{'name':'STALE_A','value':'new-value-a'},{'name':'STALE_B','value':'new-value-b'}]})
+        self.assertEqual(fixed.status_code,200,fixed.text)
+        self.assertEqual((await self.request('DELETE','/secrets/STALE_B')).status_code,200)
+        self.assertEqual((await self.publish(draft)).status_code,200)
+        self.assertEqual(edge_functions.read_context(self.root,self.names[0],str(self.projects[0]))['secrets'],{'STALE_A':'new-value-a'})
+        await corrupt('STALE_A')
+        removed=await self.request('DELETE','/secrets/STALE_A')
+        self.assertEqual(removed.status_code,200,removed.text)
+        self.assertNotIn('secrets',edge_functions.read_context(self.root,self.names[0],str(self.projects[0])))
+
     async def test_management_works_with_a_single_database_connection(self):
         import asyncio,asyncpg
         original=self.pool

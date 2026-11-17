@@ -120,10 +120,11 @@ def retire_current(root: Path, name: str) -> None:
     context = runtime_directory(root) / "tenants" / (project_name(name) + ".json")
     try:
         from app.edge_function_store import regular_bytes
-        revision = json.loads(regular_bytes(context, 65536)).get("revision", "")
+        state = json.loads(regular_bytes(context, CONTEXT_MAX_BYTES))
+        revision = state.get("revision", "")
         if not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{64}", revision):
             return
-        previous = runtime_directory(root) / "code" / project_uuid(json.loads(regular_bytes(context, 65536))["uuid"]) / revision
+        previous = runtime_directory(root) / "code" / project_uuid(state["uuid"]) / revision
         if previous.is_dir() and not previous.is_symlink():
             os.utime(previous, follow_symlinks=False)
     except (OSError, RuntimeError, ValueError, AttributeError, KeyError, TypeError):
