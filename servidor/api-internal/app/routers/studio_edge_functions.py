@@ -41,13 +41,13 @@ SETTINGS = {'EDGE_FUNCTIONS_ENABLED', 'FUNCTIONS_ALLOWED_NETWORK_HOSTS'}
 class CodeFile(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     name: StrictStr = Field(min_length=1, max_length=240)
-    content: StrictStr = Field(max_length=store.MAX_BYTES)
+    content: StrictStr = Field(max_length=store.MAX_BYTES_CEILING)
 
 
 class DraftBody(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     expected_revision: StrictStr | None = Field(..., max_length=64)
-    files: list[CodeFile] = Field(min_length=1, max_length=store.MAX_FILES)
+    files: list[CodeFile] = Field(min_length=1, max_length=store.MAX_FILES_CEILING)
 
 
 class PublishBody(BaseModel):
@@ -64,7 +64,21 @@ class SecretEntry(BaseModel):
 
 class SecretsUpdateBody(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
-    secrets: list[SecretEntry] = Field(min_length=1, max_length=edge_functions.MAX_SECRETS)
+    secrets: list[SecretEntry] = Field(min_length=1, max_length=edge_functions.QUOTA_SPECS['max_secrets']['max'])
+
+
+class QuotasUpdateBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    max_functions: StrictInt | None = None
+    max_files: StrictInt | None = None
+    max_bytes: StrictInt | None = None
+    memory_limit_mb: StrictInt | None = None
+    worker_timeout_ms: StrictInt | None = None
+    max_concurrent_project: StrictInt | None = None
+    max_secrets: StrictInt | None = None
+    max_secrets_total_bytes: StrictInt | None = None
+    alert_threshold_pct: StrictInt | None = None
+    reset_defaults: StrictBool = False
 
 
 class FunctionConfigBody(BaseModel):
@@ -117,18 +131,12 @@ class GcBody(BaseModel):
     min_age_seconds: StrictInt = Field(default=store.DEFAULT_ORPHAN_RETENTION_SECONDS, ge=0, le=31536000)
 
 
-def governance_limits() -> dict[str, int]:
+def governance_limits(quotas: dict[str, int] | None = None) -> dict[str, int]:
+    effective = edge_functions.validate_quotas(quotas)
     return {
-        'max_functions': store.MAX_FUNCTIONS,
-        'max_files': store.MAX_FILES,
-        'max_bytes': store.MAX_BYTES,
-        'memory_limit_mb': 150,
-        'worker_timeout_ms': 60000,
-        'max_concurrent_global': 4,
-        'max_concurrent_project': 2,
-        'max_secrets': edge_functions.MAX_SECRETS,
+        **effective,
+        'max_concurrent_global': edge_functions.PLATFORM_MAX_CONCURRENT_GLOBAL,
         'max_secret_value_bytes': edge_functions.MAX_SECRET_VALUE_BYTES,
-        'max_secrets_total_bytes': edge_functions.MAX_SECRETS_TOTAL_BYTES,
     }
 
 
@@ -273,6 +281,14 @@ async def configuration(conn, project_id):
     return {'enabled': row['enabled'], 'network_allowlist': network_hosts(allowlist)}
 
 
+async def load_project_quotas(conn, project_id) -> tuple[dict[str, int], dict[str, int]]:
+    row = await conn.fetchval('SELECT quotas FROM project_edge_functions WHERE project_id=$1', project_id)
+    if not row:
+        return edge_functions.default_quotas(), {}
+    raw = json.loads(row) if isinstance(row, str) else dict(row)
+    return edge_functions.validate_quotas(raw), raw
+
+
 async def settings_values(conn, project_id):
     value = await configuration(conn, project_id)
     return {'EDGE_FUNCTIONS_ENABLED': str(value['enabled']).lower(),
@@ -320,11 +336,11 @@ def load(project):
     return store.load(ROOT, project['name'], identity(project))
 
 
-def detail(project, state, slug, enabled, *, verify_jwt: bool = True):
+def detail(project, state, slug, enabled, *, verify_jwt: bool = True, quotas: dict[str, int] | None = None):
     value = store.item(ROOT, state, slug, {})
     if value is None:
         raise HTTPException(404, 'Function not found')
-    return {**value, 'enabled': enabled, 'verify_jwt': verify_jwt, 'limits': governance_limits()}
+    return {**value, 'enabled': enabled, 'verify_jwt': verify_jwt, 'limits': governance_limits(quotas)}
 
 
 async def load_function_configs(conn, project_id) -> dict[str, bool]:
@@ -662,16 +678,89 @@ async def list_secret_metadata(conn, project_id) -> list[dict]:
     ]
 
 
-def secret_limits() -> dict[str, int]:
+def secret_limits(quotas: dict[str, int] | None = None) -> dict[str, int]:
+    effective = edge_functions.validate_quotas(quotas)
     return {
-        'max_secrets': edge_functions.MAX_SECRETS,
+        'max_secrets': effective['max_secrets'],
         'max_value_bytes': edge_functions.MAX_SECRET_VALUE_BYTES,
-        'max_total_bytes': edge_functions.MAX_SECRETS_TOTAL_BYTES,
+        'max_total_bytes': effective['max_secrets_total_bytes'],
+    }
+
+
+async def _record_quota_event(
+    conn,
+    project_id,
+    kind: str,
+    severity: str,
+    message: str,
+    *,
+    function_name: str | None = None,
+    detail: dict | None = None,
+) -> None:
+    """Persist an operational quota/saturation event while keeping storage bounded."""
+    await conn.execute(
+        '''INSERT INTO studio_edge_quota_events(project_id, function_name, kind, severity, message, detail)
+           VALUES($1,$2,$3,$4,$5,$6::jsonb)''',
+        project_id, function_name, kind, severity, message[:500], json.dumps(detail or {}),
+    )
+    await conn.execute(
+        '''DELETE FROM studio_edge_quota_events
+           WHERE project_id=$1 AND id NOT IN (
+               SELECT id FROM studio_edge_quota_events
+               WHERE project_id=$1
+               ORDER BY created_at DESC, id DESC
+               LIMIT 100
+           )''',
+        project_id,
+    )
+
+
+async def _recent_429_count(conn, project_id, runtime_logs: list[dict] | None = None) -> int:
+    db_hits = await conn.fetchval(
+        '''SELECT count(*) FROM studio_edge_invocation_logs
+           WHERE project_id=$1 AND status=429 AND created_at > now() - interval '15 minutes' ''',
+        project_id,
+    )
+    evt_hits = await conn.fetchval(
+        '''SELECT count(*) FROM studio_edge_quota_events
+           WHERE project_id=$1 AND kind='concurrency_429' AND acknowledged_at IS NULL
+             AND created_at > now() - interval '15 minutes' ''',
+        project_id,
+    )
+    runtime_hits = sum(1 for item in (runtime_logs or []) if item.get('status') == 429)
+    return max(int(db_hits or 0), int(evt_hits or 0)) + runtime_hits
+
+
+async def _build_quota_report(conn, project: dict, state: dict, quotas: dict[str, int], raw_quotas: dict[str, int]) -> dict:
+    secrets = await load_project_secrets(conn, project, tolerate=True)
+    secrets_total_bytes = sum(len(k.encode('utf-8')) + len(v.encode('utf-8')) for k, v in secrets.items())
+    runtime_logs: list[dict] = []
+    try:
+        creds = canonical_projection_credentials(project)
+        merged = await _fetch_merged_logs(conn, project, creds, secrets, function_name=None, level='warn', limit=50)
+        runtime_logs = [entry for entry in merged.get('logs', []) if entry.get('source') == 'worker' and entry.get('status') == 429]
+    except Exception:
+        runtime_logs = []
+    recent_429 = await _recent_429_count(conn, project['id'], runtime_logs=runtime_logs)
+    status = store.compute_quota_status(
+        ROOT, state, {},
+        quotas=quotas,
+        secrets_count=len(secrets),
+        secrets_total_bytes=secrets_total_bytes,
+        recent_429_count=recent_429,
+    )
+    return {
+        'quotas': governance_limits(quotas),
+        'defaults': governance_limits(),
+        'bounds': edge_functions.quota_bounds(),
+        'customized': bool(raw_quotas),
+        **status,
     }
 
 
 async def prepare(conn, project, state, config, *, secrets_override: dict[str, str] | None = None,
-                  configs_override: dict[str, bool] | None = None):
+                  configs_override: dict[str, bool] | None = None,
+                  limits_override: dict[str, int] | None = None):
     secret, public_url = canonical_environment(project)
     keys = await internal_keys(conn, project)
     env = {
@@ -686,11 +775,20 @@ async def prepare(conn, project, state, config, *, secrets_override: dict[str, s
     files = store.published_files(ROOT, project['name'], identity(project), state=state)
     published_slugs = {path.split('/', 1)[0] for path in files}
     public_functions = sorted(slug for slug, verify in configs.items() if not verify and slug in published_slugs)
+    if limits_override is not None:
+        runtime_limits = limits_override
+    elif 'quotas' in config:
+        runtime_limits = edge_functions.runtime_limits_override(config['quotas'])
+    else:
+        quotas, _ = await load_project_quotas(conn, project['id'])
+        runtime_limits = edge_functions.runtime_limits_override(quotas)
     kwargs = {}
     if secrets:
         kwargs['secrets'] = secrets
     if public_functions:
         kwargs['public_functions'] = public_functions
+    if runtime_limits:
+        kwargs['limits'] = runtime_limits
     return edge_functions.prepare_context(ROOT, project['name'], identity(project), secret, env, files, config['network_allowlist'], **kwargs)
 
 
@@ -740,16 +838,150 @@ async def function_list(ref: str, request: Request, response: Response, pool=Dep
     async with management_context(ref, request, response, pool) as (conn, project, _, config):
         state = load(project)
         configs = await load_function_configs(conn, project['id'])
+        quotas, _ = await load_project_quotas(conn, project['id'])
         values = [store.item(ROOT, state, slug, {}) for slug in sorted(state['functions'])]
         return {'enabled': config['enabled'], 'functions': [
             {**{key: item[key] for key in ('name', 'revision', 'published_revision')},
-             'verify_jwt': configs.get(item['name'], True)} for item in values], 'limits': governance_limits()}
+             'verify_jwt': configs.get(item['name'], True)} for item in values], 'limits': governance_limits(quotas)}
 
 
 @router.get('/templates')
 async def templates_list(ref: str, request: Request, response: Response, pool=Depends(get_pool)):
     async with management_context(ref, request, response, pool):
         return {'templates': store.list_templates()}
+
+
+@router.get('/quotas')
+async def quotas_get(ref: str, request: Request, response: Response, pool=Depends(get_pool)):
+    async with management_context(ref, request, response, pool) as (conn, project, _, _):
+        state = load(project)
+        quotas, raw_quotas = await load_project_quotas(conn, project['id'])
+        return await _build_quota_report(conn, project, state, quotas, raw_quotas)
+
+
+@router.put('/quotas')
+async def quotas_update(ref: str, body: QuotasUpdateBody, request: Request, response: Response, pool=Depends(get_pool)):
+    async with management_context(ref, request, response, pool) as (conn, project, actor, config):
+        is_global_admin = bool(getattr(request.state, 'edge_actor_is_global_admin', False))
+        current_quotas, current_raw = await load_project_quotas(conn, project['id'])
+        if body.reset_defaults:
+            raw_updates: dict[str, int] = {}
+            proposed_quotas = edge_functions.default_quotas()
+        else:
+            supplied = {k: v for k, v in body.model_dump(exclude={'reset_defaults'}).items() if v is not None}
+            if not supplied:
+                raise HTTPException(400, 'Provide at least one quota field or reset_defaults=true')
+            merged_raw = {**current_raw, **supplied}
+            try:
+                proposed_quotas = edge_functions.validate_quotas(
+                    merged_raw, is_global_admin=is_global_admin, check_elevation=True,
+                )
+            except PermissionError as error:
+                raise HTTPException(403, str(error)) from error
+            except ValueError as error:
+                raise HTTPException(400, str(error)) from error
+            defaults = edge_functions.default_quotas()
+            raw_updates = {k: v for k, v in proposed_quotas.items() if v != defaults[k]}
+
+        audit_rev = hashlib.sha256(json.dumps({'action': 'configure_quotas', 'quotas': raw_updates}, sort_keys=True).encode()).hexdigest()
+        audit_id = await audit(conn, project, actor, 'configure_quotas', None, audit_rev)
+        state = load(project)
+        has_published = bool(store.published_files(ROOT, project['name'], identity(project), state=state))
+        runtime_limits_prev = edge_functions.runtime_limits_override(current_quotas)
+        runtime_limits_next = edge_functions.runtime_limits_override(proposed_quotas)
+        needs_runtime_sync = config['enabled'] and has_published and runtime_limits_prev != runtime_limits_next
+        previous = edge_functions.read_context(ROOT, project['name'], identity(project)) if needs_runtime_sync else None
+        proposed_config = {**config, 'quotas': proposed_quotas}
+        try:
+            async with conn.transaction():
+                await conn.execute(
+                    '''INSERT INTO project_edge_functions(project_id,enabled,network_allowlist,quotas,updated_by)
+                       VALUES($1,$2,$3::jsonb,$4::jsonb,$5)
+                       ON CONFLICT (project_id) DO UPDATE
+                       SET quotas=EXCLUDED.quotas,updated_by=EXCLUDED.updated_by,updated_at=now()''',
+                    project['id'], config['enabled'], json.dumps(config['network_allowlist']),
+                    json.dumps(raw_updates), actor,
+                )
+                if needs_runtime_sync:
+                    context = await prepare(conn, project, state, proposed_config, limits_override=runtime_limits_next)
+                    edge_functions.activate_context(ROOT, context)
+            await _record_quota_event(
+                conn, project['id'], 'quota_updated', 'info',
+                'Project Edge Functions quotas updated' if raw_updates else 'Project Edge Functions quotas reset to defaults',
+                detail={'quotas': raw_updates},
+            )
+        except Exception:
+            if needs_runtime_sync:
+                if previous is None:
+                    edge_functions.withdraw(ROOT, project['name'])
+                else:
+                    edge_functions.activate_context(ROOT, previous)
+            await outcome(conn, audit_id, 'failed')
+            raise
+        await outcome(conn, audit_id, 'completed')
+        return await _build_quota_report(conn, project, state, proposed_quotas, raw_updates)
+
+
+@router.get('/alerts')
+async def alerts_list(ref: str, request: Request, response: Response, pool=Depends(get_pool)):
+    async with management_context(ref, request, response, pool, allow_query=True) as (conn, project, _, _):
+        unknown = set(request.query_params.keys()) - {'include_acknowledged', 'limit'}
+        if unknown:
+            raise HTTPException(400, f"Unsupported query parameters: {', '.join(sorted(unknown))}")
+        include_ack = (request.query_params.get('include_acknowledged') or 'false').lower() == 'true'
+        limit_raw = request.query_params.get('limit') or '50'
+        if not limit_raw.isdigit() or not (1 <= int(limit_raw) <= 100):
+            raise HTTPException(400, 'Alert limit must be between 1 and 100')
+        limit = int(limit_raw)
+        state = load(project)
+        quotas, raw_quotas = await load_project_quotas(conn, project['id'])
+        report = await _build_quota_report(conn, project, state, quotas, raw_quotas)
+        clause = '' if include_ack else 'AND acknowledged_at IS NULL'
+        rows = await conn.fetch(
+            f'''SELECT id, function_name, kind, severity, message, detail, acknowledged_by, acknowledged_at, created_at
+                FROM studio_edge_quota_events
+                WHERE project_id=$1 {clause}
+                ORDER BY created_at DESC, id DESC
+                LIMIT $2''',
+            project['id'], limit,
+        )
+        events = [
+            {
+                'id': int(r['id']),
+                'function_name': r['function_name'],
+                'kind': r['kind'],
+                'severity': r['severity'],
+                'message': r['message'],
+                'detail': json.loads(r['detail']) if isinstance(r['detail'], str) else (r['detail'] or {}),
+                'acknowledged': r['acknowledged_at'] is not None,
+                'acknowledged_at': r['acknowledged_at'].isoformat() if r['acknowledged_at'] else None,
+                'created_at': r['created_at'].isoformat(),
+            }
+            for r in (rows or ())
+        ]
+        return {
+            'active_alerts': report['active_alerts'],
+            'events': events,
+            'usage': report['usage'],
+            'utilization_pct': report['utilization_pct'],
+            'quotas': report['quotas'],
+        }
+
+
+@router.post('/alerts/{event_id}/ack')
+async def alert_acknowledge(ref: str, event_id: int, request: Request, response: Response, pool=Depends(get_pool)):
+    async with management_context(ref, request, response, pool) as (conn, project, actor, _):
+        row = await conn.fetchrow(
+            '''UPDATE studio_edge_quota_events
+               SET acknowledged_by=COALESCE(acknowledged_by, $3),
+                   acknowledged_at=COALESCE(acknowledged_at, now())
+               WHERE project_id=$1 AND id=$2
+               RETURNING id, acknowledged_at''',
+            project['id'], event_id, actor,
+        )
+        if row is None:
+            raise HTTPException(404, 'Quota alert event not found')
+        return {'id': int(row['id']), 'acknowledged': True, 'acknowledged_at': row['acknowledged_at'].isoformat()}
 
 
 @router.post('/gc')
@@ -780,7 +1012,8 @@ async def logs_list(ref: str, request: Request, response: Response, pool=Depends
 @router.get('/secrets')
 async def secrets_list(ref: str, request: Request, response: Response, pool=Depends(get_pool)):
     async with management_context(ref, request, response, pool) as (conn, project, _, _):
-        return {'secrets': await list_secret_metadata(conn, project['id']), 'limits': secret_limits()}
+        quotas, _ = await load_project_quotas(conn, project['id'])
+        return {'secrets': await list_secret_metadata(conn, project['id']), 'limits': secret_limits(quotas)}
 
 
 @router.put('/secrets')
@@ -795,10 +1028,15 @@ async def secrets_upsert(ref: str, body: SecretsUpdateBody, request: Request, re
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
     async with management_context(ref, request, response, pool) as (conn, project, actor, config):
+        quotas, _ = await load_project_quotas(conn, project['id'])
         current_secrets = await load_project_secrets(conn, project, tolerate=frozenset(updates))
         proposed_secrets = {**current_secrets, **updates}
         try:
-            validated = edge_functions.validate_secrets(proposed_secrets)
+            validated = edge_functions.validate_secrets(
+                proposed_secrets,
+                max_secrets=quotas['max_secrets'],
+                max_total_bytes=quotas['max_secrets_total_bytes'],
+            )
         except ValueError as error:
             raise HTTPException(400, str(error)) from error
         audit_target = next(iter(updates)) if len(updates) == 1 else ','.join(sorted(updates))[:120]
@@ -837,7 +1075,7 @@ async def secrets_upsert(ref: str, body: SecretsUpdateBody, request: Request, re
             await outcome(conn, audit_id, 'failed')
             raise
         await outcome(conn, audit_id, 'completed')
-        return {'secrets': await list_secret_metadata(conn, project['id']), 'limits': secret_limits(), 'runtime_synced': runtime_synced}
+        return {'secrets': await list_secret_metadata(conn, project['id']), 'limits': secret_limits(quotas), 'runtime_synced': runtime_synced}
 
 
 @router.delete('/secrets/{secret_name}')
@@ -847,6 +1085,7 @@ async def secret_delete(ref: str, secret_name: str, request: Request, response: 
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
     async with management_context(ref, request, response, pool) as (conn, project, actor, config):
+        quotas, _ = await load_project_quotas(conn, project['id'])
         current_secrets = await load_project_secrets(conn, project, tolerate=frozenset({secret_name}))
         if secret_name not in current_secrets:
             row = await conn.fetchval(
@@ -884,7 +1123,7 @@ async def secret_delete(ref: str, secret_name: str, request: Request, response: 
             raise
         await outcome(conn, audit_id, 'completed')
         return {'deleted': True, 'name': secret_name, 'secrets': await list_secret_metadata(conn, project['id']),
-                'limits': secret_limits(), 'runtime_synced': runtime_synced}
+                'limits': secret_limits(quotas), 'runtime_synced': runtime_synced}
 
 
 @router.get('/{slug}')
@@ -892,7 +1131,8 @@ async def function_get(ref: str, slug: str, request: Request, response: Response
     validate_slug(slug)
     async with management_context(ref, request, response, pool) as (conn, project, _, config):
         configs = await load_function_configs(conn, project['id'])
-        return detail(project, load(project), slug, config['enabled'], verify_jwt=configs.get(slug, True))
+        quotas, _ = await load_project_quotas(conn, project['id'])
+        return detail(project, load(project), slug, config['enabled'], verify_jwt=configs.get(slug, True), quotas=quotas)
 
 
 def validate_slug(slug):
@@ -905,18 +1145,21 @@ def validate_slug(slug):
 @router.put('/{slug}')
 async def function_save(ref: str, slug: str, body: DraftBody, request: Request, response: Response, pool=Depends(get_pool)):
     validate_slug(slug)
-    try:
-        files = store.validate_files([file.model_dump() for file in body.files])
-    except (ValueError, UnicodeError) as error:
-        raise HTTPException(400, 'Invalid function files') from error
+    raw_files = [file.model_dump() for file in body.files]
     async with management_context(ref, request, response, pool) as (conn, project, actor, config):
+        quotas, _ = await load_project_quotas(conn, project['id'])
+        try:
+            files = store.validate_files(raw_files, max_files=quotas['max_files'], max_bytes=quotas['max_bytes'])
+        except (ValueError, UnicodeError) as error:
+            raise HTTPException(400, str(error)) from error
         state = load(project)
         current = store.item(ROOT, state, slug, {})
         if body.expected_revision != (current['revision'] if current else None):
             raise HTTPException(409, 'Function draft changed; reload before saving')
-        if not current and len(state['functions']) >= store.MAX_FUNCTIONS:
+        if not current and sum(1 for ptrs in state['functions'].values() if ptrs.get('draft') is not None) >= quotas['max_functions']:
             raise HTTPException(409, 'Project function limit reached')
-        revision = store.store_version(ROOT, project['name'], identity(project), slug, files)
+        revision = store.store_version(ROOT, project['name'], identity(project), slug, files,
+                                       max_files=quotas['max_files'], max_bytes=quotas['max_bytes'])
         state['functions'][slug] = {'draft': revision, 'published': current['published_revision'] if current else None}
         audit_id = await audit(conn, project, actor, 'save_draft', slug, revision)
         try:
@@ -928,7 +1171,7 @@ async def function_save(ref: str, slug: str, body: DraftBody, request: Request, 
             raise
         await outcome(conn, audit_id, 'completed')
         configs = await load_function_configs(conn, project['id'])
-        return detail(project, state, slug, config['enabled'], verify_jwt=configs.get(slug, True))
+        return detail(project, state, slug, config['enabled'], verify_jwt=configs.get(slug, True), quotas=quotas)
 
 
 async def commit_change(conn, project, actor, config, state, proposed, slug, revision, action):
@@ -988,7 +1231,8 @@ async def function_publish(ref: str, slug: str, body: PublishBody, request: Requ
         proposed = copy.deepcopy(state)
         proposed['functions'][slug]['published'] = body.revision
         await commit_change(conn, project, actor, config, state, proposed, slug, body.revision, 'publish')
-        return detail(project, proposed, slug, True, verify_jwt=verify_jwt)
+        quotas, _ = await load_project_quotas(conn, project['id'])
+        return detail(project, proposed, slug, True, verify_jwt=verify_jwt, quotas=quotas)
 
 
 @router.post('/{slug}/unpublish')
@@ -1005,7 +1249,8 @@ async def function_unpublish(ref: str, slug: str, body: PublishBody, request: Re
         proposed = copy.deepcopy(state)
         proposed['functions'][slug]['published'] = None
         await commit_change(conn, project, actor, config, state, proposed, slug, current['revision'], 'unpublish')
-        return detail(project, proposed, slug, config['enabled'], verify_jwt=verify_jwt)
+        quotas, _ = await load_project_quotas(conn, project['id'])
+        return detail(project, proposed, slug, config['enabled'], verify_jwt=verify_jwt, quotas=quotas)
 
 
 @router.put('/{slug}/config')
@@ -1041,7 +1286,8 @@ async def function_configure(ref: str, slug: str, body: FunctionConfigBody, requ
             await outcome(conn, audit_id, 'failed')
             raise
         await outcome(conn, audit_id, 'completed')
-        return detail(project, state, slug, config['enabled'], verify_jwt=bool(body.verify_jwt))
+        quotas, _ = await load_project_quotas(conn, project['id'])
+        return detail(project, state, slug, config['enabled'], verify_jwt=bool(body.verify_jwt), quotas=quotas)
 
 
 @router.get('/{slug}/logs')
@@ -1148,6 +1394,12 @@ async def function_invoke(ref: str, slug: str, body: InvokeBody, request: Reques
             f'{method} /{slug}{path_with_query} -> {resp_status}',
             sensitive,
         )
+        if resp_status == 429:
+            await _record_quota_event(
+                conn, project_snapshot['id'], 'concurrency_429', 'critical',
+                f"Function '{slug}' returned HTTP 429 during invocation",
+                function_name=slug, detail={'status': 429, 'request_id': request_id},
+            )
         await outcome(conn, audit_id, 'completed')
         recent = await _fetch_merged_logs(
             conn, project_snapshot, creds, secrets_snapshot,
@@ -1285,7 +1537,8 @@ async def function_rollback(ref: str, slug: str, body: RollbackBody, request: Re
             raise
         await outcome(conn, audit_id, 'completed')
         configs = await load_function_configs(conn, project['id'])
-        return detail(project, state, slug, config['enabled'], verify_jwt=configs.get(slug, True))
+        quotas, _ = await load_project_quotas(conn, project['id'])
+        return detail(project, state, slug, config['enabled'], verify_jwt=configs.get(slug, True), quotas=quotas)
 
 
 @router.delete('/{slug}')

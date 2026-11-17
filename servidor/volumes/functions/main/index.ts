@@ -38,10 +38,14 @@ async function canonicalProjection(name: string, ref: string): Promise<Projectio
   return value
 }
 
-const reservedFunctionNames = new Set(['main', 'secrets', 'logs', 'gc', 'config', 'health', 'versions'])
+const reservedFunctionNames = new Set([
+  'main', 'secrets', 'logs', 'gc', 'config', 'health', 'versions',
+  'templates', 'quotas', 'alerts', 'schedules',
+])
 const functionNamePattern = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/
 
-type Tenant = { project: string; uuid: string; jwt_secret: string; revision: string; env: Record<string, string>; network_allowlist?: string[]; secrets?: Record<string, string>; public_functions?: string[] }
+type RuntimeLimits = { memory_limit_mb: number; worker_timeout_ms: number; max_concurrent_project: number }
+type Tenant = { project: string; uuid: string; jwt_secret: string; revision: string; env: Record<string, string>; network_allowlist?: string[]; secrets?: Record<string, string>; public_functions?: string[]; limits?: RuntimeLimits }
 
 function validatePublicFunctions(raw: unknown): string[] {
   if (raw === undefined) return []
@@ -62,7 +66,7 @@ function validateSecrets(raw: unknown): Record<string, string> {
   if (raw === undefined) return {}
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Invalid context')
   const entries = Object.entries(raw as Record<string, unknown>)
-  if (entries.length === 0 || entries.length > 64) throw new Error('Invalid context')
+  if (entries.length === 0 || entries.length > 128) throw new Error('Invalid context')
   let totalBytes = 0
   const result: Record<string, string> = {}
   for (const [key, value] of entries) {
@@ -75,10 +79,32 @@ function validateSecrets(raw: unknown): Record<string, string> {
     const byteLen = textEncoder.encode(value).length
     if (byteLen > 8192) throw new Error('Invalid context')
     totalBytes += textEncoder.encode(key).length + byteLen
-    if (totalBytes > 65536) throw new Error('Invalid context')
+    if (totalBytes > 131072) throw new Error('Invalid context')
     result[key] = value
   }
   return result
+}
+
+function validateLimits(raw: unknown): RuntimeLimits {
+  const defaults: RuntimeLimits = { memory_limit_mb: 150, worker_timeout_ms: 60000, max_concurrent_project: 2 }
+  if (raw === undefined) return defaults
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Invalid context')
+  const obj = raw as Record<string, unknown>
+  const allowed = new Set(['memory_limit_mb', 'worker_timeout_ms', 'max_concurrent_project'])
+  if (Object.keys(obj).some((k) => !allowed.has(k)) || Object.keys(obj).length !== 3) {
+    throw new Error('Invalid context')
+  }
+  const mem = obj.memory_limit_mb
+  const timeout = obj.worker_timeout_ms
+  const conc = obj.max_concurrent_project
+  if (!Number.isInteger(mem) || (mem as number) < 64 || (mem as number) > 512) throw new Error('Invalid context')
+  if (!Number.isInteger(timeout) || (timeout as number) < 1000 || (timeout as number) > 120000) throw new Error('Invalid context')
+  if (!Number.isInteger(conc) || (conc as number) < 1 || (conc as number) > 4) throw new Error('Invalid context')
+  return {
+    memory_limit_mb: mem as number,
+    worker_timeout_ms: timeout as number,
+    max_concurrent_project: conc as number,
+  }
 }
 
 function response(code: string, status: number): Response {
@@ -95,7 +121,7 @@ async function tenantContext(name: string, uuid: string): Promise<Tenant | null>
   }
   if (!info.isFile || info.isSymlink || info.size > 262144) throw new Error('Invalid context')
   const data = JSON.parse(await Deno.readTextFile(path))
-  const allowedKeys = new Set([...fields, 'network_allowlist', 'secrets', 'public_functions'])
+  const allowedKeys = new Set([...fields, 'network_allowlist', 'secrets', 'public_functions', 'limits'])
   if (!data || typeof data !== 'object' || Array.isArray(data) ||
     Object.keys(data).some((key) => !allowedKeys.has(key)) || fields.some((key) => !(key in data)) ||
     data.project !== name || data.uuid !== uuid || typeof data.jwt_secret !== 'string' || !data.jwt_secret ||
@@ -105,6 +131,7 @@ async function tenantContext(name: string, uuid: string): Promise<Tenant | null>
   externalNetworkHosts(data.network_allowlist ?? [])
   validateSecrets(data.secrets)
   validatePublicFunctions(data.public_functions)
+  validateLimits(data.limits)
   return data
 }
 
@@ -430,9 +457,21 @@ Deno.serve(async (request: Request) => {
   } catch (error) {
     if (!(error instanceof Deno.errors.NotFound)) return response('tenant_configuration_unavailable', 503)
   }
-  if (totalRunning >= 4 || (running.get(project) ?? 0) >= 2) return response('function_concurrency_limit', 429)
+  const limits = validateLimits(tenant.limits)
+  const currentProjectRunning = running.get(project) ?? 0
+  if (totalRunning >= 4 || currentProjectRunning >= limits.max_concurrent_project) {
+    recordLog(
+      project,
+      name,
+      'warn',
+      'worker',
+      `Saturation: concurrency limit reached (${currentProjectRunning}/${limits.max_concurrent_project} project, ${totalRunning}/4 global)`,
+      { status: 429 },
+    )
+    return response('function_concurrency_limit', 429)
+  }
   totalRunning++
-  running.set(project, (running.get(project) ?? 0) + 1)
+  running.set(project, currentProjectRunning + 1)
   let released = false
   const release = () => {
     if (released) return
@@ -443,7 +482,7 @@ Deno.serve(async (request: Request) => {
     else running.delete(project)
     clearTimeout(timer)
   }
-  const timer = setTimeout(release, 65000)
+  const timer = setTimeout(release, limits.worker_timeout_ms + 5000)
   registerTenantRedaction(project, uuid, tenant, canonical)
   const startedAt = Date.now()
   try {
@@ -458,7 +497,7 @@ Deno.serve(async (request: Request) => {
       SUPABASE_PUBLIC_URL: new URL(tenant.env.SUPABASE_PUBLIC_URL).origin + '/' + ref }
     const workerEnv = { ...tenant.env, ...(tenant.secrets ?? {}), ...baseEnv }
     const worker = await EdgeRuntime.userWorkers.create({
-      servicePath, memoryLimitMb: 150, workerTimeoutMs: 60000,
+      servicePath, memoryLimitMb: limits.memory_limit_mb, workerTimeoutMs: limits.worker_timeout_ms,
       noModuleCache: false, forceCreate: true, importMapPath, envVars: Object.entries(workerEnv),
       permissions,
     })

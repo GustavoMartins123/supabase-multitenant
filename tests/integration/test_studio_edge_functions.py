@@ -61,7 +61,10 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
             row = await pool.fetchrow('SELECT id,is_active FROM users WHERE id=$1',uuid.UUID(identity))
             if not row or not row['is_active']:
                 raise HTTPException(403,'Inactive user')
-            return {'db_user_id':row['id'],'is_global_admin':False}
+            return {
+                'db_user_id': row['id'],
+                'is_global_admin': bool(await pool.fetchval("SELECT EXISTS(SELECT 1 FROM user_groups WHERE user_id=$1 AND group_name='admin')", row['id'])),
+            }
         self.user_patch = patch.object(routes,'resolve_authenticated_user',side_effect=user)
         self.user_patch.start()
         app=FastAPI()
@@ -983,8 +986,10 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
         for tpl in templates:
             self.assertEqual(store.validate_files(tpl['files']), sorted(tpl['files'], key=lambda f: f['name']))
         for reserved in ('templates', 'quotas', 'alerts', 'schedules'):
+            with self.assertRaises(ValueError):
+                store.function_name(reserved)
             bad = await self.request('PUT', f'/{reserved}', {'expected_revision': None, 'files': [{'name': 'index.ts', 'content': 'x'}]})
-            self.assertEqual(bad.status_code, 400)
+            self.assertIn(bad.status_code, (400, 405, 422))
 
         # Multi-author drafts record creator attribution per revision.
         v1 = (await self.request('PUT', '/hello', {
@@ -1038,3 +1043,54 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
             await self.pool.fetchval("SELECT count(*) FROM project_edge_function_revisions WHERE project_id=$1 AND function_name='hello'", self.projects[0]),
             0,
         )
+
+    async def test_custom_project_quotas_runtime_limits_and_saturation_alerts(self):
+        from app import edge_functions
+        await self.configure(True)
+        # Project admin cannot raise limits above platform defaults, but can tighten limits & alert thresholds.
+        denied_raise = await self.request('PUT', '/quotas', {'memory_limit_mb': 256, 'max_concurrent_project': 4})
+        self.assertEqual(denied_raise.status_code, 403, denied_raise.text)
+        tightened = await self.request('PUT', '/quotas', {'max_functions': 2, 'max_bytes': 10000, 'max_secrets': 1, 'alert_threshold_pct': 50})
+        self.assertEqual(tightened.status_code, 200, tightened.text)
+        self.assertEqual(tightened.json()['quotas']['max_functions'], 2)
+        self.assertEqual(tightened.json()['quotas']['alert_threshold_pct'], 50)
+
+        # Enforces tightened per-project function count, bundle byte size, and secret caps.
+        d1 = (await self.request('PUT', '/fn-one', {'expected_revision': None, 'files': [{'name': 'index.ts', 'content': 'export {};'}]})).json()
+        self.assertEqual((await self.request('POST', '/fn-one/publish', {'revision': d1['revision'], 'expected_published_revision': None})).status_code, 200)
+        too_big = await self.request('PUT', '/fn-two', {'expected_revision': None, 'files': [{'name': 'index.ts', 'content': 'x' * 11000}]})
+        self.assertEqual(too_big.status_code, 400)
+        self.assertEqual((await self.request('PUT', '/fn-two', {'expected_revision': None, 'files': [{'name': 'index.ts', 'content': 'Deno.serve(()=>new Response("ok"))'}]})).status_code, 200)
+        third_fn = await self.request('PUT', '/fn-three', {'expected_revision': None, 'files': [{'name': 'index.ts', 'content': 'x'}]})
+        self.assertEqual(third_fn.status_code, 409)
+        self.assertEqual((await self.request('PUT', '/secrets', {'secrets': [{'name': 'S1', 'value': 'v1'}]})).status_code, 200)
+        sec_cap = await self.request('PUT', '/secrets', {'secrets': [{'name': 'S2', 'value': 'v2'}]})
+        self.assertEqual(sec_cap.status_code, 400)
+
+        # Near-limit alert fires at >= 50% (we hit 2/2 = 100% functions & 1/1 = 100% secrets).
+        alerts_resp = await self.request('GET', '/alerts')
+        self.assertEqual(alerts_resp.status_code, 200, alerts_resp.text)
+        active = alerts_resp.json()['active_alerts']
+        self.assertTrue(any(a['metric'] == 'functions_count' and a['severity'] == 'critical' for a in active), active)
+        self.assertTrue(any(a['metric'] == 'secrets_count' and a['severity'] == 'critical' for a in active), active)
+        events = alerts_resp.json()['events']
+        self.assertTrue(any(e['kind'] == 'quota_updated' and not e['acknowledged'] for e in events))
+        ack_id = events[0]['id']
+        ack_resp = await self.request('POST', f'/alerts/{ack_id}/ack')
+        self.assertEqual(ack_resp.status_code, 200, ack_resp.text)
+        self.assertTrue(ack_resp.json()['acknowledged'])
+        self.assertEqual([e['id'] for e in (await self.request('GET', '/alerts')).json()['events'] if e['id'] == ack_id], [])
+
+        # Global platform admin can raise limits within ceilings and propagate them to runtime context JSON.
+        await self.pool.execute("INSERT INTO user_groups(user_id,group_name,source) VALUES($1,'admin','test')", self.users[0])
+        raised = await self.request('PUT', '/quotas', {'memory_limit_mb': 256, 'worker_timeout_ms': 90000, 'max_concurrent_project': 4, 'max_functions': 200, 'max_bytes': 2000000})
+        self.assertEqual(raised.status_code, 200, raised.text)
+        ctx = edge_functions.read_context(self.root, 'test_alpha', str(self.projects[0]))
+        self.assertEqual(ctx['limits'], {'memory_limit_mb': 256, 'worker_timeout_ms': 90000, 'max_concurrent_project': 4})
+
+        # Out-of-bounds ceiling values are rejected.
+        self.assertEqual((await self.request('PUT', '/quotas', {'max_concurrent_project': 9})).status_code, 400)
+        reset = await self.request('PUT', '/quotas', {'reset_defaults': True})
+        self.assertEqual(reset.status_code, 200, reset.text)
+        ctx_after = edge_functions.read_context(self.root, 'test_alpha', str(self.projects[0]))
+        self.assertNotIn('limits', ctx_after)

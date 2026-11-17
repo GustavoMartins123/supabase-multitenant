@@ -25,6 +25,9 @@ SEGMENT = re.compile(r"[A-Za-z0-9_@][A-Za-z0-9_@.\-]{0,99}\Z")
 MAX_FILES = 64
 MAX_BYTES = 1_000_000
 MAX_FUNCTIONS = 128
+MAX_FILES_CEILING = edge_functions.QUOTA_SPECS["max_files"]["max"]
+MAX_BYTES_CEILING = edge_functions.QUOTA_SPECS["max_bytes"]["max"]
+MAX_FUNCTIONS_CEILING = edge_functions.QUOTA_SPECS["max_functions"]["max"]
 RESERVED_SLUGS = edge_functions.RESERVED_SLUGS
 
 
@@ -34,9 +37,9 @@ def function_name(value: str) -> str:
     return value
 
 
-def validate_files(files: list[dict]) -> list[dict[str, str]]:
-    if not isinstance(files, list) or not 1 <= len(files) <= MAX_FILES:
-        raise ValueError("A function requires 1 to 64 text files")
+def validate_files(files: list[dict], *, max_files: int = MAX_FILES, max_bytes: int = MAX_BYTES) -> list[dict[str, str]]:
+    if not isinstance(files, list) or not 1 <= len(files) <= max_files:
+        raise ValueError(f"A function requires 1 to {max_files} files")
     result, names, size = [], set(), 0
     for item in files:
         if not isinstance(item, dict) or set(item) != {"name", "content"}:
@@ -51,8 +54,8 @@ def validate_files(files: list[dict]) -> list[dict[str, str]]:
         result.append({"name": name, "content": content})
     if "index.ts" not in names:
         raise ValueError("The function entrypoint must be index.ts")
-    if size > MAX_BYTES:
-        raise ValueError("Function files exceed the 1 MB limit")
+    if size > max_bytes:
+        raise ValueError(f"Function files exceed the {max_bytes} byte limit")
     if any(any(name.startswith(other + "/") for other in names) for name in names):
         raise ValueError("A file cannot also be a directory")
     for item in result:
@@ -108,7 +111,7 @@ def atomic_json(path: Path, value: dict) -> None:
 def validate_state(state: dict, name: str, identity: str) -> dict:
     if (not isinstance(state, dict) or set(state) != {"project", "uuid", "functions"}
             or state["project"] != name or state["uuid"] != identity
-            or not isinstance(state["functions"], dict) or len(state["functions"]) > MAX_FUNCTIONS * 2):
+            or not isinstance(state["functions"], dict) or len(state["functions"]) > MAX_FUNCTIONS_CEILING * 2):
         raise RuntimeError("Function storage project identity mismatch")
     for slug, item in state["functions"].items():
         function_name(slug)
@@ -119,7 +122,7 @@ def validate_state(state: dict, name: str, identity: str) -> dict:
                 or (item["published"] is not None and
                     (not isinstance(item["published"], str) or not REVISION.fullmatch(item["published"])))):
             raise RuntimeError("Invalid function revision pointers")
-    if sum(item["draft"] is not None for item in state["functions"].values()) > MAX_FUNCTIONS:
+    if sum(item["draft"] is not None for item in state["functions"].values()) > MAX_FUNCTIONS_CEILING:
         raise RuntimeError("Too many saved functions")
     return state
 
@@ -202,7 +205,8 @@ def recover_publication(root: Path, name: str, identity: str) -> None:
             files = published_files(root, name, identity, state=proposed)
             expected = edge_functions.context_value(
                 name, identity, context["jwt_secret"], context["env"], files, context.get("network_allowlist"),
-                secrets=context.get("secrets"), public_functions=context.get("public_functions"))
+                secrets=context.get("secrets"), public_functions=context.get("public_functions"),
+                limits=context.get("limits"))
             if expected != context:
                 raise RuntimeError("Publication context does not match saved versions")
             edge_functions.verify_generation(root, context, files)
@@ -218,17 +222,24 @@ def recover_publication(root: Path, name: str, identity: str) -> None:
         raise
 
 
-def version(name: str, identity: str, slug: str, files: list[dict]) -> tuple[str, dict]:
-    value = {"project": name, "uuid": identity, "function": function_name(slug), "files": validate_files(files)}
+def version(name: str, identity: str, slug: str, files: list[dict],
+            *, max_files: int = MAX_FILES_CEILING, max_bytes: int = MAX_BYTES_CEILING) -> tuple[str, dict]:
+    value = {
+        "project": name,
+        "uuid": identity,
+        "function": function_name(slug),
+        "files": validate_files(files, max_files=max_files, max_bytes=max_bytes),
+    }
     return hashlib.sha256(encoded(value)).hexdigest(), value
 
 
-def store_version(root: Path, name: str, identity: str, slug: str, files: list[dict]) -> str:
-    revision, value = version(name, identity, slug, files)
+def store_version(root: Path, name: str, identity: str, slug: str, files: list[dict],
+                  *, max_files: int = MAX_FILES_CEILING, max_bytes: int = MAX_BYTES_CEILING) -> str:
+    revision, value = version(name, identity, slug, files, max_files=max_files, max_bytes=max_bytes)
     versions = edge_functions.private_directory(directory(root, name, identity) / "versions" / slug)
     path = versions / (revision + ".json")
     try:
-        existing = regular_bytes(path, MAX_BYTES * 6 + 65536)
+        existing = regular_bytes(path, MAX_BYTES_CEILING * 6 + 65536)
     except FileNotFoundError:
         atomic_json(path, value)
         path.chmod(0o400)
@@ -243,7 +254,7 @@ def read_version(root: Path, state: dict, slug: str, revision: str) -> list[dict
     if not REVISION.fullmatch(revision):
         raise RuntimeError("Invalid function revision")
     path = directory(root, state["project"], state["uuid"]) / "versions" / slug / (revision + ".json")
-    value = json.loads(regular_bytes(path, MAX_BYTES * 6 + 65536))
+    value = json.loads(regular_bytes(path, MAX_BYTES_CEILING * 6 + 65536))
     expected, canonical = version(state["project"], state["uuid"], slug, value["files"])
     if expected != revision or value != canonical:
         raise RuntimeError("Immutable function version integrity check failed")
@@ -283,7 +294,7 @@ def published_files(root: Path, name: str, identity: str, *, state: dict | None 
         else:
             # Explicit draft/unpublish/delete state masks files from the old layout.
             functions.pop(slug, None)
-    if len(functions) > MAX_FUNCTIONS:
+    if len(functions) > MAX_FUNCTIONS_CEILING:
         raise RuntimeError("Too many published functions")
     return {slug + "/" + file["name"]: file["content"].encode()
             for slug, files in functions.items() for file in files}
@@ -662,3 +673,83 @@ def compute_version_diff(
         "summary": summary,
         "files": file_diffs,
     }
+
+
+def compute_quota_status(
+    root: Path,
+    state: dict,
+    legacy: dict,
+    *,
+    quotas: dict[str, int],
+    secrets_count: int,
+    secrets_total_bytes: int,
+    recent_429_count: int = 0,
+) -> dict:
+    """Compute current resource utilization and near-limit saturation indicators."""
+    names = function_names(state, legacy)
+    published_count = 0
+    largest_bytes = 0
+    largest_name: str | None = None
+    total_bytes_all = 0
+    for slug in names:
+        fn = item(root, state, slug, legacy)
+        if not fn:
+            continue
+        if fn.get("published_revision"):
+            published_count += 1
+        fn_bytes = sum(len(f["content"].encode("utf-8")) + len(f["name"]) for f in fn["files"])
+        total_bytes_all += fn_bytes
+        if fn_bytes >= largest_bytes:
+            largest_bytes = fn_bytes
+            largest_name = slug
+
+    def _pct(used: int, cap: int) -> int:
+        return round((used * 100) / cap) if cap > 0 else 0
+
+    usage = {
+        "functions_count": len(names),
+        "published_count": published_count,
+        "total_draft_bytes": total_bytes_all,
+        "largest_function_bytes": largest_bytes,
+        "largest_function_name": largest_name,
+        "secrets_count": secrets_count,
+        "secrets_total_bytes": secrets_total_bytes,
+        "recent_429_count": recent_429_count,
+    }
+    utilization_pct = {
+        "functions": _pct(len(names), quotas["max_functions"]),
+        "largest_bundle_bytes": _pct(largest_bytes, quotas["max_bytes"]),
+        "secrets": _pct(secrets_count, quotas["max_secrets"]),
+        "secrets_bytes": _pct(secrets_total_bytes, quotas["max_secrets_total_bytes"]),
+    }
+    threshold = quotas["alert_threshold_pct"]
+    near_limits: list[dict] = []
+    checks = (
+        ("functions", "functions_count", "Functions count", len(names), quotas["max_functions"]),
+        ("largest_bundle_bytes", "max_bytes", "Largest function bundle", largest_bytes, quotas["max_bytes"]),
+        ("secrets", "secrets_count", "Secrets count", secrets_count, quotas["max_secrets"]),
+        ("secrets_bytes", "secrets_total_bytes", "Secrets total size", secrets_total_bytes, quotas["max_secrets_total_bytes"]),
+    )
+    for metric_key, code, label, used, cap in checks:
+        pct = utilization_pct[metric_key]
+        if pct >= threshold:
+            near_limits.append({
+                "kind": "near_limit",
+                "metric": code,
+                "severity": "critical" if pct >= 100 else "warn",
+                "used": used,
+                "limit": cap,
+                "utilization_pct": pct,
+                "message": f"{label} at {pct}% of quota ({used}/{cap})",
+            })
+    if recent_429_count > 0:
+        near_limits.append({
+            "kind": "concurrency_429",
+            "metric": "max_concurrent_project",
+            "severity": "critical" if recent_429_count >= 5 else "warn",
+            "used": recent_429_count,
+            "limit": quotas["max_concurrent_project"],
+            "utilization_pct": 100,
+            "message": f"{recent_429_count} concurrency saturation response(s) (HTTP 429) detected",
+        })
+    return {"usage": usage, "utilization_pct": utilization_pct, "active_alerts": near_limits}

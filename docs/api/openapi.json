@@ -483,7 +483,7 @@
         "additionalProperties": false,
         "properties": {
           "content": {
-            "maxLength": 1000000,
+            "maxLength": 5000000,
             "title": "Content",
             "type": "string"
           },
@@ -1694,7 +1694,7 @@
             "items": {
               "$ref": "#/components/schemas/CodeFile"
             },
-            "maxItems": 64,
+            "maxItems": 128,
             "minItems": 1,
             "title": "Files",
             "type": "array"
@@ -4015,6 +4015,117 @@
         "title": "QueuedJobResponse",
         "type": "object"
       },
+      "QuotasUpdateBody": {
+        "additionalProperties": false,
+        "properties": {
+          "alert_threshold_pct": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert Threshold Pct"
+          },
+          "max_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Bytes"
+          },
+          "max_concurrent_project": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Concurrent Project"
+          },
+          "max_files": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Files"
+          },
+          "max_functions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Functions"
+          },
+          "max_secrets": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Secrets"
+          },
+          "max_secrets_total_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Secrets Total Bytes"
+          },
+          "memory_limit_mb": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Limit Mb"
+          },
+          "reset_defaults": {
+            "default": false,
+            "title": "Reset Defaults",
+            "type": "boolean"
+          },
+          "worker_timeout_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Timeout Ms"
+          }
+        },
+        "title": "QuotasUpdateBody",
+        "type": "object"
+      },
       "RateLimit": {
         "additionalProperties": false,
         "properties": {
@@ -5736,7 +5847,7 @@
             "items": {
               "$ref": "#/components/schemas/SecretEntry"
             },
-            "maxItems": 64,
+            "maxItems": 128,
             "minItems": 1,
             "title": "Secrets",
             "type": "array"
@@ -12523,6 +12634,95 @@
         ]
       }
     },
+    "/api/projects/{ref}/edge-functions/alerts": {
+      "get": {
+        "operationId": "alerts_list_api_projects__ref__edge_functions_alerts_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Alerts List",
+        "tags": [
+          "studio-edge-functions"
+        ]
+      }
+    },
+    "/api/projects/{ref}/edge-functions/alerts/{event_id}/ack": {
+      "post": {
+        "operationId": "alert_acknowledge_api_projects__ref__edge_functions_alerts__event_id__ack_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Alert Acknowledge",
+        "tags": [
+          "studio-edge-functions"
+        ]
+      }
+    },
     "/api/projects/{ref}/edge-functions/gc": {
       "post": {
         "operationId": "versions_gc_api_projects__ref__edge_functions_gc_post",
@@ -12615,6 +12815,94 @@
           }
         },
         "summary": "Logs List",
+        "tags": [
+          "studio-edge-functions"
+        ]
+      }
+    },
+    "/api/projects/{ref}/edge-functions/quotas": {
+      "get": {
+        "operationId": "quotas_get_api_projects__ref__edge_functions_quotas_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Quotas Get",
+        "tags": [
+          "studio-edge-functions"
+        ]
+      },
+      "put": {
+        "operationId": "quotas_update_api_projects__ref__edge_functions_quotas_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuotasUpdateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Quotas Update",
         "tags": [
           "studio-edge-functions"
         ]
