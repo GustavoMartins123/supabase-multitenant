@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager, suppress
 import asyncio
 import base64
 import copy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import io
@@ -618,6 +618,7 @@ async def _fetch_merged_logs(
                         'message': _redact_log_message(str(entry.get('message', '')), sensitive),
                         'status': entry.get('status'),
                         'duration_ms': entry.get('duration_ms'),
+                        **({'request_id': str(entry['request_id'])} if entry.get('request_id') else {}),
                     })
         except (httpx.HTTPError, ValueError):
             runtime_connected = False
@@ -749,19 +750,136 @@ async def _record_quota_event(
     )
 
 
-async def _recent_429_count(conn, project_id, runtime_logs: list[dict] | None = None) -> int:
-    db_hits = await conn.fetchval(
-        '''SELECT count(*) FROM studio_edge_invocation_logs
-           WHERE project_id=$1 AND status=429 AND created_at > now() - interval '15 minutes' ''',
+def _parse_log_timestamp(raw: object) -> datetime | None:
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.strip().replace('Z', '+00:00'))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+
+
+def _detail_obj(raw: object) -> dict:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw:
+        try:
+            loaded = json.loads(raw)
+            return loaded if isinstance(loaded, dict) else {}
+        except ValueError:
+            return {}
+    return {}
+
+
+async def _load_429_ack_and_known_ids(conn, project_id) -> tuple[datetime | None, set[str], set[str]]:
+    last_ack_raw = await conn.fetchval(
+        '''SELECT max(acknowledged_at) FROM studio_edge_quota_events
+           WHERE project_id=$1 AND kind='concurrency_429' AND acknowledged_at IS NOT NULL''',
         project_id,
     )
+    last_ack_at = last_ack_raw if isinstance(last_ack_raw, datetime) else None
+    if last_ack_at is not None and last_ack_at.tzinfo is None:
+        last_ack_at = last_ack_at.replace(tzinfo=timezone.utc)
+    known_runtime_ids: set[str] = set()
+    known_request_ids: set[str] = set()
+    rows = await conn.fetch(
+        '''SELECT detail FROM studio_edge_quota_events
+           WHERE project_id=$1 AND kind='concurrency_429'
+           ORDER BY created_at DESC, id DESC
+           LIMIT 100''',
+        project_id,
+    )
+    if isinstance(rows, (list, tuple)):
+        for row in rows:
+            detail = _detail_obj(row['detail'] if isinstance(row, dict) or hasattr(row, '__getitem__') else None)
+            rt_id = detail.get('runtime_log_id')
+            if isinstance(rt_id, str) and rt_id:
+                known_runtime_ids.add(rt_id)
+            req_id = detail.get('request_id')
+            if isinstance(req_id, str) and req_id:
+                known_request_ids.add(req_id)
+    return last_ack_at, known_runtime_ids, known_request_ids
+
+
+async def _ingest_runtime_429_events(conn, project_id, runtime_logs: list[dict]) -> None:
+    if not runtime_logs:
+        return
+    last_ack_at, known_runtime_ids, known_request_ids = await _load_429_ack_and_known_ids(conn, project_id)
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)
+    for entry in reversed(runtime_logs):
+        if entry.get('source') != 'worker' or entry.get('status') != 429:
+            continue
+        entry_id = str(entry.get('id') or '').strip()
+        if not entry_id or entry_id in known_runtime_ids:
+            continue
+        req_id = str(entry.get('request_id') or '').strip()
+        if req_id and req_id in known_request_ids:
+            continue
+        ts_raw = entry.get('timestamp')
+        entry_ts = _parse_log_timestamp(ts_raw)
+        if entry_ts is not None:
+            if entry_ts <= cutoff or (last_ack_at is not None and entry_ts <= last_ack_at):
+                continue
+        detail_obj: dict[str, object] = {
+            'status': 429,
+            'source': 'runtime_worker',
+            'runtime_log_id': entry_id,
+        }
+        if req_id:
+            detail_obj['request_id'] = req_id
+        if isinstance(ts_raw, str) and ts_raw:
+            detail_obj['log_timestamp'] = ts_raw
+        await _record_quota_event(
+            conn,
+            project_id,
+            'concurrency_429',
+            'critical',
+            str(entry.get('message') or 'Concurrency limit reached (HTTP 429)'),
+            function_name=(entry.get('function_name') or None),
+            detail=detail_obj,
+        )
+        known_runtime_ids.add(entry_id)
+        if req_id:
+            known_request_ids.add(req_id)
+
+
+async def _recent_429_count(conn, project_id, runtime_logs: list[dict] | None = None) -> int:
+    last_ack_at, known_runtime_ids, known_request_ids = await _load_429_ack_and_known_ids(conn, project_id)
+    if last_ack_at is not None:
+        db_hits = await conn.fetchval(
+            '''SELECT count(*) FROM studio_edge_invocation_logs
+               WHERE project_id=$1 AND status=429
+                 AND created_at > now() - interval '15 minutes'
+                 AND created_at > $2''',
+            project_id,
+            last_ack_at,
+        )
+    else:
+        db_hits = await conn.fetchval(
+            '''SELECT count(*) FROM studio_edge_invocation_logs
+               WHERE project_id=$1 AND status=429 AND created_at > now() - interval '15 minutes' ''',
+            project_id,
+        )
     evt_hits = await conn.fetchval(
         '''SELECT count(*) FROM studio_edge_quota_events
            WHERE project_id=$1 AND kind='concurrency_429' AND acknowledged_at IS NULL
              AND created_at > now() - interval '15 minutes' ''',
         project_id,
     )
-    runtime_hits = sum(1 for item in (runtime_logs or []) if item.get('status') == 429)
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)
+    runtime_hits = 0
+    for item in (runtime_logs or []):
+        if item.get('status') != 429:
+            continue
+        entry_id = str(item.get('id') or '').strip()
+        req_id = str(item.get('request_id') or '').strip()
+        if (entry_id and entry_id in known_runtime_ids) or (req_id and req_id in known_request_ids):
+            continue
+        entry_ts = _parse_log_timestamp(item.get('timestamp'))
+        if entry_ts is not None and (entry_ts <= cutoff or (last_ack_at is not None and entry_ts <= last_ack_at)):
+            continue
+        runtime_hits += 1
     return max(int(db_hits or 0), int(evt_hits or 0)) + runtime_hits
 
 
@@ -771,10 +889,11 @@ async def _build_quota_report(conn, project: dict, state: dict, quotas: dict[str
     runtime_logs: list[dict] = []
     try:
         creds = canonical_projection_credentials(project)
-        merged = await _fetch_merged_logs(conn, project, creds, secrets, function_name=None, level='warn', limit=50)
+        merged = await _fetch_merged_logs(conn, project, creds, secrets, function_name=None, level='warn', limit=200)
         runtime_logs = [entry for entry in merged.get('logs', []) if entry.get('source') == 'worker' and entry.get('status') == 429]
     except Exception:
         runtime_logs = []
+    await _ingest_runtime_429_events(conn, project['id'], runtime_logs)
     recent_429 = await _recent_429_count(conn, project['id'], runtime_logs=runtime_logs)
     status = store.compute_quota_status(
         ROOT, state, {},
@@ -1399,6 +1518,7 @@ async def _execute_function_http(
     req_body: bytes | None,
     source: str = 'studio_test',
     audit_id: int | None = None,
+    worker_timeout_ms: int | None = None,
 ) -> tuple[int, dict[str, str], str, bool, int, str, str | None]:
     request_id = str(uuid.uuid4())
     headers = dict(req_headers)
@@ -1418,9 +1538,12 @@ async def _execute_function_http(
     resp_headers: dict[str, str] = {}
     resp_body_bytes = bytearray()
     truncated = False
+    default_timeout_ms = edge_functions.QUOTA_SPECS['worker_timeout_ms']['default']
+    effective_timeout_ms = worker_timeout_ms if isinstance(worker_timeout_ms, int) and worker_timeout_ms > 0 else default_timeout_ms
+    http_timeout_sec = max(65.0, (effective_timeout_ms / 1000.0) + 5.0)
     try:
         async with httpx.AsyncClient(
-            timeout=httpx.Timeout(65.0, connect=5.0),
+            timeout=httpx.Timeout(http_timeout_sec, connect=5.0),
             follow_redirects=False,
             trust_env=False,
         ) as client:
@@ -1502,6 +1625,8 @@ async def function_invoke(ref: str, slug: str, body: InvokeBody, request: Reques
         keys = await internal_keys(conn, project)
         secrets = await load_project_secrets(conn, project, tolerate=True)
         sensitive = _collect_sensitive_values(project, creds, secrets)
+        quotas, _ = await load_project_quotas(conn, project['id'])
+        worker_timeout_ms = quotas.get('worker_timeout_ms')
         project_snapshot = dict(project)
         secrets_snapshot = dict(secrets)
         audit_id = await audit(conn, project, actor, 'test_invoke', slug, published_rev)
@@ -1511,7 +1636,7 @@ async def function_invoke(ref: str, slug: str, body: InvokeBody, request: Reques
             pool, project_snapshot, creds, keys, secrets_snapshot, sensitive,
             slug=slug, published_rev=published_rev, method=method, auth_mode=auth_mode,
             path_with_query=path_with_query, req_headers=req_headers, req_body=req_body,
-            source='studio_test', audit_id=audit_id,
+            source='studio_test', audit_id=audit_id, worker_timeout_ms=worker_timeout_ms,
         )
     )
     if err_name is not None:
@@ -1949,6 +2074,8 @@ async def function_schedule_trigger(
         keys = await internal_keys(conn, project)
         secrets = await load_project_secrets(conn, project, tolerate=True)
         sensitive = _collect_sensitive_values(project, creds, secrets)
+        quotas, _ = await load_project_quotas(conn, project['id'])
+        worker_timeout_ms = quotas.get('worker_timeout_ms')
         project_snapshot = dict(project)
         secrets_snapshot = dict(secrets)
         method_snapshot = sched['method']
@@ -1960,7 +2087,7 @@ async def function_schedule_trigger(
             pool, project_snapshot, creds, keys, secrets_snapshot, sensitive,
             slug=slug, published_rev=published_rev, method=method_snapshot, auth_mode=auth_snapshot,
             path_with_query=path_with_query, req_headers=v_headers, req_body=v_body,
-            source='cron', audit_id=audit_id,
+            source='cron', audit_id=audit_id, worker_timeout_ms=worker_timeout_ms,
         )
     )
     err_text = f'Upstream unavailable ({err_name})' if err_name else (f'HTTP {resp_status}' if resp_status >= 500 else '')
@@ -2068,6 +2195,8 @@ async def scan_edge_function_schedules(pool, *, now: datetime | None = None) -> 
                     keys = await internal_keys(lock_conn, project_row)
                     secrets = await load_project_secrets(lock_conn, project_row, tolerate=True)
                     sensitive = _collect_sensitive_values(project_row, creds, secrets)
+                    quotas, _ = await load_project_quotas(lock_conn, project_row['id'])
+                    timeout_ms = quotas.get('worker_timeout_ms')
                 except Exception as prep_err:
                     await lock_conn.execute(
                         '''UPDATE project_edge_function_schedules
@@ -2082,6 +2211,7 @@ async def scan_edge_function_schedules(pool, *, now: datetime | None = None) -> 
                     slug=slug, published_rev=published_rev, method=row['method'],
                     auth_mode=row['auth_mode'], path_with_query=path_with_query,
                     req_headers=v_headers, req_body=v_body, source='cron',
+                    worker_timeout_ms=timeout_ms,
                 )
                 err_text = f'Upstream unavailable ({err_name})' if err_name else (f'HTTP {resp_status}' if resp_status >= 500 else '')
                 await lock_conn.execute(

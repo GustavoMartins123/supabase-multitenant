@@ -172,6 +172,7 @@ interface LogEntry {
   message: string
   status?: number
   duration_ms?: number
+  request_id?: string
 }
 
 const projectLogs = new Map<string, LogEntry[]>()
@@ -249,7 +250,7 @@ function recordLog(
   level: string,
   source: string,
   rawMessage: string,
-  extra?: { status?: number; duration_ms?: number },
+  extra?: { status?: number; duration_ms?: number; request_id?: string },
 ): void {
   const message = redactMessage(project, rawMessage)
   if (!message) return
@@ -460,13 +461,14 @@ Deno.serve(async (request: Request) => {
   const limits = validateLimits(tenant.limits)
   const currentProjectRunning = running.get(project) ?? 0
   if (totalRunning >= 4 || currentProjectRunning >= limits.max_concurrent_project) {
+    const reqId = (request.headers.get('x-request-id') ?? '').trim().slice(0, 128)
     recordLog(
       project,
       name,
       'warn',
       'worker',
       `Saturation: concurrency limit reached (${currentProjectRunning}/${limits.max_concurrent_project} project, ${totalRunning}/4 global)`,
-      { status: 429 },
+      { status: 429, ...(reqId ? { request_id: reqId } : {}) },
     )
     return response('function_concurrency_limit', 429)
   }

@@ -1356,3 +1356,84 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
         finally:
             server.shutdown()
             server.server_close()
+
+    async def test_429_ack_clears_active_alert_persists_runtime_429_and_honors_timeout_and_body_cap(self):
+        from datetime import datetime, timedelta, timezone
+        from unittest.mock import AsyncMock
+        import httpx
+        await self.configure(True)
+        draft = await self.save()
+        self.assertEqual((await self.publish(draft)).status_code, 200)
+
+        t_first = datetime.now(timezone.utc) - timedelta(seconds=10)
+        runtime_entry = {
+            'id': 'rt-ext-429-1',
+            'timestamp': t_first.isoformat(),
+            'function_name': 'my-function',
+            'level': 'warn',
+            'source': 'worker',
+            'message': 'Saturation: concurrency limit reached (2/2 project, 2/4 global)',
+            'status': 429,
+        }
+        with patch.object(self.routes, '_fetch_merged_logs', AsyncMock(return_value={'logs': [runtime_entry], 'runtime_connected': True})):
+            a1 = (await self.request('GET', '/alerts')).json()
+            self.assertEqual(sum(1 for e in a1['events'] if e['kind'] == 'concurrency_429'), 1)
+            self.assertTrue(any(a['kind'] == 'concurrency_429' and a['used'] == 1 for a in a1['active_alerts']), a1)
+            a2 = (await self.request('GET', '/alerts')).json()
+            self.assertEqual(sum(1 for e in a2['events'] if e['kind'] == 'concurrency_429'), 1)
+            ack_id = next(e['id'] for e in a2['events'] if e['kind'] == 'concurrency_429')
+            self.assertTrue((await self.request('POST', f'/alerts/{ack_id}/ack')).json()['acknowledged'])
+            a3 = (await self.request('GET', '/alerts')).json()
+            self.assertEqual([e for e in a3['events'] if e['kind'] == 'concurrency_429'], [])
+            self.assertFalse(any(a['kind'] == 'concurrency_429' for a in a3['active_alerts']), a3)
+
+        class MockStreamResp:
+            status_code = 429
+            headers = httpx.Headers({'content-type': 'application/json'})
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): return False
+            async def aiter_bytes(self): yield b'{"code":"function_concurrency_limit"}'
+
+        captured_timeouts = []
+        class MockAsyncClient:
+            def __init__(self, *, timeout, **kwargs):
+                captured_timeouts.append(timeout)
+            async def __aenter__(self): return self
+            async def __aexit__(self, *args): return False
+            def stream(self, *args, **kwargs): return MockStreamResp()
+
+        with patch.object(self.routes.httpx, 'AsyncClient', MockAsyncClient), \
+             patch.object(self.routes, '_fetch_merged_logs', AsyncMock(return_value={'logs': [], 'runtime_connected': True})):
+            inv = await self.request('POST', '/my-function/invoke', {'method': 'GET', 'path': '/'})
+            self.assertEqual(inv.status_code, 200)
+            self.assertEqual(inv.json()['status'], 429)
+            req_id = inv.json()['request_id']
+
+        same_rt = {
+            'id': 'rt-dup-429',
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'function_name': 'my-function',
+            'level': 'warn',
+            'source': 'worker',
+            'message': 'Saturation: concurrency limit reached',
+            'status': 429,
+            'request_id': req_id,
+        }
+        with patch.object(self.routes, '_fetch_merged_logs', AsyncMock(return_value={'logs': [same_rt], 'runtime_connected': True})):
+            alerts_inv = (await self.request('GET', '/alerts')).json()
+            evts = [e for e in alerts_inv['events'] if e['kind'] == 'concurrency_429']
+            self.assertEqual(len(evts), 1, evts)
+            self.assertTrue((await self.request('POST', f'/alerts/{evts[0]["id"]}/ack')).json()['acknowledged'])
+            after_ack = (await self.request('GET', '/alerts')).json()
+            self.assertFalse(any(a['kind'] == 'concurrency_429' for a in after_ack['active_alerts']), after_ack)
+
+        await self.pool.execute("INSERT INTO user_groups(user_id,group_name,source) VALUES($1,'admin','test') ON CONFLICT DO NOTHING", self.users[0])
+        raised = await self.request('PUT', '/quotas', {'worker_timeout_ms': 110_000})
+        self.assertEqual(raised.status_code, 200, raised.text)
+        captured_timeouts.clear()
+        with patch.object(self.routes.httpx, 'AsyncClient', MockAsyncClient), \
+             patch.object(self.routes, '_fetch_merged_logs', AsyncMock(return_value={'logs': [], 'runtime_connected': True})):
+            await self.request('POST', '/my-function/invoke', {'method': 'GET', 'path': '/'})
+        self.assertGreaterEqual(captured_timeouts[0].read, 115.0)
+        nginx_conf = (ROOT / 'studio/nginx/nginx.conf').read_text(encoding='utf-8')
+        self.assertIn('client_max_body_size 8m;', nginx_conf)
