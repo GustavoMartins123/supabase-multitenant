@@ -17,6 +17,9 @@ PROJECT_MATERIAL_PURPOSE_RE = re.compile(
 PROJECT_FUNCTION_SECRET_PURPOSE_RE = re.compile(
     r"^functions-env-secret:[A-Za-z_][A-Za-z0-9_]{0,127}$"
 )
+PROJECT_FUNCTION_REGISTRY_PURPOSE_RE = re.compile(
+    r"^functions-registry:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
 
 
 def _project_secret_column(column: str) -> str:
@@ -143,6 +146,7 @@ def _project_material_purpose(purpose: str) -> str:
         purpose not in {"studio-administrative-key", "functions-publishable-key", "functions-secret-key"}
         and not PROJECT_MATERIAL_PURPOSE_RE.fullmatch(purpose)
         and not PROJECT_FUNCTION_SECRET_PURPOSE_RE.fullmatch(purpose)
+        and not PROJECT_FUNCTION_REGISTRY_PURPOSE_RE.fullmatch(purpose)
     ):
         raise ValueError(f"unsupported project material purpose: {purpose}")
     return purpose

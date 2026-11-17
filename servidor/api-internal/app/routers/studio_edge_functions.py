@@ -63,6 +63,35 @@ class PublishBody(BaseModel):
 class BundleBody(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     revision: StrictStr = Field(pattern=r'^[0-9a-f]{64}$')
+    force: StrictBool = False
+
+
+class RegistryCreateBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    name: StrictStr = Field(min_length=1, max_length=80)
+    kind: Literal['npm', 'jsr']
+    scope: StrictStr = Field(default='', max_length=130)
+    registry_url: StrictStr = Field(min_length=10, max_length=512)
+    auth_type: Literal['none', 'bearer', 'basic'] = 'bearer'
+    token: StrictStr | None = Field(default=None, max_length=edge_bundler.MAX_REGISTRY_TOKEN_BYTES)
+    allow_private_network: StrictBool = False
+    ca_pem: StrictStr = Field(default='', max_length=edge_bundler.MAX_REGISTRY_CA_PEM_BYTES)
+    enabled: StrictBool = True
+
+
+class RegistryUpdateBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    name: StrictStr | None = Field(default=None, min_length=1, max_length=80)
+    kind: Literal['npm', 'jsr'] | None = None
+    scope: StrictStr | None = Field(default=None, max_length=130)
+    registry_url: StrictStr | None = Field(default=None, min_length=10, max_length=512)
+    auth_type: Literal['none', 'bearer', 'basic'] | None = None
+    token: StrictStr | None = Field(default=None, max_length=edge_bundler.MAX_REGISTRY_TOKEN_BYTES)
+    clear_token: StrictBool = False
+    allow_private_network: StrictBool | None = None
+    ca_pem: StrictStr | None = Field(default=None, max_length=edge_bundler.MAX_REGISTRY_CA_PEM_BYTES)
+    clear_ca_pem: StrictBool = False
+    enabled: StrictBool | None = None
 
 
 class SecretEntry(BaseModel):
@@ -1188,6 +1217,337 @@ async def schedules_list_project(ref: str, request: Request, response: Response,
         return {'schedules': [_schedule_row_dict(r) for r in rows]}
 
 
+def _is_global_admin(request: Request) -> bool:
+    return bool(getattr(request.state, 'edge_actor_is_global_admin', False))
+
+
+def _parse_registry_uuid(registry_id: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(registry_id)
+    except ValueError as error:
+        raise HTTPException(400, 'Invalid registry identifier') from error
+
+
+def _validate_ca_with_x509(raw_pem: str | None) -> str:
+    try:
+        normalized = edge_bundler.normalize_ca_pem(raw_pem)
+    except edge_bundler.DependencyPolicyError as error:
+        raise HTTPException(400, str(error)) from error
+    if not normalized:
+        return ''
+    try:
+        from cryptography import x509
+        certs = [
+            x509.load_pem_x509_certificate(match.group(0).encode('ascii'))
+            for match in edge_bundler.PEM_CERT_RE.finditer(normalized)
+        ]
+    except Exception as error:
+        raise HTTPException(400, f'Invalid custom CA PEM certificate: {error}') from error
+    if not certs:
+        raise HTTPException(400, 'Custom CA PEM must contain at least one valid X.509 certificate')
+    return normalized
+
+
+def _registry_row_public(row) -> dict:
+    return {
+        'id': str(row['id']),
+        'name': row['name'],
+        'kind': row['kind'],
+        'scope': row['scope'] or '',
+        'registry_url': row['registry_url'],
+        'auth_type': row['auth_type'],
+        'has_token': bool(row['token_ciphertext']),
+        'allow_private_network': bool(row['allow_private_network']),
+        'has_custom_ca': bool(row['ca_pem']),
+        'enabled': bool(row['enabled']),
+        'created_at': row['created_at'].isoformat(),
+        'updated_at': row['updated_at'].isoformat(),
+    }
+
+
+def _registry_unique_error(exc: Exception) -> HTTPException:
+    constraint = str(getattr(exc, 'constraint_name', '') or '')
+    if 'active_slot' in constraint:
+        return HTTPException(409, 'An enabled registry already exists for this kind and scope; disable or update it first')
+    return HTTPException(409, 'A registry with this name already exists in this project')
+
+
+async def load_active_registries_for_bundle(conn, project: dict) -> list[dict[str, object]]:
+    rows = await conn.fetch(
+        '''SELECT id, name, kind, scope, registry_url, auth_type, token_ciphertext,
+                  allow_private_network, ca_pem
+           FROM project_edge_function_registries
+           WHERE project_id=$1 AND enabled=true
+           ORDER BY kind ASC, scope ASC, name ASC''',
+        project['id'],
+    )
+    if not isinstance(rows, (list, tuple)) or not rows:
+        return []
+    result: list[dict[str, object]] = []
+    for row in rows:
+        token = ''
+        if row['auth_type'] != 'none':
+            if not row['token_ciphertext']:
+                raise HTTPException(409, f"Registry '{row['name']}' is missing credentials; set a token before bundling")
+            try:
+                async with conn.transaction():
+                    token = await decrypt_project_material(
+                        conn,
+                        project_id=project['id'],
+                        purpose=f"functions-registry:{row['id']}",
+                        ciphertext=row['token_ciphertext'],
+                    )
+            except Exception as error:
+                raise HTTPException(
+                    409,
+                    f"Registry '{row['name']}' credentials cannot be decrypted; rotate the token or delete the registry",
+                ) from error
+        result.append({
+            'kind': row['kind'],
+            'scope': row['scope'] or '',
+            'registry_url': row['registry_url'],
+            'auth_type': row['auth_type'],
+            'token': token,
+            'allow_private_network': bool(row['allow_private_network']),
+            'ca_pem': row['ca_pem'] or '',
+        })
+    return result
+
+
+@router.get('/registries')
+async def registries_list(ref: str, request: Request, response: Response, pool=Depends(get_pool)):
+    async with management_context(ref, request, response, pool) as (conn, project, _, _):
+        is_global_admin = _is_global_admin(request)
+        rows = await conn.fetch(
+            '''SELECT id, name, kind, scope, registry_url, auth_type, token_ciphertext,
+                      allow_private_network, ca_pem, enabled, created_at, updated_at
+               FROM project_edge_function_registries
+               WHERE project_id=$1
+               ORDER BY kind ASC, scope ASC, name ASC''',
+            project['id'],
+        )
+        return {
+            'registries': [_registry_row_public(r) for r in (rows or ())],
+            'limits': {
+                'max_registries': edge_bundler.MAX_REGISTRIES_PER_PROJECT,
+                'max_token_bytes': edge_bundler.MAX_REGISTRY_TOKEN_BYTES,
+                'max_ca_pem_bytes': edge_bundler.MAX_REGISTRY_CA_PEM_BYTES,
+                'can_configure_private_network': is_global_admin,
+            },
+        }
+
+
+@router.post('/registries')
+async def registry_create(ref: str, body: RegistryCreateBody, request: Request, response: Response, pool=Depends(get_pool)):
+    async with management_context(ref, request, response, pool) as (conn, project, actor, _):
+        is_global_admin = _is_global_admin(request)
+        if not is_global_admin and (body.allow_private_network or bool((body.ca_pem or '').strip())):
+            raise HTTPException(
+                403,
+                'Only platform administrators can configure private-network registries or custom CA certificates',
+            )
+        try:
+            clean_name = edge_bundler.validate_registry_name(body.name)
+            clean = edge_bundler.validate_registry_spec({
+                'kind': body.kind,
+                'scope': body.scope,
+                'registry_url': body.registry_url,
+                'auth_type': body.auth_type,
+                'token': body.token,
+                'allow_private_network': body.allow_private_network,
+                'ca_pem': body.ca_pem,
+            })
+        except edge_bundler.DependencyPolicyError as error:
+            raise HTTPException(400, str(error)) from error
+        ca_pem = _validate_ca_with_x509(str(clean['ca_pem']))
+
+        count = await conn.fetchval(
+            'SELECT count(*) FROM project_edge_function_registries WHERE project_id=$1',
+            project['id'],
+        )
+        if (count or 0) >= edge_bundler.MAX_REGISTRIES_PER_PROJECT:
+            raise HTTPException(
+                409,
+                f'Project reached maximum of {edge_bundler.MAX_REGISTRIES_PER_PROJECT} configured registries',
+            )
+
+        reg_uuid = uuid.uuid4()
+        audit_rev = hashlib.sha256(
+            json.dumps({'action': 'configure_registry', 'id': str(reg_uuid), 'name': clean_name}, sort_keys=True).encode()
+        ).hexdigest()
+        audit_id = await audit(conn, project, actor, 'configure_registry', f'registry:{clean_name}'[:120], audit_rev)
+        try:
+            async with conn.transaction():
+                ciphertext = (
+                    await encrypt_project_material(
+                        conn,
+                        project_id=project['id'],
+                        purpose=f'functions-registry:{reg_uuid}',
+                        plaintext=str(clean['token']),
+                    )
+                    if clean['auth_type'] != 'none'
+                    else ''
+                )
+                row = await conn.fetchrow(
+                    '''INSERT INTO project_edge_function_registries
+                       (id, project_id, name, kind, scope, registry_url, auth_type, token_ciphertext,
+                        allow_private_network, ca_pem, enabled, created_by, updated_by)
+                       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)
+                       RETURNING id, name, kind, scope, registry_url, auth_type, token_ciphertext,
+                                 allow_private_network, ca_pem, enabled, created_at, updated_at''',
+                    reg_uuid, project['id'], clean_name, clean['kind'], clean['scope'], clean['registry_url'],
+                    clean['auth_type'], ciphertext, bool(clean['allow_private_network']), ca_pem, body.enabled, actor,
+                )
+        except Exception as exc:
+            await outcome(conn, audit_id, 'failed')
+            if exc.__class__.__name__ == 'UniqueViolationError':
+                raise _registry_unique_error(exc) from exc
+            raise
+        await outcome(conn, audit_id, 'completed')
+        return {'registry': _registry_row_public(row)}
+
+
+@router.put('/registries/{registry_id}')
+async def registry_update(
+    ref: str, registry_id: str, body: RegistryUpdateBody,
+    request: Request, response: Response, pool=Depends(get_pool),
+):
+    reg_uuid = _parse_registry_uuid(registry_id)
+    async with management_context(ref, request, response, pool) as (conn, project, actor, _):
+        is_global_admin = _is_global_admin(request)
+        existing = await conn.fetchrow(
+            '''SELECT id, name, kind, scope, registry_url, auth_type, token_ciphertext,
+                      allow_private_network, ca_pem, enabled
+               FROM project_edge_function_registries
+               WHERE id=$1 AND project_id=$2''',
+            reg_uuid, project['id'],
+        )
+        if existing is None:
+            raise HTTPException(404, 'Registry not found')
+
+        target_name_raw = body.name if body.name is not None else existing['name']
+        target_kind = body.kind if body.kind is not None else existing['kind']
+        target_scope = body.scope if body.scope is not None else existing['scope']
+        target_url = body.registry_url if body.registry_url is not None else existing['registry_url']
+        target_auth_type = body.auth_type if body.auth_type is not None else existing['auth_type']
+        target_allow_private = (
+            bool(existing['allow_private_network'])
+            if body.allow_private_network is None
+            else bool(body.allow_private_network)
+        )
+        target_ca_raw = (
+            '' if body.clear_ca_pem
+            else (body.ca_pem if body.ca_pem is not None else existing['ca_pem'])
+        )
+        target_enabled = bool(existing['enabled']) if body.enabled is None else bool(body.enabled)
+
+        if target_allow_private != bool(existing['allow_private_network']) and not is_global_admin:
+            raise HTTPException(403, 'Only platform administrators can modify private-network registry permissions')
+        if body.ca_pem is not None and bool(body.ca_pem.strip()) and not is_global_admin:
+            raise HTTPException(403, 'Only platform administrators can configure custom CA certificates')
+        if body.clear_ca_pem and bool(existing['ca_pem']) and not is_global_admin:
+            raise HTTPException(403, 'Only platform administrators can modify custom CA certificates')
+
+        try:
+            clean_name = edge_bundler.validate_registry_name(target_name_raw)
+            clean = edge_bundler.validate_registry_spec(
+                {
+                    'kind': target_kind,
+                    'scope': target_scope,
+                    'registry_url': target_url,
+                    'auth_type': target_auth_type,
+                    'token': body.token,
+                    'allow_private_network': target_allow_private,
+                    'ca_pem': target_ca_raw,
+                },
+                require_token_if_auth=False,
+            )
+        except edge_bundler.DependencyPolicyError as error:
+            raise HTTPException(400, str(error)) from error
+        ca_pem = _validate_ca_with_x509(str(clean['ca_pem']))
+
+        if not is_global_admin and (
+            (bool(existing['allow_private_network']) and (
+                clean['registry_url'] != existing['registry_url']
+                or clean['kind'] != existing['kind']
+                or clean['scope'] != existing['scope']
+                or not target_allow_private
+            ))
+            or ca_pem != (existing['ca_pem'] or '')
+        ):
+            raise HTTPException(
+                403,
+                'Only platform administrators can alter private-network registry targets or custom CA settings',
+            )
+
+        if target_auth_type != 'none' and body.token is None:
+            if body.clear_token:
+                raise HTTPException(400, f"Registry token is required for auth_type '{target_auth_type}'")
+            if not existing['token_ciphertext'] or target_auth_type != existing['auth_type']:
+                raise HTTPException(400, f"Registry token must be provided when configuring auth_type '{target_auth_type}'")
+
+        audit_rev = hashlib.sha256(
+            json.dumps({'action': 'configure_registry', 'id': str(reg_uuid), 'name': clean_name}, sort_keys=True).encode()
+        ).hexdigest()
+        audit_id = await audit(conn, project, actor, 'configure_registry', f'registry:{clean_name}'[:120], audit_rev)
+        try:
+            async with conn.transaction():
+                if target_auth_type == 'none':
+                    ciphertext = ''
+                elif body.token is not None:
+                    ciphertext = await encrypt_project_material(
+                        conn,
+                        project_id=project['id'],
+                        purpose=f'functions-registry:{reg_uuid}',
+                        plaintext=str(clean['token']),
+                    )
+                else:
+                    ciphertext = existing['token_ciphertext']
+                row = await conn.fetchrow(
+                    '''UPDATE project_edge_function_registries
+                       SET name=$3, kind=$4, scope=$5, registry_url=$6, auth_type=$7,
+                           token_ciphertext=$8, allow_private_network=$9, ca_pem=$10,
+                           enabled=$11, updated_by=$12, updated_at=now()
+                       WHERE id=$1 AND project_id=$2
+                       RETURNING id, name, kind, scope, registry_url, auth_type, token_ciphertext,
+                                 allow_private_network, ca_pem, enabled, created_at, updated_at''',
+                    reg_uuid, project['id'], clean_name, clean['kind'], clean['scope'], clean['registry_url'],
+                    clean['auth_type'], ciphertext, bool(clean['allow_private_network']), ca_pem, target_enabled, actor,
+                )
+        except Exception as exc:
+            await outcome(conn, audit_id, 'failed')
+            if exc.__class__.__name__ == 'UniqueViolationError':
+                raise _registry_unique_error(exc) from exc
+            raise
+        await outcome(conn, audit_id, 'completed')
+        return {'registry': _registry_row_public(row)}
+
+
+@router.delete('/registries/{registry_id}')
+async def registry_delete(ref: str, registry_id: str, request: Request, response: Response, pool=Depends(get_pool)):
+    reg_uuid = _parse_registry_uuid(registry_id)
+    async with management_context(ref, request, response, pool) as (conn, project, actor, _):
+        existing = await conn.fetchrow(
+            'SELECT id, name FROM project_edge_function_registries WHERE id=$1 AND project_id=$2',
+            reg_uuid, project['id'],
+        )
+        if existing is None:
+            raise HTTPException(404, 'Registry not found')
+        audit_rev = hashlib.sha256(
+            json.dumps({'action': 'delete_registry', 'id': str(reg_uuid), 'name': existing['name']}, sort_keys=True).encode()
+        ).hexdigest()
+        audit_id = await audit(conn, project, actor, 'delete_registry', f"registry:{existing['name']}"[:120], audit_rev)
+        deleted = await conn.fetchval(
+            'DELETE FROM project_edge_function_registries WHERE id=$1 AND project_id=$2 RETURNING id',
+            reg_uuid, project['id'],
+        )
+        if deleted is None:
+            await outcome(conn, audit_id, 'failed')
+            raise HTTPException(404, 'Registry not found')
+        await outcome(conn, audit_id, 'completed')
+        return {'id': str(deleted), 'deleted': True}
+
+
 @router.post('/gc')
 async def versions_gc(ref: str, request: Request, response: Response, body: GcBody | None = None, pool=Depends(get_pool)):
     min_age = body.min_age_seconds if body is not None else store.DEFAULT_ORPHAN_RETENTION_SECONDS
@@ -1433,9 +1793,9 @@ def current_version(project, state, slug, enabled, body):
     return current
 
 
-async def _bundle_outside_lock(files_to_bundle: list[dict]) -> bytes:
+async def _bundle_outside_lock(files_to_bundle: list[dict], *, registries: list[dict] | None = None) -> bytes:
     try:
-        return await edge_bundler.bundle_function_eszip(files_to_bundle)
+        return await edge_bundler.bundle_function_eszip(files_to_bundle, registries=registries)
     except edge_bundler.DependencyPolicyError as error:
         raise HTTPException(400, str(error)) from error
     except edge_bundler.BundleBuildError as error:
@@ -1446,6 +1806,7 @@ async def _bundle_outside_lock(files_to_bundle: list[dict]) -> bytes:
 async def function_bundle(ref: str, slug: str, body: BundleBody, request: Request, response: Response, pool=Depends(get_pool)):
     validate_slug(slug)
     files_to_bundle: list[dict] | None = None
+    registries_to_bundle: list[dict] | None = None
     async with management_context(ref, request, response, pool) as (conn, project, _, config):
         state = load(project)
         configs = await load_function_configs(conn, project['id'])
@@ -1454,10 +1815,11 @@ async def function_bundle(ref: str, slug: str, body: BundleBody, request: Reques
         if body.revision != current['revision']:
             raise HTTPException(409, 'Function version changed; reload before bundling')
         dep_info = edge_bundler.inspect_dependencies(current['files'])
-        if not dep_info['requires_bundle'] or store.has_bundle(ROOT, state, slug, body.revision):
+        if not dep_info['requires_bundle'] or (store.has_bundle(ROOT, state, slug, body.revision) and not body.force):
             return current
+        registries_to_bundle = await load_active_registries_for_bundle(conn, project)
         files_to_bundle = copy.deepcopy(current['files'])
-    eszip_bytes = await _bundle_outside_lock(files_to_bundle)
+    eszip_bytes = await _bundle_outside_lock(files_to_bundle, registries=registries_to_bundle)
     async with management_context(ref, request, response, pool) as (conn, project, _, config):
         state = load(project)
         configs = await load_function_configs(conn, project['id'])
@@ -1473,6 +1835,7 @@ async def function_bundle(ref: str, slug: str, body: BundleBody, request: Reques
 async def function_publish(ref: str, slug: str, body: PublishBody, request: Request, response: Response, pool=Depends(get_pool)):
     validate_slug(slug)
     files_to_bundle: list[dict] | None = None
+    registries_to_bundle: list[dict] | None = None
     async with management_context(ref, request, response, pool) as (conn, project, actor, config):
         if not config['enabled']:
             raise HTTPException(409, 'Edge Functions are disabled by the project administrator')
@@ -1485,6 +1848,7 @@ async def function_publish(ref: str, slug: str, body: PublishBody, request: Requ
             return {**current, 'verify_jwt': verify_jwt}
         dep_info = edge_bundler.inspect_dependencies(current['files'])
         if dep_info['requires_bundle'] and not store.has_bundle(ROOT, state, slug, body.revision):
+            registries_to_bundle = await load_active_registries_for_bundle(conn, project)
             files_to_bundle = copy.deepcopy(current['files'])
         else:
             proposed = copy.deepcopy(state)
@@ -1493,7 +1857,7 @@ async def function_publish(ref: str, slug: str, body: PublishBody, request: Requ
             quotas, _ = await load_project_quotas(conn, project['id'])
             return detail(project, proposed, slug, True, verify_jwt=verify_jwt, quotas=quotas)
 
-    eszip_bytes = await _bundle_outside_lock(files_to_bundle)
+    eszip_bytes = await _bundle_outside_lock(files_to_bundle, registries=registries_to_bundle)
     async with management_context(ref, request, response, pool) as (conn, project, actor, config):
         if not config['enabled']:
             raise HTTPException(409, 'Edge Functions are disabled by the project administrator')

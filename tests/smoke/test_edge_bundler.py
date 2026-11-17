@@ -102,6 +102,177 @@ class EdgeBundlerSmokeTests(unittest.TestCase):
             srv.server_close()
             thread.join(timeout=2)
 
+    def test_private_registry_validation_runtime_config_proxy_and_redaction(self) -> None:
+        import asyncio
+        from datetime import datetime, timedelta, timezone
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.x509.oid import NameOID
+
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "internal-ca")])
+        now = datetime.now(timezone.utc)
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(issuer)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(days=1))
+            .not_valid_after(now + timedelta(days=30))
+            .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+            .sign(key, hashes.SHA256())
+        )
+        ca_pem = cert.public_bytes(serialization.Encoding.PEM).decode("ascii")
+
+        # URL & token & CA validation contract matches between api-internal and edge-bundler policy.
+        self.assertEqual(edge_bundler.validate_registry_name(" corp-npm_1 "), "corp-npm_1")
+        with self.assertRaises(edge_bundler.DependencyPolicyError):
+            edge_bundler.validate_registry_name("-bad-start")
+        for mod in (edge_bundler, bundler_policy):
+            with self.assertRaises(mod.DependencyPolicyError):
+                mod.validate_registry_url("http://npm.example.com")
+            with self.assertRaises(mod.DependencyPolicyError):
+                mod.validate_registry_url("https://user:pass@npm.example.com")
+            with self.assertRaises(mod.DependencyPolicyError):
+                mod.validate_registry_url("https://10.0.0.5/npm", allow_private_network=False)
+            with self.assertRaises(mod.DependencyPolicyError):
+                mod.validate_registry_url("https://npm.corp.internal:8080/npm", allow_private_network=False)
+            with self.assertRaises(mod.DependencyPolicyError):
+                mod.validate_registry_url("https://npm.corp.internal:80/npm", allow_private_network=True)
+            self.assertEqual(
+                mod.validate_registry_url("https://npm.corp.internal:8443/pkg", allow_private_network=True),
+                ("https://npm.corp.internal:8443/pkg/", "npm.corp.internal", 8443, "/pkg/"),
+            )
+            with self.assertRaises(mod.DependencyPolicyError):
+                mod.normalize_ca_pem("not a pem certificate")
+            self.assertTrue(mod.normalize_ca_pem(ca_pem).startswith("-----BEGIN CERTIFICATE-----"))
+
+        regs = [
+            {
+                "kind": "npm",
+                "scope": "@corp",
+                "registry_url": "https://npm.corp.internal:8443/npm",
+                "auth_type": "bearer",
+                "token": "tok_secret_npm_123",
+                "allow_private_network": True,
+                "ca_pem": ca_pem,
+            },
+            {
+                "kind": "npm",
+                "scope": "",
+                "registry_url": "https://artifactory.example.com/npm",
+                "auth_type": "basic",
+                "token": "reader:pw_basic_456",
+                "allow_private_network": False,
+                "ca_pem": "",
+            },
+            {
+                "kind": "jsr",
+                "scope": "",
+                "registry_url": "https://jsr.corp.internal:9443",
+                "auth_type": "bearer",
+                "token": "tok_secret_jsr_789",
+                "allow_private_network": True,
+                "ca_pem": ca_pem,
+            },
+        ]
+        normalized = edge_bundler.validate_registries_payload(regs)
+        self.assertEqual(len(normalized), 3)
+
+        # Duplicate active slots or missing credentials must be rejected.
+        with self.assertRaises(edge_bundler.DependencyPolicyError):
+            edge_bundler.validate_registries_payload([regs[0], {**regs[0], "registry_url": "https://other.example.com"}])
+        with self.assertRaises(edge_bundler.DependencyPolicyError):
+            edge_bundler.validate_registries_payload([{**regs[1], "token": ""}])
+
+        # _prepare_registry_runtime writes $HOME/.npmrc, JSR_URL, DENO_AUTH_TOKENS, combined SSL_CERT_FILE.
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root_path = pathlib.Path(td)
+            home_dir = root_path / "home"
+            home_dir.mkdir()
+            endpoints, env_extra, isolate_cache = bundler_server._prepare_registry_runtime(root_path, home_dir, normalized)
+            self.assertTrue(isolate_cache)
+            self.assertTrue(endpoints[("npm.corp.internal", 8443)])
+            self.assertFalse(endpoints[("artifactory.example.com", 443)])
+            self.assertTrue(endpoints[("jsr.corp.internal", 9443)])
+            npmrc = (home_dir / ".npmrc").read_text(encoding="utf-8")
+            self.assertIn("@corp:registry=https://npm.corp.internal:8443/npm/", npmrc)
+            self.assertIn("//npm.corp.internal:8443/npm/:_authToken=tok_secret_npm_123", npmrc)
+            self.assertIn("registry=https://artifactory.example.com/npm/", npmrc)
+            basic_b64 = base64.b64encode(b"reader:pw_basic_456").decode("ascii")
+            self.assertIn(f"//artifactory.example.com/npm/:_auth={basic_b64}", npmrc)
+            self.assertEqual(env_extra["JSR_URL"], "https://jsr.corp.internal:9443")
+            self.assertEqual(env_extra["DENO_AUTH_TOKENS"], "tok_secret_jsr_789@jsr.corp.internal:9443")
+            self.assertEqual(env_extra["DENO_TLS_CA_STORE"], "system")
+            ca_bundle = pathlib.Path(env_extra["SSL_CERT_FILE"]).read_text(encoding="utf-8")
+            self.assertEqual(ca_bundle.count("-----BEGIN CERTIFICATE-----"), ca_bundle_count := ca_bundle.count("-----END CERTIFICATE-----"))
+            self.assertGreaterEqual(ca_bundle_count, 1)
+
+            # Credential redaction hides both bearer tokens and basic base64 credentials.
+            leaked = f"auth failed: tok_secret_npm_123 {basic_b64} reader:pw_basic_456"
+            redacted = bundler_server._redact_credentials(leaked, normalized)
+            self.assertNotIn("tok_secret_npm_123", redacted)
+            self.assertNotIn(basic_b64, redacted)
+            self.assertNotIn("pw_basic_456", redacted)
+
+        # _is_allowed_ip & _RegistryConnectProxy per-endpoint allow_private enforcement.
+        self.assertFalse(bundler_server._is_allowed_ip("10.0.0.1", allow_private=False))
+        self.assertTrue(bundler_server._is_allowed_ip("10.0.0.1", allow_private=True))
+        self.assertFalse(bundler_server._is_allowed_ip("169.254.169.254", allow_private=True))
+        self.assertFalse(bundler_server._is_allowed_ip("127.0.0.1", allow_private=True))
+        with patch.dict(os.environ, {"EDGE_BUNDLER_ALLOW_LOOPBACK_FOR_TESTS": "1"}):
+            self.assertTrue(bundler_server._is_allowed_ip("127.0.0.1", allow_private=True))
+            self.assertFalse(bundler_server._is_allowed_ip("127.0.0.1", allow_private=False))
+
+        orig_getaddrinfo = socket.getaddrinfo
+
+        def resolve_mock(host, port, *args, **kwargs):
+            mapping = {
+                "npm.corp.internal": "169.254.169.254",
+                "artifactory.example.com": "10.0.0.5",
+            }
+            if host in mapping:
+                return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (mapping[host], port))]
+            return orig_getaddrinfo(host, port, *args, **kwargs)
+
+        with bundler_server._RegistryConnectProxy({("npm.corp.internal", 8443): True, ("artifactory.example.com", 443): False}) as proxy_url:
+            pport = int(proxy_url.rsplit(":", 1)[1])
+            with patch.object(bundler_server.socket, "getaddrinfo", side_effect=resolve_mock):
+                for target in ("npm.corp.internal:8443", "artifactory.example.com:443", "npm.corp.internal:443"):
+                    with socket.create_connection(("127.0.0.1", pport), timeout=5) as sock:
+                        sock.sendall(f"CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n\r\n".encode())
+                        resp = sock.recv(1024).decode()
+                        self.assertTrue(resp.startswith("HTTP/1.1 403"), (target, resp))
+
+        # Bundler HTTP RPC forwards registries and surfaces redacted error output.
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), bundler_server.BundlerHandler)
+        bport = srv.server_port
+        thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        thread.start()
+        fake_eszip = b"ESZIP2.3\x00\x00\x00\x04priv"
+        seen: list[list[dict]] = []
+        try:
+            with patch.dict(os.environ, {"EDGE_BUNDLER_HMAC_SECRET": "test-secret", "EDGE_BUNDLER_URL": f"http://127.0.0.1:{bport}"}):
+                files = [{"name": "index.ts", "content": 'import x from "npm:@corp/pkg@1.0.0"; Deno.serve(() => new Response(String(x)));'}]
+
+                def fake_compile(f, registries=None):
+                    seen.append(list(registries or []))
+                    return fake_eszip
+
+                with patch.object(bundler_server, "compile_function_eszip", side_effect=fake_compile):
+                    out = asyncio.run(edge_bundler.bundle_function_eszip(files, registries=[regs[0]]))
+                self.assertEqual(out, fake_eszip)
+                self.assertEqual(len(seen), 1)
+                self.assertEqual(seen[0][0]["registry_url"], "https://npm.corp.internal:8443/npm/")
+                self.assertEqual(seen[0][0]["token"], "tok_secret_npm_123")
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            thread.join(timeout=2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -20,7 +20,7 @@ from app.functions_network import network_hosts
 PROJECT = re.compile(r"[a-z_][a-z0-9_]{2,39}\Z")
 RESERVED_SLUGS = frozenset({
     "main", "secrets", "logs", "gc", "config", "health", "versions",
-    "templates", "quotas", "alerts", "schedules",
+    "templates", "quotas", "alerts", "schedules", "registries",
 })
 ENVIRONMENT = {"SUPABASE_URL", "SUPABASE_PUBLIC_URL", "SUPABASE_ANON_KEY",
                "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_DB_URL"}

@@ -265,7 +265,192 @@ Deno.serve(async () => {
   })
 })
 ''',
+    'priv_pkg/index.ts': '''
+import privHello from 'npm:@priv/hello@1.0.0'
+import { privJsr } from 'jsr:@pjsr/tool@1.0.0'
+Deno.serve(async () => {
+  let blockedNet = false
+  try { await fetch('https://npmreg.internal:8443/npm/@priv/hello') } catch { blockedNet = true }
+  const npmVal = typeof privHello === 'function' ? privHello() : privHello.default()
+  return Response.json({
+    npm: npmVal,
+    jsr: privJsr(),
+    blockedNet,
+  })
+})
+''',
 }
+
+
+PRIVATE_REGISTRY_MOCK = r'''
+import base64
+import hashlib
+import io
+import json
+import ssl
+import tarfile
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+TAR_BUF = io.BytesIO()
+PKG_JSON = json.dumps({'name': '@priv/hello', 'version': '1.0.0', 'main': 'index.js'}).encode()
+INDEX_JS = b'module.exports = function () { return "priv-npm:ok"; };\n'
+with tarfile.open(fileobj=TAR_BUF, mode='w:gz') as tf:
+    for rel, raw in (('package/package.json', PKG_JSON), ('package/index.js', INDEX_JS)):
+        ti = tarfile.TarInfo(rel)
+        ti.size = len(raw)
+        ti.mode = 0o644
+        tf.addfile(ti, io.BytesIO(raw))
+TGZ_BYTES = TAR_BUF.getvalue()
+TGZ_SHA1 = hashlib.sha1(TGZ_BYTES).hexdigest()
+TGZ_SHA512 = base64.b64encode(hashlib.sha512(TGZ_BYTES).digest()).decode('ascii')
+
+NPM_META = json.dumps({
+    'name': '@priv/hello',
+    'dist-tags': {'latest': '1.0.0'},
+    'versions': {
+        '1.0.0': {
+            'name': '@priv/hello',
+            'version': '1.0.0',
+            'main': 'index.js',
+            'dist': {
+                'tarball': 'https://npmreg.internal:8443/npm/@priv/hello/-/hello-1.0.0.tgz',
+                'shasum': TGZ_SHA1,
+                'integrity': f'sha512-{TGZ_SHA512}',
+            },
+        },
+    },
+}).encode()
+
+MOD_TS = b'export function privJsr(): string { return "priv-jsr:ok"; }\n'
+MOD_SHA = hashlib.sha256(MOD_TS).hexdigest()
+JSR_ROOT_META = json.dumps({'scope': 'pjsr', 'name': 'tool', 'latest': '1.0.0', 'versions': {'1.0.0': {}}}).encode()
+JSR_VER_META = json.dumps({
+    'manifest': {'/mod.ts': {'size': len(MOD_TS), 'checksum': f'sha256-{MOD_SHA}'}},
+    'exports': {'.': './mod.ts'},
+}).encode()
+
+EXPECTED_BASIC = 'Basic ' + base64.b64encode(b'ci:basic-pass-123').decode('ascii')
+EXPECTED_BEARER = 'Bearer jsr-tok-secret-456'
+
+class RegHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        auth = self.headers.get('Authorization', '')
+        path = self.path.split('?', 1)[0]
+        if path.startswith('/npm/'):
+            if auth != EXPECTED_BASIC:
+                self._send(401, b'{"error":"unauthorized npm"}', 'application/json')
+                return
+            if path in ('/npm/@priv/hello', '/npm/@priv%2fhello', '/npm/@priv%2Fhello'):
+                self._send(200, NPM_META, 'application/json')
+                return
+            if path == '/npm/@priv/hello/-/hello-1.0.0.tgz':
+                self._send(200, TGZ_BYTES, 'application/octet-stream')
+                return
+        elif path.startswith('/@pjsr/'):
+            if auth != EXPECTED_BEARER:
+                self._send(401, b'{"error":"unauthorized jsr"}', 'application/json')
+                return
+            if path == '/@pjsr/tool/meta.json':
+                self._send(200, JSR_ROOT_META, 'application/json')
+                return
+            if path == '/@pjsr/tool/1.0.0_meta.json':
+                self._send(200, JSR_VER_META, 'application/json')
+                return
+            if path == '/@pjsr/tool/1.0.0/mod.ts':
+                self._send(200, MOD_TS, 'application/typescript')
+                return
+        self._send(404, b'not found', 'text/plain')
+
+    def _send(self, code, body, ctype):
+        self.send_response(code)
+        self.send_header('Content-Type', ctype)
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+httpd = ThreadingHTTPServer(('0.0.0.0', 8443), RegHandler)
+ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+ctx.load_cert_chain('/fixture/privreg.crt', '/fixture/privreg.key')
+httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
+httpd.serve_forever()
+'''
+
+
+def _generate_privreg_pki(out_dir: Path) -> str:
+    from datetime import datetime, timedelta, timezone
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+    now = datetime.now(timezone.utc)
+    ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'privreg-test-ca')])
+    ca_cert = (
+        x509.CertificateBuilder()
+        .subject_name(ca_name)
+        .issuer_name(ca_name)
+        .public_key(ca_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(days=1))
+        .not_valid_after(now + timedelta(days=30))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()), critical=False)
+        .sign(ca_key, hashes.SHA256())
+    )
+    srv_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    srv_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'npmreg.internal')])
+    srv_cert = (
+        x509.CertificateBuilder()
+        .subject_name(srv_name)
+        .issuer_name(ca_name)
+        .public_key(srv_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(days=1))
+        .not_valid_after(now + timedelta(days=30))
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(
+            x509.SubjectAlternativeName([
+                x509.DNSName('npmreg.internal'),
+                x509.DNSName('jsrreg.internal'),
+            ]),
+            critical=False,
+        )
+        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                key_encipherment=True,
+                content_commitment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=False,
+                crl_sign=False,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .sign(ca_key, hashes.SHA256())
+    )
+    ca_pem = ca_cert.public_bytes(serialization.Encoding.PEM).decode('ascii')
+    (out_dir / 'privreg-ca.pem').write_text(ca_pem, encoding='utf-8')
+    (out_dir / 'privreg.crt').write_text(srv_cert.public_bytes(serialization.Encoding.PEM).decode('ascii'), encoding='utf-8')
+    (out_dir / 'privreg.key').write_text(
+        srv_key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.TraditionalOpenSSL,
+            serialization.NoEncryption(),
+        ).decode('ascii'),
+        encoding='utf-8',
+    )
+    for fname in ('privreg-ca.pem', 'privreg.crt', 'privreg.key'):
+        (out_dir / fname).chmod(0o644)
+    return ca_pem
 
 
 def render_nginx_template(template: str, *, contract: str, project: str, identity: str,
@@ -304,13 +489,16 @@ def main() -> None:
     parser.add_argument('--edge-image', required=True)
     parser.add_argument('--nginx-image', default='nginxinc/nginx-unprivileged:1.31.7-alpine3.24-slim')
     parser.add_argument('--python-image', default='servidor-projects-api:latest')
+    parser.add_argument('--bundler-dir', type=Path, default=Path(__file__).resolve().parents[1] / 'servidor/edge-bundler')
     parser.add_argument('--result', type=Path)
     args = parser.parse_args()
 
     prefix = f'functions-rt-test-{uuid.uuid4().hex[:8]}'
     network = prefix
+    bundler_img = f'{prefix}-bundler'
     names: list[str] = []
     checks: list[str] = []
+    built_bundler_img = False
 
     def docker(*command: str) -> str:
         return subprocess.check_output(['docker', *command], stderr=subprocess.PIPE, text=True).strip()
@@ -349,6 +537,8 @@ def main() -> None:
                 target.write_text(content, encoding='utf-8')
 
         (fixture / 'canary.py').write_text(CANARY_AND_AUTH, encoding='utf-8')
+        (fixture / 'privreg.py').write_text(PRIVATE_REGISTRY_MOCK, encoding='utf-8')
+        privreg_ca_pem = _generate_privreg_pki(fixture)
         (fixture / 'auth_tokens.json').write_text(json.dumps(internal_tokens), encoding='utf-8')
         (fixture / 'hits.jsonl').write_text('', encoding='utf-8')
         (fixture / 'hits.jsonl').chmod(0o666)
@@ -385,8 +575,10 @@ def main() -> None:
                 env_srv = toks['service_role']
                 code_root = runtime / 'code' / project / ('1' * 64)
             code_root.mkdir(parents=True, exist_ok=True)
-            for fn in ('stream', 'slow', 'wait_until', 'internal_calls', 'imported', 'remote_import', 'check_env', 'webhook', 'log_test', 'ws_wasm', 'npm_jsr'):
+            for fn in ('stream', 'slow', 'wait_until', 'internal_calls', 'imported', 'remote_import', 'check_env', 'webhook', 'log_test', 'ws_wasm', 'npm_jsr', 'priv_pkg'):
                 shutil.copytree(code / fn, code_root / fn)
+            if project == 'test_alpha':
+                alpha_code_root = code_root
             tenant_doc = {
                 'project': project, 'uuid': identity, 'jwt_secret': f'{project}-synthetic-secret',
                 'revision': '1' * 64, 'network_allowlist': [],
@@ -407,6 +599,108 @@ def main() -> None:
             docker('network', 'create', '--label', 'functions.runtime-fixture=true', network)
             net_info = json.loads(docker('network', 'inspect', network))[0]
             subnet = net_info['IPAM']['Config'][0]['Subnet']
+
+            docker('build', '-t', bundler_img, str(args.bundler_dir))
+            built_bundler_img = True
+            privreg_c = f'{prefix}-privreg'
+            docker('run', '-d', '--name', privreg_c, '--network', network,
+                   '--network-alias', 'npmreg.internal', '--network-alias', 'jsrreg.internal',
+                   '-v', f'{fixture}:/fixture:ro', '-p', '127.0.0.1::8443', '--entrypoint', 'python',
+                   args.python_image, '/fixture/privreg.py')
+            names.append(privreg_c)
+            pr_port = int(docker('inspect', '-f', '{{(index (index .NetworkSettings.Ports "8443/tcp") 0).HostPort}}', privreg_c))
+            import socket
+            for _ in range(50):
+                try:
+                    with socket.create_connection(('127.0.0.1', pr_port), timeout=0.5):
+                        break
+                except OSError:
+                    time.sleep(0.1)
+            else:
+                raise RuntimeError('private registry TLS mock did not become ready')
+
+            bundler_hmac = 'runtime-test-bundler-hmac-secret'
+            bundler_c = f'{prefix}-bundler'
+            docker('run', '-d', '--name', bundler_c, '--network', network,
+                   '-e', f'EDGE_BUNDLER_HMAC_SECRET={bundler_hmac}',
+                   '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
+                   '--tmpfs', '/tmp:rw,noexec,nosuid,size=512m',
+                   '-p', '127.0.0.1::18030', bundler_img)
+            names.append(bundler_c)
+            b_port = docker('inspect', '-f', '{{(index (index .NetworkSettings.Ports "18030/tcp") 0).HostPort}}', bundler_c)
+            b_origin = f'http://127.0.0.1:{b_port}'
+
+            with httpx.Client(trust_env=False, timeout=25) as bclient:
+                for _ in range(50):
+                    try:
+                        if bclient.get(f'{b_origin}/healthz').status_code == 200:
+                            break
+                    except httpx.TransportError:
+                        pass
+                    time.sleep(0.15)
+                else:
+                    raise RuntimeError('edge-bundler container did not become healthy')
+
+                def call_bundler(payload_obj: dict) -> httpx.Response:
+                    raw = json.dumps(payload_obj, separators=(',', ':'), ensure_ascii=True).encode('utf-8')
+                    ts = str(int(time.time()))
+                    sig = hmac.new(bundler_hmac.encode('utf-8'), f'{ts}.'.encode('ascii') + raw, hashlib.sha256).hexdigest()
+                    return bclient.post(
+                        f'{b_origin}/bundle',
+                        content=raw,
+                        headers={
+                            'Content-Type': 'application/json',
+                            'X-Edge-Bundler-Timestamp': ts,
+                            'X-Edge-Bundler-Signature': sig,
+                        },
+                    )
+
+                priv_files = [{'name': 'index.ts', 'content': FUNCTIONS['priv_pkg/index.ts']}]
+                assert bclient.post(f'{b_origin}/bundle', json={'files': priv_files}).status_code == 401
+                denied_ssrf = call_bundler({
+                    'files': priv_files,
+                    'registries': [{
+                        'kind': 'npm', 'scope': '@priv', 'registry_url': 'https://npmreg.internal:8443/npm',
+                        'auth_type': 'basic', 'token': 'ci:basic-pass-123', 'allow_private_network': False,
+                    }],
+                })
+                assert denied_ssrf.status_code == 422, (denied_ssrf.status_code, denied_ssrf.text)
+
+                missing_ca = call_bundler({
+                    'files': priv_files,
+                    'registries': [
+                        {'kind': 'npm', 'scope': '@priv', 'registry_url': 'https://npmreg.internal:8443/npm',
+                         'auth_type': 'basic', 'token': 'ci:basic-pass-123', 'allow_private_network': True},
+                        {'kind': 'jsr', 'scope': '', 'registry_url': 'https://jsrreg.internal:8443',
+                         'auth_type': 'bearer', 'token': 'jsr-tok-secret-456', 'allow_private_network': True},
+                    ],
+                })
+                assert missing_ca.status_code == 422, (missing_ca.status_code, missing_ca.text)
+                basic_b64 = base64.b64encode(b'ci:basic-pass-123').decode('ascii')
+                for secret_piece in ('basic-pass-123', basic_b64, 'jsr-tok-secret-456'):
+                    assert secret_piece not in missing_ca.text, f'Credential leaked in bundler error: {missing_ca.text}'
+
+                built_ok = call_bundler({
+                    'files': priv_files,
+                    'registries': [
+                        {'kind': 'npm', 'scope': '@priv', 'registry_url': 'https://npmreg.internal:8443/npm',
+                         'auth_type': 'basic', 'token': 'ci:basic-pass-123', 'allow_private_network': True,
+                         'ca_pem': privreg_ca_pem},
+                        {'kind': 'jsr', 'scope': '', 'registry_url': 'https://jsrreg.internal:8443',
+                         'auth_type': 'bearer', 'token': 'jsr-tok-secret-456', 'allow_private_network': True,
+                         'ca_pem': privreg_ca_pem},
+                    ],
+                })
+                assert built_ok.status_code == 200, (built_ok.status_code, built_ok.text)
+                priv_eszip = base64.b64decode(built_ok.json()['eszip_b64'], validate=True)
+                assert priv_eszip.startswith(b'ESZIP') and len(priv_eszip) > 100
+                (alpha_code_root / 'priv_pkg' / 'bundle.eszip').write_bytes(priv_eszip)
+                (alpha_code_root / 'priv_pkg' / 'bundle.eszip').chmod(0o644)
+
+            docker('rm', '-f', '-v', bundler_c)
+            docker('rm', '-f', '-v', privreg_c)
+            names.remove(bundler_c)
+            names.remove(privreg_c)
 
             nginx_dir = fixture / 'nginx-alpha'
             nginx_dir.mkdir(mode=0o755)
@@ -754,12 +1048,21 @@ def main() -> None:
                 assert any('eszip-worker-log' in e.get('message', '') for e in eszip_logs), eszip_logs
                 record('npm_jsr_eszip_offline_execution')
 
+                # 13. Private authenticated npm (Basic + subpath + @scope) & JSR (Bearer + custom CA TLS) via edge-bundler -> offline ESZIP execution
+                priv_res = client.get(f'{nginx_origin}/functions/v1/priv_pkg', headers=gw_headers('/functions/v1/priv_pkg'))
+                assert priv_res.status_code == 200, priv_res.text
+                pp = priv_res.json()
+                assert pp == {'npm': 'priv-npm:ok', 'jsr': 'priv-jsr:ok', 'blockedNet': True}, pp
+                record('private_registries_tls_custom_ca_bundler_and_offline_eszip')
+
             if args.result:
                 args.result.write_text(json.dumps({'contract': args.contract, 'image': args.edge_image, 'checks': checks}, indent=2))
             print(f'Completed {len(checks)} Edge Functions runtime capability checks.', flush=True)
         finally:
             for name in reversed(names):
                 subprocess.run(['docker', 'rm', '-f', '-v', name], capture_output=True)
+            if built_bundler_img:
+                subprocess.run(['docker', 'rmi', '-f', bundler_img], capture_output=True)
             subprocess.run(['docker', 'network', 'rm', network], capture_output=True)
 
 

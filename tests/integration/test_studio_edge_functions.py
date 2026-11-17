@@ -1019,7 +1019,7 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue({'hello-world', 'webhook-hmac', 'project-rest', 'streaming-sse', 'websocket-echo', 'scheduled-cron'}.issubset(tpl_ids))
         for tpl in templates:
             self.assertEqual(store.validate_files(tpl['files']), sorted(tpl['files'], key=lambda f: f['name']))
-        for reserved in ('templates', 'quotas', 'alerts', 'schedules'):
+        for reserved in ('templates', 'quotas', 'alerts', 'schedules', 'registries'):
             with self.assertRaises(ValueError):
                 store.function_name(reserved)
             bad = await self.request('PUT', f'/{reserved}', {'expected_revision': None, 'files': [{'name': 'index.ts', 'content': 'x'}]})
@@ -1495,4 +1495,160 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(store.has_bundle(self.root, state_now, 'pkg-fn', saved.json()['revision']))
         self.assertFalse(store.has_bundle(self.root, state_now, 'pkg-fn', saved_v2['revision']))
         self.assertEqual(saved_v3['dependencies']['requires_bundle'], False)
+
+    async def test_private_package_registries_lifecycle_encryption_rbac_and_bundling(self):
+        from datetime import datetime, timedelta, timezone
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.x509.oid import NameOID
+        from app import edge_bundler
+
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'multitenant-test-ca')])
+        now = datetime.now(timezone.utc)
+        ca_pem = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(issuer)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(days=1))
+            .not_valid_after(now + timedelta(days=30))
+            .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+            .sign(key, hashes.SHA256())
+            .public_bytes(serialization.Encoding.PEM)
+            .decode('ascii')
+        )
+
+        await self.configure(True, project=0, user=0)
+        listed_user = await self.request('GET', '/registries', user=0)
+        self.assertEqual(listed_user.status_code, 200, listed_user.text)
+        self.assertEqual(listed_user.json()['registries'], [])
+        self.assertFalse(listed_user.json()['limits']['can_configure_private_network'])
+
+        # Non-global admin cannot set allow_private_network=True, ca_pem, private IPs, or http://.
+        for payload, code in (
+            ({'name': 'priv-1', 'kind': 'npm', 'registry_url': 'https://10.0.0.5/npm', 'auth_type': 'none', 'allow_private_network': True}, 403),
+            ({'name': 'priv-ca', 'kind': 'npm', 'registry_url': 'https://npm.pkg.github.com', 'auth_type': 'none', 'ca_pem': ca_pem}, 403),
+            ({'name': 'priv-ip', 'kind': 'npm', 'registry_url': 'https://10.0.0.5/npm', 'auth_type': 'none', 'allow_private_network': False}, 400),
+            ({'name': 'priv-http', 'kind': 'npm', 'registry_url': 'http://npm.pkg.github.com', 'auth_type': 'none'}, 400),
+        ):
+            bad = await self.request('POST', '/registries', payload, user=0)
+            self.assertEqual(bad.status_code, code, (payload, bad.status_code, bad.text))
+
+        # Project admin creates public scoped npm registry encrypted with project DEK envelope.
+        pub_res = await self.request('POST', '/registries', {
+            'name': 'acme-npm',
+            'kind': 'npm',
+            'scope': '@acme',
+            'registry_url': 'https://npm.pkg.github.com',
+            'auth_type': 'bearer',
+            'token': 'ghp_mt_secret_123',
+            'enabled': True,
+        }, user=0)
+        self.assertEqual(pub_res.status_code, 200, pub_res.text)
+        pub_reg = pub_res.json()['registry']
+        self.assertTrue(pub_reg['has_token'])
+        self.assertNotIn('ghp_mt_secret_123', pub_res.text)
+
+        raw_cipher = await self.pool.fetchval(
+            'SELECT token_ciphertext FROM project_edge_function_registries WHERE id=$1',
+            uuid.UUID(pub_reg['id']),
+        )
+        self.assertTrue(raw_cipher and 'ghp_mt_secret_123' not in raw_cipher and raw_cipher.startswith('v2.'))
+
+        dup_slot = await self.request('POST', '/registries', {
+            'name': 'acme-npm-2',
+            'kind': 'npm',
+            'scope': '@acme',
+            'registry_url': 'https://registry.example.org',
+            'auth_type': 'none',
+            'enabled': True,
+        }, user=0)
+        self.assertEqual(dup_slot.status_code, 409, dup_slot.text)
+
+        jsr_disabled = await self.request('POST', '/registries', {
+            'name': 'disabled-jsr',
+            'kind': 'jsr',
+            'registry_url': 'https://jsr.example.org',
+            'auth_type': 'none',
+            'enabled': False,
+        }, user=0)
+        self.assertEqual(jsr_disabled.status_code, 200, jsr_disabled.text)
+
+        # Grant global admin to user 0 temporarily to configure private-network registry, then drop it to verify lock-down.
+        await self.pool.execute("INSERT INTO user_groups(user_id,group_name,source) VALUES($1,'admin','test') ON CONFLICT DO NOTHING", self.users[0])
+        listed_admin = await self.request('GET', '/registries', user=0)
+        self.assertTrue(listed_admin.json()['limits']['can_configure_private_network'])
+
+        priv_res = await self.request('POST', '/registries', {
+            'name': 'corp-artifactory',
+            'kind': 'npm',
+            'scope': '',
+            'registry_url': 'https://npm.corp.internal:8443/npm',
+            'auth_type': 'basic',
+            'token': 'ci-user:ci-pass-mt',
+            'allow_private_network': True,
+            'ca_pem': ca_pem,
+            'enabled': True,
+        }, user=0)
+        self.assertEqual(priv_res.status_code, 200, priv_res.text)
+        priv_reg = priv_res.json()['registry']
+        self.assertTrue(priv_reg['allow_private_network'])
+        self.assertTrue(priv_reg['has_custom_ca'])
+
+        await self.pool.execute("DELETE FROM user_groups WHERE user_id=$1 AND group_name='admin'", self.users[0])
+        for bad_update in (
+            {'registry_url': 'https://169.254.169.254:8443/'},
+            {'clear_ca_pem': True},
+            {'ca_pem': ca_pem},
+            {'allow_private_network': False},
+        ):
+            deny = await self.request('PUT', f"/registries/{priv_reg['id']}", bad_update, user=0)
+            self.assertEqual(deny.status_code, 403, (bad_update, deny.status_code, deny.text))
+
+        self.assertEqual((await self.request('PUT', f"/registries/{priv_reg['id']}", {'enabled': False}, user=0)).status_code, 200)
+        self.assertEqual((await self.request('PUT', f"/registries/{priv_reg['id']}", {'enabled': True}, user=0)).status_code, 200)
+
+        # Publish and forced ESZIP rebuild forward active decrypted registries excluding disabled ones.
+        draft = (await self.request('PUT', '/priv-fn', {
+            'expected_revision': None,
+            'files': [{'name': 'index.ts', 'content': 'import x from "npm:@acme/tool@1.0.0"; Deno.serve(() => new Response(String(x)));'}],
+        }, user=0)).json()
+        fake_eszip_1 = b'ESZIP2.3\x00\x00\x00\x04mt-1'
+        bundler_mock = AsyncMock(return_value=fake_eszip_1)
+        with patch.object(edge_bundler, 'bundle_function_eszip', bundler_mock):
+            pub = await self.request('POST', '/priv-fn/publish', {'revision': draft['revision'], 'expected_published_revision': None}, user=0)
+        self.assertEqual(pub.status_code, 200, pub.text)
+        passed_regs = bundler_mock.call_args.kwargs['registries']
+        self.assertEqual({r['scope']: r['token'] for r in passed_regs}, {'@acme': 'ghp_mt_secret_123', '': 'ci-user:ci-pass-mt'})
+        self.assertFalse(any(r['registry_url'] == 'https://jsr.example.org/' for r in passed_regs))
+
+        with patch.object(edge_bundler, 'bundle_function_eszip', AsyncMock(side_effect=AssertionError('unexpected re-bundle'))):
+            self.assertEqual((await self.request('POST', '/priv-fn/bundle', {'revision': draft['revision']}, user=0)).status_code, 200)
+
+        self.assertEqual((await self.request('PUT', f"/registries/{pub_reg['id']}", {'token': 'ghp_mt_rotated'}, user=0)).status_code, 200)
+        fake_eszip_2 = b'ESZIP2.3\x00\x00\x00\x04mt-2'
+        rebuild_mock = AsyncMock(return_value=fake_eszip_2)
+        with patch.object(edge_bundler, 'bundle_function_eszip', rebuild_mock):
+            rebuilt = await self.request('POST', '/priv-fn/bundle', {'revision': draft['revision'], 'force': True}, user=0)
+        self.assertEqual(rebuilt.status_code, 200, rebuilt.text)
+        self.assertEqual(rebuilt.json()['dependencies']['bundle_bytes'], len(fake_eszip_2))
+        rebuilt_regs = rebuild_mock.call_args.kwargs['registries']
+        self.assertEqual({r['scope']: r['token'] for r in rebuilt_regs}, {'@acme': 'ghp_mt_rotated', '': 'ci-user:ci-pass-mt'})
+
+        # Project isolation & deletion + completed audit log.
+        other_proj = await self.request('GET', '/registries', project=1, user=1)
+        self.assertEqual(other_proj.json()['registries'], [])
+        self.assertEqual((await self.request('DELETE', f"/registries/{jsr_disabled.json()['registry']['id']}", project=1, user=1)).status_code, 404)
+        self.assertEqual((await self.request('DELETE', f"/registries/{jsr_disabled.json()['registry']['id']}", user=0)).status_code, 200)
+        self.assertEqual((await self.request('DELETE', '/registries/bad-uuid', user=0)).status_code, 400)
+        audit_counts = await self.pool.fetchrow(
+            "SELECT count(*) FILTER (WHERE action='configure_registry' AND outcome='completed') AS cfg, "
+            "count(*) FILTER (WHERE action='delete_registry' AND outcome='completed') AS del "
+            'FROM studio_edge_audit'
+        )
+        self.assertGreaterEqual(audit_counts['cfg'], 4)
+        self.assertEqual(audit_counts['del'], 1)
 
