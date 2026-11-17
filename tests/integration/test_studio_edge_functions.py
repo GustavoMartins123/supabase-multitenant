@@ -445,6 +445,40 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await self.request('GET','/my-function/logs')).status_code,200)
         self.assertEqual(lock_states,[True,True])
 
+    async def test_raised_secret_quota_above_default_keeps_project_manageable(self):
+        from app import edge_functions
+        await self.configure(True)
+        await self.pool.execute("UPDATE project_edge_functions SET quotas=$2::jsonb WHERE project_id=$1",
+                                self.projects[0], json.dumps({'max_secrets': 100}))
+        batch=[{'name':f'S{index}','value':f'value-{index:03d}'} for index in range(70)]
+        self.assertEqual((await self.request('PUT','/secrets',{'secrets':batch})).status_code,200)
+        draft=await self.save()
+        published=await self.publish(draft)
+        self.assertEqual(published.status_code,200,published.text)
+        self.assertEqual(len(edge_functions.read_context(self.root,self.names[0],str(self.projects[0]))['secrets']),70)
+        removed=await self.request('DELETE','/secrets/S1')
+        self.assertEqual(removed.status_code,200,removed.text)
+        self.assertEqual(len(edge_functions.read_context(self.root,self.names[0],str(self.projects[0]))['secrets']),69)
+
+    async def test_schedule_scan_never_runs_publication_recovery_outside_the_lock(self):
+        from datetime import datetime, timedelta, timezone
+        from unittest.mock import AsyncMock
+        from app import edge_function_store as store
+        await self.configure(True)
+        draft=await self.save()
+        self.assertEqual((await self.publish(draft)).status_code,200)
+        created=await self.request('POST','/my-function/schedules',{'name':'tick','cron':'*/5 * * * *','enabled':True})
+        self.assertEqual(created.status_code,200,created.text)
+        due_at=datetime(2026,6,15,10,5,0,tzinfo=timezone.utc)
+        await self.pool.execute('UPDATE project_edge_function_schedules SET next_run_at=$2 WHERE id=$1',
+                                uuid.UUID(created.json()['schedule']['id']),due_at-timedelta(seconds=5))
+        executed=AsyncMock(return_value=(200,{},'',False,1,'request-id',None))
+        with patch.object(store,'recover_publication',side_effect=AssertionError('recovery without lock')) as recovery, \
+             patch.object(self.routes,'_execute_function_http',executed):
+            self.assertEqual(await self.routes.scan_edge_function_schedules(self.pool,now=due_at),1)
+        recovery.assert_not_called()
+        executed.assert_awaited_once()
+
     async def test_management_works_with_a_single_database_connection(self):
         import asyncio,asyncpg
         original=self.pool

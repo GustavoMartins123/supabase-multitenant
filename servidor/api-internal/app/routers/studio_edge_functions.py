@@ -687,7 +687,11 @@ async def load_project_secrets(conn, project, *, tolerate: frozenset[str] | bool
             'Edge Function secrets cannot be decrypted: ' + ', '.join(unresolved)
             + '. Set new values for these secrets or delete them.',
         )
-    return edge_functions.validate_secrets(secrets)
+    return edge_functions.validate_secrets(
+        secrets,
+        max_secrets=edge_functions.QUOTA_SPECS['max_secrets']['max'],
+        max_total_bytes=edge_functions.QUOTA_SPECS['max_secrets_total_bytes']['max'],
+    )
 
 
 async def list_secret_metadata(conn, project_id) -> list[dict]:
@@ -2022,7 +2026,7 @@ async def scan_edge_function_schedules(pool, *, now: datetime | None = None) -> 
                 published_rev: str | None = None
                 if config['enabled']:
                     with suppress(OSError, RuntimeError, ValueError, KeyError, TypeError, UnicodeError):
-                        state = load(project_row)
+                        state = store.read_state(ROOT, project_row['name'], identity(project_row))
                         current = store.item(ROOT, state, slug, {})
                         if current is not None:
                             published_rev = current['published_revision']
