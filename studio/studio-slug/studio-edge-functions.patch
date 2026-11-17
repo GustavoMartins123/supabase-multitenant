@@ -2,7 +2,7 @@ diff --git a/apps/studio/components/interfaces/Functions/SelfHostedEdgeFunctions
 new file mode 100644
 --- /dev/null
 +++ b/apps/studio/components/interfaces/Functions/SelfHostedEdgeFunctions.tsx
-@@ -0,0 +1,1011 @@
+@@ -0,0 +1,2038 @@
 +// Local Studio management uses the authenticated gateway, never project API keys.
 +import { useQuery, useQueryClient } from '@tanstack/react-query'
 +import { useParams } from 'common'
@@ -32,6 +32,19 @@ new file mode 100644
 +  max_secrets: number
 +  max_secret_value_bytes: number
 +  max_secrets_total_bytes: number
++  alert_threshold_pct?: number
++}
++
++type CodeEntry = {
++  name: string
++  content: string
++  encoding?: 'utf-8' | 'base64'
++}
++
++type WasmArtifact = {
++  name: string
++  content: string
++  encoding: 'base64'
 +}
 +
 +type FunctionInfo = {
@@ -49,8 +62,18 @@ new file mode 100644
 +
 +type FunctionBody = FunctionInfo & {
 +  enabled: boolean
-+  files: { name: string; content: string }[]
++  files: CodeEntry[]
 +  limits?: GovernanceLimits
++}
++
++type FunctionTemplate = {
++  id: string
++  name: string
++  category: string
++  description: string
++  recommended_verify_jwt: boolean
++  recommended_secrets: string[]
++  files: CodeEntry[]
 +}
 +
 +type SecretMeta = {
@@ -102,6 +125,8 @@ new file mode 100644
 +  total_bytes: number
 +  is_draft: boolean
 +  is_published: boolean
++  author_id?: string | null
++  author_label?: string | null
 +}
 +
 +type VersionsResponse = {
@@ -109,6 +134,151 @@ new file mode 100644
 +  draft_revision: string | null
 +  published_revision: string | null
 +  versions: FunctionVersion[]
++}
++
++type VersionDiffFile = {
++  name: string
++  status: 'added' | 'modified' | 'removed' | 'unchanged'
++  binary?: boolean
++  lines_added: number
++  lines_removed: number
++  hunks: string[]
++}
++
++type VersionDiffResponse = {
++  name: string
++  from_revision: string
++  to_revision: string
++  summary: {
++    files_added: number
++    files_removed: number
++    files_modified: number
++    files_unchanged: number
++    lines_added: number
++    lines_removed: number
++    truncated: boolean
++  }
++  files: VersionDiffFile[]
++}
++
++type QuotaBounds = {
++  min: number
++  max: number
++  default: number
++}
++
++type QuotaAlert = {
++  kind: string
++  metric: string
++  severity: 'info' | 'warn' | 'critical'
++  used: number
++  limit: number
++  utilization_pct: number
++  message: string
++}
++
++type QuotaEvent = {
++  id: number
++  function_name: string | null
++  kind: string
++  severity: 'info' | 'warn' | 'critical'
++  message: string
++  acknowledged: boolean
++  created_at: string
++}
++
++type QuotasResponse = {
++  quotas: GovernanceLimits & { alert_threshold_pct: number; max_secrets_total_bytes: number }
++  defaults: Record<string, number>
++  bounds: Record<string, QuotaBounds>
++  customized: boolean
++  usage: {
++    functions_count: number
++    published_count: number
++    total_draft_bytes: number
++    largest_function_bytes: number
++    largest_function_name: string | null
++    secrets_count: number
++    secrets_total_bytes: number
++    recent_429_count: number
++  }
++  utilization_pct: {
++    functions: number
++    largest_bundle_bytes: number
++    secrets: number
++    secrets_bytes: number
++  }
++  active_alerts: QuotaAlert[]
++}
++
++type AlertsResponse = {
++  active_alerts: QuotaAlert[]
++  events: QuotaEvent[]
++}
++
++type FunctionSchedule = {
++  id: string
++  project_id: string
++  function_name: string
++  name: string
++  cron: string
++  timezone: string
++  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
++  path: string
++  headers: Record<string, string>
++  body: string
++  auth_mode: 'anon' | 'service_role' | 'none'
++  enabled: boolean
++  next_run_at: string | null
++  last_run_at: string | null
++  last_status: number | null
++  last_duration_ms: number | null
++  last_request_id: string | null
++  last_error: string
++  created_at: string
++  updated_at: string
++}
++
++const QUOTA_FIELD_META: { key: string; label: string; unit: string }[] = [
++  { key: 'max_functions', label: 'Max functions', unit: '' },
++  { key: 'max_files', label: 'Max files / function', unit: '' },
++  { key: 'max_bytes', label: 'Max bundle bytes', unit: 'B' },
++  { key: 'memory_limit_mb', label: 'Memory / worker', unit: 'MB' },
++  { key: 'worker_timeout_ms', label: 'Worker timeout', unit: 'ms' },
++  { key: 'max_concurrent_project', label: 'Project concurrency', unit: 'workers' },
++  { key: 'max_secrets', label: 'Max secrets', unit: '' },
++  { key: 'max_secrets_total_bytes', label: 'Secrets total size', unit: 'B' },
++  { key: 'alert_threshold_pct', label: 'Alert threshold', unit: '%' },
++]
++
++function encodeBase64Bytes(bytes: Uint8Array): string {
++  let binary = ''
++  const chunkSize = 0x8000
++  for (let i = 0; i < bytes.length; i += chunkSize) {
++    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
++  }
++  return btoa(binary)
++}
++
++function decodedBase64Length(b64: string): number {
++  const clean = b64.replace(/\s+/g, '')
++  if (!clean) return 0
++  const padding = clean.endsWith('==') ? 2 : clean.endsWith('=') ? 1 : 0
++  return Math.max(0, Math.floor((clean.length * 3) / 4) - padding)
++}
++
++function hasValidWasmMagic(bytes: Uint8Array): boolean {
++  return (
++    bytes.length >= 8 &&
++    bytes[0] === 0x00 &&
++    bytes[1] === 0x61 &&
++    bytes[2] === 0x73 &&
++    bytes[3] === 0x6d &&
++    bytes[4] === 0x01 &&
++    bytes[5] === 0x00 &&
++    bytes[6] === 0x00 &&
++    bytes[7] === 0x00
++  )
 +}
 +
 +async function management<T>(ref: string, suffix = '', options: RequestInit = {}): Promise<T> {
@@ -120,7 +290,7 @@ new file mode 100644
 +      redirect: 'manual',
 +      cache: 'no-store',
 +      headers: {
-+        'Content-Type': 'application/json',
++        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
 +        'X-Studio-Project-Ref': ref,
 +        ...(options.headers ?? {}),
 +      },
@@ -183,8 +353,50 @@ new file mode 100644
 +}
 +
 +function LimitsSummary({ limits, projectRef }: { limits?: GovernanceLimits; projectRef: string }) {
++  const queryClient = useQueryClient()
 +  const [gcBusy, setGcBusy] = useState(false)
-+  if (!limits) return null
++  const [savingQuotas, setSavingQuotas] = useState(false)
++  const [resetBusy, setResetBusy] = useState(false)
++  const [ackBusyId, setAckBusyId] = useState<number | null>(null)
++  const [quotaError, setQuotaError] = useState('')
++  const [draftQuotas, setDraftQuotas] = useState<Record<string, string>>({})
++
++  const quotasQuery = useQuery({
++    queryKey: ['local-edge-quotas', projectRef],
++    queryFn: ({ signal }) => management<QuotasResponse>(projectRef, '/quotas', { signal }),
++    retry: false,
++    gcTime: 0,
++  })
++
++  const alertsQuery = useQuery({
++    queryKey: ['local-edge-alerts', projectRef],
++    queryFn: ({ signal }) => management<AlertsResponse>(projectRef, '/alerts', { signal }),
++    retry: false,
++    gcTime: 0,
++  })
++
++  useEffect(() => {
++    if (!quotasQuery.data?.quotas) return
++    const nextDraft: Record<string, string> = {}
++    const qMap = quotasQuery.data.quotas as Record<string, number | undefined>
++    for (const meta of QUOTA_FIELD_META) {
++      const val = qMap[meta.key]
++      if (typeof val === 'number') nextDraft[meta.key] = String(val)
++    }
++    setDraftQuotas(nextDraft)
++  }, [quotasQuery.data])
++
++  const effectiveLimits = quotasQuery.data?.quotas ?? limits
++  if (!effectiveLimits) return null
++
++  async function refreshQuotaQueries() {
++    await Promise.all([
++      queryClient.invalidateQueries({ queryKey: ['local-edge-quotas', projectRef] }),
++      queryClient.invalidateQueries({ queryKey: ['local-edge-alerts', projectRef] }),
++      queryClient.invalidateQueries({ queryKey: ['local-edge-functions', projectRef] }),
++      queryClient.invalidateQueries({ queryKey: ['local-edge-function', projectRef] }),
++    ])
++  }
 +
 +  async function runGc() {
 +    setGcBusy(true)
@@ -202,24 +414,215 @@ new file mode 100644
 +    }
 +  }
 +
++  async function saveCustomQuotas() {
++    setSavingQuotas(true)
++    setQuotaError('')
++    try {
++      const payload: Record<string, number> = {}
++      const currentMap = (quotasQuery.data?.quotas ?? {}) as Record<string, number | undefined>
++      for (const meta of QUOTA_FIELD_META) {
++        const raw = draftQuotas[meta.key]
++        if (raw === undefined || raw.trim() === '') continue
++        const parsed = Number.parseInt(raw.trim(), 10)
++        if (!Number.isInteger(parsed)) {
++          throw new Error(`${meta.label} must be an integer`)
++        }
++        if (parsed !== currentMap[meta.key]) {
++          payload[meta.key] = parsed
++        }
++      }
++      if (Object.keys(payload).length === 0) {
++        toast.info('No quota changes to apply.')
++        return
++      }
++      await management<QuotasResponse>(projectRef, '/quotas', {
++        method: 'PUT',
++        body: JSON.stringify(payload),
++      })
++      toast.success('Project Edge Functions quotas updated.')
++      await refreshQuotaQueries()
++    } catch (error) {
++      setQuotaError(error instanceof Error ? error.message : 'Failed to save custom quotas')
++    } finally {
++      setSavingQuotas(false)
++    }
++  }
++
++  async function resetQuotas() {
++    setResetBusy(true)
++    setQuotaError('')
++    try {
++      await management<QuotasResponse>(projectRef, '/quotas', {
++        method: 'PUT',
++        body: JSON.stringify({ reset_defaults: true }),
++      })
++      toast.success('Project quotas reset to platform defaults.')
++      await refreshQuotaQueries()
++    } catch (error) {
++      setQuotaError(error instanceof Error ? error.message : 'Failed to reset quotas')
++    } finally {
++      setResetBusy(false)
++    }
++  }
++
++  async function acknowledgeEvent(eventId: number) {
++    setAckBusyId(eventId)
++    try {
++      await management(projectRef, `/alerts/${eventId}/ack`, {
++        method: 'POST',
++        body: JSON.stringify({}),
++      })
++      toast.success('Alert acknowledged.')
++      await queryClient.invalidateQueries({ queryKey: ['local-edge-alerts', projectRef] })
++    } catch (error) {
++      toast.error(error instanceof Error ? error.message : 'Failed to acknowledge alert')
++    } finally {
++      setAckBusyId(null)
++    }
++  }
++
++  const activeAlerts = alertsQuery.data?.active_alerts ?? quotasQuery.data?.active_alerts ?? []
++  const events = alertsQuery.data?.events ?? []
++  const usage = quotasQuery.data?.usage
++  const util = quotasQuery.data?.utilization_pct
++
 +  return (
-+    <div className="rounded border p-4 space-y-3 text-sm">
-+      <div className="flex flex-wrap items-center justify-between gap-2">
-+        <h2 className="font-medium">Runtime & Storage Quotas</h2>
-+        <Button size="tiny" variant="default" loading={gcBusy} disabled={gcBusy} onClick={runGc}>
-+          Prune old snapshots
-+        </Button>
++    <div className="space-y-4">
++      {activeAlerts.length > 0 && (
++        <div role="status" className="rounded border border-warning p-4 space-y-2 text-sm">
++          <div className="font-medium">Active Quota & Saturation Alerts</div>
++          {activeAlerts.map((alert, idx) => (
++            <div key={`${alert.metric}:${idx}`} className="flex flex-wrap items-center justify-between gap-2 text-xs">
++              <span>
++                <span className="uppercase font-semibold mr-2">[{alert.severity}]</span>
++                {alert.message}
++              </span>
++              <span className="font-mono text-foreground-light">{alert.utilization_pct}%</span>
++            </div>
++          ))}
++        </div>
++      )}
++
++      <div className="rounded border p-4 space-y-4 text-sm">
++        <div className="flex flex-wrap items-center justify-between gap-2">
++          <div>
++            <h2 className="font-medium">Runtime & Storage Quotas</h2>
++            <p className="text-xs text-foreground-light">
++              Project admins may tighten limits or adjust alert thresholds; raising limits above platform defaults requires a global admin.
++            </p>
++          </div>
++          <div className="flex flex-wrap gap-2">
++            {quotasQuery.data?.customized && (
++              <Button size="tiny" variant="default" loading={resetBusy} disabled={resetBusy || savingQuotas} onClick={() => void resetQuotas()}>
++                Reset Defaults
++              </Button>
++            )}
++            <Button size="tiny" variant="default" loading={gcBusy} disabled={gcBusy} onClick={runGc}>
++              Prune old snapshots
++            </Button>
++          </div>
++        </div>
++
++        {usage && util && (
++          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded bg-surface-200 p-3 text-xs">
++            <div>
++              <div className="text-foreground-light">Functions</div>
++              <div className="font-mono font-medium">
++                {usage.functions_count} / {effectiveLimits.max_functions} ({util.functions}%)
++              </div>
++            </div>
++            <div>
++              <div className="text-foreground-light">Largest bundle</div>
++              <div className="font-mono font-medium">
++                {usage.largest_function_bytes} B ({util.largest_bundle_bytes}%)
++              </div>
++            </div>
++            <div>
++              <div className="text-foreground-light">Secrets</div>
++              <div className="font-mono font-medium">
++                {usage.secrets_count} / {effectiveLimits.max_secrets} ({util.secrets}%)
++              </div>
++            </div>
++            <div>
++              <div className="text-foreground-light">Recent 429s</div>
++              <div className="font-mono font-medium">{usage.recent_429_count}</div>
++            </div>
++          </div>
++        )}
++
++        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
++          {QUOTA_FIELD_META.map((meta) => {
++            const bound = quotasQuery.data?.bounds?.[meta.key]
++            return (
++              <div key={meta.key} className="space-y-1">
++                <Label htmlFor={`quota-${meta.key}`}>
++                  {meta.label}
++                  {meta.unit ? ` (${meta.unit})` : ''}
++                </Label>
++                <Input
++                  id={`quota-${meta.key}`}
++                  type="number"
++                  min={bound?.min}
++                  max={bound?.max}
++                  value={draftQuotas[meta.key] ?? ''}
++                  disabled={savingQuotas || resetBusy || quotasQuery.isPending}
++                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
++                    setDraftQuotas((prev) => ({ ...prev, [meta.key]: event.target.value }))
++                  }
++                />
++                {bound && (
++                  <p className="text-[11px] text-foreground-light">
++                    Range: {bound.min}–{bound.max} (default {bound.default})
++                  </p>
++                )}
++              </div>
++            )
++          })}
++        </div>
++
++        <div className="flex flex-wrap items-center justify-between gap-2">
++          <span className="text-xs text-foreground-light">
++            Global runtime ceiling concurrency: {effectiveLimits.max_concurrent_global} · Single secret max: {effectiveLimits.max_secret_value_bytes} B
++          </span>
++          <Button size="tiny" loading={savingQuotas} disabled={savingQuotas || resetBusy || quotasQuery.isPending} onClick={() => void saveCustomQuotas()}>
++            Save Custom Quotas
++          </Button>
++        </div>
++        {quotaError && <p role="alert" className="text-xs text-destructive">{quotaError}</p>}
 +      </div>
-+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-foreground-light">
-+        <div>Max functions: {limits.max_functions}</div>
-+        <div>Max files / fn: {limits.max_files}</div>
-+        <div>Max file size: {Math.round(limits.max_bytes / 1000)} KB</div>
-+        <div>Memory / worker: {limits.memory_limit_mb} MB</div>
-+        <div>Timeout: {Math.round(limits.worker_timeout_ms / 1000)}s</div>
-+        <div>Concurrency (project): {limits.max_concurrent_project}</div>
-+        <div>Concurrency (global): {limits.max_concurrent_global}</div>
-+        <div>Max secrets: {limits.max_secrets}</div>
-+      </div>
++
++      {events.length > 0 && (
++        <div className="rounded border p-4 space-y-2 text-sm">
++          <h3 className="font-medium">Recent Saturation & Quota Events</h3>
++          <div className="divide-y">
++            {events.map((evt) => (
++              <div key={evt.id} className="py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
++                <div className="space-y-0.5">
++                  <div>
++                    <span className="uppercase font-semibold mr-2">[{evt.severity}]</span>
++                    <span>{evt.message}</span>
++                  </div>
++                  <div className="text-foreground-light">
++                    {new Date(evt.created_at).toLocaleString()}
++                    {evt.function_name ? ` · ${evt.function_name}` : ''}
++                  </div>
++                </div>
++                {!evt.acknowledged && (
++                  <Button
++                    size="tiny"
++                    variant="default"
++                    loading={ackBusyId === evt.id}
++                    disabled={ackBusyId !== null}
++                    onClick={() => void acknowledgeEvent(evt.id)}
++                  >
++                    Acknowledge
++                  </Button>
++                )}
++              </div>
++            ))}
++          </div>
++        </div>
++      )}
 +    </div>
 +  )
 +}
@@ -252,6 +655,8 @@ new file mode 100644
 +      setSecretValue('')
 +      toast.success(res.runtime_synced ? 'Secret saved and synced to runtime.' : 'Secret encrypted and saved.')
 +      void queryClient.invalidateQueries({ queryKey: ['local-edge-secrets', projectRef] })
++      void queryClient.invalidateQueries({ queryKey: ['local-edge-quotas', projectRef] })
++      void queryClient.invalidateQueries({ queryKey: ['local-edge-alerts', projectRef] })
 +    } catch (error) {
 +      setErrorMsg(error instanceof Error ? error.message : 'Failed to save secret')
 +    } finally {
@@ -266,6 +671,7 @@ new file mode 100644
 +      await management(projectRef, `/secrets/${encodeURIComponent(name)}`, { method: 'DELETE' })
 +      toast.success(`Secret ${name} deleted.`)
 +      void queryClient.invalidateQueries({ queryKey: ['local-edge-secrets', projectRef] })
++      void queryClient.invalidateQueries({ queryKey: ['local-edge-quotas', projectRef] })
 +    } catch (error) {
 +      setErrorMsg(error instanceof Error ? error.message : 'Failed to delete secret')
 +    } finally {
@@ -447,14 +853,349 @@ new file mode 100644
 +  )
 +}
 +
++function SchedulesPanel({
++  projectRef,
++  slug,
++  enabled,
++  publishedFunctions = [],
++}: {
++  projectRef: string
++  slug?: string
++  enabled: boolean
++  publishedFunctions?: string[]
++}) {
++  const queryClient = useQueryClient()
++  const [targetSlug, setTargetSlug] = useState(slug ?? publishedFunctions[0] ?? '')
++  const [schedName, setSchedName] = useState('')
++  const [cronExpr, setCronExpr] = useState('*/15 * * * *')
++  const [method, setMethod] = useState<'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'>('POST')
++  const [path, setPath] = useState('/')
++  const [authMode, setAuthMode] = useState<'service_role' | 'anon' | 'none'>('service_role')
++  const [body, setBody] = useState('')
++  const [schedEnabled, setSchedEnabled] = useState(true)
++  const [creating, setCreating] = useState(false)
++  const [busyId, setBusyId] = useState<string | null>(null)
++  const [formError, setFormError] = useState('')
++
++  useEffect(() => {
++    if (slug) {
++      setTargetSlug(slug)
++    } else if (!targetSlug && publishedFunctions.length > 0) {
++      setTargetSlug(publishedFunctions[0])
++    }
++  }, [slug, targetSlug, publishedFunctions])
++
++  const endpoint = slug ? `/${encodeURIComponent(slug)}/schedules` : '/schedules'
++  const query = useQuery({
++    queryKey: ['local-edge-schedules', projectRef, slug ?? 'all'],
++    queryFn: ({ signal }) => management<{ schedules: FunctionSchedule[] }>(projectRef, endpoint, { signal }),
++    retry: false,
++    gcTime: 0,
++  })
++
++  async function refresh() {
++    await queryClient.invalidateQueries({ queryKey: ['local-edge-schedules', projectRef] })
++  }
++
++  async function createSchedule() {
++    const fnSlug = slug ?? targetSlug
++    if (!fnSlug || !schedName.trim() || !cronExpr.trim()) return
++    setCreating(true)
++    setFormError('')
++    try {
++      await management<{ schedule: FunctionSchedule }>(
++        projectRef,
++        `/${encodeURIComponent(fnSlug)}/schedules`,
++        {
++          method: 'POST',
++          body: JSON.stringify({
++            name: schedName.trim(),
++            cron: cronExpr.trim(),
++            timezone: 'UTC',
++            method,
++            path: path.trim() || '/',
++            headers: {},
++            body: method === 'GET' ? '' : body,
++            auth_mode: authMode,
++            enabled: schedEnabled,
++          }),
++        }
++      )
++      setSchedName('')
++      setBody('')
++      toast.success('Schedule created.')
++      await refresh()
++    } catch (error) {
++      setFormError(error instanceof Error ? error.message : 'Failed to create schedule')
++    } finally {
++      setCreating(false)
++    }
++  }
++
++  async function toggleSchedule(sched: FunctionSchedule) {
++    setBusyId(sched.id)
++    setFormError('')
++    try {
++      await management<{ schedule: FunctionSchedule }>(
++        projectRef,
++        `/${encodeURIComponent(sched.function_name)}/schedules/${encodeURIComponent(sched.id)}`,
++        { method: 'PUT', body: JSON.stringify({ enabled: !sched.enabled }) }
++      )
++      toast.success(sched.enabled ? 'Schedule paused.' : 'Schedule resumed.')
++      await refresh()
++    } catch (error) {
++      setFormError(error instanceof Error ? error.message : 'Failed to update schedule')
++    } finally {
++      setBusyId(null)
++    }
++  }
++
++  async function triggerNow(sched: FunctionSchedule) {
++    setBusyId(sched.id)
++    setFormError('')
++    try {
++      const res = await management<{ schedule: FunctionSchedule; invocation: { status: number; duration_ms: number } }>(
++        projectRef,
++        `/${encodeURIComponent(sched.function_name)}/schedules/${encodeURIComponent(sched.id)}/trigger`,
++        { method: 'POST', body: JSON.stringify({}) }
++      )
++      toast.success(`Triggered "${sched.name}": HTTP ${res.invocation.status} (${res.invocation.duration_ms}ms)`)
++      await refresh()
++      void queryClient.invalidateQueries({ queryKey: ['local-edge-logs', projectRef] })
++    } catch (error) {
++      setFormError(error instanceof Error ? error.message : 'Failed to trigger schedule')
++    } finally {
++      setBusyId(null)
++    }
++  }
++
++  async function deleteSchedule(sched: FunctionSchedule) {
++    setBusyId(sched.id)
++    setFormError('')
++    try {
++      await management(
++        projectRef,
++        `/${encodeURIComponent(sched.function_name)}/schedules/${encodeURIComponent(sched.id)}`,
++        { method: 'DELETE' }
++      )
++      toast.success(`Schedule "${sched.name}" deleted.`)
++      await refresh()
++    } catch (error) {
++      setFormError(error instanceof Error ? error.message : 'Failed to delete schedule')
++    } finally {
++      setBusyId(null)
++    }
++  }
++
++  const canSelectFunction = !slug && publishedFunctions.length > 0
++  const effectiveFn = slug ?? targetSlug
++
++  return (
++    <div className="space-y-4">
++      <div className="rounded border p-4 space-y-3 text-sm">
++        <div className="flex flex-wrap items-center justify-between gap-2">
++          <div>
++            <h2 className="font-medium">Cron Schedules (UTC)</h2>
++            <p className="text-xs text-foreground-light">
++              Schedules execute published functions automatically via the advisory-locked scheduler and are automatically disabled or removed when a function is unpublished, deleted, or disabled.
++            </p>
++          </div>
++          <div className="flex flex-wrap gap-1.5">
++            {(['*/5 * * * *', '*/15 * * * *', '@hourly', '@daily'] as const).map((preset) => (
++              <Button key={preset} size="tiny" variant="default" onClick={() => setCronExpr(preset)}>
++                {preset}
++              </Button>
++            ))}
++          </div>
++        </div>
++
++        {(slug || canSelectFunction) ? (
++          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
++            {canSelectFunction && (
++              <div>
++                <Label htmlFor="sched-fn">Function</Label>
++                <select
++                  id="sched-fn"
++                  className="block w-full rounded border bg-background px-2 py-2 text-sm"
++                  value={targetSlug}
++                  onChange={(event: ChangeEvent<HTMLSelectElement>) => setTargetSlug(event.target.value)}
++                >
++                  {publishedFunctions.map((fn) => (
++                    <option key={fn} value={fn}>{fn}</option>
++                  ))}
++                </select>
++              </div>
++            )}
++            <div>
++              <Label htmlFor="sched-name">Schedule Name</Label>
++              <Input
++                id="sched-name"
++                placeholder="nightly-cleanup"
++                value={schedName}
++                disabled={creating}
++                onChange={(event: ChangeEvent<HTMLInputElement>) => setSchedName(event.target.value)}
++              />
++            </div>
++            <div>
++              <Label htmlFor="sched-cron">Cron Expression (UTC)</Label>
++              <Input
++                id="sched-cron"
++                placeholder="*/15 * * * *"
++                value={cronExpr}
++                disabled={creating}
++                onChange={(event: ChangeEvent<HTMLInputElement>) => setCronExpr(event.target.value)}
++              />
++            </div>
++            <div>
++              <Label htmlFor="sched-method">Method</Label>
++              <select
++                id="sched-method"
++                className="block w-full rounded border bg-background px-2 py-2 text-sm"
++                value={method}
++                onChange={(event: ChangeEvent<HTMLSelectElement>) =>
++                  setMethod(event.target.value as 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE')
++                }
++              >
++                {['POST', 'GET', 'PUT', 'PATCH', 'DELETE'].map((m) => (
++                  <option key={m} value={m}>{m}</option>
++                ))}
++              </select>
++            </div>
++            <div>
++              <Label htmlFor="sched-path">Path</Label>
++              <Input
++                id="sched-path"
++                placeholder="/"
++                value={path}
++                disabled={creating}
++                onChange={(event: ChangeEvent<HTMLInputElement>) => setPath(event.target.value)}
++              />
++            </div>
++            <div>
++              <Label htmlFor="sched-auth">Auth Mode</Label>
++              <select
++                id="sched-auth"
++                className="block w-full rounded border bg-background px-2 py-2 text-sm"
++                value={authMode}
++                onChange={(event: ChangeEvent<HTMLSelectElement>) =>
++                  setAuthMode(event.target.value as 'anon' | 'service_role' | 'none')
++                }
++              >
++                <option value="service_role">Service Role</option>
++                <option value="anon">Anon Role</option>
++                <option value="none">Unauthenticated</option>
++              </select>
++            </div>
++            <div>
++              <Label htmlFor="sched-body">Payload (optional JSON)</Label>
++              <Input
++                id="sched-body"
++                placeholder='{"source":"cron"}'
++                value={body}
++                disabled={creating || method === 'GET'}
++                onChange={(event: ChangeEvent<HTMLInputElement>) => setBody(event.target.value)}
++              />
++            </div>
++            <div className="flex items-center justify-between gap-2">
++              <label className="flex items-center gap-1.5 text-xs">
++                <input
++                  type="checkbox"
++                  checked={schedEnabled}
++                  onChange={(event: ChangeEvent<HTMLInputElement>) => setSchedEnabled(event.target.checked)}
++                />
++                Enabled
++              </label>
++              <Button
++                loading={creating}
++                disabled={creating || !effectiveFn || !schedName.trim() || !cronExpr.trim()}
++                onClick={() => void createSchedule()}
++              >
++                Create Schedule
++              </Button>
++            </div>
++          </div>
++        ) : (
++          <p className="text-xs text-foreground-light">
++            Publish at least one function to create a project cron schedule.
++          </p>
++        )}
++        {formError && <p role="alert" className="text-xs text-destructive">{formError}</p>}
++      </div>
++
++      {query.isPending && <p role="status">Loading schedules…</p>}
++      {query.error && <p role="alert">{query.error.message}</p>}
++      {query.data && (
++        <div className="rounded border divide-y text-sm">
++          {query.data.schedules.length === 0 ? (
++            <p className="p-4 text-foreground-light">No cron schedules configured yet.</p>
++          ) : (
++            query.data.schedules.map((sched) => (
++              <div key={sched.id} className="p-3 flex flex-wrap items-center justify-between gap-3">
++                <div className="space-y-1">
++                  <div className="flex flex-wrap items-center gap-2">
++                    <span className="font-medium">{sched.name}</span>
++                    {!slug && <span className="font-mono text-xs text-brand">{sched.function_name}</span>}
++                    <span className="rounded border px-2 py-0.5 font-mono text-xs">{sched.cron}</span>
++                    <span className="rounded border px-2 py-0.5 text-xs">
++                      {sched.enabled ? 'Active' : 'Paused'}
++                    </span>
++                    <span className="text-xs text-foreground-light">
++                      {sched.method} {sched.path} ({sched.auth_mode})
++                    </span>
++                  </div>
++                  <div className="text-xs text-foreground-light">
++                    Next run: {sched.next_run_at ? new Date(sched.next_run_at).toLocaleString() : 'Not scheduled'}
++                    {' · '}
++                    Last run: {sched.last_run_at ? `${new Date(sched.last_run_at).toLocaleString()} (HTTP ${sched.last_status ?? '-'}, ${sched.last_duration_ms ?? 0}ms)` : 'Never'}
++                  </div>
++                  {sched.last_error && <div className="text-xs text-destructive">{sched.last_error}</div>}
++                </div>
++                <div className="flex flex-wrap gap-2">
++                  <Button
++                    size="tiny"
++                    variant="default"
++                    disabled={!enabled || busyId === sched.id}
++                    loading={busyId === sched.id}
++                    onClick={() => void triggerNow(sched)}
++                  >
++                    Trigger now
++                  </Button>
++                  <Button
++                    size="tiny"
++                    variant="default"
++                    disabled={busyId === sched.id}
++                    onClick={() => void toggleSchedule(sched)}
++                  >
++                    {sched.enabled ? 'Pause' : 'Resume'}
++                  </Button>
++                  <Button
++                    size="tiny"
++                    variant="danger"
++                    disabled={busyId === sched.id}
++                    onClick={() => void deleteSchedule(sched)}
++                  >
++                    Delete
++                  </Button>
++                </div>
++              </div>
++            ))
++          )}
++        </div>
++      )}
++    </div>
++  )
++}
++
 +function FunctionsList({ projectRef }: { projectRef: string }) {
-+  const [tab, setTab] = useState<'functions' | 'secrets' | 'logs' | 'quotas'>('functions')
++  const [tab, setTab] = useState<'functions' | 'secrets' | 'logs' | 'schedules' | 'quotas'>('functions')
 +  const query = useQuery({
 +    queryKey: ['local-edge-functions', projectRef],
 +    queryFn: ({ signal }) => management<FunctionList>(projectRef, '', { signal }),
 +    retry: false,
 +    gcTime: 0,
 +  })
++  const publishedFunctions = (query.data?.functions ?? []).filter((fn) => !!fn.published_revision).map((fn) => fn.name)
++
 +  return (
 +    <div className="p-6 space-y-5 w-full max-w-6xl mx-auto">
 +      <div className="flex flex-wrap items-center justify-between gap-3">
@@ -464,14 +1205,22 @@ new file mode 100644
 +        )}
 +      </div>
 +      <div className="flex flex-wrap gap-2 border-b pb-2 text-sm">
-+        {(['functions', 'secrets', 'logs', 'quotas'] as const).map((item) => (
++        {(['functions', 'secrets', 'logs', 'schedules', 'quotas'] as const).map((item) => (
 +          <Button
 +            key={item}
 +            size="tiny"
 +            variant={tab === item ? undefined : 'default'}
 +            onClick={() => setTab(item)}
 +          >
-+            {item === 'functions' ? 'Functions' : item === 'secrets' ? 'Secrets' : item === 'logs' ? 'Logs' : 'Limits & GC'}
++            {item === 'functions'
++              ? 'Functions'
++              : item === 'secrets'
++                ? 'Secrets'
++                : item === 'logs'
++                  ? 'Logs'
++                  : item === 'schedules'
++                    ? 'Schedules'
++                    : 'Limits & GC'}
 +          </Button>
 +        ))}
 +      </div>
@@ -501,29 +1250,54 @@ new file mode 100644
 +      </>}
 +      {tab === 'secrets' && <SecretsPanel projectRef={projectRef} />}
 +      {tab === 'logs' && <LogsPanel projectRef={projectRef} />}
++      {tab === 'schedules' && (
++        <SchedulesPanel
++          projectRef={projectRef}
++          enabled={query.data?.enabled ?? false}
++          publishedFunctions={publishedFunctions}
++        />
++      )}
 +      {query.data && tab === 'quotas' && <LimitsSummary limits={query.data.limits} projectRef={projectRef} />}
 +    </div>
 +  )
 +}
 +
 +const STARTER = 'Deno.serve((_request) => Response.json({ message: "Hello from your project" }))\n'
-+const asFiles = (data: FunctionBody): FileData[] =>
-+  data.files.map((file, id) => ({ ...file, id, state: 'unchanged' }))
-+const fingerprint = (files: FileData[]) => JSON.stringify(files.map(({ name, content }) => ({ name, content })))
++const asTextFiles = (data: FunctionBody): FileData[] => {
++  const textEntries = data.files.filter((file) => file.encoding !== 'base64' && !file.name.endsWith('.wasm'))
++  return (textEntries.length > 0 ? textEntries : [{ name: 'index.ts', content: '' }]).map((file, id) => ({
++    name: file.name,
++    content: file.content,
++    id,
++    state: 'unchanged',
++  }))
++}
++const asWasmFiles = (data: FunctionBody): WasmArtifact[] =>
++  data.files
++    .filter((file) => file.encoding === 'base64' || file.name.endsWith('.wasm'))
++    .map((file) => ({ name: file.name, content: file.content, encoding: 'base64' }))
++
++const fingerprint = (files: FileData[], wasmFiles: WasmArtifact[]) =>
++  JSON.stringify({
++    text: files.map(({ name, content }) => ({ name, content })),
++    wasm: wasmFiles.map(({ name, content }) => ({ name, content })),
++  })
 +
 +function FunctionEditor({ projectRef, slug }: { projectRef: string; slug?: string }) {
 +  const router = useRouter()
 +  const queryClient = useQueryClient()
-+  const [tab, setTab] = useState<'code' | 'test' | 'logs' | 'versions' | 'settings'>('code')
++  const [tab, setTab] = useState<'code' | 'test' | 'logs' | 'versions' | 'schedules' | 'settings'>('code')
 +  const [name, setName] = useState(slug ?? '')
 +  const [info, setInfo] = useState<FunctionBody>()
 +  const [files, setFiles] = useState<FileData[]>([{ id: 0, name: 'index.ts', content: STARTER, state: 'new' }])
-+  const [saved, setSaved] = useState(slug ? '' : fingerprint(files))
++  const [wasmFiles, setWasmFiles] = useState<WasmArtifact[]>([])
++  const [saved, setSaved] = useState(slug ? '' : fingerprint(files, []))
 +  const [busy, setBusy] = useState(false)
 +  const [failure, setFailure] = useState('')
 +  const [selected, setSelected] = useState(0)
 +  const [pendingAction, setPendingAction] = useState<'unpublish' | 'delete' | null>(null)
 +  const [deleted, setDeleted] = useState(false)
++  const [lastTemplateSlug, setLastTemplateSlug] = useState('')
 +
 +  // Live invoke runner state
 +  const [invokeMethod, setInvokeMethod] = useState('POST')
@@ -535,9 +1309,14 @@ new file mode 100644
 +  const [invokeResult, setInvokeResult] = useState<InvokeResponse | null>(null)
 +  const [invokeError, setInvokeError] = useState('')
 +
++  // Version diff state
++  const [diffFrom, setDiffFrom] = useState('')
++  const [diffTo, setDiffTo] = useState('draft')
++
 +  const [configBusy, setConfigBusy] = useState(false)
 +  const [downloading, setDownloading] = useState(false)
 +  const [rollingBackRev, setRollingBackRev] = useState<string | null>(null)
++  const wasmInputRef = useRef<HTMLInputElement | null>(null)
 +
 +  const mounted = useRef(true)
 +  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
@@ -551,6 +1330,13 @@ new file mode 100644
 +    refetchOnWindowFocus: false,
 +    refetchOnReconnect: false,
 +  })
++  const templatesQuery = useQuery<{ templates: FunctionTemplate[] }>({
++    queryKey: ['local-edge-templates', projectRef],
++    queryFn: ({ signal }) => management<{ templates: FunctionTemplate[] }>(projectRef, '/templates', { signal }),
++    enabled: !slug && !info,
++    retry: false,
++    gcTime: 0,
++  })
 +  const versionsQuery = useQuery<VersionsResponse>({
 +    queryKey: ['local-edge-function-versions', projectRef, info?.name ?? slug ?? ''],
 +    queryFn: ({ signal }) => management<VersionsResponse>(
@@ -562,15 +1348,42 @@ new file mode 100644
 +    retry: false,
 +    gcTime: 0,
 +  })
++  const diffQuery = useQuery<VersionDiffResponse>({
++    queryKey: ['local-edge-function-diff', projectRef, info?.name ?? slug ?? '', diffFrom, diffTo],
++    queryFn: ({ signal }) => management<VersionDiffResponse>(
++      projectRef,
++      `/${encodeURIComponent(info?.name ?? slug ?? '')}/diff?from=${encodeURIComponent(diffFrom)}&to=${encodeURIComponent(diffTo || 'draft')}`,
++      { signal }
++    ),
++    enabled: tab === 'versions' && !!(info?.name ?? slug) && !!diffFrom && !!diffTo && diffFrom !== diffTo,
++    retry: false,
++    gcTime: 0,
++  })
++
 +  useEffect(() => {
 +    if (slug && query.data && 'files' in query.data && !info) {
 +      setInfo(query.data)
-+      const loaded = asFiles(query.data)
-+      setFiles(loaded)
-+      setSaved(fingerprint(loaded))
++      const loadedText = asTextFiles(query.data)
++      const loadedWasm = asWasmFiles(query.data)
++      setFiles(loadedText)
++      setWasmFiles(loadedWasm)
++      setSaved(fingerprint(loadedText, loadedWasm))
 +    }
 +  }, [slug, query.data, info])
-+  const dirty = fingerprint(files) !== saved
++
++  useEffect(() => {
++    if (!versionsQuery.data?.versions?.length || diffFrom) return
++    const list = versionsQuery.data.versions
++    if (versionsQuery.data.published_revision) {
++      setDiffFrom(versionsQuery.data.published_revision)
++      setDiffTo('draft')
++    } else if (list.length >= 2) {
++      setDiffFrom(list[1].revision)
++      setDiffTo(list[0].revision)
++    }
++  }, [versionsQuery.data, diffFrom])
++
++  const dirty = fingerprint(files, wasmFiles) !== saved
 +  const navigation = usePreventNavigationOnUnsavedChanges({ hasChanges: !deleted && (dirty || busy) })
 +  useEffect(() => {
 +    if (deleted) void router.replace(`/project/${projectRef}/functions`)
@@ -579,21 +1392,66 @@ new file mode 100644
 +  const loaded = !!query.data && (!slug || !!info)
 +  const validName = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(name) && name !== 'main'
 +
++  function applyTemplate(tpl: FunctionTemplate) {
++    const nextText = tpl.files
++      .filter((f) => f.encoding !== 'base64' && !f.name.endsWith('.wasm'))
++      .map((f, idx) => ({ name: f.name, content: f.content, id: idx, state: 'new' as const }))
++    const nextWasm = tpl.files
++      .filter((f) => f.encoding === 'base64' || f.name.endsWith('.wasm'))
++      .map((f) => ({ name: f.name, content: f.content, encoding: 'base64' as const }))
++    setFiles(nextText)
++    setWasmFiles(nextWasm)
++    setSelected(0)
++    if (!slug && !info && (!name.trim() || name === lastTemplateSlug)) {
++      setName(tpl.id)
++      setLastTemplateSlug(tpl.id)
++    }
++    toast.success(`Template "${tpl.name}" loaded into editor.`)
++  }
++
++  async function handleWasmUpload(event: ChangeEvent<HTMLInputElement>) {
++    const picked = event.target.files?.[0]
++    event.target.value = ''
++    if (!picked) return
++    const cleanName = picked.name.trim()
++    if (!cleanName.endsWith('.wasm') || !/^[A-Za-z0-9_@.-]+$/.test(cleanName)) {
++      toast.error('Upload a valid .wasm file with simple filename characters (e.g. add.wasm).')
++      return
++    }
++    const buf = new Uint8Array(await picked.arrayBuffer())
++    if (!hasValidWasmMagic(buf)) {
++      toast.error('Invalid WebAssembly binary: missing \\0asm version 1 header.')
++      return
++    }
++    const b64 = encodeBase64Bytes(buf)
++    setWasmFiles((prev) => [
++      ...prev.filter((item) => item.name !== cleanName),
++      { name: cleanName, content: b64, encoding: 'base64' },
++    ])
++    toast.success(`Attached ${cleanName} (${buf.length} bytes). Import it via "./${cleanName}".`)
++  }
++
 +  async function save() {
 +    setBusy(true)
 +    setFailure('')
 +    try {
++      const payloadFiles: CodeEntry[] = [
++        ...files.map(({ name: fName, content }) => ({ name: fName, content })),
++        ...wasmFiles.map(({ name: wName, content }) => ({ name: wName, content, encoding: 'base64' as const })),
++      ]
 +      const result = await management<FunctionBody>(projectRef, `/${encodeURIComponent(name)}`, {
 +        method: 'PUT',
 +        body: JSON.stringify({
 +          expected_revision: info?.revision ?? null,
-+          files: files.map(({ name, content }) => ({ name, content })),
++          files: payloadFiles,
 +        }),
 +      })
 +      if (!mounted.current) return
 +      setInfo(result)
-+      setSaved(fingerprint(files))
++      setSaved(fingerprint(files, wasmFiles))
 +      void queryClient.invalidateQueries({ queryKey: ['local-edge-function-versions', projectRef, result.name] })
++      void queryClient.invalidateQueries({ queryKey: ['local-edge-quotas', projectRef] })
++      void queryClient.invalidateQueries({ queryKey: ['local-edge-alerts', projectRef] })
 +      toast.success('Draft saved. Public code has not changed.')
 +    } catch (error) {
 +      if (mounted.current) setFailure(error instanceof Error ? error.message : 'Draft save failed')
@@ -612,6 +1470,7 @@ new file mode 100644
 +      if (!mounted.current) return
 +      setInfo(result)
 +      void queryClient.invalidateQueries({ queryKey: ['local-edge-function-versions', projectRef, result.name] })
++      void queryClient.invalidateQueries({ queryKey: ['local-edge-functions', projectRef] })
 +      toast.success('Function published for this project.')
 +    } catch (error) {
 +      if (mounted.current) setFailure(error instanceof Error ? error.message : 'Publication failed')
@@ -639,6 +1498,7 @@ new file mode 100644
 +        toast.success('Function unpublished. The saved draft is preserved.')
 +      }
 +      void queryClient.invalidateQueries({ queryKey: ['local-edge-functions', projectRef] })
++      void queryClient.invalidateQueries({ queryKey: ['local-edge-schedules', projectRef] })
 +    } catch (error) {
 +      if (mounted.current) setFailure(error instanceof Error ? error.message : 'Function removal failed')
 +    } finally { if (mounted.current) setBusy(false) }
@@ -691,6 +1551,9 @@ new file mode 100644
 +      if (!mounted.current) return
 +      setInvokeResult(res)
 +      void queryClient.invalidateQueries({ queryKey: ['local-edge-logs', projectRef, name] })
++      if (res.status === 429) {
++        void queryClient.invalidateQueries({ queryKey: ['local-edge-alerts', projectRef] })
++      }
 +    } catch (error) {
 +      if (mounted.current) setInvokeError(error instanceof Error ? error.message : 'Invocation failed')
 +    } finally { if (mounted.current) setInvoking(false) }
@@ -707,9 +1570,11 @@ new file mode 100644
 +      })
 +      if (!mounted.current) return
 +      setInfo(result)
-+      const reloaded = asFiles(result)
-+      setFiles(reloaded)
-+      setSaved(fingerprint(reloaded))
++      const reloadedText = asTextFiles(result)
++      const reloadedWasm = asWasmFiles(result)
++      setFiles(reloadedText)
++      setWasmFiles(reloadedWasm)
++      setSaved(fingerprint(reloadedText, reloadedWasm))
 +      setSelected(0)
 +      void queryClient.invalidateQueries({ queryKey: ['local-edge-function-versions', projectRef, name] })
 +      toast.success('Snapshot restored to draft. Review and publish explicitly when ready.')
@@ -770,9 +1635,27 @@ new file mode 100644
 +          {info.revision === info.published_revision ? 'Published version' : 'Unpublished draft'}
 +          {' · '}Public path: /{projectRef}/functions/v1/{name}
 +        </p>}
++        {!slug && !info && templatesQuery.data?.templates && templatesQuery.data.templates.length > 0 && (
++          <div className="rounded border p-3 space-y-2 text-xs">
++            <div className="font-medium text-sm">Starter Templates</div>
++            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
++              {templatesQuery.data.templates.map((tpl) => (
++                <button
++                  key={tpl.id}
++                  type="button"
++                  onClick={() => applyTemplate(tpl)}
++                  className="rounded border p-2.5 text-left hover:bg-surface-200 transition-colors"
++                >
++                  <div className="font-medium text-foreground">{tpl.name}</div>
++                  <div className="text-foreground-light mt-0.5">{tpl.description}</div>
++                </button>
++              ))}
++            </div>
++          </div>
++        )}
 +        {info && (
 +          <div className="flex flex-wrap gap-2 pt-1">
-+            {(['code', 'test', 'logs', 'versions', 'settings'] as const).map((item) => (
++            {(['code', 'test', 'logs', 'versions', 'schedules', 'settings'] as const).map((item) => (
 +              <Button
 +                key={item}
 +                size="tiny"
@@ -786,8 +1669,10 @@ new file mode 100644
 +                    : item === 'logs'
 +                      ? 'Logs'
 +                      : item === 'versions'
-+                        ? 'Versions'
-+                        : 'Settings & Limits'}
++                        ? 'Versions & Diff'
++                        : item === 'schedules'
++                          ? 'Schedules'
++                          : 'Settings & Limits'}
 +              </Button>
 +            ))}
 +          </div>
@@ -797,6 +1682,40 @@ new file mode 100644
 +      {loaded && (!info || tab === 'code') && <>
 +        <div inert={busy} className="flex flex-col flex-1 min-h-[450px]">
 +          <FileExplorerAndEditor editable files={files} onFilesChange={setFiles} selectedFileId={selected} setSelectedFileId={setSelected} />
++        </div>
++        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 border-t bg-surface-200 text-xs">
++          <div className="flex flex-wrap items-center gap-2">
++            <span className="font-medium">WebAssembly (.wasm) Modules:</span>
++            {wasmFiles.length === 0 ? (
++              <span className="text-foreground-light">None attached</span>
++            ) : (
++              wasmFiles.map((wf) => (
++                <span key={wf.name} className="inline-flex items-center gap-1.5 rounded border bg-background px-2 py-0.5 font-mono">
++                  {wf.name} ({decodedBase64Length(wf.content)} B)
++                  <button
++                    type="button"
++                    className="text-destructive ml-1"
++                    onClick={() => setWasmFiles((prev) => prev.filter((item) => item.name !== wf.name))}
++                    aria-label={`Remove ${wf.name}`}
++                  >
++                    ×
++                  </button>
++                </span>
++              ))
++            )}
++          </div>
++          <div>
++            <input
++              ref={wasmInputRef}
++              type="file"
++              accept=".wasm"
++              className="hidden"
++              onChange={(event) => void handleWasmUpload(event)}
++            />
++            <Button size="tiny" variant="default" disabled={busy} onClick={() => wasmInputRef.current?.click()}>
++              Attach .wasm file
++            </Button>
++          </div>
 +        </div>
 +        <div className="flex flex-wrap items-center justify-end gap-4 p-4 border-t">
 +          {info && <>
@@ -917,48 +1836,156 @@ new file mode 100644
 +        </div>
 +      )}
 +      {loaded && info && tab === 'versions' && (
-+        <div className="p-5 space-y-4">
++        <div className="p-5 space-y-5">
 +          {versionsQuery.isPending && <p role="status">Loading versions…</p>}
 +          {versionsQuery.error && <p role="alert">{versionsQuery.error.message}</p>}
 +          {versionsQuery.data && (
-+            <div className="rounded border divide-y text-sm">
-+              {versionsQuery.data.versions.map((ver) => (
-+                <div key={ver.revision} className="flex flex-wrap items-center justify-between gap-2 p-3">
-+                  <div className="space-y-0.5">
-+                    <div className="flex flex-wrap items-center gap-2">
-+                      <span className="font-mono font-medium">{ver.revision.slice(0, 12)}</span>
-+                      {ver.is_published && <span className="rounded border px-2 py-0.5 text-xs">Published</span>}
-+                      {ver.is_draft && <span className="rounded border px-2 py-0.5 text-xs">Current Draft</span>}
++            <>
++              <div className="rounded border divide-y text-sm">
++                {versionsQuery.data.versions.map((ver) => (
++                  <div key={ver.revision} className="flex flex-wrap items-center justify-between gap-2 p-3">
++                    <div className="space-y-0.5">
++                      <div className="flex flex-wrap items-center gap-2">
++                        <span className="font-mono font-medium">{ver.revision.slice(0, 12)}</span>
++                        {ver.is_published && <span className="rounded border px-2 py-0.5 text-xs">Published</span>}
++                        {ver.is_draft && <span className="rounded border px-2 py-0.5 text-xs">Current Draft</span>}
++                        {ver.author_label && (
++                          <span className="rounded bg-surface-200 px-2 py-0.5 text-xs">by {ver.author_label}</span>
++                        )}
++                      </div>
++                      <div className="text-xs text-foreground-light">
++                        {ver.created_at ? new Date(ver.created_at).toLocaleString() : 'Legacy'} · {ver.file_count} files · {ver.total_bytes} bytes
++                      </div>
 +                    </div>
-+                    <div className="text-xs text-foreground-light">
-+                      {ver.created_at ? new Date(ver.created_at).toLocaleString() : 'Legacy'} · {ver.file_count} files · {ver.total_bytes} bytes
-+                    </div>
-+                  </div>
-+                  <div className="flex gap-2">
-+                    <Button
-+                      size="tiny"
-+                      variant="default"
-+                      disabled={downloading}
-+                      onClick={() => void exportZip(ver.revision)}
-+                    >
-+                      Download ZIP
-+                    </Button>
-+                    {!ver.is_draft && (
++                    <div className="flex flex-wrap gap-2">
++                      {!ver.is_draft && (
++                        <Button
++                          size="tiny"
++                          variant="default"
++                          onClick={() => {
++                            setDiffFrom(ver.revision)
++                            setDiffTo('draft')
++                          }}
++                        >
++                          Diff vs Draft
++                        </Button>
++                      )}
 +                      <Button
 +                        size="tiny"
 +                        variant="default"
-+                        loading={rollingBackRev === ver.revision}
-+                        disabled={rollingBackRev !== null || dirty}
-+                        onClick={() => void rollbackRevision(ver.revision)}
++                        disabled={downloading}
++                        onClick={() => void exportZip(ver.revision)}
 +                      >
-+                        Restore to draft
++                        Download ZIP
 +                      </Button>
-+                    )}
++                      {!ver.is_draft && (
++                        <Button
++                          size="tiny"
++                          variant="default"
++                          loading={rollingBackRev === ver.revision}
++                          disabled={rollingBackRev !== null || dirty}
++                          onClick={() => void rollbackRevision(ver.revision)}
++                        >
++                          Restore to draft
++                        </Button>
++                      )}
++                    </div>
 +                  </div>
++                ))}
++              </div>
++
++              {versionsQuery.data.versions.length >= 2 && (
++                <div className="rounded border p-4 space-y-3 text-sm">
++                  <div className="flex flex-wrap items-end justify-between gap-3">
++                    <div>
++                      <h2 className="font-medium">Revision Line Diff</h2>
++                      <p className="text-xs text-foreground-light">Compare any two snapshots side-by-side line-by-line.</p>
++                    </div>
++                    <div className="flex flex-wrap items-end gap-3 text-xs">
++                      <div>
++                        <Label htmlFor="diff-from">From</Label>
++                        <select
++                          id="diff-from"
++                          className="block rounded border bg-background px-2 py-1.5 font-mono"
++                          value={diffFrom}
++                          onChange={(event: ChangeEvent<HTMLSelectElement>) => setDiffFrom(event.target.value)}
++                        >
++                          {versionsQuery.data.versions.map((ver) => (
++                            <option key={`from-${ver.revision}`} value={ver.revision}>
++                              {ver.revision.slice(0, 12)}{ver.is_published ? ' (published)' : ''}{ver.is_draft ? ' (draft)' : ''}
++                            </option>
++                          ))}
++                        </select>
++                      </div>
++                      <div>
++                        <Label htmlFor="diff-to">To</Label>
++                        <select
++                          id="diff-to"
++                          className="block rounded border bg-background px-2 py-1.5 font-mono"
++                          value={diffTo}
++                          onChange={(event: ChangeEvent<HTMLSelectElement>) => setDiffTo(event.target.value)}
++                        >
++                          <option value="draft">draft (current)</option>
++                          {versionsQuery.data.versions.map((ver) => (
++                            <option key={`to-${ver.revision}`} value={ver.revision}>
++                              {ver.revision.slice(0, 12)}{ver.is_published ? ' (published)' : ''}
++                            </option>
++                          ))}
++                        </select>
++                      </div>
++                    </div>
++                  </div>
++
++                  {diffQuery.isPending && <p role="status" className="text-xs">Computing diff…</p>}
++                  {diffQuery.error && <p role="alert" className="text-xs text-destructive">{diffQuery.error.message}</p>}
++                  {diffQuery.data && (
++                    <div className="space-y-3">
++                      <div className="text-xs text-foreground-light">
++                        +{diffQuery.data.summary.lines_added} / -{diffQuery.data.summary.lines_removed} lines
++                        {' · '}
++                        {diffQuery.data.summary.files_added} added, {diffQuery.data.summary.files_modified} modified, {diffQuery.data.summary.files_removed} removed
++                        {diffQuery.data.summary.truncated && ' (output truncated)'}
++                      </div>
++                      {diffQuery.data.files.filter((f) => f.status !== 'unchanged').map((file) => (
++                        <div key={file.name} className="rounded border overflow-hidden">
++                          <div className="px-3 py-1.5 bg-surface-200 flex items-center justify-between text-xs font-mono">
++                            <span>{file.name}</span>
++                            <span className="uppercase">{file.status}{file.binary ? ' (binary)' : ''}</span>
++                          </div>
++                          <pre className="p-3 overflow-auto font-mono text-xs leading-5">
++                            {file.hunks.map((line, lineIdx) => {
++                              const lineClass = line.startsWith('+') && !line.startsWith('+++')
++                                ? 'text-brand'
++                                : line.startsWith('-') && !line.startsWith('---')
++                                  ? 'text-destructive'
++                                  : line.startsWith('@@')
++                                    ? 'text-foreground-light'
++                                    : ''
++                              return (
++                                <div key={`${file.name}:${lineIdx}`} className={lineClass}>
++                                  {line || ' '}
++                                </div>
++                              )
++                            })}
++                          </pre>
++                        </div>
++                      ))}
++                    </div>
++                  )}
 +                </div>
-+              ))}
-+            </div>
++              )}
++            </>
 +          )}
++        </div>
++      )}
++      {loaded && info && tab === 'schedules' && (
++        <div className="p-5">
++          <SchedulesPanel
++            projectRef={projectRef}
++            slug={info.name}
++            enabled={enabled}
++            publishedFunctions={info.published_revision ? [info.name] : []}
++          />
 +        </div>
 +      )}
 +      {loaded && info && tab === 'settings' && (
@@ -1014,7 +2041,6 @@ new file mode 100644
 +SelfHostedEdgeFunctionsPage.getLayout = (page: ReactNode) => (
 +  <DefaultLayout><EdgeFunctionsLayout title="Edge Functions">{page}</EdgeFunctionsLayout></DefaultLayout>
 +)
-
 diff --git a/apps/studio/pages/project/[ref]/functions/index.tsx b/apps/studio/pages/project/[ref]/functions/index.tsx
 --- a/apps/studio/pages/project/[ref]/functions/index.tsx
 +++ b/apps/studio/pages/project/[ref]/functions/index.tsx
