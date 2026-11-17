@@ -695,6 +695,8 @@ async def logs_list(ref: str, request: Request, response: Response, pool=Depends
             creds = canonical_projection_credentials(project)
         except RuntimeError:
             creds = {'jwt_secret': '', 'public_url': '', 'anon_key': '', 'service_role_key': '', 'postgres_password': ''}
+        project = dict(project)
+    async with pool.acquire() as conn:
         return await _fetch_merged_logs(
             conn, project, creds, secrets,
             function_name=fn_filter, level=level_filter, limit=limit,
@@ -974,6 +976,8 @@ async def function_logs(ref: str, slug: str, request: Request, response: Respons
             creds = canonical_projection_credentials(project)
         except RuntimeError:
             creds = {'jwt_secret': '', 'public_url': '', 'anon_key': '', 'service_role_key': '', 'postgres_password': ''}
+        project = dict(project)
+    async with pool.acquire() as conn:
         return await _fetch_merged_logs(
             conn, project, creds, secrets,
             function_name=slug, level=level_filter, limit=limit,

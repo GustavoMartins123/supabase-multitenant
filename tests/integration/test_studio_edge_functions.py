@@ -422,6 +422,26 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(removed.status_code,200,removed.text)
         self.assertNotIn('secrets',edge_functions.read_context(self.root,self.names[0],str(self.projects[0])))
 
+    async def test_log_reads_do_not_hold_the_configuration_lock_while_fetching(self):
+        import fcntl
+        draft=await self.save();await self.configure(True)
+        self.assertEqual((await self.publish(draft)).status_code,200)
+        lock_states=[]
+        async def probe(conn,project,creds,secrets,*,function_name,level,limit):
+            descriptor=os.open(self.root/'.functions-locks'/self.names[0],os.O_RDWR)
+            try:
+                fcntl.flock(descriptor,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                lock_states.append(True)
+            except BlockingIOError:
+                lock_states.append(False)
+            finally:
+                os.close(descriptor)
+            return {'logs':[],'runtime_connected':False}
+        with patch.object(self.routes,'_fetch_merged_logs',side_effect=probe):
+            self.assertEqual((await self.request('GET','/logs')).status_code,200)
+            self.assertEqual((await self.request('GET','/my-function/logs')).status_code,200)
+        self.assertEqual(lock_states,[True,True])
+
     async def test_management_works_with_a_single_database_connection(self):
         import asyncio,asyncpg
         original=self.pool

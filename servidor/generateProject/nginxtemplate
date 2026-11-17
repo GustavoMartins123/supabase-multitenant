@@ -515,6 +515,11 @@ http {
             proxy_set_header X-Forwarded-Proto http;
         }
         
+        location ^~ /functions/v1/__ {
+            default_type application/json;
+            return 404 '{"code":"function_not_found"}';
+        }
+
         location /functions/v1/ {
             set $opaque_target_service functions;
             auth_request /_internal/opaque-key-authorize;

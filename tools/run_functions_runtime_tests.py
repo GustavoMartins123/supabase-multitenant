@@ -617,6 +617,9 @@ def main() -> None:
                     'X-Project-Name': 'test_beta', 'X-Project-Ref': refs['test_beta'], 'X-Project-UUID': identities['test_beta'],
                 })
                 assert beta_anon.status_code in {401, 403}, beta_anon.text
+                for internal_path in ('__logs', '__event-ingest', '__health', '%5F%5Flogs'):
+                    internal = client.get(f'{nginx_origin}/functions/v1/{internal_path}', headers=gw_headers('/functions/v1/x'))
+                    assert internal.status_code == 404, (internal_path, internal.status_code, internal.text)
                 record('per_function_verify_jwt_webhook_and_isolation')
 
                 # 10. Event worker console/boot capture, HMAC logs endpoint & redaction
