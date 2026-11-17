@@ -301,6 +301,10 @@ async def management_context(ref, request, response, pool, *, allow_query: bool 
             if (project['id'], project['name'], project['tenant_uuid']) != locked_project:
                 raise HTTPException(409, 'Project identity changed while waiting; reload before continuing')
             await ensure_project_admin_access(conn, project_id=project['id'], auth_user=user)
+            request.state.edge_actor_label = str(
+                user.get('username') or user.get('display_name') or user['db_user_id']
+            )[:128]
+            request.state.edge_actor_is_global_admin = bool(user.get('is_global_admin'))
             try:
                 yield conn, project, user['db_user_id'], await configuration(conn, project['id'])
             except (OSError, RuntimeError, ValueError, KeyError, TypeError, UnicodeError) as error:
@@ -353,6 +357,70 @@ async def sync_function_config_publication(conn, project_id, slug: str, action: 
 async def audit(conn, project, actor, action, slug=None, revision=None):
     return await conn.fetchval('''INSERT INTO studio_edge_audit(project_id,actor_id,action,function_name,revision,outcome)
         VALUES($1,$2,$3,$4,$5,'requested') RETURNING id''', project['id'], actor, action, slug, revision)
+
+
+async def _record_revision_author(conn, project_id, slug: str, revision: str, actor_id, actor_label: str, action: str = 'save_draft') -> None:
+    """Persist the original creator metadata for an immutable function revision."""
+    await conn.execute(
+        '''INSERT INTO project_edge_function_revisions(project_id,function_name,revision,author_id,author_label,action)
+           VALUES($1,$2,$3,$4,$5,$6)
+           ON CONFLICT (project_id, function_name, revision) DO NOTHING''',
+        project_id, slug, revision, actor_id, actor_label[:128], action,
+    )
+
+
+async def _load_revision_authors(conn, project_id, slug: str) -> dict[str, dict[str, str | None]]:
+    """Load author attribution per revision, falling back to legacy audit records."""
+    authors: dict[str, dict[str, str | None]] = {}
+    rev_rows = await conn.fetch(
+        '''SELECT r.revision, r.author_id,
+                  COALESCE(NULLIF(u.authelia_username, ''), NULLIF(u.display_name, ''), NULLIF(r.author_label, ''), r.author_id::text) AS label
+           FROM project_edge_function_revisions r
+           LEFT JOIN users u ON u.id = r.author_id
+           WHERE r.project_id=$1 AND r.function_name=$2''',
+        project_id, slug,
+    )
+    for row in rev_rows or ():
+        authors[row['revision']] = {
+            'author_id': str(row['author_id']) if row['author_id'] is not None else None,
+            'author_label': row['label'] or None,
+        }
+    audit_rows = await conn.fetch(
+        '''SELECT DISTINCT ON (a.revision) a.revision, a.actor_id,
+                  COALESCE(NULLIF(u.authelia_username, ''), NULLIF(u.display_name, ''), a.actor_id::text) AS label
+           FROM studio_edge_audit a
+           LEFT JOIN users u ON u.id = a.actor_id
+           WHERE a.project_id=$1 AND a.function_name=$2 AND a.action IN ('save_draft', 'rollback') AND a.revision IS NOT NULL
+           ORDER BY a.revision, a.created_at ASC''',
+        project_id, slug,
+    )
+    for row in audit_rows or ():
+        if row['revision'] not in authors:
+            authors[row['revision']] = {
+                'author_id': str(row['actor_id']) if row['actor_id'] is not None else None,
+                'author_label': row['label'] or None,
+            }
+    return authors
+
+
+def _resolve_revision_snapshot(state: dict, slug: str, selector: str) -> tuple[str, list[dict]]:
+    """Resolve 'draft', 'published', or a 64-hex revision SHA-256 to its files."""
+    current = store.item(ROOT, state, slug, {})
+    if current is None:
+        raise HTTPException(404, 'Function not found')
+    if selector == 'draft':
+        return current['revision'], current['files']
+    if selector == 'published':
+        if current['published_revision'] is None:
+            raise HTTPException(409, 'Function has no published revision')
+        target_rev = current['published_revision']
+        return target_rev, store.read_version(ROOT, state, slug, target_rev)
+    if store.REVISION.fullmatch(selector):
+        try:
+            return selector, store.read_version(ROOT, state, slug, selector)
+        except FileNotFoundError as error:
+            raise HTTPException(404, 'Function version not found') from error
+    raise HTTPException(400, 'Invalid version selector')
 
 
 async def outcome(conn, audit_id, result):
@@ -678,6 +746,12 @@ async def function_list(ref: str, request: Request, response: Response, pool=Dep
              'verify_jwt': configs.get(item['name'], True)} for item in values], 'limits': governance_limits()}
 
 
+@router.get('/templates')
+async def templates_list(ref: str, request: Request, response: Response, pool=Depends(get_pool)):
+    async with management_context(ref, request, response, pool):
+        return {'templates': store.list_templates()}
+
+
 @router.post('/gc')
 async def versions_gc(ref: str, request: Request, response: Response, body: GcBody | None = None, pool=Depends(get_pool)):
     min_age = body.min_age_seconds if body is not None else store.DEFAULT_ORPHAN_RETENTION_SECONDS
@@ -847,6 +921,8 @@ async def function_save(ref: str, slug: str, body: DraftBody, request: Request, 
         audit_id = await audit(conn, project, actor, 'save_draft', slug, revision)
         try:
             store.atomic_json(store.directory(ROOT, project['name'], identity(project)) / 'state.json', state)
+            actor_label = getattr(request.state, 'edge_actor_label', None) or str(actor)
+            await _record_revision_author(conn, project['id'], slug, revision, actor, actor_label, 'save_draft')
         except Exception:
             await outcome(conn, audit_id, 'failed')
             raise
@@ -881,6 +957,11 @@ async def commit_change(conn, project, actor, config, state, proposed, slug, rev
     if context:
         store.finish_publication(ROOT, name, tenant)
     await sync_function_config_publication(conn, project['id'], slug, action, actor)
+    if action == 'delete':
+        await conn.execute(
+            'DELETE FROM project_edge_function_revisions WHERE project_id=$1 AND function_name=$2',
+            project['id'], slug,
+        )
     await outcome(conn, audit_id, 'completed')
 
 
@@ -1090,17 +1171,72 @@ async def function_invoke(ref: str, slug: str, body: InvokeBody, request: Reques
 @router.get('/{slug}/versions')
 async def function_versions(ref: str, slug: str, request: Request, response: Response, pool=Depends(get_pool)):
     validate_slug(slug)
-    async with management_context(ref, request, response, pool) as (_, project, _, _):
+    async with management_context(ref, request, response, pool) as (conn, project, _, _):
         state = load(project)
         current = store.item(ROOT, state, slug, {})
         if current is None:
             raise HTTPException(404, 'Function not found')
+        authors = await _load_revision_authors(conn, project['id'], slug)
+        versions = []
+        for entry in store.list_versions(ROOT, state, slug):
+            meta = authors.get(entry['revision'], {})
+            versions.append({
+                **entry,
+                'author_id': meta.get('author_id'),
+                'author_label': meta.get('author_label'),
+            })
         return {
             'name': slug,
             'draft_revision': current['revision'],
             'published_revision': current['published_revision'],
-            'versions': store.list_versions(ROOT, state, slug),
+            'versions': versions,
         }
+
+
+@router.get('/{slug}/versions/{revision}')
+async def function_version_detail(ref: str, slug: str, revision: str, request: Request, response: Response, pool=Depends(get_pool)):
+    validate_slug(slug)
+    if not store.REVISION.fullmatch(revision):
+        raise HTTPException(400, 'Invalid function revision')
+    async with management_context(ref, request, response, pool) as (conn, project, _, _):
+        state = load(project)
+        current = store.item(ROOT, state, slug, {})
+        if current is None:
+            raise HTTPException(404, 'Function not found')
+        try:
+            files = store.read_version(ROOT, state, slug, revision)
+        except FileNotFoundError as error:
+            raise HTTPException(404, 'Function version not found') from error
+        authors = await _load_revision_authors(conn, project['id'], slug)
+        meta = authors.get(revision, {})
+        version_entry = next((v for v in store.list_versions(ROOT, state, slug) if v['revision'] == revision), None)
+        return {
+            'name': slug,
+            'revision': revision,
+            'created_at': version_entry['created_at'] if version_entry else None,
+            'is_draft': current['revision'] == revision,
+            'is_published': current['published_revision'] == revision,
+            'author_id': meta.get('author_id'),
+            'author_label': meta.get('author_label'),
+            'files': files,
+        }
+
+
+@router.get('/{slug}/diff')
+async def function_version_diff(ref: str, slug: str, request: Request, response: Response, pool=Depends(get_pool)):
+    validate_slug(slug)
+    async with management_context(ref, request, response, pool, allow_query=True) as (_, project, _, _):
+        unknown = set(request.query_params.keys()) - {'from', 'to'}
+        if unknown:
+            raise HTTPException(400, f"Unsupported query parameters: {', '.join(sorted(unknown))}")
+        from_sel = request.query_params.get('from')
+        to_sel = request.query_params.get('to') or 'draft'
+        if not from_sel:
+            raise HTTPException(400, "Query parameter 'from' is required")
+        state = load(project)
+        from_rev, from_files = _resolve_revision_snapshot(state, slug, from_sel)
+        to_rev, to_files = _resolve_revision_snapshot(state, slug, to_sel)
+        return store.compute_version_diff(slug, from_rev, from_files, to_rev, to_files)
 
 
 @router.get('/{slug}/download')
@@ -1112,25 +1248,7 @@ async def function_download(ref: str, slug: str, request: Request, response: Res
             raise HTTPException(400, f"Unsupported query parameters: {', '.join(sorted(unknown))}")
         selector = request.query_params.get('version') or 'draft'
         state = load(project)
-        current = store.item(ROOT, state, slug, {})
-        if current is None:
-            raise HTTPException(404, 'Function not found')
-        if selector == 'draft':
-            target_rev = current['revision']
-            files = current['files']
-        elif selector == 'published':
-            if current['published_revision'] is None:
-                raise HTTPException(409, 'Function has no published revision')
-            target_rev = current['published_revision']
-            files = store.read_version(ROOT, state, slug, target_rev)
-        elif store.REVISION.fullmatch(selector):
-            target_rev = selector
-            try:
-                files = store.read_version(ROOT, state, slug, selector)
-            except FileNotFoundError as error:
-                raise HTTPException(404, 'Function version not found') from error
-        else:
-            raise HTTPException(400, 'Invalid version selector')
+        target_rev, files = _resolve_revision_snapshot(state, slug, selector)
         configs = await load_function_configs(conn, project['id'])
         zip_bytes = _build_function_bundle_zip(slug, target_rev, files, verify_jwt=configs.get(slug, True))
         return Response(

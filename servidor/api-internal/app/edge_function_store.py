@@ -5,7 +5,9 @@ edge_functions.configuration_lock for the entire read/modify/publish operation.
 """
 from __future__ import annotations
 
+import copy
 from datetime import datetime, timezone
+import difflib
 import hashlib
 import json
 import os
@@ -23,7 +25,7 @@ SEGMENT = re.compile(r"[A-Za-z0-9_@][A-Za-z0-9_@.\-]{0,99}\Z")
 MAX_FILES = 64
 MAX_BYTES = 1_000_000
 MAX_FUNCTIONS = 128
-RESERVED_SLUGS = frozenset({"main", "secrets", "logs", "gc", "config", "health", "versions"})
+RESERVED_SLUGS = edge_functions.RESERVED_SLUGS
 
 
 def function_name(value: str) -> str:
@@ -371,3 +373,292 @@ def purge_orphan_versions(
             fn_dir.rmdir()
     edge_functions.sync_directory(versions_root)
     return {"removed_count": removed_count, "reclaimed_bytes": reclaimed_bytes, "kept_count": kept_count}
+
+
+EDGE_FUNCTION_TEMPLATES: tuple[dict, ...] = (
+    {
+        "id": "hello-world",
+        "name": "Hello World JSON",
+        "category": "starter",
+        "description": "Basic authenticated HTTP handler returning structured JSON.",
+        "recommended_verify_jwt": True,
+        "recommended_secrets": [],
+        "files": [
+            {
+                "name": "index.ts",
+                "content": (
+                    "Deno.serve(async (req: Request) => {\n"
+                    "  const { name = 'world' } = await req.json().catch(() => ({}));\n"
+                    "  return Response.json({\n"
+                    "    message: `Hello, ${name}!`,\n"
+                    "    method: req.method,\n"
+                    "    timestamp: new Date().toISOString(),\n"
+                    "  });\n"
+                    "});\n"
+                ),
+            },
+        ],
+    },
+    {
+        "id": "webhook-hmac",
+        "name": "Signed Public Webhook",
+        "category": "webhooks",
+        "description": "Public webhook endpoint (verify_jwt=false) with constant-time HMAC-SHA256 verification using a project secret.",
+        "recommended_verify_jwt": False,
+        "recommended_secrets": ["WEBHOOK_SECRET"],
+        "files": [
+            {
+                "name": "index.ts",
+                "content": (
+                    "const encoder = new TextEncoder();\n\n"
+                    "function timingSafeEqual(a: string, b: string): boolean {\n"
+                    "  if (a.length !== b.length || a.length === 0) return false;\n"
+                    "  let diff = 0;\n"
+                    "  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);\n"
+                    "  return diff === 0;\n"
+                    "}\n\n"
+                    "Deno.serve(async (req: Request) => {\n"
+                    "  const secret = Deno.env.get('WEBHOOK_SECRET') ?? '';\n"
+                    "  if (!secret) {\n"
+                    "    return Response.json({ error: 'WEBHOOK_SECRET not configured' }, { status: 500 });\n"
+                    "  }\n"
+                    "  const rawBody = await req.text();\n"
+                    "  const sig = (req.headers.get('x-webhook-signature') ?? '').toLowerCase();\n"
+                    "  const key = await crypto.subtle.importKey(\n"
+                    "    'raw',\n"
+                    "    encoder.encode(secret),\n"
+                    "    { name: 'HMAC', hash: 'SHA-256' },\n"
+                    "    false,\n"
+                    "    ['sign'],\n"
+                    "  );\n"
+                    "  const digest = await crypto.subtle.sign('HMAC', key, encoder.encode(rawBody));\n"
+                    "  const expected = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');\n"
+                    "  if (!timingSafeEqual(sig, expected)) {\n"
+                    "    return Response.json({ error: 'Invalid signature' }, { status: 401 });\n"
+                    "  }\n"
+                    "  const payload = JSON.parse(rawBody || '{}');\n"
+                    "  console.log('Webhook accepted', typeof payload);\n"
+                    "  return Response.json({ accepted: true });\n"
+                    "});\n"
+                ),
+            },
+        ],
+    },
+    {
+        "id": "project-rest",
+        "name": "Project REST & Auth Query",
+        "category": "database",
+        "description": "Queries the project's own PostgREST API using runtime environment keys and incoming caller JWT.",
+        "recommended_verify_jwt": True,
+        "recommended_secrets": [],
+        "files": [
+            {
+                "name": "index.ts",
+                "content": (
+                    "Deno.serve(async (req: Request) => {\n"
+                    "  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';\n"
+                    "  const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';\n"
+                    "  const authHeader = req.headers.get('authorization') ?? '';\n"
+                    "  const response = await fetch(`${supabaseUrl}/rest/v1/`, {\n"
+                    "    headers: {\n"
+                    "      apikey: anonKey,\n"
+                    "      ...(authHeader ? { Authorization: authHeader } : {}),\n"
+                    "    },\n"
+                    "  });\n"
+                    "  return Response.json({\n"
+                    "    upstreamStatus: response.status,\n"
+                    "    ok: response.ok,\n"
+                    "  });\n"
+                    "});\n"
+                ),
+            },
+        ],
+    },
+    {
+        "id": "streaming-sse",
+        "name": "Streaming SSE + Background Task",
+        "category": "streaming",
+        "description": "Server-Sent Events response with CORS headers and EdgeRuntime.waitUntil background flush.",
+        "recommended_verify_jwt": True,
+        "recommended_secrets": [],
+        "files": [
+            {
+                "name": "index.ts",
+                "content": (
+                    "const corsHeaders = {\n"
+                    "  'Access-Control-Allow-Origin': '*',\n"
+                    "  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',\n"
+                    "};\n\n"
+                    "Deno.serve((req: Request) => {\n"
+                    "  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });\n"
+                    "  const encoder = new TextEncoder();\n"
+                    "  const stream = new ReadableStream({\n"
+                    "    async start(controller) {\n"
+                    "      for (let i = 1; i <= 3; i++) {\n"
+                    "        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ step: i })}\\n\\n`));\n"
+                    "        await new Promise((r) => setTimeout(r, 100));\n"
+                    "      }\n"
+                    "      controller.close();\n"
+                    "    },\n"
+                    "  });\n"
+                    "  EdgeRuntime.waitUntil(Promise.resolve().then(() => console.log('SSE stream initialized')));\n"
+                    "  return new Response(stream, {\n"
+                    "    headers: {\n"
+                    "      ...corsHeaders,\n"
+                    "      'Content-Type': 'text/event-stream',\n"
+                    "      'Cache-Control': 'no-cache',\n"
+                    "    },\n"
+                    "  });\n"
+                    "});\n"
+                ),
+            },
+        ],
+    },
+    {
+        "id": "websocket-echo",
+        "name": "WebSocket Upgrade Handler",
+        "category": "realtime",
+        "description": "Handles bidirectional WebSocket connections over /functions/v1/<slug>.",
+        "recommended_verify_jwt": True,
+        "recommended_secrets": [],
+        "files": [
+            {
+                "name": "index.ts",
+                "content": (
+                    "Deno.serve((req: Request) => {\n"
+                    "  if (req.headers.get('upgrade')?.toLowerCase() !== 'websocket') {\n"
+                    "    return Response.json({ message: 'Upgrade: websocket required' }, { status: 426 });\n"
+                    "  }\n"
+                    "  const { socket, response } = Deno.upgradeWebSocket(req);\n"
+                    "  socket.onopen = () => socket.send(JSON.stringify({ type: 'connected' }));\n"
+                    "  socket.onmessage = (event) => {\n"
+                    "    socket.send(JSON.stringify({ type: 'echo', data: event.data }));\n"
+                    "  };\n"
+                    "  return response;\n"
+                    "});\n"
+                ),
+            },
+        ],
+    },
+    {
+        "id": "scheduled-cron",
+        "name": "Scheduled Maintenance Task",
+        "category": "schedules",
+        "description": "Idempotent job handler triggered by Edge Function Cron Schedules or manual POST.",
+        "recommended_verify_jwt": True,
+        "recommended_secrets": [],
+        "files": [
+            {
+                "name": "index.ts",
+                "content": (
+                    "Deno.serve(async (req: Request) => {\n"
+                    "  const scheduleId = req.headers.get('x-edge-schedule-id') ?? 'manual';\n"
+                    "  const payload = await req.json().catch(() => ({}));\n"
+                    "  console.log('Scheduled job started', scheduleId);\n"
+                    "  return Response.json({\n"
+                    "    ok: true,\n"
+                    "    scheduleId,\n"
+                    "    executedAt: new Date().toISOString(),\n"
+                    "    payload,\n"
+                    "  });\n"
+                    "});\n"
+                ),
+            },
+        ],
+    },
+)
+
+
+def list_templates() -> list[dict]:
+    """Return a copy of curated Edge Function starter templates."""
+    return copy.deepcopy(list(EDGE_FUNCTION_TEMPLATES))
+
+
+def compute_version_diff(
+    slug: str,
+    from_revision: str,
+    from_files: list[dict],
+    to_revision: str,
+    to_files: list[dict],
+    *,
+    max_diff_lines: int = 2000,
+) -> dict:
+    """Compute a per-file unified diff between two immutable revisions."""
+    from_map = {item["name"]: item for item in from_files}
+    to_map = {item["name"]: item for item in to_files}
+    summary = {
+        "files_added": 0,
+        "files_removed": 0,
+        "files_modified": 0,
+        "files_unchanged": 0,
+        "lines_added": 0,
+        "lines_removed": 0,
+        "truncated": False,
+    }
+    file_diffs: list[dict] = []
+    emitted_lines = 0
+    for name in sorted(set(from_map) | set(to_map)):
+        left = from_map.get(name)
+        right = to_map.get(name)
+        is_binary = (left is not None and left.get("encoding") == "base64") or (
+            right is not None and right.get("encoding") == "base64"
+        )
+        if left is None and right is not None:
+            status = "added"
+            summary["files_added"] += 1
+        elif right is None and left is not None:
+            status = "removed"
+            summary["files_removed"] += 1
+        elif left == right:
+            status = "unchanged"
+            summary["files_unchanged"] += 1
+        else:
+            status = "modified"
+            summary["files_modified"] += 1
+
+        hunks: list[str] = []
+        file_added = 0
+        file_removed = 0
+        if is_binary:
+            if status != "unchanged":
+                left_hash = hashlib.sha256((left["content"] if left else "").encode("utf-8")).hexdigest()[:12]
+                right_hash = hashlib.sha256((right["content"] if right else "").encode("utf-8")).hexdigest()[:12]
+                hunks.append(f"@@ binary wasm file ({left_hash} -> {right_hash}) @@")
+        elif status != "unchanged":
+            left_lines = (left["content"] if left else "").splitlines()
+            right_lines = (right["content"] if right else "").splitlines()
+            diff_iter = difflib.unified_diff(
+                left_lines,
+                right_lines,
+                fromfile=f"a/{name}" if left is not None else "/dev/null",
+                tofile=f"b/{name}" if right is not None else "/dev/null",
+                lineterm="",
+                n=3,
+            )
+            for line in diff_iter:
+                if line.startswith("+") and not line.startswith("+++"):
+                    file_added += 1
+                elif line.startswith("-") and not line.startswith("---"):
+                    file_removed += 1
+                if emitted_lines < max_diff_lines:
+                    hunks.append(line)
+                    emitted_lines += 1
+                else:
+                    summary["truncated"] = True
+        summary["lines_added"] += file_added
+        summary["lines_removed"] += file_removed
+        file_diffs.append({
+            "name": name,
+            "status": status,
+            "binary": is_binary,
+            "lines_added": file_added,
+            "lines_removed": file_removed,
+            "hunks": hunks,
+        })
+    return {
+        "name": slug,
+        "from_revision": from_revision,
+        "to_revision": to_revision,
+        "summary": summary,
+        "files": file_diffs,
+    }

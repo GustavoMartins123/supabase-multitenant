@@ -18,6 +18,10 @@ from uuid import UUID
 from app.functions_network import network_hosts
 
 PROJECT = re.compile(r"[a-z_][a-z0-9_]{2,39}\Z")
+RESERVED_SLUGS = frozenset({
+    "main", "secrets", "logs", "gc", "config", "health", "versions",
+    "templates", "quotas", "alerts", "schedules",
+})
 ENVIRONMENT = {"SUPABASE_URL", "SUPABASE_PUBLIC_URL", "SUPABASE_ANON_KEY",
                "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_DB_URL"}
 SECRET_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}\Z")
@@ -166,7 +170,7 @@ def validate_public_functions(values: list[str] | tuple[str, ...] | None, *, fil
         raise ValueError("Invalid public functions list")
     cleaned: list[str] = []
     for item in values:
-        if not isinstance(item, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", item) or item in {"main", "secrets", "logs", "gc", "config", "health", "versions"}:
+        if not isinstance(item, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", item) or item in RESERVED_SLUGS:
             raise ValueError("Invalid public function name")
         if files is not None and f"{item}/index.ts" not in files:
             raise ValueError("Unpublished function cannot bypass JWT verification")

@@ -962,3 +962,79 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
             capture_output=True, text=True,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    async def test_templates_author_attribution_version_detail_and_line_diff(self):
+        from app import edge_function_store as store
+        await self.pool.execute(
+            "INSERT INTO project_members(project_id,user_id,role) VALUES($1,$2,'admin')",
+            self.projects[1], self.users[0],
+        )
+        await self.pool.execute(
+            "INSERT INTO project_members(project_id,user_id,role) VALUES($1,$2,'admin') ON CONFLICT DO NOTHING",
+            self.projects[0], self.users[1],
+        )
+
+        # Templates catalog returns curated valid bundles and reserved names cannot be deployed as functions.
+        tpl_resp = await self.request('GET', '/templates')
+        self.assertEqual(tpl_resp.status_code, 200, tpl_resp.text)
+        templates = tpl_resp.json()['templates']
+        tpl_ids = {t['id'] for t in templates}
+        self.assertTrue({'hello-world', 'webhook-hmac', 'project-rest', 'streaming-sse', 'websocket-echo', 'scheduled-cron'}.issubset(tpl_ids))
+        for tpl in templates:
+            self.assertEqual(store.validate_files(tpl['files']), sorted(tpl['files'], key=lambda f: f['name']))
+        for reserved in ('templates', 'quotas', 'alerts', 'schedules'):
+            bad = await self.request('PUT', f'/{reserved}', {'expected_revision': None, 'files': [{'name': 'index.ts', 'content': 'x'}]})
+            self.assertEqual(bad.status_code, 400)
+
+        # Multi-author drafts record creator attribution per revision.
+        v1 = (await self.request('PUT', '/hello', {
+            'expected_revision': None,
+            'files': [{'name': 'index.ts', 'content': 'console.log("v1");\nreturn 1;\n'}],
+        }, user=0)).json()
+        v2 = (await self.request('PUT', '/hello', {
+            'expected_revision': v1['revision'],
+            'files': [
+                {'name': 'index.ts', 'content': 'console.log("v2");\nreturn 2;\n'},
+                {'name': 'helper.ts', 'content': 'export const ok = true;\n'},
+            ],
+        }, user=1)).json()
+
+        versions = (await self.request('GET', '/hello/versions')).json()['versions']
+        by_rev = {item['revision']: item for item in versions}
+        self.assertEqual(by_rev[v1['revision']]['author_id'], str(self.users[0]))
+        self.assertEqual(by_rev[v1['revision']]['author_label'], 'tester0')
+        self.assertEqual(by_rev[v2['revision']]['author_id'], str(self.users[1]))
+        self.assertEqual(by_rev[v2['revision']]['author_label'], 'tester1')
+
+        # Single version snapshot endpoint validates revision and returns immutable files + author.
+        snap_resp = await self.request('GET', f"/hello/versions/{v1['revision']}")
+        self.assertEqual(snap_resp.status_code, 200, snap_resp.text)
+        snap = snap_resp.json()
+        self.assertEqual(snap['author_label'], 'tester0')
+        self.assertEqual(snap['files'][0]['content'], 'console.log("v1");\nreturn 1;\n')
+        self.assertEqual((await self.request('GET', '/hello/versions/not-a-sha')).status_code, 400)
+        self.assertEqual((await self.request('GET', f"/hello/versions/{'0'*64}")).status_code, 404)
+
+        # Line-by-line unified diff between revisions and selectors.
+        diff_resp = await self.request('GET', f"/hello/diff?from={v1['revision']}&to=draft")
+        self.assertEqual(diff_resp.status_code, 200, diff_resp.text)
+        diff = diff_resp.json()
+        self.assertEqual(diff['from_revision'], v1['revision'])
+        self.assertEqual(diff['to_revision'], v2['revision'])
+        self.assertEqual(diff['summary']['files_added'], 1)
+        self.assertEqual(diff['summary']['files_modified'], 1)
+        by_file = {f['name']: f for f in diff['files']}
+        self.assertEqual(by_file['helper.ts']['status'], 'added')
+        self.assertEqual(by_file['index.ts']['status'], 'modified')
+        self.assertIn('-console.log("v1");', by_file['index.ts']['hunks'])
+        self.assertIn('+console.log("v2");', by_file['index.ts']['hunks'])
+        self.assertEqual((await self.request('GET', '/hello/diff')).status_code, 400)
+        self.assertEqual((await self.request('GET', '/hello/diff?from=published&to=draft')).status_code, 409)
+
+        # Deleting the function clears revision authorship rows.
+        del_resp = await self.request('DELETE', '/hello', {'revision': v2['revision'], 'expected_published_revision': None})
+        self.assertEqual(del_resp.status_code, 200, del_resp.text)
+        self.assertEqual(
+            await self.pool.fetchval("SELECT count(*) FROM project_edge_function_revisions WHERE project_id=$1 AND function_name='hello'", self.projects[0]),
+            0,
+        )
