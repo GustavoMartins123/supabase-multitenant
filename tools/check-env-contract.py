@@ -73,7 +73,7 @@ PLACEHOLDER_TOKEN_RE = re.compile(r"<[^<>\s]+>")
 KNOWN_OPTIONAL = {
     "MAILER_TEMPLATE_URL": "default interno http://template-service:18020 no adapter de templates",
     "EDGE_BUNDLER_URL": "default interno http://edge-bundler:18030 no cliente RPC do bundler",
-    "EDGE_BUNDLER_HMAC_SECRET": "segredo HMAC opcional para assinar chamadas ao edge-bundler",
+    "EDGE_BUNDLER_HMAC_SECRET": "segredo HMAC compartilhado por projects-api e edge-bundler; sem ele o bundling npm/JSR fica desativado",
     "EDGE_BUNDLER_TIMEOUT_SECONDS": "timeout opcional de bundling (padrao 60s) em edge_bundler.py",
     "EDGE_BUNDLER_MAX_ESZIP_BYTES": "limite maximo opcional de tamanho ESZIP em edge_bundler.py",
     "FUNCTIONS_TENANT_TEST_URL": "harness sintetico obrigatorio em run_functions_security_tests.py, nunca runtime",

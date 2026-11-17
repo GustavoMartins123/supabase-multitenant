@@ -212,11 +212,12 @@ def _bundler_url() -> str:
 def _sign_bundler_request(raw_body: bytes) -> dict[str, str]:
     headers = {"Content-Type": "application/json"}
     secret = (os.environ.get("EDGE_BUNDLER_HMAC_SECRET") or "").strip()
-    if secret:
-        ts = str(int(time.time()))
-        mac = hmac.new(secret.encode("utf-8"), f"{ts}.".encode("ascii") + raw_body, hashlib.sha256).hexdigest()
-        headers["X-Edge-Bundler-Timestamp"] = ts
-        headers["X-Edge-Bundler-Signature"] = mac
+    if not secret:
+        raise BundleBuildError("Edge Function dependency bundling is not configured: set EDGE_BUNDLER_HMAC_SECRET for projects-api and edge-bundler")
+    ts = str(int(time.time()))
+    mac = hmac.new(secret.encode("utf-8"), f"{ts}.".encode("ascii") + raw_body, hashlib.sha256).hexdigest()
+    headers["X-Edge-Bundler-Timestamp"] = ts
+    headers["X-Edge-Bundler-Signature"] = mac
     return headers
 
 

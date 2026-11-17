@@ -169,6 +169,8 @@ services:
   edge-bundler:
     build:
       context: ./edge-bundler
+    environment:
+      EDGE_BUNDLER_HMAC_SECRET: ${EDGE_BUNDLER_HMAC_SECRET:-}
     restart: unless-stopped
     logging: *vector-logging
     networks: [rede-supabase]
@@ -242,6 +244,7 @@ services:
       PG_META_ALLOWED_HOSTS: postgres-meta-global
       ANALYTICS_INTERNAL_URL: http://analytics:4000
       EDGE_BUNDLER_URL: http://edge-bundler:18030
+      EDGE_BUNDLER_HMAC_SECRET: ${EDGE_BUNDLER_HMAC_SECRET:-}
     volumes:
       - ./secrets/mailer/ADMIN_KEY:/run/secrets/mailer/ADMIN_KEY:ro
       - ./secrets/mailer/PUBLISH_KEY:/run/secrets/mailer/PUBLISH_KEY:ro

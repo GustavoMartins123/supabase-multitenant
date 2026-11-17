@@ -305,7 +305,7 @@ def compile_function_eszip(files: list[dict]) -> bytes:
 
 def _verify_hmac(raw_body: bytes, timestamp_hdr: str, signature_hdr: str, secret: str) -> bool:
     if not secret:
-        return True
+        return False
     if not timestamp_hdr or not signature_hdr:
         return False
     try:
@@ -362,6 +362,9 @@ class BundlerHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.BAD_REQUEST, {"detail": "Incomplete request body"})
             return
         secret = (os.environ.get("EDGE_BUNDLER_HMAC_SECRET") or "").strip()
+        if not secret:
+            self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"detail": "Edge Function bundler is not configured"})
+            return
         if not _verify_hmac(
             raw_body,
             self.headers.get("X-Edge-Bundler-Timestamp") or "",

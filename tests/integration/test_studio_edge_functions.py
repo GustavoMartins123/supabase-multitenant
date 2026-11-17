@@ -479,6 +479,23 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
         recovery.assert_not_called()
         executed.assert_awaited_once()
 
+    async def test_publishing_a_draft_outside_the_dependency_policy_returns_400_and_keeps_runtime(self):
+        from app import edge_bundler, edge_functions
+        await self.configure(True)
+        first=await self.save()
+        self.assertEqual((await self.publish(first)).status_code,200)
+        active=edge_functions.read_context(self.root,self.names[0],str(self.projects[0]))
+        with patch.object(edge_bundler,'validate_dependency_policy',return_value={}):
+            legacy=await self.request('PUT','/my-function',{'expected_revision':first['revision'],'files':[{'name':'index.ts','content':'import x from "https://esm.sh/x"; Deno.serve(()=>new Response("v2"))'}]})
+        self.assertEqual(legacy.status_code,200,legacy.text)
+        draft=legacy.json()
+        for path,body in (('/my-function/bundle',{'revision':draft['revision']}),
+                          ('/my-function/publish',{'revision':draft['revision'],'expected_published_revision':draft['published_revision']})):
+            refused=await self.request('POST',path,body)
+            self.assertEqual(refused.status_code,400,(path,refused.text))
+            self.assertIn('Disallowed import scheme',refused.text)
+        self.assertEqual(edge_functions.read_context(self.root,self.names[0],str(self.projects[0])),active)
+
     async def test_management_works_with_a_single_database_connection(self):
         import asyncio,asyncpg
         original=self.pool

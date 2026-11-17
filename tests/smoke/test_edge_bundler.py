@@ -102,6 +102,29 @@ class EdgeBundlerSmokeTests(unittest.TestCase):
             srv.server_close()
             thread.join(timeout=2)
 
+    def test_bundler_fails_closed_without_shared_secret(self) -> None:
+        import asyncio
+
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), bundler_server.BundlerHandler)
+        thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with patch.dict(os.environ, {"EDGE_BUNDLER_HMAC_SECRET": "", "EDGE_BUNDLER_URL": f"http://127.0.0.1:{srv.server_port}"}):
+                self.assertFalse(bundler_server._verify_hmac(b"{}", str(int(time.time())), "0" * 64, ""))
+                with patch.object(bundler_server, "compile_function_eszip", side_effect=AssertionError("unauthenticated bundle")):
+                    conn = http.client.HTTPConnection("127.0.0.1", srv.server_port, timeout=5)
+                    conn.request("POST", "/bundle", body=b'{"files":[{"name":"index.ts","content":"x"}]}', headers={"Content-Type": "application/json"})
+                    self.assertEqual(conn.getresponse().status, 503)
+                    conn.close()
+                files = [{"name": "index.ts", "content": 'import ms from "npm:ms@2.1.3"; Deno.serve(() => new Response(""));'}]
+                with patch.object(edge_bundler.httpx, "AsyncClient", side_effect=AssertionError("network used without secret")):
+                    with self.assertRaisesRegex(edge_bundler.BundleBuildError, "EDGE_BUNDLER_HMAC_SECRET"):
+                        asyncio.run(edge_bundler.bundle_function_eszip(files))
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            thread.join(timeout=2)
+
 
 if __name__ == "__main__":
     unittest.main()
