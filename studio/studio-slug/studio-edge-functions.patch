@@ -2,7 +2,7 @@ diff --git a/apps/studio/components/interfaces/Functions/SelfHostedEdgeFunctions
 new file mode 100644
 --- /dev/null
 +++ b/apps/studio/components/interfaces/Functions/SelfHostedEdgeFunctions.tsx
-@@ -0,0 +1,2038 @@
+@@ -0,0 +1,2049 @@
 +// Local Studio management uses the authenticated gateway, never project API keys.
 +import { useQuery, useQueryClient } from '@tanstack/react-query'
 +import { useParams } from 'common'
@@ -239,7 +239,18 @@ new file mode 100644
 +  updated_at: string
 +}
 +
-+const QUOTA_FIELD_META: { key: string; label: string; unit: string }[] = [
++type QuotaFieldKey =
++  | 'max_functions'
++  | 'max_files'
++  | 'max_bytes'
++  | 'memory_limit_mb'
++  | 'worker_timeout_ms'
++  | 'max_concurrent_project'
++  | 'max_secrets'
++  | 'max_secrets_total_bytes'
++  | 'alert_threshold_pct'
++
++const QUOTA_FIELD_META: { key: QuotaFieldKey; label: string; unit: string }[] = [
 +  { key: 'max_functions', label: 'Max functions', unit: '' },
 +  { key: 'max_files', label: 'Max files / function', unit: '' },
 +  { key: 'max_bytes', label: 'Max bundle bytes', unit: 'B' },
@@ -378,7 +389,7 @@ new file mode 100644
 +  useEffect(() => {
 +    if (!quotasQuery.data?.quotas) return
 +    const nextDraft: Record<string, string> = {}
-+    const qMap = quotasQuery.data.quotas as Record<string, number | undefined>
++    const qMap = quotasQuery.data.quotas
 +    for (const meta of QUOTA_FIELD_META) {
 +      const val = qMap[meta.key]
 +      if (typeof val === 'number') nextDraft[meta.key] = String(val)
@@ -419,7 +430,7 @@ new file mode 100644
 +    setQuotaError('')
 +    try {
 +      const payload: Record<string, number> = {}
-+      const currentMap = (quotasQuery.data?.quotas ?? {}) as Record<string, number | undefined>
++      const currentMap = quotasQuery.data?.quotas
 +      for (const meta of QUOTA_FIELD_META) {
 +        const raw = draftQuotas[meta.key]
 +        if (raw === undefined || raw.trim() === '') continue
@@ -427,7 +438,7 @@ new file mode 100644
 +        if (!Number.isInteger(parsed)) {
 +          throw new Error(`${meta.label} must be an integer`)
 +        }
-+        if (parsed !== currentMap[meta.key]) {
++        if (parsed !== currentMap?.[meta.key]) {
 +          payload[meta.key] = parsed
 +        }
 +      }
