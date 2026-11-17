@@ -26,7 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 
-from app import edge_function_store as store, edge_functions
+from app import edge_bundler, edge_function_store as store, edge_functions
 from app.database import get_pool
 from app.dependencies import ensure_project_admin_access, get_public_project_row, resolve_authenticated_user
 from app.functions_network import network_hosts
@@ -58,6 +58,11 @@ class PublishBody(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     revision: StrictStr = Field(pattern=r'^[0-9a-f]{64}$')
     expected_published_revision: StrictStr | None = Field(..., max_length=64)
+
+
+class BundleBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    revision: StrictStr = Field(pattern=r'^[0-9a-f]{64}$')
 
 
 class SecretEntry(BaseModel):
@@ -366,11 +371,33 @@ def load(project):
     return store.load(ROOT, project['name'], identity(project))
 
 
+def _dependency_metadata(state: dict, slug: str, value: dict) -> dict:
+    try:
+        summary = edge_bundler.inspect_dependencies(value.get('files') or [])
+    except ValueError:
+        summary = {'npm': [], 'jsr': [], 'requires_bundle': False}
+    rev = value.get('revision')
+    bundled_size = store.bundle_size(ROOT, state, slug, rev) if rev and slug in state.get('functions', {}) else None
+    if not isinstance(bundled_size, int) or isinstance(bundled_size, bool):
+        bundled_size = None
+    return {
+        **summary,
+        'bundled': bundled_size is not None,
+        'bundle_bytes': bundled_size,
+    }
+
+
 def detail(project, state, slug, enabled, *, verify_jwt: bool = True, quotas: dict[str, int] | None = None):
     value = store.item(ROOT, state, slug, {})
     if value is None:
         raise HTTPException(404, 'Function not found')
-    return {**value, 'enabled': enabled, 'verify_jwt': verify_jwt, 'limits': governance_limits(quotas)}
+    return {
+        **value,
+        'enabled': enabled,
+        'verify_jwt': verify_jwt,
+        'limits': governance_limits(quotas),
+        'dependencies': _dependency_metadata(state, slug, value),
+    }
 
 
 async def load_function_configs(conn, project_id) -> dict[str, bool]:
@@ -1327,6 +1354,7 @@ async def function_save(ref: str, slug: str, body: DraftBody, request: Request, 
         quotas, _ = await load_project_quotas(conn, project['id'])
         try:
             files = store.validate_files(raw_files, max_files=quotas['max_files'], max_bytes=quotas['max_bytes'])
+            edge_bundler.validate_dependency_policy(files)
         except (ValueError, UnicodeError) as error:
             raise HTTPException(400, str(error)) from error
         state = load(project)
@@ -1405,9 +1433,46 @@ def current_version(project, state, slug, enabled, body):
     return current
 
 
+async def _bundle_outside_lock(files_to_bundle: list[dict]) -> bytes:
+    try:
+        return await edge_bundler.bundle_function_eszip(files_to_bundle)
+    except edge_bundler.DependencyPolicyError as error:
+        raise HTTPException(400, str(error)) from error
+    except edge_bundler.BundleBuildError as error:
+        raise HTTPException(422, str(error)) from error
+
+
+@router.post('/{slug}/bundle')
+async def function_bundle(ref: str, slug: str, body: BundleBody, request: Request, response: Response, pool=Depends(get_pool)):
+    validate_slug(slug)
+    files_to_bundle: list[dict] | None = None
+    async with management_context(ref, request, response, pool) as (conn, project, _, config):
+        state = load(project)
+        configs = await load_function_configs(conn, project['id'])
+        quotas, _ = await load_project_quotas(conn, project['id'])
+        current = detail(project, state, slug, config['enabled'], verify_jwt=configs.get(slug, True), quotas=quotas)
+        if body.revision != current['revision']:
+            raise HTTPException(409, 'Function version changed; reload before bundling')
+        dep_info = edge_bundler.inspect_dependencies(current['files'])
+        if not dep_info['requires_bundle'] or store.has_bundle(ROOT, state, slug, body.revision):
+            return current
+        files_to_bundle = copy.deepcopy(current['files'])
+    eszip_bytes = await _bundle_outside_lock(files_to_bundle)
+    async with management_context(ref, request, response, pool) as (conn, project, _, config):
+        state = load(project)
+        configs = await load_function_configs(conn, project['id'])
+        quotas, _ = await load_project_quotas(conn, project['id'])
+        current = detail(project, state, slug, config['enabled'], verify_jwt=configs.get(slug, True), quotas=quotas)
+        if body.revision != current['revision']:
+            raise HTTPException(409, 'Function version changed; reload before bundling')
+        store.write_bundle(ROOT, state, slug, body.revision, eszip_bytes)
+        return detail(project, state, slug, config['enabled'], verify_jwt=configs.get(slug, True), quotas=quotas)
+
+
 @router.post('/{slug}/publish')
 async def function_publish(ref: str, slug: str, body: PublishBody, request: Request, response: Response, pool=Depends(get_pool)):
     validate_slug(slug)
+    files_to_bundle: list[dict] | None = None
     async with management_context(ref, request, response, pool) as (conn, project, actor, config):
         if not config['enabled']:
             raise HTTPException(409, 'Edge Functions are disabled by the project administrator')
@@ -1418,6 +1483,25 @@ async def function_publish(ref: str, slug: str, body: PublishBody, request: Requ
         if current['published_revision'] == body.revision:
             await sync_function_config_publication(conn, project['id'], slug, 'publish', actor)
             return {**current, 'verify_jwt': verify_jwt}
+        dep_info = edge_bundler.inspect_dependencies(current['files'])
+        if dep_info['requires_bundle'] and not store.has_bundle(ROOT, state, slug, body.revision):
+            files_to_bundle = copy.deepcopy(current['files'])
+        else:
+            proposed = copy.deepcopy(state)
+            proposed['functions'][slug]['published'] = body.revision
+            await commit_change(conn, project, actor, config, state, proposed, slug, body.revision, 'publish')
+            quotas, _ = await load_project_quotas(conn, project['id'])
+            return detail(project, proposed, slug, True, verify_jwt=verify_jwt, quotas=quotas)
+
+    eszip_bytes = await _bundle_outside_lock(files_to_bundle)
+    async with management_context(ref, request, response, pool) as (conn, project, actor, config):
+        if not config['enabled']:
+            raise HTTPException(409, 'Edge Functions are disabled by the project administrator')
+        state = load(project)
+        configs = await load_function_configs(conn, project['id'])
+        current = current_version(project, state, slug, True, body)
+        verify_jwt = configs.get(slug, True)
+        store.write_bundle(ROOT, state, slug, body.revision, eszip_bytes)
         proposed = copy.deepcopy(state)
         proposed['functions'][slug]['published'] = body.revision
         await commit_change(conn, project, actor, config, state, proposed, slug, body.revision, 'publish')

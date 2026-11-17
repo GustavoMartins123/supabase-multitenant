@@ -7,7 +7,7 @@ import secrets
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1437,3 +1437,62 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(captured_timeouts[0].read, 115.0)
         nginx_conf = (ROOT / 'studio/nginx/nginx.conf').read_text(encoding='utf-8')
         self.assertIn('client_max_body_size 8m;', nginx_conf)
+
+    async def test_npm_and_jsr_dependency_policy_bundle_publish_and_gc(self):
+        from app import edge_bundler, edge_function_store as store, edge_functions
+        await self.configure(True)
+        for bad_files in (
+            [{'name': 'index.ts', 'content': 'import x from "https://evil.example/mod.ts";'}],
+            [{'name': 'index.ts', 'content': 'import x from "file:///etc/passwd";'}],
+            [{'name': 'index.ts', 'content': 'import x from "../../etc/passwd";'}],
+            [{'name': 'index.ts', 'content': 'export {};'}, {'name': 'deno.json', 'content': '{"imports":{"x":"http://127.0.0.1/x.ts"}}'}],
+            [{'name': 'index.ts', 'content': 'export {};'}, {'name': 'bundle.eszip', 'content': 'bad'}],
+        ):
+            self.assertEqual((await self.request('PUT', '/pkg-bad', {'expected_revision': None, 'files': bad_files})).status_code, 400, bad_files)
+
+        files_v1 = [
+            {'name': 'deno.json', 'content': '{"imports":{"ms":"npm:ms@2.1.3","@std/fmt/bytes":"jsr:@std/fmt@1/bytes"}}'},
+            {'name': 'index.ts', 'content': '// docs: https://example.com\nimport ms from "ms";\nimport { format } from "@std/fmt/bytes";\nDeno.serve(() => Response.json({ ms: ms("1h"), fmt: format(2048) }));\n'},
+        ]
+        saved = await self.request('PUT', '/pkg-fn', {'expected_revision': None, 'files': files_v1})
+        self.assertEqual(saved.status_code, 200, saved.text)
+        deps = saved.json()['dependencies']
+        self.assertEqual(deps['npm'], ['npm:ms@2.1.3'])
+        self.assertEqual(deps['jsr'], ['jsr:@std/fmt@1/bytes'])
+        self.assertTrue(deps['requires_bundle'])
+        self.assertFalse(deps['bundled'])
+
+        fake_eszip = b'ESZIP2.3\x00\x00\x00\x04bundle-v1'
+        bundler_mock = AsyncMock(return_value=fake_eszip)
+        with patch.object(edge_bundler, 'bundle_function_eszip', bundler_mock):
+            pub = await self.request('POST', '/pkg-fn/publish', {'revision': saved.json()['revision'], 'expected_published_revision': None})
+        self.assertEqual(pub.status_code, 200, pub.text)
+        bundler_mock.assert_awaited_once()
+        self.assertTrue(pub.json()['dependencies']['bundled'])
+        self.assertEqual(pub.json()['dependencies']['bundle_bytes'], len(fake_eszip))
+
+        ctx = edge_functions.read_context(self.root, self.names[0], str(self.projects[0]))
+        deployed_eszip = self.root / '.functions-runtime/code' / str(self.projects[0]) / ctx['revision'] / 'pkg-fn/bundle.eszip'
+        self.assertEqual(deployed_eszip.read_bytes(), fake_eszip)
+
+        with patch.object(edge_bundler, 'bundle_function_eszip', AsyncMock(side_effect=AssertionError('unexpected re-bundle'))):
+            sec = await self.request('PUT', '/secrets', {'secrets': [{'name': 'API_KEY', 'value': 'val-1'}]})
+        self.assertEqual(sec.status_code, 200, sec.text)
+
+        files_v2 = [
+            {'name': 'index.ts', 'content': 'import ms from "npm:ms@2.1.3"; Deno.serve(() => new Response(String(ms("2h"))));'},
+        ]
+        saved_v2 = (await self.request('PUT', '/pkg-fn', {'expected_revision': saved.json()['revision'], 'files': files_v2})).json()
+        fake_eszip_v2 = b'ESZIP2.3\x00\x00\x00\x04bundle-v2'
+        with patch.object(edge_bundler, 'bundle_function_eszip', AsyncMock(return_value=fake_eszip_v2)):
+            bun_v2 = await self.request('POST', '/pkg-fn/bundle', {'revision': saved_v2['revision']})
+        self.assertEqual(bun_v2.status_code, 200, bun_v2.text)
+        self.assertTrue(bun_v2.json()['dependencies']['bundled'])
+        saved_v3 = (await self.request('PUT', '/pkg-fn', {'expected_revision': saved_v2['revision'], 'files': [{'name': 'index.ts', 'content': 'Deno.serve(() => new Response("plain"))'}]})).json()
+        gc_res = await self.request('POST', '/gc', {'min_age_seconds': 0})
+        self.assertEqual(gc_res.status_code, 200, gc_res.text)
+        state_now = store.load(self.root, self.names[0], str(self.projects[0]))
+        self.assertTrue(store.has_bundle(self.root, state_now, 'pkg-fn', saved.json()['revision']))
+        self.assertFalse(store.has_bundle(self.root, state_now, 'pkg-fn', saved_v2['revision']))
+        self.assertEqual(saved_v3['dependencies']['requires_bundle'], False)
+

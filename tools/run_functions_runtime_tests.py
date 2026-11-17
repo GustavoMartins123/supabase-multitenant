@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -246,6 +247,24 @@ Deno.serve((req) => {
   return Response.json({ wasmSum: mod.add(20, 22) })
 })
 ''',
+    'npm_jsr/deno.json': '{"imports":{"ms":"npm:ms@2.1.3","@std/fmt/bytes":"jsr:@std/fmt@1/bytes"}}',
+    'npm_jsr/index.ts': '''
+import ms from 'ms'
+import { format } from '@std/fmt/bytes'
+Deno.serve(async () => {
+  console.log('eszip-worker-log')
+  let blockedRead = false
+  try { await Deno.readTextFile('/etc/passwd') } catch { blockedRead = true }
+  let blockedNet = false
+  try { await fetch('https://example.com') } catch { blockedNet = true }
+  return Response.json({
+    ms: ms('1h'),
+    fmt: format(2048),
+    blockedRead,
+    blockedNet,
+  })
+})
+''',
 }
 
 
@@ -343,6 +362,13 @@ def main() -> None:
         runtime = fixture / 'runtime'
         (runtime / 'tenants').mkdir(parents=True)
 
+        (code / 'npm_jsr').chmod(0o755)
+        docker('run', '--rm', '--user', f'{os.getuid()}:{os.getgid()}',
+               '-e', 'HOME=/tmp', '-e', 'DENO_DIR=/tmp/deno',
+               '-v', f"{code / 'npm_jsr'}:/work:rw", '-w', '/work',
+               args.edge_image, 'bundle', '--entrypoint', '/work/index.ts', '--output', '/work/bundle.eszip')
+        (code / 'npm_jsr' / 'bundle.eszip').chmod(0o644)
+
         for project, identity in identities.items():
             toks = internal_tokens[project]
             if args.contract == 'projected':
@@ -359,7 +385,7 @@ def main() -> None:
                 env_srv = toks['service_role']
                 code_root = runtime / 'code' / project / ('1' * 64)
             code_root.mkdir(parents=True, exist_ok=True)
-            for fn in ('stream', 'slow', 'wait_until', 'internal_calls', 'imported', 'remote_import', 'check_env', 'webhook', 'log_test', 'ws_wasm'):
+            for fn in ('stream', 'slow', 'wait_until', 'internal_calls', 'imported', 'remote_import', 'check_env', 'webhook', 'log_test', 'ws_wasm', 'npm_jsr'):
                 shutil.copytree(code / fn, code_root / fn)
             tenant_doc = {
                 'project': project, 'uuid': identity, 'jwt_secret': f'{project}-synthetic-secret',
@@ -711,6 +737,22 @@ def main() -> None:
                 ws_reply = asyncio.run(run_ws_echo())
                 assert ws_reply == 'ws-wasm:hello:42', ws_reply
                 record('websocket_gateway_and_wasm_module_execution')
+
+                # 12. Pre-bundled npm:/jsr: ESZIP executes offline with permissions and event-worker logs
+                eszip_res = client.get(f'{nginx_origin}/functions/v1/npm_jsr', headers=gw_headers('/functions/v1/npm_jsr'))
+                assert eszip_res.status_code == 200, eszip_res.text
+                ep = eszip_res.json()
+                assert ep == {'ms': 3600000, 'fmt': '2.05 kB', 'blockedRead': True, 'blockedNet': True}, ep
+                eszip_logs: list[dict] = []
+                deadline = time.time() + 5.0
+                while time.time() < deadline:
+                    lr = client.get(f'{rt_origin}/__logs', params={'function': 'npm_jsr', 'limit': '20'}, headers=logs_headers('test_alpha'))
+                    if lr.status_code == 200 and any('eszip-worker-log' in e.get('message', '') for e in lr.json()['logs']):
+                        eszip_logs = lr.json()['logs']
+                        break
+                    time.sleep(0.2)
+                assert any('eszip-worker-log' in e.get('message', '') for e in eszip_logs), eszip_logs
+                record('npm_jsr_eszip_offline_execution')
 
             if args.result:
                 args.result.write_text(json.dumps({'contract': args.contract, 'image': args.edge_image, 'checks': checks}, indent=2))

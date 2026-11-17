@@ -479,6 +479,21 @@
         "title": "AvailableProjectUser",
         "type": "object"
       },
+      "BundleBody": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Revision",
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "title": "BundleBody",
+        "type": "object"
+      },
       "CodeFile": {
         "additionalProperties": false,
         "properties": {
@@ -13503,6 +13518,65 @@
           }
         },
         "summary": "Function Save",
+        "tags": [
+          "studio-edge-functions"
+        ]
+      }
+    },
+    "/api/projects/{ref}/edge-functions/{slug}/bundle": {
+      "post": {
+        "operationId": "function_bundle_api_projects__ref__edge_functions__slug__bundle_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "title": "Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BundleBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Function Bundle",
         "tags": [
           "studio-edge-functions"
         ]

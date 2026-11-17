@@ -458,6 +458,16 @@ Deno.serve(async (request: Request) => {
   } catch (error) {
     if (!(error instanceof Deno.errors.NotFound)) return response('tenant_configuration_unavailable', 503)
   }
+  let maybeEszip: Uint8Array | undefined
+  try {
+    const eszipInfo = await Deno.lstat(`${servicePath}/bundle.eszip`)
+    if (!eszipInfo.isFile || eszipInfo.isSymlink || eszipInfo.size <= 0 || eszipInfo.size > 33554432) {
+      return response('tenant_configuration_unavailable', 503)
+    }
+    maybeEszip = await Deno.readFile(`${servicePath}/bundle.eszip`)
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) return response('tenant_configuration_unavailable', 503)
+  }
   const limits = validateLimits(tenant.limits)
   const currentProjectRunning = running.get(project) ?? 0
   if (totalRunning >= 4 || currentProjectRunning >= limits.max_concurrent_project) {
@@ -500,7 +510,9 @@ Deno.serve(async (request: Request) => {
     const workerEnv = { ...tenant.env, ...(tenant.secrets ?? {}), ...baseEnv }
     const worker = await EdgeRuntime.userWorkers.create({
       servicePath, memoryLimitMb: limits.memory_limit_mb, workerTimeoutMs: limits.worker_timeout_ms,
-      noModuleCache: false, forceCreate: true, importMapPath, envVars: Object.entries(workerEnv),
+      noModuleCache: false, forceCreate: true, importMapPath: maybeEszip ? null : importMapPath,
+      ...(maybeEszip ? { maybeEszip } : {}),
+      envVars: Object.entries(workerEnv),
       permissions,
     })
     const result = await worker.fetch(request)

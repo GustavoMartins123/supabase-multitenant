@@ -2,7 +2,7 @@ diff --git a/apps/studio/components/interfaces/Functions/SelfHostedEdgeFunctions
 new file mode 100644
 --- /dev/null
 +++ b/apps/studio/components/interfaces/Functions/SelfHostedEdgeFunctions.tsx
-@@ -0,0 +1,2068 @@
+@@ -0,0 +1,2124 @@
 +// Local Studio management uses the authenticated gateway, never project API keys.
 +import { useQuery, useQueryClient } from '@tanstack/react-query'
 +import { useParams } from 'common'
@@ -60,10 +60,19 @@ new file mode 100644
 +  limits?: GovernanceLimits
 +}
 +
++type FunctionDependencies = {
++  npm: string[]
++  jsr: string[]
++  requires_bundle: boolean
++  bundled: boolean
++  bundle_bytes: number | null
++}
++
 +type FunctionBody = FunctionInfo & {
 +  enabled: boolean
 +  files: CodeEntry[]
 +  limits?: GovernanceLimits
++  dependencies?: FunctionDependencies
 +}
 +
 +type FunctionTemplate = {
@@ -1344,6 +1353,7 @@ new file mode 100644
 +  const [diffTo, setDiffTo] = useState('draft')
 +
 +  const [configBusy, setConfigBusy] = useState(false)
++  const [bundling, setBundling] = useState(false)
 +  const [downloading, setDownloading] = useState(false)
 +  const [rollingBackRev, setRollingBackRev] = useState<string | null>(null)
 +  const wasmInputRef = useRef<HTMLInputElement | null>(null)
@@ -1486,6 +1496,27 @@ new file mode 100644
 +    } catch (error) {
 +      if (mounted.current) setFailure(error instanceof Error ? error.message : 'Draft save failed')
 +    } finally { if (mounted.current) setBusy(false) }
++  }
++
++  async function bundleDependencies() {
++    if (!info?.revision || dirty) return
++    setBundling(true)
++    setFailure('')
++    try {
++      const result = await management<FunctionBody>(projectRef, `/${encodeURIComponent(name)}/bundle`, {
++        method: 'POST',
++        body: JSON.stringify({ revision: info.revision }),
++      })
++      if (!mounted.current) return
++      setInfo(result)
++      toast.success(
++        result.dependencies?.bundled
++          ? `npm/JSR dependencies bundled (${result.dependencies.bundle_bytes ?? 0} B ESZIP).`
++          : 'Dependencies verified.'
++      )
++    } catch (error) {
++      if (mounted.current) setFailure(error instanceof Error ? error.message : 'Dependency bundling failed')
++    } finally { if (mounted.current) setBundling(false) }
 +  }
 +
 +  async function publish() {
@@ -1710,7 +1741,7 @@ new file mode 100644
 +      </div>
 +      {!loaded && !query.error && <p role="status" className="p-5">Loading editor…</p>}
 +      {loaded && (!info || tab === 'code') && <>
-+        <div inert={busy} className="flex flex-col flex-1 min-h-[450px]">
++        <div inert={busy || bundling} className="flex flex-col flex-1 min-h-[450px]">
 +          <FileExplorerAndEditor editable files={files} onFilesChange={setFiles} selectedFileId={selected} setSelectedFileId={setSelected} />
 +        </div>
 +        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 border-t bg-surface-200 text-xs">
@@ -1725,6 +1756,7 @@ new file mode 100644
 +                  <button
 +                    type="button"
 +                    className="text-destructive ml-1"
++                    disabled={busy || bundling}
 +                    onClick={() => setWasmFiles((prev) => prev.filter((item) => item.name !== wf.name))}
 +                    aria-label={`Remove ${wf.name}`}
 +                  >
@@ -1742,21 +1774,45 @@ new file mode 100644
 +              className="hidden"
 +              onChange={(event) => void handleWasmUpload(event)}
 +            />
-+            <Button size="tiny" variant="default" disabled={busy} onClick={() => wasmInputRef.current?.click()}>
++            <Button size="tiny" variant="default" disabled={busy || bundling} onClick={() => wasmInputRef.current?.click()}>
 +              Attach .wasm file
 +            </Button>
 +          </div>
 +        </div>
++        {info?.dependencies?.requires_bundle && (
++          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2 border-t bg-surface-200 text-xs">
++            <div className="flex flex-wrap items-center gap-2">
++              <span className="font-medium">npm / JSR Packages:</span>
++              <span className="font-mono text-foreground-light">
++                {[...info.dependencies.npm, ...info.dependencies.jsr].join(', ')}
++              </span>
++              <span className={info.dependencies.bundled ? 'text-brand font-medium' : 'text-warning font-medium'}>
++                {info.dependencies.bundled
++                  ? `· ESZIP cached (${info.dependencies.bundle_bytes ?? 0} B)`
++                  : '· Will bundle automatically on Publish'}
++              </span>
++            </div>
++            <Button
++              size="tiny"
++              variant="default"
++              loading={bundling}
++              disabled={busy || bundling || dirty || !info.revision}
++              onClick={() => void bundleDependencies()}
++            >
++              {info.dependencies.bundled ? 'Rebuild ESZIP' : 'Bundle npm/JSR Deps'}
++            </Button>
++          </div>
++        )}
 +        <div className="flex flex-wrap items-center justify-end gap-4 p-4 border-t">
 +          {info && <>
-+            <Button variant="danger" disabled={busy} onClick={() => setPendingAction('delete')}>Delete function</Button>
-+            <Button variant="default" disabled={busy || !info.published_revision} onClick={() => setPendingAction('unpublish')}>Unpublish function</Button>
++            <Button variant="danger" disabled={busy || bundling} onClick={() => setPendingAction('delete')}>Delete function</Button>
++            <Button variant="default" disabled={busy || bundling || !info.published_revision} onClick={() => setPendingAction('unpublish')}>Unpublish function</Button>
 +          </>}
 +          <Label htmlFor="local-function-name">Function name</Label>
-+          <Input id="local-function-name" className="w-64" value={name} disabled={!!slug || !!info || busy}
++          <Input id="local-function-name" className="w-64" value={name} disabled={!!slug || !!info || busy || bundling}
 +            onChange={(event: ChangeEvent<HTMLInputElement>) => setName(event.target.value)} placeholder="my-function" />
-+          <Button variant="default" loading={busy} disabled={busy || !validName || !files.length} onClick={save}>Save draft</Button>
-+          <Button disabled={busy || !enabled || !info?.revision || dirty || info.revision === info.published_revision} onClick={publish}>Publish function</Button>
++          <Button variant="default" loading={busy} disabled={busy || bundling || !validName || !files.length} onClick={save}>Save draft</Button>
++          <Button disabled={busy || bundling || !enabled || !info?.revision || dirty || info.revision === info.published_revision} onClick={publish}>Publish function</Button>
 +        </div>
 +      </>}
 +      {loaded && info && tab === 'test' && (

@@ -65,6 +65,8 @@ def validate_files(files: list[dict], *, max_files: int = MAX_FILES, max_bytes: 
                 or any(not SEGMENT.fullmatch(part) for part in name.split("/"))
                 or not isinstance(content, str) or name in names):
             raise ValueError("File paths must be unique, relative and contain no traversal or hidden segments")
+        if name.lower().endswith(".eszip"):
+            raise ValueError("ESZIP bundle filenames are reserved by the platform")
         if encoding == "base64":
             if not name.lower().endswith(".wasm"):
                 raise ValueError("Base64 binary files are restricted to .wasm modules")
@@ -318,6 +320,65 @@ def function_names(state: dict, legacy: dict) -> list[str]:
                   if state["functions"].get(slug, {}).get("draft", "legacy") is not None)
 
 
+MAX_ESZIP_BYTES = 32 * 1024 * 1024
+
+
+def bundle_path(root: Path, state: dict, slug: str, revision: str) -> Path:
+    function_name(slug)
+    if not REVISION.fullmatch(revision):
+        raise RuntimeError("Invalid function revision")
+    return directory(root, state["project"], state["uuid"]) / "bundles" / slug / (revision + ".eszip")
+
+
+def bundle_size(root: Path, state: dict, slug: str, revision: str) -> int | None:
+    try:
+        path = bundle_path(root, state, slug, revision)
+        if any(parent.is_symlink() for parent in (path, *path.parents)):
+            return None
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_size <= 0 or info.st_size > MAX_ESZIP_BYTES:
+            return None
+        return int(info.st_size)
+    except FileNotFoundError:
+        return None
+
+
+def has_bundle(root: Path, state: dict, slug: str, revision: str) -> bool:
+    return bundle_size(root, state, slug, revision) is not None
+
+
+def read_bundle(root: Path, state: dict, slug: str, revision: str) -> bytes | None:
+    path = bundle_path(root, state, slug, revision)
+    try:
+        data = regular_bytes(path, MAX_ESZIP_BYTES)
+    except FileNotFoundError:
+        return None
+    if not data.startswith(b"ESZIP"):
+        raise RuntimeError("Invalid cached ESZIP bundle")
+    return data
+
+
+def write_bundle(root: Path, state: dict, slug: str, revision: str, data: bytes) -> Path:
+    if not isinstance(data, (bytes, bytearray)) or not data.startswith(b"ESZIP") or not (0 < len(data) <= MAX_ESZIP_BYTES):
+        raise RuntimeError("Invalid ESZIP bundle payload")
+    path = bundle_path(root, state, slug, revision)
+    edge_functions.private_directory(path.parent)
+    if path.is_symlink():
+        raise RuntimeError("Refusing symlinked bundle path")
+    descriptor, temporary = tempfile.mkstemp(prefix=".bundle-", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, 0o400)
+        os.replace(temporary, path)
+        edge_functions.sync_directory(path.parent)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    return path
+
+
 def published_files(root: Path, name: str, identity: str, *, state: dict | None = None) -> dict[str, bytes]:
     state = load(root, name, identity) if state is None else state
     functions = legacy_functions(root, name)
@@ -329,8 +390,14 @@ def published_files(root: Path, name: str, identity: str, *, state: dict | None 
             functions.pop(slug, None)
     if len(functions) > MAX_FUNCTIONS_CEILING:
         raise RuntimeError("Too many published functions")
-    return {slug + "/" + file["name"]: file_bytes(file)
-            for slug, files in functions.items() for file in files}
+    out = {slug + "/" + file["name"]: file_bytes(file)
+           for slug, files in functions.items() for file in files}
+    for slug, pointers in state["functions"].items():
+        if slug in functions and pointers.get("published"):
+            bundled = read_bundle(root, state, slug, pointers["published"])
+            if bundled is not None:
+                out[slug + "/bundle.eszip"] = bundled
+    return out
 
 
 DEFAULT_ORPHAN_RETENTION_SECONDS = 3600
@@ -376,46 +443,49 @@ def purge_orphan_versions(
 ) -> dict[str, int]:
     if min_age_seconds < 0:
         raise ValueError("min_age_seconds must be non-negative")
-    versions_root = directory(root, state["project"], state["uuid"]) / "versions"
-    if any(parent.is_symlink() for parent in (versions_root, *versions_root.parents)):
-        raise RuntimeError("Refusing symlinked versions root")
-    if versions_root.is_symlink():
-        raise RuntimeError("Refusing symlinked versions root")
-    if not versions_root.exists():
-        return {"removed_count": 0, "reclaimed_bytes": 0, "kept_count": 0}
+    base_dir = directory(root, state["project"], state["uuid"])
     current_time = time.time() if now is None else float(now)
     removed_count = 0
     reclaimed_bytes = 0
     kept_count = 0
-    for fn_dir in sorted(versions_root.iterdir()):
-        if fn_dir.name.startswith("."):
+    for tree_name, expected_suffix, track_kept in (("versions", ".json", True), ("bundles", ".eszip", False)):
+        tree_root = base_dir / tree_name
+        if any(parent.is_symlink() for parent in (tree_root, *tree_root.parents)):
+            raise RuntimeError(f"Refusing symlinked {tree_name} root")
+        if tree_root.is_symlink():
+            raise RuntimeError(f"Refusing symlinked {tree_name} root")
+        if not tree_root.exists():
             continue
-        fn_info = fn_dir.lstat()
-        if stat.S_ISLNK(fn_info.st_mode) or not stat.S_ISDIR(fn_info.st_mode):
-            raise RuntimeError("Invalid entry inside versions root")
-        slug = function_name(fn_dir.name)
-        pointers = state["functions"].get(slug) or {}
-        referenced = {rev for rev in (pointers.get("draft"), pointers.get("published")) if rev}
-        for entry in sorted(fn_dir.iterdir()):
-            if entry.name.startswith("."):
+        for fn_dir in sorted(tree_root.iterdir()):
+            if fn_dir.name.startswith("."):
                 continue
-            info = entry.lstat()
-            if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
-                raise RuntimeError("Invalid file inside function version directory")
-            if entry.suffix != ".json" or not REVISION.fullmatch(entry.stem):
-                continue
-            age = max(0.0, current_time - info.st_mtime)
-            if entry.stem in referenced or age < min_age_seconds:
-                kept_count += 1
-                continue
-            entry.chmod(0o600)
-            entry.unlink()
-            removed_count += 1
-            reclaimed_bytes += info.st_size
-        remaining = [p for p in fn_dir.iterdir() if not p.name.startswith(".")]
-        if not remaining and slug not in state["functions"]:
-            fn_dir.rmdir()
-    edge_functions.sync_directory(versions_root)
+            fn_info = fn_dir.lstat()
+            if stat.S_ISLNK(fn_info.st_mode) or not stat.S_ISDIR(fn_info.st_mode):
+                raise RuntimeError(f"Invalid entry inside {tree_name} root")
+            slug = function_name(fn_dir.name)
+            pointers = state["functions"].get(slug) or {}
+            referenced = {rev for rev in (pointers.get("draft"), pointers.get("published")) if rev}
+            for entry in sorted(fn_dir.iterdir()):
+                if entry.name.startswith("."):
+                    continue
+                info = entry.lstat()
+                if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+                    raise RuntimeError(f"Invalid file inside function {tree_name} directory")
+                if entry.suffix != expected_suffix or not REVISION.fullmatch(entry.stem):
+                    continue
+                age = max(0.0, current_time - info.st_mtime)
+                if entry.stem in referenced or age < min_age_seconds:
+                    if track_kept:
+                        kept_count += 1
+                    continue
+                entry.chmod(0o600)
+                entry.unlink()
+                removed_count += 1
+                reclaimed_bytes += info.st_size
+            remaining = [p for p in fn_dir.iterdir() if not p.name.startswith(".")]
+            if not remaining and slug not in state["functions"]:
+                fn_dir.rmdir()
+        edge_functions.sync_directory(tree_root)
     return {"removed_count": removed_count, "reclaimed_bytes": reclaimed_bytes, "kept_count": kept_count}
 
 
