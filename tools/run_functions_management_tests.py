@@ -86,7 +86,7 @@ def main():
             runtime=start('runtime','--network-alias','functions','--user',str(os.getuid())+':'+str(os.getgid()),'--read-only','--cap-drop','ALL','--security-opt','no-new-privileges:true','--tmpfs','/tmp:rw,nosuid,size=128m',
                 '-e','DENO_DIR=/tmp/deno','-p','127.0.0.1::9000',*mount(ROOT/'servidor/volumes/functions/main','/home/deno/main'),
                 *mount(server/'.functions-runtime','/home/deno/runtime'),*mount(server/'.functions-tenants','/home/deno/tenant-config'),
-                *mount(server/'.functions-hosts','/etc/hosts',True),args.edge_image,'start','--main-service','/home/deno/main')
+                *mount(server/'.functions-hosts','/etc/hosts',True),args.edge_image,'start','--main-service','/home/deno/main','--event-worker','/home/deno/main/event-worker')
             wait('http://127.0.0.1:'+port(runtime,9000)+'/__health',client)
             gateways={}
             for name,project in projects.items():
@@ -162,7 +162,8 @@ def main():
                 return client.get(gateways[project]+'/functions/v1'+path,headers={'apikey':key,'Authorization':'Bearer '+key,
                     'X-Gateway-Admission':r.headers['X-Gateway-Admission'],'X-Admission-URI':uri,'X-Admission-Method':'GET',**(headers or {})})
             wait(origin+'/api/platform/projects/'+projects['test_alpha']['ref']+'/edge-functions',client,401)
-            assert management('GET').json()=={'enabled':False,'functions':[]}
+            initial_listing=management('GET').json()
+            assert initial_listing['enabled'] is False and initial_listing['functions']==[] and 'limits' in initial_listing,initial_listing
             alpha=save('alpha-v1');assert publish(alpha).status_code==409
             assert invoke().status_code==404
             record('default_disabled_and_publication_cannot_enable_project')
@@ -254,6 +255,68 @@ def main():
                 info=json.loads(docker('inspect',container))[0]
                 assert not any(m['Destination']=='/var/run/docker.sock' for m in info['Mounts'])
             record('management_api_and_global_runtime_have_no_docker_socket')
+
+            # Secrets, webhooks, invoke, event-worker logs, versions, ZIP export, and GC
+            import io, zipfile
+            sec_set=management('PUT','/secrets',{'secrets':[{'name':'E2E_WEBHOOK_SECRET','value':'sec_live_987654'}]})
+            assert sec_set.status_code==200 and 'sec_live_987654' not in sec_set.text,sec_set.text
+            wh_code='''Deno.serve(async(req)=>{
+  const sec=Deno.env.get('E2E_WEBHOOK_SECRET')||'missing';
+  console.log('mgmt-e2e-log', sec, 'Bearer tok_mgmt_secret_42');
+  return Response.json({ok:true,hasSecret:sec.startsWith('sec_live_')&&sec.length===15,method:req.method,sig:req.headers.get('stripe-signature')});
+})'''
+            wh_v1=management('PUT','/wh-probe',{'expected_revision':None,'files':[{'name':'index.ts','content':wh_code}]}).json()
+            assert management('POST','/wh-probe/publish',{'revision':wh_v1['revision'],'expected_published_revision':None}).status_code==200
+            cfg_off=management('PUT','/wh-probe/config',{'verify_jwt':False})
+            assert cfg_off.status_code==200 and cfg_off.json()['verify_jwt'] is False,cfg_off.text
+
+            # Public anonymous call to verify_jwt=false webhook via KeyAuthorizer + Project Nginx
+            p_alpha=projects['test_alpha']
+            wh_uri='/'+p_alpha['ref']+'/functions/v1/wh-probe'
+            wh_admit=client.post(auth_origin+'/v1/admit',headers={'X-Admission-Secret':'a'*64},json={
+                'project_ref':'test_alpha','gateway_token':p_alpha['gateway_token'],'uri':wh_uri,
+                'method':'POST','client_ip':'203.0.113.8','api_key':'','authorization':'Stripe-Signature t=1'
+            })
+            assert wh_admit.status_code==204,wh_admit.text
+            wh_resp=client.post(gateways['test_alpha']+'/functions/v1/wh-probe',headers={
+                'Stripe-Signature':'t=1,v1=sig','X-Gateway-Admission':wh_admit.headers['X-Gateway-Admission'],
+                'X-Admission-URI':wh_uri,'X-Admission-Method':'POST'
+            },content='{"ok":1}')
+            assert wh_resp.status_code==200 and wh_resp.json()['hasSecret'] is True,wh_resp.text
+
+            # Live test invoke via API (published only + stale draft warning) + logs redaction
+            wh_v2=management('PUT','/wh-probe',{'expected_revision':wh_v1['revision'],'files':[{'name':'index.ts','content':wh_code+'\n// draft v2\n'}]}).json()
+            inv=management('POST','/wh-probe/invoke',{'method':'POST','path':'/hook','headers':{'Stripe-Signature':'studio-test'},'body':'{}','auth_mode':'none'})
+            assert inv.status_code==200 and inv.json()['stale_draft_warning'] is True,inv.text
+            assert json.loads(inv.json()['body'])['hasSecret'] is True
+
+            logs_data={}
+            for _ in range(25):
+                lr=management('GET','/wh-probe/logs?limit=50')
+                assert lr.status_code==200,lr.text
+                logs_data=lr.json()
+                if any(e.get('source')=='worker' and 'mgmt-e2e-log' in e.get('message','') for e in logs_data['logs']):
+                    break
+                time.sleep(0.2)
+            assert any(e.get('source')=='worker' and 'mgmt-e2e-log' in e.get('message','') for e in logs_data['logs']),logs_data
+            assert any(e.get('source')=='studio_test' for e in logs_data['logs']),logs_data
+            dumped_logs=json.dumps(logs_data['logs'])
+            assert 'sec_live_987654' not in dumped_logs and 'tok_mgmt_secret_42' not in dumped_logs,dumped_logs
+            assert '[REDACTED]' in dumped_logs,dumped_logs
+
+            # Versions, ZIP download without secrets, rollback to draft, and GC
+            hist=management('GET','/wh-probe/versions').json()
+            assert {v['revision'] for v in hist['versions']}=={wh_v1['revision'],wh_v2['revision']},hist
+            dl=management('GET','/wh-probe/download?version=draft')
+            assert dl.status_code==200,dl.text
+            assert b'sec_live_987654' not in dl.content
+            with zipfile.ZipFile(io.BytesIO(dl.content),'r') as zf:
+                assert {'wh-probe/index.ts','wh-probe/manifest.json'}==set(zf.namelist())
+            rb=management('POST','/wh-probe/rollback',{'revision':wh_v1['revision'],'expected_revision':wh_v2['revision']})
+            assert rb.status_code==200 and rb.json()['revision']==wh_v1['revision'] and rb.json()['published_revision']==wh_v1['revision']
+            gc_res=management('POST','/gc',{'min_age_seconds':0})
+            assert gc_res.status_code==200 and gc_res.json()['removed_count']>=1,gc_res.text
+            record('secrets_webhooks_invoke_event_worker_logs_versions_download_and_gc')
             if args.result:args.result.write_text(json.dumps({'checks':checks,'fixture':str(fixture),'origin':origin,'containers':names},indent=2))
             print('Completed '+str(len(checks))+' full Functions management checks.',flush=True)
             if args.keep_fixture:
