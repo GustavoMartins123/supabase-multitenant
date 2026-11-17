@@ -1,7 +1,8 @@
 """Studio-managed, tenant-bound drafts and publication for the shared runtime."""
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+import asyncio
 import base64
 import copy
 from datetime import datetime, timezone
@@ -14,6 +15,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import time
+from types import SimpleNamespace
 from typing import Literal
 from urllib.parse import urlsplit
 import uuid
@@ -131,6 +133,32 @@ class RollbackBody(BaseModel):
 class GcBody(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     min_age_seconds: StrictInt = Field(default=store.DEFAULT_ORPHAN_RETENTION_SECONDS, ge=0, le=31536000)
+
+
+class ScheduleCreateBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    name: StrictStr = Field(min_length=1, max_length=80)
+    cron: StrictStr = Field(min_length=5, max_length=100)
+    timezone: Literal['UTC'] = 'UTC'
+    method: Literal['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] = 'POST'
+    path: StrictStr = Field(default='/', min_length=1, max_length=256)
+    headers: dict[StrictStr, StrictStr] = Field(default_factory=dict)
+    body: StrictStr = Field(default='', max_length=65536)
+    auth_mode: Literal['anon', 'service_role', 'none'] = 'service_role'
+    enabled: StrictBool = True
+
+
+class ScheduleUpdateBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    name: StrictStr | None = Field(default=None, min_length=1, max_length=80)
+    cron: StrictStr | None = Field(default=None, min_length=5, max_length=100)
+    timezone: Literal['UTC'] | None = None
+    method: Literal['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] | None = None
+    path: StrictStr | None = Field(default=None, min_length=1, max_length=256)
+    headers: dict[StrictStr, StrictStr] | None = None
+    body: StrictStr | None = Field(default=None, max_length=65536)
+    auth_mode: Literal['anon', 'service_role', 'none'] | None = None
+    enabled: StrictBool | None = None
 
 
 def governance_limits(quotas: dict[str, int] | None = None) -> dict[str, int]:
@@ -828,6 +856,15 @@ async def configure_project(ref, updates, request, pool):
                 VALUES($1,$2,$3::jsonb,$4) ON CONFLICT(project_id) DO UPDATE SET enabled=EXCLUDED.enabled,
                 network_allowlist=EXCLUDED.network_allowlist,updated_by=EXCLUDED.updated_by,updated_at=now()''',
                 project['id'], desired['enabled'], json.dumps(desired['network_allowlist']), actor)
+            if not desired['enabled']:
+                await conn.execute(
+                    '''UPDATE project_edge_function_schedules
+                       SET enabled=false, next_run_at=NULL,
+                           last_error='Disabled when Edge Functions were turned off',
+                           updated_by=$2, updated_at=now()
+                       WHERE project_id=$1 AND enabled=true''',
+                    project['id'], actor,
+                )
         except Exception:
             edge_functions.withdraw(ROOT, project['name'])
             await outcome(conn, audit_id, 'failed')
@@ -984,6 +1021,21 @@ async def alert_acknowledge(ref: str, event_id: int, request: Request, response:
         if row is None:
             raise HTTPException(404, 'Quota alert event not found')
         return {'id': int(row['id']), 'acknowledged': True, 'acknowledged_at': row['acknowledged_at'].isoformat()}
+
+
+@router.get('/schedules')
+async def schedules_list_project(ref: str, request: Request, response: Response, pool=Depends(get_pool)):
+    async with management_context(ref, request, response, pool) as (conn, project, _, _):
+        rows = await conn.fetch(
+            '''SELECT id, project_id, function_name, name, cron, timezone, method, path, headers_json,
+                      body, auth_mode, enabled, next_run_at, last_run_at, last_status, last_duration_ms,
+                      last_request_id, last_error, created_at, updated_at
+               FROM project_edge_function_schedules
+               WHERE project_id=$1
+               ORDER BY function_name ASC, name ASC''',
+            project['id'],
+        )
+        return {'schedules': [_schedule_row_dict(r) for r in rows]}
 
 
 @router.post('/gc')
@@ -1207,6 +1259,19 @@ async def commit_change(conn, project, actor, config, state, proposed, slug, rev
             'DELETE FROM project_edge_function_revisions WHERE project_id=$1 AND function_name=$2',
             project['id'], slug,
         )
+        await conn.execute(
+            'DELETE FROM project_edge_function_schedules WHERE project_id=$1 AND function_name=$2',
+            project['id'], slug,
+        )
+    elif action == 'unpublish':
+        await conn.execute(
+            '''UPDATE project_edge_function_schedules
+               SET enabled=false, next_run_at=NULL,
+                   last_error='Disabled on function unpublish',
+                   updated_by=$3, updated_at=now()
+               WHERE project_id=$1 AND function_name=$2 AND enabled=true''',
+            project['id'], slug, actor,
+        )
     await outcome(conn, audit_id, 'completed')
 
 
@@ -1313,6 +1378,107 @@ async def function_logs(ref: str, slug: str, request: Request, response: Respons
         )
 
 
+async def _execute_function_http(
+    pool,
+    project_snapshot: dict,
+    creds: dict[str, str],
+    keys: dict[str, str],
+    secrets_snapshot: dict[str, str],
+    sensitive: list[str],
+    *,
+    slug: str,
+    published_rev: str,
+    method: str,
+    auth_mode: str,
+    path_with_query: str,
+    req_headers: dict[str, str],
+    req_body: bytes | None,
+    source: str = 'studio_test',
+    audit_id: int | None = None,
+) -> tuple[int, dict[str, str], str, bool, int, str, str | None]:
+    request_id = str(uuid.uuid4())
+    headers = dict(req_headers)
+    target_url = f'{_runtime_base_url()}/{slug}{path_with_query}'
+    headers['x-project-name'] = project_snapshot['name']
+    headers['x-project-ref'] = project_snapshot['public_ref']
+    headers['x-request-id'] = request_id
+    if auth_mode == 'anon':
+        headers['apikey'] = creds['anon_key'] or keys['publishable']
+        headers['authorization'] = f"Bearer {_mint_hs256_jwt(creds['jwt_secret'], 'anon')}"
+    elif auth_mode == 'service_role':
+        headers['apikey'] = creds['service_role_key'] or keys['secret']
+        headers['authorization'] = f"Bearer {_mint_hs256_jwt(creds['jwt_secret'], 'service_role')}"
+
+    started = time.monotonic()
+    resp_status = 502
+    resp_headers: dict[str, str] = {}
+    resp_body_bytes = bytearray()
+    truncated = False
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(65.0, connect=5.0),
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
+            async with client.stream(method, target_url, headers=headers, content=req_body) as upstream:
+                resp_status = upstream.status_code
+                for k, v in upstream.headers.multi_items():
+                    kl = k.lower()
+                    if kl not in OMITTED_RESPONSE_HEADERS and len(resp_headers) < 64:
+                        resp_headers[kl] = v[:4096]
+                async for chunk in upstream.aiter_bytes():
+                    remaining = (MAX_RESPONSE_BODY_BYTES + 1) - len(resp_body_bytes)
+                    if remaining <= 0:
+                        truncated = True
+                        break
+                    resp_body_bytes.extend(chunk[:remaining])
+                    if len(resp_body_bytes) > MAX_RESPONSE_BODY_BYTES:
+                        del resp_body_bytes[MAX_RESPONSE_BODY_BYTES:]
+                        truncated = True
+                        break
+    except httpx.HTTPError as error:
+        duration_ms = int((time.monotonic() - started) * 1000)
+        err_name = type(error).__name__
+        async with pool.acquire() as conn:
+            await _persist_invocation_log(
+                conn, project_snapshot['id'], slug, request_id, method,
+                path_with_query or '/', 502, duration_ms, source, 'error', True,
+                f'{method} /{slug}{path_with_query} -> upstream unavailable ({err_name})',
+                sensitive,
+            )
+            if audit_id is not None:
+                await outcome(conn, audit_id, 'failed')
+        return 502, {}, '', False, duration_ms, request_id, err_name
+
+    duration_ms = int((time.monotonic() - started) * 1000)
+    level = 'error' if resp_status >= 500 else 'warn' if resp_status >= 400 else 'info'
+    async with pool.acquire() as conn:
+        await _persist_invocation_log(
+            conn, project_snapshot['id'], slug, request_id, method,
+            path_with_query or '/', resp_status, duration_ms, source, level, True,
+            f'{method} /{slug}{path_with_query} -> {resp_status}',
+            sensitive,
+        )
+        if resp_status == 429:
+            await _record_quota_event(
+                conn, project_snapshot['id'], 'concurrency_429', 'critical',
+                f"Function '{slug}' returned HTTP 429 during invocation",
+                function_name=slug, detail={'status': 429, 'request_id': request_id, 'source': source},
+            )
+        if audit_id is not None:
+            await outcome(conn, audit_id, 'completed')
+    effective_req_id = resp_headers.get('x-request-id', request_id)
+    return (
+        resp_status,
+        resp_headers,
+        bytes(resp_body_bytes).decode('utf-8', errors='replace'),
+        truncated,
+        duration_ms,
+        effective_req_id,
+        None,
+    )
+
+
 @router.post('/{slug}/invoke')
 async def function_invoke(ref: str, slug: str, body: InvokeBody, request: Request, response: Response, pool=Depends(get_pool)):
     validate_slug(slug)
@@ -1336,73 +1502,17 @@ async def function_invoke(ref: str, slug: str, body: InvokeBody, request: Reques
         secrets_snapshot = dict(secrets)
         audit_id = await audit(conn, project, actor, 'test_invoke', slug, published_rev)
 
-    request_id = str(uuid.uuid4())
-    target_url = f'{_runtime_base_url()}/{slug}{path_with_query}'
-    req_headers['x-project-name'] = project_snapshot['name']
-    req_headers['x-project-ref'] = project_snapshot['public_ref']
-    req_headers['x-request-id'] = request_id
-    if auth_mode == 'anon':
-        req_headers['apikey'] = creds['anon_key'] or keys['publishable']
-        req_headers['authorization'] = f"Bearer {_mint_hs256_jwt(creds['jwt_secret'], 'anon')}"
-    elif auth_mode == 'service_role':
-        req_headers['apikey'] = creds['service_role_key'] or keys['secret']
-        req_headers['authorization'] = f"Bearer {_mint_hs256_jwt(creds['jwt_secret'], 'service_role')}"
-
-    started = time.monotonic()
-    resp_status = 502
-    resp_headers: dict[str, str] = {}
-    resp_body_bytes = bytearray()
-    truncated = False
-    try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(65.0, connect=5.0),
-            follow_redirects=False,
-            trust_env=False,
-        ) as client:
-            async with client.stream(method, target_url, headers=req_headers, content=req_body) as upstream:
-                resp_status = upstream.status_code
-                for k, v in upstream.headers.multi_items():
-                    kl = k.lower()
-                    if kl not in OMITTED_RESPONSE_HEADERS and len(resp_headers) < 64:
-                        resp_headers[kl] = v[:4096]
-                async for chunk in upstream.aiter_bytes():
-                    remaining = (MAX_RESPONSE_BODY_BYTES + 1) - len(resp_body_bytes)
-                    if remaining <= 0:
-                        truncated = True
-                        break
-                    resp_body_bytes.extend(chunk[:remaining])
-                    if len(resp_body_bytes) > MAX_RESPONSE_BODY_BYTES:
-                        del resp_body_bytes[MAX_RESPONSE_BODY_BYTES:]
-                        truncated = True
-                        break
-    except httpx.HTTPError as error:
-        duration_ms = int((time.monotonic() - started) * 1000)
-        async with pool.acquire() as conn:
-            await _persist_invocation_log(
-                conn, project_snapshot['id'], slug, request_id, method,
-                path_with_query or '/', 502, duration_ms, 'studio_test', 'error', True,
-                f'{method} /{slug}{path_with_query} -> upstream unavailable ({type(error).__name__})',
-                sensitive,
-            )
-            await outcome(conn, audit_id, 'failed')
-        raise HTTPException(502, 'Edge Function runtime unavailable') from error
-
-    duration_ms = int((time.monotonic() - started) * 1000)
-    level = 'error' if resp_status >= 500 else 'warn' if resp_status >= 400 else 'info'
-    async with pool.acquire() as conn:
-        await _persist_invocation_log(
-            conn, project_snapshot['id'], slug, request_id, method,
-            path_with_query or '/', resp_status, duration_ms, 'studio_test', level, True,
-            f'{method} /{slug}{path_with_query} -> {resp_status}',
-            sensitive,
+    resp_status, resp_headers, body_str, truncated, duration_ms, effective_req_id, err_name = (
+        await _execute_function_http(
+            pool, project_snapshot, creds, keys, secrets_snapshot, sensitive,
+            slug=slug, published_rev=published_rev, method=method, auth_mode=auth_mode,
+            path_with_query=path_with_query, req_headers=req_headers, req_body=req_body,
+            source='studio_test', audit_id=audit_id,
         )
-        if resp_status == 429:
-            await _record_quota_event(
-                conn, project_snapshot['id'], 'concurrency_429', 'critical',
-                f"Function '{slug}' returned HTTP 429 during invocation",
-                function_name=slug, detail={'status': 429, 'request_id': request_id},
-            )
-        await outcome(conn, audit_id, 'completed')
+    )
+    if err_name is not None:
+        raise HTTPException(502, 'Edge Function runtime unavailable')
+    async with pool.acquire() as conn:
         recent = await _fetch_merged_logs(
             conn, project_snapshot, creds, secrets_snapshot,
             function_name=slug, level=None, limit=20,
@@ -1411,10 +1521,10 @@ async def function_invoke(ref: str, slug: str, body: InvokeBody, request: Reques
     return {
         'status': resp_status,
         'headers': resp_headers,
-        'body': bytes(resp_body_bytes).decode('utf-8', errors='replace'),
+        'body': body_str,
         'truncated': truncated,
         'duration_ms': duration_ms,
-        'request_id': resp_headers.get('x-request-id', request_id),
+        'request_id': effective_req_id,
         'executed_revision': published_rev,
         'draft_revision': draft_rev,
         'stale_draft_warning': draft_rev != published_rev,
@@ -1553,3 +1663,462 @@ async def function_delete(ref: str, slug: str, body: PublishBody, request: Reque
         proposed['functions'].pop(slug)
         await commit_change(conn, project, actor, config, state, proposed, slug, current['revision'], 'delete')
         return {'name': slug, 'deleted': True}
+
+
+_SCHEDULE_LOCK_NAME = 'edge-function-schedules-v1'
+_SCHEDULE_POLL_SECONDS = max(5, int(os.environ.get('EDGE_FUNCTION_SCHEDULE_POLL_SECONDS', '15')))
+_schedule_task: asyncio.Task | None = None
+
+
+def _schedule_row_dict(row) -> dict:
+    raw_headers = row['headers_json']
+    headers = json.loads(raw_headers) if isinstance(raw_headers, str) else dict(raw_headers or {})
+    return {
+        'id': str(row['id']),
+        'project_id': str(row['project_id']),
+        'function_name': row['function_name'],
+        'name': row['name'],
+        'cron': row['cron'],
+        'timezone': row['timezone'],
+        'method': row['method'],
+        'path': row['path'],
+        'headers': headers,
+        'body': row['body'],
+        'auth_mode': row['auth_mode'],
+        'enabled': bool(row['enabled']),
+        'next_run_at': row['next_run_at'].isoformat() if row['next_run_at'] else None,
+        'last_run_at': row['last_run_at'].isoformat() if row['last_run_at'] else None,
+        'last_status': row['last_status'],
+        'last_duration_ms': row['last_duration_ms'],
+        'last_request_id': row['last_request_id'],
+        'last_error': row['last_error'] or '',
+        'created_at': row['created_at'].isoformat(),
+        'updated_at': row['updated_at'].isoformat(),
+    }
+
+
+def _validate_schedule_inputs(
+    *, name: str, cron: str, method: str, path: str, headers: dict, body: str, auth_mode: str,
+) -> tuple[str, str, str, str, str, dict[str, str], bytes | None]:
+    try:
+        clean_name = store.validate_schedule_name(name)
+        clean_cron = store.validate_cron_expression(cron)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+    if len(body.encode('utf-8')) > 65536:
+        raise HTTPException(400, 'Schedule payload body exceeds 64 KiB limit')
+    v_method, v_auth_mode, path_with_query, v_headers, v_body = _validate_invoke_request(
+        SimpleNamespace(
+            method=method,
+            path=path,
+            headers=headers,
+            body=body if body != '' else None,
+            auth_mode=auth_mode,
+        )
+    )
+    if v_method not in {'GET', 'POST', 'PUT', 'PATCH', 'DELETE'}:
+        raise HTTPException(400, f'Unsupported schedule HTTP method: {method}')
+    if v_auth_mode not in {'anon', 'service_role', 'none'}:
+        raise HTTPException(400, f'Unsupported schedule auth_mode: {auth_mode}')
+    db_path = f'/{path_with_query}' if path_with_query.startswith('?') else (path_with_query or '/')
+    if len(db_path) > 256:
+        raise HTTPException(400, 'Schedule request path exceeds 256 characters')
+    return clean_name, clean_cron, v_method, db_path, v_auth_mode, v_headers, v_body
+
+
+def _parse_schedule_uuid(schedule_id: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(schedule_id)
+    except ValueError as error:
+        raise HTTPException(400, 'Invalid schedule identifier') from error
+
+
+@router.get('/{slug}/schedules')
+async def function_schedules_list(ref: str, slug: str, request: Request, response: Response, pool=Depends(get_pool)):
+    validate_slug(slug)
+    async with management_context(ref, request, response, pool) as (conn, project, _, _):
+        state = load(project)
+        if store.item(ROOT, state, slug, {}) is None:
+            raise HTTPException(404, 'Function not found')
+        rows = await conn.fetch(
+            '''SELECT id, project_id, function_name, name, cron, timezone, method, path, headers_json,
+                      body, auth_mode, enabled, next_run_at, last_run_at, last_status, last_duration_ms,
+                      last_request_id, last_error, created_at, updated_at
+               FROM project_edge_function_schedules
+               WHERE project_id=$1 AND function_name=$2
+               ORDER BY name ASC''',
+            project['id'], slug,
+        )
+        return {'schedules': [_schedule_row_dict(r) for r in rows]}
+
+
+@router.post('/{slug}/schedules')
+async def function_schedule_create(ref: str, slug: str, body: ScheduleCreateBody, request: Request, response: Response, pool=Depends(get_pool)):
+    validate_slug(slug)
+    clean_name, clean_cron, v_method, db_path, v_auth_mode, v_headers, _ = _validate_schedule_inputs(
+        name=body.name, cron=body.cron, method=body.method, path=body.path,
+        headers=body.headers, body=body.body, auth_mode=body.auth_mode,
+    )
+    async with management_context(ref, request, response, pool) as (conn, project, actor, config):
+        state = load(project)
+        current = store.item(ROOT, state, slug, {})
+        if current is None:
+            raise HTTPException(404, 'Function not found')
+        if body.enabled:
+            if not config['enabled']:
+                raise HTTPException(409, 'Edge Functions are disabled by the project administrator')
+            if current['published_revision'] is None:
+                raise HTTPException(409, 'Function must be published before enabling a schedule')
+        proj_count = await conn.fetchval(
+            'SELECT count(*) FROM project_edge_function_schedules WHERE project_id=$1',
+            project['id'],
+        )
+        if proj_count >= store.MAX_SCHEDULES_PER_PROJECT:
+            raise HTTPException(409, f'Project reached maximum of {store.MAX_SCHEDULES_PER_PROJECT} schedules')
+        fn_count = await conn.fetchval(
+            'SELECT count(*) FROM project_edge_function_schedules WHERE project_id=$1 AND function_name=$2',
+            project['id'], slug,
+        )
+        if fn_count >= store.MAX_SCHEDULES_PER_FUNCTION:
+            raise HTTPException(409, f'Function reached maximum of {store.MAX_SCHEDULES_PER_FUNCTION} schedules')
+
+        next_run = store.next_cron_run(clean_cron) if body.enabled else None
+        rev_marker = current['published_revision'] or current['revision']
+        audit_id = await audit(conn, project, actor, 'configure_schedule', slug, rev_marker)
+        try:
+            row = await conn.fetchrow(
+                '''INSERT INTO project_edge_function_schedules
+                   (project_id, function_name, name, cron, timezone, method, path, headers_json,
+                    body, auth_mode, enabled, next_run_at, created_by, updated_by)
+                   VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$13)
+                   RETURNING id, project_id, function_name, name, cron, timezone, method, path, headers_json,
+                             body, auth_mode, enabled, next_run_at, last_run_at, last_status, last_duration_ms,
+                             last_request_id, last_error, created_at, updated_at''',
+                project['id'], slug, clean_name, clean_cron, body.timezone, v_method, db_path,
+                json.dumps(v_headers), body.body, v_auth_mode, body.enabled, next_run, actor,
+            )
+        except Exception as exc:
+            await outcome(conn, audit_id, 'failed')
+            if exc.__class__.__name__ == 'UniqueViolationError':
+                raise HTTPException(409, 'A schedule with this name already exists for this function') from exc
+            raise
+        await outcome(conn, audit_id, 'completed')
+        return {'schedule': _schedule_row_dict(row)}
+
+
+@router.put('/{slug}/schedules/{schedule_id}')
+async def function_schedule_update(
+    ref: str, slug: str, schedule_id: str, body: ScheduleUpdateBody,
+    request: Request, response: Response, pool=Depends(get_pool),
+):
+    validate_slug(slug)
+    sched_uuid = _parse_schedule_uuid(schedule_id)
+    async with management_context(ref, request, response, pool) as (conn, project, actor, config):
+        state = load(project)
+        current = store.item(ROOT, state, slug, {})
+        if current is None:
+            raise HTTPException(404, 'Function not found')
+        existing = await conn.fetchrow(
+            '''SELECT id, name, cron, timezone, method, path, headers_json, body, auth_mode, enabled, next_run_at
+               FROM project_edge_function_schedules
+               WHERE id=$1 AND project_id=$2 AND function_name=$3''',
+            sched_uuid, project['id'], slug,
+        )
+        if existing is None:
+            raise HTTPException(404, 'Schedule not found')
+
+        existing_headers = existing['headers_json']
+        if isinstance(existing_headers, str):
+            existing_headers = json.loads(existing_headers)
+        target_enabled = bool(existing['enabled']) if body.enabled is None else body.enabled
+        clean_name, clean_cron, v_method, db_path, v_auth_mode, v_headers, _ = _validate_schedule_inputs(
+            name=body.name if body.name is not None else existing['name'],
+            cron=body.cron if body.cron is not None else existing['cron'],
+            method=body.method if body.method is not None else existing['method'],
+            path=body.path if body.path is not None else existing['path'],
+            headers=body.headers if body.headers is not None else dict(existing_headers or {}),
+            body=body.body if body.body is not None else existing['body'],
+            auth_mode=body.auth_mode if body.auth_mode is not None else existing['auth_mode'],
+        )
+        target_body = body.body if body.body is not None else existing['body']
+        if target_enabled:
+            if not config['enabled']:
+                raise HTTPException(409, 'Edge Functions are disabled by the project administrator')
+            if current['published_revision'] is None:
+                raise HTTPException(409, 'Function must be published before enabling a schedule')
+            next_run = (
+                store.next_cron_run(clean_cron)
+                if (body.cron is not None or not existing['enabled'] or existing['next_run_at'] is None)
+                else existing['next_run_at']
+            )
+        else:
+            next_run = None
+
+        rev_marker = current['published_revision'] or current['revision']
+        audit_id = await audit(conn, project, actor, 'configure_schedule', slug, rev_marker)
+        try:
+            row = await conn.fetchrow(
+                '''UPDATE project_edge_function_schedules
+                   SET name=$4, cron=$5, timezone=$6, method=$7, path=$8, headers_json=$9::jsonb,
+                       body=$10, auth_mode=$11, enabled=$12, next_run_at=$13,
+                       last_error=CASE WHEN $12 THEN '' ELSE last_error END,
+                       updated_by=$14, updated_at=now()
+                   WHERE id=$1 AND project_id=$2 AND function_name=$3
+                   RETURNING id, project_id, function_name, name, cron, timezone, method, path, headers_json,
+                             body, auth_mode, enabled, next_run_at, last_run_at, last_status, last_duration_ms,
+                             last_request_id, last_error, created_at, updated_at''',
+                sched_uuid, project['id'], slug, clean_name, clean_cron,
+                body.timezone or existing['timezone'], v_method, db_path, json.dumps(v_headers),
+                target_body, v_auth_mode, target_enabled, next_run, actor,
+            )
+        except Exception as exc:
+            await outcome(conn, audit_id, 'failed')
+            if exc.__class__.__name__ == 'UniqueViolationError':
+                raise HTTPException(409, 'A schedule with this name already exists for this function') from exc
+            raise
+        await outcome(conn, audit_id, 'completed')
+        return {'schedule': _schedule_row_dict(row)}
+
+
+@router.delete('/{slug}/schedules/{schedule_id}')
+async def function_schedule_delete(
+    ref: str, slug: str, schedule_id: str,
+    request: Request, response: Response, pool=Depends(get_pool),
+):
+    validate_slug(slug)
+    sched_uuid = _parse_schedule_uuid(schedule_id)
+    async with management_context(ref, request, response, pool) as (conn, project, actor, _):
+        state = load(project)
+        current = store.item(ROOT, state, slug, {})
+        rev_marker = (current['published_revision'] or current['revision']) if current else None
+        audit_id = await audit(conn, project, actor, 'delete_schedule', slug, rev_marker)
+        deleted = await conn.fetchval(
+            '''DELETE FROM project_edge_function_schedules
+               WHERE id=$1 AND project_id=$2 AND function_name=$3
+               RETURNING id''',
+            sched_uuid, project['id'], slug,
+        )
+        if deleted is None:
+            await outcome(conn, audit_id, 'failed')
+            raise HTTPException(404, 'Schedule not found')
+        await outcome(conn, audit_id, 'completed')
+        return {'id': str(deleted), 'deleted': True}
+
+
+@router.post('/{slug}/schedules/{schedule_id}/trigger')
+async def function_schedule_trigger(
+    ref: str, slug: str, schedule_id: str,
+    request: Request, response: Response, pool=Depends(get_pool),
+):
+    validate_slug(slug)
+    sched_uuid = _parse_schedule_uuid(schedule_id)
+    async with management_context(ref, request, response, pool) as (conn, project, actor, config):
+        if not config['enabled']:
+            raise HTTPException(409, 'Edge Functions are disabled by the project administrator')
+        state = load(project)
+        current = store.item(ROOT, state, slug, {})
+        if current is None:
+            raise HTTPException(404, 'Function not found')
+        published_rev = current['published_revision']
+        if published_rev is None:
+            raise HTTPException(409, 'Function has no published revision; publish it before invoking')
+        sched = await conn.fetchrow(
+            '''SELECT id, name, method, path, headers_json, body, auth_mode
+               FROM project_edge_function_schedules
+               WHERE id=$1 AND project_id=$2 AND function_name=$3''',
+            sched_uuid, project['id'], slug,
+        )
+        if sched is None:
+            raise HTTPException(404, 'Schedule not found')
+        headers_raw = sched['headers_json']
+        headers_map = json.loads(headers_raw) if isinstance(headers_raw, str) else dict(headers_raw or {})
+        _, _, path_with_query, v_headers, v_body = _validate_invoke_request(
+            SimpleNamespace(
+                method=sched['method'],
+                path=sched['path'],
+                headers=headers_map,
+                body=sched['body'] if sched['body'] != '' else None,
+                auth_mode=sched['auth_mode'],
+            )
+        )
+        creds = canonical_projection_credentials(project)
+        keys = await internal_keys(conn, project)
+        secrets = await load_project_secrets(conn, project, tolerate=True)
+        sensitive = _collect_sensitive_values(project, creds, secrets)
+        project_snapshot = dict(project)
+        secrets_snapshot = dict(secrets)
+        method_snapshot = sched['method']
+        auth_snapshot = sched['auth_mode']
+        audit_id = await audit(conn, project, actor, 'test_invoke', slug, published_rev)
+
+    resp_status, resp_headers, body_str, truncated, duration_ms, effective_req_id, err_name = (
+        await _execute_function_http(
+            pool, project_snapshot, creds, keys, secrets_snapshot, sensitive,
+            slug=slug, published_rev=published_rev, method=method_snapshot, auth_mode=auth_snapshot,
+            path_with_query=path_with_query, req_headers=v_headers, req_body=v_body,
+            source='cron', audit_id=audit_id,
+        )
+    )
+    err_text = f'Upstream unavailable ({err_name})' if err_name else (f'HTTP {resp_status}' if resp_status >= 500 else '')
+    async with pool.acquire() as conn:
+        updated_row = await conn.fetchrow(
+            '''UPDATE project_edge_function_schedules
+               SET last_run_at=now(), last_status=$2, last_duration_ms=$3,
+                   last_request_id=$4, last_error=$5, updated_at=now()
+               WHERE id=$1
+               RETURNING id, project_id, function_name, name, cron, timezone, method, path, headers_json,
+                         body, auth_mode, enabled, next_run_at, last_run_at, last_status, last_duration_ms,
+                         last_request_id, last_error, created_at, updated_at''',
+            sched_uuid, resp_status, duration_ms, effective_req_id, err_text,
+        )
+    if err_name is not None:
+        raise HTTPException(502, 'Edge Function runtime unavailable')
+    return {
+        'schedule': _schedule_row_dict(updated_row),
+        'invocation': {
+            'status': resp_status,
+            'headers': resp_headers,
+            'body': body_str,
+            'truncated': truncated,
+            'duration_ms': duration_ms,
+            'request_id': effective_req_id,
+        },
+    }
+
+
+async def scan_edge_function_schedules(pool, *, now: datetime | None = None) -> int:
+    """Claim and execute due cron-scheduled Edge Function invocations under an advisory lock."""
+    current_now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    executed = 0
+    async with pool.acquire() as lock_conn:
+        owns = await lock_conn.fetchval(
+            'SELECT pg_try_advisory_lock(hashtextextended($1, 0))',
+            _SCHEDULE_LOCK_NAME,
+        )
+        if not owns:
+            return 0
+        try:
+            due_rows = await lock_conn.fetch(
+                '''SELECT s.id, s.project_id, s.function_name, s.cron, s.method, s.path,
+                          s.headers_json, s.body, s.auth_mode,
+                          p.name AS project_name, p.public_ref, p.tenant_uuid
+                   FROM project_edge_function_schedules s
+                   JOIN projects p ON p.id = s.project_id
+                   WHERE s.enabled = true AND s.next_run_at IS NOT NULL AND s.next_run_at <= $1
+                   ORDER BY s.next_run_at ASC
+                   LIMIT 16''',
+                current_now,
+            )
+            for row in due_rows:
+                sched_id = row['id']
+                slug = row['function_name']
+                project_row = {
+                    'id': row['project_id'],
+                    'name': row['project_name'],
+                    'public_ref': row['public_ref'],
+                    'tenant_uuid': row['tenant_uuid'],
+                }
+                config = await configuration(lock_conn, project_row['id'])
+                published_rev: str | None = None
+                if config['enabled']:
+                    with suppress(OSError, RuntimeError, ValueError, KeyError, TypeError, UnicodeError):
+                        state = load(project_row)
+                        current = store.item(ROOT, state, slug, {})
+                        if current is not None:
+                            published_rev = current['published_revision']
+                if not config['enabled'] or published_rev is None:
+                    reason = (
+                        'Auto-disabled: Edge Functions disabled'
+                        if not config['enabled']
+                        else 'Auto-disabled: function missing or unpublished'
+                    )
+                    await lock_conn.execute(
+                        '''UPDATE project_edge_function_schedules
+                           SET enabled=false, next_run_at=NULL, last_error=$2, updated_at=now()
+                           WHERE id=$1''',
+                        sched_id, reason,
+                    )
+                    continue
+
+                upcoming = store.next_cron_run(row['cron'], after=current_now)
+                await lock_conn.execute(
+                    '''UPDATE project_edge_function_schedules
+                       SET next_run_at=$2, last_run_at=$3, updated_at=now()
+                       WHERE id=$1''',
+                    sched_id, upcoming, current_now,
+                )
+
+                try:
+                    headers_raw = row['headers_json']
+                    headers_map = json.loads(headers_raw) if isinstance(headers_raw, str) else dict(headers_raw or {})
+                    _, _, path_with_query, v_headers, v_body = _validate_invoke_request(
+                        SimpleNamespace(
+                            method=row['method'],
+                            path=row['path'],
+                            headers=headers_map,
+                            body=row['body'] if row['body'] != '' else None,
+                            auth_mode=row['auth_mode'],
+                        )
+                    )
+                    creds = canonical_projection_credentials(project_row)
+                    keys = await internal_keys(lock_conn, project_row)
+                    secrets = await load_project_secrets(lock_conn, project_row, tolerate=True)
+                    sensitive = _collect_sensitive_values(project_row, creds, secrets)
+                except Exception as prep_err:
+                    await lock_conn.execute(
+                        '''UPDATE project_edge_function_schedules
+                           SET last_status=500, last_error=$2, updated_at=now()
+                           WHERE id=$1''',
+                        sched_id, f'Preparation failed: {str(prep_err)[:300]}',
+                    )
+                    continue
+
+                resp_status, _, _, _, duration_ms, req_id, err_name = await _execute_function_http(
+                    pool, project_row, creds, keys, secrets, sensitive,
+                    slug=slug, published_rev=published_rev, method=row['method'],
+                    auth_mode=row['auth_mode'], path_with_query=path_with_query,
+                    req_headers=v_headers, req_body=v_body, source='cron',
+                )
+                err_text = f'Upstream unavailable ({err_name})' if err_name else (f'HTTP {resp_status}' if resp_status >= 500 else '')
+                await lock_conn.execute(
+                    '''UPDATE project_edge_function_schedules
+                       SET last_status=$2, last_duration_ms=$3, last_request_id=$4, last_error=$5, updated_at=now()
+                       WHERE id=$1''',
+                    sched_id, resp_status, duration_ms, req_id, err_text,
+                )
+                executed += 1
+        finally:
+            await lock_conn.fetchval(
+                'SELECT pg_advisory_unlock(hashtextextended($1, 0))',
+                _SCHEDULE_LOCK_NAME,
+            )
+    return executed
+
+
+async def _edge_schedule_loop() -> None:
+    while True:
+        try:
+            pool = await get_pool()
+            await scan_edge_function_schedules(pool)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning('Edge Function schedule scan failed: %s', exc)
+        await asyncio.sleep(_SCHEDULE_POLL_SECONDS)
+
+
+async def start_edge_function_scheduler() -> None:
+    global _schedule_task
+    if _schedule_task is not None:
+        return
+    _schedule_task = asyncio.create_task(_edge_schedule_loop(), name='edge-function-schedules')
+
+
+async def stop_edge_function_scheduler() -> None:
+    global _schedule_task
+    if _schedule_task is None:
+        return
+    _schedule_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await _schedule_task
+    _schedule_task = None

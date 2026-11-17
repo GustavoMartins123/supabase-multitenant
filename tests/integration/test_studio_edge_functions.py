@@ -1159,3 +1159,166 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(wasm_diff['binary'])
         self.assertEqual(wasm_diff['status'], 'modified')
         self.assertIn('binary wasm file', wasm_diff['hunks'][0])
+
+    async def test_cron_schedules_execution_advisory_lock_and_auto_cleanup(self):
+        from datetime import datetime, timedelta, timezone
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from app import edge_function_store as store
+
+        # 1. Cron parser & Vixie calendar semantics.
+        self.assertEqual(store.validate_cron_expression('@hourly'), '0 * * * *')
+        self.assertEqual(store.validate_cron_expression('*/15 9-17 * jan-dec mon-fri'), '*/15 9-17 * jan-dec mon-fri')
+        leap_next = store.next_cron_run('0 12 29 2 *', datetime(2025, 1, 1, 0, 0, tzinfo=timezone.utc))
+        self.assertEqual(leap_next, datetime(2028, 2, 29, 12, 0, tzinfo=timezone.utc))
+        vixie_or = store.next_cron_run('0 0 15 * mon', datetime(2026, 6, 14, 12, 0, tzinfo=timezone.utc))
+        self.assertEqual(vixie_or, datetime(2026, 6, 15, 0, 0, tzinfo=timezone.utc))
+        for bad_expr in ('* * * *', '60 * * * *', '*/0 * * * *', '5-2 * * * *', '0 0 30 2 *', '0 0 * 13 *'):
+            with self.assertRaises(ValueError):
+                store.validate_cron_expression(bad_expr)
+
+        # 2. Setup runtime stub & project credentials.
+        name, ref, tenant_id = self.names[0], self.refs[0], str(self.projects[0])
+        (self.root / 'projects' / name / '.env').write_text(
+            f'PROJECT_ID={name}\nPROJECT_UUID={tenant_id}\nPROJECT_PUBLIC_REF={ref}\n'
+            f'JWT_SECRET_PROJETO=synthetic-{name}\nANON_KEY_PROJETO=anon-jwt-{name}\n'
+            f'SERVICE_ROLE_KEY_PROJETO=svc-jwt-{name}\nAPI_EXTERNAL_URL=https://api.example.com/{ref}\n'
+        )
+        (self.root / '.functions-tenants' / f'{name}.json').write_text(json.dumps({
+            'technical_name': name,
+            'project_ref': ref,
+            'project_uuid': tenant_id,
+            'jwt_secret': f'synthetic-{name}',
+            'anon_key': f'anon-jwt-{name}',
+            'service_role_key': f'svc-jwt-{name}',
+        }))
+        captured: list[dict] = []
+
+        class _CronStub(BaseHTTPRequestHandler):
+            def log_message(self, format, *args):
+                return
+
+            def do_POST(self):
+                length = int(self.headers.get('Content-Length', '0') or '0')
+                raw = self.rfile.read(length) if length else b''
+                captured.append({'path': self.path, 'body': raw.decode('utf-8'), 'headers': {k.lower(): v for k, v in self.headers.items()}})
+                resp = b'{"scheduled":true}'
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(resp)))
+                self.end_headers()
+                self.wfile.write(resp)
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), _CronStub)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with patch.dict(os.environ, {'EDGE_FUNCTIONS_RUNTIME_URL': f'http://127.0.0.1:{server.server_address[1]}'}):
+                draft = await self.save()
+                # Disabled project / unpublished function guards.
+                self.assertEqual((await self.request('POST', '/my-function/schedules', {'name': 's1', 'cron': '*/5 * * * *', 'enabled': True})).status_code, 409)
+                await self.configure(True)
+                self.assertEqual((await self.request('POST', '/my-function/schedules', {'name': 's1', 'cron': '*/5 * * * *', 'enabled': True})).status_code, 409)
+                paused = await self.request('POST', '/my-function/schedules', {'name': 'paused', 'cron': '@daily', 'enabled': False})
+                self.assertEqual(paused.status_code, 200, paused.text)
+                self.assertFalse(paused.json()['schedule']['enabled'])
+
+                await self.publish(draft)
+                # Access & validation boundaries.
+                self.assertEqual((await self.request('GET', '/schedules', user=2)).status_code, 403)
+                self.assertEqual((await self.request('POST', '/my-function/schedules', {'name': 'bad', 'cron': '99 * * * *'})).status_code, 400)
+                self.assertEqual((await self.request('POST', '/my-function/schedules', {'name': 'bad-hdr', 'cron': '*/5 * * * *', 'headers': {'X-Project-Ref': 'evil'}})).status_code, 400)
+
+                created = await self.request('POST', '/my-function/schedules', {
+                    'name': 'tick-every-5m',
+                    'cron': '*/5 * * * *',
+                    'method': 'POST',
+                    'path': '/cron?source=scheduler',
+                    'headers': {'X-Job': 'nightly'},
+                    'body': '{"task":"cleanup"}',
+                    'auth_mode': 'service_role',
+                    'enabled': True,
+                })
+                self.assertEqual(created.status_code, 200, created.text)
+                sched = created.json()['schedule']
+                sched_id = sched['id']
+                self.assertTrue(sched['enabled'])
+                self.assertIsNotNone(sched['next_run_at'])
+                # Duplicate name rejected cleanly.
+                self.assertEqual((await self.request('POST', '/my-function/schedules', {'name': 'tick-every-5m', 'cron': '*/5 * * * *'})).status_code, 409)
+
+                # Project-wide and per-function listing both see the schedules.
+                proj_scheds = (await self.request('GET', '/schedules')).json()['schedules']
+                fn_scheds = (await self.request('GET', '/my-function/schedules')).json()['schedules']
+                self.assertEqual(len(proj_scheds), 2)
+                self.assertEqual(len(fn_scheds), 2)
+
+                # Manual trigger executes immediately & records cron invocation log.
+                trig = await self.request('POST', f'/my-function/schedules/{sched_id}/trigger')
+                self.assertEqual(trig.status_code, 200, trig.text)
+                self.assertEqual(trig.json()['invocation']['status'], 200)
+                self.assertEqual(captured[-1]['path'], '/my-function/cron?source=scheduler')
+                self.assertEqual(captured[-1]['body'], '{"task":"cleanup"}')
+                self.assertEqual(captured[-1]['headers']['x-job'], 'nightly')
+                self.assertEqual(
+                    await self.pool.fetchval("SELECT count(*) FROM studio_edge_invocation_logs WHERE project_id=$1 AND source='cron'", self.projects[0]),
+                    1,
+                )
+
+                # Simulate due tick under advisory lock: executes once, advances next_run_at, second scan is a no-op.
+                due_at = datetime(2026, 6, 15, 10, 5, 0, tzinfo=timezone.utc)
+                await self.pool.execute(
+                    'UPDATE project_edge_function_schedules SET next_run_at=$2 WHERE id=$1',
+                    sched_id, due_at - timedelta(seconds=10),
+                )
+                async with self.pool.acquire() as holder:
+                    locked = await holder.fetchval('SELECT pg_try_advisory_lock(hashtextextended($1, 0))', self.routes._SCHEDULE_LOCK_NAME)
+                    self.assertTrue(locked)
+                    try:
+                        self.assertEqual(await self.routes.scan_edge_function_schedules(self.pool, now=due_at), 0)
+                    finally:
+                        await holder.fetchval('SELECT pg_advisory_unlock(hashtextextended($1, 0))', self.routes._SCHEDULE_LOCK_NAME)
+
+                ran = await self.routes.scan_edge_function_schedules(self.pool, now=due_at)
+                self.assertEqual(ran, 1)
+                self.assertEqual(len(captured), 2)
+                self.assertEqual(await self.routes.scan_edge_function_schedules(self.pool, now=due_at), 0)
+                row_after = await self.pool.fetchrow('SELECT next_run_at, last_status FROM project_edge_function_schedules WHERE id=$1', sched_id)
+                self.assertEqual(row_after['last_status'], 200)
+                self.assertEqual(row_after['next_run_at'], datetime(2026, 6, 15, 10, 10, 0, tzinfo=timezone.utc))
+
+                # Disabling Edge Functions disables active schedules automatically.
+                await self.configure(False)
+                self.assertFalse(await self.pool.fetchval('SELECT enabled FROM project_edge_function_schedules WHERE id=$1', sched_id))
+
+                # Re-enable + re-enable schedule, then test unpublish disables it automatically.
+                await self.configure(True)
+                upd = await self.request('PUT', f'/my-function/schedules/{sched_id}', {'enabled': True, 'cron': '*/10 * * * *'})
+                self.assertEqual(upd.status_code, 200, upd.text)
+                self.assertEqual(upd.json()['schedule']['cron'], '*/10 * * * *')
+                unpub = await self.request('POST', '/my-function/unpublish', {'revision': draft['revision'], 'expected_published_revision': draft['revision']})
+                self.assertEqual(unpub.status_code, 200)
+                self.assertFalse(await self.pool.fetchval('SELECT enabled FROM project_edge_function_schedules WHERE id=$1', sched_id))
+
+                # Deleting paused schedule directly via DELETE endpoint, and deleting function cascades remaining schedule.
+                paused_id = paused.json()['schedule']['id']
+                self.assertEqual((await self.request('DELETE', f'/my-function/schedules/{paused_id}')).status_code, 200)
+                del_fn = await self.request('DELETE', '/my-function', {'revision': draft['revision'], 'expected_published_revision': None})
+                self.assertEqual(del_fn.status_code, 200)
+                self.assertEqual(
+                    await self.pool.fetchval("SELECT count(*) FROM project_edge_function_schedules WHERE project_id=$1 AND function_name='my-function'", self.projects[0]),
+                    0,
+                )
+
+                # Project delete ON DELETE CASCADE removes any project schedules.
+                f2 = (await self.request('PUT', '/cron-cascade', {'expected_revision': None, 'files': [{'name': 'index.ts', 'content': 'export {};'}]})).json()
+                self.assertEqual((await self.request('POST', '/cron-cascade/publish', {'revision': f2['revision'], 'expected_published_revision': None})).status_code, 200)
+                self.assertEqual((await self.request('POST', '/cron-cascade/schedules', {'name': 'on-proj', 'cron': '@hourly'})).status_code, 200)
+                await self.pool.execute('DELETE FROM projects WHERE id=$1', self.projects[0])
+                self.assertEqual(
+                    await self.pool.fetchval('SELECT count(*) FROM project_edge_function_schedules WHERE project_id=$1', self.projects[0]),
+                    0,
+                )
+        finally:
+            server.shutdown()
+            server.server_close()

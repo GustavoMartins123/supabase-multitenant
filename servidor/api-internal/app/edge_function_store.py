@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import base64
 import binascii
+import calendar
 import copy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import difflib
 import hashlib
 import json
@@ -785,3 +786,153 @@ def compute_quota_status(
             "message": f"{recent_429_count} concurrency saturation response(s) (HTTP 429) detected",
         })
     return {"usage": usage, "utilization_pct": utilization_pct, "active_alerts": near_limits}
+
+
+SCHEDULE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 _.-]{0,79}\Z")
+MAX_SCHEDULES_PER_PROJECT = 32
+MAX_SCHEDULES_PER_FUNCTION = 8
+_CRON_MACROS = {
+    "@hourly": "0 * * * *",
+    "@daily": "0 0 * * *",
+    "@midnight": "0 0 * * *",
+    "@weekly": "0 0 * * 0",
+    "@monthly": "0 0 1 * *",
+    "@yearly": "0 0 1 1 *",
+    "@annually": "0 0 1 1 *",
+}
+_CRON_MONTH_NAMES = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+_CRON_DOW_NAMES = {"sun": 0, "mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6}
+
+
+def validate_schedule_name(name: str) -> str:
+    """Validate a human-friendly unique schedule name within a function."""
+    cleaned = name.strip() if isinstance(name, str) else ""
+    if not cleaned or not SCHEDULE_NAME.fullmatch(cleaned):
+        raise ValueError("Invalid schedule name (1-80 alphanumeric, space, '.', '_' or '-' chars)")
+    return cleaned
+
+
+def _parse_cron_token(
+    raw: str, low: int, high: int, *, names: dict[str, int] | None = None, wrap_seven: bool = False,
+) -> set[int]:
+    if not raw or "/" in raw and raw.count("/") > 1:
+        raise ValueError(f"Invalid cron token '{raw}'")
+    base_part, sep, step_part = raw.partition("/")
+    step = 1
+    if sep:
+        if not step_part.isdigit():
+            raise ValueError(f"Invalid cron step '{raw}'")
+        step = int(step_part)
+        if step < 1:
+            raise ValueError(f"Cron step must be >= 1 in '{raw}'")
+
+    def _val(tok: str) -> int:
+        key = tok.strip().lower()
+        if names and key in names:
+            return names[key]
+        if not key.isdigit():
+            raise ValueError(f"Invalid cron value '{tok}'")
+        v = int(key)
+        if v < low or v > high:
+            raise ValueError(f"Cron value {v} out of range [{low}, {high}]")
+        return v
+
+    if base_part == "*":
+        vals = range(low, (6 if wrap_seven else high) + 1, step)
+        return {0 if (wrap_seven and x == 7) else x for x in vals}
+    if "-" in base_part:
+        start_s, dash_sep, end_s = base_part.partition("-")
+        if not start_s or not end_s or "-" in end_s:
+            raise ValueError(f"Invalid cron range '{raw}'")
+        start_v, end_v = _val(start_s), _val(end_s)
+        if start_v > end_v:
+            raise ValueError(f"Cron range start exceeds end in '{raw}'")
+        return {0 if (wrap_seven and x == 7) else x for x in range(start_v, end_v + 1, step)}
+    if sep:
+        start_v = _val(base_part)
+        upper = 6 if wrap_seven and start_v <= 6 else high
+        return {0 if (wrap_seven and x == 7) else x for x in range(start_v, upper + 1, step)}
+    v = _val(base_part)
+    return {0 if (wrap_seven and v == 7) else v}
+
+
+def _parse_cron_field(
+    field: str, low: int, high: int, *, names: dict[str, int] | None = None, wrap_seven: bool = False,
+) -> tuple[frozenset[int], bool]:
+    is_wild = field.strip() == "*"
+    allowed: set[int] = set()
+    for part in field.split(","):
+        allowed.update(_parse_cron_token(part.strip(), low, high, names=names, wrap_seven=wrap_seven))
+    if not allowed:
+        raise ValueError(f"Empty cron field '{field}'")
+    return frozenset(allowed), is_wild
+
+
+def _compile_cron(expr: str) -> tuple[str, frozenset[int], frozenset[int], frozenset[int], bool, frozenset[int], frozenset[int], bool]:
+    if not isinstance(expr, str):
+        raise ValueError("Cron expression must be a string")
+    raw = " ".join(expr.strip().split())
+    normalized = _CRON_MACROS.get(raw.lower(), raw)
+    parts = normalized.split(" ")
+    if len(parts) != 5 or len(normalized) > 100:
+        raise ValueError("Cron expression must have 5 space-separated UTC fields (minute hour dom month dow)")
+    minutes, _ = _parse_cron_field(parts[0], 0, 59)
+    hours, _ = _parse_cron_field(parts[1], 0, 23)
+    doms, dom_wild = _parse_cron_field(parts[2], 1, 31)
+    months, _ = _parse_cron_field(parts[3], 1, 12, names=_CRON_MONTH_NAMES)
+    dows, dow_wild = _parse_cron_field(parts[4], 0, 7, names=_CRON_DOW_NAMES, wrap_seven=True)
+    return normalized, minutes, hours, doms, dom_wild, months, dows, dow_wild
+
+
+def next_cron_run(expr: str, after: datetime | None = None) -> datetime:
+    """Return the next UTC execution timestamp strictly after `after` matching `expr`."""
+    _, minutes, hours, doms, dom_wild, months, dows, dow_wild = _compile_cron(expr)
+    sorted_minutes = sorted(minutes)
+    sorted_hours = sorted(hours)
+    base = (after or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    cursor = base.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    max_year = cursor.year + 4
+    year = cursor.year
+    month = cursor.month
+    while year <= max_year:
+        if month not in months:
+            month += 1
+            if month > 12:
+                year += 1
+                month = 1
+            cursor = datetime(year, month, 1, 0, 0, tzinfo=timezone.utc)
+            continue
+        days_in_month = calendar.monthrange(year, month)[1]
+        start_day = cursor.day if (cursor.year == year and cursor.month == month) else 1
+        for day in range(start_day, days_in_month + 1):
+            day_dt = datetime(year, month, day, 0, 0, tzinfo=timezone.utc)
+            cron_dow = (day_dt.weekday() + 1) % 7
+            dom_ok = day in doms
+            dow_ok = cron_dow in dows
+            if not ((dom_ok and dow_ok) if (dom_wild or dow_wild) else (dom_ok or dow_ok)):
+                cursor = day_dt + timedelta(days=1)
+                continue
+            min_hour = cursor.hour if cursor.date() == day_dt.date() else 0
+            for hour in sorted_hours:
+                if hour < min_hour:
+                    continue
+                min_minute = cursor.minute if (cursor.date() == day_dt.date() and hour == min_hour) else 0
+                for minute in sorted_minutes:
+                    if minute >= min_minute:
+                        return datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
+        month += 1
+        if month > 12:
+            year += 1
+            month = 1
+        cursor = datetime(year, month, 1, 0, 0, tzinfo=timezone.utc)
+    raise ValueError("Cron expression does not match any valid calendar date")
+
+
+def validate_cron_expression(expr: str) -> str:
+    """Validate and normalize a 5-field UTC cron expression (or @hourly/@daily macro)."""
+    normalized, *_ = _compile_cron(expr)
+    next_cron_run(normalized)
+    return normalized
