@@ -319,3 +319,75 @@ for (const name of ['execute_destructive_sql']) {
     assert.equal(calls.filter(action => action === 'sql').length, 1)
   })
 }
+
+test('edge-functions/generate returns validated proposal and strips optional JSON markdown fences', async t => {
+  const proposal = {
+    summary: 'Validates payload and echoes caller greeting.',
+    suggestedName: 'hello-ai',
+    files: [
+      { name: 'deno.json', content: '{"imports":{"ms":"npm:ms@2.1.3"}}' },
+      { name: 'index.ts', content: 'import ms from "ms";\nDeno.serve(() => Response.json({ ttl: ms("1h") }));\n' },
+    ],
+  }
+  const model = new MockLanguageModelV3({
+    doGenerate: async () => ({
+      content: [{ type: 'text', text: '```json\n' + JSON.stringify(proposal) + '\n```' }],
+      finishReason: { unified: 'stop', raw: 'stop' },
+      usage,
+      warnings: [],
+    }),
+  })
+  const { store, request, calls } = await harness(t, model)
+  store.save(actor, { provider: 'openai', model: 'explicit-model', permission: 'none', apiKey: 'synthetic-provider-key-only' })
+  const response = await request('/api/ai/edge-functions/generate', 'POST', {
+    projectRef: actor.ref,
+    prompt: 'Create a function using ms package',
+    files: [{ name: 'index.ts', content: 'Deno.serve(() => new Response("hi"))' }],
+  })
+  assert.equal(response.status, 200)
+  const payload = await response.json()
+  assert.deepEqual(payload, proposal)
+  assert.equal(calls.length, 0)
+  assert.equal(model.doGenerateCalls.length, 1)
+})
+
+test('edge-functions/generate refuses unsigned, mismatched ref, empty prompt, and bad input files before provider', async t => {
+  const model = new MockLanguageModelV3({
+    doGenerate: async () => ({ content: [{ type: 'text', text: '{}' }], finishReason: { unified: 'stop', raw: 'stop' }, usage, warnings: [] }),
+  })
+  const { store, request } = await harness(t, model)
+  store.save(actor, { provider: 'openai', model: 'explicit-model', permission: 'none', apiKey: 'synthetic-provider-key-only' })
+  assert.equal((await request('/api/ai/edge-functions/generate', 'POST', { projectRef: actor.ref, prompt: 'hi' }, actor, false)).status, 401)
+  assert.equal((await request('/api/ai/edge-functions/generate', 'POST', { projectRef: 'z'.repeat(20), prompt: 'hi' })).status, 400)
+  assert.equal((await request('/api/ai/edge-functions/generate', 'POST', { projectRef: actor.ref, prompt: '   ' })).status, 400)
+  assert.equal((await request('/api/ai/edge-functions/generate', 'POST', { projectRef: actor.ref, prompt: 'edit', files: [{ name: '../secret.ts', content: 'x' }] })).status, 400)
+  assert.equal((await request('/api/ai/edge-functions/generate', 'POST', { projectRef: actor.ref, prompt: 'edit', files: [{ name: 'mod.wasm', content: 'x' }] })).status, 400)
+  assert.equal(model.doGenerateCalls.length, 0)
+})
+
+test('edge-functions/generate rejects malformed JSON, traversal paths, binary files, or missing index.ts with 502', async t => {
+  const badOutputs = [
+    'not json at all',
+    JSON.stringify({ summary: 'bad', files: [{ name: '../evil.ts', content: 'x' }, { name: 'index.ts', content: 'y' }] }),
+    JSON.stringify({ summary: 'bad', files: [{ name: 'bad.wasm', content: 'x' }, { name: 'index.ts', content: 'y' }] }),
+    JSON.stringify({ summary: 'bad', files: [{ name: 'helper.ts', content: 'export const a = 1' }] }),
+  ]
+  let idx = 0
+  const model = new MockLanguageModelV3({
+    doGenerate: async () => ({
+      content: [{ type: 'text', text: badOutputs[idx++] }],
+      finishReason: { unified: 'stop', raw: 'stop' },
+      usage,
+      warnings: [],
+    }),
+  })
+  const secretKey = 'synthetic-provider-key-only'
+  const { store, request } = await harness(t, model)
+  store.save(actor, { provider: 'openai', model: 'explicit-model', permission: 'none', apiKey: secretKey })
+  for (let i = 0; i < badOutputs.length; i++) {
+    const res = await request('/api/ai/edge-functions/generate', 'POST', { projectRef: actor.ref, prompt: 'Generate edge function' })
+    assert.equal(res.status, 502)
+    const bodyText = await res.text()
+    assert.equal(bodyText.includes(secretKey), false)
+  }
+})
