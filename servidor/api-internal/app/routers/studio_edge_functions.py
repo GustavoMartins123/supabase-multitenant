@@ -392,6 +392,13 @@ async def management_context(ref, request, response, pool, *, allow_query: bool 
                 raise HTTPException(503, 'Function storage or project configuration failed integrity validation') from error
 
 
+def dependency_summary(files: list[dict]) -> dict:
+    try:
+        return edge_bundler.inspect_dependencies(files)
+    except edge_bundler.DependencyPolicyError as error:
+        raise HTTPException(400, str(error)) from error
+
+
 def identity(project):
     return str(project['tenant_uuid'])
 
@@ -1814,7 +1821,7 @@ async def function_bundle(ref: str, slug: str, body: BundleBody, request: Reques
         current = detail(project, state, slug, config['enabled'], verify_jwt=configs.get(slug, True), quotas=quotas)
         if body.revision != current['revision']:
             raise HTTPException(409, 'Function version changed; reload before bundling')
-        dep_info = edge_bundler.inspect_dependencies(current['files'])
+        dep_info = dependency_summary(current['files'])
         if not dep_info['requires_bundle'] or (store.has_bundle(ROOT, state, slug, body.revision) and not body.force):
             return current
         registries_to_bundle = await load_active_registries_for_bundle(conn, project)
@@ -1846,7 +1853,7 @@ async def function_publish(ref: str, slug: str, body: PublishBody, request: Requ
         if current['published_revision'] == body.revision:
             await sync_function_config_publication(conn, project['id'], slug, 'publish', actor)
             return {**current, 'verify_jwt': verify_jwt}
-        dep_info = edge_bundler.inspect_dependencies(current['files'])
+        dep_info = dependency_summary(current['files'])
         if dep_info['requires_bundle'] and not store.has_bundle(ROOT, state, slug, body.revision):
             registries_to_bundle = await load_active_registries_for_bundle(conn, project)
             files_to_bundle = copy.deepcopy(current['files'])
