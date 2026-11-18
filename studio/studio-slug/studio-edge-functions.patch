@@ -2,7 +2,7 @@ diff --git a/apps/studio/components/interfaces/Functions/SelfHostedEdgeFunctions
 new file mode 100644
 --- /dev/null
 +++ b/apps/studio/components/interfaces/Functions/SelfHostedEdgeFunctions.tsx
-@@ -0,0 +1,2828 @@
+@@ -0,0 +1,2849 @@
 +// Local Studio management uses the authenticated gateway, never project API keys.
 +import { useQuery, useQueryClient } from '@tanstack/react-query'
 +import { useParams } from 'common'
@@ -1714,7 +1714,7 @@ new file mode 100644
 +
 +function FunctionsList({ projectRef }: { projectRef: string }) {
 +  const router = useRouter()
-+  const [tab, setTab] = useState<'functions' | 'secrets' | 'registries' | 'logs' | 'schedules' | 'quotas'>(() =>
++  const [tab, setTab] = useState<'functions' | 'registries' | 'logs' | 'schedules' | 'quotas'>(() =>
 +    router.query.tab === 'registries' ? 'registries' : 'functions'
 +  )
 +  const query = useQuery({
@@ -1734,7 +1734,7 @@ new file mode 100644
 +        )}
 +      </div>
 +      <div className="flex flex-wrap gap-2 border-b pb-2 text-sm">
-+        {(['functions', 'secrets', 'registries', 'logs', 'schedules', 'quotas'] as const).map((item) => (
++        {(['functions', 'registries', 'logs', 'schedules', 'quotas'] as const).map((item) => (
 +          <Button
 +            key={item}
 +            size="tiny"
@@ -1743,15 +1743,13 @@ new file mode 100644
 +          >
 +            {item === 'functions'
 +              ? 'Functions'
-+              : item === 'secrets'
-+                ? 'Secrets'
-+                : item === 'registries'
-+                  ? 'Registries'
-+                  : item === 'logs'
-+                    ? 'Logs'
-+                    : item === 'schedules'
-+                      ? 'Schedules'
-+                      : 'Limits & GC'}
++              : item === 'registries'
++                ? 'Registries'
++                : item === 'logs'
++                  ? 'Logs'
++                  : item === 'schedules'
++                    ? 'Schedules'
++                    : 'Limits & GC'}
 +          </Button>
 +        ))}
 +      </div>
@@ -1779,7 +1777,6 @@ new file mode 100644
 +          ))}
 +        </ul>
 +      </>}
-+      {tab === 'secrets' && <SecretsPanel projectRef={projectRef} />}
 +      {tab === 'registries' && <RegistriesPanel projectRef={projectRef} />}
 +      {tab === 'logs' && <LogsPanel projectRef={projectRef} />}
 +      {tab === 'schedules' && (
@@ -1790,6 +1787,27 @@ new file mode 100644
 +        />
 +      )}
 +      {query.data && tab === 'quotas' && <LimitsSummary limits={query.data.limits} projectRef={projectRef} />}
++    </div>
++  )
++}
++
++function FunctionsSecretsView({ projectRef }: { projectRef: string }) {
++  const query = useQuery({
++    queryKey: ['local-edge-functions', projectRef],
++    queryFn: ({ signal }) => management<FunctionList>(projectRef, '', { signal }),
++    retry: false,
++    gcTime: 0,
++  })
++  return (
++    <div className="p-6 space-y-5 w-full max-w-6xl mx-auto">
++      <div className="flex flex-wrap items-center justify-between gap-3">
++        <div>
++          <h1 className="text-xl">Edge Function Secrets</h1>
++          <p className="text-sm text-foreground-light">Project: {projectRef}</p>
++        </div>
++      </div>
++      {query.data && <BlockedNotice enabled={query.data.enabled} />}
++      <SecretsPanel projectRef={projectRef} />
 +    </div>
 +  )
 +}
@@ -2823,6 +2841,9 @@ new file mode 100644
 +  const { ref, functionSlug } = useParams()
 +  const router = useRouter()
 +  if (!ref) return <p role="alert">A project context is required.</p>
++  if (router.pathname === '/project/[ref]/functions/secrets') {
++    return <FunctionsSecretsView key={`${ref}:secrets`} projectRef={ref} />
++  }
 +  const isEditor = router.pathname !== '/project/[ref]/functions'
 +  return isEditor
 +    ? <FunctionEditor key={`${ref}:${functionSlug ?? 'new'}`} projectRef={ref} slug={functionSlug} />
@@ -2903,6 +2924,20 @@ diff --git a/apps/studio/pages/project/[ref]/functions/[functionSlug]/details.ts
 
 -export default PageLayout
 +export default IS_PLATFORM ? PageLayout : SelfHostedEdgeFunctionsPage
+diff --git a/apps/studio/pages/project/[ref]/functions/secrets.tsx b/apps/studio/pages/project/[ref]/functions/secrets.tsx
+--- a/apps/studio/pages/project/[ref]/functions/secrets.tsx
++++ b/apps/studio/pages/project/[ref]/functions/secrets.tsx
+@@ -1,3 +1,4 @@
++import { SelfHostedEdgeFunctionsPage } from '@/components/interfaces/Functions/SelfHostedEdgeFunctions'
+ import { Admonition } from 'ui-patterns/admonition'
+ import { PageContainer } from 'ui-patterns/PageContainer'
+ import {
+@@ -114,4 +115,4 @@
+   )
+ }
+ 
+-export default SecretsPage
++export default IS_PLATFORM ? SecretsPage : SelfHostedEdgeFunctionsPage
 diff --git a/apps/studio/components/ui/FileExplorerAndEditor/index.tsx b/apps/studio/components/ui/FileExplorerAndEditor/index.tsx
 --- a/apps/studio/components/ui/FileExplorerAndEditor/index.tsx
 +++ b/apps/studio/components/ui/FileExplorerAndEditor/index.tsx
