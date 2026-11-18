@@ -16,7 +16,7 @@ from pathlib import Path, PurePosixPath
 import re
 import time
 from types import SimpleNamespace
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlsplit
 import uuid
 import zipfile
@@ -258,7 +258,7 @@ def _redact_log_message(message: str, sensitive: list[str]) -> str:
     return cleaned
 
 
-def _validate_invoke_request(body: InvokeBody) -> tuple[str, str, str, dict[str, str], bytes | None]:
+def _validate_invoke_request(body: InvokeBody | SimpleNamespace) -> tuple[str, str, str, dict[str, str], bytes | None]:
     method = body.method.upper()
     if method not in ALLOWED_INVOKE_METHODS:
         raise HTTPException(400, f'Unsupported HTTP method: {body.method}')
@@ -581,7 +581,7 @@ def canonical_projection_credentials(project) -> dict[str, str]:
     if not url:
         raise RuntimeError('Project public API URL unavailable')
     return {
-        'jwt_secret': env['JWT_SECRET_PROJETO'],
+        'jwt_secret': str(env['JWT_SECRET_PROJETO'] or ''),
         'public_url': url,
         'anon_key': str(projected.get('anon_key') or env.get('ANON_KEY_PROJETO') or ''),
         'service_role_key': str(projected.get('service_role_key') or env.get('SERVICE_ROLE_KEY_PROJETO') or ''),
@@ -744,7 +744,8 @@ async def load_project_secrets(conn, project, *, tolerate: frozenset[str] | bool
             secrets[name] = edge_functions.validate_secret_value(value)
         except (ValueError, UnicodeError, TypeError):
             broken.append(name)
-    unresolved = [] if tolerate is True else sorted(name for name in broken if name not in tolerate)
+    tolerated = tolerate if isinstance(tolerate, frozenset) else frozenset()
+    unresolved = [] if tolerate is True else sorted(name for name in broken if name not in tolerated)
     if unresolved:
         raise HTTPException(
             409,
@@ -998,7 +999,7 @@ async def prepare(conn, project, state, config, *, secrets_override: dict[str, s
     else:
         quotas, _ = await load_project_quotas(conn, project['id'])
         runtime_limits = edge_functions.runtime_limits_override(quotas)
-    kwargs = {}
+    kwargs: dict[str, Any] = {}
     if secrets:
         kwargs['secrets'] = secrets
     if public_functions:

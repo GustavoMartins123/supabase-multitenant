@@ -360,7 +360,7 @@ if [[ -L "$SRC_DIR/functions-studio.tar.gz" ]]; then
 fi
 if [[ -f "$SRC_DIR/functions-studio.tar.gz" ]]; then
   say "Restaurando drafts de Edge Functions sem republicacao automatica..."
-  mkdir -p -m 700 "$PROJECT_ROOT/.functions-studio"
+  [[ -d "$PROJECT_ROOT/.functions-studio" ]] || mkdir -m 700 "$PROJECT_ROOT/.functions-studio"
   FUNCTIONS_STAGE="$(mktemp -d "${FUNCTIONS_STUDIO_DIR}.stage.XXXXXX")"
   python3 - "$SRC_DIR/functions-studio.tar.gz" "$FUNCTIONS_STAGE" "$PROJECT" "$PROJECT_UUID" <<'PY' \
     || { rm -rf -- "$FUNCTIONS_STAGE"; die "Falha ao restaurar drafts de Edge Functions"; }
