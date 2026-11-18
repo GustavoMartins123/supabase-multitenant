@@ -20,18 +20,19 @@ import sys
 import tempfile
 import threading
 import time
+from urllib.parse import unquote
 
 from policy import (
     BundleBuildError,
     DEFAULT_ALLOWED_REGISTRIES,
     DependencyPolicyError,
     MAX_ESZIP_BYTES,
+    MAX_FILES,
     validate_dependency_policy,
     validate_registries_payload,
 )
 
 MAX_REQUEST_BYTES = 10 * 1024 * 1024
-MAX_FILES = 32
 MAX_TOTAL_SOURCE_BYTES = 6 * 1024 * 1024
 MAX_HMAC_SKEW_SECONDS = 60
 REGISTRY_HOST_RE = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}")
@@ -39,6 +40,12 @@ PRIVATE_REGISTRY_HOST_RE = re.compile(
     r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*"
 )
 SYSTEM_CA_BUNDLE = Path("/etc/ssl/certs/ca-certificates.crt")
+_ESZIP_FILE_URI_RE = re.compile(rb"file://[^\x00-\x20\x7f\"'<>\\]*")
+_THIS_NET_V4 = ipaddress.ip_network("0.0.0.0/8")
+_NAT64_NET_V6 = ipaddress.ip_network("64:ff9b::/96")
+_PROC_NET_ROUTE = Path("/proc/net/route")
+_PROC_NET_FIB_TRIE = Path("/proc/net/fib_trie")
+_PROC_NET_IF_INET6 = Path("/proc/net/if_inet6")
 
 try:
     _CONCURRENCY = max(1, min(4, int(os.environ.get("EDGE_BUNDLER_CONCURRENCY", "2") or "2")))
@@ -92,6 +99,79 @@ def _is_public_global_ip(raw_ip: str) -> bool:
     return _is_allowed_ip(raw_ip, allow_private=False)
 
 
+def _decode_proc_hex_ipv4(hex_str: str) -> ipaddress.IPv4Address:
+    return ipaddress.IPv4Address(socket.ntohl(int(hex_str, 16)))
+
+
+def _is_container_environment() -> bool:
+    if Path("/.dockerenv").exists():
+        return True
+    with suppress(OSError):
+        cgroup = Path("/proc/1/cgroup").read_text(encoding="utf-8", errors="ignore")
+        return "docker" in cgroup or "containerd" in cgroup
+    return False
+
+
+def _blocked_local_interface_networks() -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
+    nets: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = [_THIS_NET_V4, _NAT64_NET_V6]
+    in_container = _is_container_environment()
+    if _PROC_NET_ROUTE.is_file():
+        with suppress(OSError, ValueError):
+            for line in _PROC_NET_ROUTE.read_text(encoding="utf-8", errors="ignore").splitlines()[1:]:
+                cols = line.split()
+                if len(cols) < 8:
+                    continue
+                iface, dest_hex, gw_hex, _flags, _ref, _use, _metric, mask_hex = cols[:8]
+                # Reject container bridge/gateway routes and host docker/bridge subnets even when allow_private=True.
+                if not (in_container or iface.startswith(("docker", "br-", "veth"))):
+                    continue
+                if gw_hex != "00000000":
+                    gw_ip = _decode_proc_hex_ipv4(gw_hex)
+                    if not gw_ip.is_unspecified:
+                        nets.append(ipaddress.ip_network(f"{gw_ip}/32", strict=False))
+                elif mask_hex != "00000000":
+                    dest_ip = _decode_proc_hex_ipv4(dest_hex)
+                    mask_ip = _decode_proc_hex_ipv4(mask_hex)
+                    prefix = ipaddress.IPv4Network(f"0.0.0.0/{mask_ip}").prefixlen
+                    if prefix > 0:
+                        net = ipaddress.ip_network(f"{dest_ip}/{prefix}", strict=False)
+                        if not net.is_loopback:
+                            nets.append(net)
+    if _PROC_NET_FIB_TRIE.is_file():
+        with suppress(OSError, ValueError):
+            current_ip: str | None = None
+            for line in _PROC_NET_FIB_TRIE.read_text(encoding="utf-8", errors="ignore").splitlines():
+                stripped = line.strip()
+                if stripped.startswith("|-- "):
+                    candidate = stripped[4:].strip()
+                    with suppress(ValueError):
+                        ipaddress.IPv4Address(candidate)
+                        current_ip = candidate
+                        continue
+                if current_ip and "/32 host LOCAL" in stripped:
+                    addr = ipaddress.IPv4Address(current_ip)
+                    if not addr.is_loopback:
+                        nets.append(ipaddress.ip_network(f"{addr}/32", strict=False))
+                current_ip = None
+    if _PROC_NET_IF_INET6.is_file():
+        with suppress(OSError, ValueError):
+            for line in _PROC_NET_IF_INET6.read_text(encoding="utf-8", errors="ignore").splitlines():
+                cols = line.split()
+                if not cols:
+                    continue
+                addr6 = ipaddress.IPv6Address(bytes.fromhex(cols[0]))
+                if not addr6.is_loopback and not addr6.is_link_local:
+                    nets.append(ipaddress.ip_network(f"{addr6}/128", strict=False))
+    extra = (os.environ.get("EDGE_BUNDLER_BLOCKED_CIDRS") or "").strip()
+    if extra:
+        for cidr in extra.split(","):
+            raw_cidr = cidr.strip()
+            if raw_cidr:
+                with suppress(ValueError):
+                    nets.append(ipaddress.ip_network(raw_cidr, strict=False))
+    return nets
+
+
 def _is_allowed_ip(raw_ip: str, *, allow_private: bool = False) -> bool:
     addr = ipaddress.ip_address(raw_ip)
     if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
@@ -100,6 +180,9 @@ def _is_allowed_ip(raw_ip: str, *, allow_private: bool = False) -> bool:
         return False
     if addr.is_loopback:
         return allow_private and os.environ.get("EDGE_BUNDLER_ALLOW_LOOPBACK_FOR_TESTS") == "1"
+    for blocked in _blocked_local_interface_networks():
+        if addr.version == blocked.version and addr in blocked:
+            return False
     if allow_private and addr.is_private:
         return True
     return bool(addr.is_global and not addr.is_private and not addr.is_reserved)
@@ -175,7 +258,7 @@ class _RegistryConnectProxy:
                 return
             allow_private = self._endpoints[(host, port_num)]
             infos = socket.getaddrinfo(host, port_num, type=socket.SOCK_STREAM)
-            ips = list(dict.fromkeys(info[4][0] for info in infos))
+            ips = list(dict.fromkeys(str(info[4][0]) for info in infos))
             if not ips or not all(_is_allowed_ip(ip, allow_private=allow_private) for ip in ips):
                 client.sendall(b"HTTP/1.1 403 Forbidden\r\n\r\n")
                 return
@@ -291,7 +374,7 @@ def _prepare_registry_runtime(
 
     for reg in normalized_regs:
         host = str(reg["host"])
-        port = int(reg["port"])  # type: ignore[arg-type]
+        port = int(str(reg["port"]))
         allow_priv = bool(reg["allow_private_network"])
         endpoints[(host, port)] = endpoints.get((host, port), False) or allow_priv
         ca_pem = str(reg.get("ca_pem") or "")
@@ -347,6 +430,57 @@ def _prepare_registry_runtime(
     return endpoints, env_extra, isolate_cache
 
 
+def _validate_eszip_bundle(
+    data: bytes,
+    src_dir: Path,
+    creds_root: Path,
+    normalized_regs: list[dict[str, object]],
+) -> None:
+    if not data.startswith(b"ESZIP") or len(data) == 0 or len(data) > MAX_ESZIP_BYTES:
+        raise BundleBuildError("Generated ESZIP bundle failed format or size validation")
+
+    resolved_src = src_dir.resolve()
+    creds_bytes = str(creds_root.resolve()).encode("utf-8", errors="ignore")
+    if creds_bytes and creds_bytes in data:
+        raise DependencyPolicyError("Generated ESZIP references bundler credential storage")
+
+    for match in _ESZIP_FILE_URI_RE.finditer(data):
+        raw_uri = match.group(0).decode("utf-8", errors="replace")
+        raw_path = raw_uri[len("file://") :]
+        if raw_path.startswith("localhost/"):
+            raw_path = raw_path[len("localhost") :]
+        uri_path_raw = raw_path.split("?", 1)[0].split("#", 1)[0]
+        decoded = uri_path_raw
+        for _ in range(3):
+            next_val = unquote(decoded)
+            if next_val == decoded:
+                break
+            decoded = next_val
+        if "\x00" in decoded or "\\" in decoded or ".." in PurePosixPath(decoded).parts:
+            raise DependencyPolicyError("Generated ESZIP references an unsafe file:// path")
+        if os.name != "nt" and decoded.startswith("/") and ":\\" not in decoded:
+            candidate = Path(os.path.normpath(decoded))
+            try:
+                candidate.resolve().relative_to(resolved_src)
+            except ValueError as err:
+                raise DependencyPolicyError(
+                    "Generated ESZIP references a file outside the function source directory"
+                ) from err
+        else:
+            raise DependencyPolicyError("Generated ESZIP contains an invalid file:// URI")
+
+    for reg in normalized_regs:
+        tok = str(reg.get("token") or "")
+        if len(tok) >= 6:
+            tok_bytes = tok.encode("utf-8", errors="ignore")
+            if tok_bytes in data:
+                raise DependencyPolicyError("Generated ESZIP contains private registry credential material")
+            if reg.get("auth_type") == "basic":
+                b64_bytes = base64.b64encode(tok_bytes)
+                if len(b64_bytes) >= 6 and b64_bytes in data:
+                    raise DependencyPolicyError("Generated ESZIP contains private registry credential material")
+
+
 def compile_function_eszip(files: list[dict], registries: list[dict] | None = None) -> bytes:
     """Validate dependencies and registries and compile files into an offline-ready ESZIP binary."""
     validate_dependency_policy(files)
@@ -365,19 +499,26 @@ def compile_function_eszip(files: list[dict], registries: list[dict] | None = No
         os.chmod(shared_cache_dir, 0o700)
 
     with _BUNDLE_SEM:
-        with tempfile.TemporaryDirectory(prefix="edge-bundle-") as temp_root:
-            root_path = Path(temp_root)
+        # Keep untrusted function source files in an isolated TemporaryDirectory
+        # separate from credentials (.npmrc, custom CA bundle), DENO_DIR, and output ESZIP.
+        with (
+            tempfile.TemporaryDirectory(prefix="edge-bundle-src-") as temp_src_root,
+            tempfile.TemporaryDirectory(prefix="edge-bundle-creds-") as temp_creds_root,
+        ):
+            src_root = Path(temp_src_root)
+            creds_root = Path(temp_creds_root)
             with suppress(OSError):
-                os.chmod(root_path, 0o700)
-            src_dir = root_path / "src"
-            home_dir = root_path / "home"
+                os.chmod(src_root, 0o700)
+                os.chmod(creds_root, 0o700)
+            src_dir = src_root / "src"
+            home_dir = creds_root / "home"
             src_dir.mkdir(parents=True)
             home_dir.mkdir(parents=True)
             has_wasm = _write_temp_function_tree(src_dir, files)
-            endpoints, reg_env, isolate_cache = _prepare_registry_runtime(root_path, home_dir, normalized_regs)
-            deno_cache = (root_path / "deno") if isolate_cache else shared_cache_dir
+            endpoints, reg_env, isolate_cache = _prepare_registry_runtime(creds_root, home_dir, normalized_regs)
+            deno_cache = (creds_root / "deno") if isolate_cache else shared_cache_dir
             deno_cache.mkdir(parents=True, exist_ok=True)
-            out_path = root_path / "bundle.eszip"
+            out_path = creds_root / "bundle.eszip"
             command = [
                 bundler_bin,
                 "bundle",
@@ -408,7 +549,7 @@ def compile_function_eszip(files: list[dict], registries: list[dict] | None = No
                 try:
                     proc = subprocess.run(
                         command,
-                        cwd=str(root_path),
+                        cwd=str(src_dir),
                         env=env,
                         capture_output=True,
                         timeout=timeout_sec + 5,
@@ -424,8 +565,7 @@ def compile_function_eszip(files: list[dict], registries: list[dict] | None = No
                     summary = " | ".join(lines)[:400] if lines else "Unknown bundler failure"
                     raise BundleBuildError(f"Failed to bundle Edge Function dependencies: {summary}")
                 data = out_path.read_bytes()
-    if not data.startswith(b"ESZIP") or len(data) > MAX_ESZIP_BYTES:
-        raise BundleBuildError("Generated ESZIP bundle failed format or size validation")
+            _validate_eszip_bundle(data, src_dir, creds_root, normalized_regs)
     return data
 
 

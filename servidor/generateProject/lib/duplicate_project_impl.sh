@@ -140,7 +140,7 @@ rollback() {
   if [[ "$CREATED_REALTIME" -eq 1 ]]; then
     tenant_status="$(docker exec realtime-dev.supabase-realtime curl -sS -o /dev/null -w '%{http_code}' -X DELETE \
       "http://localhost:4000/api/tenants/$PROJECT_UUID" \
-      -H "Authorization: Bearer $ANON_TOKEN")" || rollback_failed=1
+      -H "Authorization: Bearer $GLOBAL_ANON_TOKEN")" || rollback_failed=1
     [[ "$tenant_status" == "200" || "$tenant_status" == "202" \
       || "$tenant_status" == "204" || "$tenant_status" == "404" ]] \
       || rollback_failed=1
@@ -454,7 +454,7 @@ realtime_payload=$(jq -cn \
 CREATED_REALTIME=1
 response=$(docker exec realtime-dev.supabase-realtime curl -sS -w '\n%{http_code}' \
   -X POST http://localhost:4000/api/tenants -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer $ANON_TOKEN" -d "$realtime_payload")
+  -H "Authorization: Bearer $GLOBAL_ANON_TOKEN" -d "$realtime_payload")
 code=$(echo "$response" | tail -n1)
 [[ "$code" == "200" || "$code" == "201" ]] || die "Falha no Realtime (HTTP $code)"
 

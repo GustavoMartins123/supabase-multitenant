@@ -4,10 +4,12 @@ from __future__ import annotations
 import base64
 import http.client
 import importlib.util
+import ipaddress
 import json
 import os
 import pathlib
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -295,6 +297,105 @@ class EdgeBundlerSmokeTests(unittest.TestCase):
             srv.shutdown()
             srv.server_close()
             thread.join(timeout=2)
+
+    def test_sec06_bundler_import_bypasses_isolated_tempdirs_eszip_and_bridge_ssrf(self) -> None:
+        self.assertEqual(bundler_server.MAX_FILES, 128)
+        self.assertEqual(bundler_policy.MAX_FILES, 128)
+        self.assertEqual(edge_bundler.MAX_FILES, 128)
+
+        bypass_samples = [
+            'import/*c*/"../home/.npmrc";',
+            'import"../home/.npmrc";',
+            'import{x}from"../home/.npmrc";',
+            'import*as x from"../home/.npmrc";',
+            'export{x}from"../home/.npmrc";',
+            'export*from"../home/.npmrc";',
+            'export*as ns from"../home/.npmrc";',
+            'import("../home/.npmrc");',
+            'import(`../home/.npmrc`);',
+            'import(`npm:ms@${ver}`);',
+            'import(targetVar);',
+            'import "../\\u0068ome/.npmrc";',
+            '// comment\rimport "../home/.npmrc";',
+            '// comment\u2028import "../home/.npmrc";',
+            'const s = `hi ${`quote "`}`; import "../home/.npmrc";',
+        ]
+        for mod in (edge_bundler, bundler_policy):
+            for sample in bypass_samples:
+                with self.subTest(module=mod.__name__, sample=sample):
+                    with self.assertRaises(mod.DependencyPolicyError):
+                        mod.inspect_dependencies([{"name": "index.ts", "content": sample}])
+
+            legit = (
+                'const r = /import("https:\\/\\/evil.example")/g;\n'
+                'const obj = { import(x: string) { return x; } };\n'
+                'obj.import("../not-a-module");\n'
+                'import ms from "npm:ms@2.1.3";\n'
+            )
+            res = mod.inspect_dependencies([{"name": "index.ts", "content": legit}])
+            self.assertEqual(res["npm"], ["npm:ms@2.1.3"])
+
+        observed: dict[str, object] = {}
+
+        def fake_run(cmd, cwd=None, env=None, **kwargs):
+            cwd_path = pathlib.Path(cwd or "")
+            observed["cwd"] = str(cwd_path)
+            observed["home"] = (env or {}).get("HOME", "")
+            observed["src_root_entries"] = sorted(p.name for p in cwd_path.resolve().parent.iterdir())
+            out_file = pathlib.Path(cmd[cmd.index("--output") + 1])
+            out_file.write_bytes(b"ESZIP2.3\x00\x00\x00\x04valid")
+            return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+        reg = [{
+            "kind": "npm",
+            "scope": "@corp",
+            "registry_url": "https://npm.corp.internal:8443/npm",
+            "auth_type": "bearer",
+            "token": "top-secret-npm-tok-123",
+            "allow_private_network": True,
+            "ca_pem": "",
+        }]
+        with patch.object(bundler_server, "find_bundler_bin", return_value="/usr/local/bin/edge-runtime"), \
+             patch.object(bundler_server.subprocess, "run", side_effect=fake_run):
+            eszip = bundler_server.compile_function_eszip(
+                [{"name": "index.ts", "content": 'import x from "npm:@corp/pkg@1.0.0";'}],
+                registries=reg,
+            )
+            self.assertTrue(eszip.startswith(b"ESZIP"))
+            src_root = pathlib.Path(str(observed["cwd"])).resolve().parent
+            home_dir = pathlib.Path(str(observed["home"])).resolve()
+            self.assertNotEqual(src_root, home_dir.parent)
+            self.assertEqual(observed["src_root_entries"], ["src"])
+
+        def fake_run_file_escape(cmd, **kwargs):
+            out_file = pathlib.Path(cmd[cmd.index("--output") + 1])
+            out_file.write_bytes(b"ESZIP2.3\x00file:///etc/passwd\x00")
+            return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+        with patch.object(bundler_server, "find_bundler_bin", return_value="/usr/local/bin/edge-runtime"), \
+             patch.object(bundler_server.subprocess, "run", side_effect=fake_run_file_escape):
+            with self.assertRaises(bundler_policy.DependencyPolicyError):
+                bundler_server.compile_function_eszip([{"name": "index.ts", "content": 'import ms from "npm:ms@2.1.3";'}])
+
+        def fake_run_token_leak(cmd, **kwargs):
+            out_file = pathlib.Path(cmd[cmd.index("--output") + 1])
+            out_file.write_bytes(b"ESZIP2.3\x00top-secret-npm-tok-123\x00")
+            return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+        with patch.object(bundler_server, "find_bundler_bin", return_value="/usr/local/bin/edge-runtime"), \
+             patch.object(bundler_server.subprocess, "run", side_effect=fake_run_token_leak):
+            with self.assertRaises(bundler_policy.DependencyPolicyError):
+                bundler_server.compile_function_eszip(
+                    [{"name": "index.ts", "content": 'import x from "npm:@corp/pkg@1.0.0";'}],
+                    registries=reg,
+                )
+
+        with patch.object(bundler_server, "_blocked_local_interface_networks", return_value=[ipaddress.ip_network("172.50.0.0/16")]):
+            self.assertFalse(bundler_server._is_allowed_ip("172.50.0.1", allow_private=True))
+            self.assertFalse(bundler_server._is_allowed_ip("172.50.0.22", allow_private=True))
+            self.assertTrue(bundler_server._is_allowed_ip("10.0.0.1", allow_private=True))
+        with patch.dict(os.environ, {"EDGE_BUNDLER_BLOCKED_CIDRS": "10.200.0.0/16"}):
+            self.assertFalse(bundler_server._is_allowed_ip("10.200.1.5", allow_private=True))
 
 
 if __name__ == "__main__":

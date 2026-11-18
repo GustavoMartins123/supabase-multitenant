@@ -146,7 +146,7 @@ rollback_transaction() {
       || rollback_failed=1
   fi
   if [[ -n "$CREATED_REALTIME_TENANT" ]]; then
-    delete_tenant_api realtime-dev.supabase-realtime "$CREATED_REALTIME_TENANT" "$ANON_TOKEN" \
+    delete_tenant_api realtime-dev.supabase-realtime "$CREATED_REALTIME_TENANT" "$GLOBAL_ANON_TOKEN" \
       || rollback_failed=1
   fi
   if [[ -n "$CREATED_SUPAVISOR_TENANT" || -n "$CREATED_REALTIME_TENANT" ]]; then
@@ -389,7 +389,7 @@ realtime_tenant() {
     '{tenant:{name:$uuid,external_id:$uuid,jwt_secret:$secret,max_concurrent_users:$max_users,extensions:[{type:"postgres_cdc_rls",settings:{db_name:$db,db_host:$host,db_user:"supabase_admin",db_password:$password,db_port:$port,region:"us-west-1",poll_interval_ms:100,poll_max_record_bytes:1048576,ssl_enforced:false,slot_name:$slot}}]}}')
   response=$(docker exec realtime-dev.supabase-realtime curl -sS -w '\n%{http_code}' \
     -X POST http://localhost:4000/api/tenants \
-    -H 'Content-Type: application/json' -H "Authorization: Bearer $ANON_TOKEN" \
+    -H 'Content-Type: application/json' -H "Authorization: Bearer $GLOBAL_ANON_TOKEN" \
     -d "$payload")
   http_code=$(echo "$response" | tail -n1)
   body=$(echo "$response" | head -n-1)

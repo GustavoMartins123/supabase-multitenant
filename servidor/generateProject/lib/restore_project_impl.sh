@@ -235,7 +235,7 @@ say "Parando servicos do projeto $PROJECT..."
 functions_config_withdraw "$PROJECT"
 MUTATION_STARTED=1
 backup_stop_project_containers "$PROJECT" >/dev/null
-code="$(backup_http_code realtime-dev.supabase-realtime POST "/api/tenants/$PROJECT_UUID/shutdown" "$ANON_KEY_PROJETO")"
+code="$(backup_http_code realtime-dev.supabase-realtime POST "/api/tenants/$PROJECT_UUID/shutdown" "$GLOBAL_ANON_TOKEN")"
 backup_accepted_code "$code" 200 202 204 404 || die "Realtime nao aceitou shutdown (HTTP $code)"
 code="$(backup_http_code supabase-pooler GET "/api/tenants/$PROJECT/terminate" "$GLOBAL_ANON_TOKEN")"
 backup_accepted_code "$code" 200 204 404 || die "Supavisor nao encerrou pools (HTTP $code)"

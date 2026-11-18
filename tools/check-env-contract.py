@@ -102,6 +102,8 @@ REAL_FILE_PASS_ALLOWLIST = {
 REQUIRED_IN_REAL_ENV = [
     "PROJECT_SECRETS_MASTER_KEY",
     "PG_META_CRYPTO_KEY",
+    "IMGPROXY_KEY",
+    "IMGPROXY_SALT",
     "STUDIO_SERVICE_KEY_ENCRYPTION_KEY",
     "NGINX_HMAC_SECRET",
     "STUDIO_GATEWAY_HMAC_SECRET",
@@ -376,6 +378,8 @@ def check_real_files(
             if relative != "servidor/.env" and key in (
                 "PROJECT_SECRETS_MASTER_KEY",
                 "PG_META_CRYPTO_KEY",
+                "IMGPROXY_KEY",
+                "IMGPROXY_SALT",
                 "STUDIO_SERVICE_KEY_ENCRYPTION_KEY",
                 "NGINX_HMAC_SECRET",
                 "HOST_AGENT_HMAC_SECRET",
