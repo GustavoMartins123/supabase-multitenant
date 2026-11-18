@@ -1561,19 +1561,19 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
             'scope': '@acme',
             'registry_url': 'https://npm.pkg.github.com',
             'auth_type': 'bearer',
-            'token': 'ghp_mt_secret_123',
+            'token': 'synthetic-gh-token',
             'enabled': True,
         }, user=0)
         self.assertEqual(pub_res.status_code, 200, pub_res.text)
         pub_reg = pub_res.json()['registry']
         self.assertTrue(pub_reg['has_token'])
-        self.assertNotIn('ghp_mt_secret_123', pub_res.text)
+        self.assertNotIn('synthetic-gh-token', pub_res.text)
 
         raw_cipher = await self.pool.fetchval(
             'SELECT token_ciphertext FROM project_edge_function_registries WHERE id=$1',
             uuid.UUID(pub_reg['id']),
         )
-        self.assertTrue(raw_cipher and 'ghp_mt_secret_123' not in raw_cipher and raw_cipher.startswith('v2.'))
+        self.assertTrue(raw_cipher and 'synthetic-gh-token' not in raw_cipher and raw_cipher.startswith('v2.'))
 
         dup_slot = await self.request('POST', '/registries', {
             'name': 'acme-npm-2',
@@ -1639,7 +1639,7 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
             pub = await self.request('POST', '/priv-fn/publish', {'revision': draft['revision'], 'expected_published_revision': None}, user=0)
         self.assertEqual(pub.status_code, 200, pub.text)
         passed_regs = bundler_mock.call_args.kwargs['registries']
-        self.assertEqual({r['scope']: r['token'] for r in passed_regs}, {'@acme': 'ghp_mt_secret_123', '': 'ci-user:ci-pass-mt'})
+        self.assertEqual({r['scope']: r['token'] for r in passed_regs}, {'@acme': 'synthetic-gh-token', '': 'ci-user:ci-pass-mt'})
         self.assertFalse(any(r['registry_url'] == 'https://jsr.example.org/' for r in passed_regs))
 
         with patch.object(edge_bundler, 'bundle_function_eszip', AsyncMock(side_effect=AssertionError('unexpected re-bundle'))):

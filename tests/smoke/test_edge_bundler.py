@@ -155,7 +155,7 @@ class EdgeBundlerSmokeTests(unittest.TestCase):
                 "scope": "@corp",
                 "registry_url": "https://npm.corp.internal:8443/npm",
                 "auth_type": "bearer",
-                "token": "tok_secret_npm_123",
+                "token": "synthetic-npm-token",
                 "allow_private_network": True,
                 "ca_pem": ca_pem,
             },
@@ -200,7 +200,7 @@ class EdgeBundlerSmokeTests(unittest.TestCase):
             self.assertTrue(endpoints[("jsr.corp.internal", 9443)])
             npmrc = (home_dir / ".npmrc").read_text(encoding="utf-8")
             self.assertIn("@corp:registry=https://npm.corp.internal:8443/npm/", npmrc)
-            self.assertIn("//npm.corp.internal:8443/npm/:_authToken=tok_secret_npm_123", npmrc)
+            self.assertIn("//npm.corp.internal:8443/npm/:_authToken=synthetic-npm-token", npmrc)
             self.assertIn("registry=https://artifactory.example.com/npm/", npmrc)
             basic_b64 = base64.b64encode(b"reader:pw_basic_456").decode("ascii")
             self.assertIn(f"//artifactory.example.com/npm/:_auth={basic_b64}", npmrc)
@@ -212,9 +212,9 @@ class EdgeBundlerSmokeTests(unittest.TestCase):
             self.assertGreaterEqual(ca_bundle_count, 1)
 
             # Credential redaction hides both bearer tokens and basic base64 credentials.
-            leaked = f"auth failed: tok_secret_npm_123 {basic_b64} reader:pw_basic_456"
+            leaked = f"auth failed: synthetic-npm-token {basic_b64} reader:pw_basic_456"
             redacted = bundler_server._redact_credentials(leaked, normalized)
-            self.assertNotIn("tok_secret_npm_123", redacted)
+            self.assertNotIn("synthetic-npm-token", redacted)
             self.assertNotIn(basic_b64, redacted)
             self.assertNotIn("pw_basic_456", redacted)
 
@@ -267,7 +267,7 @@ class EdgeBundlerSmokeTests(unittest.TestCase):
                 self.assertEqual(out, fake_eszip)
                 self.assertEqual(len(seen), 1)
                 self.assertEqual(seen[0][0]["registry_url"], "https://npm.corp.internal:8443/npm/")
-                self.assertEqual(seen[0][0]["token"], "tok_secret_npm_123")
+                self.assertEqual(seen[0][0]["token"], "synthetic-npm-token")
         finally:
             srv.shutdown()
             srv.server_close()
