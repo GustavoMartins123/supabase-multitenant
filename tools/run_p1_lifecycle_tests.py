@@ -28,7 +28,7 @@ RESERVED_CONTAINERS = {
     'traefik-traefik-1', 'traefik-geoip-api-1', 'supabase-traefik-config-watcher', 'traefik-deny-service',
 }
 RESERVED_NETWORKS = {'rede-supabase', 'supabase-storage-control', 'supabase-storage-data-plane',
-                     'supabase-storage-gateways', 'supabase-analytics-internal'}
+                     'supabase-storage-gateways', 'supabase-imgproxy-internal', 'supabase-analytics-internal'}
 
 
 def archive(extra_sources: tuple[str, ...] = ()) -> bytes:
