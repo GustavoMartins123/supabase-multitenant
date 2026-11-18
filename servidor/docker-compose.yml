@@ -305,7 +305,9 @@ services:
       [
       "start",
       "--main-service",
-      "/home/deno/main"
+      "/home/deno/main",
+      "--event-worker",
+      "/home/deno/main/event-worker"
       ]
 
   storage:

@@ -166,6 +166,33 @@ services:
       retries: 3
       start_period: 10s
 
+  edge-bundler:
+    build:
+      context: ./edge-bundler
+    environment:
+      EDGE_BUNDLER_HMAC_SECRET: ${EDGE_BUNDLER_HMAC_SECRET:-}
+    restart: unless-stopped
+    logging: *vector-logging
+    networks: [rede-supabase]
+    expose: ["18030"]
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1.0
+    pids_limit: 128
+    labels:
+      traefik.enable: "false"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=512m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18030/healthz', timeout=2)"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
   projects-api:
     container_name: projects-api
     user: ${STORAGE_RUN_AS_USER:?defina STORAGE_RUN_AS_USER}
@@ -216,6 +243,8 @@ services:
       PG_META_INTERNAL_URL: http://postgres-meta-global:8080
       PG_META_ALLOWED_HOSTS: postgres-meta-global
       ANALYTICS_INTERNAL_URL: http://analytics:4000
+      EDGE_BUNDLER_URL: http://edge-bundler:18030
+      EDGE_BUNDLER_HMAC_SECRET: ${EDGE_BUNDLER_HMAC_SECRET:-}
     volumes:
       - ./secrets/mailer/ADMIN_KEY:/run/secrets/mailer/ADMIN_KEY:ro
       - ./secrets/mailer/PUBLISH_KEY:/run/secrets/mailer/PUBLISH_KEY:ro

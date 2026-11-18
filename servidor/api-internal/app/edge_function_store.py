@@ -5,6 +5,12 @@ edge_functions.configuration_lock for the entire read/modify/publish operation.
 """
 from __future__ import annotations
 
+import base64
+import binascii
+import calendar
+import copy
+from datetime import datetime, timedelta, timezone
+import difflib
 import hashlib
 import json
 import os
@@ -12,6 +18,7 @@ from pathlib import Path
 import re
 import stat
 import tempfile
+import time
 
 from app import edge_functions
 
@@ -21,33 +28,69 @@ SEGMENT = re.compile(r"[A-Za-z0-9_@][A-Za-z0-9_@.\-]{0,99}\Z")
 MAX_FILES = 64
 MAX_BYTES = 1_000_000
 MAX_FUNCTIONS = 128
+MAX_FILES_CEILING = edge_functions.QUOTA_SPECS["max_files"]["max"]
+MAX_BYTES_CEILING = edge_functions.QUOTA_SPECS["max_bytes"]["max"]
+MAX_FUNCTIONS_CEILING = edge_functions.QUOTA_SPECS["max_functions"]["max"]
+RESERVED_SLUGS = edge_functions.RESERVED_SLUGS
+WASM_MAGIC = b"\x00asm\x01\x00\x00\x00"
+
+
+def file_bytes(item: dict) -> bytes:
+    """Return raw bytes for either a UTF-8 source file or a base64-encoded .wasm artifact."""
+    if item.get("encoding") == "base64":
+        return base64.b64decode(item["content"], validate=True)
+    return item["content"].encode("utf-8")
 
 
 def function_name(value: str) -> str:
-    if not SLUG.fullmatch(value) or value == "main":
+    if not SLUG.fullmatch(value) or value in RESERVED_SLUGS:
         raise ValueError("Invalid function name")
     return value
 
 
-def validate_files(files: list[dict]) -> list[dict[str, str]]:
-    if not isinstance(files, list) or not 1 <= len(files) <= MAX_FILES:
-        raise ValueError("A function requires 1 to 64 text files")
+def validate_files(files: list[dict], *, max_files: int = MAX_FILES, max_bytes: int = MAX_BYTES) -> list[dict[str, str]]:
+    if not isinstance(files, list) or not 1 <= len(files) <= max_files:
+        raise ValueError(f"A function requires 1 to {max_files} files")
     result, names, size = [], set(), 0
     for item in files:
-        if not isinstance(item, dict) or set(item) != {"name", "content"}:
+        if not isinstance(item, dict) or not {"name", "content"}.issubset(item) or set(item) - {"name", "content", "encoding"}:
             raise ValueError("Invalid function file")
         name, content = item["name"], item["content"]
+        encoding = item.get("encoding")
+        if encoding is None:
+            encoding = "utf-8"
+        if encoding not in {"utf-8", "base64"}:
+            raise ValueError("Unsupported file encoding")
         if (not isinstance(name, str) or len(name) > 240 or len(name.split("/")) > 8
                 or any(not SEGMENT.fullmatch(part) for part in name.split("/"))
-                or not isinstance(content, str) or "\0" in content or name in names):
+                or not isinstance(content, str) or name in names):
             raise ValueError("File paths must be unique, relative and contain no traversal or hidden segments")
+        if name.lower().endswith(".eszip"):
+            raise ValueError("ESZIP bundle filenames are reserved by the platform")
+        if encoding == "base64":
+            if not name.lower().endswith(".wasm"):
+                raise ValueError("Base64 binary files are restricted to .wasm modules")
+            try:
+                raw = base64.b64decode(content.encode("ascii"), validate=True)
+            except (binascii.Error, UnicodeEncodeError, ValueError) as error:
+                raise ValueError("Invalid base64 payload for .wasm artifact") from error
+            if len(raw) < len(WASM_MAGIC) or not raw.startswith(WASM_MAGIC):
+                raise ValueError("Binary .wasm artifact must contain a valid WebAssembly header")
+            normalized_content = base64.b64encode(raw).decode("ascii")
+            entry = {"name": name, "content": normalized_content, "encoding": "base64"}
+            byte_len = len(raw)
+        else:
+            if "\0" in content:
+                raise ValueError("Text source files cannot contain null bytes")
+            byte_len = len(content.encode("utf-8"))
+            entry = {"name": name, "content": content}
         names.add(name)
-        size += len(content.encode("utf-8")) + len(name)
-        result.append({"name": name, "content": content})
+        size += byte_len + len(name)
+        result.append(entry)
     if "index.ts" not in names:
         raise ValueError("The function entrypoint must be index.ts")
-    if size > MAX_BYTES:
-        raise ValueError("Function files exceed the 1 MB limit")
+    if size > max_bytes:
+        raise ValueError(f"Function files exceed the {max_bytes} byte limit")
     if any(any(name.startswith(other + "/") for other in names) for name in names):
         raise ValueError("A file cannot also be a directory")
     for item in result:
@@ -103,7 +146,7 @@ def atomic_json(path: Path, value: dict) -> None:
 def validate_state(state: dict, name: str, identity: str) -> dict:
     if (not isinstance(state, dict) or set(state) != {"project", "uuid", "functions"}
             or state["project"] != name or state["uuid"] != identity
-            or not isinstance(state["functions"], dict) or len(state["functions"]) > MAX_FUNCTIONS * 2):
+            or not isinstance(state["functions"], dict) or len(state["functions"]) > MAX_FUNCTIONS_CEILING * 2):
         raise RuntimeError("Function storage project identity mismatch")
     for slug, item in state["functions"].items():
         function_name(slug)
@@ -114,7 +157,7 @@ def validate_state(state: dict, name: str, identity: str) -> dict:
                 or (item["published"] is not None and
                     (not isinstance(item["published"], str) or not REVISION.fullmatch(item["published"])))):
             raise RuntimeError("Invalid function revision pointers")
-    if sum(item["draft"] is not None for item in state["functions"].values()) > MAX_FUNCTIONS:
+    if sum(item["draft"] is not None for item in state["functions"].values()) > MAX_FUNCTIONS_CEILING:
         raise RuntimeError("Too many saved functions")
     return state
 
@@ -195,7 +238,10 @@ def recover_publication(root: Path, name: str, identity: str) -> None:
         context = edge_functions.read_context(root, name, identity)
         if context and context["revision"] == intent["runtime_revision"]:
             files = published_files(root, name, identity, state=proposed)
-            expected = edge_functions.context_value(name, identity, context["jwt_secret"], context["env"], files, context.get("network_allowlist"))
+            expected = edge_functions.context_value(
+                name, identity, context["jwt_secret"], context["env"], files, context.get("network_allowlist"),
+                secrets=context.get("secrets"), public_functions=context.get("public_functions"),
+                limits=context.get("limits"))
             if expected != context:
                 raise RuntimeError("Publication context does not match saved versions")
             edge_functions.verify_generation(root, context, files)
@@ -211,17 +257,24 @@ def recover_publication(root: Path, name: str, identity: str) -> None:
         raise
 
 
-def version(name: str, identity: str, slug: str, files: list[dict]) -> tuple[str, dict]:
-    value = {"project": name, "uuid": identity, "function": function_name(slug), "files": validate_files(files)}
+def version(name: str, identity: str, slug: str, files: list[dict],
+            *, max_files: int = MAX_FILES_CEILING, max_bytes: int = MAX_BYTES_CEILING) -> tuple[str, dict]:
+    value = {
+        "project": name,
+        "uuid": identity,
+        "function": function_name(slug),
+        "files": validate_files(files, max_files=max_files, max_bytes=max_bytes),
+    }
     return hashlib.sha256(encoded(value)).hexdigest(), value
 
 
-def store_version(root: Path, name: str, identity: str, slug: str, files: list[dict]) -> str:
-    revision, value = version(name, identity, slug, files)
+def store_version(root: Path, name: str, identity: str, slug: str, files: list[dict],
+                  *, max_files: int = MAX_FILES_CEILING, max_bytes: int = MAX_BYTES_CEILING) -> str:
+    revision, value = version(name, identity, slug, files, max_files=max_files, max_bytes=max_bytes)
     versions = edge_functions.private_directory(directory(root, name, identity) / "versions" / slug)
     path = versions / (revision + ".json")
     try:
-        existing = regular_bytes(path, MAX_BYTES * 6 + 65536)
+        existing = regular_bytes(path, MAX_BYTES_CEILING * 6 + 65536)
     except FileNotFoundError:
         atomic_json(path, value)
         path.chmod(0o400)
@@ -236,7 +289,7 @@ def read_version(root: Path, state: dict, slug: str, revision: str) -> list[dict
     if not REVISION.fullmatch(revision):
         raise RuntimeError("Invalid function revision")
     path = directory(root, state["project"], state["uuid"]) / "versions" / slug / (revision + ".json")
-    value = json.loads(regular_bytes(path, MAX_BYTES * 6 + 65536))
+    value = json.loads(regular_bytes(path, MAX_BYTES_CEILING * 6 + 65536))
     expected, canonical = version(state["project"], state["uuid"], slug, value["files"])
     if expected != revision or value != canonical:
         raise RuntimeError("Immutable function version integrity check failed")
@@ -267,6 +320,65 @@ def function_names(state: dict, legacy: dict) -> list[str]:
                   if state["functions"].get(slug, {}).get("draft", "legacy") is not None)
 
 
+MAX_ESZIP_BYTES = 32 * 1024 * 1024
+
+
+def bundle_path(root: Path, state: dict, slug: str, revision: str) -> Path:
+    function_name(slug)
+    if not REVISION.fullmatch(revision):
+        raise RuntimeError("Invalid function revision")
+    return directory(root, state["project"], state["uuid"]) / "bundles" / slug / (revision + ".eszip")
+
+
+def bundle_size(root: Path, state: dict, slug: str, revision: str) -> int | None:
+    try:
+        path = bundle_path(root, state, slug, revision)
+        if any(parent.is_symlink() for parent in (path, *path.parents)):
+            return None
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_size <= 0 or info.st_size > MAX_ESZIP_BYTES:
+            return None
+        return int(info.st_size)
+    except FileNotFoundError:
+        return None
+
+
+def has_bundle(root: Path, state: dict, slug: str, revision: str) -> bool:
+    return bundle_size(root, state, slug, revision) is not None
+
+
+def read_bundle(root: Path, state: dict, slug: str, revision: str) -> bytes | None:
+    path = bundle_path(root, state, slug, revision)
+    try:
+        data = regular_bytes(path, MAX_ESZIP_BYTES)
+    except FileNotFoundError:
+        return None
+    if not data.startswith(b"ESZIP"):
+        raise RuntimeError("Invalid cached ESZIP bundle")
+    return data
+
+
+def write_bundle(root: Path, state: dict, slug: str, revision: str, data: bytes) -> Path:
+    if not isinstance(data, (bytes, bytearray)) or not data.startswith(b"ESZIP") or not (0 < len(data) <= MAX_ESZIP_BYTES):
+        raise RuntimeError("Invalid ESZIP bundle payload")
+    path = bundle_path(root, state, slug, revision)
+    edge_functions.private_directory(path.parent)
+    if path.is_symlink():
+        raise RuntimeError("Refusing symlinked bundle path")
+    descriptor, temporary = tempfile.mkstemp(prefix=".bundle-", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, 0o400)
+        os.replace(temporary, path)
+        edge_functions.sync_directory(path.parent)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    return path
+
+
 def published_files(root: Path, name: str, identity: str, *, state: dict | None = None) -> dict[str, bytes]:
     state = load(root, name, identity) if state is None else state
     functions = legacy_functions(root, name)
@@ -276,7 +388,621 @@ def published_files(root: Path, name: str, identity: str, *, state: dict | None 
         else:
             # Explicit draft/unpublish/delete state masks files from the old layout.
             functions.pop(slug, None)
-    if len(functions) > MAX_FUNCTIONS:
+    if len(functions) > MAX_FUNCTIONS_CEILING:
         raise RuntimeError("Too many published functions")
-    return {slug + "/" + file["name"]: file["content"].encode()
-            for slug, files in functions.items() for file in files}
+    out = {slug + "/" + file["name"]: file_bytes(file)
+           for slug, files in functions.items() for file in files}
+    for slug, pointers in state["functions"].items():
+        if slug in functions and pointers.get("published"):
+            bundled = read_bundle(root, state, slug, pointers["published"])
+            if bundled is not None:
+                out[slug + "/bundle.eszip"] = bundled
+    return out
+
+
+DEFAULT_ORPHAN_RETENTION_SECONDS = 3600
+
+
+def list_versions(root: Path, state: dict, slug: str) -> list[dict]:
+    function_name(slug)
+    versions_dir = directory(root, state["project"], state["uuid"]) / "versions" / slug
+    if any(parent.is_symlink() for parent in (versions_dir, *versions_dir.parents)):
+        raise RuntimeError("Refusing symlinked version history directory")
+    if versions_dir.is_symlink():
+        raise RuntimeError("Refusing symlinked version history directory")
+    if not versions_dir.exists():
+        return []
+    pointers = state["functions"].get(slug)
+    entries: list[dict] = []
+    for entry in sorted(versions_dir.iterdir()):
+        if entry.name.startswith("."):
+            continue
+        info = entry.lstat()
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+            raise RuntimeError("Invalid entry in function versions directory")
+        revision = entry.stem
+        if entry.suffix != ".json" or not REVISION.fullmatch(revision):
+            continue
+        files = read_version(root, state, slug, revision)
+        entries.append({
+            "revision": revision,
+            "created_at": datetime.fromtimestamp(info.st_mtime, tz=timezone.utc).isoformat(),
+            "file_count": len(files),
+            "total_bytes": sum(len(file_bytes(f)) for f in files),
+            "is_draft": bool(pointers and pointers.get("draft") == revision),
+            "is_published": bool(pointers and pointers.get("published") == revision),
+        })
+    entries.sort(key=lambda item: (item["created_at"], item["is_published"], item["is_draft"], item["revision"]), reverse=True)
+    return entries
+
+
+def purge_orphan_versions(
+    root: Path, state: dict, *,
+    min_age_seconds: int = DEFAULT_ORPHAN_RETENTION_SECONDS,
+    now: float | None = None,
+) -> dict[str, int]:
+    if min_age_seconds < 0:
+        raise ValueError("min_age_seconds must be non-negative")
+    base_dir = directory(root, state["project"], state["uuid"])
+    current_time = time.time() if now is None else float(now)
+    removed_count = 0
+    reclaimed_bytes = 0
+    kept_count = 0
+    for tree_name, expected_suffix, track_kept in (("versions", ".json", True), ("bundles", ".eszip", False)):
+        tree_root = base_dir / tree_name
+        if any(parent.is_symlink() for parent in (tree_root, *tree_root.parents)):
+            raise RuntimeError(f"Refusing symlinked {tree_name} root")
+        if tree_root.is_symlink():
+            raise RuntimeError(f"Refusing symlinked {tree_name} root")
+        if not tree_root.exists():
+            continue
+        for fn_dir in sorted(tree_root.iterdir()):
+            if fn_dir.name.startswith("."):
+                continue
+            fn_info = fn_dir.lstat()
+            if stat.S_ISLNK(fn_info.st_mode) or not stat.S_ISDIR(fn_info.st_mode):
+                raise RuntimeError(f"Invalid entry inside {tree_name} root")
+            slug = function_name(fn_dir.name)
+            pointers = state["functions"].get(slug) or {}
+            referenced = {rev for rev in (pointers.get("draft"), pointers.get("published")) if rev}
+            for entry in sorted(fn_dir.iterdir()):
+                if entry.name.startswith("."):
+                    continue
+                info = entry.lstat()
+                if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+                    raise RuntimeError(f"Invalid file inside function {tree_name} directory")
+                if entry.suffix != expected_suffix or not REVISION.fullmatch(entry.stem):
+                    continue
+                age = max(0.0, current_time - info.st_mtime)
+                if entry.stem in referenced or age < min_age_seconds:
+                    if track_kept:
+                        kept_count += 1
+                    continue
+                entry.chmod(0o600)
+                entry.unlink()
+                removed_count += 1
+                reclaimed_bytes += info.st_size
+            remaining = [p for p in fn_dir.iterdir() if not p.name.startswith(".")]
+            if not remaining and slug not in state["functions"]:
+                fn_dir.rmdir()
+        edge_functions.sync_directory(tree_root)
+    return {"removed_count": removed_count, "reclaimed_bytes": reclaimed_bytes, "kept_count": kept_count}
+
+
+EDGE_FUNCTION_TEMPLATES: tuple[dict, ...] = (
+    {
+        "id": "hello-world",
+        "name": "Hello World JSON",
+        "category": "starter",
+        "description": "Basic authenticated HTTP handler returning structured JSON.",
+        "recommended_verify_jwt": True,
+        "recommended_secrets": [],
+        "files": [
+            {
+                "name": "index.ts",
+                "content": (
+                    "Deno.serve(async (req: Request) => {\n"
+                    "  const { name = 'world' } = await req.json().catch(() => ({}));\n"
+                    "  return Response.json({\n"
+                    "    message: `Hello, ${name}!`,\n"
+                    "    method: req.method,\n"
+                    "    timestamp: new Date().toISOString(),\n"
+                    "  });\n"
+                    "});\n"
+                ),
+            },
+        ],
+    },
+    {
+        "id": "webhook-hmac",
+        "name": "Signed Public Webhook",
+        "category": "webhooks",
+        "description": "Public webhook endpoint (verify_jwt=false) with constant-time HMAC-SHA256 verification using a project secret.",
+        "recommended_verify_jwt": False,
+        "recommended_secrets": ["WEBHOOK_SECRET"],
+        "files": [
+            {
+                "name": "index.ts",
+                "content": (
+                    "const encoder = new TextEncoder();\n\n"
+                    "function timingSafeEqual(a: string, b: string): boolean {\n"
+                    "  if (a.length !== b.length || a.length === 0) return false;\n"
+                    "  let diff = 0;\n"
+                    "  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);\n"
+                    "  return diff === 0;\n"
+                    "}\n\n"
+                    "Deno.serve(async (req: Request) => {\n"
+                    "  const secret = Deno.env.get('WEBHOOK_SECRET') ?? '';\n"
+                    "  if (!secret) {\n"
+                    "    return Response.json({ error: 'WEBHOOK_SECRET not configured' }, { status: 500 });\n"
+                    "  }\n"
+                    "  const rawBody = await req.text();\n"
+                    "  const sig = (req.headers.get('x-webhook-signature') ?? '').toLowerCase();\n"
+                    "  const key = await crypto.subtle.importKey(\n"
+                    "    'raw',\n"
+                    "    encoder.encode(secret),\n"
+                    "    { name: 'HMAC', hash: 'SHA-256' },\n"
+                    "    false,\n"
+                    "    ['sign'],\n"
+                    "  );\n"
+                    "  const digest = await crypto.subtle.sign('HMAC', key, encoder.encode(rawBody));\n"
+                    "  const expected = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');\n"
+                    "  if (!timingSafeEqual(sig, expected)) {\n"
+                    "    return Response.json({ error: 'Invalid signature' }, { status: 401 });\n"
+                    "  }\n"
+                    "  const payload = JSON.parse(rawBody || '{}');\n"
+                    "  console.log('Webhook accepted', typeof payload);\n"
+                    "  return Response.json({ accepted: true });\n"
+                    "});\n"
+                ),
+            },
+        ],
+    },
+    {
+        "id": "project-rest",
+        "name": "Project REST & Auth Query",
+        "category": "database",
+        "description": "Queries the project's own PostgREST API using runtime environment keys and incoming caller JWT.",
+        "recommended_verify_jwt": True,
+        "recommended_secrets": [],
+        "files": [
+            {
+                "name": "index.ts",
+                "content": (
+                    "Deno.serve(async (req: Request) => {\n"
+                    "  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';\n"
+                    "  const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';\n"
+                    "  const authHeader = req.headers.get('authorization') ?? '';\n"
+                    "  const response = await fetch(`${supabaseUrl}/rest/v1/`, {\n"
+                    "    headers: {\n"
+                    "      apikey: anonKey,\n"
+                    "      ...(authHeader ? { Authorization: authHeader } : {}),\n"
+                    "    },\n"
+                    "  });\n"
+                    "  return Response.json({\n"
+                    "    upstreamStatus: response.status,\n"
+                    "    ok: response.ok,\n"
+                    "  });\n"
+                    "});\n"
+                ),
+            },
+        ],
+    },
+    {
+        "id": "streaming-sse",
+        "name": "Streaming SSE + Background Task",
+        "category": "streaming",
+        "description": "Server-Sent Events response with CORS headers and EdgeRuntime.waitUntil background flush.",
+        "recommended_verify_jwt": True,
+        "recommended_secrets": [],
+        "files": [
+            {
+                "name": "index.ts",
+                "content": (
+                    "const corsHeaders = {\n"
+                    "  'Access-Control-Allow-Origin': '*',\n"
+                    "  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',\n"
+                    "};\n\n"
+                    "Deno.serve((req: Request) => {\n"
+                    "  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });\n"
+                    "  const encoder = new TextEncoder();\n"
+                    "  const stream = new ReadableStream({\n"
+                    "    async start(controller) {\n"
+                    "      for (let i = 1; i <= 3; i++) {\n"
+                    "        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ step: i })}\\n\\n`));\n"
+                    "        await new Promise((r) => setTimeout(r, 100));\n"
+                    "      }\n"
+                    "      controller.close();\n"
+                    "    },\n"
+                    "  });\n"
+                    "  EdgeRuntime.waitUntil(Promise.resolve().then(() => console.log('SSE stream initialized')));\n"
+                    "  return new Response(stream, {\n"
+                    "    headers: {\n"
+                    "      ...corsHeaders,\n"
+                    "      'Content-Type': 'text/event-stream',\n"
+                    "      'Cache-Control': 'no-cache',\n"
+                    "    },\n"
+                    "  });\n"
+                    "});\n"
+                ),
+            },
+        ],
+    },
+    {
+        "id": "websocket-echo",
+        "name": "WebSocket Upgrade Handler",
+        "category": "realtime",
+        "description": "Handles bidirectional WebSocket connections over /functions/v1/<slug>.",
+        "recommended_verify_jwt": True,
+        "recommended_secrets": [],
+        "files": [
+            {
+                "name": "index.ts",
+                "content": (
+                    "Deno.serve((req: Request) => {\n"
+                    "  if (req.headers.get('upgrade')?.toLowerCase() !== 'websocket') {\n"
+                    "    return Response.json({ message: 'Upgrade: websocket required' }, { status: 426 });\n"
+                    "  }\n"
+                    "  const { socket, response } = Deno.upgradeWebSocket(req);\n"
+                    "  socket.onopen = () => socket.send(JSON.stringify({ type: 'connected' }));\n"
+                    "  socket.onmessage = (event) => {\n"
+                    "    socket.send(JSON.stringify({ type: 'echo', data: event.data }));\n"
+                    "  };\n"
+                    "  return response;\n"
+                    "});\n"
+                ),
+            },
+        ],
+    },
+    {
+        "id": "scheduled-cron",
+        "name": "Scheduled Maintenance Task",
+        "category": "schedules",
+        "description": "Idempotent job handler triggered by Edge Function Cron Schedules or manual POST.",
+        "recommended_verify_jwt": True,
+        "recommended_secrets": [],
+        "files": [
+            {
+                "name": "index.ts",
+                "content": (
+                    "Deno.serve(async (req: Request) => {\n"
+                    "  const scheduleId = req.headers.get('x-edge-schedule-id') ?? 'manual';\n"
+                    "  const payload = await req.json().catch(() => ({}));\n"
+                    "  console.log('Scheduled job started', scheduleId);\n"
+                    "  return Response.json({\n"
+                    "    ok: true,\n"
+                    "    scheduleId,\n"
+                    "    executedAt: new Date().toISOString(),\n"
+                    "    payload,\n"
+                    "  });\n"
+                    "});\n"
+                ),
+            },
+        ],
+    },
+)
+
+
+def list_templates() -> list[dict]:
+    """Return a copy of curated Edge Function starter templates."""
+    return copy.deepcopy(list(EDGE_FUNCTION_TEMPLATES))
+
+
+def compute_version_diff(
+    slug: str,
+    from_revision: str,
+    from_files: list[dict],
+    to_revision: str,
+    to_files: list[dict],
+    *,
+    max_diff_lines: int = 2000,
+) -> dict:
+    """Compute a per-file unified diff between two immutable revisions."""
+    from_map = {item["name"]: item for item in from_files}
+    to_map = {item["name"]: item for item in to_files}
+    summary = {
+        "files_added": 0,
+        "files_removed": 0,
+        "files_modified": 0,
+        "files_unchanged": 0,
+        "lines_added": 0,
+        "lines_removed": 0,
+        "truncated": False,
+    }
+    file_diffs: list[dict] = []
+    emitted_lines = 0
+    for name in sorted(set(from_map) | set(to_map)):
+        left = from_map.get(name)
+        right = to_map.get(name)
+        is_binary = (left is not None and left.get("encoding") == "base64") or (
+            right is not None and right.get("encoding") == "base64"
+        )
+        if left is None and right is not None:
+            status = "added"
+            summary["files_added"] += 1
+        elif right is None and left is not None:
+            status = "removed"
+            summary["files_removed"] += 1
+        elif left == right:
+            status = "unchanged"
+            summary["files_unchanged"] += 1
+        else:
+            status = "modified"
+            summary["files_modified"] += 1
+
+        hunks: list[str] = []
+        file_added = 0
+        file_removed = 0
+        if is_binary:
+            if status != "unchanged":
+                left_hash = hashlib.sha256((left["content"] if left else "").encode("utf-8")).hexdigest()[:12]
+                right_hash = hashlib.sha256((right["content"] if right else "").encode("utf-8")).hexdigest()[:12]
+                hunks.append(f"@@ binary wasm file ({left_hash} -> {right_hash}) @@")
+        elif status != "unchanged":
+            left_lines = (left["content"] if left else "").splitlines()
+            right_lines = (right["content"] if right else "").splitlines()
+            diff_iter = difflib.unified_diff(
+                left_lines,
+                right_lines,
+                fromfile=f"a/{name}" if left is not None else "/dev/null",
+                tofile=f"b/{name}" if right is not None else "/dev/null",
+                lineterm="",
+                n=3,
+            )
+            for line in diff_iter:
+                if line.startswith("+") and not line.startswith("+++"):
+                    file_added += 1
+                elif line.startswith("-") and not line.startswith("---"):
+                    file_removed += 1
+                if emitted_lines < max_diff_lines:
+                    hunks.append(line)
+                    emitted_lines += 1
+                else:
+                    summary["truncated"] = True
+        summary["lines_added"] += file_added
+        summary["lines_removed"] += file_removed
+        file_diffs.append({
+            "name": name,
+            "status": status,
+            "binary": is_binary,
+            "lines_added": file_added,
+            "lines_removed": file_removed,
+            "hunks": hunks,
+        })
+    return {
+        "name": slug,
+        "from_revision": from_revision,
+        "to_revision": to_revision,
+        "summary": summary,
+        "files": file_diffs,
+    }
+
+
+def compute_quota_status(
+    root: Path,
+    state: dict,
+    legacy: dict,
+    *,
+    quotas: dict[str, int],
+    secrets_count: int,
+    secrets_total_bytes: int,
+    recent_429_count: int = 0,
+) -> dict:
+    """Compute current resource utilization and near-limit saturation indicators."""
+    names = function_names(state, legacy)
+    published_count = 0
+    largest_bytes = 0
+    largest_name: str | None = None
+    total_bytes_all = 0
+    for slug in names:
+        fn = item(root, state, slug, legacy)
+        if not fn:
+            continue
+        if fn.get("published_revision"):
+            published_count += 1
+        fn_bytes = sum(len(file_bytes(f)) + len(f["name"]) for f in fn["files"])
+        total_bytes_all += fn_bytes
+        if fn_bytes >= largest_bytes:
+            largest_bytes = fn_bytes
+            largest_name = slug
+
+    def _pct(used: int, cap: int) -> int:
+        return round((used * 100) / cap) if cap > 0 else 0
+
+    usage = {
+        "functions_count": len(names),
+        "published_count": published_count,
+        "total_draft_bytes": total_bytes_all,
+        "largest_function_bytes": largest_bytes,
+        "largest_function_name": largest_name,
+        "secrets_count": secrets_count,
+        "secrets_total_bytes": secrets_total_bytes,
+        "recent_429_count": recent_429_count,
+    }
+    utilization_pct = {
+        "functions": _pct(len(names), quotas["max_functions"]),
+        "largest_bundle_bytes": _pct(largest_bytes, quotas["max_bytes"]),
+        "secrets": _pct(secrets_count, quotas["max_secrets"]),
+        "secrets_bytes": _pct(secrets_total_bytes, quotas["max_secrets_total_bytes"]),
+    }
+    threshold = quotas["alert_threshold_pct"]
+    near_limits: list[dict] = []
+    checks = (
+        ("functions", "functions_count", "Functions count", len(names), quotas["max_functions"]),
+        ("largest_bundle_bytes", "max_bytes", "Largest function bundle", largest_bytes, quotas["max_bytes"]),
+        ("secrets", "secrets_count", "Secrets count", secrets_count, quotas["max_secrets"]),
+        ("secrets_bytes", "secrets_total_bytes", "Secrets total size", secrets_total_bytes, quotas["max_secrets_total_bytes"]),
+    )
+    for metric_key, code, label, used, cap in checks:
+        pct = utilization_pct[metric_key]
+        if pct >= threshold:
+            near_limits.append({
+                "kind": "near_limit",
+                "metric": code,
+                "severity": "critical" if pct >= 100 else "warn",
+                "used": used,
+                "limit": cap,
+                "utilization_pct": pct,
+                "message": f"{label} at {pct}% of quota ({used}/{cap})",
+            })
+    if recent_429_count > 0:
+        near_limits.append({
+            "kind": "concurrency_429",
+            "metric": "max_concurrent_project",
+            "severity": "critical" if recent_429_count >= 5 else "warn",
+            "used": recent_429_count,
+            "limit": quotas["max_concurrent_project"],
+            "utilization_pct": 100,
+            "message": f"{recent_429_count} concurrency saturation response(s) (HTTP 429) detected",
+        })
+    return {"usage": usage, "utilization_pct": utilization_pct, "active_alerts": near_limits}
+
+
+SCHEDULE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 _.-]{0,79}\Z")
+MAX_SCHEDULES_PER_PROJECT = 32
+MAX_SCHEDULES_PER_FUNCTION = 8
+_CRON_MACROS = {
+    "@hourly": "0 * * * *",
+    "@daily": "0 0 * * *",
+    "@midnight": "0 0 * * *",
+    "@weekly": "0 0 * * 0",
+    "@monthly": "0 0 1 * *",
+    "@yearly": "0 0 1 1 *",
+    "@annually": "0 0 1 1 *",
+}
+_CRON_MONTH_NAMES = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+_CRON_DOW_NAMES = {"sun": 0, "mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6}
+
+
+def validate_schedule_name(name: str) -> str:
+    """Validate a human-friendly unique schedule name within a function."""
+    cleaned = name.strip() if isinstance(name, str) else ""
+    if not cleaned or not SCHEDULE_NAME.fullmatch(cleaned):
+        raise ValueError("Invalid schedule name (1-80 alphanumeric, space, '.', '_' or '-' chars)")
+    return cleaned
+
+
+def _parse_cron_token(
+    raw: str, low: int, high: int, *, names: dict[str, int] | None = None, wrap_seven: bool = False,
+) -> set[int]:
+    if not raw or "/" in raw and raw.count("/") > 1:
+        raise ValueError(f"Invalid cron token '{raw}'")
+    base_part, sep, step_part = raw.partition("/")
+    step = 1
+    if sep:
+        if not step_part.isdigit():
+            raise ValueError(f"Invalid cron step '{raw}'")
+        step = int(step_part)
+        if step < 1:
+            raise ValueError(f"Cron step must be >= 1 in '{raw}'")
+
+    def _val(tok: str) -> int:
+        key = tok.strip().lower()
+        if names and key in names:
+            return names[key]
+        if not key.isdigit():
+            raise ValueError(f"Invalid cron value '{tok}'")
+        v = int(key)
+        if v < low or v > high:
+            raise ValueError(f"Cron value {v} out of range [{low}, {high}]")
+        return v
+
+    if base_part == "*":
+        vals = range(low, (6 if wrap_seven else high) + 1, step)
+        return {0 if (wrap_seven and x == 7) else x for x in vals}
+    if "-" in base_part:
+        start_s, dash_sep, end_s = base_part.partition("-")
+        if not start_s or not end_s or "-" in end_s:
+            raise ValueError(f"Invalid cron range '{raw}'")
+        start_v, end_v = _val(start_s), _val(end_s)
+        if start_v > end_v:
+            raise ValueError(f"Cron range start exceeds end in '{raw}'")
+        return {0 if (wrap_seven and x == 7) else x for x in range(start_v, end_v + 1, step)}
+    if sep:
+        start_v = _val(base_part)
+        upper = 6 if wrap_seven and start_v <= 6 else high
+        return {0 if (wrap_seven and x == 7) else x for x in range(start_v, upper + 1, step)}
+    v = _val(base_part)
+    return {0 if (wrap_seven and v == 7) else v}
+
+
+def _parse_cron_field(
+    field: str, low: int, high: int, *, names: dict[str, int] | None = None, wrap_seven: bool = False,
+) -> tuple[frozenset[int], bool]:
+    is_wild = field.strip() == "*"
+    allowed: set[int] = set()
+    for part in field.split(","):
+        allowed.update(_parse_cron_token(part.strip(), low, high, names=names, wrap_seven=wrap_seven))
+    if not allowed:
+        raise ValueError(f"Empty cron field '{field}'")
+    return frozenset(allowed), is_wild
+
+
+def _compile_cron(expr: str) -> tuple[str, frozenset[int], frozenset[int], frozenset[int], bool, frozenset[int], frozenset[int], bool]:
+    if not isinstance(expr, str):
+        raise ValueError("Cron expression must be a string")
+    raw = " ".join(expr.strip().split())
+    normalized = _CRON_MACROS.get(raw.lower(), raw)
+    parts = normalized.split(" ")
+    if len(parts) != 5 or len(normalized) > 100:
+        raise ValueError("Cron expression must have 5 space-separated UTC fields (minute hour dom month dow)")
+    minutes, _ = _parse_cron_field(parts[0], 0, 59)
+    hours, _ = _parse_cron_field(parts[1], 0, 23)
+    doms, dom_wild = _parse_cron_field(parts[2], 1, 31)
+    months, _ = _parse_cron_field(parts[3], 1, 12, names=_CRON_MONTH_NAMES)
+    dows, dow_wild = _parse_cron_field(parts[4], 0, 7, names=_CRON_DOW_NAMES, wrap_seven=True)
+    return normalized, minutes, hours, doms, dom_wild, months, dows, dow_wild
+
+
+def next_cron_run(expr: str, after: datetime | None = None) -> datetime:
+    """Return the next UTC execution timestamp strictly after `after` matching `expr`."""
+    _, minutes, hours, doms, dom_wild, months, dows, dow_wild = _compile_cron(expr)
+    sorted_minutes = sorted(minutes)
+    sorted_hours = sorted(hours)
+    base = (after or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    cursor = base.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    max_year = cursor.year + 4
+    year = cursor.year
+    month = cursor.month
+    while year <= max_year:
+        if month not in months:
+            month += 1
+            if month > 12:
+                year += 1
+                month = 1
+            cursor = datetime(year, month, 1, 0, 0, tzinfo=timezone.utc)
+            continue
+        days_in_month = calendar.monthrange(year, month)[1]
+        start_day = cursor.day if (cursor.year == year and cursor.month == month) else 1
+        for day in range(start_day, days_in_month + 1):
+            day_dt = datetime(year, month, day, 0, 0, tzinfo=timezone.utc)
+            cron_dow = (day_dt.weekday() + 1) % 7
+            dom_ok = day in doms
+            dow_ok = cron_dow in dows
+            if not ((dom_ok and dow_ok) if (dom_wild or dow_wild) else (dom_ok or dow_ok)):
+                cursor = day_dt + timedelta(days=1)
+                continue
+            min_hour = cursor.hour if cursor.date() == day_dt.date() else 0
+            for hour in sorted_hours:
+                if hour < min_hour:
+                    continue
+                min_minute = cursor.minute if (cursor.date() == day_dt.date() and hour == min_hour) else 0
+                for minute in sorted_minutes:
+                    if minute >= min_minute:
+                        return datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
+        month += 1
+        if month > 12:
+            year += 1
+            month = 1
+        cursor = datetime(year, month, 1, 0, 0, tzinfo=timezone.utc)
+    raise ValueError("Cron expression does not match any valid calendar date")
+
+
+def validate_cron_expression(expr: str) -> str:
+    """Validate and normalize a 5-field UTC cron expression (or @hourly/@daily macro)."""
+    normalized, *_ = _compile_cron(expr)
+    next_cron_run(normalized)
+    return normalized

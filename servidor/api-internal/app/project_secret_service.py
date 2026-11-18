@@ -14,6 +14,12 @@ PROJECT_MATERIAL_PURPOSE_RE = re.compile(
     r"^opaque-api-key-reveal:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
     r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
+PROJECT_FUNCTION_SECRET_PURPOSE_RE = re.compile(
+    r"^functions-env-secret:[A-Za-z_][A-Za-z0-9_]{0,127}$"
+)
+PROJECT_FUNCTION_REGISTRY_PURPOSE_RE = re.compile(
+    r"^functions-registry:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
 
 
 def _project_secret_column(column: str) -> str:
@@ -136,7 +142,12 @@ async def decrypt_project_secret(
 def _project_material_purpose(purpose: str) -> str:
     """Restrict non-column AAD purposes to explicitly supported material."""
 
-    if purpose not in {"studio-administrative-key", "functions-publishable-key", "functions-secret-key"} and not PROJECT_MATERIAL_PURPOSE_RE.fullmatch(purpose):
+    if (
+        purpose not in {"studio-administrative-key", "functions-publishable-key", "functions-secret-key"}
+        and not PROJECT_MATERIAL_PURPOSE_RE.fullmatch(purpose)
+        and not PROJECT_FUNCTION_SECRET_PURPOSE_RE.fullmatch(purpose)
+        and not PROJECT_FUNCTION_REGISTRY_PURPOSE_RE.fullmatch(purpose)
+    ):
         raise ValueError(f"unsupported project material purpose: {purpose}")
     return purpose
 

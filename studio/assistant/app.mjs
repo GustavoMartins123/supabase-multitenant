@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { createHash } from 'node:crypto'
 import { authenticate } from './auth.mjs'
 import { levels, settingsSchema } from './store.mjs'
-import { assistantPrompt } from './prompts.mjs'
+import { assistantPrompt, edgeFunctionPrompt } from './prompts.mjs'
 import { assistantErrorMessage } from './errors.mjs'
 import { boundedAssistantStream } from './stream.mjs'
 import { privilegeSchema, privilegeSql } from './privileges.mjs'
@@ -12,6 +12,57 @@ import { privilegeSchema, privilegeSql } from './privileges.mjs'
 const chatSchema = z.object({ messages: z.array(z.any()).min(1).max(200), chatId: z.string().uuid(), projectRef: z.string() })
 const savedChat = z.object({ id: z.string().uuid(), name: z.string().max(200), messages: z.array(z.any()).max(200), createdAt: z.string(), updatedAt: z.string() })
 const stateSchema = z.object({ projectRef: z.string(), activeChatId: z.string().uuid().optional(), chats: z.record(z.string().uuid(), savedChat), model: z.string().optional() }).strict()
+const edgeFnFileSchema = z.object({ name: z.string().min(1).max(240), content: z.string().max(200_000) }).strict()
+const edgeFnOutputSchema = z.object({
+  summary: z.string().trim().min(1).max(2000),
+  suggestedName: z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/).optional(),
+  files: z.array(z.object({ name: z.string().min(1).max(240), content: z.string().max(250_000) }).strict()).min(1).max(16),
+}).strict()
+const ALLOWED_EDGE_EXTS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.json', '.txt', '.md']
+class AssistantOutputError extends Error {}
+function validEdgeFileName(name) {
+  if (!name || name.length > 240 || name.startsWith('/') || name.includes('\\') || name.includes('\0')) return false
+  const parts = name.split('/')
+  if (parts.some(p => !p || p === '.' || p === '..')) return false
+  const lower = name.toLowerCase()
+  if (lower.endsWith('.eszip') || lower.endsWith('.wasm')) return false
+  return ALLOWED_EDGE_EXTS.some(ext => lower.endsWith(ext))
+}
+function parseEdgeFunctionProposal(rawText) {
+  const trimmed = String(rawText ?? '').trim()
+  const fenced = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i)
+  let candidate = (fenced ? fenced[1] : trimmed).trim()
+  if (!candidate.startsWith('{')) {
+    const start = candidate.indexOf('{')
+    const end = candidate.lastIndexOf('}')
+    if (start >= 0 && end > start) candidate = candidate.slice(start, end + 1)
+  }
+  let parsedJson
+  try { parsedJson = JSON.parse(candidate) } catch {
+    throw new AssistantOutputError('Assistant returned invalid JSON while generating the Edge Function. Try refining your prompt.')
+  }
+  const parsed = edgeFnOutputSchema.safeParse(parsedJson)
+  if (!parsed.success) {
+    throw new AssistantOutputError('Assistant response did not match the expected Edge Function file format. Try refining your prompt.')
+  }
+  const seen = new Set()
+  let totalBytes = 0
+  for (const file of parsed.data.files) {
+    if (!validEdgeFileName(file.name) || seen.has(file.name)) {
+      throw new AssistantOutputError('Assistant generated an invalid or disallowed file path. Try refining your prompt.')
+    }
+    seen.add(file.name)
+    totalBytes += Buffer.byteLength(file.content, 'utf8')
+    if (totalBytes > 512_000) {
+      throw new AssistantOutputError('Assistant generated too much code (> 512 KB). Narrow the scope and try again.')
+    }
+  }
+  if (!seen.has('index.ts')) {
+    throw new AssistantOutputError('Assistant response omitted the required index.ts entrypoint. Try again.')
+  }
+  const slug = parsed.data.suggestedName && parsed.data.suggestedName !== 'main' ? parsed.data.suggestedName : undefined
+  return { summary: parsed.data.summary, ...(slug ? { suggestedName: slug } : {}), files: parsed.data.files }
+}
 export const providerModel = config => {
   if (config.provider === 'openai') return createOpenAI({ apiKey: config.apiKey, baseURL: 'https://api.openai.com/v1' }).responses(config.model)
   if (config.provider === 'openrouter') return createOpenAI({ apiKey: config.apiKey, baseURL: 'https://openrouter.ai/api/v1' }).chat(config.model)
@@ -129,8 +180,23 @@ export function createHandler({ store, secret, call, modelFactory = providerMode
         }
         return send(res, 405, { message: 'Method not allowed' })
       }
-      if (!['/api/ai/sql/generate-v4', '/api/ai/code/complete'].includes(req.url)) return send(res, 404, { message: 'Assistant route not found' })
+      if (!['/api/ai/sql/generate-v4', '/api/ai/code/complete', '/api/ai/edge-functions/generate'].includes(req.url)) return send(res, 404, { message: 'Assistant route not found' })
       if (req.method !== 'POST') return send(res, 405, { message: 'Method not allowed' })
+      let edgeFnInput
+      if (req.url === '/api/ai/edge-functions/generate') {
+        edgeFnInput = z.object({
+          projectRef: z.literal(scope.ref),
+          functionName: z.string().max(80).optional(),
+          prompt: z.string().trim().min(1).max(10_000),
+          files: z.array(edgeFnFileSchema).max(16).optional(),
+        }).strict().parse(body)
+        let inputBytes = 0
+        for (const file of edgeFnInput.files ?? []) {
+          if (!validEdgeFileName(file.name)) throw new Error('Invalid file path in Edge Function context')
+          inputBytes += Buffer.byteLength(file.content, 'utf8')
+          if (inputBytes > 400_000) throw new Error('Edge Function context exceeds assistant size limit')
+        }
+      }
       const config = store.configuration(scope)
       const candidateKey = `${scope.userId}:${scope.projectId}`
       if (active.has(candidateKey) || active.size >= 16) return send(res, 429, { message: 'Assistant already running; stop it before starting another request' })
@@ -146,6 +212,17 @@ export function createHandler({ store, secret, call, modelFactory = providerMode
           system: 'Complete the requested SQL. Return only the completion, without markdown or explanations. Do not execute anything.',
           prompt: JSON.stringify(data) })
         return send(res, 200, result.text)
+      }
+      if (req.url === '/api/ai/edge-functions/generate') {
+        phase = 'provider'
+        const result = await generateText({ model, maxRetries: 0, abortSignal: abort.signal, maxOutputTokens: 4096,
+          system: edgeFunctionPrompt(),
+          prompt: JSON.stringify({
+            functionName: edgeFnInput.functionName || null,
+            currentFiles: edgeFnInput.files ?? [],
+            instruction: edgeFnInput.prompt,
+          }) })
+        return send(res, 200, parseEdgeFunctionProposal(result.text))
       }
       const data = chatSchema.parse(body)
       if (data.projectRef !== scope.ref) throw new Error('Project context mismatch')
@@ -194,7 +271,7 @@ export function createHandler({ store, secret, call, modelFactory = providerMode
       })
     } catch (error) {
       if (!res.headersSent) send(res, phase === 'authentication' ? 401 : phase === 'validation' ? 400 : 502,
-        { message: phase === 'authentication' ? 'Assistant authentication failed' : phase === 'validation' ? 'Invalid assistant configuration or request' : phase === 'context' ? 'Assistant project authorization could not be verified.' : assistantErrorMessage(error) })
+        { message: phase === 'authentication' ? 'Assistant authentication failed' : phase === 'validation' ? 'Invalid assistant configuration or request' : phase === 'context' ? 'Assistant project authorization could not be verified.' : error instanceof AssistantOutputError ? error.message : assistantErrorMessage(error) })
       else if (!res.writableEnded) res.end()
     } finally {
       clearTimeout(timer)

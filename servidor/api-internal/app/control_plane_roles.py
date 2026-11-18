@@ -146,6 +146,8 @@ async def ensure_key_authorizer_role(
                 GRANT SELECT (project_id, secret_hash, is_active)
                     ON project_studio_keys TO key_authorizer;
                 GRANT SELECT (project_id, enabled) ON project_edge_functions TO key_authorizer;
+                GRANT SELECT (project_id, function_name, verify_jwt, published)
+                    ON project_edge_function_configs TO key_authorizer;
                 GRANT SELECT (id, project_id, kind, secret_hash, is_active)
                     ON project_function_keys TO key_authorizer;
                 GRANT SELECT ON project_access_policies, slot_access_policies,

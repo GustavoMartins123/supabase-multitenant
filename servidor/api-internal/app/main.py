@@ -533,9 +533,13 @@ async def startup():
         rotation_runner=_rotate_project_key_background,
     )
     await start_automatic_opaque_key_rotation()
+    from app.routers.studio_edge_functions import start_edge_function_scheduler
+    await start_edge_function_scheduler()
 
 @app.on_event("shutdown")
 async def shutdown():
+    from app.routers.studio_edge_functions import stop_edge_function_scheduler
+    await stop_edge_function_scheduler()
     await stop_automatic_opaque_key_rotation()
     await stop_automatic_key_rotation()
     await action_queue.shutdown()
