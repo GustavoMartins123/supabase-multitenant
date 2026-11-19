@@ -223,9 +223,9 @@ def main():
             record('delete_stops_invocation_preserves_other_project_and_stale_removal_is_rejected')
             assert invoke(key=projects['test_beta']['publishable']).status_code==403
             assert invoke(headers={'X-Project-Ref':projects['test_beta']['ref'],'X-Project-Name':'test_beta','X-Project-UUID':projects['test_beta']['id']}).json()['ref']==projects['test_alpha']['ref']
-            for user in ('member','outsider'):
-                assert management('GET',user=user).status_code==403
-                assert management('POST','/my-function/publish',{'revision':changed['revision'],'expected_published_revision':changed['published_revision']},user=user).status_code==403
+            assert management('GET',user='member').status_code==200
+            assert management('GET',user='outsider').status_code==403
+            assert management('POST','/my-function/publish',{'revision':changed['revision'],'expected_published_revision':changed['published_revision']},user='outsider').status_code==403
             assert management('GET',headers={'X-Studio-Project-Ref':projects['test_beta']['ref']}).status_code==409
             assert management('PUT','/forged',{'expected_revision':None,'files':[{'name':'index.ts','content':''}]},headers={'Origin':'https://attacker.invalid'}).status_code==403
             assert client.get(api_origin+'/api/projects/'+projects['test_alpha']['ref']+'/edge-functions').status_code==401

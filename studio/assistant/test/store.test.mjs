@@ -59,11 +59,12 @@ test('missing or wrong master key refuses startup', t => {
   assert.throws(() => new AssistantStore(path, randomBytes(32).toString('hex')))
 })
 
-test('members cannot configure database tools or keep privileges after demotion', t => {
+test('project members can configure database tools while non-member roles are rejected', t => {
   const { store } = fixture(t); const actor = scope()
-  assert.throws(() => store.save({ ...actor, role: 'member' }, config))
-  store.save(actor, config)
-  assert.throws(() => store.configuration({ ...actor, role: 'member' }))
+  store.save({ ...actor, role: 'member' }, config)
+  assert.equal(store.configuration({ ...actor, role: 'member' }).permission, config.permission)
+  assert.throws(() => store.save({ ...actor, role: 'outsider' }, config))
+  assert.throws(() => store.configuration({ ...actor, role: 'outsider' }))
   store.save({ ...actor, role: 'member' }, { ...config, permission: 'none' })
   assert.equal(store.configuration({ ...actor, role: 'member' }).permission, 'none')
 })

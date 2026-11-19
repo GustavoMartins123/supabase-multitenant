@@ -7,7 +7,7 @@ end
 local user_context_headers = require("project_context.user_context_headers")
 user_context_headers.apply(email, ngx.var.authelia_groups or "")
 
-local context = require("security.project_access").enforce_admin()
+local context = require("security.project_access").enforce_studio()
 if type(context) ~= "table" then
     return
 end

@@ -41,7 +41,7 @@ class StoragePolicyProxyTests(unittest.IsolatedAsyncioTestCase):
             "validate_project_ref": lambda value: value,
             "resolve_authenticated_user": AsyncMock(return_value={"id": "admin"}),
             "get_public_project_row": AsyncMock(return_value=self.project),
-            "ensure_project_admin_access": self.authorize,
+            "ensure_project_member_access": self.authorize,
             "decrypt_project_secret": AsyncMock(return_value="service-key"),
             "get_project_meta_connection_string": lambda *args: "postgres://tenant:p@db/project",
             "_extract_project_admin_apikey": lambda request: request.headers.get("apikey", ""),

@@ -75,7 +75,7 @@ export class AssistantStore {
     const current = this.row(scope)
     if (!current && !value.apiKey) throw new Error('A provider key is required')
     if (current && value.provider !== current.provider && !value.apiKey) throw new Error('Changing provider requires a new key')
-    if (value.permission !== 'none' && scope.role !== 'admin') throw new Error('Database access requires project administration')
+    if (value.permission !== 'none' && !['admin', 'member'].includes(scope.role)) throw new Error('Database access requires project membership')
     let keyId, wrappedKey, credential
     if (value.apiKey) {
       const dek = randomBytes(32)
@@ -96,7 +96,7 @@ export class AssistantStore {
   configuration(scope) {
     const row = this.row(scope)
     if (!row) throw new Error('Assistant is not configured for this user/project')
-    if (row.permission !== 'none' && scope.role !== 'admin') throw new Error('Assistant database permission is no longer authorized')
+    if (row.permission !== 'none' && !['admin', 'member'].includes(scope.role)) throw new Error('Assistant database permission is no longer authorized')
     const hex = open(this.master, row.wrapped_key, aad(scope, `dek:${row.key_id}`))
     if (!/^[0-9a-f]{64}$/.test(hex)) throw new Error('Stored data key is invalid')
     const dek = Buffer.from(hex, 'hex')

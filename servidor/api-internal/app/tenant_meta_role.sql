@@ -78,9 +78,20 @@ BEGIN
     EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA realtime GRANT INSERT ON TABLES TO %I', current_user, tenant_role);
     FOR obj IN SELECT nspname FROM pg_namespace WHERE nspname IN ('auth','storage','extensions') LOOP
         EXECUTE format('GRANT USAGE ON SCHEMA %I TO %I', obj.nspname, tenant_role);
-        EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO %I', obj.nspname, tenant_role);
+        EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE, REFERENCES ON ALL TABLES IN SCHEMA %I TO %I', obj.nspname, tenant_role);
         EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I', obj.nspname, tenant_role);
     END LOOP;
+    -- Auth/Storage migrations can create tables after initial provisioning on new projects.
+    IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'auth')
+       AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_auth_admin') THEN
+        EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE supabase_auth_admin IN SCHEMA auth GRANT SELECT, INSERT, UPDATE, DELETE, REFERENCES ON TABLES TO %I', tenant_role);
+        EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE supabase_auth_admin IN SCHEMA auth GRANT USAGE, SELECT ON SEQUENCES TO %I', tenant_role);
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'storage')
+       AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_storage_admin') THEN
+        EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE supabase_storage_admin IN SCHEMA storage GRANT SELECT, INSERT, UPDATE, DELETE, REFERENCES ON TABLES TO %I', tenant_role);
+        EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE supabase_storage_admin IN SCHEMA storage GRANT USAGE, SELECT ON SEQUENCES TO %I', tenant_role);
+    END IF;
 END
 $tenant_meta$;
 DO $assistant_reader$
