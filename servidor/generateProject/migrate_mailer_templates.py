@@ -601,7 +601,12 @@ def activate_project(root, project, tenant, plan, document, saved, *, restart=Fa
     )
     if restart:
         subprocess.run(
-            command + ["up", "--build", "-d", "--no-deps", "nginx", "auth"],
+            command + ["up", "--build", "-d", "--no-deps", "--wait", "--wait-timeout", "120", "nginx"],
+            check=True,
+            timeout=600,
+        )
+        subprocess.run(
+            command + ["up", "--build", "-d", "--no-deps", "auth"],
             check=True,
             timeout=600,
         )
