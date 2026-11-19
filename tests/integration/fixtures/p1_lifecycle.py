@@ -158,6 +158,8 @@ def main() -> None:
         service['labels'] = labels.copy()
         service['logging'] = {'driver': 'json-file'}
         service['restart'] = 'no'
+    if 'project-internal' in (project_model.get('networks') or {}):
+        project_model['networks']['project-internal']['labels'] = labels.copy()
     template.write_text(yaml.safe_dump(project_model, sort_keys=False))
     project_dockerfile = server / 'generateProject/Dockerfile'
     project_dockerfile.write_text(project_dockerfile.read_text() + '\nLABEL codex.p1.run=' + suffix + '\n')
@@ -179,6 +181,7 @@ def main() -> None:
         assert sys.argv[3] == 'end-to-end' and sys.argv[4] in {'single', 'split'}
         from p1_end_to_end import validate
         run('docker', 'network', 'connect', 'rede-supabase', 'p1-lifecycle-executor-' + suffix)
+        run('docker', 'network', 'connect', 'supabase-functions-gateways', 'p1-lifecycle-executor-' + suffix)
         validate(root, suffix, sys.argv[4], values, '--benchmark' in sys.argv[5:])
         return
 
@@ -340,10 +343,18 @@ def main() -> None:
         env = environment(server / 'projects' / ref / '.env')
         assert result == {'project_ref': public_refs[ref], 'technical_name': ref, 'project_uuid': tenant,
                           'anon_key': env['ANON_KEY_PROJETO'], 'service_role_key': env['SERVICE_ROLE_KEY_PROJETO'],
-                          'jwt_secret': env['JWT_SECRET_PROJETO'], 'network_allowlist': []}
+                          'jwt_secret': env['JWT_SECRET_PROJETO'], 'network_allowlist': [],
+                          'edge_gateway_token': env['API_GATEWAY_TOKEN_PROJETO']}
         assert path.stat().st_mode & 0o777 == 0o600
+        status_without_token = run('curl', '--silent', '--show-error', '--output', '/dev/null', '--write-out', '%{http_code}',
+                                   '-H', 'X-Project-Ref: ' + public_refs[ref], '-H', 'X-Project-Name: ' + ref,
+                                   '-H', 'apikey: ' + result['service_role_key'],
+                                   '-H', 'Authorization: Bearer ' + result['service_role_key'],
+                                   'http://supabase-edge-functions:9000/p1_probe')
+        assert status_without_token == '403', status_without_token
         status = run('curl', '--silent', '--show-error', '--output', '/dev/null', '--write-out', '%{http_code}',
                      '-H', 'X-Project-Ref: ' + public_refs[ref], '-H', 'X-Project-Name: ' + ref,
+                     '-H', 'X-Edge-Gateway-Token: ' + result['edge_gateway_token'],
                      '-H', 'apikey: ' + result['service_role_key'],
                      '-H', 'Authorization: Bearer ' + result['service_role_key'],
                      'http://supabase-edge-functions:9000/p1_probe')
@@ -497,9 +508,10 @@ process.stdout.write(body);});'''
     def check_object(ref: str) -> None:
         assert object_request(ref, 'GET', '/object/p1-files/original.txt', '', 'text/plain') == 'original object'
 
-    # Executor must join the server network, but no HTTP service gets its socket.
+    # Executor must join the server and functions-gateways networks, but no HTTP service gets its socket.
     executor = 'p1-lifecycle-executor-' + suffix
     run('docker', 'network', 'connect', 'rede-supabase', executor)
+    run('docker', 'network', 'connect', 'supabase-functions-gateways', executor)
     seed(project, first_uuid)
     lifecycle('generate_project.sh', project, first_uuid, 'false')
     initial = check_projection(project, first_uuid)
@@ -580,6 +592,7 @@ process.stdout.write(body);});'''
     assert not (server / 'projects' / new_ref).exists()
     status = run('curl', '--silent', '-o', '/dev/null', '-w', '%{http_code}',
                  '-H', 'X-Project-Ref: ' + old_ref, '-H', 'X-Project-Name: ' + project,
+                 '-H', 'X-Edge-Gateway-Token: ' + initial['edge_gateway_token'],
                  '-H', 'Authorization: Bearer ' + initial['service_role_key'],
                  'http://supabase-edge-functions:9000/p1_probe')
     assert status == '503', status

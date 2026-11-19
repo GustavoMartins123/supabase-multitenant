@@ -614,24 +614,36 @@ http {
 stream {
     resolver 127.0.0.11 valid=30s ipv6=off;
 
+    map "" $stream_pooler_session_upstream {
+        default "${POSTGRES_POOLER}:${POOLER_PROXY_PORT_SESSION}";
+    }
+
+    map "" $stream_pooler_transaction_upstream {
+        default "${POSTGRES_POOLER}:${POOLER_PROXY_PORT_TRANSACTION}";
+    }
+
+    map "" $stream_template_service_upstream {
+        default "template-service:18020";
+    }
+
     server {
         listen 5432;
         allow ${PROJECT_INTERNAL_SUBNET};
         deny all;
-        proxy_pass ${POSTGRES_POOLER}:${POOLER_PROXY_PORT_SESSION};
+        proxy_pass $stream_pooler_session_upstream;
     }
 
     server {
         listen 6543;
         allow ${PROJECT_INTERNAL_SUBNET};
         deny all;
-        proxy_pass ${POSTGRES_POOLER}:${POOLER_PROXY_PORT_TRANSACTION};
+        proxy_pass $stream_pooler_transaction_upstream;
     }
 
     server {
         listen 18020;
         allow ${PROJECT_INTERNAL_SUBNET};
         deny all;
-        proxy_pass template-service:18020;
+        proxy_pass $stream_template_service_upstream;
     }
 }

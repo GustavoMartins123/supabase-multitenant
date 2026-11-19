@@ -899,7 +899,8 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
         v1 = await self.save('version-1')
         self.assertIn('limits', v1)
         self.assertEqual(v1['limits']['memory_limit_mb'], 150)
-        self.assertEqual(v1['limits']['max_concurrent_global'], 4)
+        self.assertEqual(v1['limits']['max_concurrent_global'], edge_functions.PLATFORM_MAX_CONCURRENT_GLOBAL)
+        self.assertEqual(v1['limits']['max_concurrent_global'], 24)
         self.assertEqual(v1['limits']['max_concurrent_project'], 2)
 
         listed = (await self.request('GET', '')).json()

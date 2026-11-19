@@ -105,7 +105,9 @@ class Phase1SecuritySyncTest(unittest.TestCase):
         nginx_tpl = (SERVER / "generateProject/nginxtemplate").read_text(encoding="utf-8")
         self.assertIn('proxy_set_header X-Edge-Gateway-Token "${API_GATEWAY_TOKEN_PROJETO}";', nginx_tpl)
         self.assertIn("allow ${PROJECT_INTERNAL_SUBNET};", nginx_tpl)
-        self.assertIn("proxy_pass template-service:18020;", nginx_tpl)
+        self.assertIn('default "template-service:18020";', nginx_tpl)
+        self.assertIn("proxy_pass $stream_template_service_upstream;", nginx_tpl)
+        self.assertNotIn("proxy_pass template-service:18020;", nginx_tpl)
 
         spec = importlib.util.spec_from_file_location(
             "allocate_project_subnet", SERVER / "generateProject/allocate_project_subnet.py"

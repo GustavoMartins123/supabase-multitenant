@@ -47,6 +47,9 @@ if not required_version then
     return ngx.exit(ngx.HTTP_SERVICE_UNAVAILABLE)
 end
 ngx.shared.service_key_metrics:incr("invalidation", 1, 0)
+if ngx.shared.studio_context_cache then
+    ngx.shared.studio_context_cache:flush_all()
+end
 
 ngx.header.content_type = "application/json"
 ngx.say(cjson.encode({

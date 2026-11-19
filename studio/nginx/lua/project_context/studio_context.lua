@@ -54,7 +54,7 @@ function _M.load(ref, administrative)
         target = target .. "?access=admin"
         access_mode = "admin"
     end
-    local cache_ttl = tonumber(os.getenv("STUDIO_CONTEXT_CACHE_TTL_SECONDS")) or 5
+    local cache_ttl = tonumber(os.getenv("STUDIO_CONTEXT_CACHE_TTL_SECONDS")) or 0
     local shared_cache = cache_ttl > 0 and ngx.shared and ngx.shared.studio_context_cache or nil
     local cache_key = ref .. ":" .. user_id .. ":" .. access_mode .. ":" .. (ngx.var.authelia_groups or "")
     if shared_cache then
