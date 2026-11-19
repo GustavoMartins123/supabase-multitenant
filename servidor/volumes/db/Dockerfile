@@ -1,5 +1,5 @@
 FROM busybox:1.38.0-musl AS tools
-FROM supabase/postgres:15.14.1.142
+FROM supabase/postgres:17.11.0.019
 COPY --from=tools /bin/busybox /usr/local/bin/less
 COPY pg_hba.conf /etc/postgresql/pg_hba.conf
 COPY configure-pg-hba.sh /usr/local/bin/configure-pg-hba.sh
