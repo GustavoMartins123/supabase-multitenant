@@ -342,12 +342,17 @@ class GatewayOptimizationAndHardeningContractTest(unittest.TestCase):
             ("proxy_rewrites/rest_v1.lua", "security/inject_service_key.lua"),
             ("proxy_rewrites/graphql.lua", "security/inject_service_key_graphql.lua"),
             ("proxy_rewrites/analytics.lua", "security/studio_project_admin_access.lua"),
-            ("proxy_rewrites/storage.lua", "security/inject_service_key_storage.lua"),
         )
         rewrite_lines = [line for line in nginx_src.splitlines() if "rewrite_by_lua_file" in line and "server_rewrite_by_lua_file" not in line]
         self.assertEqual(len(rewrite_lines), len(expected_pairs))
         for rewrite_mod, access_mod in expected_pairs:
             self.assertLess(nginx_src.index(rewrite_mod), nginx_src.index(access_mod), rewrite_mod)
+        # Storage JSON rewrite runs inside access phase after project_access.enforce_storage()
+        storage_access = read(LUA / "security" / "inject_service_key_storage.lua")
+        self.assertLess(
+            storage_access.index('require("security.project_access").enforce_storage()'),
+            storage_access.index('require("proxy_rewrites.storage").rewrite()'),
+        )
 
 
 if __name__ == "__main__":

@@ -3351,6 +3351,17 @@
             "title": "Public Ref",
             "type": "string"
           },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
           "storage_limit_token": {
             "title": "Storage Limit Token",
             "type": "string"
@@ -5855,6 +5866,18 @@
         "title": "RotateApiKeySlot",
         "type": "object"
       },
+      "RotateProjectKeyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "rotate_jwt_secret": {
+            "default": false,
+            "title": "Rotate Jwt Secret",
+            "type": "boolean"
+          }
+        },
+        "title": "RotateProjectKeyRequest",
+        "type": "object"
+      },
       "RotateProjectKeyResponse": {
         "additionalProperties": true,
         "properties": {
@@ -8324,6 +8347,18 @@
     "/api/projects": {
       "get": {
         "operationId": "list_projects_api_projects_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_status",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Status",
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -8338,6 +8373,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "List Projects",
@@ -11624,7 +11669,7 @@
     },
     "/api/projects/{project_ref}/rotate-key": {
       "post": {
-        "description": "Rotaciona anon/service_role via script. Enfileirado por projeto.",
+        "description": "Rotaciona anon/service_role via script (e opcionalmente JWT_SECRET_PROJETO). Enfileirado por projeto.",
         "operationId": "rotate_project_key_api_projects__project_ref__rotate_key_post",
         "parameters": [
           {
@@ -11637,6 +11682,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RotateProjectKeyRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "202": {
             "content": {

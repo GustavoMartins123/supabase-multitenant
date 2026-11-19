@@ -36,8 +36,9 @@ export class AssistantStore {
   constructor(path, master) {
     if (!/^[0-9a-f]{64}$/.test(master)) throw new Error('Assistant master key is invalid')
     this.master = Buffer.from(master, 'hex')
+    this._lastNoncePurge = 0
     this.db = new DatabaseSync(path)
-    this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=3000;
+    this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;
       PRAGMA secure_delete=ON; PRAGMA foreign_keys=ON;
       CREATE TABLE IF NOT EXISTS metadata (id INTEGER PRIMARY KEY CHECK (id=1), version INTEGER NOT NULL, master_id TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS settings (
@@ -49,7 +50,8 @@ export class AssistantStore {
       CREATE TABLE IF NOT EXISTS approvals (user_id TEXT NOT NULL, project_id TEXT NOT NULL, chat_id TEXT NOT NULL,
         call_id TEXT NOT NULL, approval_id TEXT NOT NULL, input_hash TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0,
         expires_at INTEGER NOT NULL, PRIMARY KEY(user_id, project_id, chat_id, call_id));
-      CREATE TABLE IF NOT EXISTS nonces (nonce TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);`)
+      CREATE TABLE IF NOT EXISTS nonces (nonce TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS idx_nonces_expires_at ON nonces(expires_at);`)
     this.db.exec(`CREATE TABLE IF NOT EXISTS executions (
       user_id TEXT NOT NULL, project_id TEXT NOT NULL, chat_id TEXT NOT NULL,
       call_id TEXT NOT NULL, input_hash TEXT NOT NULL, PRIMARY KEY(user_id,project_id,chat_id,call_id));`)
@@ -136,7 +138,11 @@ export class AssistantStore {
   }
 
   claimNonce(nonce, expiry) {
-    this.db.prepare('DELETE FROM nonces WHERE expires_at < ?').run(Date.now())
+    const now = Date.now()
+    if (now - this._lastNoncePurge >= 60_000) {
+      this._lastNoncePurge = now
+      this.db.prepare('DELETE FROM nonces WHERE expires_at < ?').run(now)
+    }
     this.db.prepare('INSERT INTO nonces VALUES (?, ?)').run(nonce, expiry)
   }
 

@@ -139,7 +139,7 @@ class ProjectRepository {
     RequestCancellation? cancellation,
   }) async {
     final response = await _client.get(
-      Uri.parse('/api/projects'),
+      Uri.parse('/api/projects?include_status=true'),
       cancellation: cancellation,
     );
     _ensureCommandSucceeded(response);

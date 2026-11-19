@@ -8,17 +8,23 @@ if not slug or slug == "" then
 end
 
 ngx.req.read_body()
+local req_body = ngx.req.get_body_data()
 
 local req_headers = ngx.req.get_headers()
+local forward_headers = {
+    ["Remote-Groups"] = req_headers["Remote-Groups"],
+    ["X-User-Token"] = req_headers["X-User-Token"],
+    ["X-User-Groups"] = req_headers["X-User-Groups"],
+    ["X-User-Username"] = req_headers["X-User-Username"],
+    ["X-User-Display-Name"] = req_headers["X-User-Display-Name"],
+}
+if req_headers["Content-Type"] then
+    forward_headers["Content-Type"] = req_headers["Content-Type"]
+end
 local res = ngx.location.capture("/_internal_api/projects/" .. slug .. "/rotate-key", {
     method = ngx.HTTP_POST,
-    headers = {
-        ["Remote-Groups"] = req_headers["Remote-Groups"],
-        ["X-User-Token"] = req_headers["X-User-Token"],
-        ["X-User-Groups"] = req_headers["X-User-Groups"],
-        ["X-User-Username"] = req_headers["X-User-Username"],
-        ["X-User-Display-Name"] = req_headers["X-User-Display-Name"],
-    }
+    body = req_body,
+    headers = forward_headers,
 })
 
 ngx.status = res.status

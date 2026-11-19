@@ -155,6 +155,10 @@ async def seed():
         "${SERVICE_ROLE_KEY_PROJETO}": "synthetic-service-jwt",
         "${API_GATEWAY_TOKEN_PROJETO}": first["gateway"],
         "${SUPABASE_NETWORK_SUBNET}": "10.207.0.0/24",
+        "${PROJECT_INTERNAL_SUBNET}": "10.210.0.0/28",
+        "${POSTGRES_POOLER}": "supabase-pooler",
+        "${POOLER_PROXY_PORT_SESSION}": "5432",
+        "${POOLER_PROXY_PORT_TRANSACTION}": "6543",
         "${FILE_SIZE_LIMIT}": "50m",
     }
     for key, value in values.items():

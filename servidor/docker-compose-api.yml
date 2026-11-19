@@ -204,7 +204,7 @@ services:
     stop_grace_period: ${PROJECTS_API_STOP_GRACE_PERIOD}
     env_file:
       - .analytics.env
-    networks: [rede-supabase, analytics-internal]
+    networks: [rede-supabase, analytics-internal, functions-gateways]
     expose: ["${PROJECTS_API_PORT}"]
     depends_on:
       control-plane-migrations:
@@ -245,6 +245,7 @@ services:
       ANALYTICS_INTERNAL_URL: http://analytics:4000
       EDGE_BUNDLER_URL: http://edge-bundler:18030
       EDGE_BUNDLER_HMAC_SECRET: ${EDGE_BUNDLER_HMAC_SECRET:-}
+      EDGE_DB_HOST: supabase-db
     volumes:
       - ./secrets/mailer/ADMIN_KEY:/run/secrets/mailer/ADMIN_KEY:ro
       - ./secrets/mailer/PUBLISH_KEY:/run/secrets/mailer/PUBLISH_KEY:ro
@@ -333,6 +334,9 @@ networks:
     external: true
   analytics-internal:
     name: supabase-analytics-internal
+    external: true
+  functions-gateways:
+    name: supabase-functions-gateways
     external: true
 
 volumes:

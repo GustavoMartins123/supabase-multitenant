@@ -371,6 +371,37 @@ async def fetch_project_containers(
     ]
 
 
+async def fetch_projects_containers(
+    conn_or_pool: Any,
+    projects: list[str],
+) -> dict[str, list[dict[str, Any]]]:
+    """Snapshot em lote dos containers de multiplos projetos em uma unica consulta."""
+    if not projects:
+        return {}
+    rows = await conn_or_pool.fetch(
+        """
+        SELECT project, container_name, state, status, image, ports, created_at_text
+        FROM project_container_state
+        WHERE project = ANY($1::text[])
+        ORDER BY project, container_name
+        """,
+        projects,
+    )
+    grouped: dict[str, list[dict[str, Any]]] = {project: [] for project in projects}
+    for row in rows:
+        grouped.setdefault(row["project"], []).append(
+            {
+                "Names": row["container_name"],
+                "State": row["state"] or "",
+                "Status": row["status"] or "",
+                "Image": row["image"] or "",
+                "Ports": row["ports"] or "",
+                "CreatedAt": row["created_at_text"] or "",
+            }
+        )
+    return grouped
+
+
 async def container_state_is_fresh(pool: asyncpg.Pool) -> bool:
     """Estado utilizavel: worker vivo (o snapshot pode estar vazio)."""
     return await worker_alive(pool)

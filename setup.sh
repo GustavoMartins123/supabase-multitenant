@@ -482,6 +482,8 @@ main() {
     PROJECT_SECRETS_MASTER_KEY=$(env_secret servidor/.env PROJECT_SECRETS_MASTER_KEY generate_fernet_key)
     STUDIO_SERVICE_KEY_ENCRYPTION_KEY=$(env_secret servidor/.env STUDIO_SERVICE_KEY_ENCRYPTION_KEY generate_fernet_key)
     PG_META_CRYPTO_KEY=$(env_secret servidor/.env PG_META_CRYPTO_KEY generate_hmac_secret)
+    IMGPROXY_KEY=$(env_secret servidor/.env IMGPROXY_KEY generate_hmac_secret)
+    IMGPROXY_SALT=$(env_secret servidor/.env IMGPROXY_SALT generate_hmac_secret)
     SHARED_NGINX_HMAC_SECRET=$(env_secret servidor/.env NGINX_HMAC_SECRET generate_hmac_secret)
     SHARED_INTERNAL_HMAC_SECRET=$(env_secret servidor/.env INTERNAL_HMAC_SECRET generate_hmac_secret)
     HOST_AGENT_HMAC_SECRET=$(env_secret servidor/.env HOST_AGENT_HMAC_SECRET generate_hmac_secret)
@@ -615,6 +617,8 @@ PYEOF
     safe_sed "s|JWT_SECRET=pass|JWT_SECRET=$JWT_SECRET|g" servidor/.env
     safe_sed "s|PROJECT_SECRETS_MASTER_KEY=pass|PROJECT_SECRETS_MASTER_KEY=$PROJECT_SECRETS_MASTER_KEY|g" servidor/.env
     safe_sed "s|PG_META_CRYPTO_KEY=pass|PG_META_CRYPTO_KEY=$PG_META_CRYPTO_KEY|g" servidor/.env
+    safe_sed "s|IMGPROXY_KEY=pass|IMGPROXY_KEY=$IMGPROXY_KEY|g" servidor/.env
+    safe_sed "s|IMGPROXY_SALT=pass|IMGPROXY_SALT=$IMGPROXY_SALT|g" servidor/.env
     safe_sed "s|^STUDIO_SERVICE_KEY_ENCRYPTION_KEY=.*|STUDIO_SERVICE_KEY_ENCRYPTION_KEY=$STUDIO_SERVICE_KEY_ENCRYPTION_KEY|g" servidor/.env
     safe_sed "s|^NGINX_HMAC_SECRET=.*|NGINX_HMAC_SECRET=$SHARED_NGINX_HMAC_SECRET|g" servidor/.env
     safe_sed "s|^INTERNAL_HMAC_SECRET=.*|INTERNAL_HMAC_SECRET=$SHARED_INTERNAL_HMAC_SECRET|g" servidor/.env

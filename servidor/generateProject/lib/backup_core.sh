@@ -46,14 +46,27 @@ backup_stop_project_containers() {
 
 backup_start_project_containers() {
   local project="$1" only="${2:-}"
-  local service name
-  for service in meta auth rest nginx; do
+  local service name health waited
+  # Start nginx first and wait for it to become healthy because auth/rest
+  # connect to the pooler through supabase-nginx-<project>:5432 on project-internal.
+  for service in nginx meta auth rest; do
     name="supabase-$service-$project"
     if [[ -n "$only" ]] && ! grep -qx "$name" <<< "$only"; then
       continue
     fi
     docker inspect "$name" >/dev/null 2>&1 || continue
     docker start "$name" >/dev/null || return 1
+    if [[ "$service" == "nginx" ]]; then
+      waited=0
+      while (( waited < 30 )); do
+        health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$name" 2>/dev/null || true)"
+        if [[ "$health" == "healthy" || "$health" == "none" ]]; then
+          break
+        fi
+        sleep 1
+        waited=$((waited + 1))
+      done
+    fi
   done
 }
 

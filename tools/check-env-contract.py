@@ -76,6 +76,7 @@ KNOWN_OPTIONAL = {
     "EDGE_BUNDLER_HMAC_SECRET": "segredo HMAC compartilhado por projects-api e edge-bundler; sem ele o bundling npm/JSR fica desativado",
     "EDGE_BUNDLER_TIMEOUT_SECONDS": "timeout opcional de bundling (padrao 60s) em edge_bundler.py",
     "EDGE_BUNDLER_MAX_ESZIP_BYTES": "limite maximo opcional de tamanho ESZIP em edge_bundler.py",
+    "EDGE_DB_HOST": "hostname do Postgres na rede isolada functions-db (padrao supabase-db)",
     "FUNCTIONS_TENANT_TEST_URL": "harness sintetico obrigatorio em run_functions_security_tests.py, nunca runtime",
     "FUNCTIONS_PROJECTION_TEST_DIR": "diretorio sintetico do mesmo harness, nunca runtime",
     "CONTROL_PLANE_TEST_DSN": "DSN descartavel gerado pelo runner obrigatorio de seguranca, nunca runtime",
@@ -102,6 +103,8 @@ REAL_FILE_PASS_ALLOWLIST = {
 REQUIRED_IN_REAL_ENV = [
     "PROJECT_SECRETS_MASTER_KEY",
     "PG_META_CRYPTO_KEY",
+    "IMGPROXY_KEY",
+    "IMGPROXY_SALT",
     "STUDIO_SERVICE_KEY_ENCRYPTION_KEY",
     "NGINX_HMAC_SECRET",
     "STUDIO_GATEWAY_HMAC_SECRET",
@@ -376,6 +379,8 @@ def check_real_files(
             if relative != "servidor/.env" and key in (
                 "PROJECT_SECRETS_MASTER_KEY",
                 "PG_META_CRYPTO_KEY",
+                "IMGPROXY_KEY",
+                "IMGPROXY_SALT",
                 "STUDIO_SERVICE_KEY_ENCRYPTION_KEY",
                 "NGINX_HMAC_SECRET",
                 "HOST_AGENT_HMAC_SECRET",

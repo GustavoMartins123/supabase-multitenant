@@ -4,10 +4,6 @@ defmodule RealtimeWeb.Router do
   require Logger
   require OpenTelemetry.Tracer, as: Tracer
 
-  alias Realtime.Api
-  alias Realtime.Api.Tenant
-  alias Realtime.Crypto
-
   import RealtimeWeb.ChannelsAuthorization, only: [authorize: 3]
 
   pipeline :browser do
@@ -145,12 +141,13 @@ defmodule RealtimeWeb.Router do
   end
 
   defp check_auth(conn, [secret_key, blocklist_key]) do
-    secret = Application.fetch_env!(:realtime, secret_key)
+    secrets = :realtime |> Application.fetch_env!(secret_key) |> List.wrap()
     blocklist = Application.get_env(:realtime, blocklist_key, [])
 
-    with {:ok, token} <- bearer_token(conn),
+    with ["Bearer " <> token] <- get_req_header(conn, "authorization"),
+         token <- Regex.replace(~r/\s|\n/, URI.decode(token), ""),
          false <- token in blocklist,
-         :ok <- authorize_request(conn, token, secret_key, secret) do
+         {:ok, _claims} <- authorize_any(token, secrets) do
       conn
     else
       _ ->
@@ -160,103 +157,13 @@ defmodule RealtimeWeb.Router do
     end
   end
 
-  defp bearer_token(conn) do
-    with ["Bearer " <> token] <- get_req_header(conn, "authorization") do
-      {:ok, Regex.replace(~r/\s|\n/, URI.decode(token), "")}
-    else
-      _ -> {:error, :missing_token}
-    end
-  end
-
-  defp authorize_request(conn, token, :api_jwt_secret, global_secret) do
-    case tenant_auth_context(conn) do
-      :none ->
-        authorize_with_secret(token, global_secret)
-
-      {:ok, context} ->
-        authorize_with_tenant_context(token, context)
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  defp authorize_request(_conn, token, _secret_key, global_secret), do: authorize_with_secret(token, global_secret)
-
-  defp authorize_with_secret(token, secret) do
-    case authorize(token, secret, nil) do
-      {:ok, _claims} -> :ok
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp authorize_with_tenant_context(token, %{secret: secret, tenant_id: tenant_id, source: source}) do
-    case authorize(token, secret, nil) do
-      {:ok, claims} -> validate_tenant_claims(claims, tenant_id, source)
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp validate_tenant_claims(claims, tenant_id, :payload) do
-    case Map.get(claims, "iss") do
-      ^tenant_id -> :ok
-      _ -> {:error, :tenant_claim_mismatch}
-    end
-  end
-
-  defp validate_tenant_claims(claims, tenant_id, :tenant) do
-    case Map.get(claims, "iss") do
-      nil -> :ok
-      ^tenant_id -> :ok
-      _ -> {:error, :tenant_claim_mismatch}
-    end
-  end
-
-  defp tenant_auth_context(conn) do
-    case tenant_context_from_existing_tenant(conn) || tenant_context_from_payload(conn) do
-      nil ->
-        if tenant_id_from_request(conn), do: {:error, :tenant_context_missing}, else: :none
-
-      context ->
-        {:ok, context}
-    end
-  end
-
-  defp tenant_context_from_existing_tenant(conn) do
-    external_id = tenant_id_from_request(conn)
-
-    with external_id when is_binary(external_id) <- external_id,
-         %Tenant{jwt_secret: jwt_secret} <- Api.get_tenant_by_external_id(external_id, use_replica?: false) do
-      %{
-        tenant_id: external_id,
-        secret: Crypto.decrypt!(jwt_secret),
-        source: :tenant
-      }
-    else
-      _ -> nil
-    end
-  end
-
-  defp tenant_context_from_payload(conn) do
-    tenant_params = Map.get(conn.body_params, "tenant", %{})
-    external_id = tenant_id_from_request(conn)
-
-    with jwt_secret when is_binary(jwt_secret) <- Map.get(tenant_params, "jwt_secret"),
-         tenant_id when is_binary(tenant_id) <- external_id do
-      %{
-        tenant_id: tenant_id,
-        secret: jwt_secret,
-        source: :payload
-      }
-    else
-      _ -> nil
-    end
-  end
-
-  defp tenant_id_from_request(conn) do
-    conn.path_params["tenant_id"] ||
-      get_in(conn.body_params, ["tenant", "external_id"]) ||
-      get_in(conn.params, ["tenant", "external_id"])
+  defp authorize_any(token, secrets) do
+    Enum.find_value(secrets, {:error, :unauthorized}, fn secret ->
+      case authorize(token, secret, nil) do
+        {:ok, claims} -> {:ok, claims}
+        _ -> nil
+      end
+    end)
   end
 
   defp dashboard_auth(conn, _opts) do

@@ -6,22 +6,44 @@ local str = require("resty.string")
 
 local M = {}
 M.VERSION = "internal-hmac-v1"
+M.DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024
 
 local function get_header(headers, name)
     return headers[name] or headers[name:lower()]
 end
 
-function M.read_current_body()
+function M.read_current_body(max_bytes)
+    local limit = tonumber(max_bytes) or M.DEFAULT_MAX_BODY_BYTES
+    if limit <= 0 then
+        limit = M.DEFAULT_MAX_BODY_BYTES
+    end
+    local headers = ngx.req.get_headers()
+    local content_length = tonumber(get_header(headers, "Content-Length") or "")
+    if content_length and content_length > limit then
+        return nil, "request body too large"
+    end
     ngx.req.read_body()
     local body = ngx.req.get_body_data()
-    if body then return body end
+    if body then
+        if #body > limit then
+            return nil, "request body too large"
+        end
+        return body
+    end
     local body_file = ngx.req.get_body_file()
     if not body_file then return "" end
     local file, err = io.open(body_file, "rb")
     if not file then return nil, err or "failed to open temporary request body" end
-    local data, read_err = file:read("*a")
+    local file_size = file:seek("end")
+    if file_size and file_size > limit then
+        file:close()
+        return nil, "request body too large"
+    end
+    file:seek("set", 0)
+    local data, read_err = file:read(limit + 1)
     file:close()
     if data == nil then return nil, read_err or "failed to read temporary request body" end
+    if #data > limit then return nil, "request body too large" end
     return data
 end
 
@@ -113,7 +135,12 @@ function M.verify_current_request(secret, expected_service, options)
         return nil, ngx.HTTP_UNAUTHORIZED, "Expired internal signature"
     end
     local body, body_err = M.read_current_body()
-    if body == nil then return nil, ngx.HTTP_BAD_REQUEST, body_err or "Invalid request body" end
+    if body == nil then
+        if body_err == "request body too large" then
+            return nil, ngx.HTTP_REQUEST_ENTITY_TOO_LARGE, body_err
+        end
+        return nil, ngx.HTTP_BAD_REQUEST, body_err or "Invalid request body"
+    end
     local body_hash, hash_err = M.sha256_hex(body)
     if not body_hash then return nil, ngx.HTTP_INTERNAL_SERVER_ERROR, hash_err or "Failed to hash body" end
     local canonical = M.canonical(service, ngx.req.get_method(), ngx.var.request_uri, timestamp, nonce, body_hash)
@@ -129,8 +156,13 @@ function M.verify_current_request(secret, expected_service, options)
     end
     local nonce_key = service .. ":" .. string.lower(nonce)
     local nonce_ttl = math.max(5, max_skew * 2 + 5)
-    local added = nonce_cache:add(nonce_key, true, nonce_ttl)
-    if not added then return nil, ngx.HTTP_UNAUTHORIZED, "Replayed internal signature" end
+    local added, add_err = nonce_cache:safe_add(nonce_key, true, nonce_ttl)
+    if not added then
+        if add_err == "no memory" then
+            return nil, ngx.HTTP_SERVICE_UNAVAILABLE, "Internal nonce cache is full"
+        end
+        return nil, ngx.HTTP_UNAUTHORIZED, "Replayed internal signature"
+    end
     return true
 end
 

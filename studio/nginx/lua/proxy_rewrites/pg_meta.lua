@@ -115,10 +115,21 @@ function _M.rewrite(context)
     end
 
     local args, args_err = ngx.req.get_uri_args()
-    if args_err then return nil, "Invalid pg-meta query parameters" end
+    if args_err == "truncated" then
+        return nil, "Too many pg-meta query parameters"
+    elseif args_err then
+        return nil, "Invalid pg-meta query parameters"
+    end
     local id = args.id
     if id ~= nil then
-        if type(id) ~= "string" or id == "" or #id > 128 then
+        if type(id) ~= "string"
+            or #id == 0
+            or #id > 128
+            or id == "."
+            or id == ".."
+            or id:find("..", 1, true) ~= nil
+            or not id:match("^[A-Za-z0-9_.:%-]+$")
+        then
             return nil, "Invalid pg-meta resource id"
         end
         args.id = nil

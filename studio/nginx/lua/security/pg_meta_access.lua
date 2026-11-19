@@ -24,10 +24,13 @@ ngx.req.set_header("apikey", key)
 
 local rewritten, rewrite_err = require("proxy_rewrites.pg_meta").rewrite(context)
 if not rewritten then
-    ngx.status = ngx.HTTP_BAD_REQUEST
+    local status = rewrite_err == "request body too large"
+        and ngx.HTTP_REQUEST_ENTITY_TOO_LARGE
+        or ngx.HTTP_BAD_REQUEST
+    ngx.status = status
     ngx.header["Content-Type"] = "application/json; charset=utf-8"
     ngx.say(require("cjson.safe").encode({ error = "invalid_pg_meta_request", message = rewrite_err }))
-    return ngx.exit(ngx.HTTP_BAD_REQUEST)
+    return ngx.exit(status)
 end
 
 require("security.projects_api_signer").enforce()

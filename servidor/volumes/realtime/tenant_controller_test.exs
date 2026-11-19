@@ -9,7 +9,6 @@ defmodule RealtimeWeb.TenantControllerTest do
   alias Realtime.Api.Tenant
   alias Realtime.Crypto
   alias Realtime.Database
-  alias Realtime.PromEx.Plugins.Tenants
   alias Realtime.Tenants
   alias Realtime.Tenants.Cache
   alias Realtime.Tenants.Connect
@@ -32,9 +31,8 @@ defmodule RealtimeWeb.TenantControllerTest do
     {:ok, conn: conn}
   end
 
-  defp with_tenant(%{conn: conn}) do
-    tenant = Containers.checkout_tenant(run_migrations: true)
-    %{conn: conn_with_tenant_jwt(conn, tenant, tenant.external_id), tenant: tenant}
+  defp with_tenant(_context) do
+    %{tenant: Containers.checkout_tenant(run_migrations: true)}
   end
 
   defp conn_with_tenant_jwt(conn, secret_or_tenant, tenant_id) do
@@ -57,26 +55,17 @@ defmodule RealtimeWeb.TenantControllerTest do
       refute get_in(response, ["data", "extensions", Access.at(0), "settings", "db_password"])
     end
 
-    test "rejects requests for an unknown tenant id", %{conn: conn} do
+    test "not_found if tenant doesn't exist", %{conn: conn} do
       conn = get(conn, ~p"/api/tenants/no")
-      assert response(conn, 403) == ""
+      assert json_response(conn, 404) == %{"message" => "Tenant not found"}
     end
 
-    test "accepts tenant jwt for an existing tenant", %{conn: conn, tenant: tenant} do
-      conn =
-        conn
-        |> conn_with_tenant_jwt(tenant, tenant.external_id)
-        |> get(~p"/api/tenants/#{tenant.external_id}")
-
-      assert json_response(conn, 200)["data"]["external_id"] == tenant.external_id
-    end
-
-    test "rejects global jwt for an existing tenant", %{tenant: tenant} do
+    test "accepts global jwt for an existing tenant", %{tenant: tenant} do
       key = Application.get_env(:realtime, :api_jwt_secret)
       jwt =
         generate_jwt_token(key, %{
           role: "authenticated",
-          iss: tenant.external_id,
+          iss: "supabase",
           exp: System.system_time(:second) + 100_000
         })
 
@@ -84,6 +73,15 @@ defmodule RealtimeWeb.TenantControllerTest do
         build_conn()
         |> put_req_header("accept", "application/json")
         |> put_req_header("authorization", "Bearer #{jwt}")
+        |> get(~p"/api/tenants/#{tenant.external_id}")
+
+      assert json_response(conn, 200)["data"]["external_id"] == tenant.external_id
+    end
+
+    test "rejects tenant jwt for an existing tenant", %{conn: conn, tenant: tenant} do
+      conn =
+        conn
+        |> conn_with_tenant_jwt(tenant, tenant.external_id)
         |> get(~p"/api/tenants/#{tenant.external_id}")
 
       assert response(conn, 403) == ""
@@ -119,10 +117,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       attrs = default_tenant_attrs(port)
       attrs = Map.put(attrs, "external_id", external_id)
 
-      conn =
-        conn
-        |> conn_with_tenant_jwt(attrs["jwt_secret"], external_id)
-        |> post(~p"/api/tenants", tenant: attrs)
+      conn = post(conn, ~p"/api/tenants", tenant: attrs)
 
       assert %{"id" => _id, "external_id" => ^external_id} = json_response(conn, 201)["data"]
 
@@ -142,20 +137,7 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert tenant.migrations_ran > 0
     end
 
-    test "rejects global jwt when tenant payload declares a tenant secret", %{conn: conn} do
-      external_id = random_string()
-      {:ok, port} = Containers.checkout()
-
-      attrs =
-        default_tenant_attrs(port)
-        |> Map.put("external_id", external_id)
-
-      conn = post(conn, ~p"/api/tenants", tenant: attrs)
-
-      assert response(conn, 403) == ""
-    end
-
-    test "accepts tenant jwt matching the payload secret", %{conn: conn} do
+    test "rejects tenant jwt matching the payload secret", %{conn: conn} do
       external_id = random_string()
       {:ok, port} = Containers.checkout()
       jwt_secret = random_string()
@@ -170,7 +152,8 @@ defmodule RealtimeWeb.TenantControllerTest do
         |> conn_with_tenant_jwt(jwt_secret, external_id)
         |> post(~p"/api/tenants", tenant: attrs)
 
-      assert json_response(conn, 201)["data"]["external_id"] == external_id
+      assert response(conn, 403) == ""
+      assert nil == Tenants.get_tenant_by_external_id(external_id)
     end
   end
 
@@ -183,10 +166,7 @@ defmodule RealtimeWeb.TenantControllerTest do
 
       attrs = default_tenant_attrs(port)
 
-      conn =
-        conn
-        |> conn_with_tenant_jwt(attrs["jwt_secret"], external_id)
-        |> put(~p"/api/tenants/#{external_id}", tenant: attrs)
+      conn = put(conn, ~p"/api/tenants/#{external_id}", tenant: attrs)
 
       assert %{"id" => _id, "external_id" => ^external_id} = json_response(conn, 201)["data"]
       [%{"settings" => settings}] = json_response(conn, 201)["data"]["extensions"]
@@ -200,6 +180,20 @@ defmodule RealtimeWeb.TenantControllerTest do
 
       assert Crypto.encrypt!("postgres") == settings["db_password"]
       assert tenant.migrations_ran > 0
+    end
+
+    test "rejects tenant jwt matching the payload secret", %{conn: conn} do
+      external_id = random_string()
+      {:ok, port} = Containers.checkout()
+      attrs = default_tenant_attrs(port)
+
+      conn =
+        conn
+        |> conn_with_tenant_jwt(attrs["jwt_secret"], external_id)
+        |> put(~p"/api/tenants/#{external_id}", tenant: attrs)
+
+      assert response(conn, 403) == ""
+      assert nil == Tenants.get_tenant_by_external_id(external_id)
     end
   end
 
@@ -393,6 +387,16 @@ defmodule RealtimeWeb.TenantControllerTest do
       assert response(conn, 403) == ""
     end
 
+    test "rejects tenant jwt on delete", %{conn: conn, tenant: tenant} do
+      conn =
+        conn
+        |> conn_with_tenant_jwt(tenant, tenant.external_id)
+        |> delete(~p"/api/tenants/#{tenant.external_id}")
+
+      assert response(conn, 403) == ""
+      assert Tenants.get_tenant_by_external_id(tenant.external_id)
+    end
+
     test "sets appropriate observability metadata", %{conn: conn, tenant: tenant} do
       external_id = tenant.external_id
 
@@ -506,6 +510,15 @@ defmodule RealtimeWeb.TenantControllerTest do
     test "returns 403 when jwt is invalid", %{conn: conn, tenant: tenant} do
       conn = put_req_header(conn, "authorization", "Bearer potato")
       conn = post(conn, ~p"/api/tenants/#{tenant.external_id}/shutdown")
+      assert response(conn, 403) == ""
+    end
+
+    test "rejects tenant jwt on shutdown", %{conn: conn, tenant: tenant} do
+      conn =
+        conn
+        |> conn_with_tenant_jwt(tenant, tenant.external_id)
+        |> post(~p"/api/tenants/#{tenant.external_id}/shutdown")
+
       assert response(conn, 403) == ""
     end
 

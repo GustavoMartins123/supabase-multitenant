@@ -181,9 +181,15 @@ def validate_command_args(command: str, project: str, args: dict[str, Any]) -> l
     }:
         reject_unknown(set())
     elif command == "rotate_keys":
-        reject_unknown({"trigger"})
+        reject_unknown({"trigger", "rotate_jwt_secret"})
         if args.get("trigger") not in {"manual", "automatic"}:
             errors.append("invalid_rotation_trigger")
+        if "rotate_jwt_secret" in args:
+            rotate_jwt = args.get("rotate_jwt_secret")
+            if not isinstance(rotate_jwt, bool):
+                errors.append("invalid_rotate_jwt_secret")
+            elif rotate_jwt and args.get("trigger") != "manual":
+                errors.append("automatic_jwt_secret_rotation_not_allowed")
     elif command in {"delete_project_storage", "delete_project_files"}:
         reject_unknown({"tenant_uuid"})
         if not is_valid_uuid(args.get("tenant_uuid")):

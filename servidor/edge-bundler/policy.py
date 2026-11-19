@@ -6,8 +6,9 @@ import ipaddress
 import json
 from pathlib import PurePosixPath
 import re
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
+MAX_FILES = 128
 MAX_ESZIP_BYTES = 32 * 1024 * 1024
 MAX_REGISTRIES_PER_PROJECT = 16
 MAX_REGISTRY_TOKEN_BYTES = 4096
@@ -23,10 +24,12 @@ JSR_SPEC_RE = re.compile(
 NODE_SPEC_RE = re.compile(r"^node:[a-z0-9_./-]+$")
 SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 STATIC_IMPORT_RE = re.compile(
-    r"""(?:^|[;\n}])\s*(?:import|export)\s+(?:type\s+)?(?:[^;'"`]*?\bfrom\s+)?(['"])([^'"\n]+)\1""",
+    r"""(?:^|[;\r\n\u2028\u2029}])\s*(?:import\s*(?:(?:type\s+)?(?:[\w$*,\s{}]*?)\bfrom\s*)?|export\s*(?:type\b\s*)?(?:\*(?:\s*as\s+[\w$]+)?|\{[^}]*\})\s*from\s*)(['"])((?:\\.|(?!\1)[^\r\n\u2028\u2029])*)\1""",
     re.MULTILINE,
 )
-DYNAMIC_IMPORT_RE = re.compile(r"""\bimport\s*\(\s*(['"])([^'"\n]+)\1""")
+DYNAMIC_IMPORT_RE = re.compile(
+    r"""(?<![.\w$])import\s*\(\s*(['"`])((?:\\.|(?!\1)[\s\S])*)\1\s*(?:,|\))"""
+)
 
 REGISTRY_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]{0,79}$")
 NPM_SCOPE_RE = re.compile(r"^@[a-z0-9][a-z0-9._-]{0,127}$")
@@ -34,59 +37,424 @@ PUBLIC_HOSTNAME_RE = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-
 PRIVATE_HOSTNAME_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*")
 PEM_CERT_RE = re.compile(r"-----BEGIN CERTIFICATE-----\s+([A-Za-z0-9+/=\s]+?)\s+-----END CERTIFICATE-----")
 
+_JS_LINE_TERMS = ("\n", "\r", "\u2028", "\u2029")
+_REGEX_PRECEDING_KEYWORDS = frozenset({
+    "return", "throw", "case", "delete", "void", "typeof",
+    "instanceof", "in", "of", "new", "yield", "await", "else", "do",
+})
+_METHOD_MODIFIERS = frozenset({
+    "async", "static", "public", "private", "protected",
+    "readonly", "override", "abstract", "get", "set",
+})
+_JSX_CLOSE_TAG_RE = re.compile(r"/(?:[A-Za-z_$][A-Za-z0-9_$.:-]*)?\s*>")
+_MULTI_CHAR_OPS = (
+    ">>>=", "===", "!==", ">>>", "<<=", ">>=", "**=", "&&=", "||=", "??=",
+    "...", "=>", "?.", "++", "--", "==", "!=", "<=", ">=", "&&", "||",
+    "??", "**", "<<", ">>", "+=", "-=", "*=", "%=", "&=", "|=", "^=",
+)
+
 
 class DependencyPolicyError(ValueError):
     """Raised when a function or registry configuration violates security policy."""
+
+
+PolicyViolationError = DependencyPolicyError
 
 
 class BundleBuildError(RuntimeError):
     """Raised when offline-safe ESZIP compilation fails."""
 
 
-def _strip_js_comments(source: str) -> str:
-    """Strip JS/TS comments while preserving quoted and template string literals."""
-    out: list[str] = []
-    i = 0
+def _scan_regex_literal(source: str, start: int) -> int | None:
+    """Scan a JS/TS RegExp literal starting at '/' or return None if not a single-line regex."""
     n = len(source)
+    j = start + 1
+    if j >= n or source[j] in ("/", "*", *_JS_LINE_TERMS):
+        return None
+    in_class = False
+    while j < n:
+        ch = source[j]
+        if ch in _JS_LINE_TERMS:
+            return None
+        if ch == "\\":
+            if j + 1 >= n or source[j + 1] in _JS_LINE_TERMS:
+                return None
+            j += 2
+            continue
+        if ch == "[":
+            in_class = True
+            j += 1
+            continue
+        if ch == "]" and in_class:
+            in_class = False
+            j += 1
+            continue
+        if ch == "/" and not in_class:
+            j += 1
+            while j < n and (source[j].isalnum() or source[j] in ("_", "$")):
+                j += 1
+            return j
+        j += 1
+    return None
+
+
+def _scan_template_chunk(source: str, start: int, pos: int) -> tuple[str, str, int]:
+    """Scan template text until closing backtick or '${' substitution start."""
+    n = len(source)
+    i = pos
+    while i < n:
+        cur = source[i]
+        if cur == "\\":
+            if i + 1 < n:
+                if source[i + 1] == "\r" and i + 2 < n and source[i + 2] == "\n":
+                    i += 3
+                else:
+                    i += 2
+            else:
+                i += 1
+            continue
+        if cur == "`":
+            i += 1
+            return "closed", source[start:i], i
+        if cur == "$" and i + 1 < n and source[i + 1] == "{":
+            i += 2
+            return "subst", source[start:i], i
+        i += 1
+    return "eof", source[start:i], i
+
+
+def _lex_js(source: str) -> list[tuple[str, str]]:
+    """Tokenize JS/TS source, tracking comments, strings, regexes, and nested template literals."""
+    tokens: list[tuple[str, str]] = []
+    n = len(source)
+    i = 0
+    expr_allowed = True
+    pending_ctrl_paren = False
+    last_sig_kind = ""
+    last_sig_val = ""
+    paren_stack: list[bool] = []
+    brace_stack: list[str] = []
+
     while i < n:
         ch = source[i]
-        if ch in {"'", '"', "`"}:
+        if i == 0 and source.startswith("#!"):
+            i = 2
+            while i < n and source[i] not in _JS_LINE_TERMS:
+                i += 1
+            tokens.append(("comment_line", source[:i]))
+            continue
+        if ch in _JS_LINE_TERMS:
+            if ch == "\r" and i + 1 < n and source[i + 1] == "\n":
+                tokens.append(("nl", "\r\n"))
+                i += 2
+            else:
+                tokens.append(("nl", ch))
+                i += 1
+            continue
+        if ch.isspace() or ch == "\ufeff":
+            start = i
+            i += 1
+            while i < n and source[i] not in _JS_LINE_TERMS and (source[i].isspace() or source[i] == "\ufeff"):
+                i += 1
+            tokens.append(("ws", source[start:i]))
+            continue
+        if ch == "/" and i + 1 < n and source[i + 1] == "/":
+            start = i
+            i += 2
+            while i < n and source[i] not in _JS_LINE_TERMS:
+                i += 1
+            tokens.append(("comment_line", source[start:i]))
+            continue
+        if ch == "/" and i + 1 < n and source[i + 1] == "*":
+            start = i
+            i += 2
+            while i + 1 < n and not (source[i] == "*" and source[i + 1] == "/"):
+                i += 1
+            i = min(n, i + 2)
+            tokens.append(("comment_block", source[start:i]))
+            continue
+        if ch in ("'", '"'):
             quote = ch
-            out.append(ch)
+            start = i
             i += 1
             while i < n:
                 cur = source[i]
-                out.append(cur)
-                if cur == "\\" and i + 1 < n:
-                    out.append(source[i + 1])
-                    i += 2
+                if cur == "\\":
+                    if i + 1 < n:
+                        if source[i + 1] == "\r" and i + 2 < n and source[i + 2] == "\n":
+                            i += 3
+                        else:
+                            i += 2
+                    else:
+                        i += 1
                     continue
                 if cur == quote:
                     i += 1
                     break
+                if cur in _JS_LINE_TERMS:
+                    break
                 i += 1
+            lit = source[start:i]
+            tokens.append(("string", lit))
+            expr_allowed = False
+            pending_ctrl_paren = False
+            last_sig_kind = "string"
+            last_sig_val = lit
             continue
-        if ch == "/" and i + 1 < n and source[i + 1] == "/":
-            i += 2
-            while i < n and source[i] != "\n":
+        if ch == "`":
+            mode, chunk, i = _scan_template_chunk(source, i, i + 1)
+            if mode == "subst":
+                tokens.append(("template_head", chunk))
+                brace_stack.append("template")
+                expr_allowed = True
+                pending_ctrl_paren = False
+                last_sig_kind = "template_head"
+                last_sig_val = "${"
+            else:
+                tokens.append(("template_nosub", chunk))
+                expr_allowed = False
+                pending_ctrl_paren = False
+                last_sig_kind = "template_nosub"
+                last_sig_val = chunk
+            continue
+        if ch == "}":
+            ctx = brace_stack.pop() if brace_stack else "block"
+            if ctx == "template":
+                mode, chunk, i = _scan_template_chunk(source, i, i + 1)
+                if mode == "subst":
+                    tokens.append(("template_middle", chunk))
+                    brace_stack.append("template")
+                    expr_allowed = True
+                    pending_ctrl_paren = False
+                    last_sig_kind = "template_middle"
+                    last_sig_val = "${"
+                else:
+                    tokens.append(("template_tail", chunk))
+                    expr_allowed = False
+                    pending_ctrl_paren = False
+                    last_sig_kind = "template_tail"
+                    last_sig_val = chunk
+            else:
+                tokens.append(("punct", "}"))
                 i += 1
+                expr_allowed = ctx == "block"
+                pending_ctrl_paren = False
+                last_sig_kind = "punct"
+                last_sig_val = "}"
             continue
-        if ch == "/" and i + 1 < n and source[i + 1] == "*":
-            i += 2
-            while i + 1 < n and not (source[i] == "*" and source[i + 1] == "/"):
-                if source[i] == "\n":
-                    out.append("\n")
+        if ch == "{":
+            is_obj = (
+                expr_allowed
+                and bool(last_sig_kind)
+                and last_sig_val not in {"}", ";", ")", "=>", "else", "do", "try", "finally"}
+            )
+            brace_stack.append("obj" if is_obj else "block")
+            tokens.append(("punct", "{"))
+            i += 1
+            expr_allowed = True
+            pending_ctrl_paren = False
+            last_sig_kind = "punct"
+            last_sig_val = "{"
+            continue
+        if ch == "(":
+            paren_stack.append(pending_ctrl_paren)
+            pending_ctrl_paren = False
+            tokens.append(("punct", "("))
+            i += 1
+            expr_allowed = True
+            last_sig_kind = "punct"
+            last_sig_val = "("
+            continue
+        if ch == ")":
+            is_ctrl = paren_stack.pop() if paren_stack else False
+            tokens.append(("punct", ")"))
+            i += 1
+            expr_allowed = is_ctrl
+            pending_ctrl_paren = False
+            last_sig_kind = "punct"
+            last_sig_val = ")"
+            continue
+        if ch == "/":
+            if expr_allowed and not (i > 0 and source[i - 1] == "<" and _JSX_CLOSE_TAG_RE.match(source, i)):
+                end_re = _scan_regex_literal(source, i)
+                if end_re is not None:
+                    tokens.append(("regex", source[i:end_re]))
+                    i = end_re
+                    expr_allowed = False
+                    pending_ctrl_paren = False
+                    last_sig_kind = "regex"
+                    last_sig_val = "/re/"
+                    continue
+            op = "/=" if (i + 1 < n and source[i + 1] == "=") else "/"
+            tokens.append(("punct", op))
+            i += len(op)
+            expr_allowed = True
+            pending_ctrl_paren = False
+            last_sig_kind = "punct"
+            last_sig_val = op
+            continue
+        if ch.isalpha() or ch in ("_", "$") or (
+            ch == "#" and i + 1 < n and (source[i + 1].isalpha() or source[i + 1] in ("_", "$"))
+        ):
+            start = i
+            i += 1
+            while i < n and (source[i].isalnum() or source[i] in ("_", "$")):
                 i += 1
+            ident = source[start:i]
+            tokens.append(("ident", ident))
+            if last_sig_kind == "punct" and last_sig_val in {".", "?."}:
+                expr_allowed = False
+                pending_ctrl_paren = False
+            elif ident in {"if", "while", "for", "with"}:
+                pending_ctrl_paren = True
+                expr_allowed = False
+            elif ident == "await" and last_sig_val == "for":
+                pending_ctrl_paren = True
+                expr_allowed = True
+            else:
+                pending_ctrl_paren = False
+                expr_allowed = ident in _REGEX_PRECEDING_KEYWORDS
+            last_sig_kind = "ident"
+            last_sig_val = ident
+            continue
+        if ch.isdigit() or (ch == "." and i + 1 < n and source[i + 1].isdigit()):
+            start = i
+            i += 1
+            while i < n and (source[i].isalnum() or source[i] in ("_", ".")):
+                if source[i] in ("e", "E") and i + 1 < n and source[i + 1] in ("+", "-"):
+                    i += 2
+                    continue
+                i += 1
+            num = source[start:i]
+            tokens.append(("number", num))
+            expr_allowed = False
+            pending_ctrl_paren = False
+            last_sig_kind = "number"
+            last_sig_val = num
+            continue
+
+        matched_op = ""
+        for candidate in _MULTI_CHAR_OPS:
+            if source.startswith(candidate, i):
+                matched_op = candidate
+                break
+        if matched_op:
+            tokens.append(("punct", matched_op))
+            i += len(matched_op)
+            if matched_op in {"?.", "++", "--"}:
+                expr_allowed = False
+            else:
+                expr_allowed = True
+            pending_ctrl_paren = False
+            last_sig_kind = "punct"
+            last_sig_val = matched_op
+            continue
+
+        tokens.append(("punct", ch))
+        i += 1
+        if ch in {"]", "."}:
+            expr_allowed = False
+        elif ch == "!":
+            expr_allowed = bool(expr_allowed)
+        else:
+            expr_allowed = True
+        pending_ctrl_paren = False
+        last_sig_kind = "punct"
+        last_sig_val = ch
+
+    return tokens
+
+
+def _strip_js_comments(source: str) -> str:
+    """Strip JS/TS comments while preserving quoted, regex, and template string literals."""
+    out: list[str] = []
+    for kind, val in _lex_js(source):
+        if kind == "comment_line":
+            continue
+        if kind == "comment_block":
+            out.append("\n" if any(ch in val for ch in _JS_LINE_TERMS) else " ")
+            continue
+        if kind == "nl":
+            out.append("\n")
+            continue
+        out.append(val)
+    return "".join(out)
+
+
+def _decode_js_string_literal(token_text: str, source_name: str = "<source>") -> str:
+    if len(token_text) < 2 or token_text[0] not in ("'", '"') or token_text[-1] != token_text[0]:
+        raise DependencyPolicyError(f"Unterminated string literal in import in {source_name}")
+    inner = token_text[1:-1]
+    if "\\" not in inner:
+        return inner
+    out: list[str] = []
+    i = 0
+    n = len(inner)
+    simple_escapes = {"n": "\n", "r": "\r", "t": "\t", "b": "\b", "f": "\f", "v": "\v"}
+    while i < n:
+        ch = inner[i]
+        if ch != "\\":
+            out.append(ch)
+            i += 1
+            continue
+        i += 1
+        if i >= n:
+            raise DependencyPolicyError(f"Invalid escape sequence in import specifier in {source_name}")
+        esc = inner[i]
+        if esc == "\r" and i + 1 < n and inner[i + 1] == "\n":
             i += 2
             continue
-        out.append(ch)
+        if esc in _JS_LINE_TERMS:
+            i += 1
+            continue
+        if esc in simple_escapes:
+            out.append(simple_escapes[esc])
+            i += 1
+            continue
+        if esc == "0":
+            if i + 1 < n and inner[i + 1].isdigit():
+                raise DependencyPolicyError(f"Invalid octal escape in import specifier in {source_name}")
+            out.append("\0")
+            i += 1
+            continue
+        if esc == "x":
+            hex_part = inner[i + 1:i + 3]
+            if len(hex_part) != 2 or not all(c in "0123456789abcdefABCDEF" for c in hex_part):
+                raise DependencyPolicyError(f"Invalid hex escape in import specifier in {source_name}")
+            out.append(chr(int(hex_part, 16)))
+            i += 3
+            continue
+        if esc == "u":
+            if i + 1 < n and inner[i + 1] == "{":
+                end_brace = inner.find("}", i + 2)
+                hex_part = inner[i + 2:end_brace] if end_brace != -1 else ""
+                if not (1 <= len(hex_part) <= 6) or not all(c in "0123456789abcdefABCDEF" for c in hex_part):
+                    raise DependencyPolicyError(f"Invalid unicode escape in import specifier in {source_name}")
+                cp = int(hex_part, 16)
+                if cp > 0x10FFFF or 0xD800 <= cp <= 0xDFFF:
+                    raise DependencyPolicyError(f"Invalid unicode code point in import specifier in {source_name}")
+                out.append(chr(cp))
+                i = end_brace + 1
+                continue
+            hex_part = inner[i + 1:i + 5]
+            if len(hex_part) != 4 or not all(c in "0123456789abcdefABCDEF" for c in hex_part):
+                raise DependencyPolicyError(f"Invalid unicode escape in import specifier in {source_name}")
+            cp = int(hex_part, 16)
+            if 0xD800 <= cp <= 0xDFFF:
+                raise DependencyPolicyError(f"Invalid surrogate escape in import specifier in {source_name}")
+            out.append(chr(cp))
+            i += 5
+            continue
+        if esc.isdigit():
+            raise DependencyPolicyError(f"Invalid numeric escape in import specifier in {source_name}")
+        out.append(esc)
         i += 1
     return "".join(out)
 
 
 def _validate_relative_import(spec: str, source_name: str) -> None:
-    if "?" in spec or "#" in spec or "\0" in spec:
-        raise DependencyPolicyError(f"Unsupported query or fragment in local import '{spec}' ({source_name})")
+    if "?" in spec or "#" in spec or "\0" in spec or "\\" in spec or "%" in spec:
+        raise DependencyPolicyError(f"Unsupported query, fragment, or encoding in local import '{spec}' ({source_name})")
     base_dir = PurePosixPath(source_name).parent
     combined = (base_dir / PurePosixPath(spec)).parts
     depth = 0
@@ -99,15 +467,32 @@ def _validate_relative_import(spec: str, source_name: str) -> None:
                 raise DependencyPolicyError(f"Local import '{spec}' in {source_name} escapes function directory")
         else:
             depth += 1
+    if depth <= 0:
+        raise DependencyPolicyError(f"Local import '{spec}' in {source_name} must reference a file inside function directory")
 
 
 def _validate_specifier(spec: str, source_name: str) -> str | None:
     """Validate an import specifier and return 'npm', 'jsr', or None."""
-    if not isinstance(spec, str) or not spec or any(c.isspace() or ord(c) < 32 for c in spec):
+    if (
+        not isinstance(spec, str)
+        or not spec
+        or "\\" in spec
+        or any(c.isspace() or ord(c) < 32 or ord(c) == 127 or 0xD800 <= ord(c) <= 0xDFFF for c in spec)
+    ):
         raise DependencyPolicyError(f"Invalid import specifier in {source_name}")
+    unquoted = unquote(spec)
+    if unquoted != spec and (
+        spec.startswith(("/", "./", "../"))
+        or unquoted.startswith(("/", "./", "../"))
+        or unquoted in {".", ".."}
+        or "\\" in unquoted
+        or ".." in PurePosixPath(unquoted).parts
+        or SCHEME_RE.match(unquoted)
+    ):
+        raise DependencyPolicyError(f"Disallowed percent-encoded import specifier '{spec}' in {source_name}")
     if spec.startswith("/"):
         raise DependencyPolicyError(f"Absolute path import '{spec}' is not allowed in {source_name}")
-    if spec.startswith(("./", "../")):
+    if spec in {".", ".."} or spec.startswith(("./", "../")):
         _validate_relative_import(spec, source_name)
         return None
     if SCHEME_RE.match(spec):
@@ -121,30 +506,227 @@ def _validate_specifier(spec: str, source_name: str) -> str | None:
                 raise DependencyPolicyError(f"Invalid jsr specifier '{spec}' in {source_name}")
             return "jsr"
         if lower.startswith("node:"):
-            if not NODE_SPEC_RE.fullmatch(spec):
+            if not NODE_SPEC_RE.fullmatch(spec) or ".." in PurePosixPath(spec[5:]).parts:
                 raise DependencyPolicyError(f"Invalid node specifier '{spec}' in {source_name}")
             return None
         raise DependencyPolicyError(
             f"Disallowed import scheme '{spec}' in {source_name}; use local files, 'npm:', 'jsr:', or 'node:'"
         )
+    if ".." in PurePosixPath(spec).parts:
+        raise DependencyPolicyError(f"Invalid traversal segment in import specifier '{spec}' in {source_name}")
     return None
 
 
-def _extract_source_specifiers(source: str) -> list[str]:
-    stripped = _strip_js_comments(source)
+def _is_method_or_signature_decl(sig: list[tuple[str, str]], kw_idx: int, open_paren_idx: int) -> bool:
+    """Return True when '<kw>(...)' is a function/object/class/interface method declaration."""
+    if kw_idx > 0 and sig[kw_idx - 1] == ("ident", "function"):
+        return True
+    if kw_idx == 0:
+        return False
+    pk, pv = sig[kw_idx - 1]
+    if not (
+        (pk == "punct" and pv in {"{", ",", ";", "*"})
+        or (pk == "ident" and pv in _METHOD_MODIFIERS)
+    ):
+        return False
+    m = len(sig)
+    depth = 1
+    close_idx = open_paren_idx + 1
+    while close_idx < m and depth > 0:
+        if sig[close_idx] == ("punct", "("):
+            depth += 1
+        elif sig[close_idx] == ("punct", ")"):
+            depth -= 1
+        close_idx += 1
+    if depth != 0:
+        return False
+    close_idx -= 1
+    if close_idx == open_paren_idx + 1:
+        return close_idx + 1 < m and sig[close_idx + 1][0] == "punct" and sig[close_idx + 1][1] in {"{", ":"}
+    first_k, _ = sig[open_paren_idx + 1]
+    if first_k != "ident" and sig[open_paren_idx + 1] != ("punct", "..."):
+        return False
+    if (
+        open_paren_idx + 2 < close_idx
+        and sig[open_paren_idx + 1][0] == "ident"
+        and (
+            sig[open_paren_idx + 2] == ("punct", ":")
+            or (
+                sig[open_paren_idx + 2] == ("punct", "?")
+                and open_paren_idx + 3 < close_idx
+                and sig[open_paren_idx + 3] == ("punct", ":")
+            )
+        )
+    ):
+        return True
+    return close_idx + 1 < m and sig[close_idx + 1] == ("punct", "{")
+
+
+def _extract_source_specifiers(source: str, source_name: str = "<source>") -> list[str]:
+    sig = [
+        (kind, val)
+        for kind, val in _lex_js(source)
+        if kind not in {"ws", "nl", "comment_line", "comment_block"}
+    ]
     specs: list[str] = []
-    for match in STATIC_IMPORT_RE.finditer(stripped):
-        specs.append(match.group(2))
-    for match in DYNAMIC_IMPORT_RE.finditer(stripped):
-        specs.append(match.group(2))
+    m = len(sig)
+    is_cjs = PurePosixPath(source_name).suffix.lower() in {".cjs", ".cts"}
+    idx = 0
+
+    while idx < m:
+        kind, val = sig[idx]
+        is_member = idx > 0 and sig[idx - 1][0] == "punct" and sig[idx - 1][1] in {".", "?."}
+        is_alias = idx > 0 and sig[idx - 1] == ("ident", "as")
+
+        if kind == "ident" and val == "import" and not is_member and not is_alias:
+            if idx + 1 >= m:
+                raise DependencyPolicyError(f"Incomplete import statement in {source_name}")
+            nk, nv = sig[idx + 1]
+            if nk == "punct" and nv in {".", ":", "?", ",", "}"}:
+                idx += 1
+                continue
+            if nk == "punct" and nv == "(":
+                if _is_method_or_signature_decl(sig, idx, idx + 1):
+                    idx += 1
+                    continue
+                if (
+                    idx + 3 < m
+                    and sig[idx + 2][0] == "string"
+                    and sig[idx + 3] in {("punct", ")"), ("punct", ",")}
+                ):
+                    specs.append(_decode_js_string_literal(sig[idx + 2][1], source_name))
+                    idx += 3
+                    continue
+                raise DependencyPolicyError(
+                    f"Dynamic import() requires a static string literal specifier in {source_name}"
+                )
+            if nk == "string":
+                specs.append(_decode_js_string_literal(nv, source_name))
+                idx += 2
+                continue
+            if nk in {"template_nosub", "template_head"}:
+                raise DependencyPolicyError(f"Template literal module specifiers are not allowed in {source_name}")
+
+            k = idx + 1
+            eq_idx: int | None = None
+            if nk == "ident" and k + 1 < m and sig[k + 1] == ("punct", "="):
+                eq_idx = k + 1
+            elif nk == "ident" and nv == "type" and k + 2 < m and sig[k + 1][0] == "ident" and sig[k + 2] == ("punct", "="):
+                eq_idx = k + 2
+            if eq_idx is not None:
+                if (
+                    eq_idx + 2 < m
+                    and sig[eq_idx + 1] == ("ident", "require")
+                    and sig[eq_idx + 2] == ("punct", "(")
+                ):
+                    if (
+                        eq_idx + 4 < m
+                        and sig[eq_idx + 3][0] == "string"
+                        and sig[eq_idx + 4] == ("punct", ")")
+                    ):
+                        specs.append(_decode_js_string_literal(sig[eq_idx + 3][1], source_name))
+                        idx = eq_idx + 5
+                        continue
+                    raise DependencyPolicyError(
+                        f"import = require() requires a static string literal specifier in {source_name}"
+                    )
+                idx = eq_idx + 1
+                continue
+
+            j = k
+            bdepth = 0
+            matched_from = False
+            while j < m:
+                tk, tv = sig[j]
+                if tk == "punct" and tv == "{":
+                    bdepth += 1
+                    j += 1
+                    continue
+                if tk == "punct" and tv == "}":
+                    bdepth -= 1
+                    if bdepth < 0:
+                        break
+                    j += 1
+                    continue
+                if bdepth == 0:
+                    if tk == "punct" and tv == ";":
+                        break
+                    if tk == "ident" and tv == "from" and j > k:
+                        if j == k + 1 and sig[k] == ("ident", "type") and j + 1 < m and sig[j + 1] == ("ident", "from"):
+                            j += 1
+                            continue
+                        if j + 1 < m and sig[j + 1][0] == "string":
+                            specs.append(_decode_js_string_literal(sig[j + 1][1], source_name))
+                            idx = j + 2
+                            matched_from = True
+                            break
+                        raise DependencyPolicyError(
+                            f"Invalid module specifier in import statement in {source_name}"
+                        )
+                j += 1
+            if matched_from:
+                continue
+            raise DependencyPolicyError(f"Malformed static import statement in {source_name}")
+
+        if kind == "ident" and val == "export" and not is_member and not is_alias:
+            if idx + 1 >= m:
+                idx += 1
+                continue
+            if sig[idx + 1][0] == "punct" and sig[idx + 1][1] in {":", "?", ",", "}"}:
+                idx += 1
+                continue
+            k = idx + 1
+            if sig[k] == ("ident", "type") and k + 1 < m and sig[k + 1][0] == "punct" and sig[k + 1][1] in {"*", "{"}:
+                k += 1
+            if sig[k] == ("punct", "*"):
+                j = k + 1
+                if j + 1 < m and sig[j] == ("ident", "as") and sig[j + 1][0] == "ident":
+                    j += 2
+                if j < m and sig[j] == ("ident", "from") and j + 1 < m and sig[j + 1][0] == "string":
+                    specs.append(_decode_js_string_literal(sig[j + 1][1], source_name))
+                    idx = j + 2
+                    continue
+                raise DependencyPolicyError(f"Invalid module specifier in export * statement in {source_name}")
+            if sig[k] == ("punct", "{"):
+                j = k + 1
+                bdepth = 1
+                while j < m and bdepth > 0:
+                    if sig[j] == ("punct", "{"):
+                        bdepth += 1
+                    elif sig[j] == ("punct", "}"):
+                        bdepth -= 1
+                    j += 1
+                if bdepth == 0 and j < m and sig[j] == ("ident", "from"):
+                    if j + 1 < m and sig[j + 1][0] == "string":
+                        specs.append(_decode_js_string_literal(sig[j + 1][1], source_name))
+                        idx = j + 2
+                        continue
+                    raise DependencyPolicyError(f"Invalid module specifier in export statement in {source_name}")
+
+        if is_cjs and kind == "ident" and val == "require" and not is_member and not is_alias:
+            if idx + 1 < m and sig[idx + 1] == ("punct", "(") and not _is_method_or_signature_decl(sig, idx, idx + 1):
+                if idx + 3 < m and sig[idx + 2][0] == "string" and sig[idx + 3] == ("punct", ")"):
+                    specs.append(_decode_js_string_literal(sig[idx + 2][1], source_name))
+                    idx += 4
+                    continue
+                raise DependencyPolicyError(
+                    f"CommonJS require() requires a static string literal specifier in {source_name}"
+                )
+
+        idx += 1
+
     return specs
 
 
 def inspect_dependencies(files: list[dict]) -> dict[str, object]:
     """Validate deno.json and JS/TS imports and return summarized npm/JSR dependency metadata."""
+    if not isinstance(files, list) or len(files) > MAX_FILES:
+        raise DependencyPolicyError(f"Expected at most {MAX_FILES} function files")
     npm_specs: set[str] = set()
     jsr_specs: set[str] = set()
     for item in files:
+        if not isinstance(item, dict):
+            raise DependencyPolicyError("Invalid file entry payload")
         name = str(item.get("name", ""))
         if item.get("encoding") == "base64":
             continue
@@ -186,7 +768,7 @@ def inspect_dependencies(files: list[dict]) -> dict[str, object]:
             continue
         suffix = PurePosixPath(name).suffix.lower()
         if suffix in SOURCE_EXTENSIONS:
-            for spec in _extract_source_specifiers(content):
+            for spec in _extract_source_specifiers(content, name):
                 kind = _validate_specifier(spec, name)
                 if kind == "npm":
                     npm_specs.add(spec)

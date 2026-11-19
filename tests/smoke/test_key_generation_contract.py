@@ -172,6 +172,8 @@ class KeyGenerationContractTest(unittest.TestCase):
         self.assertIn("ENTRYPOINT", dockerfile)
         self.assertIn(
             "envsubst '$FILE_SIZE_LIMIT $SUPABASE_NETWORK_SUBNET "
+            "$PROJECT_INTERNAL_SUBNET $POSTGRES_POOLER "
+            "$POOLER_PROXY_PORT_SESSION $POOLER_PROXY_PORT_TRANSACTION "
             "$ANON_KEY_PROJETO $SERVICE_ROLE_KEY_PROJETO "
             "$API_GATEWAY_TOKEN_PROJETO'",
             dockerfile,

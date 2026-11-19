@@ -46,10 +46,26 @@ function _M.load(ref, administrative)
     end
 
     local target = "/api/projects/internal/studio-context/" .. ref
+    local access_mode = "member"
     if administrative == "storage" then
         target = target .. "?access=storage"
+        access_mode = "storage"
     elseif administrative then
         target = target .. "?access=admin"
+        access_mode = "admin"
+    end
+    local cache_ttl = tonumber(os.getenv("STUDIO_CONTEXT_CACHE_TTL_SECONDS")) or 0
+    local shared_cache = cache_ttl > 0 and ngx.shared and ngx.shared.studio_context_cache or nil
+    local cache_key = ref .. ":" .. user_id .. ":" .. access_mode .. ":" .. (ngx.var.authelia_groups or "")
+    if shared_cache then
+        local cached_raw = shared_cache:get(cache_key)
+        if type(cached_raw) == "string" and cached_raw ~= "" then
+            local cached_decoded = cjson.decode(cached_raw)
+            local cached_ctx = validate_context(cached_decoded, ref)
+            if cached_ctx then
+                return cached_ctx
+            end
+        end
     end
     local signed_headers, sign_err = internal_hmac.sign_headers(
         service_hmac_secret,
@@ -113,6 +129,9 @@ function _M.load(ref, administrative)
         return nil, "Invalid response from Studio context service", ngx.HTTP_SERVICE_UNAVAILABLE
     end
 
+    if shared_cache then
+        shared_cache:set(cache_key, response.body, math.min(cache_ttl, 15))
+    end
     return context
 end
 

@@ -100,7 +100,7 @@ def load_project_environment(
         for key, value in raw_values.items()
         if key is not None and value is not None
     }
-    for required in ("PROJECT_UUID", "ANON_KEY_PROJETO"):
+    for required in ("PROJECT_UUID",):
         if not values.get(required, "").strip():
             raise ProjectDeletionError(
                 f"ambiente do projeto {project_name} não contém {required}"
@@ -108,13 +108,13 @@ def load_project_environment(
     return values
 
 
-def build_realtime_delete_token(project_env: Mapping[str, str]) -> str:
-    """Retorna exclusivamente a chave anon persistida para o tenant."""
+def build_realtime_delete_token(
+    project_env: Mapping[str, str] | None = None,
+) -> str:
+    """Gera o token administrativo global para excluir o tenant Realtime."""
 
-    token = project_env.get("ANON_KEY_PROJETO", "").strip()
-    if not token:
-        raise ProjectDeletionError("ANON_KEY_PROJETO ausente para excluir tenant Realtime")
-    return token
+    _ = project_env
+    return build_global_delete_token("supabase")
 
 
 def build_global_delete_token(issuer: str) -> str:

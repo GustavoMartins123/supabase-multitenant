@@ -7,6 +7,7 @@ Dockerfile e docker-compose do projeto durante o recreate.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import re
 import tempfile
@@ -15,6 +16,43 @@ from pathlib import Path
 from .envfile import read_canonical_env_value
 from .security import ensure_inside
 from .mailer_runtime import prepare_mailer_files
+
+
+def _ensure_project_internal_subnet(
+    root: Path, scripts_dir: Path, project_dir: Path, project: str
+) -> str:
+    env_path = ensure_inside(project_dir, project_dir / ".env")
+    existing = read_canonical_env_value(env_path, "PROJECT_INTERNAL_SUBNET")
+    if existing:
+        return existing
+    allocator_path = scripts_dir / "allocate_project_subnet.py"
+    spec = importlib.util.spec_from_file_location("allocate_project_subnet", allocator_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("allocate_project_subnet.py ausente")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    subnet = str(module.allocate_project_internal_subnet(project, root / "projects"))
+    current_text = env_path.read_text(encoding="utf-8")
+    separator = "" if not current_text or current_text.endswith("\n") else "\n"
+    updated = f"{current_text}{separator}PROJECT_INTERNAL_SUBNET={subnet}\n"
+    existing_mode = env_path.stat().st_mode & 0o777
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=".env.", suffix=".tmp", dir=env_path.parent
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(updated)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary_name, existing_mode)
+        os.replace(temporary_name, env_path)
+    except Exception:
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
+        raise
+    return subnet
 
 
 def _normalize_public_base_url(url: str, proto: str | None = None) -> str:
@@ -147,6 +185,7 @@ def sync_project_generated_files(
     """Regenera nginx.conf, Dockerfile e docker-compose.yml do projeto."""
     replacements = _build_replacements(root, project_dir, project)
     replacements["host_agent_public_assets"] = prepare_mailer_files(root, scripts_dir, project_dir)
+    _ensure_project_internal_subnet(root, scripts_dir, project_dir, project)
 
     nginx_config_path = ensure_inside(
         project_dir, project_dir / "nginx" / f"nginx_{project}.conf"

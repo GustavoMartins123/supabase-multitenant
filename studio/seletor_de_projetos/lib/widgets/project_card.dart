@@ -30,6 +30,7 @@ class ProjectCard extends ConsumerStatefulWidget {
     required this.automaticKeyRotationLeadDays,
     required this.displayName,
     this.serverDomain,
+    this.initialStatus,
     this.automaticKeyRotationLastError,
     this.isLoading = false,
     this.activeJob,
@@ -41,6 +42,7 @@ class ProjectCard extends ConsumerStatefulWidget {
   final int opaqueApiKeySlotCount;
   final String displayName;
   final String? serverDomain;
+  final String? initialStatus;
   final bool automaticKeyRotationEnabled;
   final bool automaticKeyRotationBlocked;
   final String? automaticKeyRotationLastError;
@@ -60,6 +62,7 @@ class ProjectCard extends ConsumerStatefulWidget {
 class _ProjectCardState extends ConsumerState<ProjectCard>
     with TickerProviderStateMixin {
   bool _hover = false;
+  bool _watchLiveStatus = false;
 
   Future<void> _openSettings() async {
     final deleted = await showDialog<String>(
@@ -76,7 +79,13 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
 
     if (deleted == widget.refKey) {
       widget.onDeleted();
+      return;
     }
+    if (!mounted) return;
+    if (!_watchLiveStatus) {
+      setState(() => _watchLiveStatus = true);
+    }
+    ref.invalidate(projectStatusProvider(widget.refKey));
   }
 
   Future<void> _openCollaboration() async {
@@ -139,12 +148,17 @@ class _ProjectCardState extends ConsumerState<ProjectCard>
       return _buildLoadingCard(widget.activeJob);
     }
 
-    final statusAsync = ref.watch(projectStatusProvider(widget.refKey));
+    final shouldWatchLive = _watchLiveStatus || widget.initialStatus == null;
+    final statusAsync =
+        shouldWatchLive ? ref.watch(projectStatusProvider(widget.refKey)) : null;
     final collaborationAsync = ref.watch(
       projectCollaborationProvider(widget.refKey),
     );
-    final isRunning = statusAsync.value?.status == 'running';
-    final statusLoading = statusAsync.isLoading && !statusAsync.hasValue;
+    final resolvedStatus =
+        statusAsync != null ? statusAsync.value?.status : widget.initialStatus;
+    final isRunning = resolvedStatus == 'running';
+    final statusLoading =
+        statusAsync != null && statusAsync.isLoading && !statusAsync.hasValue;
     final tags = collaborationAsync.value?.assignedTags ?? [];
 
     return MouseRegion(

@@ -1,5 +1,19 @@
 local cjson = require("cjson.safe")
 local _M = {}
+local cached_origin = nil
+
+local function read_canonical_origin()
+    if cached_origin then
+        return cached_origin
+    end
+    local file = io.open("/config/.studio-origin", "rb")
+    if not file then return nil, "canonical_origin_unavailable" end
+    local origin = file:read("*a"):gsub("%s+$", "")
+    file:close()
+    if not origin:match("^https://[^/]+$") then return nil, "canonical_origin_invalid" end
+    cached_origin = origin
+    return origin
+end
 
 local function reject(status, code)
     ngx.status=status
@@ -18,11 +32,8 @@ function _M.enforce()
     local headers=ngx.req.get_headers()
     -- This endpoint is service-HMAC only and does not authenticate cookies.
     if uri=="/api/internal/push" and not headers.Cookie then return true end
-    local file=io.open("/config/.studio-origin", "rb")
-    if not file then return reject(503,"canonical_origin_unavailable") end
-    local origin=file:read("*a"):gsub("%s+$", "")
-    file:close()
-    if not origin:match("^https://[^/]+$") then return reject(503,"canonical_origin_invalid") end
+    local origin, origin_err = read_canonical_origin()
+    if not origin then return reject(503, origin_err) end
     -- Exact origin includes scheme and port. SameSite/CORS are not authorization.
     if headers.Origin~=origin then return reject(403,"csrf_origin_denied") end
     local fetch_site=headers["Sec-Fetch-Site"]

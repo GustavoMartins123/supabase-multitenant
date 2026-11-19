@@ -54,8 +54,11 @@ class F01FunctionsDsn(unittest.TestCase):
 class F02SharedPasswordScope(unittest.TestCase):
     def test_project_dsns_go_through_the_pooler_with_scoped_roles(self) -> None:
         template = (ROOT / "servidor/generateProject/dockercomposetemplate").read_text(encoding="utf-8")
-        self.assertIn("${AUTH_DB_USER}.{{project_id}}:${POSTGRES_PASSWORD}@${POSTGRES_POOLER}", template)
-        self.assertIn("${POSTGREST_DB_USER}.{{project_id}}:${POSTGRES_PASSWORD}@${POSTGRES_POOLER}", template)
+        nginx = (ROOT / "servidor/generateProject/nginxtemplate").read_text(encoding="utf-8")
+        self.assertIn("${AUTH_DB_USER}.{{project_id}}:${POSTGRES_PASSWORD}@supabase-nginx-{{project_id}}:${POOLER_PROXY_PORT_SESSION}", template)
+        self.assertIn("${POSTGREST_DB_USER}.{{project_id}}:${POSTGRES_PASSWORD}@supabase-nginx-{{project_id}}:${POOLER_PROXY_PORT_SESSION}", template)
+        self.assertIn('default "${POSTGRES_POOLER}:${POOLER_PROXY_PORT_SESSION}";', nginx)
+        self.assertIn("proxy_pass $stream_pooler_session_upstream;", nginx)
 
     def test_tenant_databases_revoke_public_and_grant_roles(self) -> None:
         source = (

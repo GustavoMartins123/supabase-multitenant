@@ -101,7 +101,19 @@ INTEGER_SETTING_RANGES = {
     "VECTOR_MAX_INDEXES": (1, 1000000),
 }
 
-SCHEMA_NAME_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
+SCHEMA_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
+ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+FORBIDDEN_PGRST_SCHEMAS = frozenset(
+    {
+        "pg_catalog",
+        "information_schema",
+        "pg_toast",
+        "_supavisor",
+        "_analytics",
+        "_realtime",
+        "pgbouncer",
+    }
+)
 
 RESOURCE_PROFILES = ("small", "medium", "large", "custom")
 RESOLVED_LIMIT_KEYS = ("PROJECT_MEM_LIMIT", "PROJECT_CPUS", "PROJECT_PIDS_LIMIT")
@@ -377,6 +389,8 @@ def _split_across_services(totals: dict[str, str]) -> dict[str, str]:
 
 
 def _read_env_whitelisted(env_path: pathlib.Path) -> dict[str, str]:
+    if env_path.is_symlink() or env_path.parent.is_symlink():
+        raise ValueError("Caminho .env não pode usar symlink")
     all_values = {
         key: str(value)
         for key, value in dotenv_values(env_path).items()
@@ -400,17 +414,18 @@ def get_project_file_size_limit(
         ) from exc
 
     value = str(values.get("FILE_SIZE_LIMIT") or "").strip()
-    if re.fullmatch(r"\d+", value) and int(value) > 0:
+    if re.fullmatch(r"[0-9]+", value) and int(value) > 0:
         return value
     raise HTTPException(409, "FILE_SIZE_LIMIT ausente ou inválido no projeto")
 
 
 def _normalize_setting_value(key: str, raw_value: str) -> str:
-    value = str(raw_value).strip()
-    if "\n" in value or "\r" in value or "\x00" in value:
+    raw_str = str(raw_value)
+    if "\n" in raw_str or "\r" in raw_str or "\x00" in raw_str:
         raise HTTPException(
             400, f"{key}: valor não pode conter quebra de linha ou byte nulo"
         )
+    value = raw_str.strip()
     if not value and key != "FUNCTIONS_ALLOWED_NETWORK_HOSTS":
         raise HTTPException(400, f"{key}: valor obrigatório")
 
@@ -422,17 +437,17 @@ def _normalize_setting_value(key: str, raw_value: str) -> str:
         return value
 
     if key == "PROJECT_MEM_LIMIT":
-        if not re.fullmatch(r"\d+[mMgG]", value):
+        if not re.fullmatch(r"[0-9]+[mMgG]", value):
             raise HTTPException(400, f"{key}: use o formato 256m ou 1g")
         return value.lower()
 
     if key == "PROJECT_CPUS":
-        if not re.fullmatch(r"\d+(?:\.\d{1,2})?", value):
+        if not re.fullmatch(r"[0-9]+(?:\.[0-9]{1,2})?", value):
             raise HTTPException(400, f"{key}: use o formato 1.50")
         return value
 
     if key == "PROJECT_PIDS_LIMIT":
-        if not re.fullmatch(r"\d+", value) or int(value) < 1:
+        if not re.fullmatch(r"[0-9]+", value) or int(value) < 1:
             raise HTTPException(400, f"{key}: use um número inteiro maior que zero")
         return value
 
@@ -444,7 +459,7 @@ def _normalize_setting_value(key: str, raw_value: str) -> str:
 
     int_range = INTEGER_SETTING_RANGES.get(key)
     if int_range:
-        if not re.fullmatch(r"\d+", value):
+        if not re.fullmatch(r"[0-9]+", value):
             raise HTTPException(400, f"{key}: use apenas números inteiros")
         parsed = int(value)
         min_value, max_value = int_range
@@ -467,9 +482,14 @@ def _normalize_setting_value(key: str, raw_value: str) -> str:
         if not schemas or any(not part for part in schemas):
             raise HTTPException(400, f"{key}: informe schemas separados por vírgula")
         for schema in schemas:
-            if not SCHEMA_NAME_RE.fullmatch(schema):
+            lowered = schema.lower()
+            if (
+                not SCHEMA_NAME_RE.fullmatch(schema)
+                or lowered in FORBIDDEN_PGRST_SCHEMAS
+                or lowered.startswith(("pg_toast", "pg_temp"))
+            ):
                 raise HTTPException(400, f"{key}: schema inválido: {schema}")
-        return ",".join(schemas)
+        return ",".join(dict.fromkeys(schemas))
 
     raise HTTPException(400, f"{key}: configuração sem validador")
 
@@ -510,6 +530,15 @@ def _normalize_settings_updates(settings: dict[str, str]) -> dict[str, str]:
 
 
 def _write_env_whitelisted(env_path: pathlib.Path, updates: dict[str, str]) -> None:
+    if env_path.is_symlink() or env_path.parent.is_symlink():
+        raise ValueError("Caminho .env não pode usar symlink")
+
+    for key, value in updates.items():
+        if not isinstance(key, str) or not ENV_KEY_RE.fullmatch(key):
+            raise ValueError(f"Chave de ambiente inválida: {key!r}")
+        if not isinstance(value, str) or "\n" in value or "\r" in value or "\x00" in value:
+            raise ValueError(f"Valor inválido para {key}: contém quebra de linha ou byte nulo")
+
     with open(env_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
@@ -552,16 +581,19 @@ def _write_env_whitelisted(env_path: pathlib.Path, updates: dict[str, str]) -> N
             delete=False,
         ) as temp_file:
             temp_path = pathlib.Path(temp_file.name)
+            os.chmod(temp_file.fileno(), 0o600)
             temp_file.writelines(new_lines)
             temp_file.flush()
             os.fsync(temp_file.fileno())
-        shutil.copymode(env_path, temp_path)
+        os.chmod(temp_path, 0o600)
         temp_stat = os.stat(temp_path)
         if (temp_stat.st_uid, temp_stat.st_gid) != (
             original.st_uid,
             original.st_gid,
         ):
             os.chown(temp_path, original.st_uid, original.st_gid)
+        if env_path.is_symlink() or env_path.parent.is_symlink():
+            raise ValueError("Caminho .env não pode usar symlink")
         os.replace(temp_path, env_path)
     finally:
         if temp_path is not None and temp_path.exists():

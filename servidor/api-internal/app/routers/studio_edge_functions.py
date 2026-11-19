@@ -586,6 +586,7 @@ def canonical_projection_credentials(project) -> dict[str, str]:
         'anon_key': str(projected.get('anon_key') or env.get('ANON_KEY_PROJETO') or ''),
         'service_role_key': str(projected.get('service_role_key') or env.get('SERVICE_ROLE_KEY_PROJETO') or ''),
         'postgres_password': str(env.get('POSTGRES_PASSWORD') or ''),
+        'edge_gateway_token': str(projected.get('edge_gateway_token') or env.get('API_GATEWAY_TOKEN_PROJETO') or ''),
     }
 
 
@@ -597,7 +598,7 @@ def canonical_environment(project):
 def _collect_sensitive_values(project: dict, creds: dict[str, str], secrets: dict[str, str]) -> list[str]:
     excluded = {project['name'], project['public_ref'], identity(project)}
     values = [v for v in secrets.values() if isinstance(v, str) and len(v) >= 4 and v not in excluded]
-    for field in ('jwt_secret', 'anon_key', 'service_role_key', 'postgres_password'):
+    for field in ('jwt_secret', 'anon_key', 'service_role_key', 'postgres_password', 'edge_gateway_token'):
         val = creds.get(field, '')
         if isinstance(val, str) and len(val) >= 4 and val not in excluded:
             values.append(val)
@@ -985,7 +986,11 @@ async def prepare(conn, project, state, config, *, secrets_override: dict[str, s
         'SUPABASE_PUBLIC_URL': public_url,
         'SUPABASE_ANON_KEY': keys['publishable'],
         'SUPABASE_SERVICE_ROLE_KEY': keys['secret'],
-        'SUPABASE_DB_URL': get_project_meta_connection_string(project['name'], project['tenant_uuid']),
+        'SUPABASE_DB_URL': get_project_meta_connection_string(
+            project['name'],
+            project['tenant_uuid'],
+            host_override=os.getenv('EDGE_DB_HOST') or 'supabase-db',
+        ),
     }
     secrets = secrets_override if secrets_override is not None else await load_project_secrets(conn, project)
     configs = configs_override if configs_override is not None else await load_function_configs(conn, project['id'])
@@ -1082,7 +1087,9 @@ async def quotas_get(ref: str, request: Request, response: Response, pool=Depend
     async with management_context(ref, request, response, pool) as (conn, project, _, _):
         state = load(project)
         quotas, raw_quotas = await load_project_quotas(conn, project['id'])
-        return await _build_quota_report(conn, project, state, quotas, raw_quotas)
+        project_snap = dict(project)
+    async with pool.acquire() as conn:
+        return await _build_quota_report(conn, project_snap, state, quotas, raw_quotas)
 
 
 @router.put('/quotas')
@@ -1145,7 +1152,9 @@ async def quotas_update(ref: str, body: QuotasUpdateBody, request: Request, resp
             await outcome(conn, audit_id, 'failed')
             raise
         await outcome(conn, audit_id, 'completed')
-        return await _build_quota_report(conn, project, state, proposed_quotas, raw_updates)
+        project_snap = dict(project)
+    async with pool.acquire() as conn:
+        return await _build_quota_report(conn, project_snap, state, proposed_quotas, raw_updates)
 
 
 @router.get('/alerts')
@@ -1161,7 +1170,9 @@ async def alerts_list(ref: str, request: Request, response: Response, pool=Depen
         limit = int(limit_raw)
         state = load(project)
         quotas, raw_quotas = await load_project_quotas(conn, project['id'])
-        report = await _build_quota_report(conn, project, state, quotas, raw_quotas)
+        project_snap = dict(project)
+    async with pool.acquire() as conn:
+        report = await _build_quota_report(conn, project_snap, state, quotas, raw_quotas)
         clause = '' if include_ack else 'AND acknowledged_at IS NULL'
         rows = await conn.fetch(
             f'''SELECT id, function_name, kind, severity, message, detail, acknowledged_by, acknowledged_at, created_at
@@ -1169,7 +1180,7 @@ async def alerts_list(ref: str, request: Request, response: Response, pool=Depen
                 WHERE project_id=$1 {clause}
                 ORDER BY created_at DESC, id DESC
                 LIMIT $2''',
-            project['id'], limit,
+            project_snap['id'], limit,
         )
         events = [
             {
@@ -1982,6 +1993,8 @@ async def _execute_function_http(
     headers['x-project-name'] = project_snapshot['name']
     headers['x-project-ref'] = project_snapshot['public_ref']
     headers['x-request-id'] = request_id
+    if creds.get('edge_gateway_token'):
+        headers['x-edge-gateway-token'] = creds['edge_gateway_token']
     if auth_mode == 'anon':
         headers['apikey'] = creds['anon_key'] or keys['publishable']
         headers['authorization'] = f"Bearer {_mint_hs256_jwt(creds['jwt_secret'], 'anon')}"
@@ -2574,9 +2587,9 @@ async def function_schedule_trigger(
 
 
 async def scan_edge_function_schedules(pool, *, now: datetime | None = None) -> int:
-    """Claim and execute due cron-scheduled Edge Function invocations under an advisory lock."""
+    """Claim due cron-scheduled Edge Function invocations under a short advisory lock, then execute concurrently."""
     current_now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    executed = 0
+    claimed_jobs: list[dict[str, Any]] = []
     async with pool.acquire() as lock_conn:
         owns = await lock_conn.fetchval(
             'SELECT pg_try_advisory_lock(hashtextextended($1, 0))',
@@ -2662,27 +2675,61 @@ async def scan_edge_function_schedules(pool, *, now: datetime | None = None) -> 
                     )
                     continue
 
-                resp_status, _, _, _, duration_ms, req_id, err_name = await _execute_function_http(
-                    pool, project_row, creds, keys, secrets, sensitive,
-                    slug=slug, published_rev=published_rev, method=row['method'],
-                    auth_mode=row['auth_mode'], path_with_query=path_with_query,
-                    req_headers=v_headers, req_body=v_body, source='cron',
-                    worker_timeout_ms=timeout_ms,
-                )
-                err_text = f'Upstream unavailable ({err_name})' if err_name else (f'HTTP {resp_status}' if resp_status >= 500 else '')
-                await lock_conn.execute(
-                    '''UPDATE project_edge_function_schedules
-                       SET last_status=$2, last_duration_ms=$3, last_request_id=$4, last_error=$5, updated_at=now()
-                       WHERE id=$1''',
-                    sched_id, resp_status, duration_ms, req_id, err_text,
-                )
-                executed += 1
+                claimed_jobs.append({
+                    'sched_id': sched_id,
+                    'project_row': project_row,
+                    'creds': creds,
+                    'keys': keys,
+                    'secrets': secrets,
+                    'sensitive': sensitive,
+                    'slug': slug,
+                    'published_rev': published_rev,
+                    'method': row['method'],
+                    'auth_mode': row['auth_mode'],
+                    'path_with_query': path_with_query,
+                    'req_headers': v_headers,
+                    'req_body': v_body,
+                    'timeout_ms': timeout_ms,
+                })
         finally:
             await lock_conn.fetchval(
                 'SELECT pg_advisory_unlock(hashtextextended($1, 0))',
                 _SCHEDULE_LOCK_NAME,
             )
-    return executed
+
+    if not claimed_jobs:
+        return 0
+
+    sem = asyncio.Semaphore(4)
+
+    async def _run_one(item: dict[str, Any]) -> int:
+        async with sem:
+            resp_status, _, _, _, duration_ms, req_id, err_name = await _execute_function_http(
+                pool, item['project_row'], item['creds'], item['keys'], item['secrets'], item['sensitive'],
+                slug=item['slug'], published_rev=item['published_rev'], method=item['method'],
+                auth_mode=item['auth_mode'], path_with_query=item['path_with_query'],
+                req_headers=item['req_headers'], req_body=item['req_body'], source='cron',
+                worker_timeout_ms=item['timeout_ms'],
+            )
+            if err_name:
+                err_text = f'Upstream unavailable ({err_name})'
+            elif resp_status == 429:
+                err_text = 'HTTP 429 (concurrency limit reached)'
+            elif resp_status >= 500:
+                err_text = f'HTTP {resp_status}'
+            else:
+                err_text = ''
+            async with pool.acquire() as update_conn:
+                await update_conn.execute(
+                    '''UPDATE project_edge_function_schedules
+                       SET last_status=$2, last_duration_ms=$3, last_request_id=$4, last_error=$5, updated_at=now()
+                       WHERE id=$1''',
+                    item['sched_id'], resp_status, duration_ms, req_id, err_text,
+                )
+            return 1
+
+    results = await asyncio.gather(*(_run_one(item) for item in claimed_jobs))
+    return sum(results)
 
 
 async def _edge_schedule_loop() -> None:

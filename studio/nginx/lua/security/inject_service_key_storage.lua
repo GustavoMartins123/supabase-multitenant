@@ -2,6 +2,7 @@ local context = require("security.project_access").enforce_storage()
 if type(context) ~= "table" then
     return
 end
+require("proxy_rewrites.storage").rewrite()
 require("security.storage_upload_limit").enforce(context)
 require("proxy_rewrites.storage_public_url").handle(context)
 

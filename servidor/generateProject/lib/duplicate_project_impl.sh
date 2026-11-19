@@ -140,7 +140,7 @@ rollback() {
   if [[ "$CREATED_REALTIME" -eq 1 ]]; then
     tenant_status="$(docker exec realtime-dev.supabase-realtime curl -sS -o /dev/null -w '%{http_code}' -X DELETE \
       "http://localhost:4000/api/tenants/$PROJECT_UUID" \
-      -H "Authorization: Bearer $ANON_TOKEN")" || rollback_failed=1
+      -H "Authorization: Bearer $GLOBAL_ANON_TOKEN")" || rollback_failed=1
     [[ "$tenant_status" == "200" || "$tenant_status" == "202" \
       || "$tenant_status" == "204" || "$tenant_status" == "404" ]] \
       || rollback_failed=1
@@ -275,6 +275,8 @@ generate_jwt() {
 PUBLIC_BASE_URL="$(normalize_public_base_url "$SERVER_URL" "${SERVER_PROTO:-}")"
 PROJECT_PUBLIC_URL="$PUBLIC_BASE_URL/$PROJECT_PUBLIC_REF"
 PROJECT_AUTH_EXTERNAL_URL="$PROJECT_PUBLIC_URL/auth/v1"
+PROJECT_INTERNAL_SUBNET="$(python3 "$SCRIPT_DIR/allocate_project_subnet.py" "$NEW_PROJECT" "$PROJECT_ROOT/projects")" \
+  || die "Falha ao alocar subnet interna do projeto"
 JWT_SECRET_PROJETO=$(openssl rand -base64 32 | tr '/+' '_-' | tr -d '\n\r')
 now_epoch=$(date +%s)
 exp=$((now_epoch + (3 * 30 * 24 * 3600)))
@@ -297,6 +299,7 @@ template_to_file() {
     -e "s|{{project_id}}|$(escape_sed_replacement "$NEW_PROJECT")|g" \
     -e "s|{{project_uuid}}|$(escape_sed_replacement "$PROJECT_UUID")|g" \
     -e "s|{{project_public_ref}}|$PROJECT_PUBLIC_REF|g" \
+    -e "s|{{project_internal_subnet}}|$(escape_sed_replacement "$PROJECT_INTERNAL_SUBNET")|g" \
     -e "s|{{jwt_secret}}|$(escape_sed_replacement "$JWT_SECRET_PROJETO")|g" \
     -e "s|{{api_gateway_token}}|$(escape_sed_replacement "$API_GATEWAY_TOKEN_PROJETO")|g" \
     -e "s|{{server_url}}|$(escape_sed_replacement "$SERVER_URL")|g" \
@@ -454,7 +457,7 @@ realtime_payload=$(jq -cn \
 CREATED_REALTIME=1
 response=$(docker exec realtime-dev.supabase-realtime curl -sS -w '\n%{http_code}' \
   -X POST http://localhost:4000/api/tenants -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer $ANON_TOKEN" -d "$realtime_payload")
+  -H "Authorization: Bearer $GLOBAL_ANON_TOKEN" -d "$realtime_payload")
 code=$(echo "$response" | tail -n1)
 [[ "$code" == "200" || "$code" == "201" ]] || die "Falha no Realtime (HTTP $code)"
 
@@ -463,7 +466,8 @@ pg_version=$(docker exec supabase-db psql -U supabase_admin -d postgres -tAc "SE
 supavisor_payload=$(jq -cn \
   --arg id "$NEW_PROJECT" --arg host "$POSTGRES_HOST" --arg port "$POSTGRES_PORT" \
   --arg password "$POSTGRES_PASSWORD" --arg version "$pg_version" \
-  '{tenant:{external_id:$id,db_host:$host,db_port:$port,db_database:("_supabase_"+$id),ip_version:"auto",enforce_ssl:false,require_user:false,auth_query:"SELECT * FROM pgbouncer.get_auth($1)",default_max_clients:800,default_pool_size:40,default_parameter_status:{server_version:$version},users:[{db_user:"pgbouncer",db_password:$password,mode_type:"transaction",pool_size:40,is_manager:true}]}}')
+  --argjson pool_size "${POOLER_DEFAULT_POOL_SIZE:-15}" \
+  '{tenant:{external_id:$id,db_host:$host,db_port:$port,db_database:("_supabase_"+$id),ip_version:"auto",enforce_ssl:false,require_user:false,auth_query:"SELECT * FROM pgbouncer.get_auth($1)",default_max_clients:800,default_pool_size:$pool_size,default_parameter_status:{server_version:$version},users:[{db_user:"pgbouncer",db_password:$password,mode_type:"transaction",pool_size:$pool_size,is_manager:true}]}}')
 CREATED_SUPAVISOR=1
 response=$(docker exec supabase-pooler curl -sS -w '\n%{http_code}' \
   -X PUT "http://localhost:4000/api/tenants/$NEW_PROJECT" -H 'Content-Type: application/json' \

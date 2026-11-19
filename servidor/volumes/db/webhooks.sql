@@ -3,10 +3,11 @@ BEGIN;
   CREATE EXTENSION IF NOT EXISTS pg_net SCHEMA extensions;
   -- Create supabase_functions schema
   CREATE SCHEMA supabase_functions AUTHORIZATION supabase_admin;
-  GRANT USAGE ON SCHEMA supabase_functions TO postgres, anon, authenticated, service_role;
-  ALTER DEFAULT PRIVILEGES IN SCHEMA supabase_functions GRANT ALL ON TABLES TO postgres, anon, authenticated, service_role;
-  ALTER DEFAULT PRIVILEGES IN SCHEMA supabase_functions GRANT ALL ON FUNCTIONS TO postgres, anon, authenticated, service_role;
-  ALTER DEFAULT PRIVILEGES IN SCHEMA supabase_functions GRANT ALL ON SEQUENCES TO postgres, anon, authenticated, service_role;
+  REVOKE ALL ON SCHEMA supabase_functions FROM PUBLIC, anon, authenticated;
+  GRANT USAGE ON SCHEMA supabase_functions TO postgres, service_role;
+  ALTER DEFAULT PRIVILEGES IN SCHEMA supabase_functions GRANT ALL ON TABLES TO postgres, service_role;
+  ALTER DEFAULT PRIVILEGES IN SCHEMA supabase_functions GRANT ALL ON FUNCTIONS TO postgres, service_role;
+  ALTER DEFAULT PRIVILEGES IN SCHEMA supabase_functions GRANT ALL ON SEQUENCES TO postgres, service_role;
   -- supabase_functions.migrations definition
   CREATE TABLE supabase_functions.migrations (
     version text PRIMARY KEY,
@@ -148,15 +149,22 @@ BEGIN;
       WHERE extname = 'pg_net'
     )
     THEN
-      GRANT USAGE ON SCHEMA net TO supabase_functions_admin, postgres, anon, authenticated, service_role;
+      REVOKE ALL ON SCHEMA net FROM PUBLIC, anon, authenticated;
+      GRANT USAGE ON SCHEMA net TO supabase_functions_admin, postgres, service_role;
       ALTER function net.http_get(url text, params jsonb, headers jsonb, timeout_milliseconds integer) SECURITY DEFINER;
       ALTER function net.http_post(url text, body jsonb, params jsonb, headers jsonb, timeout_milliseconds integer) SECURITY DEFINER;
       ALTER function net.http_get(url text, params jsonb, headers jsonb, timeout_milliseconds integer) SET search_path = net;
       ALTER function net.http_post(url text, body jsonb, params jsonb, headers jsonb, timeout_milliseconds integer) SET search_path = net;
-      REVOKE ALL ON FUNCTION net.http_get(url text, params jsonb, headers jsonb, timeout_milliseconds integer) FROM PUBLIC;
-      REVOKE ALL ON FUNCTION net.http_post(url text, body jsonb, params jsonb, headers jsonb, timeout_milliseconds integer) FROM PUBLIC;
-      GRANT EXECUTE ON FUNCTION net.http_get(url text, params jsonb, headers jsonb, timeout_milliseconds integer) TO supabase_functions_admin, postgres, anon, authenticated, service_role;
-      GRANT EXECUTE ON FUNCTION net.http_post(url text, body jsonb, params jsonb, headers jsonb, timeout_milliseconds integer) TO supabase_functions_admin, postgres, anon, authenticated, service_role;
+      REVOKE ALL ON ALL FUNCTIONS IN SCHEMA net FROM PUBLIC, anon, authenticated;
+      REVOKE ALL ON ALL TABLES IN SCHEMA net FROM PUBLIC, anon, authenticated;
+      REVOKE ALL ON ALL SEQUENCES IN SCHEMA net FROM PUBLIC, anon, authenticated;
+      GRANT EXECUTE ON FUNCTION net.http_get(url text, params jsonb, headers jsonb, timeout_milliseconds integer) TO supabase_functions_admin, postgres, service_role;
+      GRANT EXECUTE ON FUNCTION net.http_post(url text, body jsonb, params jsonb, headers jsonb, timeout_milliseconds integer) TO supabase_functions_admin, postgres, service_role;
+      IF to_regprocedure('net.http_delete(text,jsonb,jsonb,integer)') IS NOT NULL THEN
+        ALTER function net.http_delete(url text, params jsonb, headers jsonb, timeout_milliseconds integer) SECURITY DEFINER;
+        ALTER function net.http_delete(url text, params jsonb, headers jsonb, timeout_milliseconds integer) SET search_path = net;
+        GRANT EXECUTE ON FUNCTION net.http_delete(url text, params jsonb, headers jsonb, timeout_milliseconds integer) TO supabase_functions_admin, postgres, service_role;
+      END IF;
     END IF;
   END
   $$;
@@ -174,15 +182,22 @@ BEGIN;
       WHERE ext.extname = 'pg_net'
     )
     THEN
-      GRANT USAGE ON SCHEMA net TO supabase_functions_admin, postgres, anon, authenticated, service_role;
+      REVOKE ALL ON SCHEMA net FROM PUBLIC, anon, authenticated;
+      GRANT USAGE ON SCHEMA net TO supabase_functions_admin, postgres, service_role;
       ALTER function net.http_get(url text, params jsonb, headers jsonb, timeout_milliseconds integer) SECURITY DEFINER;
       ALTER function net.http_post(url text, body jsonb, params jsonb, headers jsonb, timeout_milliseconds integer) SECURITY DEFINER;
       ALTER function net.http_get(url text, params jsonb, headers jsonb, timeout_milliseconds integer) SET search_path = net;
       ALTER function net.http_post(url text, body jsonb, params jsonb, headers jsonb, timeout_milliseconds integer) SET search_path = net;
-      REVOKE ALL ON FUNCTION net.http_get(url text, params jsonb, headers jsonb, timeout_milliseconds integer) FROM PUBLIC;
-      REVOKE ALL ON FUNCTION net.http_post(url text, body jsonb, params jsonb, headers jsonb, timeout_milliseconds integer) FROM PUBLIC;
-      GRANT EXECUTE ON FUNCTION net.http_get(url text, params jsonb, headers jsonb, timeout_milliseconds integer) TO supabase_functions_admin, postgres, anon, authenticated, service_role;
-      GRANT EXECUTE ON FUNCTION net.http_post(url text, body jsonb, params jsonb, headers jsonb, timeout_milliseconds integer) TO supabase_functions_admin, postgres, anon, authenticated, service_role;
+      REVOKE ALL ON ALL FUNCTIONS IN SCHEMA net FROM PUBLIC, anon, authenticated;
+      REVOKE ALL ON ALL TABLES IN SCHEMA net FROM PUBLIC, anon, authenticated;
+      REVOKE ALL ON ALL SEQUENCES IN SCHEMA net FROM PUBLIC, anon, authenticated;
+      GRANT EXECUTE ON FUNCTION net.http_get(url text, params jsonb, headers jsonb, timeout_milliseconds integer) TO supabase_functions_admin, postgres, service_role;
+      GRANT EXECUTE ON FUNCTION net.http_post(url text, body jsonb, params jsonb, headers jsonb, timeout_milliseconds integer) TO supabase_functions_admin, postgres, service_role;
+      IF to_regprocedure('net.http_delete(text,jsonb,jsonb,integer)') IS NOT NULL THEN
+        ALTER function net.http_delete(url text, params jsonb, headers jsonb, timeout_milliseconds integer) SECURITY DEFINER;
+        ALTER function net.http_delete(url text, params jsonb, headers jsonb, timeout_milliseconds integer) SET search_path = net;
+        GRANT EXECUTE ON FUNCTION net.http_delete(url text, params jsonb, headers jsonb, timeout_milliseconds integer) TO supabase_functions_admin, postgres, service_role;
+      END IF;
     END IF;
   END;
   $$;
@@ -203,6 +218,8 @@ BEGIN;
   INSERT INTO supabase_functions.migrations (version) VALUES ('20210809183423_update_grants');
   ALTER function supabase_functions.http_request() SECURITY DEFINER;
   ALTER function supabase_functions.http_request() SET search_path = supabase_functions;
-  REVOKE ALL ON FUNCTION supabase_functions.http_request() FROM PUBLIC;
-  GRANT EXECUTE ON FUNCTION supabase_functions.http_request() TO postgres, anon, authenticated, service_role;
+  REVOKE ALL ON ALL TABLES IN SCHEMA supabase_functions FROM PUBLIC, anon, authenticated;
+  REVOKE ALL ON ALL SEQUENCES IN SCHEMA supabase_functions FROM PUBLIC, anon, authenticated;
+  REVOKE ALL ON FUNCTION supabase_functions.http_request() FROM PUBLIC, anon, authenticated;
+  GRANT EXECUTE ON FUNCTION supabase_functions.http_request() TO postgres, service_role, supabase_functions_admin;
 COMMIT;

@@ -504,7 +504,7 @@ async def get_project_ai_functions(
         await ensure_project_member_access(conn, project_id=project_row["id"], auth_user=auth_user)
 
     try:
-        async with tenant_connection(project_row, "admin") as proj_conn:
+        async with tenant_connection(project_row, "reader") as proj_conn:
             rows = await proj_conn.fetch("""
                 SELECT
                     p.proname AS name,
@@ -572,20 +572,21 @@ async def execute_project_function(
         project_id = project_row["id"]
 
     try:
-        async with tenant_connection(project_row, "admin") as proj_conn:
-            candidates = await proj_conn.fetch("""
+        async with tenant_connection(project_row, "reader") as meta_conn:
+            candidates = await meta_conn.fetch("""
                 SELECT
                     p.oid,
                     p.proname AS name,
                     p.proargnames AS argument_names,
                     p.pronargs AS argument_count,
-                    p.pronargdefaults AS default_count
+                    p.pronargdefaults AS default_count,
+                    p.provolatile AS volatility
                 FROM pg_proc p
                 JOIN pg_namespace n ON p.pronamespace = n.oid
                 WHERE n.nspname = 'public'
                   AND p.prokind = 'f'
                   AND p.proargmodes IS NULL
-                AND p.proname = $1
+                  AND p.proname = $1
                   AND obj_description(p.oid, 'pg_proc') ILIKE '%[AI]%'
                 ORDER BY p.oid
             """, function_name)
@@ -599,6 +600,9 @@ async def execute_project_function(
                 )
 
             function = candidates[0]
+            volatility = str(function["volatility"] or "v").lower()
+            is_read_only = volatility in {"i", "s"}
+            execution_role = "reader" if is_read_only else "admin"
             argument_count = int(function["argument_count"] or 0)
             default_count = int(function["default_count"] or 0)
             argument_names = list(function["argument_names"] or [])[:argument_count]
@@ -632,29 +636,42 @@ async def execute_project_function(
                 + ", ".join(named_placeholders)
                 + f") AS result LIMIT {AI_TOOL_MAX_ROWS}"
             )
-            async with proj_conn.transaction():
-                await proj_conn.fetchval(
-                    "SELECT set_config('statement_timeout', $1, true)",
-                    str(AI_TOOL_TIMEOUT_MS),
-                )
-                rows = await proj_conn.fetch(query, *values)
+            rows: list[Any] | None = None
+            if is_read_only:
+                async with meta_conn.transaction(readonly=True):
+                    await meta_conn.fetchval(
+                        "SELECT set_config('statement_timeout', $1, true)",
+                        str(AI_TOOL_TIMEOUT_MS),
+                    )
+                    rows = await meta_conn.fetch(query, *values)
 
-            async with pool.acquire() as conn:
-                await audit_studio_action(
-                    conn,
-                    project_id=project_id,
-                    actor_user_id=auth_user["db_user_id"],
-                    action="project_ai_tool_executed",
-                    target_type="database_function",
-                    target_id=f"public.{function_name}",
-                    new_value={
-                        "argument_names": sorted(arguments.keys()),
-                        "returned_rows": len(rows),
-                        "row_limit": AI_TOOL_MAX_ROWS,
-                    },
-                )
+        if rows is None:
+            async with tenant_connection(project_row, execution_role) as proj_conn:
+                async with proj_conn.transaction():
+                    await proj_conn.fetchval(
+                        "SELECT set_config('statement_timeout', $1, true)",
+                        str(AI_TOOL_TIMEOUT_MS),
+                    )
+                    rows = await proj_conn.fetch(query, *values)
 
-            return [dict(row) for row in rows]
+        async with pool.acquire() as conn:
+            await audit_studio_action(
+                conn,
+                project_id=project_id,
+                actor_user_id=auth_user["db_user_id"],
+                action="project_ai_tool_executed",
+                target_type="database_function",
+                target_id=f"public.{function_name}",
+                new_value={
+                    "argument_names": sorted(arguments.keys()),
+                    "returned_rows": len(rows),
+                    "row_limit": AI_TOOL_MAX_ROWS,
+                    "execution_role": execution_role,
+                    "read_only": is_read_only,
+                },
+            )
+
+        return [dict(row) for row in rows]
 
     except HTTPException:
         raise

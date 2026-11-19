@@ -289,10 +289,18 @@ def validate(root: Path, suffix: str, topology: str, values: dict[str, str], ben
         assert record == {'project_ref': env['PROJECT_PUBLIC_REF'], 'technical_name': ref,
                           'project_uuid': env['PROJECT_UUID'],
                           'anon_key': env['ANON_KEY_PROJETO'], 'service_role_key': env['SERVICE_ROLE_KEY_PROJETO'],
-                          'jwt_secret': env['JWT_SECRET_PROJETO'], 'network_allowlist': []}
+                          'jwt_secret': env['JWT_SECRET_PROJETO'], 'network_allowlist': [],
+                          'edge_gateway_token': env['API_GATEWAY_TOKEN_PROJETO']}
         assert path.stat().st_mode & 0o777 == 0o600
+        status_without_token = run('curl', '--silent', '--show-error', '--output', '/dev/null', '--write-out', '%{http_code}',
+                                   '-H', 'X-Project-Ref: ' + env['PROJECT_PUBLIC_REF'], '-H', 'X-Project-Name: ' + ref,
+                                   '-H', 'apikey: ' + record['service_role_key'],
+                                   '-H', 'Authorization: Bearer ' + record['service_role_key'],
+                                   'http://supabase-edge-functions:9000/p1_probe')
+        assert status_without_token == '403', status_without_token
         status = run('curl', '--silent', '--show-error', '--output', '/dev/null', '--write-out', '%{http_code}',
                      '-H', 'X-Project-Ref: ' + env['PROJECT_PUBLIC_REF'], '-H', 'X-Project-Name: ' + ref,
+                     '-H', 'X-Edge-Gateway-Token: ' + record['edge_gateway_token'],
                      '-H', 'apikey: ' + record['service_role_key'],
                      '-H', 'Authorization: Bearer ' + record['service_role_key'],
                      'http://supabase-edge-functions:9000/p1_probe')

@@ -283,7 +283,17 @@ class ReferenceRotation:
             self.sync_directory((self.directory / relative).parent)
 
     def restart(self) -> None:
-        if self.running:
+        if not self.running:
+            return
+        # auth connects to the pooler through supabase-nginx-<project>:5432 on
+        # project-internal; start nginx first with --wait before dependent services.
+        ordered_batches: list[list[str]] = []
+        if "nginx" in self.running:
+            ordered_batches.append(["nginx"])
+        others = [svc for svc in self.running if svc != "nginx"]
+        if others:
+            ordered_batches.append(others)
+        for batch in ordered_batches:
             self.compose(
                 "up",
                 "-d",
@@ -293,7 +303,7 @@ class ReferenceRotation:
                 "--wait",
                 "--wait-timeout",
                 "120",
-                *self.running,
+                *batch,
             )
 
     def rollback(self) -> None:

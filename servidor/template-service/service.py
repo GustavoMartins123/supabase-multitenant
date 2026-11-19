@@ -193,6 +193,7 @@ class Templates:
         self.requests = OrderedDict()
         self.cache_bytes = 0
         self.max_cache_bytes = max_cache_bytes
+        self._last_grant_purge_at = 0.0
 
     def throttle(self, tenant, actor, operation):
         key = (tenant, actor, operation)
@@ -545,9 +546,12 @@ class Templates:
                 body = current["draft_body"]
                 if body is not None:
                     await self.engine.preview(kind, body, approved)
-                await conn.execute(
-                    "DELETE FROM mailer_template_publication_grant WHERE expires_at<now()"
-                )
+                now_mono = time.monotonic()
+                if now_mono - self._last_grant_purge_at >= 60.0:
+                    await conn.execute(
+                        "DELETE FROM mailer_template_publication_grant WHERE expires_at<now()"
+                    )
+                    self._last_grant_purge_at = now_mono
                 used = await conn.fetchval(
                     """INSERT INTO mailer_template_publication_grant(jti,expires_at) VALUES($1,$2)
                     ON CONFLICT DO NOTHING RETURNING jti""",

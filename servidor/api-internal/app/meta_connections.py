@@ -13,7 +13,12 @@ def _format_host(hostname: str) -> str:
     return hostname
 
 
-def get_project_meta_connection_string(project_ref: str, tenant_uuid: object) -> str:
+def get_project_meta_connection_string(
+    project_ref: str,
+    tenant_uuid: object,
+    *,
+    host_override: str | None = None,
+) -> str:
     project_ref = validate_project_id(project_ref)
     meta_dsn = (os.getenv("META_ADMIN_DSN") or "").strip()
     if not meta_dsn:
@@ -22,9 +27,10 @@ def get_project_meta_connection_string(project_ref: str, tenant_uuid: object) ->
     if dsn.scheme not in {"postgres", "postgresql"} or not dsn.hostname or not dsn.username:
         raise RuntimeError("DB_DSN inválido para construir a conexão administrativa do projeto")
 
+    target_host = (host_override or "").strip() or dsn.hostname
     db_name = f"_supabase_{project_ref}"
     role, password = tenant_meta_credentials(tenant_uuid, dsn.password or "")
-    netloc = f"{role}:{password}@{_format_host(dsn.hostname)}:{dsn.port or 5432}"
+    netloc = f"{role}:{password}@{_format_host(target_host)}:{dsn.port or 5432}"
     return urllib.parse.urlunparse(
         dsn._replace(
             netloc=netloc,

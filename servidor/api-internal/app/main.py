@@ -215,12 +215,14 @@ async def _build_recovery_runner(row: asyncpg.Record):
         if raw_trigger not in {"manual", "automatic"}:
             return None
         trigger = str(raw_trigger)
+        rotate_jwt_secret = bool(payload.get("rotate_jwt_secret")) and trigger == "manual"
         actor_user_id = owner_id if trigger == "manual" else None
         return lambda: _rotate_project_key_background(
             job_id,
             project_name,
             actor_user_id,
             trigger=trigger,
+            rotate_jwt_secret=rotate_jwt_secret,
         )
     if action == "rename":
         pool = await get_pool()
