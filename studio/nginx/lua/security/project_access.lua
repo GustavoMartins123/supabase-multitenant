@@ -55,7 +55,9 @@ function _M.enforce(expected_ref, administrative)
         return reject_resolution(resolution_err)
     end
 
-    local access_mode = administrative == "storage" and "storage" or administrative and "admin" or "member"
+    local access_mode = (administrative == "storage" or administrative == "studio") and administrative
+        or administrative and "admin"
+        or "member"
     local existing = ngx.ctx.studio_project_context
     if existing and existing.ref == ref
         and (not administrative or existing.enc_admin_key
@@ -82,6 +84,10 @@ end
 
 function _M.enforce_admin(expected_ref)
     return _M.enforce(expected_ref, true)
+end
+
+function _M.enforce_studio(expected_ref)
+    return _M.enforce(expected_ref, "studio")
 end
 
 function _M.enforce_storage(expected_ref)

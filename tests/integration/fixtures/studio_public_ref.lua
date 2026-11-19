@@ -70,8 +70,9 @@ http {
                         assert(options.ssl_verify == true)
                         assert(options.headers["X-User-Token"] == "fixture-user-token")
                         assert(options.headers["X-Internal-Signature"])
-                        if url ~= "http://127.0.0.1:19842/api/projects/internal/studio-context/abcdefghijklmnopqrst?access=admin"
-                            or ngx.var.http_x_test_role ~= "admin" then
+                        local role = ngx.var.http_x_test_role
+                        if url ~= "http://127.0.0.1:19842/api/projects/internal/studio-context/abcdefghijklmnopqrst?access=studio"
+                            or (role ~= "admin" and role ~= "member") then
                             return { status = 403, body = '{}' }
                         end
                         return {
@@ -184,7 +185,8 @@ local ok, err = xpcall(function()
     request(base .. "/query", nil, { ["X-Studio-Project-Ref"] = other }, 409)
     request(base .. "/query", nil, { ["X-Studio-Project-Ref"] = "technical_project" }, 400)
     request(base .. "/query", "{broken", { ["X-Test-User"] = "" }, 401)
-    request(base .. "/query", "{broken", { ["X-Test-Role"] = "member" }, 404)
+    request(base .. "/query", '{"query":"select 1"}', { ["X-Test-Role"] = "member" }, 200)
+    request(base .. "/query", "{broken", { ["X-Test-Role"] = "outsider" }, 404)
     request(base .. "/query", nil, { ["X-Test-Key-Failure"] = "1" }, 503)
     request(base .. "/query", nil, { ["X-Test-Technical-Name"] = "../escape" }, 503)
     request("/api/platform/pg-meta/technical_project/query", nil, nil, 404)

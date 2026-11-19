@@ -307,6 +307,11 @@ async def ensure_project_member_access(
         FROM project_members
         WHERE project_id = $1
           AND user_id = $2
+        UNION ALL
+        SELECT 1
+        FROM projects
+        WHERE id = $1
+          AND owner_id = $2
         LIMIT 1
         """,
         project_id,

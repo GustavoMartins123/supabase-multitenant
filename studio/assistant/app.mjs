@@ -158,10 +158,10 @@ export function createHandler({ store, secret, call, modelFactory = providerMode
       phase = 'validation'
       const body = bytes.length ? JSON.parse(bytes.toString('utf8')) : undefined
       if (req.url === '/api/ai/settings') {
-        if (req.method === 'GET') return send(res, 200, { ...store.status(scope), maxPermission: scope.role === 'admin' ? 'full' : 'none' })
+        if (req.method === 'GET') return send(res, 200, { ...store.status(scope), maxPermission: ['admin', 'member'].includes(scope.role) ? 'full' : 'none' })
         if (req.method === 'PUT') {
           const parsed = settingsSchema.parse(body)
-          if (scope.role !== 'admin' && parsed.permission !== 'none') return send(res, 403, { message: 'Database access requires project administration' })
+          if (!['admin', 'member'].includes(scope.role) && parsed.permission !== 'none') return send(res, 403, { message: 'Database access requires project membership' })
           return send(res, 200, store.save(scope, parsed))
         }
         return send(res, 405, { message: 'Method not allowed' })
@@ -237,7 +237,7 @@ export function createHandler({ store, secret, call, modelFactory = providerMode
       if (messages.some(message => !['user', 'assistant'].includes(message.role) || message.parts.some(part => !permittedParts.has(part.type)))) throw new Error('Unsupported assistant message content')
       phase = 'context'
       const context = await call(scope, 'context', undefined, abort.signal)
-      if (context.project_id !== scope.projectId || context.user_id !== scope.userId || (config.permission !== 'none' && context.role !== 'admin')) throw new Error('Assistant authorization changed')
+      if (context.project_id !== scope.projectId || context.user_id !== scope.userId || (config.permission !== 'none' && !['admin', 'member'].includes(context.role))) throw new Error('Assistant authorization changed')
       let summaryStepReached = false
       const boundedCall = (...args) => {
         if (summaryStepReached) throw new Error('Assistant operation-step budget reached; no database operation was authorized')

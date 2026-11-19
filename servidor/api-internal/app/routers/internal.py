@@ -254,20 +254,20 @@ async def get_studio_project_context(
     _require_studio_nginx(request)
     auth_user = await resolve_authenticated_user(request, pool)
     access = request.query_params.get("access", "member")
-    if access not in {"member", "admin", "storage"}:
+    if access not in {"member", "studio", "admin", "storage"}:
         raise HTTPException(400, "Invalid Studio access mode")
     enc_admin_key = None
 
     async with pool.acquire() as conn:
         async with conn.transaction():
-            project = await get_public_project_row(conn, ref, for_update=access in {"admin", "storage"})
+            project = await get_public_project_row(conn, ref, for_update=access in {"admin", "studio", "storage"})
 
             await ensure_project_member_access(
                 conn,
                 project_id=project["id"],
                 auth_user=auth_user,
             )
-            if access in {"admin", "storage"}:
+            if access in {"admin", "studio", "storage"}:
                 if access == "admin":
                     await ensure_project_admin_access(conn, project_id=project["id"], auth_user=auth_user)
                 administrative_key = await get_studio_administrative_key(conn, project_id=project["id"])
@@ -277,7 +277,7 @@ async def get_studio_project_context(
                 project_id=project["id"],
                 auth_user=auth_user,
             )
-            if role is None and auth_user["is_global_admin"]:
+            if role is None and (auth_user["is_global_admin"] or project.get("owner_id") == auth_user["db_user_id"]):
                 role = "admin"
 
             keys = await conn.fetchrow(

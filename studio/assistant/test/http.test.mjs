@@ -89,9 +89,10 @@ test('real HTTP settings never return the provider key; unsigned and cross-user 
   assert.equal((await response.text()).includes(providerKey),false)
   assert.equal((await (await request('/api/ai/settings')).json()).hasKey,true)
   assert.equal((await (await request('/api/ai/settings','GET',undefined,{...actor,userId:randomUUID()})).json()).hasKey,false)
-  const refused = await request('/api/ai/settings','PUT',{provider:'openai',model:'explicit-model',permission:'write',apiKey:providerKey},{...actor,role:'member'})
-  assert.equal(refused.status,403)
-  assert.equal((await refused.text()).includes(providerKey),false)
+  const memberAllowed = await request('/api/ai/settings','PUT',{provider:'openai',model:'explicit-model',permission:'write',apiKey:providerKey},{...actor,role:'member'})
+  assert.equal(memberAllowed.status,200)
+  assert.equal((await memberAllowed.text()).includes(providerKey),false)
+  assert.equal((await (await request('/api/ai/settings','GET',undefined,{...actor,role:'member'})).json()).maxPermission,'full')
 })
 
 test('AI SDK delivers native UI SSE and finishes without prematurely cancelling a completed POST body', async t => {

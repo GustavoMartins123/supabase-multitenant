@@ -27,7 +27,11 @@ class StudioOpenRestyTransportTest(unittest.TestCase):
         self.assertTrue(body["opaque"])
         self.assertTrue(body["administrative"])
 
-    def test_denied_actor_is_not_proxied(self):
+    def test_project_member_is_proxied_and_outsider_is_denied(self):
+        with self.request("rest/orders", actor="member") as response:
+            body = json.load(response)
+        self.assertEqual(body["uri"], "/demo/rest/v1/orders")
+        self.assertTrue(body["opaque"])
         with self.assertRaises(urllib.error.HTTPError) as error:
-            self.request("rest/orders", actor="member")
+            self.request("rest/orders", actor="outsider")
         self.assertEqual(error.exception.code, 403)

@@ -28,7 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, Strict
 
 from app import edge_bundler, edge_function_store as store, edge_functions
 from app.database import get_pool
-from app.dependencies import ensure_project_admin_access, get_public_project_row, resolve_authenticated_user
+from app.dependencies import ensure_project_member_access, get_public_project_row, resolve_authenticated_user
 from app.functions_network import network_hosts
 from app.meta_connections import get_project_meta_connection_string
 from app.opaque_keys import generate_opaque_key, parse_opaque_key
@@ -371,7 +371,7 @@ async def management_context(ref, request, response, pool, *, allow_query: bool 
     user = await resolve_authenticated_user(request, pool)
     async with pool.acquire() as conn:
         project = await get_public_project_row(conn, ref)
-        await ensure_project_admin_access(conn, project_id=project['id'], auth_user=user)
+        await ensure_project_member_access(conn, project_id=project['id'], auth_user=user)
     locked_project = (project['id'], project['name'], project['tenant_uuid'])
     async with edge_functions.configuration_lock(ROOT, project['name']):
         # No database connection is held while waiting for lifecycle or directory I/O.
@@ -380,7 +380,7 @@ async def management_context(ref, request, response, pool, *, allow_query: bool 
             project = await get_public_project_row(conn, ref)
             if (project['id'], project['name'], project['tenant_uuid']) != locked_project:
                 raise HTTPException(409, 'Project identity changed while waiting; reload before continuing')
-            await ensure_project_admin_access(conn, project_id=project['id'], auth_user=user)
+            await ensure_project_member_access(conn, project_id=project['id'], auth_user=user)
             request.state.edge_actor_label = str(
                 user.get('username') or user.get('display_name') or user['db_user_id']
             )[:128]

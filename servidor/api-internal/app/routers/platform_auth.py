@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.database import get_pool
 from app.dependencies import (
-    ensure_project_admin_access,
+    ensure_project_member_access,
     get_public_project_row,
     resolve_authenticated_user,
 )
@@ -115,7 +115,7 @@ async def list_project_auth_users(
     async with pool.acquire() as conn:
         project_row = await get_public_project_row(conn, project_ref)
         project_name = project_row["name"]
-        await ensure_project_admin_access(
+        await ensure_project_member_access(
             conn,
             project_id=project_row["id"],
             auth_user=auth_user,
@@ -247,7 +247,7 @@ async def proxy_project_auth_admin(
     async with pool.acquire() as conn:
         project_row = await get_public_project_row(conn, project_ref)
         project_name = project_row["name"]
-        await ensure_project_admin_access(
+        await ensure_project_member_access(
             conn,
             project_id=project_row["id"],
             auth_user=auth_user,

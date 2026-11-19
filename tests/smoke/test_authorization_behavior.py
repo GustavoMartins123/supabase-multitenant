@@ -543,6 +543,7 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
         path = "/api/projects/internal/studio-context/abcdefghijklmnopqrst"
         with mock.patch("app.routers.internal.get_project_file_size_limit", return_value=5000):
             storage = await self.request("GET", path + "?access=storage", actor=self.ex_member)
+            studio = await self.request("GET", path + "?access=studio", actor=self.ex_member)
             ordinary = await self.request("GET", path, actor=self.ex_member)
         self.assertEqual(storage.status_code, 200, storage.text)
         self.assertEqual(storage.json()["role"], "member")
@@ -550,6 +551,10 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
         key = service_key_transport_fernet.decrypt(storage.json()["enc_admin_key"].encode())
         self.assertTrue(key.startswith(b"sb_secret_"))
         self.assertNotIn(key.decode(), storage.text)
+        self.assertEqual(studio.status_code, 200, studio.text)
+        self.assertEqual(studio.json()["role"], "member")
+        studio_key = service_key_transport_fernet.decrypt(studio.json()["enc_admin_key"].encode())
+        self.assertEqual(studio_key, key)
         self.assertEqual(ordinary.status_code, 200, ordinary.text)
         self.assertIsNone(ordinary.json()["enc_admin_key"])
         denied = await self.request("GET", path + "?access=admin", actor=self.ex_member)
