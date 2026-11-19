@@ -133,7 +133,8 @@ class EdgeFunctionWorkersGetOnlyTheirTenantEnvTest(unittest.TestCase):
     def test_worker_env_never_carries_a_cluster_dsn(self) -> None:
         self.assertNotIn('Deno.env.get(', self.main)
         routes = read("servidor/api-internal/app/routers/studio_edge_functions.py")
-        self.assertIn("get_project_meta_connection_string(project['name'], project['tenant_uuid'])", routes)
+        self.assertIn("get_project_meta_connection_string(", routes)
+        self.assertIn("host_override=os.getenv('EDGE_DB_HOST') or 'supabase-db'", routes)
         self.assertNotIn("POSTGRES_PASSWORD", self.main)
 
 

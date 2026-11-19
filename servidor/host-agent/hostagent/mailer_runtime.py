@@ -102,8 +102,10 @@ def prepare_mailer_files(root: Path, scripts_dir: Path, project_dir: Path) -> st
         static_mount = re.search(
             r"""(?::|target:\s*)["']?/usr/share/nginx/html(?:[/'"\s:]|$)""", text
         )
+        expected_gateway_mailer = f"supabase-nginx-{project_dir.name}:18020/mailer/"
         if static_mount or any(
-            "template-service:18020/mailer/" not in url for url in urls
+            ("template-service:18020/mailer/" not in url and expected_gateway_mailer not in url)
+            for url in urls
         ):
             raise RuntimeError(
                 "Migre os templates legados com migrate_mailer_templates.py antes de regenerar o projeto"

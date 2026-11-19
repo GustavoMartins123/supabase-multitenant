@@ -14,6 +14,10 @@ from pydantic import BaseModel, ConfigDict, Field
 import asyncpg
 
 from app.database import get_pool
+from app.host_agent import (
+    fetch_projects_containers,
+    worker_alive as host_agent_alive,
+)
 from app.mailer_templates import copy_project as copy_mailer_templates
 from app.access_policy import copy_project_access_policy
 from app.identity_schemas import ProjectIdentity, JobIdentity
@@ -95,6 +99,7 @@ class ProjectListItem(ProjectIdentity):
     last_key_rotation_at: str | None
     opaque_api_keys_status: str
     opaque_api_key_slot_count: int
+    status: str | None = None
 
 
 class QueuedJobResponse(JobIdentity):
@@ -118,9 +123,25 @@ class QueuedJobResponse(JobIdentity):
     queue_position: int
 
 
+def _summarize_container_status(
+    containers: list[dict[str, Any]],
+    *,
+    agent_online: bool,
+) -> str:
+    if not containers:
+        return "not_found" if agent_online else "unknown"
+    running_count = sum(1 for c in containers if c.get("State") == "running")
+    if running_count == 0:
+        return "stopped"
+    if running_count == len(containers):
+        return "running"
+    return "partial"
+
+
 @router.get("/api/projects", response_model=list[ProjectListItem])
 async def list_projects(
     request: Request,
+    include_status: bool = False,
     pool=Depends(get_pool)
 ):
     auth_user = await resolve_authenticated_user(request, pool)
@@ -152,6 +173,13 @@ async def list_projects(
                   )
                 ORDER BY p.name
             """, auth_user["db_user_id"])
+            grouped_containers: dict[str, list[dict[str, Any]]] = {}
+            agent_online = True
+            if include_status and rows:
+                project_names = [r["name"] for r in rows]
+                grouped_containers = await fetch_projects_containers(conn, project_names)
+                if any(not grouped_containers.get(name) for name in project_names):
+                    agent_online = await host_agent_alive(pool)
             result = []
             for r in rows:
                 key_expires_at = (
@@ -164,7 +192,7 @@ async def list_projects(
                     if key_expires_at is not None
                     else None
                 )
-                result.append({
+                item = {
                     "project_uuid": str(r["id"]),
                     "tenant_uuid": (
                         str(r["tenant_uuid"]) if r["tenant_uuid"] else None
@@ -220,7 +248,13 @@ async def list_projects(
                     "opaque_api_key_slot_count": int(
                         r["opaque_key_slot_count"]
                     ),
-                })
+                }
+                if include_status:
+                    item["status"] = _summarize_container_status(
+                        grouped_containers.get(r["name"], []),
+                        agent_online=agent_online,
+                    )
+                result.append(item)
     return result
 
 

@@ -8,6 +8,14 @@ const envFields = ['SUPABASE_URL', 'SUPABASE_PUBLIC_URL', 'SUPABASE_ANON_KEY',
   'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_DB_URL']
 const running = new Map<string, number>()
 let totalRunning = 0
+const MAX_CONCURRENT_GLOBAL = 24
+const MAX_ESZIP_CACHE_BYTES = 32 * 1024 * 1024
+const MAX_ESZIP_CACHE_ENTRY_BYTES = 16 * 1024 * 1024
+const eszipBundles = new Map<string, Uint8Array>()
+let eszipCacheBytes = 0
+const parsedContextByPath = new Map<string, { sig: string; data: Tenant }>()
+const parsedProjectionByPath = new Map<string, { sig: string; data: Projection }>()
+const MAX_PARSED_CONTEXTS = 200
 const secretNamePattern = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/
 const reservedSecretNames = new Set([
   'PATH', 'HOME', 'USER', 'SHELL', 'PWD', 'LANG', 'LC_ALL', 'TZ', 'HOST', 'PORT', 'HOSTNAME', 'VERIFY_JWT',
@@ -20,21 +28,79 @@ const reservedSecretPrefixes = [
 const textEncoder = new TextEncoder()
 
 type Projection = { project_ref: string; technical_name: string; project_uuid: string;
-  anon_key: string; service_role_key: string; jwt_secret: string; network_allowlist?: string[] }
+  anon_key: string; service_role_key: string; jwt_secret: string; network_allowlist?: string[]; edge_gateway_token?: string }
+const gatewayTokenPattern = /^[0-9a-f]{64}$/
+
+function fileStatSignature(info: Deno.FileInfo): string {
+  return `${info.ino ?? 0}:${info.size}:${info.mtime?.getTime() ?? 0}`
+}
+
+function getCachedEszip(key: string): Uint8Array | undefined {
+  const hit = eszipBundles.get(key)
+  if (!hit) return undefined
+  eszipBundles.delete(key)
+  eszipBundles.set(key, hit)
+  return hit.slice()
+}
+
+function putCachedEszip(key: string, bytes: Uint8Array): void {
+  if (bytes.byteLength <= 0 || bytes.byteLength > MAX_ESZIP_CACHE_ENTRY_BYTES) return
+  const existing = eszipBundles.get(key)
+  if (existing) {
+    eszipCacheBytes -= existing.byteLength
+    eszipBundles.delete(key)
+  }
+  while (eszipCacheBytes + bytes.byteLength > MAX_ESZIP_CACHE_BYTES && eszipBundles.size > 0) {
+    const oldestKey = eszipBundles.keys().next().value
+    if (!oldestKey) break
+    const oldest = eszipBundles.get(oldestKey)
+    if (oldest) eszipCacheBytes -= oldest.byteLength
+    eszipBundles.delete(oldestKey)
+  }
+  eszipBundles.set(key, bytes)
+  eszipCacheBytes += bytes.byteLength
+}
 
 async function canonicalProjection(name: string, ref: string): Promise<Projection> {
   const path = `/home/deno/tenant-config/${name}.json`
-  const info = await Deno.lstat(path)
-  if (!info.isFile || info.isSymlink || info.size > 65536) throw new Error('Invalid lifecycle projection')
+  let info: Deno.FileInfo
+  try {
+    info = await Deno.lstat(path)
+  } catch (error) {
+    parsedProjectionByPath.delete(path)
+    throw error
+  }
+  if (!info.isFile || info.isSymlink || info.size > 65536) {
+    parsedProjectionByPath.delete(path)
+    throw new Error('Invalid lifecycle projection')
+  }
+  const sig = fileStatSignature(info)
+  const cached = parsedProjectionByPath.get(path)
+  if (cached && cached.sig === sig && cached.data.technical_name === name && cached.data.project_ref === ref) {
+    parsedProjectionByPath.delete(path)
+    parsedProjectionByPath.set(path, cached)
+    return cached.data
+  }
   const value = JSON.parse(await Deno.readTextFile(path))
   const required = ['project_ref', 'technical_name', 'project_uuid', 'anon_key', 'service_role_key', 'jwt_secret']
-  if (!value || ![required.length, required.length + 1].includes(Object.keys(value).length) ||
-    Object.keys(value).some(key => ![...required, 'network_allowlist'].includes(key)) ||
+  const allowed = new Set([...required, 'network_allowlist', 'edge_gateway_token'])
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+    Object.keys(value).some(key => !allowed.has(key)) ||
     required.some(key => typeof value[key] !== 'string' || !value[key] || value[key] !== value[key].trim()) ||
     value.project_ref !== ref || value.technical_name !== name || !uuidPattern.test(value.project_uuid)) {
     throw new Error('Invalid lifecycle projection')
   }
+  if (value.edge_gateway_token !== undefined &&
+    (typeof value.edge_gateway_token !== 'string' || !gatewayTokenPattern.test(value.edge_gateway_token))) {
+    throw new Error('Invalid lifecycle projection')
+  }
   externalNetworkHosts(value.network_allowlist ?? [])
+  parsedProjectionByPath.delete(path)
+  parsedProjectionByPath.set(path, { sig, data: value })
+  if (parsedProjectionByPath.size > MAX_PARSED_CONTEXTS) {
+    const oldest = parsedProjectionByPath.keys().next().value
+    if (oldest && oldest !== path) parsedProjectionByPath.delete(oldest)
+  }
   return value
 }
 
@@ -99,7 +165,7 @@ function validateLimits(raw: unknown): RuntimeLimits {
   const conc = obj.max_concurrent_project
   if (!Number.isInteger(mem) || (mem as number) < 64 || (mem as number) > 512) throw new Error('Invalid context')
   if (!Number.isInteger(timeout) || (timeout as number) < 1000 || (timeout as number) > 120000) throw new Error('Invalid context')
-  if (!Number.isInteger(conc) || (conc as number) < 1 || (conc as number) > 4) throw new Error('Invalid context')
+  if (!Number.isInteger(conc) || (conc as number) < 1 || (conc as number) > 8) throw new Error('Invalid context')
   return {
     memory_limit_mb: mem as number,
     worker_timeout_ms: timeout as number,
@@ -116,10 +182,21 @@ async function tenantContext(name: string, uuid: string): Promise<Tenant | null>
   let info: Deno.FileInfo
   try { info = await Deno.lstat(path) }
   catch (error) {
+    parsedContextByPath.delete(path)
     if (error instanceof Deno.errors.NotFound) return null
     throw error
   }
-  if (!info.isFile || info.isSymlink || info.size > 262144) throw new Error('Invalid context')
+  if (!info.isFile || info.isSymlink || info.size > 262144) {
+    parsedContextByPath.delete(path)
+    throw new Error('Invalid context')
+  }
+  const sig = fileStatSignature(info)
+  const cached = parsedContextByPath.get(path)
+  if (cached && cached.sig === sig && cached.data.project === name && cached.data.uuid === uuid) {
+    parsedContextByPath.delete(path)
+    parsedContextByPath.set(path, cached)
+    return cached.data
+  }
   const data = JSON.parse(await Deno.readTextFile(path))
   const allowedKeys = new Set([...fields, 'network_allowlist', 'secrets', 'public_functions', 'limits'])
   if (!data || typeof data !== 'object' || Array.isArray(data) ||
@@ -132,6 +209,12 @@ async function tenantContext(name: string, uuid: string): Promise<Tenant | null>
   validateSecrets(data.secrets)
   validatePublicFunctions(data.public_functions)
   validateLimits(data.limits)
+  parsedContextByPath.delete(path)
+  parsedContextByPath.set(path, { sig, data })
+  if (parsedContextByPath.size > MAX_PARSED_CONTEXTS) {
+    const oldest = parsedContextByPath.keys().next().value
+    if (oldest && oldest !== path) parsedContextByPath.delete(oldest)
+  }
   return data
 }
 
@@ -214,6 +297,7 @@ function registerTenantRedaction(project: string, uuid: string, tenant: Tenant, 
     collect(canonical.jwt_secret)
     collect(canonical.anon_key)
     collect(canonical.service_role_key)
+    collect(canonical.edge_gateway_token)
   }
   for (const val of Object.values(tenant.secrets ?? {})) collect(val)
   for (const [key, val] of Object.entries(tenant.env ?? {})) {
@@ -426,6 +510,12 @@ Deno.serve(async (request: Request) => {
   let canonical: Projection
   try { canonical = await canonicalProjection(project, ref) }
   catch { return response('tenant_configuration_unavailable', 503) }
+  if (canonical.edge_gateway_token) {
+    const providedGatewayToken = request.headers.get('x-edge-gateway-token') ?? ''
+    if (!providedGatewayToken || !constantTimeEqual(providedGatewayToken, canonical.edge_gateway_token)) {
+      return response('forbidden', 403)
+    }
+  }
   const uuid = canonical.project_uuid
   let tenant: Tenant | null
   try { tenant = await tenantContext(project, uuid) }
@@ -460,24 +550,31 @@ Deno.serve(async (request: Request) => {
   }
   let maybeEszip: Uint8Array | undefined
   try {
-    const eszipInfo = await Deno.lstat(`${servicePath}/bundle.eszip`)
+    const eszipPath = `${servicePath}/bundle.eszip`
+    const eszipInfo = await Deno.lstat(eszipPath)
     if (!eszipInfo.isFile || eszipInfo.isSymlink || eszipInfo.size <= 0 || eszipInfo.size > 33554432) {
       return response('tenant_configuration_unavailable', 503)
     }
-    maybeEszip = await Deno.readFile(`${servicePath}/bundle.eszip`)
+    const eszipKey = `${eszipPath}:${fileStatSignature(eszipInfo)}`
+    maybeEszip = getCachedEszip(eszipKey)
+    if (!maybeEszip) {
+      const loaded = await Deno.readFile(eszipPath)
+      putCachedEszip(eszipKey, loaded)
+      maybeEszip = loaded.slice()
+    }
   } catch (error) {
     if (!(error instanceof Deno.errors.NotFound)) return response('tenant_configuration_unavailable', 503)
   }
   const limits = validateLimits(tenant.limits)
   const currentProjectRunning = running.get(project) ?? 0
-  if (totalRunning >= 4 || currentProjectRunning >= limits.max_concurrent_project) {
+  if (totalRunning >= MAX_CONCURRENT_GLOBAL || currentProjectRunning >= limits.max_concurrent_project) {
     const reqId = (request.headers.get('x-request-id') ?? '').trim().slice(0, 128)
     recordLog(
       project,
       name,
       'warn',
       'worker',
-      `Saturation: concurrency limit reached (${currentProjectRunning}/${limits.max_concurrent_project} project, ${totalRunning}/4 global)`,
+      `Saturation: concurrency limit reached (${currentProjectRunning}/${limits.max_concurrent_project} project, ${totalRunning}/${MAX_CONCURRENT_GLOBAL} global)`,
       { status: 429, ...(reqId ? { request_id: reqId } : {}) },
     )
     return response('function_concurrency_limit', 429)
@@ -522,6 +619,10 @@ Deno.serve(async (request: Request) => {
       status: result.status,
       duration_ms: durationMs,
     })
+    if (result.status === 101) {
+      request.signal?.addEventListener('abort', () => { release() }, { once: true })
+      return result
+    }
     if (!result.body) { release(); return result }
     const headers = new Headers(result.headers)
     if (headers.get('content-type')?.toLowerCase().includes('text/event-stream') && !headers.has('x-accel-buffering')) {

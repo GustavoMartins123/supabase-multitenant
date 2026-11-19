@@ -53,7 +53,7 @@ class MailerRuntimeTests(unittest.TestCase):
         )
         self.assertEqual((self.project / ".env").stat().st_mode & 0o777, 0o600)
         compose = (self.project / "docker-compose.yml").read_text()
-        self.assertEqual(compose.count("http://template-service:18020/mailer/"), 6)
+        self.assertEqual(compose.count(f"http://supabase-nginx-{NAME}:18020/mailer/"), 6)
         self.assertIn(
             "${MAILER_TEMPLATE_KEY:?MAILER_TEMPLATE_KEY is required}", compose
         )

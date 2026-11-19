@@ -332,31 +332,49 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
               ),
             ],
           ),
-          SliverToBoxAdapter(
-            child: FadeTransition(
-              opacity: _fadeAnimation,
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 1400),
-                  child: Builder(
-                    builder: (_) {
-                      if (isLoading) return _buildLoadingState();
-                      if (hasLoadError) {
-                        return _buildErrorState(loadError);
-                      }
-                      if (projects.isEmpty) return _buildEmptyState();
-
-                      return _buildProjectGrid(
-                        projects,
-                        favorites,
-                        serverDomain,
-                      );
-                    },
+          if (isLoading)
+            SliverToBoxAdapter(
+              child: FadeTransition(
+                opacity: _fadeAnimation,
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1400),
+                    child: _buildLoadingState(),
                   ),
                 ),
               ),
+            )
+          else if (hasLoadError)
+            SliverToBoxAdapter(
+              child: FadeTransition(
+                opacity: _fadeAnimation,
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1400),
+                    child: _buildErrorState(loadError),
+                  ),
+                ),
+              ),
+            )
+          else if (projects.isEmpty)
+            SliverToBoxAdapter(
+              child: FadeTransition(
+                opacity: _fadeAnimation,
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1400),
+                    child: _buildEmptyState(),
+                  ),
+                ),
+              ),
+            )
+          else
+            ..._buildProjectGridSlivers(
+              context,
+              projects,
+              favorites,
+              serverDomain,
             ),
-          ),
         ],
       ),
       floatingActionButton: Session().isSysAdmin ? _buildAdminFab() : null,
@@ -484,7 +502,8 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
     );
   }
 
-  Widget _buildProjectGrid(
+  List<Widget> _buildProjectGridSlivers(
+    BuildContext context,
     List<Map<String, dynamic>> projects,
     Set<String> favorites,
     String? serverDomain,
@@ -493,15 +512,29 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
         projects.where((p) => favorites.contains(p['project_uuid'])).toList();
     final otherProjects =
         projects.where((p) => !favorites.contains(p['project_uuid'])).toList();
+    final width = MediaQuery.sizeOf(context).width;
+    final horizontalInset =
+        ((width - 1400) / 2).clamp(0.0, double.infinity) + 24.0;
+    const gridDelegate = SliverGridDelegateWithMaxCrossAxisExtent(
+      maxCrossAxisExtent: 380,
+      crossAxisSpacing: 16,
+      mainAxisSpacing: 16,
+      childAspectRatio: 1.35,
+    );
 
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (favProjects.isNotEmpty) ...[
-            const Padding(
-              padding: EdgeInsets.only(left: 4, bottom: 12),
+    final slivers = <Widget>[];
+    if (favProjects.isNotEmpty) {
+      slivers.add(
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(
+            horizontalInset + 4,
+            24,
+            horizontalInset,
+            12,
+          ),
+          sliver: SliverFadeTransition(
+            opacity: _fadeAnimation,
+            sliver: const SliverToBoxAdapter(
               child: Row(
                 children: [
                   Icon(
@@ -522,26 +555,53 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
                 ],
               ),
             ),
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 380,
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 16,
-                childAspectRatio: 1.35,
+          ),
+        ),
+      );
+      slivers.add(
+        SliverPadding(
+          padding: EdgeInsets.symmetric(horizontal: horizontalInset),
+          sliver: SliverFadeTransition(
+            opacity: _fadeAnimation,
+            sliver: SliverGrid(
+              gridDelegate: gridDelegate,
+              delegate: SliverChildBuilderDelegate(
+                (_, i) => _buildCard(favProjects[i], true, serverDomain),
+                childCount: favProjects.length,
               ),
-              itemCount: favProjects.length,
-              itemBuilder: (_, i) =>
-                  _buildCard(favProjects[i], true, serverDomain),
             ),
-            const SizedBox(height: 32),
-            const Divider(color: SupabaseColors.border, height: 1),
-            const SizedBox(height: 24),
-          ],
-          if (otherProjects.isNotEmpty) ...[
-            const Padding(
-              padding: EdgeInsets.only(left: 4, bottom: 12),
+          ),
+        ),
+      );
+      slivers.add(
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(
+            horizontalInset,
+            32,
+            horizontalInset,
+            24,
+          ),
+          sliver: SliverFadeTransition(
+            opacity: _fadeAnimation,
+            sliver: const SliverToBoxAdapter(
+              child: Divider(color: SupabaseColors.border, height: 1),
+            ),
+          ),
+        ),
+      );
+    }
+    if (otherProjects.isNotEmpty) {
+      slivers.add(
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(
+            horizontalInset + 4,
+            favProjects.isEmpty ? 24 : 0,
+            horizontalInset,
+            12,
+          ),
+          sliver: SliverFadeTransition(
+            opacity: _fadeAnimation,
+            sliver: const SliverToBoxAdapter(
               child: Text(
                 'TODOS OS PROJETOS',
                 style: TextStyle(
@@ -552,23 +612,31 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
                 ),
               ),
             ),
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 380,
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 16,
-                childAspectRatio: 1.35,
+          ),
+        ),
+      );
+      slivers.add(
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(
+            horizontalInset,
+            0,
+            horizontalInset,
+            24,
+          ),
+          sliver: SliverFadeTransition(
+            opacity: _fadeAnimation,
+            sliver: SliverGrid(
+              gridDelegate: gridDelegate,
+              delegate: SliverChildBuilderDelegate(
+                (_, i) => _buildCard(otherProjects[i], false, serverDomain),
+                childCount: otherProjects.length,
               ),
-              itemCount: otherProjects.length,
-              itemBuilder: (_, i) =>
-                  _buildCard(otherProjects[i], false, serverDomain),
             ),
-          ],
-        ],
-      ),
-    );
+          ),
+        ),
+      );
+    }
+    return slivers;
   }
 
   Widget _buildCard(
@@ -581,6 +649,7 @@ class _ProjectListPageState extends ConsumerState<ProjectListPage>
       technicalName: project['name'] as String,
       opaqueApiKeysStatus: project['opaque_api_keys_status'] as String,
       opaqueApiKeySlotCount: project['opaque_api_key_slot_count'] as int,
+      initialStatus: project['status']?.toString(),
       isLoading: project['is_loading'] == true,
       activeJob: project['active_job'],
       isFavorite: isFavorite,

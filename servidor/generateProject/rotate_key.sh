@@ -15,6 +15,9 @@ source "$SCRIPT_DIR/lib/project_public_ref.sh"
 TRANSACTION_DIR="$PROJECT_ROOT/.rotate_transaction_$$"
 MODIFIED_FILES=()
 STORAGE_KEYS_UPDATED=false
+REALTIME_JWT_UPDATED=false
+ROTATE_JWT_SECRET="${ROTATE_JWT_SECRET:-false}"
+SERVICES_TO_RECREATE=(nginx)
 
 init_transaction() {
   mkdir -p "$TRANSACTION_DIR"
@@ -39,6 +42,18 @@ commit_transaction() {
   fi
 }
 
+realtime_patch_tenant_jwt_secret() {
+  local tenant_uuid="$1" secret="$2" api_token="$3" payload response http_code
+  payload="$(jq -cn --arg secret "$secret" '{tenant:{jwt_secret:$secret}}')" || return 1
+  response="$(docker exec realtime-dev.supabase-realtime curl -sS -w '\n%{http_code}' \
+    -X PUT "http://localhost:4000/api/tenants/${tenant_uuid}" \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer ${api_token}" \
+    -d "$payload")" || return 1
+  http_code="$(printf '%s\n' "$response" | tail -n1)"
+  [[ "$http_code" == "200" || "$http_code" == "201" || "$http_code" == "204" ]]
+}
+
 rollback_transaction() {
   trap - ERR
   set +e
@@ -48,8 +63,19 @@ rollback_transaction() {
   fi
   echo "❌ Erro detectado! Revertendo alterações..."
 
+  if [[ "$REALTIME_JWT_UPDATED" == "true" ]]; then
+    if ! realtime_patch_tenant_jwt_secret "$PROJECT_UUID" "$PREVIOUS_JWT_SECRET" "$GLOBAL_API_TOKEN"; then
+      runtime_restored=false
+      echo "❌ Configuracao anterior do tenant Realtime nao foi restaurada." >&2
+    fi
+  fi
+
   if [[ "$STORAGE_KEYS_UPDATED" == "true" ]]; then
-    if ! storage_patch_tenant_keys "$PROJECT_UUID" "$CURRENT_ANON" "$CURRENT_SERVICE"; then
+    local rollback_jwt=""
+    if [[ "$ROTATE_JWT_SECRET" == "true" ]]; then
+      rollback_jwt="$PREVIOUS_JWT_SECRET"
+    fi
+    if ! storage_patch_tenant_keys "$PROJECT_UUID" "$CURRENT_ANON" "$CURRENT_SERVICE" "$rollback_jwt"; then
       runtime_restored=false
       echo "❌ Configuracao anterior do tenant Storage nao foi restaurada." >&2
     fi
@@ -70,12 +96,12 @@ rollback_transaction() {
         docker compose -p "$PROJECT_ID" \
           --env-file ../../.env \
           --env-file .env \
-          up --build -d nginx
+          up --build -d "${SERVICES_TO_RECREATE[@]}"
       ); then
-        echo "   Runtime do Nginx restaurado com a configuração anterior."
+        echo "   Runtime dos servicos restaurado com a configuração anterior."
       else
         runtime_restored=false
-        echo "❌ Arquivos restaurados, mas o runtime anterior do Nginx não pôde ser confirmado." >&2
+        echo "❌ Arquivos restaurados, mas o runtime anterior nao pôde ser confirmado." >&2
       fi
     fi
     if [[ "$runtime_restored" == "true" ]]; then
@@ -101,9 +127,35 @@ set +a
 [[ -z "${SERVER_URL:-}" ]] && die "SERVER_URL ausente"
 [[ -z "${HOST_PROJECT_ROOT:-}" ]] && die "HOST_PROJECT_ROOT ausente"
 
-PROJECT_ID="${1:-}"
+PROJECT_ID=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --rotate-jwt-secret)
+      ROTATE_JWT_SECRET="true"
+      shift
+      ;;
+    --keep-jwt-secret)
+      ROTATE_JWT_SECRET="false"
+      shift
+      ;;
+    -*)
+      die "Flag nao reconhecida: $1"
+      ;;
+    *)
+      if [[ -z "$PROJECT_ID" ]]; then
+        PROJECT_ID="$1"
+      else
+        die "Uso: $0 <project_id> [--rotate-jwt-secret]"
+      fi
+      shift
+      ;;
+  esac
+done
 
-[[ -z "$PROJECT_ID" ]] && die "Uso: $0 <project_id>"
+[[ "$ROTATE_JWT_SECRET" == "true" || "$ROTATE_JWT_SECRET" == "false" ]] \
+  || die "ROTATE_JWT_SECRET deve ser true ou false"
+
+[[ -z "$PROJECT_ID" ]] && die "Uso: $0 <project_id> [--rotate-jwt-secret]"
 [[ "$PROJECT_ID" =~ ^[a-z_][a-z0-9_]{2,39}$ ]] \
   || die "PROJECT_ID invalido"
 
@@ -212,8 +264,18 @@ now=$(date +%s)
 exp=$((now + (3 * 30 * 24 * 3600)))
 anon_jti=$(openssl rand -hex 16)
 service_jti=$(openssl rand -hex 16)
+PREVIOUS_JWT_SECRET="$JWT_SECRET_PROJETO"
+GLOBAL_API_TOKEN=""
 
-echo "🔄 Gerando novos tokens para projeto $PROJECT_ID..."
+if [[ "$ROTATE_JWT_SECRET" == "true" ]]; then
+  [[ -n "${JWT_SECRET:-}" ]] || die "JWT_SECRET global ausente para atualizar o Realtime"
+  JWT_SECRET_PROJETO="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
+  SERVICES_TO_RECREATE=(auth rest nginx)
+  GLOBAL_API_TOKEN="$(generate_jwt "{\"role\":\"service_role\",\"iss\":\"supabase\",\"iat\":$now,\"exp\":$((now + 300))}" "$JWT_SECRET")"
+  echo "🔄 Gerando novo JWT_SECRET_PROJETO e novos tokens para projeto $PROJECT_ID..."
+else
+  echo "🔄 Gerando novos tokens para projeto $PROJECT_ID..."
+fi
 echo "   Usando issuer: $PROJECT_UUID"
 
 echo "HOST_AGENT_PROGRESS=rotate:generate_tokens"
@@ -259,9 +321,20 @@ functions_config_withdraw "$PROJECT_ID"
 init_transaction
 
 echo "HOST_AGENT_PROGRESS=rotate:configure_storage"
-storage_patch_tenant_keys "$PROJECT_UUID" "$NEW_ANON" "$NEW_SERVICE" \
-  || die "Storage nao aceitou os novos JWTs internos"
+if [[ "$ROTATE_JWT_SECRET" == "true" ]]; then
+  storage_patch_tenant_keys "$PROJECT_UUID" "$NEW_ANON" "$NEW_SERVICE" "$JWT_SECRET_PROJETO" \
+    || die "Storage nao aceitou o novo JWT_SECRET e os novos JWTs internos"
+else
+  storage_patch_tenant_keys "$PROJECT_UUID" "$NEW_ANON" "$NEW_SERVICE" \
+    || die "Storage nao aceitou os novos JWTs internos"
+fi
 STORAGE_KEYS_UPDATED=true
+
+if [[ "$ROTATE_JWT_SECRET" == "true" ]]; then
+  realtime_patch_tenant_jwt_secret "$PROJECT_UUID" "$JWT_SECRET_PROJETO" "$GLOBAL_API_TOKEN" \
+    || die "Realtime nao aceitou o novo JWT_SECRET_PROJETO"
+  REALTIME_JWT_UPDATED=true
+fi
 
 backup_file "$PROJECT_DIR/nginx/nginx_${PROJECT_ID}.conf"
 backup_file "$PROJECT_DIR/Dockerfile"
@@ -278,6 +351,14 @@ chmod 600 "$PROJECT_DIR/.env"
 apply_project_resource_limits "$PROJECT_ROOT/.env" "$PROJECT_DIR/.env" "${PROJECT_RESOURCE_PROFILE_OVERRIDE:-}"
 chmod 644 "$PROJECT_DIR/nginx/nginx_${PROJECT_ID}.conf" "$PROJECT_DIR/.dockerignore"
 
+if [[ "$ROTATE_JWT_SECRET" == "true" ]]; then
+  replace_env_value "JWT_SECRET_PROJETO" "$JWT_SECRET_PROJETO" "$PROJECT_DIR/.env"
+fi
+if ! grep -q '^PROJECT_INTERNAL_SUBNET=' "$PROJECT_DIR/.env"; then
+  PROJECT_INTERNAL_SUBNET="$(python3 "$SCRIPT_DIR/allocate_project_subnet.py" "$PROJECT_ID" "$PROJECT_ROOT/projects")" \
+    || die "Falha ao alocar subnet interna do projeto"
+  printf '\nPROJECT_INTERNAL_SUBNET=%s\n' "$PROJECT_INTERNAL_SUBNET" >> "$PROJECT_DIR/.env"
+fi
 replace_env_value "ANON_KEY_PROJETO" "$NEW_ANON" "$PROJECT_DIR/.env"
 replace_env_value "SERVICE_ROLE_KEY_PROJETO" "$NEW_SERVICE" "$PROJECT_DIR/.env"
 
@@ -286,7 +367,7 @@ cd "$PROJECT_DIR"
 docker compose -p "$PROJECT_ID" \
   --env-file ../../.env \
   --env-file .env \
-  up --build -d nginx
+  up --build -d "${SERVICES_TO_RECREATE[@]}"
 
 echo "HOST_AGENT_PROGRESS=rotate:verify_storage"
 storage_validate_tenant "$PROJECT_UUID" "$NEW_SERVICE" \
@@ -299,8 +380,12 @@ storage_assert_project_gateway "$PROJECT_UUID" "$PROJECT_ID" "$NEW_SERVICE" \
 echo ""
 echo "✅ Tokens rotacionados com sucesso para projeto $PROJECT_ID"
 echo ""
-echo "⚠️  NOTA: O JWT_SECRET_PROJETO não foi alterado"
-echo "   Apenas os tokens foram regenerados com o mesmo secret."
+if [[ "$ROTATE_JWT_SECRET" == "true" ]]; then
+  echo "🔐 JWT_SECRET_PROJETO rotacionado; sessoes e JWTs anteriores foram invalidados."
+else
+  echo "⚠️  NOTA: O JWT_SECRET_PROJETO não foi alterado"
+  echo "   Apenas os tokens foram regenerados com o mesmo secret."
+fi
 
 echo "HOST_AGENT_PROGRESS=rotate:publish_configuration"
 functions_config_publish "$PROJECT_ID"

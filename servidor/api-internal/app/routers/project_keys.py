@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
@@ -56,6 +56,12 @@ class AutomaticKeyRotationResponse(BaseModel):
     automatic_key_rotation_blocked: bool
     automatic_key_rotation_last_error: str | None
     automatic_key_rotation_lead_days: int
+
+
+class RotateProjectKeyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rotate_jwt_secret: bool = False
 
 
 class RotateProjectKeyResponse(BaseModel):
@@ -175,10 +181,12 @@ async def update_automatic_key_rotation(
 async def rotate_project_key(
     project_ref: str,
     request: Request,
+    body: RotateProjectKeyRequest | None = Body(default=None),
     pool=Depends(get_pool),
 ):
-    """Rotaciona anon/service_role via script. Enfileirado por projeto."""
+    """Rotaciona anon/service_role via script (e opcionalmente JWT_SECRET_PROJETO). Enfileirado por projeto."""
     project_ref = validate_project_ref(project_ref)
+    rotate_jwt_secret = bool(body.rotate_jwt_secret) if body is not None else False
     auth_user = await resolve_authenticated_user(request, pool)
 
     async with pool.acquire() as conn:
@@ -226,6 +234,7 @@ async def rotate_project_key(
                     "project_name": project_name,
                     "actor_user_id": str(auth_user["db_user_id"]),
                     "trigger": "manual",
+                    "rotate_jwt_secret": rotate_jwt_secret,
                 },
                 total_steps=4,
                 project_uuid=project_row["id"],
@@ -239,6 +248,7 @@ async def rotate_project_key(
             project_name,
             auth_user["db_user_id"],
             trigger="manual",
+            rotate_jwt_secret=rotate_jwt_secret,
         ),
     )
     message = (

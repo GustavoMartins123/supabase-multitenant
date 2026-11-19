@@ -10,6 +10,7 @@ import re
 import sys
 import tempfile
 
+from allocate_project_subnet import allocate_project_internal_subnet
 from project_env_urls import render_project_url_values
 
 
@@ -91,6 +92,16 @@ def main() -> int:
         raise SystemExit("replacements invalidos")
 
     old_values, old_order = read_assignments(old_path)
+    if not replacements.get("project_internal_subnet"):
+        existing_subnet = old_values.get("PROJECT_INTERNAL_SUBNET", "").strip()
+        if existing_subnet:
+            replacements["project_internal_subnet"] = existing_subnet
+        else:
+            project_id = replacements.get("project_id") or old_values.get("PROJECT_ID") or output_path.parent.name
+            projects_dir = output_path.parent.parent if output_path.parent.parent.is_dir() else None
+            replacements["project_internal_subnet"] = allocate_project_internal_subnet(
+                project_id, projects_dir, inspect_docker=False
+            )
     project_url_values = render_project_url_values(old_values, replacements)
     lines = template_path.read_text(encoding="utf-8").splitlines()
     rendered: list[str] = []

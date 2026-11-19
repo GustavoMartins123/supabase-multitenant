@@ -139,8 +139,8 @@ storage_assert_global_container_contract() {
     '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' \
     "$STORAGE_GLOBAL_CONTAINER")" || return 1
   attached_count="$(grep -c '[^[:space:]]' <<<"$attached_networks" || true)"
-  [[ "$attached_count" == "2" ]] || {
-    storage_fail "Storage global deve possuir exatamente duas redes internas"
+  [[ "$attached_count" == "3" ]] || {
+    storage_fail "Storage global deve possuir exatamente tres redes internas"
     return 1
   }
   grep -Fxq 'supabase-storage-control' <<<"$attached_networks" || {
@@ -149,6 +149,10 @@ storage_assert_global_container_contract() {
   }
   grep -Fxq 'supabase-storage-data-plane' <<<"$attached_networks" || {
     storage_fail "Storage global nao esta conectado a rede interna da data plane"
+    return 1
+  }
+  grep -Fxq 'supabase-imgproxy-internal' <<<"$attached_networks" || {
+    storage_fail "Storage global nao esta conectado a rede interna do imgproxy"
     return 1
   }
   ! grep -Fxq 'rede-supabase' <<<"$attached_networks" || {
@@ -210,8 +214,8 @@ storage_assert_project_gateway_container_contract() {
     return 1
   }
   attached_count="$(grep -c '[^[:space:]]' <<<"$attached_networks" || true)"
-  [[ "$attached_count" == "2" ]] || {
-    storage_fail "$container deve possuir somente as redes geral e de gateway Storage"
+  [[ "$attached_count" == "4" ]] || {
+    storage_fail "$container deve possuir somente as redes geral, Storage gateway, Functions gateway e interna do projeto"
     return 1
   }
   grep -Fxq 'rede-supabase' <<<"$attached_networks" || {
@@ -220,6 +224,14 @@ storage_assert_project_gateway_container_contract() {
   }
   grep -Fxq 'supabase-storage-gateways' <<<"$attached_networks" || {
     storage_fail "$container nao esta conectado a rede exclusiva dos gateways Storage"
+    return 1
+  }
+  grep -Fxq 'supabase-functions-gateways' <<<"$attached_networks" || {
+    storage_fail "$container nao esta conectado a rede exclusiva dos gateways Functions"
+    return 1
+  }
+  grep -Fxq "supabase-internal-${project_ref}" <<<"$attached_networks" || {
+    storage_fail "$container nao esta conectado a rede interna isolada do projeto"
     return 1
   }
 }
@@ -449,14 +461,19 @@ storage_patch_tenant_connection() {
 }
 
 storage_patch_tenant_keys() {
-  local tenant_id="$1" anon_key="$2" service_key="$3" payload
+  local tenant_id="$1" anon_key="$2" service_key="$3" jwt_secret="${4:-}" payload
   storage_validate_tenant_id "$tenant_id" || return 1
   [[ -n "$anon_key" && -n "$service_key" ]] || {
     storage_fail "JWTs internos ausentes"
     return 1
   }
-  payload="$(printf '%s\n%s\n' "$anon_key" "$service_key" \
-    | jq -Rn '[inputs] | {anonKey: .[0], serviceKey: .[1]}')" || return 1
+  if [[ -n "$jwt_secret" ]]; then
+    payload="$(printf '%s\n%s\n%s\n' "$anon_key" "$service_key" "$jwt_secret" \
+      | jq -Rn '[inputs] | {anonKey: .[0], serviceKey: .[1], jwtSecret: .[2]}')" || return 1
+  else
+    payload="$(printf '%s\n%s\n' "$anon_key" "$service_key" \
+      | jq -Rn '[inputs] | {anonKey: .[0], serviceKey: .[1]}')" || return 1
+  fi
   storage_admin_request PATCH "/tenants/$tenant_id" "204" "$payload" >/dev/null
 }
 

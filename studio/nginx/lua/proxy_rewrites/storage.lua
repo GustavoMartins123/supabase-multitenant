@@ -1,7 +1,9 @@
+local module_arg = ...
 local cjson = require("utils.json")
 local internal_hmac = require("security.internal_hmac")
 local platform_router = require("proxy_rewrites.storage_platform_router")
 
+local M = {}
 local storage_prefix = "/storage/v1"
 
 local function json_array(items)
@@ -89,7 +91,8 @@ local function set_route_body(route)
     if route.body_mode == "vector_bucket_create" then
         local body, err = read_json_body()
         if not body then
-            return nil, "Corpo JSON invalido: " .. tostring(err), ngx.HTTP_BAD_REQUEST,
+            local status = err == "request body too large" and ngx.HTTP_REQUEST_ENTITY_TOO_LARGE or ngx.HTTP_BAD_REQUEST
+            return nil, "Corpo JSON invalido: " .. tostring(err), status,
                 "storage_platform_invalid_json"
         end
 
@@ -109,7 +112,8 @@ local function set_route_body(route)
     if route.body_mode == "vector_index_create" then
         local body, err = read_json_body()
         if not body then
-            return nil, "Corpo JSON invalido: " .. tostring(err), ngx.HTTP_BAD_REQUEST,
+            local status = err == "request body too large" and ngx.HTTP_REQUEST_ENTITY_TOO_LARGE or ngx.HTTP_BAD_REQUEST
+            return nil, "Corpo JSON invalido: " .. tostring(err), status,
                 "storage_platform_invalid_json"
         end
 
@@ -149,6 +153,7 @@ local function set_route_body(route)
         ngx.HTTP_INTERNAL_SERVER_ERROR, "storage_platform_body_mode_unknown"
 end
 
+function M.rewrite()
 local original_uri = ngx.var.uri or ""
 local route, route_error = platform_router.resolve(original_uri, ngx.req.get_method())
 
@@ -212,6 +217,13 @@ end
 
 local body_data, read_err = internal_hmac.read_current_body()
 if body_data == nil then
+    if read_err == "request body too large" then
+        return reject({
+            status = ngx.HTTP_REQUEST_ENTITY_TOO_LARGE,
+            code = "storage_request_body_too_large",
+            message = "Corpo JSON da requisicao excede o limite suportado",
+        })
+    end
     ngx.log(ngx.ERR, "Falha ao ler o corpo da requisicao do Storage: ", tostring(read_err))
     return
 end
@@ -296,3 +308,10 @@ if body_data ~= "" then
         ngx.log(ngx.DEBUG, "Corpo do Storage nao e JSON; mantendo payload original: ", decode_err)
     end
 end
+end
+
+if type(module_arg) ~= "string" then
+    return M.rewrite()
+end
+
+return M

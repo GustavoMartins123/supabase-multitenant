@@ -30,6 +30,7 @@ class TenantPools:
     pools: dict = field(default_factory=dict)
     users: int = 0
     touched: float = field(default_factory=time.monotonic)
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
 
 class TenantPoolManager:
@@ -49,6 +50,8 @@ class TenantPoolManager:
 
     async def _close(self, entry):
         pools = list(entry.pools.values())
+        if not pools:
+            return
         try:
             async with asyncio.timeout(5):
                 await asyncio.gather(*(pool.close() for pool in pools))
@@ -58,7 +61,13 @@ class TenantPoolManager:
             if not isinstance(exc, TimeoutError):
                 raise
 
+    async def _release_reservation(self, identity: str, entry: TenantPools) -> None:
+        async with self._lock:
+            entry.users -= 1
+            entry.touched = time.monotonic()
+
     async def _reserve(self, identity, dsns, access):
+        to_close: list[TenantPools] = []
         async with self._lock:
             if self._closed:
                 raise TenantPoolUnavailable("Tenant pools are shutting down")
@@ -66,13 +75,13 @@ class TenantPoolManager:
             for key, expired in list(self._tenants.items()):
                 if expired.users == 0 and now - expired.touched >= self.idle_seconds:
                     del self._tenants[key]
-                    await self._close(expired)
+                    to_close.append(expired)
             entry = self._tenants.get(identity)
             if entry and entry.dsns != dsns:
                 if entry.users:
                     raise TenantPoolUnavailable("Tenant database identity changed during use")
                 del self._tenants[identity]
-                await self._close(entry)
+                to_close.append(entry)
                 entry = None
             if entry is None:
                 if len(self._tenants) >= self.max_tenants:
@@ -81,22 +90,30 @@ class TenantPoolManager:
                         raise TenantPoolUnavailable("Tenant pool capacity exhausted")
                     key, expired = min(idle, key=lambda item: item[1].touched)
                     del self._tenants[key]
-                    await self._close(expired)
+                    to_close.append(expired)
                 entry = TenantPools(dict(dsns))
                 self._tenants[identity] = entry
             if entry.users >= self.max_requests:
                 raise TenantPoolUnavailable("Tenant request capacity exhausted")
-            if access not in entry.pools:
-                try:
-                    entry.pools[access] = await self.factory(
-                        dsns[access], min_size=0, max_size=self.size_per_role,
-                        timeout=5, command_timeout=30, reset=reset_tenant_session,
-                        max_inactive_connection_lifetime=self.idle_seconds,
-                    )
-                except Exception as exc:
-                    raise TenantPoolUnavailable("Tenant database pool creation failed") from exc
             entry.users += 1
-            return entry, entry.pools[access]
+
+        try:
+            if to_close:
+                await asyncio.gather(*(self._close(expired) for expired in to_close))
+            async with entry.lock:
+                if access not in entry.pools:
+                    try:
+                        entry.pools[access] = await self.factory(
+                            dsns[access], min_size=0, max_size=self.size_per_role,
+                            timeout=5, command_timeout=30, reset=reset_tenant_session,
+                            max_inactive_connection_lifetime=self.idle_seconds,
+                        )
+                    except Exception as exc:
+                        raise TenantPoolUnavailable("Tenant database pool creation failed") from exc
+                return entry, entry.pools[access]
+        except BaseException:
+            await self._release_reservation(identity, entry)
+            raise
 
     @asynccontextmanager
     async def connection(self, tenant_uuid, dsns, access):

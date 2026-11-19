@@ -1007,10 +1007,14 @@ async def handle_delete_project_storage(
 async def handle_rotate_keys(ctx: CommandContext, project: str, args: dict[str, Any]) -> CommandOutcome:
     resolve_project_dir(ctx.config.projects_root, project, must_exist=True)
     ctx.state.report(progress=10, step="rotate_keys", message="Rotacionando chaves...")
+    env: dict[str, str] = {}
+    if bool(args.get("rotate_jwt_secret")):
+        env["ROTATE_JWT_SECRET"] = "true"
     outcome, _ = await _run_lifecycle_script(
         ctx,
         "rotate_key.sh",
         [project],
+        env=env or None,
         error_code="rotate_script_failed",
         progress_events=ROTATE_PROGRESS_EVENTS,
     )
@@ -1248,7 +1252,7 @@ async def handle_container_logs(ctx: CommandContext, project: str, args: dict[st
         inspected = {}
     labels = (inspected.get("Config") or {}).get("Labels") or {}
     owner = labels.get(COMPOSE_PROJECT_LABEL) if isinstance(labels, dict) else None
-    if owner is not None and owner != project:
+    if owner != project:
         return CommandOutcome(
             status="failed",
             error_code="container_not_found",

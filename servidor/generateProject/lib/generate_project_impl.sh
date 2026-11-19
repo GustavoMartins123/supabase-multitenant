@@ -352,6 +352,8 @@ escape_sed_replacement() { printf '%s' "$1" | sed -e 's/[&|\\]/\\&/g'; }
 PUBLIC_BASE_URL="$(normalize_public_base_url "$SERVER_URL" "${SERVER_PROTO:-}")"
 PROJECT_PUBLIC_URL="$PUBLIC_BASE_URL/$PROJECT_PUBLIC_REF"
 PROJECT_AUTH_EXTERNAL_URL="$PROJECT_PUBLIC_URL/auth/v1"
+PROJECT_INTERNAL_SUBNET="$(python3 "$SCRIPT_DIR/allocate_project_subnet.py" "$PROJECT_ID" "$PROJECT_ROOT/projects")" \
+  || die "Falha ao alocar subnet interna do projeto"
 
 template_to_file() {
   local template="$1" output="$2"
@@ -361,6 +363,7 @@ template_to_file() {
     -e "s|{{project_id}}|$(escape_sed_replacement "$PROJECT_ID")|g" \
     -e "s|{{project_uuid}}|$(escape_sed_replacement "$PROJECT_UUID")|g" \
     -e "s|{{project_public_ref}}|$PROJECT_PUBLIC_REF|g" \
+    -e "s|{{project_internal_subnet}}|$(escape_sed_replacement "$PROJECT_INTERNAL_SUBNET")|g" \
     -e "s|{{jwt_secret}}|$(escape_sed_replacement "$JWT_SECRET_PROJETO")|g" \
     -e "s|{{api_gateway_token}}|$(escape_sed_replacement "$API_GATEWAY_TOKEN_PROJETO")|g" \
     -e "s|{{server_url}}|$(escape_sed_replacement "$SERVER_URL")|g" \
@@ -406,7 +409,8 @@ supavisor_tenant() {
   payload=$(jq -cn \
     --arg id "$PROJECT_ID" --arg host "$POSTGRES_HOST" --arg port "$POSTGRES_PORT" \
     --arg password "$POSTGRES_PASSWORD" --arg version "$pg_version" \
-    '{tenant:{external_id:$id,db_host:$host,db_port:$port,db_database:("_supabase_"+$id),ip_version:"auto",enforce_ssl:false,require_user:false,auth_query:"SELECT * FROM pgbouncer.get_auth($1)",default_max_clients:800,default_pool_size:40,default_parameter_status:{server_version:$version},users:[{db_user:"pgbouncer",db_password:$password,mode_type:"transaction",pool_size:40,is_manager:true}]}}')
+    --argjson pool_size "${POOLER_DEFAULT_POOL_SIZE:-15}" \
+    '{tenant:{external_id:$id,db_host:$host,db_port:$port,db_database:("_supabase_"+$id),ip_version:"auto",enforce_ssl:false,require_user:false,auth_query:"SELECT * FROM pgbouncer.get_auth($1)",default_max_clients:800,default_pool_size:$pool_size,default_parameter_status:{server_version:$version},users:[{db_user:"pgbouncer",db_password:$password,mode_type:"transaction",pool_size:$pool_size,is_manager:true}]}}')
   response=$(docker exec supabase-pooler curl -sS -w '\n%{http_code}' \
     -X PUT "http://localhost:4000/api/tenants/$PROJECT_ID" \
     -H 'Content-Type: application/json' -H "Authorization: Bearer $GLOBAL_ANON_TOKEN" \

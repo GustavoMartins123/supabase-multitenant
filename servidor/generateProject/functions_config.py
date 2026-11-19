@@ -42,23 +42,34 @@ def projection(root: Path, ref: str) -> dict[str, str]:
         values: dict[str, str] = {}
         for line in stream.read().splitlines():
             match = re.match(r"\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=", line)
-            if not match or match[1] not in (*FIELDS, "FUNCTIONS_ALLOWED_NETWORK_HOSTS"):
+            if not match or match[1] not in (*FIELDS, "FUNCTIONS_ALLOWED_NETWORK_HOSTS", "API_GATEWAY_TOKEN_PROJETO"):
                 continue
             key = match[1]
             value = line[len(key) + 1:]
             if key in values or not line.startswith(key + "=") or (not value and key != "FUNCTIONS_ALLOWED_NETWORK_HOSTS") or value != value.strip() or any(c in value for c in "\"'\x00"):
                 raise ValueError("noncanonical Functions credential")
             values[key] = value
-    if set(values) - {"FUNCTIONS_ALLOWED_NETWORK_HOSTS"} != set(FIELDS) or values["PROJECT_ID"] != ref:
+    if set(values) - {"FUNCTIONS_ALLOWED_NETWORK_HOSTS", "API_GATEWAY_TOKEN_PROJETO"} != set(FIELDS) or values["PROJECT_ID"] != ref:
         raise ValueError("incomplete or divergent project identity")
     if str(uuid.UUID(values["PROJECT_UUID"])) != values["PROJECT_UUID"]:
         raise ValueError("noncanonical project UUID")
     if not re.fullmatch(r"[a-z]{20}", values["PROJECT_PUBLIC_REF"]):
         raise ValueError("noncanonical public project reference")
-    return {"project_ref": values["PROJECT_PUBLIC_REF"], "technical_name": ref, "project_uuid": values["PROJECT_UUID"],
-            "anon_key": values["ANON_KEY_PROJETO"], "service_role_key": values["SERVICE_ROLE_KEY_PROJETO"],
-            "jwt_secret": values["JWT_SECRET_PROJETO"],
-            "network_allowlist": network_hosts(values.get("FUNCTIONS_ALLOWED_NETWORK_HOSTS", ""))}
+    result: dict[str, object] = {
+        "project_ref": values["PROJECT_PUBLIC_REF"],
+        "technical_name": ref,
+        "project_uuid": values["PROJECT_UUID"],
+        "anon_key": values["ANON_KEY_PROJETO"],
+        "service_role_key": values["SERVICE_ROLE_KEY_PROJETO"],
+        "jwt_secret": values["JWT_SECRET_PROJETO"],
+        "network_allowlist": network_hosts(values.get("FUNCTIONS_ALLOWED_NETWORK_HOSTS", "")),
+    }
+    gateway_token = values.get("API_GATEWAY_TOKEN_PROJETO", "")
+    if gateway_token:
+        if not re.fullmatch(r"[a-f0-9]{64}", gateway_token):
+            raise ValueError("noncanonical edge gateway token")
+        result["edge_gateway_token"] = gateway_token
+    return result
 
 
 def fsync_directory(path: Path) -> None:

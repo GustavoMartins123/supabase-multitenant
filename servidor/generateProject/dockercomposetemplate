@@ -23,6 +23,10 @@ services:
     environment:
       FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT}
       SUPABASE_NETWORK_SUBNET: ${SUPABASE_NETWORK_SUBNET}
+      PROJECT_INTERNAL_SUBNET: ${PROJECT_INTERNAL_SUBNET:?defina PROJECT_INTERNAL_SUBNET no .env do projeto}
+      POSTGRES_POOLER: ${POSTGRES_POOLER}
+      POOLER_PROXY_PORT_SESSION: ${POOLER_PROXY_PORT_SESSION}
+      POOLER_PROXY_PORT_TRANSACTION: ${POOLER_PROXY_PORT_TRANSACTION}
       ANON_KEY_PROJETO: ${ANON_KEY_PROJETO}
       SERVICE_ROLE_KEY_PROJETO: ${SERVICE_ROLE_KEY_PROJETO}
       API_GATEWAY_TOKEN_PROJETO: ${API_GATEWAY_TOKEN_PROJETO}
@@ -38,6 +42,8 @@ services:
     networks:
       - rede-supabase
       - storage-gateways
+      - functions-gateways
+      - project-internal
   auth:
     container_name: supabase-auth-{{project_id}}
     image: ${AUTH_IMAGE}
@@ -48,7 +54,8 @@ services:
     pids_limit: ${PROJECT_AUTH_PIDS_LIMIT:?defina PROJECT_AUTH_PIDS_LIMIT no .env do projeto}
     logging: *vector-logging
     networks:
-      - rede-supabase
+      - project-internal
+      - project-egress
     healthcheck:
       test:
         [
@@ -71,7 +78,7 @@ services:
       API_EXTERNAL_URL: ${API_EXTERNAL_URL}
 
       GOTRUE_DB_DRIVER: ${GOTRUE_DB_DRIVER}
-      GOTRUE_DB_DATABASE_URL: postgres://${AUTH_DB_USER}.{{project_id}}:${POSTGRES_PASSWORD}@${POSTGRES_POOLER}:${POOLER_PROXY_PORT_SESSION}/${POSTGRES_DATABASE}
+      GOTRUE_DB_DATABASE_URL: postgres://${AUTH_DB_USER}.{{project_id}}:${POSTGRES_PASSWORD}@supabase-nginx-{{project_id}}:${POOLER_PROXY_PORT_SESSION}/${POSTGRES_DATABASE}
 
       GOTRUE_SITE_URL: ${SITE_URL}
       GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS}
@@ -97,12 +104,12 @@ services:
 
       # GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED: true
       # GOTRUE_SMTP_MAX_FREQUENCY: 1s
-      GOTRUE_MAILER_TEMPLATES_RECOVERY: http://template-service:18020/mailer/${PROJECT_UUID}/recovery?k=${MAILER_TEMPLATE_KEY:?MAILER_TEMPLATE_KEY is required}
-      GOTRUE_MAILER_TEMPLATES_INVITE: http://template-service:18020/mailer/${PROJECT_UUID}/invite?k=${MAILER_TEMPLATE_KEY:?MAILER_TEMPLATE_KEY is required}
-      GOTRUE_MAILER_TEMPLATES_CONFIRMATION: http://template-service:18020/mailer/${PROJECT_UUID}/confirmation?k=${MAILER_TEMPLATE_KEY:?MAILER_TEMPLATE_KEY is required}
-      GOTRUE_MAILER_TEMPLATES_EMAIL_CHANGE: http://template-service:18020/mailer/${PROJECT_UUID}/email_change?k=${MAILER_TEMPLATE_KEY:?MAILER_TEMPLATE_KEY is required}
-      GOTRUE_MAILER_TEMPLATES_MAGIC_LINK: http://template-service:18020/mailer/${PROJECT_UUID}/magic_link?k=${MAILER_TEMPLATE_KEY:?MAILER_TEMPLATE_KEY is required}
-      GOTRUE_MAILER_TEMPLATES_REAUTHENTICATION: http://template-service:18020/mailer/${PROJECT_UUID}/reauthentication?k=${MAILER_TEMPLATE_KEY:?MAILER_TEMPLATE_KEY is required}
+      GOTRUE_MAILER_TEMPLATES_RECOVERY: http://supabase-nginx-{{project_id}}:18020/mailer/${PROJECT_UUID}/recovery?k=${MAILER_TEMPLATE_KEY:?MAILER_TEMPLATE_KEY is required}
+      GOTRUE_MAILER_TEMPLATES_INVITE: http://supabase-nginx-{{project_id}}:18020/mailer/${PROJECT_UUID}/invite?k=${MAILER_TEMPLATE_KEY:?MAILER_TEMPLATE_KEY is required}
+      GOTRUE_MAILER_TEMPLATES_CONFIRMATION: http://supabase-nginx-{{project_id}}:18020/mailer/${PROJECT_UUID}/confirmation?k=${MAILER_TEMPLATE_KEY:?MAILER_TEMPLATE_KEY is required}
+      GOTRUE_MAILER_TEMPLATES_EMAIL_CHANGE: http://supabase-nginx-{{project_id}}:18020/mailer/${PROJECT_UUID}/email_change?k=${MAILER_TEMPLATE_KEY:?MAILER_TEMPLATE_KEY is required}
+      GOTRUE_MAILER_TEMPLATES_MAGIC_LINK: http://supabase-nginx-{{project_id}}:18020/mailer/${PROJECT_UUID}/magic_link?k=${MAILER_TEMPLATE_KEY:?MAILER_TEMPLATE_KEY is required}
+      GOTRUE_MAILER_TEMPLATES_REAUTHENTICATION: http://supabase-nginx-{{project_id}}:18020/mailer/${PROJECT_UUID}/reauthentication?k=${MAILER_TEMPLATE_KEY:?MAILER_TEMPLATE_KEY is required}
       GOTRUE_MAILER_TEMPLATE_MAX_AGE: 1m
       GOTRUE_MAILER_SUBJECTS_INVITE: ${MAILER_SUBJECTS_INVITE}
       GOTRUE_MAILER_SUBJECTS_RECOVERY: ${MAILER_SUBJECTS_RECOVERY}
@@ -153,7 +160,7 @@ services:
     pids_limit: ${PROJECT_REST_PIDS_LIMIT:?defina PROJECT_REST_PIDS_LIMIT no .env do projeto}
     logging: *vector-logging
     networks:
-      - rede-supabase
+      - project-internal
     # depends_on:
     #   db:
     #     # Disable this if you are using an external Postgres database
@@ -161,7 +168,7 @@ services:
     #   analytics:
     #     condition: service_healthy
     environment:
-      PGRST_DB_URI: postgres://${POSTGREST_DB_USER}.{{project_id}}:${POSTGRES_PASSWORD}@${POSTGRES_POOLER}:${POOLER_PROXY_PORT_SESSION}/${POSTGRES_DATABASE}
+      PGRST_DB_URI: postgres://${POSTGREST_DB_USER}.{{project_id}}:${POSTGRES_PASSWORD}@supabase-nginx-{{project_id}}:${POOLER_PROXY_PORT_SESSION}/${POSTGRES_DATABASE}
       PGRST_DB_SCHEMA_CACHE_DURATION: ${PGRST_DB_SCHEMA_CACHE_DURATION}
       PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS}
       PGRST_DB_ANON_ROLE: ${PGRST_DB_ANON_ROLE}
@@ -185,3 +192,16 @@ networks:
   storage-gateways:
     external: true
     name: supabase-storage-gateways
+  functions-gateways:
+    external: true
+    name: supabase-functions-gateways
+  project-egress:
+    external: true
+    name: supabase-project-egress
+  project-internal:
+    name: supabase-internal-{{project_id}}
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: ${PROJECT_INTERNAL_SUBNET:?defina PROJECT_INTERNAL_SUBNET no .env do projeto}

@@ -36,12 +36,12 @@ QUOTA_SPECS: dict[str, dict[str, int]] = {
     "max_bytes": {"default": 1_000_000, "min": 10_000, "max": 5_000_000},
     "memory_limit_mb": {"default": 150, "min": 64, "max": 512},
     "worker_timeout_ms": {"default": 60_000, "min": 1_000, "max": 120_000},
-    "max_concurrent_project": {"default": 2, "min": 1, "max": 4},
+    "max_concurrent_project": {"default": 2, "min": 1, "max": 8},
     "max_secrets": {"default": MAX_SECRETS, "min": 1, "max": 128},
     "max_secrets_total_bytes": {"default": MAX_SECRETS_TOTAL_BYTES, "min": 1024, "max": 131_072},
     "alert_threshold_pct": {"default": 80, "min": 50, "max": 99},
 }
-PLATFORM_MAX_CONCURRENT_GLOBAL = 4
+PLATFORM_MAX_CONCURRENT_GLOBAL = 24
 RESERVED_SECRET_NAMES = frozenset({
     "PATH", "HOME", "USER", "SHELL", "PWD", "LANG", "LC_ALL", "TZ", "HOST", "PORT", "HOSTNAME", "VERIFY_JWT",
 })

@@ -106,8 +106,20 @@ function _M.decrypt(self, token, ttl)
     return nil, "invalid base64"
   end
 
-  if (#data - 57) % 16 ~= 0 then
+  if #data < 57 or (#data - 57) % 16 ~= 0 then
     return nil, "invalid data size"
+  end
+
+  -- Verify HMAC before inspecting version/timestamp/TTL to avoid unauthenticated
+  -- timing or error-oracle differences on forged tokens.
+  local mac_a = data:sub(#data - 31)
+  local mac_b, err = hmac(self.signing_key, data:sub(1, #data - 32))
+  if err then
+    return nil, err
+  end
+
+  if not secure_compare.equals(mac_a, mac_b) then
+    return nil, "hmac digests do not match"
   end
 
   local version = data:byte(1)
@@ -124,16 +136,6 @@ function _M.decrypt(self, token, ttl)
 
   if ttl and time_diff > ttl then
     return nil, "token has expired"
-  end
-
-  local mac_a = data:sub(#data - 31)
-  local mac_b, err = hmac(self.signing_key, data:sub(1, #data - 32))
-  if err then
-    return nil, err
-  end
-
-  if not secure_compare.equals(mac_a, mac_b) then
-    return nil, "hmac digests do not match"
   end
 
   local iv = data:sub(10, 25)

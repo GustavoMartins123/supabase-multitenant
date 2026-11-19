@@ -892,6 +892,7 @@ async def _rotate_project_key_background(
     actor_user_id: uuid.UUID | None,
     *,
     trigger: str,
+    rotate_jwt_secret: bool = False,
 ) -> None:
     if trigger not in {"manual", "automatic"}:
         await _set_job_status(
@@ -945,6 +946,9 @@ async def _rotate_project_key_background(
                 error_code="opaque_gateway_not_ready",
             )
             return
+        rotate_args: dict[str, Any] = {"trigger": trigger}
+        if rotate_jwt_secret and trigger == "manual":
+            rotate_args["rotate_jwt_secret"] = True
         record = await run_host_agent_command_for_job(
             pool,
             job_id=job_id,
@@ -952,7 +956,7 @@ async def _rotate_project_key_background(
             project=project_name,
             project_uuid=await _get_job_project_uuid(pool, job_id),
             requested_by=actor_user_id,
-            args={"trigger": trigger},
+            args=rotate_args,
             reuse_terminal=True,
             on_progress=_job_progress_mirror(job_id, start_progress=10, end_progress=80),
         )
@@ -1041,6 +1045,7 @@ async def _rotate_project_key_background(
                     target_id=job_id,
                     new_value={
                         "trigger": trigger,
+                        "rotate_jwt_secret": bool(rotate_jwt_secret and trigger == "manual"),
                         "project_key_version": key_version,
                         "expires_at": schedule.expires_at.isoformat(),
                     },

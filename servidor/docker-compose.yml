@@ -32,6 +32,9 @@ services:
       analytics-internal:
       storage-control:
       client-configuration-data:
+      functions-db:
+        aliases:
+          - supabase-db
     volumes:
       - ./volumes/db/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql:Z
       # Must be superuser to create event trigger
@@ -274,12 +277,14 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-    tmpfs: ["/tmp:rw,nosuid,size=128m"]
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=128m"]
     image: supabase/edge-runtime:v1.74.2
     restart: unless-stopped
     logging: *vector-logging
     networks:
-      - rede-supabase
+      - functions-gateways
+      - functions-db
+      - project-egress
     volumes:
       - ./volumes/functions/main:/home/deno/main:ro,Z
       - ./.functions-runtime:/home/deno/runtime:ro
@@ -537,5 +542,27 @@ networks:
     name: supabase-storage-data-plane
     driver: bridge
     internal: true
+  functions-gateways:
+    name: supabase-functions-gateways
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.51.0.0/23
+  functions-db:
+    name: supabase-functions-db
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.51.2.0/28
+  project-egress:
+    name: supabase-project-egress
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
+    ipam:
+      config:
+        - subnet: 172.53.0.0/22
 volumes:
   db-config:

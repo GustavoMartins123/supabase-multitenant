@@ -103,7 +103,11 @@ class AutomaticRotationContractTest(unittest.TestCase):
             backgrounds,
         )
         self.assertIn(
-            'args={"trigger": trigger}',
+            'rotate_args: dict[str, Any] = {"trigger": trigger}',
+            backgrounds,
+        )
+        self.assertIn(
+            'if rotate_jwt_secret and trigger == "manual":',
             backgrounds,
         )
         self.assertIn('if trigger not in {"manual", "automatic"}:', backgrounds)

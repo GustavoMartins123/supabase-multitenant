@@ -10,6 +10,7 @@ import re
 import sys
 import tempfile
 
+from allocate_project_subnet import allocate_project_internal_subnet
 from project_env_urls import render_project_url_values
 
 
@@ -44,6 +45,7 @@ PROTECTED_KEYS = {
     "PROJECT_ID",
     "PROJECT_UUID",
     "PROJECT_PUBLIC_REF",
+    "PROJECT_INTERNAL_SUBNET",
     "SITE_URL",
     "ADDITIONAL_REDIRECT_URLS",
     "API_EXTERNAL_URL",
@@ -92,6 +94,16 @@ def main() -> int:
         raise SystemExit("replacements invalidos")
 
     current_values, current_order = read_assignments(current_path)
+    if not replacements.get("project_internal_subnet"):
+        existing_subnet = current_values.get("PROJECT_INTERNAL_SUBNET", "").strip()
+        if existing_subnet:
+            replacements["project_internal_subnet"] = existing_subnet
+        else:
+            project_id = replacements.get("project_id") or current_values.get("PROJECT_ID") or output_path.parent.name
+            projects_dir = output_path.parent.parent if output_path.parent.parent.is_dir() else None
+            replacements["project_internal_subnet"] = allocate_project_internal_subnet(
+                project_id, projects_dir, inspect_docker=False
+            )
     project_url_values = render_project_url_values(current_values, replacements)
     obsolete = sorted(
         OBSOLETE_STORAGE_KEYS.intersection(current_values)
