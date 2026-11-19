@@ -8,6 +8,7 @@ import html5lib
 import tinycss2
 
 POLICY_VERSION = 1
+VERIFICATION_TYPES = {"magic_link": "magiclink", "confirmation": "signup"}
 FIELDS = {
     "Token",
     "TokenHash",
@@ -195,9 +196,36 @@ def css(text, *, sheet=False):
     rules(tinycss2.parse_stylesheet(text, skip_comments=True, skip_whitespace=True))
 
 
+def normalize_legacy_preview(body, kind):
+    """Render the migrated verification link with the sample site URL."""
+    verification_type = VERIFICATION_TYPES.get(kind, kind)
+    query = (
+        r"\?token=\{\{\s*\.TokenHash\s*\}\}(?:&amp;|&)type="
+        + re.escape(verification_type)
+    )
+    legacy_link = (
+        r"\{\{\s*if\s+\.RedirectTo\s*\}\}\{\{\s*\.RedirectTo\s*\}\}"
+        + query
+        + r"\{\{\s*else\s*\}\}\{\{\s*\.SiteURL\s*\}\}"
+        + query
+        + r"\{\{\s*end\s*\}\}"
+    )
+    return re.sub(
+        legacy_link,
+        "{{ .SiteURL }}?token={{ .TokenHash }}&amp;type=" + verification_type,
+        body,
+    )
+
+
 def url(value, fields, approved, *, href, kind):
+    if "<!-- mailer " in value:
+        raise PolicyError(
+            "Use {{ .ConfirmationURL }} no atributo href do link de autenticação"
+            if href
+            else "Use uma URL HTTPS estática no atributo src da imagem"
+        )
     if any(ord(c) <= 32 or ord(c) == 127 for c in value) or "\\" in value:
-        raise PolicyError("URL inválida")
+        raise PolicyError("URL inválida no atributo " + ("href" if href else "src"))
     matches = list(MARKER.finditer(value))
     if matches:
         names = [fields[int(m[1])] for m in matches]
@@ -216,9 +244,7 @@ def url(value, fields, approved, *, href, kind):
         ):
             suffix = value[len(matches[0][0]) :]
             # Keep the existing project verification flow, on the configured SiteURL.
-            expected_type = {"magic_link": "magiclink", "confirmation": "signup"}.get(
-                kind, kind
-            )
+            expected_type = VERIFICATION_TYPES.get(kind, kind)
             for m, name in zip(matches[1:], names[1:]):
                 suffix = suffix.replace(m[0], "{{" + name + "}}")
             if not matches[1:] and (

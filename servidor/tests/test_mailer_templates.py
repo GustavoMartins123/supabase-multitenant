@@ -769,10 +769,60 @@ class MailerIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertIn("123456 enviado para pessoa@example.com", response.json()["html"])
 
-    async def test_preview_renders_signed_legacy_but_does_not_exempt_new_edits(self):
+    async def test_preview_updates_edited_templates_with_migrated_verification_links(self):
         payload = self.legacy_payload()
         await self.import_active_legacy(payload)
-        original = payload["projects"][0]["templates"]["magic_link"]
+        edited_text = "Confira as instruções desta mensagem."
+        for kind, verification_type in (
+            ("confirmation", "signup"),
+            ("invite", "invite"),
+            ("magic_link", "magiclink"),
+            ("email_change", "email_change"),
+        ):
+            with self.subTest(kind=kind):
+                original = payload["defaults"][kind]
+                edited = original.replace("</body>", f"<p>{edited_text}</p></body>")
+                response = await self.client.post(
+                    f"{self.base}/{kind}/preview",
+                    headers=self.headers,
+                    json={"body": edited},
+                )
+                self.assertEqual(response.status_code, 200, response.text)
+                html = response.json()["html"]
+                self.assertIn(edited_text, html)
+                self.assertIn(
+                    f'https://example.com?token=hash-de-exemplo&amp;type={verification_type}"',
+                    html,
+                )
+                draft = await self.client.put(
+                    f"{self.base}/{kind}",
+                    headers=self.headers,
+                    json={"version": 1, "body": edited},
+                )
+                self.assertEqual(draft.status_code, 422, draft.text)
+                self.assertIn("href", draft.json()["detail"])
+                runtime = await self.get_runtime(kind=kind)
+                published = payload["projects"][0]["templates"][kind] or original
+                self.assertEqual(runtime.text, published)
+
+        custom_redirect = payload["defaults"]["email_change"].replace(
+            "{{ .RedirectTo }}?token=", "{{ .Data.url }}?token=", 1
+        )
+        response = await self.client.post(
+            f"{self.base}/email_change/preview",
+            headers=self.headers,
+            json={"body": custom_redirect},
+        )
+        self.assertEqual(response.status_code, 422, response.text)
+
+    async def test_preview_renders_signed_legacy_but_does_not_exempt_new_edits(self):
+        payload = self.legacy_payload()
+        overrides = payload["projects"][0]["templates"]
+        overrides["magic_link"] = overrides["magic_link"].replace(
+            "</body>", '<img src="https://unapproved.example.test/logo.png"></body>'
+        )
+        await self.import_active_legacy(payload)
+        original = overrides["magic_link"]
         response = await self.client.post(self.base + "/magic_link/preview", headers=self.headers, json={"body": original})
         self.assertEqual(response.status_code, 200, response.text)
         self.assertIn("IDR Campo legado", response.json()["html"])
