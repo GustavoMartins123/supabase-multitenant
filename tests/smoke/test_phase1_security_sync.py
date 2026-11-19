@@ -98,9 +98,11 @@ class Phase1SecuritySyncTest(unittest.TestCase):
         self.assertNotIn("- rede-supabase", auth_block)
         self.assertIn("- project-internal", auth_block)
         self.assertIn("- project-egress", auth_block)
+        self.assertIn("condition: service_healthy", auth_block)
         self.assertNotIn("- rede-supabase", rest_block)
         self.assertNotIn("- project-egress", rest_block)
         self.assertIn("- project-internal", rest_block)
+        self.assertIn("condition: service_healthy", rest_block)
 
         nginx_tpl = (SERVER / "generateProject/nginxtemplate").read_text(encoding="utf-8")
         self.assertIn('proxy_set_header X-Edge-Gateway-Token "${API_GATEWAY_TOKEN_PROJETO}";', nginx_tpl)

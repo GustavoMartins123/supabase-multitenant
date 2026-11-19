@@ -126,7 +126,7 @@ attack=''' + repr('''
         ssl_certificate_key /config/ssl/server.key;
         location / {
             default_type text/html;
-            return 200 '<form method="POST" action="https://studio.p1.test/api/csrf-probe" target="result"><input name="action" value="disable"></form><iframe name="result"></iframe>';
+            return 200 '<form method="POST" action="https://studio.p1.test/api/csrf-probe"><input name="action" value="disable"></form>';
         }
     }
 ''') + '''

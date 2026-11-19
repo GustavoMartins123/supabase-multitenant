@@ -39,6 +39,16 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "grep -q ':1538 .* 0A ' /proc/net/tcp && grep -q ':1F90 .* 0A ' /proc/net/tcp"
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 1s
     networks:
       - rede-supabase
       - storage-gateways
@@ -53,6 +63,9 @@ services:
     cpus: ${PROJECT_AUTH_CPUS:?defina PROJECT_AUTH_CPUS no .env do projeto}
     pids_limit: ${PROJECT_AUTH_PIDS_LIMIT:?defina PROJECT_AUTH_PIDS_LIMIT no .env do projeto}
     logging: *vector-logging
+    depends_on:
+      nginx:
+        condition: service_healthy
     networks:
       - project-internal
       - project-egress
@@ -159,6 +172,9 @@ services:
     cpus: ${PROJECT_REST_CPUS:?defina PROJECT_REST_CPUS no .env do projeto}
     pids_limit: ${PROJECT_REST_PIDS_LIMIT:?defina PROJECT_REST_PIDS_LIMIT no .env do projeto}
     logging: *vector-logging
+    depends_on:
+      nginx:
+        condition: service_healthy
     networks:
       - project-internal
     # depends_on:

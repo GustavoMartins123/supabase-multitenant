@@ -101,6 +101,10 @@ class RealSessionTest(unittest.TestCase):
                 self.assertIn('authelia_session=', headers['cookie'])
                 self.assertEqual(headers['origin'], origin + ':444')
                 self.assertEqual(headers['sec-fetch-site'], 'same-site')
+                self.assertEqual(
+                    response.headers.get('content-security-policy'),
+                    "frame-ancestors 'self';",
+                )
                 self.assertEqual(json.loads(response.text())['error'], 'csrf_origin_denied')
 
                 # Legitimate origin still works after the attack.
