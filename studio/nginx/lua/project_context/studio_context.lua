@@ -50,6 +50,9 @@ function _M.load(ref, administrative)
     if administrative == "storage" then
         target = target .. "?access=storage"
         access_mode = "storage"
+    elseif administrative == "studio" then
+        target = target .. "?access=studio"
+        access_mode = "studio"
     elseif administrative then
         target = target .. "?access=admin"
         access_mode = "admin"

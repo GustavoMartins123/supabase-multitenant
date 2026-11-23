@@ -371,18 +371,14 @@ if(!response.ok){console.error(response.status+': '+await response.text());proce
         repeated = json.load(response)
     normal = request('owner', 'GET', rest)
     assert all(m['status'] == 200 for m in repeated['measurements']), (repeated, 'normal_status', normal['status'])
-    for actor in ('owner', 'admin', 'exmember', 'disabled', 'global'):
+    for actor in ('owner', 'admin', 'member', 'exmember', 'disabled', 'global'):
         assert expect(actor, 'GET', rest, 200) == [{'id': 1, 'value': 'original'}]
         assert 'data' in expect(actor, 'POST', graphql, 200, {'query': '{ __typename }'})
         expect(actor, 'GET', buckets, 200)
         expect(actor, 'GET', vectors, 200)
-    for actor in ('member', 'outsider'):
-        for method, path, body in [('GET', rest, None), ('POST', graphql, {'query': '{ __typename }'})]:
-            expect(actor, method, path, 404, body)
-    expect('member', 'GET', buckets, 200)
-    expect('member', 'GET', vectors, 200)
-    expect('outsider', 'GET', buckets, 404)
-    expect('outsider', 'GET', vectors, 404)
+    for method, path, body in [('GET', rest, None), ('POST', graphql, {'query': '{ __typename }'}),
+                               ('GET', buckets, None), ('GET', vectors, None)]:
+        expect('outsider', method, path, 404, body)
     expect('member', 'POST', '/api/projects/' + ref_of(alpha) + '/members', 403, {'user_id': ids['outsider'], 'role': 'admin'})
     expect('admin', 'POST', '/api/projects/' + ref_of(alpha) + '/members', 403, {'user_id': ids['exmember'], 'role': 'member'})
     expect('admin', 'POST', '/api/projects/' + ref_of(alpha) + '/members', 409, {'user_id': ids['owner'], 'role': 'member'})

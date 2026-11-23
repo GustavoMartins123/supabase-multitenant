@@ -282,12 +282,13 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.configure(False)).status_code,200)
         self.assertTrue((self.root/'.functions-runtime/tenants/test_beta.json').exists())
 
-    async def test_member_other_project_and_unsigned_gateway_cannot_manage(self):
+    async def test_member_can_manage_while_other_project_and_unsigned_gateway_cannot(self):
+        self.assertEqual((await self.request('GET','',None,user=2)).status_code,200)
+        self.assertEqual((await self.configure(True,user=2)).status_code,200)
         for method,path,body in [('GET','',None),('PUT','/my-function',{'expected_revision':None,'files':[{'name':'index.ts','content':''}]}),('POST','/my-function/publish',{'revision':'a'*64,'expected_published_revision':None}),('POST','/my-function/unpublish',{'revision':'a'*64,'expected_published_revision':None}),('DELETE','/my-function',{'revision':'a'*64,'expected_published_revision':None})]:
-            self.assertEqual((await self.request(method,path,body,user=2)).status_code,403)
             self.assertEqual((await self.request(method,path,body,user=1)).status_code,403)
             self.assertEqual((await self.request(method,path,body,service='forged')).status_code,403)
-        self.assertEqual((await self.configure(True,user=2)).status_code,403)
+        self.assertEqual((await self.configure(True,user=1)).status_code,403)
         await self.pool.execute('UPDATE users SET is_active=false WHERE id=$1',self.users[0])
         self.assertEqual((await self.request('GET')).status_code,403)
 
@@ -557,10 +558,10 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
         for reserved in ('SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'JWT_SECRET', 'POSTGRES_PASSWORD', 'PATH', 'VERIFY_JWT', 'PROJECT_REF'):
             resp = await self.request('PUT', '/secrets', {'secrets': [{'name': reserved, 'value': 'blocked'}]})
             self.assertEqual(resp.status_code, 400, reserved)
-        # Member and wrong-project admin cannot read or write secrets.
-        self.assertEqual((await self.request('GET', '/secrets', user=2)).status_code, 403)
-        self.assertEqual((await self.request('PUT', '/secrets', {'secrets': [{'name': 'STRIPE_KEY', 'value': 'sk_1'}]}, user=2)).status_code, 403)
+        # Project members can inspect secrets; wrong-project admin cannot.
+        self.assertEqual((await self.request('GET', '/secrets', user=2)).status_code, 200)
         self.assertEqual((await self.request('GET', '/secrets', user=1, project=0)).status_code, 403)
+        self.assertEqual((await self.request('PUT', '/secrets', {'secrets': [{'name': 'STRIPE_KEY', 'value': 'sk_1'}]}, user=1, project=0)).status_code, 403)
         # Managing secrets before enabling or publishing persists encrypted ciphertext only.
         res = await self.request('PUT', '/secrets', {'secrets': [{'name': 'STRIPE_KEY', 'value': 'sk_alpha_1'}]})
         self.assertEqual(res.status_code, 200, res.text)
@@ -598,7 +599,7 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.request('PUT', '/my-function/config', {'verify_jwt': False})).status_code, 404)
         draft = await self.save()
         self.assertTrue(draft['verify_jwt'])
-        self.assertEqual((await self.request('PUT', '/my-function/config', {'verify_jwt': False}, user=2)).status_code, 403)
+        self.assertEqual((await self.request('PUT', '/my-function/config', {'verify_jwt': False}, user=1, project=0)).status_code, 403)
         # Configuring before enablement/publish stores intent with published=false.
         cfg = await self.request('PUT', '/my-function/config', {'verify_jwt': False})
         self.assertEqual(cfg.status_code, 200, cfg.text)
@@ -802,12 +803,12 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
         thread.start()
         try:
             with patch.dict(os.environ, {'EDGE_FUNCTIONS_RUNTIME_URL': f'http://127.0.0.1:{server.server_address[1]}'}):
-                self.assertEqual((await self.request('GET', '/logs', user=2)).status_code, 403)
+                self.assertEqual((await self.request('GET', '/logs', user=2)).status_code, 200)
                 self.assertEqual((await self.request('GET', '/logs', user=1, project=0)).status_code, 403)
                 self.assertEqual((await self.request('GET', '/logs?unknown=1')).status_code, 400)
                 self.assertEqual((await self.request('GET', '/logs?limit=999')).status_code, 400)
                 self.assertEqual((await self.request('GET', '/logs?level=trace')).status_code, 400)
-                self.assertEqual((await self.request('POST', '/my-function/invoke', {'method': 'POST'}, user=2)).status_code, 403)
+                self.assertEqual((await self.request('POST', '/my-function/invoke', {'method': 'POST'}, user=1, project=0)).status_code, 403)
 
                 await self.configure(True)
                 draft = await self.save()
@@ -910,7 +911,7 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
         v2 = await self.save('version-2-orphan', v1['revision'])
         v3 = await self.save('version-3-draft', v2['revision'])
 
-        self.assertEqual((await self.request('GET', '/my-function/versions', user=2)).status_code, 403)
+        self.assertEqual((await self.request('GET', '/my-function/versions', user=1, project=0)).status_code, 403)
         self.assertEqual((await self.request('GET', '/missing/versions')).status_code, 404)
         hist = (await self.request('GET', '/my-function/versions')).json()
         self.assertEqual(hist['draft_revision'], v3['revision'])
@@ -920,7 +921,7 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(revs[v1['revision']]['is_published'])
         self.assertTrue(revs[v3['revision']]['is_draft'])
 
-        self.assertEqual((await self.request('GET', '/my-function/download', user=2)).status_code, 403)
+        self.assertEqual((await self.request('GET', '/my-function/download', user=1, project=0)).status_code, 403)
         self.assertEqual((await self.request('GET', '/my-function/download?extra=1')).status_code, 400)
         self.assertEqual((await self.request('GET', '/my-function/download?version=invalid')).status_code, 400)
         dl_draft = await self.request('GET', '/my-function/download?version=draft')
@@ -938,7 +939,7 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
         with zipfile.ZipFile(io.BytesIO(dl_pub.content), 'r') as zf:
             self.assertIn('version-1', zf.read('my-function/index.ts').decode('utf-8'))
 
-        self.assertEqual((await self.request('POST', '/my-function/rollback', {'revision': v2['revision'], 'expected_revision': v2['revision']}, user=2)).status_code, 403)
+        self.assertEqual((await self.request('POST', '/my-function/rollback', {'revision': v2['revision'], 'expected_revision': v2['revision']}, user=1, project=0)).status_code, 403)
         self.assertEqual((await self.request('POST', '/my-function/rollback', {'revision': v2['revision'], 'expected_revision': v1['revision']})).status_code, 409)
         self.assertEqual((await self.request('POST', '/my-function/rollback', {'revision': 'f' * 64, 'expected_revision': v3['revision']})).status_code, 404)
         runtime_before = edge_functions.read_context(self.root, self.names[0], str(self.projects[0]))
@@ -950,7 +951,7 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(edge_functions.read_context(self.root, self.names[0], str(self.projects[0])), runtime_before)
         self.assertEqual(await self.pool.fetchval("SELECT count(*) FROM studio_edge_audit WHERE action='rollback' AND outcome='completed'"), 1)
 
-        self.assertEqual((await self.request('POST', '/gc', {}, user=2)).status_code, 403)
+        self.assertEqual((await self.request('POST', '/gc', {}, user=1, project=0)).status_code, 403)
         kept_recent = (await self.request('POST', '/gc', {'min_age_seconds': 3600})).json()
         self.assertEqual(kept_recent['removed_count'], 0)
         cleaned = (await self.request('POST', '/gc', {'min_age_seconds': 0})).json()
@@ -1277,7 +1278,8 @@ class StudioFunctionsTest(unittest.IsolatedAsyncioTestCase):
 
                 await self.publish(draft)
                 # Access & validation boundaries.
-                self.assertEqual((await self.request('GET', '/schedules', user=2)).status_code, 403)
+                self.assertEqual((await self.request('GET', '/schedules', user=2)).status_code, 200)
+                self.assertEqual((await self.request('GET', '/schedules', user=1, project=0)).status_code, 403)
                 self.assertEqual((await self.request('POST', '/my-function/schedules', {'name': 'bad', 'cron': '99 * * * *'})).status_code, 400)
                 self.assertEqual((await self.request('POST', '/my-function/schedules', {'name': 'bad-hdr', 'cron': '*/5 * * * *', 'headers': {'X-Project-Ref': 'evil'}})).status_code, 400)
 

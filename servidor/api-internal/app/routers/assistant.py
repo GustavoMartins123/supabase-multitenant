@@ -15,7 +15,7 @@ from app.assistant_privileges import PrivilegeChangeBody, execute_privilege_chan
 from app.assistant_security import SecurityBody, inspect_table_security
 from app.database import get_pool
 from app.dependencies import (
-    ensure_project_admin_access, ensure_project_member_access,
+    ensure_project_member_access,
     get_project_role, get_public_project_row, resolve_authenticated_user,
 )
 from app.tenant_pools import tenant_connection
@@ -38,14 +38,11 @@ async def _context(ref: str, request: Request, pool, *, database: bool = False):
     user = await resolve_authenticated_user(request, pool)
     async with pool.acquire() as conn:
         project = await get_public_project_row(conn, ref)
-        if database:
-            await ensure_project_admin_access(conn, project_id=project["id"], auth_user=user)
-        else:
-            await ensure_project_member_access(conn, project_id=project["id"], auth_user=user)
+        await ensure_project_member_access(conn, project_id=project["id"], auth_user=user)
         role = await get_project_role(conn, project_id=project["id"], auth_user=user)
-    if user["is_global_admin"]:
+    if user["is_global_admin"] or project.get("owner_id") == user["db_user_id"]:
         role = "admin"
-    return project, user, role
+    return project, user, role or "member"
 
 
 def _connect(project):

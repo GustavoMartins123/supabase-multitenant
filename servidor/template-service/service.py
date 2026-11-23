@@ -20,7 +20,13 @@ from pathlib import Path
 import asyncpg
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-from policy import validate, origins, PolicyError, POLICY_VERSION
+from policy import (
+    POLICY_VERSION,
+    PolicyError,
+    normalize_legacy_preview,
+    origins,
+    validate,
+)
 
 MAX_BODY = 1024 * 1024
 MAX_REQUEST = 8 * MAX_BODY  # JSON may escape each Unicode codepoint.
@@ -135,7 +141,9 @@ class Engine:
                 raise HTTPException(422, result.get("error", "Go template inválido"))
             return result
 
-    async def render(self, kind, body, *, approved=None, enforce_policy=False):
+    async def render(
+        self, kind, body, *, approved=None, enforce_policy=False, editor_preview=False
+    ):
         if kind not in KINDS:
             raise HTTPException(404, "Tipo de template desconhecido")
         if not isinstance(body, str):
@@ -147,6 +155,8 @@ class Engine:
         if not 0 < size <= MAX_BODY:
             raise HTTPException(422, "O HTML deve conter entre 1 byte e 1 MB")
         if enforce_policy:
+            if editor_preview:
+                body = normalize_legacy_preview(body, kind)
             try:
                 validate(body, approved or [], kind)
             except (PolicyError, ValueError) as exc:
@@ -319,7 +329,9 @@ class Templates:
             default = await conn.fetchrow("SELECT * FROM mailer_template_default WHERE kind=$1", kind)
             if default and default["body"] == body:
                 return await self.check_migration("platform", kind, body, default["version"], default["migration_signature"])
-        return await self.engine.preview(kind, body, approved)
+        return await self.engine.render(
+            kind, body, approved=approved, enforce_policy=True, editor_preview=True
+        )
 
     async def default_for(self, conn, kind):
         row = await conn.fetchrow(

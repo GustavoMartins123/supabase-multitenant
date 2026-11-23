@@ -76,7 +76,7 @@ class StudioSlugContextContractTest(unittest.TestCase):
                 gate = (
                     "enforce_storage()"
                     if name == "inject_service_key_storage.lua"
-                    else "enforce_admin()"
+                    else "enforce_studio()"
                 )
                 self.assertIn(gate, source)
                 self.assertIn(".load(context)", source)
@@ -251,7 +251,7 @@ local calls = {}
 package.preload["project_context.studio_context"] = function()
     return {load = function(ref, mode)
         calls[#calls + 1] = mode
-        if mode == "storage" then
+        if mode == "storage" or mode == "studio" then
             return {ref = ref, role = "member", enc_admin_key = "encrypted"}
         end
         return nil, "Project access denied", 403
@@ -267,10 +267,15 @@ assert(storage.role == "member")
 assert(storage.enc_admin_key == "encrypted")
 assert(access.enforce_storage() == storage)
 assert(#calls == 1)
+local studio = access.enforce_studio()
+assert(studio.role == "member")
+assert(studio.enc_admin_key == "encrypted")
+assert(access.enforce_studio() == studio)
+assert(#calls == 2 and calls[2] == "studio")
 assert(access.enforce_admin() == nil)
 assert(ngx.status == 403)
-assert(#calls == 2 and calls[2] == true)
-assert(access.enforce() == storage)
+assert(#calls == 3 and calls[3] == true)
+assert(access.enforce() == studio)
 """
         subprocess.run([runtime, "-", str(LUA)], input=script, text=True, check=True)
 

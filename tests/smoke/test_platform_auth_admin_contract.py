@@ -126,7 +126,7 @@ class UsersListingReaderContract(unittest.TestCase):
         self.assertIn("/api/projects/internal/auth-users/{project_ref}", self.router)
         self.assertIn("FROM auth.users", self.router)
         self.assertIn('"platform_reader"', self.router)
-        self.assertIn("ensure_project_admin_access", self.router)
+        self.assertIn("ensure_project_member_access", self.router)
 
     def test_meta_guest_trap_is_untouched(self) -> None:
         compose = (ROOT / "servidor" / "docker-compose-api.yml").read_text(

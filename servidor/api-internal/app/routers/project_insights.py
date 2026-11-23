@@ -398,11 +398,11 @@ async def proxy_project_meta(
     async with pool.acquire() as conn:
         async with conn.transaction():
             project_row = await get_public_project_row(conn, ref)
-            await ensure_project_admin_access(
+            await ensure_project_member_access(
                 conn,
                 project_id=project_row["id"],
                 auth_user=auth_user,
-                message="Apenas admins podem acessar roles e metadados do banco",
+                message="Acesso negado: você não é membro deste projeto",
             )
             encrypted_service_role = await conn.fetchval(
                 "SELECT service_role FROM projects WHERE id = $1",
@@ -429,6 +429,12 @@ async def proxy_project_meta(
         raise HTTPException(status_code=403, detail="apikey administrativa inválida para o projeto")
 
     target_path = meta_path.lstrip("/")
+    first_segment = target_path.split("/", 1)[0].lower() if target_path else ""
+    if first_segment == "roles" and request.method.upper() != "GET":
+        raise HTTPException(
+            403,
+            "Alteração de roles e senhas do PostgreSQL pela interface não é permitida",
+        )
     target_url = f"{PG_META_INTERNAL_URL}/{target_path}" if target_path else PG_META_INTERNAL_URL
     upstream_headers = {
         "Authorization": postgres_meta_authorization(PG_META_CRYPTO_KEY),
@@ -563,11 +569,11 @@ async def execute_project_function(
     async with pool.acquire() as conn:
         auth_user = await resolve_authenticated_user(request, pool)
         project_row = await get_public_project_row(conn, ref)
-        await ensure_project_admin_access(
+        await ensure_project_member_access(
             conn,
             project_id=project_row["id"],
             auth_user=auth_user,
-            message="Apenas admins podem executar AI tools",
+            message="Acesso negado: você não é membro deste projeto",
         )
         project_id = project_row["id"]
 

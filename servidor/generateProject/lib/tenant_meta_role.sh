@@ -13,7 +13,7 @@ provision_tenant_meta_role() {
   {
     printf "SELECT set_config('platform.storage_policy_key','%s',false);\n" "$storage_policy_key"
     cat "$PROJECT_ROOT/api-internal/app/tenant_meta_role.sql"
-    printf "\nSELECT to_regclass('storage.objects') IS NOT NULL AS storage_policies_available \\gset\n\\if :storage_policies_available\n"
+    printf "\nSELECT (to_regclass('storage.objects') IS NOT NULL OR EXISTS (SELECT 1 FROM pg_class c JOIN pg_roles r ON r.oid = c.relowner WHERE c.oid = to_regclass('auth.users') AND r.rolname = 'supabase_auth_admin')) AS storage_policies_available \\gset\n\\if :storage_policies_available\n"
     cat "$PROJECT_ROOT/api-internal/app/studio_storage_policies.sql"
     printf '\n\\endif\n'
   } | docker exec -i supabase-db psql -q -v ON_ERROR_STOP=1 -1 -U supabase_admin -d "$db" \

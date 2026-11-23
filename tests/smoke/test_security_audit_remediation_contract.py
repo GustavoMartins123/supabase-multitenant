@@ -103,16 +103,16 @@ class InternalNamespaceIsolationTest(unittest.TestCase):
 
 
 class AuthAdminProxyAuthorizationTest(unittest.TestCase):
-    """auth-admin anexa a service_role do tenant: exige admin do projeto."""
+    """auth-admin anexa a service_role do tenant: exige membro do projeto via Studio gateway."""
 
     def setUp(self):
         self.source = read(APP / "routers" / "platform_auth.py")
 
-    def test_proxy_requires_project_admin(self):
+    def test_proxy_requires_project_member(self):
         start = self.source.index("async def proxy_project_auth_admin(")
         body = self.source[start : start + 1500]
         self.assertIn("resolve_authenticated_user", body)
-        self.assertIn("ensure_project_admin_access", body)
+        self.assertIn("ensure_project_member_access", body)
         self.assertIn("_require_studio_nginx(request)", body)
 
     def test_control_plane_identity_never_reaches_the_tenant_gotrue(self):
