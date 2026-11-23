@@ -56,7 +56,7 @@ class StoragePolicyProxyTests(unittest.IsolatedAsyncioTestCase):
         handler.decorator_list = []
         exec(compile(ast.Module(body=[handler], type_ignores=[]), "project_insights.py", "exec"), namespace)
         app = FastAPI()
-        app.add_api_route("/meta/{meta_path:path}", namespace["proxy_project_meta"], methods=["POST"])
+        app.add_api_route("/meta/{meta_path:path}", namespace["proxy_project_meta"], methods=["GET", "POST", "PATCH", "PUT", "DELETE"])
         self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://api")
         self.addAsyncCleanup(self.client.aclose)
         self.forwarded = []
@@ -98,9 +98,49 @@ class StoragePolicyProxyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.forwarded, [])
 
     async def test_unsafe_policy_does_not_reach_metadata(self):
-        response = await self.query("CREATE POLICY p ON storage.objects TO authenticated USING(public.escalate())")
-        self.assertEqual(response.status_code, 400, response.text)
-        self.assertEqual(self.forwarded, [])
+        for sql in (
+            "CREATE POLICY p ON storage.objects TO authenticated USING(set_config('role','postgres',false) IS NOT NULL)",
+            "CREATE POLICY p ON storage.objects TO authenticated USING(net.http_get('http://internal') IS NOT NULL)",
+            "ALTER ROLE current_user PASSWORD 'broken'",
+            "ALTER ROLE supabase_storage_admin PASSWORD 'stolen'",
+            "CREATE ROLE rogue LOGIN PASSWORD 'x'",
+            "DO $$ BEGIN EXECUTE 'ALTER ROLE current_user PASSWORD ''x'''; END $$",
+        ):
+            with self.subTest(sql=sql):
+                response = await self.query(sql)
+                self.assertEqual(response.status_code, 400, response.text)
+                self.assertEqual(self.forwarded, [])
+
+    async def test_role_mutation_routes_are_blocked_while_get_roles_succeeds(self):
+        for method, path in (
+            ("POST", "/meta/roles?ref=aaaaaaaaaaaaaaaaaaaa"),
+            ("PATCH", "/meta/roles/1?ref=aaaaaaaaaaaaaaaaaaaa"),
+            ("PUT", "/meta/roles/1?ref=aaaaaaaaaaaaaaaaaaaa"),
+            ("DELETE", "/meta/roles/1?ref=aaaaaaaaaaaaaaaaaaaa"),
+        ):
+            with self.subTest(method=method, path=path):
+                response = await self.client.request(method, path, headers={"apikey": "service-key"}, json={"password": "x"})
+                self.assertEqual(response.status_code, 403, response.text)
+                self.assertEqual(self.forwarded, [])
+        response = await self.client.get("/meta/roles?ref=aaaaaaaaaaaaaaaaaaaa", headers={"apikey": "service-key"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(self.forwarded), 1)
+
+    async def test_storage_trigger_migration_with_set_role_reaches_metadata_signed(self):
+        sql = (
+            "BEGIN; "
+            "SET ROLE supabase_storage_admin; "
+            "DROP TRIGGER IF EXISTS trg_media ON storage.objects; "
+            "CREATE TRIGGER trg_media AFTER INSERT ON storage.objects FOR EACH ROW EXECUTE FUNCTION public.catalogar(); "
+            "RESET ROLE; "
+            "COMMIT;"
+        )
+        response = await self.query(sql)
+        self.assertEqual(response.status_code, 200, response.text)
+        forwarded_sql = json.loads(self.forwarded[0].content)["query"]
+        self.assertNotIn("SET ROLE", forwarded_sql)
+        self.assertNotIn("RESET ROLE", forwarded_sql)
+        self.assertEqual(forwarded_sql.count("studio_storage_guard.execute_policy("), 2)
 
     async def test_unavailable_signing_key_does_not_reach_metadata(self):
         with patch.object(storage_policies, "delegation_key", side_effect=RuntimeError("missing key")):

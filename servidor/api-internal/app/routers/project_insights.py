@@ -429,6 +429,12 @@ async def proxy_project_meta(
         raise HTTPException(status_code=403, detail="apikey administrativa inválida para o projeto")
 
     target_path = meta_path.lstrip("/")
+    first_segment = target_path.split("/", 1)[0].lower() if target_path else ""
+    if first_segment == "roles" and request.method.upper() != "GET":
+        raise HTTPException(
+            403,
+            "Alteração de roles e senhas do PostgreSQL pela interface não é permitida",
+        )
     target_url = f"{PG_META_INTERNAL_URL}/{target_path}" if target_path else PG_META_INTERNAL_URL
     upstream_headers = {
         "Authorization": postgres_meta_authorization(PG_META_CRYPTO_KEY),
