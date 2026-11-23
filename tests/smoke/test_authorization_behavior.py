@@ -279,15 +279,21 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(old.status_code, 404)
         self.assertEqual(new.json(), admin.json())
 
-    async def test_assistant_database_tools_reject_members_before_database_access(self):
+    async def test_assistant_database_tools_reject_outsiders_and_removed_members_before_database_access(self):
         from app.routers import assistant
+        await self.pool.execute(
+            "DELETE FROM project_members WHERE project_id=$1 AND user_id=$2",
+            self.project_a,
+            self.ex_member,
+        )
         with mock.patch.object(assistant, "_connect") as connection:
-            for action, method, body in (("schema", "GET", b""), ("functions", "GET", b""),
-                                         ("security", "POST", b'{"tables":["example"]}'),
-                                         ("rows", "POST", b'{"table":"example","limit":5}'),
-                                         ("execute", "POST", b'{"function_name":"example","arguments":{}}')):
-                response = await self.request(method, f"/api/projects/abcdefghijklmnopqrst/assistant/{action}", actor=self.ex_member, body=body)
-                self.assertEqual(response.status_code, 403, response.text)
+            for actor in (self.ex_member, self.outsider):
+                for action, method, body in (("schema", "GET", b""), ("functions", "GET", b""),
+                                             ("security", "POST", b'{"tables":["example"]}'),
+                                             ("rows", "POST", b'{"table":"example","limit":5}'),
+                                             ("execute", "POST", b'{"function_name":"example","arguments":{}}')):
+                    response = await self.request(method, f"/api/projects/abcdefghijklmnopqrst/assistant/{action}", actor=actor, body=body)
+                    self.assertEqual(response.status_code, 403, response.text)
             connection.assert_not_called()
 
     async def test_assistant_revocation_and_directory_deactivation_are_immediate(self):
@@ -327,6 +333,11 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_assistant_sql_approval_gateway_still_rechecks_actor_and_project_membership(self):
         from app.routers import assistant
+        await self.pool.execute(
+            "DELETE FROM project_members WHERE project_id=$1 AND user_id=$2",
+            self.project_a,
+            self.ex_member,
+        )
         path = "/api/projects/abcdefghijklmnopqrst/assistant/sql"
         sql = "DELETE FROM public.example"
         body = json.dumps({"sql": sql, "label": "Synthetic query", "permission": "full", "execution": {
@@ -342,7 +353,7 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(response.status_code, 403, response.text)
             connection.assert_not_called()
 
-    async def test_assistant_privileges_require_dedicated_proof_and_current_administration(self):
+    async def test_assistant_privileges_require_dedicated_proof_and_current_membership(self):
         from app.routers import assistant
         path = "/api/projects/abcdefghijklmnopqrst/assistant/privileges"
         body = json.dumps({"operation":"grant", "tables":["example"], "role":"authenticated", "privileges":["SELECT"],
@@ -353,6 +364,11 @@ class AuthorizationBehaviorTest(unittest.IsolatedAsyncioTestCase):
             for actor in (self.owner, self.admin2, self.ex_member, self.outsider):
                 response = await self.request("POST", path, actor=actor, body=body)
                 self.assertEqual(response.status_code, 403, response.text)
+            await self.pool.execute(
+                "DELETE FROM project_members WHERE project_id=$1 AND user_id=$2",
+                self.project_a,
+                self.ex_member,
+            )
             for actor, contract in ((self.owner,"sql"),(self.ex_member,"privileges"),(self.outsider,"privileges")):
                 headers = self.signed_headers("POST", path, actor, body)
                 proof = f"assistant-{contract}-execution-v1\n{headers['X-Internal-Signature']}\n{headers['X-User-Token']}"
