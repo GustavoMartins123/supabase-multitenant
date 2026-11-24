@@ -1254,12 +1254,13 @@ def main() -> None:
 
                 # 12b. Fake Upgrade: websocket requests to non-WebSocket functions must not lock concurrency slots
                 settle()
+                ws_sample_key = base64.b64encode(b'the sample nonce').decode('ascii')
                 fake_ws_beta_partial = {**beta_hdrs, 'Upgrade': 'websocket'}
                 fake_ws_beta_full = {
                     **beta_hdrs,
                     'Upgrade': 'websocket',
                     'Connection': 'Upgrade',
-                    'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+                    'Sec-WebSocket-Key': ws_sample_key,
                     'Sec-WebSocket-Version': '13',
                 }
                 for _ in range(2):
@@ -1272,7 +1273,7 @@ def main() -> None:
                     **gw_headers('/functions/v1/imported'),
                     'Upgrade': 'websocket',
                     'Connection': 'Upgrade',
-                    'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+                    'Sec-WebSocket-Key': ws_sample_key,
                     'Sec-WebSocket-Version': '13',
                 }
                 for _ in range(2):
