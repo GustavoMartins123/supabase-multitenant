@@ -21,7 +21,7 @@ arquitetura. São necessários:
 - `supabase-db` em execução;
 - Projects API e host-agent instalados no modelo atual;
 - `STORAGE_IMAGE=supabase/storage-api:v1.61.12`, proxy
-  `nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim` e backend file no layout
+  `nginx/nginx-unprivileged:1.31.10-alpine3.24-slim` e backend file no layout
   canônico (`/var/lib/storage`, bucket interno `objects`); valores diferentes
   são recusados antes da conversão;
 - nenhum job ou comando de lifecycle em `queued` ou `running`;

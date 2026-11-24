@@ -1,4 +1,4 @@
-FROM nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim
+FROM nginx/nginx-unprivileged:1.31.10-alpine3.24-slim
 COPY --chown=101:101 --chmod=0400 \
   nginx/nginx_{{project_id}}.conf /etc/nginx/nginx.conf.template
 COPY --chown=101:101 nginx/public/ /usr/share/nginx/html/

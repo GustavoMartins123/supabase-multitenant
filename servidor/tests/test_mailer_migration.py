@@ -34,7 +34,7 @@ class MigrationTests(unittest.TestCase):
             f"PROJECT_UUID={self.tenant}\nKEEP_SETTING=unchanged\n"
         )
         (self.project / "Dockerfile").write_text(
-            "FROM nginx:1.31.8\nCOPY nginx/nginx_idr_campo_prod.conf /etc/nginx/nginx.conf\n"
+            "FROM nginx:1.31.10\nCOPY nginx/nginx_idr_campo_prod.conf /etc/nginx/nginx.conf\n"
         )
         (self.project / ".dockerignore").write_text(
             "**\n!Dockerfile\n!nginx/\n!nginx/nginx_*.conf\n"
@@ -79,7 +79,7 @@ class MigrationTests(unittest.TestCase):
         )
         self.compose = self.project / "docker-compose.yml"
         self.compose.write_text(
-            'name: supabase\nservices:\n  nginx:\n    image: nginx:1.31.8\n    volumes:\n      - ${HOST_PROJECT_ROOT}/projects/idr_campo_prod/auth:/usr/share/nginx/html:ro\n      - ./other:/other:ro\n    networks: [rede-supabase]\n    labels:\n      traefik.enable: "true"\n  auth:\n    image: supabase/gotrue:v2.197.0\n    environment:\n'
+            'name: supabase\nservices:\n  nginx:\n    image: nginx:1.31.10\n    volumes:\n      - ${HOST_PROJECT_ROOT}/projects/idr_campo_prod/auth:/usr/share/nginx/html:ro\n      - ./other:/other:ro\n    networks: [rede-supabase]\n    labels:\n      traefik.enable: "true"\n  auth:\n    image: supabase/gotrue:v2.197.0\n    environment:\n'
             + environment
             + "      GOTRUE_JWT_EXP: 900\n      GOTRUE_SMTP_HOST: smtp.private\n  rest:\n    image: postgrest/postgrest:v16.5\nnetworks:\n  rede-supabase:\n    external: true\n"
         )

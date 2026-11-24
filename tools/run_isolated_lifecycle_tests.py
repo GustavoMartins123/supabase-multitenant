@@ -17,7 +17,7 @@ IMAGES = (
     "servidor-control-plane-migrations:latest", "servidor-key-authorizer:latest",
     "supabase/edge-runtime:v1.74.2", "supabase/supavisor:2.9.7",
     "supabase/storage-api:v1.61.12", "darthsim/imgproxy:v4.0.11",
-    "nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim",
+    "nginx/nginx-unprivileged:1.31.10-alpine3.24-slim",
     "supabase/gotrue:v2.193.0-rc.3", "postgrest/postgrest:v14.14",
     "redis:8.2.2-alpine",
 )
