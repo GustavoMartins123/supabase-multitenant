@@ -27,7 +27,7 @@ def main():
     parser.add_argument("--configuration-image", default="access-configuration:test")
     parser.add_argument("--api-image", default="access-api:test")
     parser.add_argument(
-        "--nginx-image", default="nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim"
+        "--nginx-image", default="nginx/nginx-unprivileged:1.31.10-alpine3.24-slim"
     )
     args = parser.parse_args()
     suffix = uuid.uuid4().hex[:10]

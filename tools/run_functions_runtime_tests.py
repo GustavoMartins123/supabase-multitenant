@@ -545,7 +545,7 @@ def main() -> None:
     parser.add_argument('--template', type=Path, required=True)
     parser.add_argument('--contract', choices=('versioned', 'projected'), required=True)
     parser.add_argument('--edge-image', required=True)
-    parser.add_argument('--nginx-image', default='nginxinc/nginx-unprivileged:1.31.7-alpine3.24-slim')
+    parser.add_argument('--nginx-image', default='nginx/nginx-unprivileged:1.31.10-alpine3.24-slim')
     parser.add_argument('--python-image', default='servidor-projects-api:latest')
     parser.add_argument('--bundler-dir', type=Path, default=Path(__file__).resolve().parents[1] / 'servidor/edge-bundler')
     parser.add_argument('--result', type=Path)

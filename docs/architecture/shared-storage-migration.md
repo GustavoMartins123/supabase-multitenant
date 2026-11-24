@@ -20,7 +20,7 @@ architecture. Required:
 - `supabase-db` running;
 - Projects API and host-agent installed in the current model;
 - `STORAGE_IMAGE=supabase/storage-api:v1.61.12`, proxy
-  `nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim`, and file backend in
+  `nginx/nginx-unprivileged:1.31.10-alpine3.24-slim`, and file backend in
   the canonical layout (`/var/lib/storage`, internal `objects` bucket);
   different values are rejected before conversion;
 - no lifecycle job or command in `queued` or `running`;

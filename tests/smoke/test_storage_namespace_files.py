@@ -33,7 +33,7 @@ class NamespaceFileTests(unittest.TestCase):
         (directory / 'version.json').write_text('{"contentType":"image/png","cacheControl":"3600"}')
         (self.server / '.env').write_text('\n'.join((
             'STORAGE_IMAGE=supabase/storage-api:v1.61.12',
-            'STORAGE_DATA_PLANE_PROXY_IMAGE=nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim',
+            'STORAGE_DATA_PLANE_PROXY_IMAGE=nginx/nginx-unprivileged:1.31.10-alpine3.24-slim',
             'STORAGE_BACKEND=file', 'STORAGE_FILE_BACKEND_PATH=/var/lib/storage',
             'STORAGE_INTERNAL_BUCKET=objects', 'STORAGE_TENANT_DB_USER=supabase_storage_admin',
             'STORAGE_TENANT_HOST_REGEXP=^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})[.]storage[.]internal$',

@@ -40,8 +40,8 @@ tested against. One row per moving part; the platform row is the canonical
 | --- | --- | --- |
 | Traefik | `traefik:v3.7.6` | `servidor/traefik/docker-compose.yml` |
 | Vector | `timberio/vector:0.53.0-alpine` | `servidor/docker-compose.yml` |
-| OpenResty (Studio gateway) | `openresty/openresty:1.31.1.1-1-bookworm-fat` | `studio/Dockerfile` |
-| Nginx (data-plane proxy) | `nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim` | `servidor/.env.example` (`STORAGE_DATA_PLANE_PROXY_IMAGE`), `servidor/traefik/docker-compose.yml` |
+| OpenResty (Studio gateway) | `openresty/openresty:1.31.9.1-noble` | `studio/Dockerfile` |
+| Nginx (data-plane proxy) | `nginx/nginx-unprivileged:1.31.10-alpine3.24-slim` | `servidor/.env.example` (`STORAGE_DATA_PLANE_PROXY_IMAGE`), `servidor/traefik/docker-compose.yml` |
 | Authelia | `authelia/authelia:4.39.20` | `studio/docker-compose.yml` |
 | Redis (Authelia sessions) | `redis:8.2.2-alpine` | `studio/docker-compose.yml` |
 | Studio assistant | `node:22-bookworm-slim`, AI SDK 6, local SQLite | `studio/assistant/Dockerfile` |

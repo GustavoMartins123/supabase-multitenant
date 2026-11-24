@@ -56,7 +56,7 @@ def main() -> None:
     copied = 'p1_copy_' + suffix
     for image in ('servidor-db:latest', 'servidor-realtime:latest', 'servidor-control-plane-migrations:latest',
                   'ghcr.io/gustavomartins123/multitenant-edge-runtime:v1.79.5-wsfix', 'supabase/supavisor:2.9.7', 'supabase/storage-api:v1.61.12',
-                  'nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim', 'darthsim/imgproxy:v4.0.11',
+                  'nginx/nginx-unprivileged:1.31.10-alpine3.24-slim', 'darthsim/imgproxy:v4.0.11',
                   'supabase/gotrue:v2.193.0-rc.3', 'postgrest/postgrest:v14.14', 'redis:8.2.2-alpine'):
         assert run('docker', 'image', 'inspect', image, '--format', '{{.Os}}') == 'linux', image
     env_file = server / '.env'
