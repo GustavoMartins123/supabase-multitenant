@@ -80,7 +80,7 @@ an inherited lock descriptor; direct unlocked `publish`/`withdraw` commands fail
 ```bash
 python tools/run_functions_security_tests.py \
   --lifecycle-image servidor-projects-api:latest \
-  --edge-image ghcr.io/gustavomartins123/supabase-edge-runtime-custom:v1.79.5-wsfix
+  --edge-image ghcr.io/gustavomartins123/multitenant-edge-runtime:v1.79.5-wsfix
 ```
 
 The runner requires existing Linux images, mounts only synthetic fixture files,
