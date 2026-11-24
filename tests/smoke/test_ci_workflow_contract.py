@@ -64,7 +64,7 @@ class CiWorkflowContract(unittest.TestCase):
             self.assertIn("result.skipped", runner)
             self.assertIn("--pull=never", runner)
         self.assertIn("--postgres-image postgres:15 --postgres-user postgres", source)
-        self.assertIn("--edge-image supabase/edge-runtime:v1.74.2", source)
+        self.assertIn("--edge-image ghcr.io/gustavomartins123/multitenant-edge-runtime:v1.79.5-wsfix", source)
 
     def test_e2e_suite_stays_opt_in(self) -> None:
         e2e = (

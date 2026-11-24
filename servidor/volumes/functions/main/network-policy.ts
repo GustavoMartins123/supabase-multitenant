@@ -80,8 +80,31 @@ async function pinNetworkHosts(approved: string[]) {
   await operation
 }
 
-export async function workerPermissions(project: string, external: unknown = [], databaseUrl?: string) {
+const projectUuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const servicePathPattern = /^\/home\/deno\/runtime\/code\/([^/]+)\/[0-9a-f]{64}\/[A-Za-z][A-Za-z0-9_-]{0,63}$/
+
+export async function workerPermissions(
+  project: string,
+  external: unknown = [],
+  databaseUrl?: string,
+  servicePath = '',
+  projectUuid?: string,
+) {
   if (!/^[a-z_][a-z0-9_]{2,39}$/.test(project)) throw new Error('Invalid function project')
+  if (projectUuid !== undefined && !projectUuidPattern.test(projectUuid)) {
+    throw new Error('Invalid function project identity')
+  }
+  if (servicePath) {
+    const match = servicePath.match(servicePathPattern)
+    const tenantSegment = match?.[1]
+    const isOwnSlug = tenantSegment === project
+    const isOwnUuid = Boolean(
+      tenantSegment && projectUuidPattern.test(tenantSegment) && (!projectUuid || tenantSegment === projectUuid),
+    )
+    if (!isOwnSlug && !isOwnUuid) {
+      throw new Error('Invalid function service path')
+    }
+  }
   const approved = externalNetworkHosts(external)
   await pinNetworkHosts(approved)
   const gateway = `supabase-nginx-${project}:8080`
@@ -96,7 +119,7 @@ export async function workerPermissions(project: string, external: unknown = [],
     allow_net: [...new Set(allowNet)],
     allow_import: [gateway, ...approved],
     allow_env: [],
-    allow_read: [],
+    allow_read: servicePath ? ['/tmp', servicePath] : ['/tmp'],
     allow_write: ['/tmp'],
     deny_run: [],
     deny_ffi: [],

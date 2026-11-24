@@ -15,7 +15,7 @@ LABEL = "multitenant.isolated-lifecycle"
 IMAGES = (
     "servidor-db:latest", "servidor-realtime:latest",
     "servidor-control-plane-migrations:latest", "servidor-key-authorizer:latest",
-    "supabase/edge-runtime:v1.74.2", "supabase/supavisor:2.9.7",
+    "ghcr.io/gustavomartins123/multitenant-edge-runtime:v1.79.5-wsfix", "supabase/supavisor:2.9.7",
     "supabase/storage-api:v1.61.12", "darthsim/imgproxy:v4.0.11",
     "nginx/nginx-unprivileged:1.31.10-alpine3.24-slim",
     "supabase/gotrue:v2.193.0-rc.3", "postgrest/postgrest:v14.14",

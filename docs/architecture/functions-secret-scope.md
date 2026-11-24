@@ -25,10 +25,10 @@ malformed, unknown-field, divergent or absent configuration with 503. JWTs must
 be HS256 with that tenant's secret. Function names cannot traverse paths or invoke
 `main`.
 
-**Workers must not be reused by function path.** Edge Runtime v1.74.2 otherwise
-reuses a worker with the first tenant's environment, even when a subsequent
+**Workers must not be reused by function path.** Edge Runtime v1.74.2 was observed
+to reuse a worker with the first tenant's environment, even when a subsequent
 `create` call supplies different `envVars`. The supervisor uses `forceCreate:true`
-for every request. Module caching is independent and remains enabled. Workers
+for every request on every runtime version, including v1.79.5-wsfix. Module caching is independent and remains enabled. Workers
 receive only the requested tenant's URL, anon/service keys, JWT secret and ref;
 the real runtime denies their filesystem reads of supervisor credentials.
 
@@ -80,7 +80,7 @@ an inherited lock descriptor; direct unlocked `publish`/`withdraw` commands fail
 ```bash
 python tools/run_functions_security_tests.py \
   --lifecycle-image servidor-projects-api:latest \
-  --edge-image supabase/edge-runtime:v1.74.2
+  --edge-image ghcr.io/gustavomartins123/multitenant-edge-runtime:v1.79.5-wsfix
 ```
 
 The runner requires existing Linux images, mounts only synthetic fixture files,

@@ -133,18 +133,18 @@ jobs:
       - name: Explicit disposable test images
         run: |
           docker pull python:3.12-slim-bookworm
-          docker pull supabase/edge-runtime:v1.74.2
+          docker pull ghcr.io/gustavomartins123/multitenant-edge-runtime:v1.79.5-wsfix
       - name: Required Functions filesystem and worker isolation checks (no skips)
         run: |
           python tools/run_functions_security_tests.py \
             --lifecycle-image python:3.12-slim-bookworm \
-            --edge-image supabase/edge-runtime:v1.74.2
+            --edge-image ghcr.io/gustavomartins123/multitenant-edge-runtime:v1.79.5-wsfix
 
       - name: Required Functions network allowlist checks
         run: |
           python tools/run_functions_network_tests.py \
             --supervisor servidor/volumes/functions/main --contract projected \
-            --edge-image supabase/edge-runtime:v1.74.2 \
+            --edge-image ghcr.io/gustavomartins123/multitenant-edge-runtime:v1.79.5-wsfix \
             --python-image python:3.12-slim-bookworm
       - name: Build authenticated metadata and obtain disposable database
         run: |
@@ -185,7 +185,7 @@ jobs:
       - name: Build and obtain disposable Functions integration images
         run: |
           docker build -t functions-authorizer-ci:local -f servidor/key-authorizer/Dockerfile servidor
-          docker pull supabase/edge-runtime:v1.74.2
+          docker pull ghcr.io/gustavomartins123/multitenant-edge-runtime:v1.79.5-wsfix
           docker pull nginx/nginx-unprivileged:1.31.10-alpine3.24-slim
           docker pull postgrest/postgrest:v14.14
           docker pull redis:8.2.2-alpine
@@ -235,7 +235,7 @@ jobs:
           docker build -t codex-p1-executor:local -f tests/integration/fixtures/p1_executor.Dockerfile tests/integration/fixtures
       - name: Explicit production service images
         run: |
-          docker pull supabase/edge-runtime:v1.74.2
+          docker pull ghcr.io/gustavomartins123/multitenant-edge-runtime:v1.79.5-wsfix
           docker pull supabase/supavisor:2.9.7
           docker pull supabase/storage-api:v1.61.12
           docker pull nginx/nginx-unprivileged:1.31.10-alpine3.24-slim

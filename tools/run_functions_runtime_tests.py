@@ -163,6 +163,15 @@ Deno.serve(() => {
   return Response.json({ scheduled: true })
 })
 ''',
+    'hold_bg/index.ts': '''
+Deno.serve((req) => {
+  const secs = Number(new URL(req.url).searchParams.get('secs') ?? '1.5')
+  EdgeRuntime.waitUntil((async () => {
+    await new Promise((r) => setTimeout(r, secs * 1000))
+  })())
+  return Response.json({ scheduled: true })
+})
+''',
     'internal_calls/index.ts': '''
 Deno.serve(async (req) => {
   const url = Deno.env.get('SUPABASE_URL')!
@@ -277,6 +286,51 @@ Deno.serve(async () => {
     jsr: privJsr(),
     blockedNet,
   })
+})
+''',
+    'fs_scope/index.ts': '''
+Deno.serve(async (req) => {
+  const url = new URL(req.url)
+  const denoCanary = url.searchParams.get('deno_canary') ?? '/var/cache/deno/edge01-canary'
+  const otherTenant = url.searchParams.get('other_tenant') ?? ''
+  const otherFn = url.searchParams.get('other_fn') ?? ''
+  const oversizeMb = Number(url.searchParams.get('oversize_mb') ?? '6')
+  const results: Record<string, string> = {}
+  const attempt = async (name: string, fn: () => Promise<unknown>) => {
+    try { await fn(); results[name] = 'allowed' } catch (error) { results[name] = `blocked:${(error as Error).name}` }
+  }
+  const canary = '/edge01-canary/canary'
+  await attempt('read_etc_hostname', () => Deno.readTextFile('/etc/hostname'))
+  await attempt('read_traversal_etc', () => Deno.readTextFile('/tmp/../etc/hostname'))
+  await attempt('read_supervisor_deno_dir', () => Deno.readTextFile(denoCanary))
+  if (otherTenant) {
+    await attempt('read_other_tenant_code', () => Deno.readTextFile(otherTenant))
+  }
+  if (otherFn) {
+    await attempt('read_other_function_code', () => Deno.readTextFile(otherFn))
+  }
+  await attempt('read_tenant_config', () => Deno.readTextFile('/home/deno/runtime/tenants/test_beta.json'))
+  await attempt('read_symlink_etc', async () => {
+    await Deno.symlink('/etc/hostname', '/tmp/esc-read')
+    return await Deno.readTextFile('/tmp/esc-read')
+  })
+  await attempt('read_symlink_canary', async () => {
+    await Deno.symlink(canary, '/tmp/esc-canary')
+    return await Deno.readTextFile('/tmp/esc-canary')
+  })
+  await attempt('write_traversal_canary', () => Deno.writeTextFile('/tmp/../edge01-canary/canary', 'pwned'))
+  await attempt('write_symlink_canary', async () => {
+    await Deno.symlink(canary, '/tmp/esc-write')
+    await Deno.writeTextFile('/tmp/esc-write', 'pwned')
+  })
+  await attempt('write_outside_tmp', () => Deno.writeTextFile('/edge01-canary/outside', 'x'))
+  await attempt('read_private_tmp_before_write', () => Deno.readTextFile('/tmp/owned'))
+  await attempt('write_private_tmp', () => Deno.writeTextFile('/tmp/owned', 'owned'))
+  await attempt('read_private_tmp', () => Deno.readTextFile('/tmp/owned'))
+  await attempt('temp_dir', () => Deno.makeTempDir())
+  await attempt('tmp_within_quota', () => Deno.writeFile('/tmp/within', new Uint8Array(512 * 1024)))
+  await attempt('tmp_oversize', () => Deno.writeFile('/tmp/oversize', new Uint8Array(oversizeMb * 1024 * 1024)))
+  return Response.json(results)
 })
 ''',
 }
@@ -469,7 +523,11 @@ def render_nginx_template(template: str, *, contract: str, project: str, identit
         .replace('${ANON_KEY_PROJETO}', anon_key)
         .replace('${SERVICE_ROLE_KEY_PROJETO}', service_role_key)
         .replace('${API_GATEWAY_TOKEN_PROJETO}', gateway_token)
-        .replace('${SUPABASE_NETWORK_SUBNET}', subnet))
+        .replace('${SUPABASE_NETWORK_SUBNET}', subnet)
+        .replace('${PROJECT_INTERNAL_SUBNET}', subnet)
+        .replace('${POSTGRES_POOLER}', 'supabase-pooler')
+        .replace('${POOLER_PROXY_PORT_SESSION}', '5432')
+        .replace('${POOLER_PROXY_PORT_TRANSACTION}', '6543'))
     rendered = rendered.replace(f'supabase-auth-{project}:9999', 'canary:8080')
     rendered = rendered.replace(f'supabase-rest-{project}:3000', 'canary:8080')
     rendered = rendered.replace('supabase-storage-global:5000', 'canary:8080')
@@ -575,7 +633,7 @@ def main() -> None:
                 env_srv = toks['service_role']
                 code_root = runtime / 'code' / project / ('1' * 64)
             code_root.mkdir(parents=True, exist_ok=True)
-            for fn in ('stream', 'slow', 'wait_until', 'internal_calls', 'imported', 'remote_import', 'check_env', 'webhook', 'log_test', 'ws_wasm', 'npm_jsr', 'priv_pkg'):
+            for fn in ('stream', 'slow', 'wait_until', 'hold_bg', 'internal_calls', 'imported', 'remote_import', 'check_env', 'fs_scope', 'webhook', 'log_test', 'ws_wasm', 'npm_jsr', 'priv_pkg'):
                 shutil.copytree(code / fn, code_root / fn)
             if project == 'test_alpha':
                 alpha_code_root = code_root
@@ -602,31 +660,34 @@ def main() -> None:
 
             docker('build', '-t', bundler_img, str(args.bundler_dir))
             built_bundler_img = True
-            privreg_c = f'{prefix}-privreg'
-            docker('run', '-d', '--name', privreg_c, '--network', network,
-                   '--network-alias', 'npmreg.internal', '--network-alias', 'jsrreg.internal',
-                   '-v', f'{fixture}:/fixture:ro', '-p', '127.0.0.1::8443', '--entrypoint', 'python',
-                   args.python_image, '/fixture/privreg.py')
-            names.append(privreg_c)
-            pr_port = int(docker('inspect', '-f', '{{(index (index .NetworkSettings.Ports "8443/tcp") 0).HostPort}}', privreg_c))
-            import socket
-            for _ in range(50):
-                try:
-                    with socket.create_connection(('127.0.0.1', pr_port), timeout=0.5):
-                        break
-                except OSError:
-                    time.sleep(0.1)
-            else:
-                raise RuntimeError('private registry TLS mock did not become ready')
-
+            # The bundler refuses private addresses inside its own bridge subnets, so the mock shares the
+            # bundler's network namespace and is reached over loopback through the bundler's test-only switch.
             bundler_hmac = 'runtime-test-bundler-hmac-secret'
             bundler_c = f'{prefix}-bundler'
             docker('run', '-d', '--name', bundler_c, '--network', network,
+                   '--add-host', 'npmreg.internal:127.0.0.1', '--add-host', 'jsrreg.internal:127.0.0.1',
                    '-e', f'EDGE_BUNDLER_HMAC_SECRET={bundler_hmac}',
+                   '-e', 'EDGE_BUNDLER_ALLOW_LOOPBACK_FOR_TESTS=1',
                    '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
                    '--tmpfs', '/tmp:rw,noexec,nosuid,size=512m',
                    '-p', '127.0.0.1::18030', bundler_img)
             names.append(bundler_c)
+            privreg_c = f'{prefix}-privreg'
+            docker('run', '-d', '--name', privreg_c, '--network', f'container:{bundler_c}',
+                   '-v', f'{fixture}:/fixture:ro', '--entrypoint', 'python',
+                   args.python_image, '/fixture/privreg.py')
+            names.append(privreg_c)
+            for _ in range(50):
+                ready = subprocess.run(
+                    ['docker', 'exec', privreg_c, 'python', '-c',
+                     "import socket; socket.create_connection(('127.0.0.1', 8443), timeout=0.5)"],
+                    capture_output=True,
+                )
+                if ready.returncode == 0:
+                    break
+                time.sleep(0.1)
+            else:
+                raise RuntimeError('private registry TLS mock did not become ready')
             b_port = docker('inspect', '-f', '{{(index (index .NetworkSettings.Ports "18030/tcp") 0).HostPort}}', bundler_c)
             b_origin = f'http://127.0.0.1:{b_port}'
 
@@ -741,9 +802,11 @@ def main() -> None:
             rt_cmd = [
                 'run', '-d', '--name', runtime_c, '--network', network,
                 '--network-alias', 'functions', '--network-alias', 'supabase-edge-functions-global',
-                '-e', 'DENO_DIR=/tmp/deno', '-e', 'VERIFY_JWT=true',
+                '-e', 'DENO_DIR=/var/cache/deno', '-e', 'VERIFY_JWT=true',
                 '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
-                '--tmpfs', '/tmp:rw,nosuid,size=128m',
+                '--tmpfs', '/tmp:rw,noexec,nosuid,size=128m',
+                '--tmpfs', '/var/cache/deno:rw,noexec,nosuid,size=128m',
+                '--tmpfs', '/edge01-canary:rw,nosuid,size=1m',
                 '-v', f'{hosts}:/etc/hosts:rw',
                 '-v', f'{code / "main"}:/home/deno/main:ro',
                 '-v', f'{runtime}:/home/deno/runtime:ro',
@@ -881,18 +944,17 @@ def main() -> None:
                 assert after_cancel.status_code == 200, after_cancel.text
                 record('sse_client_cancel_releases_concurrency')
 
-                # 7. Per-project concurrency (2) and global concurrency (4)
+                # 7. Per-project concurrency (2), bounded admission queue and slot recovery
                 codes: list[int] = []
+
                 def slow_alpha():
                     r = client.get(f'{nginx_origin}/functions/v1/slow?ms=700', headers=gw_headers('/functions/v1/slow?ms=700'))
                     codes.append(r.status_code)
+
                 threads = [threading.Thread(target=slow_alpha), threading.Thread(target=slow_alpha)]
                 for t in threads:
                     t.start()
                 time.sleep(0.18)
-                third_alpha = client.get(f'{nginx_origin}/functions/v1/imported', headers=gw_headers('/functions/v1/imported'))
-                assert third_alpha.status_code == 429 and third_alpha.json()['code'] == 'function_concurrency_limit', third_alpha.text
-                assert third_alpha.headers.get('access-control-allow-origin') == 'http://localhost:3000'
                 beta_hdrs = {
                     'apikey': internal_tokens['test_beta']['anon'],
                     'Authorization': 'Bearer ' + internal_tokens['test_beta']['anon'],
@@ -900,14 +962,112 @@ def main() -> None:
                     'X-Project-Ref': refs['test_beta'],
                     'X-Project-UUID': identities['test_beta'],
                 }
+                # beta still has capacity on supervisor directly
                 beta_ok = client.get(f'{rt_origin}/imported', headers=beta_hdrs)
                 assert beta_ok.status_code == 200, beta_ok.text
+                # The third alpha request waits in the bounded queue and runs as soon as a slot frees.
+                queued_t0 = time.monotonic()
+                third_alpha = client.get(f'{nginx_origin}/functions/v1/imported', headers=gw_headers('/functions/v1/imported'))
+                queued_for = time.monotonic() - queued_t0
+                assert third_alpha.status_code == 200 and queued_for > 0.35, (third_alpha.status_code, queued_for, third_alpha.text)
+                assert third_alpha.headers.get('access-control-allow-origin') == 'http://localhost:3000'
                 for t in threads:
                     t.join()
                 assert codes == [200, 200], codes
+                # Slots freed after slow requests end
                 recovered = client.get(f'{nginx_origin}/functions/v1/imported', headers=gw_headers('/functions/v1/imported'))
                 assert recovered.status_code == 200, recovered.text
-                record('concurrency_limits_and_slot_recovery')
+                record('concurrency_queue_waits_then_serves')
+                failures: list[BaseException] = []
+
+                def guarded(target):
+                    def run(*args):
+                        try:
+                            target(*args)
+                        except BaseException as exc:
+                            failures.append(exc)
+                    return run
+
+                def settle():
+                    time.sleep(0.6)
+
+                # 7b. The queue is bounded: once it is full, one more request is rejected at once
+                settle()
+                waiting = 16
+                burst: list[tuple[int, str]] = []
+
+                def burst_alpha(path: str):
+                    with httpx.Client(trust_env=False, timeout=30) as own:
+                        r = own.get(f'{nginx_origin}/functions/v1/{path}', headers=gw_headers(f'/functions/v1/{path}'))
+                    burst.append((r.status_code, r.headers.get('retry-after')))
+
+                runners = [threading.Thread(target=guarded(burst_alpha), args=('slow?ms=2500',)) for _ in range(2)]
+                for t in runners:
+                    t.start()
+                time.sleep(0.5)
+                waiters = [threading.Thread(target=guarded(burst_alpha), args=('imported',)) for _ in range(waiting)]
+                for t in waiters:
+                    t.start()
+                time.sleep(0.7)
+                # A request that is queued instead of rejected would be served later; never abandon it here.
+                overflow_t0 = time.monotonic()
+                overflow = client.get(f'{nginx_origin}/functions/v1/imported', headers=gw_headers('/functions/v1/imported'), timeout=20.0)
+                overflow_for = time.monotonic() - overflow_t0
+                assert overflow.status_code == 429 and overflow.json()['code'] == 'function_concurrency_limit', (overflow.status_code, overflow.text)
+                assert overflow.headers.get('retry-after') == '1' and overflow_for < 0.4, (overflow.headers, overflow_for)
+                assert overflow.headers.get('access-control-allow-origin') == 'http://localhost:3000'
+                for t in runners + waiters:
+                    t.join()
+                assert not failures, failures
+                assert sorted(code for code, _ in burst) == [200] * (2 + waiting), burst
+                record('concurrency_queue_overflow_rejected')
+
+                # 7c. A background task (waitUntil) keeps its slot until it finishes
+                settle()
+                for _ in range(2):
+                    background = client.get(f'{nginx_origin}/functions/v1/hold_bg?secs=1.5', headers=gw_headers('/functions/v1/hold_bg?secs=1.5'))
+                    assert background.status_code == 200 and background.json()['scheduled'] is True, background.text
+                held_codes: list[int] = []
+
+                def fast_alpha():
+                    with httpx.Client(trust_env=False, timeout=10) as own:
+                        held_codes.append(own.get(f'{nginx_origin}/functions/v1/imported', headers=gw_headers('/functions/v1/imported')).status_code)
+
+                held_t0 = time.monotonic()
+                held = [threading.Thread(target=guarded(fast_alpha)) for _ in range(2)]
+                for t in held:
+                    t.start()
+                for t in held:
+                    t.join()
+                held_for = time.monotonic() - held_t0
+                assert not failures, failures
+                assert held_codes == [200, 200] and held_for > 1.0, (held_codes, held_for)
+                record('background_task_holds_concurrency_slot')
+
+                # 7d. Finished isolates are ended right away instead of piling up until the wall clock
+                settle()
+                served: list[int] = []
+
+                def fast_burst(count: int):
+                    with httpx.Client(trust_env=False, timeout=10) as own:
+                        for _ in range(count):
+                            served.append(own.get(f'{nginx_origin}/functions/v1/imported', headers=gw_headers('/functions/v1/imported')).status_code)
+
+                # Two clients saturate the per-project concurrency cap (2) across 90 back-to-back requests.
+                fast = [threading.Thread(target=guarded(fast_burst), args=(45,)) for _ in range(2)]
+                for t in fast:
+                    t.start()
+                for t in fast:
+                    t.join()
+                assert not failures, failures
+                assert served == [200] * 90, sorted(set(served))
+                time.sleep(1.0)
+                usage = docker('stats', '--no-stream', '--format', '{{.MemUsage}}', runtime_c).split('/')[0].strip()
+                runtime_mib = float(''.join(ch for ch in usage if ch.isdigit() or ch == '.'))
+                if usage.endswith('GiB'):
+                    runtime_mib *= 1024
+                assert runtime_mib < 350, f'runtime kept {usage} after 90 short requests; isolates are not being ended'
+                record('finished_isolates_do_not_accumulate')
 
                 # 8. Project-scoped secrets injection & cross-tenant isolation
                 env_alpha = client.get(f'{nginx_origin}/functions/v1/check_env', headers=gw_headers('/functions/v1/check_env'))
@@ -930,6 +1090,64 @@ def main() -> None:
                 finally:
                     beta_ctx.write_text(saved_beta)
                 record('project_secrets_injection_and_isolation')
+
+                # 8b. Worker filesystem scope: private per-worker tmpfs, isolated DENO_DIR, no cross-tenant read/write escape
+                canary_dir = '/edge01-canary'
+                deno_canary = '/var/cache/deno/edge01-canary'
+                docker('exec', runtime_c, 'sh', '-c',
+                       f'printf host-canary > {canary_dir}/canary && printf deno-canary > {deno_canary}')
+                alpha_seg = identities['test_alpha'] if args.contract == 'projected' else 'test_alpha'
+                beta_seg = identities['test_beta'] if args.contract == 'projected' else 'test_beta'
+                oversize_mb = '6' if args.contract == 'projected' else '11'
+                fs_params = {
+                    'deno_canary': deno_canary,
+                    'other_tenant': f'/home/deno/runtime/code/{beta_seg}/{"1" * 64}/imported/index.ts',
+                    'other_fn': f'/home/deno/runtime/code/{alpha_seg}/{"1" * 64}/imported/index.ts',
+                    'oversize_mb': oversize_mb,
+                }
+                fs_query = '&'.join(f'{k}={v}' for k, v in fs_params.items())
+                fs_scope = client.get(
+                    f'{nginx_origin}/functions/v1/fs_scope?{fs_query}',
+                    headers=gw_headers(f'/functions/v1/fs_scope?{fs_query}'),
+                )
+                assert fs_scope.status_code == 200, (fs_scope.status_code, fs_scope.text, '\n'.join(
+                    l for l in subprocess.run(['docker', 'logs', '--tail', '400', runtime_c], capture_output=True, text=True).stderr.splitlines()
+                    if 'early termination' not in l)[-3800:])
+                fs_results = {k: v.split(':')[0] for k, v in fs_scope.json().items()}
+                assert fs_results == {
+                    'read_etc_hostname': 'blocked', 'read_traversal_etc': 'blocked',
+                    'read_supervisor_deno_dir': 'blocked', 'read_other_tenant_code': 'blocked',
+                    'read_other_function_code': 'blocked', 'read_tenant_config': 'blocked',
+                    'read_symlink_etc': 'blocked', 'read_symlink_canary': 'blocked',
+                    'write_traversal_canary': 'blocked', 'write_symlink_canary': 'blocked',
+                    'write_outside_tmp': 'blocked', 'read_private_tmp_before_write': 'blocked',
+                    'write_private_tmp': 'allowed', 'read_private_tmp': 'allowed', 'temp_dir': 'allowed',
+                    'tmp_within_quota': 'allowed', 'tmp_oversize': 'blocked',
+                }, fs_results
+                # Nothing reached the real filesystem outside the worker's private tmpfs, and DENO_DIR stayed writable
+                assert docker('exec', runtime_c, 'cat', f'{canary_dir}/canary') == 'host-canary'
+                assert docker('exec', runtime_c, 'cat', deno_canary) == 'deno-canary'
+                assert docker('exec', runtime_c, 'sh', '-c', f'ls {canary_dir}') == 'canary'
+                assert docker('exec', runtime_c, 'sh', '-c', 'ls /tmp/owned /tmp/esc-read /tmp/within 2>/dev/null | wc -l') == '0'
+                # Another tenant - and a later worker of the same tenant - get their own private tmpfs
+                beta_fs_params = {
+                    'deno_canary': deno_canary,
+                    'other_tenant': f'/home/deno/runtime/code/{alpha_seg}/{"1" * 64}/imported/index.ts',
+                    'other_fn': f'/home/deno/runtime/code/{beta_seg}/{"1" * 64}/imported/index.ts',
+                    'oversize_mb': oversize_mb,
+                }
+                for fs_url, fs_headers in (
+                    (f'{rt_origin}/fs_scope?{"&".join(f"{k}={v}" for k, v in beta_fs_params.items())}', beta_hdrs),
+                    (f'{nginx_origin}/functions/v1/fs_scope?{fs_query}', gw_headers(f'/functions/v1/fs_scope?{fs_query}')),
+                ):
+                    other_fs = client.get(fs_url, headers=fs_headers)
+                    assert other_fs.status_code == 200, other_fs.text
+                    other_results = other_fs.json()
+                    assert other_results['read_private_tmp_before_write'] == 'blocked:NotFound', other_results
+                    assert other_results['read_other_tenant_code'].startswith('blocked'), other_results
+                    assert other_results['read_symlink_canary'].startswith('blocked'), other_results
+                    assert other_results['tmp_oversize'].startswith('blocked'), other_results
+                record('worker_filesystem_scope_isolated')
 
                 # 9. Per-function verify_jwt=false webhook admission & protected isolation
                 wh_hdrs = {'Stripe-Signature': 't=1,v1=sig123'}
@@ -1011,7 +1229,87 @@ def main() -> None:
                 assert client.get(f'{rt_origin}/__logs', params={'function': 'log_test'}, headers=logs_headers('test_beta')).json()['logs'] == []
                 record('event_worker_logs_and_redaction')
 
-                # 11. WebSocket upgrade through Project Nginx + ESM .wasm module execution
+                # 11. Pre-bundled npm:/jsr: ESZIP executes offline with permissions and event-worker logs
+                eszip_res = client.get(f'{nginx_origin}/functions/v1/npm_jsr', headers=gw_headers('/functions/v1/npm_jsr'))
+                assert eszip_res.status_code == 200, eszip_res.text
+                ep = eszip_res.json()
+                assert ep == {'ms': 3600000, 'fmt': '2.05 kB', 'blockedRead': True, 'blockedNet': True}, ep
+                eszip_logs: list[dict] = []
+                deadline = time.time() + 5.0
+                while time.time() < deadline:
+                    lr = client.get(f'{rt_origin}/__logs', params={'function': 'npm_jsr', 'limit': '20'}, headers=logs_headers('test_alpha'))
+                    if lr.status_code == 200 and any('eszip-worker-log' in e.get('message', '') for e in lr.json()['logs']):
+                        eszip_logs = lr.json()['logs']
+                        break
+                    time.sleep(0.2)
+                assert any('eszip-worker-log' in e.get('message', '') for e in eszip_logs), eszip_logs
+                record('npm_jsr_eszip_offline_execution')
+
+                # 12. Private authenticated npm (Basic + subpath + @scope) & JSR (Bearer + custom CA TLS) via edge-bundler -> offline ESZIP execution
+                priv_res = client.get(f'{nginx_origin}/functions/v1/priv_pkg', headers=gw_headers('/functions/v1/priv_pkg'))
+                assert priv_res.status_code == 200, priv_res.text
+                pp = priv_res.json()
+                assert pp == {'npm': 'priv-npm:ok', 'jsr': 'priv-jsr:ok', 'blockedNet': True}, pp
+                record('private_registries_tls_custom_ca_bundler_and_offline_eszip')
+
+                # 12b. Fake Upgrade: websocket requests to non-WebSocket functions must not lock concurrency slots
+                settle()
+                ws_sample_key = base64.b64encode(b'the sample nonce').decode('ascii')
+                fake_ws_beta_partial = {**beta_hdrs, 'Upgrade': 'websocket'}
+                fake_ws_beta_full = {
+                    **beta_hdrs,
+                    'Upgrade': 'websocket',
+                    'Connection': 'Upgrade',
+                    'Sec-WebSocket-Key': ws_sample_key,
+                    'Sec-WebSocket-Version': '13',
+                }
+                for _ in range(2):
+                    r_partial = client.get(f'{rt_origin}/imported', headers=fake_ws_beta_partial)
+                    assert r_partial.status_code == 200, (r_partial.status_code, r_partial.text)
+                for _ in range(2):
+                    r_beta_full = client.get(f'{rt_origin}/imported', headers=fake_ws_beta_full)
+                    assert r_beta_full.status_code != 101, (r_beta_full.status_code, r_beta_full.text)
+                fake_ws_alpha_full = {
+                    **gw_headers('/functions/v1/imported'),
+                    'Upgrade': 'websocket',
+                    'Connection': 'Upgrade',
+                    'Sec-WebSocket-Key': ws_sample_key,
+                    'Sec-WebSocket-Version': '13',
+                }
+                for _ in range(2):
+                    r_alpha_full = client.get(f'{nginx_origin}/functions/v1/imported', headers=fake_ws_alpha_full)
+                    assert r_alpha_full.status_code != 101, (r_alpha_full.status_code, r_alpha_full.text)
+                time.sleep(0.5)
+                post_fake_codes: list[int] = []
+
+                def probe_after_fake(target_url: str, target_headers: dict[str, str]):
+                    with httpx.Client(trust_env=False, timeout=5) as own:
+                        post_fake_codes.append(own.get(target_url, headers=target_headers).status_code)
+
+                post_fake_t0 = time.monotonic()
+                post_fake_threads = [
+                    threading.Thread(
+                        target=guarded(probe_after_fake),
+                        args=(f'{nginx_origin}/functions/v1/imported', gw_headers('/functions/v1/imported')),
+                    )
+                    for _ in range(2)
+                ] + [
+                    threading.Thread(target=guarded(probe_after_fake), args=(f'{rt_origin}/imported', beta_hdrs))
+                    for _ in range(2)
+                ]
+                for t in post_fake_threads:
+                    t.start()
+                for t in post_fake_threads:
+                    t.join()
+                post_fake_elapsed = time.monotonic() - post_fake_t0
+                assert not failures, failures
+                assert post_fake_codes == [200, 200, 200, 200] and post_fake_elapsed < 1.5, (
+                    post_fake_codes, post_fake_elapsed,
+                )
+                record('fake_websocket_upgrade_does_not_lock_slots')
+
+                # 13. WebSocket upgrade through Project Nginx + ESM .wasm module execution.
+                # Kept last: an upgraded isolate is only ended by the wall clock, so it holds its slot for a while.
                 wasm_http = client.get(f'{nginx_origin}/functions/v1/ws_wasm', headers=gw_headers('/functions/v1/ws_wasm'))
                 assert wasm_http.status_code == 200 and wasm_http.json().get('wasmSum') == 42, wasm_http.text
 
@@ -1031,29 +1329,6 @@ def main() -> None:
                 ws_reply = asyncio.run(run_ws_echo())
                 assert ws_reply == 'ws-wasm:hello:42', ws_reply
                 record('websocket_gateway_and_wasm_module_execution')
-
-                # 12. Pre-bundled npm:/jsr: ESZIP executes offline with permissions and event-worker logs
-                eszip_res = client.get(f'{nginx_origin}/functions/v1/npm_jsr', headers=gw_headers('/functions/v1/npm_jsr'))
-                assert eszip_res.status_code == 200, eszip_res.text
-                ep = eszip_res.json()
-                assert ep == {'ms': 3600000, 'fmt': '2.05 kB', 'blockedRead': True, 'blockedNet': True}, ep
-                eszip_logs: list[dict] = []
-                deadline = time.time() + 5.0
-                while time.time() < deadline:
-                    lr = client.get(f'{rt_origin}/__logs', params={'function': 'npm_jsr', 'limit': '20'}, headers=logs_headers('test_alpha'))
-                    if lr.status_code == 200 and any('eszip-worker-log' in e.get('message', '') for e in lr.json()['logs']):
-                        eszip_logs = lr.json()['logs']
-                        break
-                    time.sleep(0.2)
-                assert any('eszip-worker-log' in e.get('message', '') for e in eszip_logs), eszip_logs
-                record('npm_jsr_eszip_offline_execution')
-
-                # 13. Private authenticated npm (Basic + subpath + @scope) & JSR (Bearer + custom CA TLS) via edge-bundler -> offline ESZIP execution
-                priv_res = client.get(f'{nginx_origin}/functions/v1/priv_pkg', headers=gw_headers('/functions/v1/priv_pkg'))
-                assert priv_res.status_code == 200, priv_res.text
-                pp = priv_res.json()
-                assert pp == {'npm': 'priv-npm:ok', 'jsr': 'priv-jsr:ok', 'blockedNet': True}, pp
-                record('private_registries_tls_custom_ca_bundler_and_offline_eszip')
 
             if args.result:
                 args.result.write_text(json.dumps({'contract': args.contract, 'image': args.edge_image, 'checks': checks}, indent=2))

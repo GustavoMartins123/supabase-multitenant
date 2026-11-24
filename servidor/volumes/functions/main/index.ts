@@ -497,6 +497,196 @@ async function handleLogsRequest(request: Request, url: URL): Promise<Response> 
   return Response.json({ logs }, { headers: { 'cache-control': 'no-store' } })
 }
 
+const QUEUE_PER_PROJECT = 16
+const QUEUE_GLOBAL = 64
+const QUEUE_MAX_WAIT_MS = 10000
+const SWEEP_INTERVAL_MS = 100
+const SWEEP_REPLY_TIMEOUT_MS = 50
+const DISPATCH_GUARD_MS = 20
+const IDLE_GRACE_MS = 25
+// Keep 24 global concurrent workers safely within the 128 MiB /tmp tmpfs (24 * 5 MiB = 120 MiB).
+const TMPFS_QUOTA_BYTES = 5 * 1024 * 1024
+
+type Admission = 'admitted' | 'aborted' | 'rejected' | 'timeout'
+type Waiter = { project: string; cap: number; signal: AbortSignal | null; finish: (result: Admission) => void }
+type UserWorker = { key: string; fetch(request: Request): Promise<Response> }
+type Isolate = { free: () => void }
+type UserWorkersControl = {
+  create(options: Record<string, unknown>): Promise<UserWorker>
+  tryCleanupIdleWorkers(timeoutMs: number): Promise<number>
+  memStats(): Promise<Record<string, unknown>>
+}
+const userWorkers = () => (EdgeRuntime.userWorkers as unknown as UserWorkersControl)
+const waiters: Waiter[] = []
+const queuedByProject = new Map<string, number>()
+const liveIsolates = new Map<string, Isolate>()
+let sweepInFlight: Promise<void> | null = null
+let settleTimer = 0
+let retryTimer = 0
+let sweepNotBefore = 0
+let dispatching = 0
+let upgradedAlive = 0
+let wsNegotiating = 0
+
+function isWebSocketUpgradeRequest(request: Request): boolean {
+  if (request.method !== 'GET') return false
+  const upgrade = (request.headers.get('upgrade') ?? '').toLowerCase()
+  if (!upgrade.split(',').some((token) => token.trim() === 'websocket')) return false
+  const connection = (request.headers.get('connection') ?? '').toLowerCase()
+  if (!connection.split(',').some((token) => token.trim() === 'upgrade')) return false
+  if ((request.headers.get('sec-websocket-version') ?? '').trim() !== '13') return false
+  const key = (request.headers.get('sec-websocket-key') ?? '').trim()
+  return /^[A-Za-z0-9+/]{22}==$/.test(key)
+}
+
+function hasCapacity(project: string, cap: number): boolean {
+  return totalRunning < MAX_CONCURRENT_GLOBAL && (running.get(project) ?? 0) < cap
+}
+
+function takeSlot(project: string): void {
+  totalRunning++
+  running.set(project, (running.get(project) ?? 0) + 1)
+}
+
+function pump(): void {
+  for (const waiter of [...waiters]) {
+    if (hasCapacity(waiter.project, waiter.cap)) waiter.finish(waiter.signal?.aborted ? 'aborted' : 'admitted')
+  }
+}
+
+function acquireSlot(project: string, cap: number, signal: AbortSignal | null): Promise<Admission> {
+  if (hasCapacity(project, cap)) {
+    takeSlot(project)
+    return Promise.resolve('admitted')
+  }
+  if (QUEUE_PER_PROJECT === 0 || (queuedByProject.get(project) ?? 0) >= QUEUE_PER_PROJECT || waiters.length >= QUEUE_GLOBAL) {
+    return Promise.resolve('rejected')
+  }
+  return new Promise((resolve) => {
+    const waiter: Waiter = { project, cap, signal, finish: () => {} }
+    const finish = (result: Admission) => {
+      const index = waiters.indexOf(waiter)
+      if (index < 0) return
+      waiters.splice(index, 1)
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      const remaining = (queuedByProject.get(project) ?? 1) - 1
+      if (remaining > 0) queuedByProject.set(project, remaining)
+      else queuedByProject.delete(project)
+      if (result === 'admitted') takeSlot(project)
+      resolve(result)
+    }
+    const onAbort = () => finish('aborted')
+    const timer = setTimeout(() => finish('timeout'), QUEUE_MAX_WAIT_MS)
+    waiter.finish = finish
+    waiters.push(waiter)
+    queuedByProject.set(project, (queuedByProject.get(project) ?? 0) + 1)
+    // The runtime never aborts this signal for a client that gives up while queued; the wait limit expires it.
+    if (signal?.aborted) finish('aborted')
+    else signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+function releaseSlot(project: string): void {
+  totalRunning--
+  const count = (running.get(project) ?? 1) - 1
+  if (count) running.set(project, count)
+  else running.delete(project)
+  pump()
+}
+
+async function createIsolate(options: Record<string, unknown>): Promise<UserWorker> {
+  dispatching++
+  try {
+    return await userWorkers().create(options)
+  } catch (error) {
+    dispatching--
+    throw error
+  }
+}
+
+function sendToIsolate(worker: UserWorker, request: Request): Promise<Response> {
+  let fetching: Promise<Response>
+  try {
+    fetching = worker.fetch(request)
+  } catch (error) {
+    dispatching--
+    throw error
+  }
+  setTimeout(() => {
+    dispatching--
+  }, DISPATCH_GUARD_MS)
+  return fetching
+}
+
+function forgetEndedIsolates(stats: Record<string, unknown>): void {
+  for (const [key, isolate] of [...liveIsolates]) {
+    if (key in stats) continue
+    isolate.free()
+  }
+}
+
+async function runSweep(): Promise<void> {
+  const started = Date.now()
+  let reaped = 0
+  let stats: Record<string, unknown>
+  try {
+    if (upgradedAlive === 0 && wsNegotiating === 0) {
+      reaped = await userWorkers().tryCleanupIdleWorkers(SWEEP_REPLY_TIMEOUT_MS)
+    }
+    stats = await userWorkers().memStats()
+  } catch {
+    return
+  }
+  const finished = Date.now()
+  if (!stats || typeof stats !== 'object') return
+  forgetEndedIsolates(stats)
+  if (finished - started >= SWEEP_REPLY_TIMEOUT_MS) {
+    sweepNotBefore = Date.now() + 200
+  } else if (reaped > 0 && liveIsolates.size > 0) {
+    sweepLater(10)
+  }
+}
+
+function sweep(): Promise<void> {
+  if (sweepInFlight) return sweepInFlight
+  if (liveIsolates.size === 0 || dispatching > 0) return Promise.resolve()
+  if (Date.now() < sweepNotBefore) {
+    sweepLater(sweepNotBefore - Date.now())
+    return Promise.resolve()
+  }
+  sweepInFlight = runSweep()
+  const current = sweepInFlight
+  void current.finally(() => {
+    if (sweepInFlight === current) sweepInFlight = null
+  }).catch(() => {})
+  return current
+}
+
+function sweepLater(delayMs: number): void {
+  if (retryTimer) return
+  retryTimer = setTimeout(() => {
+    retryTimer = 0
+    void sweep()
+  }, delayMs)
+}
+
+function responseEnded(): void {
+  if (settleTimer) return
+  settleTimer = setTimeout(() => {
+    settleTimer = 0
+    void sweep()
+  }, IDLE_GRACE_MS + 5)
+}
+
+setInterval(() => {
+  void sweep()
+}, SWEEP_INTERVAL_MS)
+
+function saturated(): Response {
+  return Response.json({ code: 'function_concurrency_limit' }, { status: 429, headers: { 'retry-after': '1' } })
+}
+
 Deno.serve(async (request: Request) => {
   const url = new URL(request.url)
   if (url.pathname === '/__health') return Response.json({ status: 'ok' })
@@ -566,36 +756,48 @@ Deno.serve(async (request: Request) => {
     if (!(error instanceof Deno.errors.NotFound)) return response('tenant_configuration_unavailable', 503)
   }
   const limits = validateLimits(tenant.limits)
-  const currentProjectRunning = running.get(project) ?? 0
-  if (totalRunning >= MAX_CONCURRENT_GLOBAL || currentProjectRunning >= limits.max_concurrent_project) {
+  const admission = await acquireSlot(project, limits.max_concurrent_project, request.signal)
+  if (admission !== 'admitted') {
     const reqId = (request.headers.get('x-request-id') ?? '').trim().slice(0, 128)
     recordLog(
       project,
       name,
       'warn',
       'worker',
-      `Saturation: concurrency limit reached (${currentProjectRunning}/${limits.max_concurrent_project} project, ${totalRunning}/${MAX_CONCURRENT_GLOBAL} global)`,
-      { status: 429, ...(reqId ? { request_id: reqId } : {}) },
+      admission === 'aborted'
+        ? 'Cancelled while waiting for a concurrency slot'
+        : `Saturation: concurrency limit reached (${running.get(project) ?? 0}/${limits.max_concurrent_project} project, ${totalRunning}/${MAX_CONCURRENT_GLOBAL} global); queue ${admission === 'timeout' ? 'wait exceeded' : 'full'}`,
+      { status: admission === 'aborted' ? 499 : 429, ...(reqId ? { request_id: reqId } : {}) },
     )
-    return response('function_concurrency_limit', 429)
+    if (admission === 'aborted') return new Response(null, { status: 499 })
+    return saturated()
   }
-  totalRunning++
-  running.set(project, currentProjectRunning + 1)
+  const wsCandidate = isWebSocketUpgradeRequest(request)
+  let upgraded = false
+  let negotiating = false
   let released = false
+  let isolateKey = ''
   const release = () => {
     if (released) return
     released = true
-    totalRunning--
-    const count = (running.get(project) ?? 1) - 1
-    if (count) running.set(project, count)
-    else running.delete(project)
-    clearTimeout(timer)
+    clearTimeout(safety)
+    if (isolateKey) liveIsolates.delete(isolateKey)
+    if (upgraded) {
+      upgraded = false
+      upgradedAlive--
+    }
+    if (negotiating) {
+      negotiating = false
+      wsNegotiating--
+    }
+    releaseSlot(project)
   }
-  const timer = setTimeout(release, limits.worker_timeout_ms + 5000)
+  const isolate: Isolate = { free: release }
+  const safety = setTimeout(release, limits.worker_timeout_ms + 5000)
   registerTenantRedaction(project, uuid, tenant, canonical)
   const startedAt = Date.now()
   try {
-    const permissions = await workerPermissions(project, tenant.network_allowlist ?? [], tenant.env.SUPABASE_DB_URL)
+    const permissions = await workerPermissions(project, tenant.network_allowlist ?? [], tenant.env.SUPABASE_DB_URL, servicePath, uuid)
     // DNS resolution may await I/O. Recheck both publication and lifecycle only after it completes.
     if ((await tenantContext(project, uuid))?.revision !== tenant.revision ||
       JSON.stringify(await canonicalProjection(project, ref)) !== JSON.stringify(canonical)) {
@@ -605,47 +807,73 @@ Deno.serve(async (request: Request) => {
     const baseEnv = { ...tenant.env, PROJECT_REF: ref, TECHNICAL_PROJECT_NAME: project,
       SUPABASE_PUBLIC_URL: new URL(tenant.env.SUPABASE_PUBLIC_URL).origin + '/' + ref }
     const workerEnv = { ...tenant.env, ...(tenant.secrets ?? {}), ...baseEnv }
-    const worker = await EdgeRuntime.userWorkers.create({
+    const supervisorContext = wsCandidate
+      ? { cleanupIdleGraceMs: IDLE_GRACE_MS }
+      : { cleanupIdleGraceMs: IDLE_GRACE_MS, requestAbsentTimeoutMs: IDLE_GRACE_MS }
+    if (wsCandidate) {
+      negotiating = true
+      wsNegotiating++
+      if (sweepInFlight) await sweepInFlight.catch(() => {})
+    }
+    if (released) return response('function_execution_failed', 500)
+    const worker = await createIsolate({
       servicePath, memoryLimitMb: limits.memory_limit_mb, workerTimeoutMs: limits.worker_timeout_ms,
       noModuleCache: false, forceCreate: true, importMapPath: maybeEszip ? null : importMapPath,
       ...(maybeEszip ? { maybeEszip } : {}),
       envVars: Object.entries(workerEnv),
       permissions,
+      tmpFsConfig: { quota: TMPFS_QUOTA_BYTES },
+      context: { supervisor: supervisorContext },
     })
-    const result = await worker.fetch(request)
+    isolateKey = worker.key
+    if (!released) liveIsolates.set(isolateKey, isolate)
+    const result = await sendToIsolate(worker, request)
+    if (wsCandidate && result.status === 101 && !released) {
+      upgraded = true
+      upgradedAlive++
+    }
+    if (negotiating) {
+      negotiating = false
+      wsNegotiating--
+    }
     const durationMs = Date.now() - startedAt
     const level = result.status >= 500 ? 'error' : result.status >= 400 ? 'warn' : 'info'
     recordLog(project, name, level, 'invocation', `${request.method} ${url.pathname} -> ${result.status}`, {
       status: result.status,
       duration_ms: durationMs,
     })
-    if (result.status === 101) {
-      request.signal?.addEventListener('abort', () => { release() }, { once: true })
+    if (result.status === 101) return result
+    if (!result.body) {
+      responseEnded()
       return result
     }
-    if (!result.body) { release(); return result }
     const headers = new Headers(result.headers)
     if (headers.get('content-type')?.toLowerCase().includes('text/event-stream') && !headers.has('x-accel-buffering')) {
       headers.set('x-accel-buffering', 'no')
     }
     const reader = result.body.getReader()
     request.signal?.addEventListener('abort', () => {
-      release()
+      responseEnded()
       void reader.cancel().catch(() => {})
     }, { once: true })
     const body = new ReadableStream({
       async pull(controller) {
         try {
           const chunk = await reader.read()
-          if (chunk.done) { release(); controller.close() }
-          else controller.enqueue(chunk.value)
+          if (chunk.done) {
+            responseEnded()
+            controller.close()
+          } else controller.enqueue(chunk.value)
         } catch (error) {
           recordLog(project, name, 'error', 'worker', error instanceof Error ? error.message : 'Stream read error')
-          release()
+          responseEnded()
           controller.error(error)
         }
       },
-      async cancel(reason) { try { await reader.cancel(reason) } finally { release() } },
+      cancel(reason) {
+        responseEnded()
+        return reader.cancel(reason)
+      },
     })
     return new Response(body, { status: result.status, statusText: result.statusText, headers })
   } catch (error) {

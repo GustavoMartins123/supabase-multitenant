@@ -13,8 +13,17 @@ python tools/run_auth_security_tests.py \
 
 python tools/run_functions_security_tests.py \
   --lifecycle-image servidor-projects-api:latest \
-  --edge-image supabase/edge-runtime:v1.74.2
+  --edge-image ghcr.io/gustavomartins123/multitenant-edge-runtime:v1.79.5-wsfix
 ```
+
+The runtime harness (`tools/run_functions_runtime_tests.py`, 20 checks) includes
+`worker_filesystem_scope_isolated` and `fake_websocket_upgrade_does_not_lock_slots`:
+every user worker gets a private `/tmp` (`tmpFsConfig`, 5 MiB quota per isolate so
+all 24 global workers fit within the 128 MiB `/tmp` tmpfs), `DENO_DIR` is isolated
+on its own 128 MiB `/var/cache/deno` tmpfs mount, workers cannot read or write
+outside `/tmp` through `..` or symlinks (or read another tenant's/function's code
+or `DENO_DIR`), and `allow_read` lists only `/tmp` and the worker's own function
+directory.
 
 The SQL runner creates its own cluster: tenant isolation tests revoke cluster
 PUBLIC grants, so accepting an external DSN would be unsafe. PostgreSQL readiness

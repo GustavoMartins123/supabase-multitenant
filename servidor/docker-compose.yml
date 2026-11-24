@@ -277,8 +277,10 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-    tmpfs: ["/tmp:rw,noexec,nosuid,size=128m"]
-    image: supabase/edge-runtime:v1.74.2
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+      - /var/cache/deno:rw,noexec,nosuid,size=128m
+    image: ghcr.io/gustavomartins123/multitenant-edge-runtime:v1.79.5-wsfix
     restart: unless-stopped
     logging: *vector-logging
     networks:
@@ -305,7 +307,7 @@ services:
         condition: service_healthy  
     environment:
       VERIFY_JWT: "true"
-      DENO_DIR: /tmp/deno
+      DENO_DIR: /var/cache/deno
     command:
       [
       "start",
