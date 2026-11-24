@@ -155,7 +155,13 @@ def main() -> None:
     template = server / 'generateProject/dockercomposetemplate'
     project_model = yaml.safe_load(template.read_text())
     for service in project_model['services'].values():
-        service['labels'] = labels.copy()
+        existing_labels = service.get('labels')
+        if isinstance(existing_labels, list):
+            service['labels'] = [*existing_labels, *(f'{k}={v}' for k, v in labels.items())]
+        elif isinstance(existing_labels, dict):
+            service['labels'] = {**existing_labels, **labels}
+        else:
+            service['labels'] = labels.copy()
         service['logging'] = {'driver': 'json-file'}
         service['restart'] = 'no'
     if 'project-internal' in (project_model.get('networks') or {}):
@@ -181,6 +187,7 @@ def main() -> None:
         assert sys.argv[3] == 'end-to-end' and sys.argv[4] in {'single', 'split'}
         from p1_end_to_end import validate
         run('docker', 'network', 'connect', 'rede-supabase', 'p1-lifecycle-executor-' + suffix)
+        run('docker', 'network', 'connect', 'supabase-project-gateways', 'p1-lifecycle-executor-' + suffix)
         run('docker', 'network', 'connect', 'supabase-functions-gateways', 'p1-lifecycle-executor-' + suffix)
         validate(root, suffix, sys.argv[4], values, '--benchmark' in sys.argv[5:])
         return
@@ -508,9 +515,10 @@ process.stdout.write(body);});'''
     def check_object(ref: str) -> None:
         assert object_request(ref, 'GET', '/object/p1-files/original.txt', '', 'text/plain') == 'original object'
 
-    # Executor must join the server and functions-gateways networks, but no HTTP service gets its socket.
+    # Executor must join the server, project-gateways and functions-gateways networks, but no HTTP service gets its socket.
     executor = 'p1-lifecycle-executor-' + suffix
     run('docker', 'network', 'connect', 'rede-supabase', executor)
+    run('docker', 'network', 'connect', 'supabase-project-gateways', executor)
     run('docker', 'network', 'connect', 'supabase-functions-gateways', executor)
     seed(project, first_uuid)
     lifecycle('generate_project.sh', project, first_uuid, 'false')

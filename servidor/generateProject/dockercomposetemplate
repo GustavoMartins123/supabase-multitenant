@@ -23,8 +23,8 @@ services:
     environment:
       FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT}
       SUPABASE_NETWORK_SUBNET: ${SUPABASE_NETWORK_SUBNET}
+      PROJECT_GATEWAYS_SUBNET: ${PROJECT_GATEWAYS_SUBNET:-172.54.0.0/23}
       PROJECT_INTERNAL_SUBNET: ${PROJECT_INTERNAL_SUBNET:?defina PROJECT_INTERNAL_SUBNET no .env do projeto}
-      POSTGRES_POOLER: ${POSTGRES_POOLER}
       POOLER_PROXY_PORT_SESSION: ${POOLER_PROXY_PORT_SESSION}
       POOLER_PROXY_PORT_TRANSACTION: ${POOLER_PROXY_PORT_TRANSACTION}
       ANON_KEY_PROJETO: ${ANON_KEY_PROJETO}
@@ -49,8 +49,10 @@ services:
       timeout: 2s
       retries: 15
       start_period: 1s
+    labels:
+      - "traefik.docker.network=supabase-project-gateways"
     networks:
-      - rede-supabase
+      - project-gateways
       - storage-gateways
       - functions-gateways
       - project-internal
@@ -203,8 +205,9 @@ services:
         "postgrest"
       ]
 networks:
-  rede-supabase:
+  project-gateways:
     external: true
+    name: supabase-project-gateways
   storage-gateways:
     external: true
     name: supabase-storage-gateways

@@ -194,8 +194,21 @@ class BackendResourceProfileContract(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("provision_platform_reader()", helper)
         self.assertIn(
-            "GRANT SELECT ON auth.users, auth.sessions TO platform_reader;", helper
+            "REVOKE ALL ON TABLE auth.users, auth.sessions FROM platform_reader;",
+            helper,
         )
+        self.assertNotIn("GRANT SELECT ON auth.users", helper)
+        self.assertIn("ON auth.users TO platform_reader;", helper)
+        self.assertIn("ON auth.sessions TO platform_reader;", helper)
+        for sensitive in (
+            "encrypted_password",
+            "confirmation_token",
+            "recovery_token",
+            "email_change_token",
+            "reauthentication_token",
+            "phone_change_token",
+        ):
+            self.assertNotIn(sensitive, helper)
         for script in (
             ROOT / "servidor/generateProject/lib/generate_project_impl.sh",
             ROOT / "servidor/generateProject/lib/duplicate_project_impl.sh",

@@ -27,7 +27,7 @@ RESERVED_CONTAINERS = {
     'supabase-analytics', 'supabase-vector-global', 'supabase-studio', 'nginx', 'authelia',
     'traefik-traefik-1', 'traefik-geoip-api-1', 'supabase-traefik-config-watcher', 'traefik-deny-service',
 }
-RESERVED_NETWORKS = {'rede-supabase', 'supabase-storage-control', 'supabase-storage-data-plane',
+RESERVED_NETWORKS = {'rede-supabase', 'supabase-project-gateways', 'supabase-storage-control', 'supabase-storage-data-plane',
                      'supabase-storage-gateways', 'supabase-imgproxy-internal', 'supabase-analytics-internal'}
 
 

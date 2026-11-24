@@ -102,7 +102,7 @@ services:
       dockerfile: ./key-authorizer/Dockerfile
     restart: unless-stopped
     logging: *vector-logging
-    networks: [rede-supabase, traffic-admission]
+    networks: [rede-supabase, traffic-admission, project-gateways]
     expose: ["18010"]
     depends_on:
       traffic-redis:
@@ -132,7 +132,7 @@ services:
     build:
       context: ./template-service
     restart: unless-stopped
-    networks: [rede-supabase]
+    networks: [rede-supabase, project-gateways]
     expose: ["18020"]
     mem_limit: 256m
     memswap_limit: 512m
@@ -331,6 +331,9 @@ networks:
   client-configuration-data:
     external: true
   rede-supabase:
+    external: true
+  project-gateways:
+    name: supabase-project-gateways
     external: true
   analytics-internal:
     name: supabase-analytics-internal

@@ -4,4 +4,4 @@ COPY --chown=101:101 --chmod=0400 \
 COPY --chown=101:101 nginx/public/ /usr/share/nginx/html/
 USER 101
 ENTRYPOINT ["/bin/sh", "-c"]
-CMD ["envsubst '$FILE_SIZE_LIMIT $SUPABASE_NETWORK_SUBNET $PROJECT_INTERNAL_SUBNET $POSTGRES_POOLER $POOLER_PROXY_PORT_SESSION $POOLER_PROXY_PORT_TRANSACTION $ANON_KEY_PROJETO $SERVICE_ROLE_KEY_PROJETO $API_GATEWAY_TOKEN_PROJETO' < /etc/nginx/nginx.conf.template > /tmp/nginx.conf && exec nginx -g 'daemon off;' -c /tmp/nginx.conf"]
+CMD ["envsubst '$FILE_SIZE_LIMIT $SUPABASE_NETWORK_SUBNET $PROJECT_GATEWAYS_SUBNET $PROJECT_INTERNAL_SUBNET $POOLER_PROXY_PORT_SESSION $POOLER_PROXY_PORT_TRANSACTION $ANON_KEY_PROJETO $SERVICE_ROLE_KEY_PROJETO $API_GATEWAY_TOKEN_PROJETO' < /etc/nginx/nginx.conf.template > /tmp/nginx.conf && exec nginx -g 'daemon off;' -c /tmp/nginx.conf"]

@@ -504,6 +504,7 @@ http {
             proxy_set_header apikey $opaque_upstream_apikey;
             proxy_set_header Authorization $opaque_upstream_authorization;
             proxy_set_header X-Api-Key-Id $opaque_key_id;
+            allow ${PROJECT_GATEWAYS_SUBNET};
             allow ${SUPABASE_NETWORK_SUBNET};
             deny all;
 
@@ -590,6 +591,7 @@ http {
         server_name _{{project_id}};
 
         location /vector/ {
+            allow ${PROJECT_GATEWAYS_SUBNET};
             allow ${SUPABASE_NETWORK_SUBNET};
             deny all;
 
@@ -615,11 +617,11 @@ stream {
     resolver 127.0.0.11 valid=30s ipv6=off;
 
     map "" $stream_pooler_session_upstream {
-        default "${POSTGRES_POOLER}:${POOLER_PROXY_PORT_SESSION}";
+        default "supabase-pooler:${POOLER_PROXY_PORT_SESSION}";
     }
 
     map "" $stream_pooler_transaction_upstream {
-        default "${POSTGRES_POOLER}:${POOLER_PROXY_PORT_TRANSACTION}";
+        default "supabase-pooler:${POOLER_PROXY_PORT_TRANSACTION}";
     }
 
     map "" $stream_template_service_upstream {

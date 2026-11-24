@@ -478,7 +478,19 @@ The same profiles are accepted by `stop_containers.sh`. In split-node mode, all 
 
 ### One machine
 
-All components run on the same host. Project services share `rede-supabase`; only their Nginx instances also join `supabase-storage-gateways`. Storage uses separate internal control and data-plane networks, and Analytics uses its own internal network.
+All components run on the same host, with tenant traffic isolated away from the shared platform network (`rede-supabase`):
+
+| Network | Attached services | Type |
+| --- | --- | --- |
+| `rede-supabase` | Platform control plane (`supabase-db`, `projects-api`, `postgres-meta-global`, `edge-bundler`, `control-plane-migrations`, `traefik`, `realtime`, `supavisor`, `key-authorizer`, `template-service`, Studio) | bridge (`SUPABASE_NETWORK_SUBNET`) |
+| `supabase-project-gateways` | Project Nginx gateways, `traefik`, `realtime`, `supabase-pooler`, `key-authorizer`, `template-service`, and `supabase-db` (outbound Storage Vectors FDW `:8081/vector` only; inbound PostgreSQL connections from `PROJECT_GATEWAYS_SUBNET` are rejected in `pg_hba.conf`) | `internal: true` (`PROJECT_GATEWAYS_SUBNET`, default `172.54.0.0/23`) |
+| `supabase-internal-<project>` | Per-project Nginx, Auth, and PostgREST | `internal: true` (`/28` in `172.52.0.0/16`) |
+| `supabase-project-egress` | Per-project Auth and Edge Functions outbound Internet egress | bridge (`enable_icc: false`) |
+| `supabase-storage-gateways` | Project Nginx gateways and shared Storage data-plane proxy | `internal: true` |
+| `supabase-functions-gateways` | Project Nginx gateways, `projects-api`, and Edge Functions runtime | `internal: true` |
+| `supabase-functions-db` | Edge Functions runtime and `supabase-db` | `internal: true` (`172.51.2.0/28`) |
+
+Project Nginx containers join `supabase-project-gateways` (with `traefik.docker.network=supabase-project-gateways`) instead of `rede-supabase` and reach Supavisor by DNS name (`supabase-pooler`). Storage uses separate internal control and data-plane networks, and Analytics uses its own internal network. Existing projects can be synchronized to the current templates and network topology with `tools/sync_existing_projects_security.py`.
 
 The host-agent remains outside the containers as a systemd service, even in the single-node topology.
 

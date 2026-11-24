@@ -172,12 +172,13 @@ class KeyGenerationContractTest(unittest.TestCase):
         self.assertIn("ENTRYPOINT", dockerfile)
         self.assertIn(
             "envsubst '$FILE_SIZE_LIMIT $SUPABASE_NETWORK_SUBNET "
-            "$PROJECT_INTERNAL_SUBNET $POSTGRES_POOLER "
+            "$PROJECT_GATEWAYS_SUBNET $PROJECT_INTERNAL_SUBNET "
             "$POOLER_PROXY_PORT_SESSION $POOLER_PROXY_PORT_TRANSACTION "
             "$ANON_KEY_PROJETO $SERVICE_ROLE_KEY_PROJETO "
             "$API_GATEWAY_TOKEN_PROJETO'",
             dockerfile,
         )
+        self.assertNotIn("$POSTGRES_POOLER", dockerfile)
         self.assertNotIn("/etc/nginx/templates/", dockerfile)
 
         nginx_template = (GENERATE / "nginxtemplate").read_text(encoding="utf-8")
@@ -185,8 +186,11 @@ class KeyGenerationContractTest(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertNotIn("allow 172.50.0.0/16", nginx_template)
+        self.assertIn("allow ${PROJECT_GATEWAYS_SUBNET}", nginx_template)
         self.assertIn("allow ${SUPABASE_NETWORK_SUBNET}", nginx_template)
         self.assertIn("SUPABASE_NETWORK_SUBNET: ${SUPABASE_NETWORK_SUBNET}", compose_template)
+        self.assertIn("PROJECT_GATEWAYS_SUBNET: ${PROJECT_GATEWAYS_SUBNET:-172.54.0.0/23}", compose_template)
+        self.assertNotIn("POSTGRES_POOLER", compose_template)
         for key in {
             "ANON_KEY_PROJETO",
             "SERVICE_ROLE_KEY_PROJETO",

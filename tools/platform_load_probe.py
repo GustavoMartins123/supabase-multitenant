@@ -423,7 +423,7 @@ def build_endpoints(
             raise ProbeError("credenciais internas ou PROJECT_UUID ausentes no projeto")
         auth_ip = target_ip(targets, "project/auth", "rede-supabase")
         rest_ip = target_ip(targets, "project/rest", "rede-supabase")
-        nginx_ip = target_ip(targets, "project/nginx", "rede-supabase")
+        nginx_ip = target_ip(targets, "project/nginx", "supabase-project-gateways")
         functions_ip = target_ip(targets, "shared/edge-functions", "rede-supabase")
         storage_ip = target_ip(
             targets, "shared/storage-data-plane", "supabase-storage-gateways"

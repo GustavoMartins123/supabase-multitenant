@@ -35,8 +35,9 @@ class TraefikGuardContractTests(unittest.TestCase):
         self.assertIn('f"          scope: {yaml_quote(project_uuid)}"', renderer)
         self.assertIn('f"        - project-guard-{project_id}"', renderer)
         self.assertIn('f"        - project-strip-{project_id}"', renderer)
-        self.assertNotIn("traefik.", template)
-        self.assertNotIn("labels:", template)
+        self.assertNotIn("traefik.enable", template)
+        self.assertNotIn("traefik.http.", template)
+        self.assertIn("traefik.docker.network=supabase-project-gateways", template)
 
     def test_project_defaults_are_declared(self) -> None:
         env_example = (ROOT / "servidor/.env.example").read_text(encoding="utf-8")

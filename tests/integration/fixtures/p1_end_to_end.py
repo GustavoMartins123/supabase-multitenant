@@ -183,6 +183,7 @@ def validate(root: Path, suffix: str, topology: str, values: dict[str, str], ben
                      '-v', str(server / 'traefik/plugins-local') + ':/plugins-local:ro',
                      command=('--configFile=' + str(traefik_static),))
     run('docker', 'network', 'connect', '--alias', 'server.p1.test', wire, traefik)
+    run('docker', 'network', 'connect', 'supabase-project-gateways', traefik)
 
     # Derive the real API service and explicitly select the canonical topology.
     model = yaml.safe_load((server / 'p1-compose.yml').read_text(encoding='utf-8'))

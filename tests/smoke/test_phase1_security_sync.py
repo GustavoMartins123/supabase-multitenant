@@ -93,8 +93,11 @@ class Phase1SecuritySyncTest(unittest.TestCase):
         nginx_block = proj_compose.split("  nginx:\n", 1)[1].split("\n  auth:\n", 1)[0]
         auth_block = proj_compose.split("\n  auth:\n", 1)[1].split("\n  rest:\n", 1)[0]
         rest_block = proj_compose.split("\n  rest:\n", 1)[1].split("\nnetworks:\n", 1)[0]
-        for net in ("rede-supabase", "storage-gateways", "functions-gateways", "project-internal"):
+        for net in ("project-gateways", "storage-gateways", "functions-gateways", "project-internal"):
             self.assertIn(f"- {net}", nginx_block)
+        self.assertNotIn("rede-supabase", nginx_block)
+        self.assertIn("traefik.docker.network=supabase-project-gateways", nginx_block)
+        self.assertIn("name: supabase-project-gateways", proj_compose.split("\nnetworks:\n", 1)[1])
         self.assertNotIn("- rede-supabase", auth_block)
         self.assertIn("- project-internal", auth_block)
         self.assertIn("- project-egress", auth_block)
@@ -107,6 +110,9 @@ class Phase1SecuritySyncTest(unittest.TestCase):
         nginx_tpl = (SERVER / "generateProject/nginxtemplate").read_text(encoding="utf-8")
         self.assertIn('proxy_set_header X-Edge-Gateway-Token "${API_GATEWAY_TOKEN_PROJETO}";', nginx_tpl)
         self.assertIn("allow ${PROJECT_INTERNAL_SUBNET};", nginx_tpl)
+        self.assertIn('default "supabase-pooler:${POOLER_PROXY_PORT_SESSION}";', nginx_tpl)
+        self.assertIn('default "supabase-pooler:${POOLER_PROXY_PORT_TRANSACTION}";', nginx_tpl)
+        self.assertNotIn("${POSTGRES_POOLER}", nginx_tpl)
         self.assertIn('default "template-service:18020";', nginx_tpl)
         self.assertIn("proxy_pass $stream_template_service_upstream;", nginx_tpl)
         self.assertNotIn("proxy_pass template-service:18020;", nginx_tpl)

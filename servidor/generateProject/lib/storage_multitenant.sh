@@ -215,13 +215,21 @@ storage_assert_project_gateway_container_contract() {
   }
   attached_count="$(grep -c '[^[:space:]]' <<<"$attached_networks" || true)"
   [[ "$attached_count" == "4" ]] || {
-    storage_fail "$container deve possuir somente as redes geral, Storage gateway, Functions gateway e interna do projeto"
+    storage_fail "$container deve possuir somente as redes de gateway de projeto, Storage gateway, Functions gateway e interna do projeto"
     return 1
   }
-  grep -Fxq 'rede-supabase' <<<"$attached_networks" || {
-    storage_fail "$container nao esta conectado a rede geral do projeto"
+  if ! grep -Fxq 'supabase-project-gateways' <<<"$attached_networks"; then
+    # Legacy project created before SEC-11: accepted only until migrated off rede-supabase.
+    grep -Fxq 'rede-supabase' <<<"$attached_networks" || {
+      storage_fail "$container nao esta conectado a rede dedicada dos gateways de projeto"
+      return 1
+    }
+  fi
+  if grep -Fxq 'supabase-project-gateways' <<<"$attached_networks" \
+    && grep -Fxq 'rede-supabase' <<<"$attached_networks"; then
+    storage_fail "$container nao pode estar na rede geral e na rede dedicada dos gateways ao mesmo tempo"
     return 1
-  }
+  fi
   grep -Fxq 'supabase-storage-gateways' <<<"$attached_networks" || {
     storage_fail "$container nao esta conectado a rede exclusiva dos gateways Storage"
     return 1

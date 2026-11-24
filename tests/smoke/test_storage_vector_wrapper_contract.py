@@ -66,6 +66,7 @@ class StorageVectorWrapperContractTests(unittest.TestCase):
     def test_internal_vector_listener_only_accepts_sigv4_and_has_no_public_port(self) -> None:
         nginx = (ROOT / 'servidor/generateProject/nginxtemplate').read_text()
         internal = nginx.split('listen 8081;', 1)[1]
+        self.assertIn('allow ${PROJECT_GATEWAYS_SUBNET};', internal)
         self.assertIn('allow ${SUPABASE_NETWORK_SUBNET};', internal)
         self.assertIn('deny all;', internal)
         self.assertIn('if ($request_method != POST) { return 405; }', internal)

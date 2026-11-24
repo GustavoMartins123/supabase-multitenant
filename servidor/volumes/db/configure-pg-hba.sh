@@ -20,8 +20,22 @@ append_unique_cidrs() {
   for cidr in "$@"; do
     cidr="$(printf '%s' "$cidr" | tr -d ' \t\r\n')"
     valid_cidr "$cidr" || continue
+    if grep -Fxq "$cidr" "$TMP_DENY_CIDRS" 2>/dev/null; then
+      continue
+    fi
     if ! grep -Fxq "$cidr" "$TMP_CIDRS" 2>/dev/null; then
       printf '%s\n' "$cidr" >> "$TMP_CIDRS"
+    fi
+  done
+}
+
+append_unique_deny_cidrs() {
+  local cidr
+  for cidr in "$@"; do
+    cidr="$(printf '%s' "$cidr" | tr -d ' \t\r\n')"
+    valid_cidr "$cidr" || continue
+    if ! grep -Fxq "$cidr" "$TMP_DENY_CIDRS" 2>/dev/null; then
+      printf '%s\n' "$cidr" >> "$TMP_DENY_CIDRS"
     fi
   done
 }
@@ -52,7 +66,13 @@ detect_proc_route_cidrs() {
 }
 
 TMP_CIDRS="$(mktemp)"
-trap 'rm -f "$TMP_CIDRS" "$TMP_FILE"' EXIT
+TMP_DENY_CIDRS="$(mktemp)"
+trap 'rm -f "$TMP_CIDRS" "$TMP_DENY_CIDRS" "$TMP_FILE"' EXIT
+
+if [[ -n "${PG_HBA_DENY_CIDRS:-}" ]]; then
+  IFS=',' read -r -a deny_cidrs <<< "$PG_HBA_DENY_CIDRS"
+  append_unique_deny_cidrs "${deny_cidrs[@]}"
+fi
 
 if command -v ip >/dev/null 2>&1; then
   while IFS= read -r cidr; do
@@ -77,6 +97,10 @@ fi
   echo "local   all             all                                     peer map=supabase_map"
   echo "host    all             all             127.0.0.1/32            scram-sha-256"
   echo "host    all             all             ::1/128                 scram-sha-256"
+  while IFS= read -r cidr; do
+    [[ -n "$cidr" ]] || continue
+    printf 'host    all             all             %-23s reject\n' "$cidr"
+  done < "$TMP_DENY_CIDRS"
   while IFS= read -r cidr; do
     [[ -n "$cidr" ]] || continue
     printf 'host    all             all             %-23s scram-sha-256\n' "$cidr"

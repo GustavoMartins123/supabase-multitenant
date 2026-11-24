@@ -95,10 +95,11 @@ def validate_routing(executor_image: str, nginx_image: str, traefik_image: str) 
         containers.append(docker(
             *base, "--network-alias", "supabase-nginx-technical_project",
             "-e", "FILE_SIZE_LIMIT=52428800", "-e", "SUPABASE_NETWORK_SUBNET=127.0.0.0/8",
+            "-e", "PROJECT_GATEWAYS_SUBNET=127.0.0.0/8",
             "-e", "ANON_KEY_PROJETO=header.payload.sig", "-e", "SERVICE_ROLE_KEY_PROJETO=header.payload.sig",
             "-e", "API_GATEWAY_TOKEN_PROJETO=" + "b" * 64,
             "--entrypoint", "/bin/sh", nginx_image, "-c",
-            "envsubst '$FILE_SIZE_LIMIT $SUPABASE_NETWORK_SUBNET $ANON_KEY_PROJETO $SERVICE_ROLE_KEY_PROJETO "
+            "envsubst '$FILE_SIZE_LIMIT $SUPABASE_NETWORK_SUBNET $PROJECT_GATEWAYS_SUBNET $ANON_KEY_PROJETO $SERVICE_ROLE_KEY_PROJETO "
             "$API_GATEWAY_TOKEN_PROJETO' < /test/projects/technical_project/nginx/"
             "nginx_technical_project.conf > /tmp/nginx.conf && exec nginx -g 'daemon off;' -c /tmp/nginx.conf",
         ))
