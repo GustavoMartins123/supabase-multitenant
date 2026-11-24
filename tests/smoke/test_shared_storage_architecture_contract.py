@@ -54,7 +54,7 @@ class SharedStorageTopologyContractTest(unittest.TestCase):
         self.assertIn("- .storage.env", compose)
         self.assertIn("STORAGE_BACKEND=file", env)
         self.assertIn(
-            "STORAGE_DATA_PLANE_PROXY_IMAGE=nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim",
+            "STORAGE_DATA_PLANE_PROXY_IMAGE=nginx/nginx-unprivileged:1.31.10-alpine3.24-slim",
             env,
         )
         self.assertIn("STORAGE_INTERNAL_BUCKET=objects", env)

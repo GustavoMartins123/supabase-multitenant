@@ -9,7 +9,7 @@ STORAGE_GLOBAL_CONTAINER="supabase-storage-global"
 STORAGE_DATA_PLANE_CONTAINER="shared-storage-data-plane"
 STORAGE_OBJECT_ROOT="$STORAGE_SERVER_ROOT/volumes/storage/objects"
 STORAGE_SUPPORTED_IMAGE="supabase/storage-api:v1.61.12"
-STORAGE_SUPPORTED_DATA_PLANE_IMAGE="nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim"
+STORAGE_SUPPORTED_DATA_PLANE_IMAGE="nginx/nginx-unprivileged:1.31.10-alpine3.24-slim"
 STORAGE_SUPPORTED_TENANT_DB_USER="supabase_storage_admin"
 STORAGE_SUPPORTED_TENANT_HOST_REGEXP='^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})[.]storage[.]internal$'
 

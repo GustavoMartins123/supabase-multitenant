@@ -186,7 +186,7 @@ jobs:
         run: |
           docker build -t functions-authorizer-ci:local -f servidor/key-authorizer/Dockerfile servidor
           docker pull supabase/edge-runtime:v1.74.2
-          docker pull nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim
+          docker pull nginx/nginx-unprivileged:1.31.10-alpine3.24-slim
           docker pull postgrest/postgrest:v14.14
           docker pull redis:8.2.2-alpine
       - name: Required Studio publication, opaque invocation and tenant REST acceptance
@@ -238,7 +238,7 @@ jobs:
           docker pull supabase/edge-runtime:v1.74.2
           docker pull supabase/supavisor:2.9.7
           docker pull supabase/storage-api:v1.61.12
-          docker pull nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim
+          docker pull nginx/nginx-unprivileged:1.31.10-alpine3.24-slim
           docker pull darthsim/imgproxy:v4.0.11
           docker pull supabase/gotrue:v2.193.0-rc.3
           docker pull postgrest/postgrest:v14.14

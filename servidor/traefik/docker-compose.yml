@@ -87,7 +87,7 @@ services:
     logging: *vector-logging
 
   deny-service:
-    image: nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim
+    image: nginx/nginx-unprivileged:1.31.10-alpine3.24-slim
     container_name: traefik-deny-service
     networks:
       - rede-supabase

@@ -21,7 +21,7 @@ def main():
     parser.add_argument('--api-image',required=True)
     parser.add_argument('--authorizer-image',required=True)
     parser.add_argument('--edge-image',default='supabase/edge-runtime:v1.74.2')
-    parser.add_argument('--nginx-image',default='nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim')
+    parser.add_argument('--nginx-image',default='nginx/nginx-unprivileged:1.31.10-alpine3.24-slim')
     parser.add_argument('--gateway-image',required=True)
     parser.add_argument('--database-image',default='postgres:15')
     parser.add_argument('--redis-image',default='redis:8.8.0-alpine3.23')
