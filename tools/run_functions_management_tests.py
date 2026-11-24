@@ -20,7 +20,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--api-image',required=True)
     parser.add_argument('--authorizer-image',required=True)
-    parser.add_argument('--edge-image',default='supabase/edge-runtime:v1.74.2')
+    parser.add_argument('--edge-image',default='supabase/edge-runtime:v1.77.9')
     parser.add_argument('--nginx-image',default='nginxinc/nginx-unprivileged:1.31.2-alpine3.23-slim')
     parser.add_argument('--gateway-image',required=True)
     parser.add_argument('--database-image',default='postgres:15')
