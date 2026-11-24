@@ -28,7 +28,7 @@ be HS256 with that tenant's secret. Function names cannot traverse paths or invo
 **Workers must not be reused by function path.** Edge Runtime v1.74.2 was observed
 to reuse a worker with the first tenant's environment, even when a subsequent
 `create` call supplies different `envVars`. The supervisor uses `forceCreate:true`
-for every request on every runtime version, including v1.77.9. Module caching is independent and remains enabled. Workers
+for every request on every runtime version, including v1.79.5-wsfix. Module caching is independent and remains enabled. Workers
 receive only the requested tenant's URL, anon/service keys, JWT secret and ref;
 the real runtime denies their filesystem reads of supervisor credentials.
 
@@ -80,7 +80,7 @@ an inherited lock descriptor; direct unlocked `publish`/`withdraw` commands fail
 ```bash
 python tools/run_functions_security_tests.py \
   --lifecycle-image servidor-projects-api:latest \
-  --edge-image supabase/edge-runtime:v1.77.9
+  --edge-image ghcr.io/gustavomartins123/supabase-edge-runtime-custom:v1.79.5-wsfix
 ```
 
 The runner requires existing Linux images, mounts only synthetic fixture files,

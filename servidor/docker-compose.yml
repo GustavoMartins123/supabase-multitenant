@@ -280,7 +280,7 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=128m
       - /var/cache/deno:rw,noexec,nosuid,size=128m
-    image: supabase/edge-runtime:v1.77.9
+    image: ghcr.io/gustavomartins123/supabase-edge-runtime-custom:v1.79.5-wsfix
     restart: unless-stopped
     logging: *vector-logging
     networks:

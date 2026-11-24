@@ -13,7 +13,7 @@ python tools/run_auth_security_tests.py \
 
 python tools/run_functions_security_tests.py \
   --lifecycle-image servidor-projects-api:latest \
-  --edge-image supabase/edge-runtime:v1.77.9
+  --edge-image ghcr.io/gustavomartins123/supabase-edge-runtime-custom:v1.79.5-wsfix
 ```
 
 The runtime harness (`tools/run_functions_runtime_tests.py`, 20 checks) includes

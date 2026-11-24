@@ -30,7 +30,7 @@ tested against. One row per moving part; the platform row is the canonical
 | Storage API | `supabase/storage-api:v1.61.12` | `servidor/.env.example` (`STORAGE_IMAGE`) | no — official image, unpatched by design |
 | imgproxy | `darthsim/imgproxy:v4.0.11` | `servidor/.env.example` (`IMGPROXY_IMAGE`) | no |
 | Supavisor | `supabase/supavisor:2.9.7` | `servidor/docker-compose.yml` | no |
-| Edge Runtime | `supabase/edge-runtime:v1.77.9` | `servidor/docker-compose.yml` | no |
+| Edge Runtime | `ghcr.io/gustavomartins123/supabase-edge-runtime-custom:v1.79.5-wsfix` | `servidor/docker-compose.yml` | yes — `GustavoMartins123/supabase-edge-runtime-custom@v1.79.5-wsfix` |
 | Postgres-Meta | `supabase/postgres-meta:v0.96.1` | `servidor/docker-compose-api.yml` | no |
 | Logflare / Analytics | `v1.47.1` | `servidor/volumes/analytics/Dockerfile` (`LOGFLARE_VER`) | yes — 2 `.ex` + 1 `.exs` |
 
