@@ -40,7 +40,7 @@ class MultitenantPerfHardeningTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("POOLER_DEFAULT_POOL_SIZE=15", env_example)
         # Option A: PostgREST stays on Session Mode (:5432 via nginx stream proxy)
         self.assertIn("POOLER_PROXY_PORT_SESSION: ${POOLER_PROXY_PORT_SESSION}", project_compose)
-        self.assertIn("${POSTGRES_POOLER}:${POOLER_PROXY_PORT_SESSION}", project_nginx)
+        self.assertIn("supabase-pooler:${POOLER_PROXY_PORT_SESSION}", project_nginx)
         self.assertIn("POOLER_DEFAULT_POOL_SIZE:-15", gen)
         self.assertIn("POOLER_DEFAULT_POOL_SIZE:-15", dup)
 

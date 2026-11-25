@@ -458,7 +458,19 @@ Os mesmos perfis são aceitos por `stop_containers.sh`. No split-node, todas as 
 
 ### Uma máquina
 
-Todos os componentes rodam no mesmo host. Os serviços de projeto compartilham `rede-supabase`; somente seus Nginx também entram em `supabase-storage-gateways`. Storage usa redes internas separadas de controle e data plane, e Analytics usa sua própria rede interna.
+Todos os componentes rodam no mesmo host, com o tráfego de inquilinos isolado fora da rede compartilhada da plataforma (`rede-supabase`):
+
+| Rede | Serviços conectados | Tipo |
+| --- | --- | --- |
+| `rede-supabase` | Control plane da plataforma (`supabase-db`, `projects-api`, `postgres-meta-global`, `edge-bundler`, `control-plane-migrations`, `traefik`, `realtime`, `supavisor`, `key-authorizer`, `template-service`, Studio) | bridge (`SUPABASE_NETWORK_SUBNET`) |
+| `supabase-project-gateways` | Gateways Nginx dos projetos, `traefik`, `realtime`, `supabase-pooler`, `key-authorizer`, `template-service` e `supabase-db` (somente saída HTTP do FDW de Storage Vectors para `:8081/vector`; conexões PostgreSQL de entrada vindas de `PROJECT_GATEWAYS_SUBNET` são rejeitadas no `pg_hba.conf`) | `internal: true` (`PROJECT_GATEWAYS_SUBNET`, padrão `172.54.0.0/23`) |
+| `supabase-internal-<projeto>` | Nginx, Auth e PostgREST do projeto | `internal: true` (`/28` em `172.52.0.0/16`) |
+| `supabase-project-egress` | Saída externa do Auth do projeto e do runtime de Edge Functions | bridge (`enable_icc: false`) |
+| `supabase-storage-gateways` | Gateways Nginx dos projetos e proxy de data plane do Storage | `internal: true` |
+| `supabase-functions-gateways` | Gateways Nginx dos projetos, `projects-api` e runtime de Edge Functions | `internal: true` |
+| `supabase-functions-db` | Runtime de Edge Functions e `supabase-db` | `internal: true` (`172.51.2.0/28`) |
+
+Os gateways Nginx de projeto entram em `supabase-project-gateways` (com label `traefik.docker.network=supabase-project-gateways`) em vez de `rede-supabase` e alcançam o Supavisor por DNS (`supabase-pooler`). Storage usa redes internas separadas de controle e data plane, e Analytics usa sua própria rede interna. Projetos existentes podem ser sincronizados para os templates e topologia de rede atuais com `tools/sync_existing_projects_security.py`.
 
 O host-agent continua fora dos containers, como serviço systemd, mesmo na topologia single-node.
 

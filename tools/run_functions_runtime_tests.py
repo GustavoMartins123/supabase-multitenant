@@ -525,7 +525,7 @@ def render_nginx_template(template: str, *, contract: str, project: str, identit
         .replace('${API_GATEWAY_TOKEN_PROJETO}', gateway_token)
         .replace('${SUPABASE_NETWORK_SUBNET}', subnet)
         .replace('${PROJECT_INTERNAL_SUBNET}', subnet)
-        .replace('${POSTGRES_POOLER}', 'supabase-pooler')
+        .replace('${PROJECT_GATEWAYS_SUBNET}', subnet)
         .replace('${POOLER_PROXY_PORT_SESSION}', '5432')
         .replace('${POOLER_PROXY_PORT_TRANSACTION}', '6543'))
     rendered = rendered.replace(f'supabase-auth-{project}:9999', 'canary:8080')

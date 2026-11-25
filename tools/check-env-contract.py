@@ -330,6 +330,14 @@ def check_network(report: Report, values: dict[str, str], origin: str) -> None:
             allowed, allow_placeholders=origin.endswith(".example")
         ):
             report.error(f"{origin}: PROJECTS_API_ALLOWED_IP_RANGES: {problem}")
+    gateways_subnet_raw = values.get("PROJECT_GATEWAYS_SUBNET", "")
+    if gateways_subnet_raw and not PLACEHOLDER_TOKEN_RE.search(gateways_subnet_raw):
+        try:
+            ipaddress.ip_network(gateways_subnet_raw.strip(), strict=False)
+        except ValueError:
+            report.error(
+                f"{origin}: PROJECT_GATEWAYS_SUBNET invalida: {gateways_subnet_raw!r}"
+            )
 
 
 def check_traefik_labels(report: Report) -> None:

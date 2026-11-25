@@ -155,7 +155,13 @@ def main() -> None:
     template = server / 'generateProject/dockercomposetemplate'
     project_model = yaml.safe_load(template.read_text())
     for service in project_model['services'].values():
-        service['labels'] = labels.copy()
+        existing_labels = service.get('labels')
+        if isinstance(existing_labels, list):
+            service['labels'] = [*existing_labels, *(f'{k}={v}' for k, v in labels.items())]
+        elif isinstance(existing_labels, dict):
+            service['labels'] = {**existing_labels, **labels}
+        else:
+            service['labels'] = labels.copy()
         service['logging'] = {'driver': 'json-file'}
         service['restart'] = 'no'
     if 'project-internal' in (project_model.get('networks') or {}):
@@ -181,6 +187,7 @@ def main() -> None:
         assert sys.argv[3] == 'end-to-end' and sys.argv[4] in {'single', 'split'}
         from p1_end_to_end import validate
         run('docker', 'network', 'connect', 'rede-supabase', 'p1-lifecycle-executor-' + suffix)
+        run('docker', 'network', 'connect', 'supabase-project-gateways', 'p1-lifecycle-executor-' + suffix)
         run('docker', 'network', 'connect', 'supabase-functions-gateways', 'p1-lifecycle-executor-' + suffix)
         validate(root, suffix, sys.argv[4], values, '--benchmark' in sys.argv[5:])
         return
@@ -440,10 +447,21 @@ process.stdout.write(JSON.stringify({status:response.status,body}));
         assert response['vectors'][0]['key'] == 'original'
         assert response['vectors'][0]['data']['float32'] == [1, 0, 0]
 
+    def project_gateway_ip(ref: str) -> str:
+        # The test executor shares both supabase-project-gateways and
+        # supabase-functions-gateways with project gateways, so dial the
+        # project-gateways IP directly to match the DB FDW network path.
+        ip = run('docker', 'inspect', '--format',
+                 '{{(index .NetworkSettings.Networks "supabase-project-gateways").IPAddress}}',
+                 'supabase-nginx-' + ref)
+        assert ip, f'missing supabase-project-gateways IP for supabase-nginx-{ref}'
+        return ip
+
     def check_signed_gateway(ref: str, credential_ref: str, expected: int,
                              *, tamper: bool = False) -> None:
         env = environment(server / 'projects' / credential_ref / '.env')
         host = 'supabase-nginx-' + ref + ':8081'
+        gateway_ip = project_gateway_ip(ref)
         path, body = '/vector/ListVectorBuckets', b'{}'
         stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
         day = stamp[:8]
@@ -459,7 +477,7 @@ process.stdout.write(JSON.stringify({status:response.status,body}));
         signature = hmac.new(key, to_sign.encode(), 'sha256').hexdigest()
         if tamper:
             signature = ('0' if signature[0] != '0' else '1') + signature[1:]
-        request = urllib.request.Request('http://' + host + path, data=body, headers={
+        request = urllib.request.Request(f'http://{gateway_ip}:8081{path}', data=body, headers={
             'Content-Type': 'application/json', 'Host': host, 'X-Amz-Date': stamp,
             'X-Amz-Content-Sha256': digest,
             # A source credential must not select its tenant through a clone gateway.
@@ -491,11 +509,14 @@ process.stdout.write(body);});'''
 
     def check_internal_auth_boundary(ref: str) -> None:
         env = environment(server / 'projects' / ref / '.env')
+        host = 'supabase-nginx-' + ref + ':8081'
+        endpoint = f'http://{project_gateway_ip(ref)}:8081/vector/ListVectorBuckets'
         for method, authorization, expected in [('POST', None, 403),
                                                  ('POST', 'Bearer ' + env['SERVICE_ROLE_KEY_PROJETO'], 403),
                                                  ('GET', None, 405)]:
-            request = urllib.request.Request('http://supabase-nginx-' + ref + ':8081/vector/ListVectorBuckets',
-                                             data=b'{}' if method == 'POST' else None, method=method)
+            request = urllib.request.Request(endpoint,
+                                             data=b'{}' if method == 'POST' else None, method=method,
+                                             headers={'Host': host})
             if authorization:
                 request.add_header('Authorization', authorization)
             try:
@@ -508,9 +529,10 @@ process.stdout.write(body);});'''
     def check_object(ref: str) -> None:
         assert object_request(ref, 'GET', '/object/p1-files/original.txt', '', 'text/plain') == 'original object'
 
-    # Executor must join the server and functions-gateways networks, but no HTTP service gets its socket.
+    # Executor must join the server, project-gateways and functions-gateways networks, but no HTTP service gets its socket.
     executor = 'p1-lifecycle-executor-' + suffix
     run('docker', 'network', 'connect', 'rede-supabase', executor)
+    run('docker', 'network', 'connect', 'supabase-project-gateways', executor)
     run('docker', 'network', 'connect', 'supabase-functions-gateways', executor)
     seed(project, first_uuid)
     lifecycle('generate_project.sh', project, first_uuid, 'false')

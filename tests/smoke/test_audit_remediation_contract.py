@@ -57,7 +57,9 @@ class F02SharedPasswordScope(unittest.TestCase):
         nginx = (ROOT / "servidor/generateProject/nginxtemplate").read_text(encoding="utf-8")
         self.assertIn("${AUTH_DB_USER}.{{project_id}}:${POSTGRES_PASSWORD}@supabase-nginx-{{project_id}}:${POOLER_PROXY_PORT_SESSION}", template)
         self.assertIn("${POSTGREST_DB_USER}.{{project_id}}:${POSTGRES_PASSWORD}@supabase-nginx-{{project_id}}:${POOLER_PROXY_PORT_SESSION}", template)
-        self.assertIn('default "${POSTGRES_POOLER}:${POOLER_PROXY_PORT_SESSION}";', nginx)
+        self.assertIn('default "supabase-pooler:${POOLER_PROXY_PORT_SESSION}";', nginx)
+        self.assertIn('default "supabase-pooler:${POOLER_PROXY_PORT_TRANSACTION}";', nginx)
+        self.assertNotIn("${POSTGRES_POOLER}", nginx)
         self.assertIn("proxy_pass $stream_pooler_session_upstream;", nginx)
 
     def test_tenant_databases_revoke_public_and_grant_roles(self) -> None:

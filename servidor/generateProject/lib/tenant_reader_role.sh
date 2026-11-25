@@ -50,8 +50,23 @@ grant_platform_reader_on_tenant() {
     psql_exec_stdin "$db" <<SQL \
         || tenant_reader_error "falha ao conceder permissoes de leitura em $db"
 REVOKE ALL ON SCHEMA auth FROM platform_reader;
+REVOKE ALL ON TABLE auth.users, auth.sessions FROM platform_reader;
 GRANT USAGE ON SCHEMA auth TO platform_reader;
-GRANT SELECT ON auth.users, auth.sessions TO platform_reader;
+GRANT SELECT (
+    id,
+    email,
+    phone,
+    email_confirmed_at,
+    created_at,
+    last_sign_in_at,
+    raw_user_meta_data,
+    is_sso_user
+) ON auth.users TO platform_reader;
+GRANT SELECT (
+    id,
+    user_id,
+    created_at
+) ON auth.sessions TO platform_reader;
 GRANT CONNECT ON DATABASE ${db} TO platform_reader;
 SQL
 }

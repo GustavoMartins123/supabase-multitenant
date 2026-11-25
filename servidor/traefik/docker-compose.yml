@@ -73,6 +73,7 @@ services:
       - ./plugins-storage:/plugins-storage
     networks:
       - rede-supabase
+      - project-gateways
       - client-configuration-data
     restart: unless-stopped
     logging: *vector-logging
@@ -110,3 +111,6 @@ networks:
     external: true
   rede-supabase:
     external: true
+  project-gateways:
+    external: true
+    name: supabase-project-gateways

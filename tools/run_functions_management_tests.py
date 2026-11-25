@@ -97,7 +97,7 @@ def main():
                 mapping={'{{project_id}}':name,'{{project_public_ref}}':project['ref'],'{{project_uuid}}':project['id'],'{{server_url}}':'api.example.com',
                     '${ANON_KEY_PROJETO}':project['anon_jwt'],'${SERVICE_ROLE_KEY_PROJETO}':project['service_jwt'],
                     '${API_GATEWAY_TOKEN_PROJETO}':project['gateway_token'],'${FILE_SIZE_LIMIT}':'1000000','${SUPABASE_NETWORK_SUBNET}':'172.16.0.0/12',
-                    '${PROJECT_INTERNAL_SUBNET}':'10.210.0.0/28','${POSTGRES_POOLER}':'supabase-pooler',
+                    '${PROJECT_GATEWAYS_SUBNET}':'172.54.0.0/23','${PROJECT_INTERNAL_SUBNET}':'10.210.0.0/28',
                     '${POOLER_PROXY_PORT_SESSION}':'5432','${POOLER_PROXY_PORT_TRANSACTION}':'6543'}
                 for key,value in mapping.items():template=template.replace(key,value)
                 path=fixture/(name+'.conf');path.write_text(template)

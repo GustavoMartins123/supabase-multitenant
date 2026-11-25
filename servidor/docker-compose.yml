@@ -35,6 +35,10 @@ services:
       functions-db:
         aliases:
           - supabase-db
+      # Attached solely for outbound Storage Vectors FDW HTTP calls to
+      # http://supabase-nginx-<project>:8081/vector; inbound PostgreSQL
+      # connections from PROJECT_GATEWAYS_SUBNET are rejected in pg_hba.conf.
+      project-gateways:
     volumes:
       - ./volumes/db/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql:Z
       # Must be superuser to create event trigger
@@ -89,13 +93,14 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXP: ${JWT_EXPIRY}
+      PG_HBA_DENY_CIDRS: ${PROJECT_GATEWAYS_SUBNET:-172.54.0.0/23}
     shm_size: ${POSTGRES_SHM_SIZE}
     command:
       - postgres
       - -c
       - config_file=/etc/postgresql/postgresql.conf
       - -c
-      - log_min_messages=fatal
+      - log_min_messages=warning
       - -c
       - superuser_reserved_connections=5
       - -c
@@ -176,6 +181,7 @@ services:
     logging: *vector-logging
     networks:
       - rede-supabase
+      - project-gateways
     ulimits:
       nofile:
         soft: ${REALTIME_RLIMIT_NOFILE}
@@ -227,6 +233,7 @@ services:
       rede-supabase:
         ipv4_address: ${POSTGRES_POOLER}
       storage-control:
+      project-gateways:
     volumes:
       - ./volumes/pooler/pooler.exs:/etc/pooler/pooler.exs:ro
     depends_on:
@@ -558,6 +565,13 @@ networks:
     ipam:
       config:
         - subnet: 172.51.2.0/28
+  project-gateways:
+    name: supabase-project-gateways
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: ${PROJECT_GATEWAYS_SUBNET:-172.54.0.0/23}
   project-egress:
     name: supabase-project-egress
     driver: bridge

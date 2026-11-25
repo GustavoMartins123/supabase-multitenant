@@ -922,7 +922,7 @@ class FunctionalFixture:
         self.cleanup_failures: list[str] = []
 
     def project_base(self) -> str:
-        address = probe.target_ip(self.targets, "project/nginx", "rede-supabase")
+        address = probe.target_ip(self.targets, "project/nginx", "supabase-project-gateways")
         return f"http://{address}:8080"
 
     def key_headers(self) -> dict[str, str]:
