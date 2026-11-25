@@ -4,7 +4,14 @@
 ARG SUPABASE_STUDIO_COMMIT=20290c71bdc48bef1720bfe7d292f3b9e6154f7d
 ARG SUPABASE_STUDIO_REPOSITORY=https://github.com/supabase/supabase.git
 
-FROM node:22-slim AS base
+FROM node:22.23.5-trixie-slim AS runtime
+RUN apt-get update -qq && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    update-ca-certificates
+WORKDIR /app
+
+FROM runtime AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 
@@ -12,10 +19,8 @@ RUN apt-get update -qq && \
     apt-get install -y --no-install-recommends \
       git \
       python3 \
-      ca-certificates \
       build-essential && \
-    rm -rf /var/lib/apt/lists/* && \
-    update-ca-certificates
+    rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g pnpm@10.24.0
 WORKDIR /app
@@ -38,6 +43,10 @@ COPY studio-edge-functions.patch /tmp/studio-edge-functions.patch
 RUN git -C /src apply --check /tmp/studio-edge-functions.patch && \
     git -C /src apply /tmp/studio-edge-functions.patch
 
+COPY studio-security-deps.patch /tmp/studio-security-deps.patch
+RUN git -C /src apply --check /tmp/studio-security-deps.patch && \
+    git -C /src apply /tmp/studio-security-deps.patch
+
 FROM base AS turbo
 COPY --from=source /src .
 RUN pnpm dlx turbo@2.9.14 prune studio --docker
@@ -46,7 +55,8 @@ FROM base AS deps
 COPY --from=turbo /app/out/json ./
 COPY --from=turbo /app/out/pnpm-lock.yaml ./
 COPY --from=source /src/patches ./patches
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --no-frozen-lockfile && \
+    node -e 'const fs=require("fs"); const nextVer=JSON.parse(fs.readFileSync("apps/studio/node_modules/next/package.json","utf8")).version; if(nextVer!=="16.4.6") throw new Error("Expected next 16.4.6, got "+nextVer); const sharpDirs=fs.readdirSync("node_modules/.pnpm").filter((d)=>d.startsWith("sharp@")); if(!sharpDirs.length||!sharpDirs.every((d)=>d.startsWith("sharp@0.35.5"))) throw new Error("Expected sharp@0.35.5 only, got "+JSON.stringify(sharpDirs)); console.log("Verified Studio security pins:",{next:nextVer,sharp:sharpDirs});'
 
 FROM deps AS builder
 ARG STUDIO_BUILD_NODE_OPTIONS=--max-old-space-size=8192
@@ -56,7 +66,7 @@ RUN test -s apps/studio/public/deno/edge-runtime.d.ts && \
     test -s apps/studio/public/deno/lib.deno.d.ts && \
     NODE_OPTIONS="$STUDIO_BUILD_NODE_OPTIONS" pnpm --filter studio exec next build --webpack
 
-FROM base AS production
+FROM runtime AS production
 ARG SUPABASE_STUDIO_COMMIT
 ARG SUPABASE_STUDIO_REPOSITORY
 
@@ -68,7 +78,7 @@ ARG SUPABASE_STUDIO_REPOSITORY
 # sponsored by, or endorsed by Supabase. Do not add the Supabase name/logo in a
 # way that implies endorsement.
 COPY LICENSE /usr/share/doc/multitenant-studio/LICENSE
-COPY studio-project-context.patch studio-edge-functions.patch README.md /usr/share/doc/multitenant-studio/
+COPY studio-project-context.patch studio-edge-functions.patch studio-security-deps.patch README.md /usr/share/doc/multitenant-studio/
 
 LABEL org.opencontainers.image.title="multitenant-studio" \
       org.opencontainers.image.description="UNOFFICIAL derivative of Supabase Studio with a per-tab project-context patch. Not affiliated with, sponsored by, or endorsed by Supabase." \
@@ -84,6 +94,12 @@ COPY --from=builder /app/apps/studio/.next/standalone ./
 COPY --from=builder /app/apps/studio/.next/static ./apps/studio/.next/static
 COPY logflare-hmac-hook.cjs /usr/local/lib/studio-logflare-hmac.cjs
 
+RUN mkdir -p /app/apps/studio/.next/cache && \
+    chown -R node:node /app/apps/studio/.next/cache && \
+    chmod 0644 /usr/local/lib/studio-logflare-hmac.cjs && \
+    chmod -R a+rX /usr/share/doc/multitenant-studio
+
+USER node
 EXPOSE 3000
 ENTRYPOINT ["docker-entrypoint.sh"]
 HEALTHCHECK --interval=5s --timeout=5s --retries=3 CMD node -e "fetch('http://localhost:3000/api/platform/profile').then((r) => {if (r.status !== 200) throw new Error(r.status)})"

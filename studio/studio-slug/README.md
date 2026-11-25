@@ -1,8 +1,10 @@
 # Studio com contexto por aba
 
 Esta imagem parte do Supabase Studio no commit
-`20290c71bdc48bef1720bfe7d292f3b9e6154f7d` e aplica somente o patch
-`studio-project-context.patch`.
+`20290c71bdc48bef1720bfe7d292f3b9e6154f7d` e aplica os patches verificados
+`studio-project-context.patch`, `studio-edge-functions.patch` e
+`studio-security-deps.patch` (`next@16.4.6` e `sharp@0.35.5` sobre runtime
+limpo `node:22.23.5-trixie-slim` como usuário não-root `node`).
 
 O contrato do patch é intencionalmente estrito:
 

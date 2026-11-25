@@ -1,0 +1,27 @@
+diff --git a/pnpm-workspace.yaml b/pnpm-workspace.yaml
+index 1111111..2222222 100644
+--- a/pnpm-workspace.yaml
++++ b/pnpm-workspace.yaml
+@@ -24,7 +24,7 @@ catalog:
+   '@vitest/ui': ^4.1.4
+   lodash: ^4.18.1
+   lodash-es: ^4.18.1
+-  next: 16.2.6
++  next: 16.4.6
+   next-themes: ^0.4.6
+   postcss: ^8.5.10
+   radix-ui: ^1.4.3
+@@ -82,11 +82,13 @@ overrides:
+   'h3@1': 1.15.11
+   lodash: 'catalog:'
+   lodash-es: 'catalog:'
++  next: 16.4.6
+   node-gyp>tar: ^7.5.11
+   nodemailer: ^7.0.11
+   postcss: 'catalog:'
+   qs: ^6.15.2
+   refractor>prismjs: ^1.30.0
++  sharp: 0.35.5
+   supabase>tar: ^7.5.11
+   tmp: ^0.2.7
+   vite>esbuild: ^0.28.1
