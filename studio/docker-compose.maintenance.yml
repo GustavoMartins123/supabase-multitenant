@@ -1,6 +1,6 @@
 services:
   studio:
-    image: ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v19
+    image: ghcr.io/gustavomartins123/multitenant-studio:20290c7-context-v20
     build:
       context: ./studio-slug
       dockerfile: Dockerfile

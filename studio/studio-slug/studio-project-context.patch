@@ -5017,3 +5017,16 @@ new file mode 100644
 +    expect(screen.getByText('Running...')).toBeDefined()
 +  })
 +})
+diff --git a/packages/pg-meta/src/sql/studio/database/misc.ts b/packages/pg-meta/src/sql/studio/database/misc.ts
+index 76e1e251..91f4c20f 100644
+--- a/packages/pg-meta/src/sql/studio/database/misc.ts
++++ b/packages/pg-meta/src/sql/studio/database/misc.ts
+@@ -1,7 +1,7 @@
+ import { literal, safeSql, type SafeSqlFragment } from '../../../pg-format'
+ 
+ export const getDatabaseSizeSql = (): SafeSqlFragment => {
+-  return safeSql`select sum(pg_database_size(pg_database.datname))::bigint as db_size from pg_database;`
++  return safeSql`select pg_database_size(current_database())::bigint as db_size;`
+ }
+ 
+ export const getLiveTupleEstimate = (table: string, schema: string = 'public'): SafeSqlFragment => {
