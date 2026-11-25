@@ -40,7 +40,14 @@ RUN cd /tmp/lyaml-6.2.8-1.src && \
     rm -rf /tmp/lyaml-6.2.8-1.src
 
 RUN luarocks install https://luarocks.org/manifests/fffonion/lua-resty-openssl-1.7.1-1.rockspec \
-    && opm get ledgetech/lua-resty-http=0.17.1
+    && (timeout 20 opm get ledgetech/lua-resty-http=0.17.1 \
+        || (curl -fsSL https://github.com/ledgetech/lua-resty-http/archive/refs/tags/v0.17.1.tar.gz -o /tmp/lua-resty-http-0.17.1.tar.gz \
+            && echo "f52a0538b20a2d45025f318c18a138b78f6f88f07713dd0ed502183cb3d16f17  /tmp/lua-resty-http-0.17.1.tar.gz" | sha256sum -c - \
+            && tar -xzf /tmp/lua-resty-http-0.17.1.tar.gz -C /tmp \
+            && mkdir -p /usr/local/openresty/site/lualib/resty \
+            && cp /tmp/lua-resty-http-0.17.1/lib/resty/*.lua /usr/local/openresty/site/lualib/resty/ \
+            && rm -rf /tmp/lua-resty-http-0.17.1 /tmp/lua-resty-http-0.17.1.tar.gz)) \
+    && /usr/local/openresty/bin/resty -e 'local http = require("resty.http"); assert(type(http.new) == "function")'
 
 COPY --from=authelia-cli /app/authelia /usr/local/bin/authelia
 
