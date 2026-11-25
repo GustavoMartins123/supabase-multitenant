@@ -92,10 +92,11 @@ LABEL org.opencontainers.image.title="multitenant-studio" \
 COPY --from=builder /app/apps/studio/public ./apps/studio/public
 COPY --from=builder /app/apps/studio/.next/standalone ./
 COPY --from=builder /app/apps/studio/.next/static ./apps/studio/.next/static
-COPY --chmod=0644 logflare-hmac-hook.cjs /usr/local/lib/studio-logflare-hmac.cjs
+COPY logflare-hmac-hook.cjs /usr/local/lib/studio-logflare-hmac.cjs
 
 RUN mkdir -p /app/apps/studio/.next/cache && \
     chown -R node:node /app/apps/studio/.next/cache && \
+    chmod 0644 /usr/local/lib/studio-logflare-hmac.cjs && \
     chmod -R a+rX /usr/share/doc/multitenant-studio
 
 USER node
