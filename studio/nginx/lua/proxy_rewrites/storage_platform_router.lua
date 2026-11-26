@@ -106,11 +106,17 @@ function _M.resolve(uri, method)
 
     -- O Studio usa endpoints REST de plataforma, mas o Storage API implementa
     -- Vector Buckets como operacoes POST no namespace /vector.
+    if path == "/vector-buckets/" then
+        path = "/vector-buckets"
+    elseif path:match("^/vector%-buckets/[^/]+/indexes/$") then
+        path = path:sub(1, -2)
+    end
+
     if path == "/vector-buckets" then
         if method == "GET" then
             return target("/storage/v1/vector/ListVectorBuckets", {
                 method = "POST",
-                body_mode = "empty_json_object",
+                body_mode = "vector_buckets_list",
                 route_name = "vector_buckets_list",
             })
         end

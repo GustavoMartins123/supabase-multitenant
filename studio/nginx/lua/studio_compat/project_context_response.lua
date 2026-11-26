@@ -17,6 +17,17 @@ local tenant_endpoint = authority .. "/" .. ref
 local rest_url = server_domain .. "/" .. ref .. "/rest/v1/"
 local inserted_at = "2021-08-02T06:40:40.646Z"
 
+local function storage_s3_region()
+    local raw = os.getenv("STORAGE_S3_REGION")
+    if type(raw) == "string" then
+        local trimmed = raw:match("^%s*(.-)%s*$")
+        if trimmed and trimmed ~= "" then
+            return trimmed
+        end
+    end
+    return "us-east-1"
+end
+
 local function array(items)
     return setmetatable(items or {}, cjson.array_mt)
 end
@@ -37,7 +48,7 @@ local function project_detail()
         organization_id = 1,
         cloud_provider = "localhost",
         status = "ACTIVE_HEALTHY",
-        region = "local",
+        region = storage_s3_region(),
         inserted_at = inserted_at,
         connectionString = "",
         restUrl = rest_url,
@@ -88,7 +99,7 @@ local function project_settings()
         project_uuid = context.project_uuid,
         tenant_uuid = context.tenant_uuid,
         ref = ref,
-        region = "local",
+        region = storage_s3_region(),
         service_api_keys = array({ anon_key }),
         ssl_enforced = false,
         status = "ACTIVE_HEALTHY",
@@ -115,7 +126,7 @@ local function project_props()
             organization_id = 1,
             cloud_provider = "localhost",
             status = "ACTIVE_HEALTHY",
-            region = "local",
+            region = storage_s3_region(),
             inserted_at = inserted_at,
             api_key_supabase_encrypted = "",
             db_host = db_host,
@@ -161,7 +172,7 @@ local function databases()
             db_user = "postgres",
             identifier = ref,
             inserted_at = "",
-            region = "local",
+            region = storage_s3_region(),
             restUrl = rest_url,
             size = "",
             status = "ACTIVE_HEALTHY",

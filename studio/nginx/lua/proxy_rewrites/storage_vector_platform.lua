@@ -48,17 +48,23 @@ local function storage_request(path, payload)
     local httpc = http.new()
     httpc:set_timeout(10000)
 
+    local headers = {
+        ["Accept"] = "application/json",
+        ["Authorization"] = "Bearer " .. service_key,
+        ["apikey"] = service_key,
+        ["Content-Type"] = "application/json",
+        ["User-Agent"] = "studio-storage-compat/1.0",
+    }
+    local host = ngx.var.server_hostname
+    if type(host) == "string" and host ~= "" then
+        headers["Host"] = host
+    end
+
     return httpc:request_uri(base_url .. path, outbound_tls.apply_internal(base_url, {
         method = "POST",
         body = encoded,
         keepalive = false,
-        headers = {
-            ["Accept"] = "application/json",
-            ["Authorization"] = "Bearer " .. service_key,
-            ["apikey"] = service_key,
-            ["Content-Type"] = "application/json",
-            ["User-Agent"] = "studio-storage-compat/1.0",
-        },
+        headers = headers,
     }))
 end
 
@@ -121,10 +127,21 @@ local function handle_list_indexes()
         })
     end
 
-    local list_res, request_err = storage_request("/storage/v1/vector/ListIndexes", {
+    local list_args = type(ngx.ctx.storage_platform_list_args) == "table"
+        and ngx.ctx.storage_platform_list_args
+        or {}
+    local list_request_body = {
         vectorBucketName = vector_bucket_name,
-        maxResults = 100,
-    })
+        maxResults = list_args.maxResults or 100,
+    }
+    if list_args.prefix ~= nil then
+        list_request_body.prefix = list_args.prefix
+    end
+    if list_args.nextToken ~= nil then
+        list_request_body.nextToken = list_args.nextToken
+    end
+
+    local list_res, request_err = storage_request("/storage/v1/vector/ListIndexes", list_request_body)
 
     if not list_res then
         return respond_json(ngx.HTTP_BAD_GATEWAY, {
