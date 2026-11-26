@@ -58,6 +58,7 @@ services:
       PROJECT_SECRETS_MASTER_KEY: ${PROJECT_SECRETS_MASTER_KEY:?defina PROJECT_SECRETS_MASTER_KEY}
       PROJECT_SECRETS_MASTER_KEY_ID: ${PROJECT_SECRETS_MASTER_KEY_ID:?defina PROJECT_SECRETS_MASTER_KEY_ID}
       PROJECT_SECRETS_PREVIOUS_MASTER_KEYS: ${PROJECT_SECRETS_PREVIOUS_MASTER_KEYS}
+      STORAGE_S3_REGION: ${STORAGE_S3_REGION:-us-east-1}
     volumes:
       - ./secrets/mailer/DB_PASSWORD:/run/secrets/mailer/DB_PASSWORD:ro
     command: ["sh", "-c", "python -m app.schema_migrations apply && python -m app.migrate_client_configuration_material"]
@@ -246,6 +247,7 @@ services:
       EDGE_BUNDLER_URL: http://edge-bundler:18030
       EDGE_BUNDLER_HMAC_SECRET: ${EDGE_BUNDLER_HMAC_SECRET:-}
       EDGE_DB_HOST: supabase-db
+      STORAGE_S3_REGION: ${STORAGE_S3_REGION:-us-east-1}
     volumes:
       - ./secrets/mailer/ADMIN_KEY:/run/secrets/mailer/ADMIN_KEY:ro
       - ./secrets/mailer/PUBLISH_KEY:/run/secrets/mailer/PUBLISH_KEY:ro
