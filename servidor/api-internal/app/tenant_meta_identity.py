@@ -30,3 +30,8 @@ def tenant_storage_policy_key(tenant_uuid: object, master_password: str) -> byte
     tenant_meta_credentials(tenant_uuid, master_password)
     identity = uuid.UUID(str(tenant_uuid))
     return hmac.new(master_password.encode(), f"studio-storage-policies-v1:{identity}".encode(), hashlib.sha256).digest()
+
+
+def tenant_vector_fdw_key(tenant_uuid: object, master_password: str) -> bytes:
+    storage_key = tenant_storage_policy_key(tenant_uuid, master_password)
+    return hmac.new(storage_key, b"studio-vector-fdw-v1", hashlib.sha256).digest()

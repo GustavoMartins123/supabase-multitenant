@@ -85,6 +85,8 @@ async def get_project_s3_vector_keys(
 ):
     """Return the selected tenant's SigV4 pair to an authorized Studio admin."""
 
+    if request.query_params:
+        raise HTTPException(400, "Query parameters are not allowed")
     project_ref = validate_project_ref(project_ref)
     auth_user = await resolve_authenticated_user(request, pool)
 

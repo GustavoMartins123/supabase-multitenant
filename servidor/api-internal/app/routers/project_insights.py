@@ -460,9 +460,19 @@ async def proxy_project_meta(
             query_body = None
         if isinstance(query_body, dict) and isinstance(query_body.get("query"), str):
             try:
-                prepared = storage_policies.prepare_policy_statements(query_body["query"])
+                storage_s3_region = storage_policies.resolve_storage_s3_region()
+                prepared = storage_policies.prepare_policy_statements(
+                    query_body["query"],
+                    project_id=project_row["name"],
+                    storage_s3_region=storage_s3_region,
+                )
                 if prepared is not None:
-                    query_body["query"] = storage_policies.rewrite_policy_statements(prepared, project_row["tenant_uuid"])
+                    query_body["query"] = storage_policies.rewrite_policy_statements(
+                        prepared,
+                        project_row["tenant_uuid"],
+                        project_id=project_row["name"],
+                        storage_s3_region=storage_s3_region,
+                    )
                     upstream_body = json.dumps(query_body).encode()
             except storage_policies.StoragePolicyError as error:
                 raise HTTPException(400, str(error)) from None
