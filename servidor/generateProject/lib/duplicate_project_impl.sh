@@ -201,7 +201,7 @@ trap 'rollback 130' INT
 trap 'rollback 129' HUP
 trap cleanup_tmp EXIT
 
-for command in docker jq openssl sed tar; do
+for command in docker jq openssl python3 sed tar; do
   command -v "$command" >/dev/null || die "Comando obrigatorio ausente: $command"
 done
 for container in supabase-db supabase-pooler realtime-dev.supabase-realtime; do
@@ -350,14 +350,15 @@ if [[ "$COPY_MODE" == "with-data" ]]; then
     >/dev/null
   echo "HOST_AGENT_PROGRESS=duplicate:export_database"
   docker exec supabase-db pg_dump -U supabase_admin -d "$ORIGINAL_DB" \
-    --exclude-schema=realtime --exclude-schema=studio_storage_guard > "$DUMP_FILE"
+    --exclude-schema=realtime --exclude-schema=studio_storage_guard \
+    --exclude-schema=studio_vector_fdw_guard > "$DUMP_FILE"
 else
   echo "HOST_AGENT_PROGRESS=duplicate:export_database"
   docker exec supabase-db pg_dump -U supabase_admin -d "$ORIGINAL_DB" \
     --schema=auth --schema=storage --schema-only > "$DUMP_FILE"
   docker exec supabase-db pg_dump -U supabase_admin -d "$ORIGINAL_DB" \
     --exclude-schema=auth --exclude-schema=storage --exclude-schema=realtime \
-    --exclude-schema=studio_storage_guard \
+    --exclude-schema=studio_storage_guard --exclude-schema=studio_vector_fdw_guard \
     --exclude-table='storage_vectors.*' --schema-only >> "$DUMP_FILE"
   docker exec supabase-db pg_dump -U supabase_admin -d "$ORIGINAL_DB" --data-only \
     -t 'auth.schema_migrations' -t 'storage.migrations' >> "$DUMP_FILE"
@@ -376,7 +377,8 @@ if [[ "$COPY_MODE" == "with-data" ]]; then
 fi
 
 echo "HOST_AGENT_PROGRESS=duplicate:restore_database"
-docker exec -i supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$NEW_DB" < "$DUMP_FILE"
+python3 "$SCRIPT_DIR/lib/pg_dump_filter.py" sql < "$DUMP_FILE" \
+  | docker exec -i supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$NEW_DB"
 docker exec -i supabase-db psql -v ON_ERROR_STOP=1 -U supabase_admin -d "$NEW_DB" \
   < "$PROJECT_ROOT/volumes/db/graphql.sql"
 [[ -s "$RT_STRUCTURE_FILE" ]] || die "Dump da estrutura Realtime ficou vazio"

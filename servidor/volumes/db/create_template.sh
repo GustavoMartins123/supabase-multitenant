@@ -20,33 +20,65 @@ GRANT ALL PRIVILEGES ON DATABASE "_supabase_storage" TO supabase_admin;
 EOSQL
 
 # O Storage API com VECTOR_BUCKET_PROVIDER=pgvector executa suas migrations em
-# cada banco de projeto. Como os projetos nascem de _supabase_template, a
-# extensao precisa existir no banco base antes do pg_dump que forma o template.
-# Isso evita que cada projeto dependa de um bootstrap manual posterior.
-echo "Habilitando pgvector no banco base antes de criar _supabase_template..."
+# cada banco de projeto e o Studio usa Wrappers (s3_vectors_fdw) em extensions.
+# Como os projetos nascem de _supabase_template, vector >= 0.7.0 em public e
+# wrappers >= 0.5.7 em extensions precisam existir no banco base antes do pg_dump.
+echo "Habilitando pgvector e wrappers no banco base antes de criar _supabase_template..."
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-'EOSQL'
+CREATE SCHEMA IF NOT EXISTS extensions;
 CREATE EXTENSION IF NOT EXISTS vector SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS wrappers SCHEMA extensions;
 
-DO $vector_check$
+DO $vector_and_wrappers_check$
 DECLARE
   installed_version text;
+  installed_schema text;
 BEGIN
-  SELECT extversion
-    INTO installed_version
-    FROM pg_extension
-   WHERE extname = 'vector';
+  SELECT e.extversion, n.nspname
+    INTO installed_version, installed_schema
+    FROM pg_extension e
+    JOIN pg_namespace n ON n.oid = e.extnamespace
+   WHERE e.extname = 'vector';
 
   IF installed_version IS NULL THEN
     RAISE EXCEPTION 'pgvector extension is not installed';
   END IF;
 
-  IF string_to_array(installed_version, '.')::int[] < ARRAY[0, 7, 0]::int[] THEN
+  IF installed_schema <> 'public' THEN
+    RAISE EXCEPTION
+      'pgvector must be installed in public for Storage Vectors, found schema %',
+      installed_schema;
+  END IF;
+
+  IF string_to_array(split_part(installed_version, '-', 1), '.')::int[] < ARRAY[0, 7, 0]::int[] THEN
     RAISE EXCEPTION
       'pgvector >= 0.7.0 required for Storage Vectors, found %',
       installed_version;
   END IF;
+
+  SELECT e.extversion, n.nspname
+    INTO installed_version, installed_schema
+    FROM pg_extension e
+    JOIN pg_namespace n ON n.oid = e.extnamespace
+   WHERE e.extname = 'wrappers';
+
+  IF installed_version IS NULL THEN
+    RAISE EXCEPTION 'wrappers extension is not installed';
+  END IF;
+
+  IF installed_schema <> 'extensions' THEN
+    RAISE EXCEPTION
+      'wrappers must be installed in extensions for s3_vectors_fdw, found schema %',
+      installed_schema;
+  END IF;
+
+  IF string_to_array(split_part(installed_version, '-', 1), '.')::int[] < ARRAY[0, 5, 7]::int[] THEN
+    RAISE EXCEPTION
+      'wrappers >= 0.5.7 required for s3_vectors_fdw, found %',
+      installed_version;
+  END IF;
 END
-$vector_check$;
+$vector_and_wrappers_check$;
 EOSQL
 
 echo "Criando database _supabase_template..."
@@ -68,12 +100,12 @@ echo "Validando GraphQL e seus grants no template..."
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname _supabase_template \
   -f /etc/supabase/graphql.sql
 
-# Falha durante a inicializacao do Postgres caso o dump deixe de transportar a
-# extensao. Assim nenhum projeto pode ser criado a partir de um template sem
-# suporte ao backend vetorial.
-echo "Validando pgvector dentro de _supabase_template..."
+# Falha durante a inicializacao do Postgres caso o dump deixe de transportar as
+# extensoes. Assim nenhum projeto pode ser criado a partir de um template sem
+# suporte ao backend vetorial e ao s3_vectors_fdw.
+echo "Validando pgvector e wrappers dentro de _supabase_template..."
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname _supabase_template <<-'EOSQL'
-DO $template_vector_check$
+DO $template_vector_and_wrappers_check$
 DECLARE
   installed_version text;
   installed_schema text;
@@ -94,15 +126,43 @@ BEGIN
       installed_schema;
   END IF;
 
-  IF string_to_array(installed_version, '.')::int[] < ARRAY[0, 7, 0]::int[] THEN
+  IF string_to_array(split_part(installed_version, '-', 1), '.')::int[] < ARRAY[0, 7, 0]::int[] THEN
     RAISE EXCEPTION
       '_supabase_template requires pgvector >= 0.7.0, found %',
       installed_version;
   END IF;
+
+  SELECT e.extversion, n.nspname
+    INTO installed_version, installed_schema
+    FROM pg_extension e
+    JOIN pg_namespace n ON n.oid = e.extnamespace
+   WHERE e.extname = 'wrappers';
+
+  IF installed_version IS NULL THEN
+    RAISE EXCEPTION '_supabase_template was created without wrappers';
+  END IF;
+
+  IF installed_schema <> 'extensions' THEN
+    RAISE EXCEPTION
+      'wrappers must be installed in extensions for s3_vectors_fdw, found schema %',
+      installed_schema;
+  END IF;
+
+  IF string_to_array(split_part(installed_version, '-', 1), '.')::int[] < ARRAY[0, 5, 7]::int[] THEN
+    RAISE EXCEPTION
+      '_supabase_template requires wrappers >= 0.5.7, found %',
+      installed_version;
+  END IF;
 END
-$template_vector_check$;
+$template_vector_and_wrappers_check$;
 EOSQL
 
+echo "Configurando search_path de supabase_storage_admin para resolver tipos pgvector..."
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+  -v target_db="$POSTGRES_DB" <<-'EOSQL'
+  ALTER ROLE supabase_storage_admin IN DATABASE _supabase_template SET search_path = storage, public;
+  ALTER ROLE supabase_storage_admin IN DATABASE :"target_db" SET search_path = storage, public;
+EOSQL
 
 echo "Transformando _supabase_template em um template de fato..."
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
@@ -110,7 +170,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
   UPDATE pg_database SET datallowconn = false WHERE datname = '_supabase_template';
 EOSQL
 
-echo "Template _supabase_template criado com pgvector e validado com sucesso."
+echo "Template _supabase_template criado com pgvector e wrappers e validado com sucesso."
 
 echo "Criando banco e usuário restrito para fallback do pg-meta..."
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL

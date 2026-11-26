@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 umask 077
 
+BACKUP_CORE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 backup_progress() {
   printf 'HOST_AGENT_PROGRESS=backup:%s\n' "$1"
 }
@@ -81,7 +83,10 @@ backup_capture() {
 
   backup_progress database_started
   docker exec supabase-db pg_dump -U supabase_admin -d "$db" \
-    --exclude-schema=realtime | gzip > "$tmp_dir/db.sql.gz"
+    --exclude-schema=realtime --exclude-schema=studio_storage_guard \
+    --exclude-schema=studio_vector_fdw_guard \
+    | python3 "$BACKUP_CORE_DIR/pg_dump_filter.py" sql \
+    | gzip > "$tmp_dir/db.sql.gz"
   backup_progress database_dumped
   docker exec supabase-db pg_dump -U supabase_admin -d "$db" \
     --schema=realtime --schema-only | gzip > "$tmp_dir/realtime-structure.sql.gz"

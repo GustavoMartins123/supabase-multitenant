@@ -428,6 +428,51 @@ print("COMMIT;")
       -U "$POSTGRES_USER" -d "$database"
 }
 
+ensure_project_vector_database_prerequisites() {
+  local database="$1"
+  [[ -n "${POSTGRES_USER:-}" ]] || die "POSTGRES_USER ausente"
+  [[ "$database" =~ ^_supabase_[a-z_][a-z0-9_]{2,39}$ ]] \
+    || die "database invalido para pre-requisitos vetoriais: $database"
+
+  docker exec -i supabase-db psql -X -q -v ON_ERROR_STOP=1 \
+    -U "$POSTGRES_USER" -d "$database" <<'SQL'
+CREATE SCHEMA IF NOT EXISTS extensions;
+CREATE EXTENSION IF NOT EXISTS wrappers SCHEMA extensions;
+
+DO $wrappers_check$
+DECLARE
+  installed_version text;
+  installed_schema text;
+BEGIN
+  SELECT e.extversion, n.nspname
+    INTO installed_version, installed_schema
+    FROM pg_extension e
+    JOIN pg_namespace n ON n.oid = e.extnamespace
+   WHERE e.extname = 'wrappers';
+
+  IF installed_version IS NULL THEN
+    RAISE EXCEPTION 'wrappers extension is not installed';
+  END IF;
+  IF installed_schema <> 'extensions' THEN
+    RAISE EXCEPTION 'wrappers must be installed in extensions for s3_vectors_fdw, found schema %', installed_schema;
+  END IF;
+  IF string_to_array(split_part(installed_version, '-', 1), '.')::int[] < ARRAY[0, 5, 7]::int[] THEN
+    EXECUTE 'ALTER EXTENSION wrappers UPDATE';
+    SELECT extversion INTO installed_version FROM pg_extension WHERE extname = 'wrappers';
+  END IF;
+  IF string_to_array(split_part(installed_version, '-', 1), '.')::int[] < ARRAY[0, 5, 7]::int[] THEN
+    RAISE EXCEPTION 'wrappers >= 0.5.7 required for s3_vectors_fdw, found %', installed_version;
+  END IF;
+END
+$wrappers_check$;
+SQL
+
+  docker exec supabase-db psql -X -q -v ON_ERROR_STOP=1 \
+    -U "$POSTGRES_USER" -d postgres -c \
+    "ALTER ROLE supabase_storage_admin IN DATABASE \"$database\" SET search_path = storage, public;" \
+    >/dev/null
+}
+
 restore_project_config() {
   local project="$1" archive="$RUN_DIR/config-before/$1.tar.gz"
   local project_dir="$SERVER_ROOT/projects/$1"
@@ -516,6 +561,7 @@ migrate_project() (
     && [[ "${S3_PROTOCOL_CREDENTIAL_ID:-}" =~ ^[0-9a-f-]{36}$ ]] \
     && tenant_exists "$PROJECT_UUID" \
     && [[ -d "$(storage_assert_namespace_target "$PROJECT_UUID")" ]]; then
+    ensure_project_vector_database_prerequisites "_supabase_$project" || return 1
     vector_validate_s3_credentials || return 1
     storage_validate_tenant "$PROJECT_UUID" "$SERVICE_ROLE_KEY_PROJETO" \
       "$S3_PROTOCOL_ACCESS_KEY_ID" "$S3_PROTOCOL_ACCESS_KEY_SECRET" \
@@ -614,6 +660,8 @@ migrate_project() (
   vector_rekeyed=1
   printf 'VECTORS_REKEYED\n' > "$state_file"
 
+  ensure_project_vector_database_prerequisites "_supabase_$project"
+
   storage_provision_tenant "$PROJECT_UUID" "$project" "$JWT_SECRET_PROJETO" \
     "$ANON_KEY_PROJETO" "$SERVICE_ROLE_KEY_PROJETO" "$FILE_SIZE_LIMIT" \
     "$ENABLE_IMAGE_TRANSFORMATION" "$S3_PROTOCOL_ENABLED" "$VECTOR_BUCKETS_ENABLED" \
@@ -704,11 +752,14 @@ convert_backup() (
   docker exec supabase-db psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" \
     -d postgres -c "CREATE DATABASE \"$temp_db\";" >/dev/null
   gunzip -c "$backup_dir/db.sql.gz" \
+    | python3 "$SCRIPT_DIR/lib/pg_dump_filter.py" sql \
     | docker exec -i supabase-db psql -X -q -v ON_ERROR_STOP=1 \
       -U "$POSTGRES_USER" -d "$temp_db" >/dev/null
   migration_rekey_vector_physical_tables "$temp_db" stub "$tenant"
   docker exec supabase-db pg_dump -U "$POSTGRES_USER" -d "$temp_db" \
-    --exclude-schema=realtime | gzip > "$stage/db.sql.gz"
+    --exclude-schema=realtime --exclude-schema=studio_vector_fdw_guard \
+    | python3 "$SCRIPT_DIR/lib/pg_dump_filter.py" sql \
+    | gzip > "$stage/db.sql.gz"
   drop_temp_database "$temp_db"
 
   jq --arg tenant "$tenant" '.format = 2
