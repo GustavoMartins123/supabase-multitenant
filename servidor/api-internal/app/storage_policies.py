@@ -887,14 +887,11 @@ def _rewrite_create_server(tree: dict) -> tuple[object, bool] | None:
         return None
     # Validate AST shape eagerly before deferring endpoint/region pinning to rewrite time.
     _build_create_server_sql(tree, "http://supabase-nginx-placeholder:8081/vector", "us-east-1")
-    return (
-        _PinnedVectorServerSql(
-            lambda endpoint_url, aws_region, stmt_tree=tree: _build_create_server_sql(
-                stmt_tree, endpoint_url, aws_region
-            )
-        ),
-        False,
-    )
+
+    def _build(endpoint_url: str, aws_region: str) -> str:
+        return _build_create_server_sql(tree, endpoint_url, aws_region)
+
+    return (_PinnedVectorServerSql(_build), False)
 
 
 def _rewrite_alter_server(tree: dict) -> tuple[object, bool] | None:
