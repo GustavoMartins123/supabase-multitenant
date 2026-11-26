@@ -1081,11 +1081,12 @@ def _rewrite_vector_server_do_stmt(tree: dict) -> tuple[object, bool] | None:
     lang_clause = f" LANGUAGE {_format_ident(language)}" if language else ""
 
     def _build(endpoint_url: str, aws_region: str) -> str:
-        option_clauses = [f"{name} %L" for name, _ in preserved_opt_specs]
+        safe_header_sql = header_sql.replace("%", "%%")
+        option_clauses = [f"{name.replace('%', '%%')} %L" for name, _ in preserved_opt_specs]
         option_clauses.extend(["aws_region %L", "endpoint_url %L"])
         format_args = [expr for _, expr in preserved_opt_specs]
         format_args.extend([_quote_literal(aws_region), _quote_literal(endpoint_url)])
-        rebuilt_template = f"{header_sql} OPTIONS ({', '.join(option_clauses)});"
+        rebuilt_template = f"{safe_header_sql} OPTIONS ({', '.join(option_clauses)});"
         rebuilt_exec = f"execute format({_quote_literal(rebuilt_template)}, {', '.join(format_args)})"
         rebuilt_body = f"{prefix_body}{rebuilt_exec}{suffix_body}"
         return f"DO{lang_clause} {_dollar_quote(rebuilt_body)}"

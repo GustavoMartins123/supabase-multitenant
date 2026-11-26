@@ -367,6 +367,33 @@ commit;"""
         self.assertNotIn("host.docker.internal", rewritten_tf)
         self.assertNotIn("'local'", rewritten_tf)
 
+        # Format-string SQL injection via %% -> % inside DO $$ execute format(...) header/option names is neutralized.
+        fmt_inj_sql = """DO $$
+DECLARE
+  v text := 'x'' ); CREATE ' || 'SERVER evil FOREIGN DATA WRAPPER my_fdw OPTIONS (endpoint_' || 'url ''http://storage:5001''); --';
+BEGIN
+  execute format(
+    E'create server "a%%1$s" type ''t%%1$s'' version ''v%%1$s'' foreign data wrapper "f%%1$s" options ("opt%%1$s" %L, endpoint_url %L);',
+    v, 'http://evil'
+  );
+END $$;"""
+        rewritten_fmt_inj = storage_policies.rewrite_policy_statements(
+            storage_policies.prepare_policy_statements(
+                fmt_inj_sql, project_id=PROJECT_NAME, storage_s3_region="us-east-1"
+            ),
+            tenant_uuid,
+            project_id=PROJECT_NAME,
+            storage_s3_region="us-east-1",
+        )
+        self.assertIn('"a%%1$s"', rewritten_fmt_inj)
+        self.assertIn("''t%%1$s''", rewritten_fmt_inj)
+        self.assertIn("''v%%1$s''", rewritten_fmt_inj)
+        self.assertIn('"f%%1$s"', rewritten_fmt_inj)
+        self.assertIn('"opt%%1$s" %L', rewritten_fmt_inj)
+        self.assertNotIn('"a%1$s"', rewritten_fmt_inj)
+        self.assertNotIn('"opt%1$s"', rewritten_fmt_inj)
+        self.assertIn(EXPECTED_ENDPOINT, rewritten_fmt_inj)
+
     def test_region_and_project_id_validation_and_root_env_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root_env = Path(tmpdir) / ".env"
@@ -708,6 +735,12 @@ class VectorFdwGuardDatabaseTests(unittest.IsolatedAsyncioTestCase):
             ALTER TABLE storage.objects OWNER TO supabase_storage_admin;
             CREATE FUNCTION extensions.s3_vectors_fdw_handler() RETURNS fdw_handler LANGUAGE internal IMMUTABLE STRICT AS 'postgresql_fdw_validator';
             CREATE FUNCTION extensions.s3_vectors_fdw_validator(text[], oid) RETURNS void LANGUAGE plpgsql AS $$ BEGIN RETURN; END; $$;
+            CREATE FOREIGN DATA WRAPPER cli_vec_fdw HANDLER extensions.s3_vectors_fdw_handler VALIDATOR extensions.s3_vectors_fdw_validator;
+            CREATE SERVER cli_vec_srv FOREIGN DATA WRAPPER cli_vec_fdw OPTIONS (aws_region 'us-east-1', endpoint_url 'http://supabase-nginx-"""
+            + self.project["name"]
+            + """:8081/vector');
+            CREATE FOREIGN DATA WRAPPER other_preexisting_fdw;
+            CREATE SERVER other_preexisting_srv FOREIGN DATA WRAPPER other_preexisting_fdw;
             CREATE SCHEMA vault;
             REVOKE ALL ON SCHEMA vault FROM PUBLIC;
             CREATE TABLE vault.secrets(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text UNIQUE, secret text, description text);
@@ -852,6 +885,33 @@ class VectorFdwGuardDatabaseTests(unittest.IsolatedAsyncioTestCase):
                     proof,
                 )
 
+        # Pre-existing CLI-created s3_vectors_fdw wrapper & server get USAGE granted to tenant_meta,
+        # while non-vector FDWs/servers stay untouched.
+        self.assertTrue(
+            await self.owner.fetchval(
+                "SELECT has_foreign_data_wrapper_privilege($1, 'cli_vec_fdw', 'USAGE')",
+                self.role,
+            )
+        )
+        self.assertTrue(
+            await self.owner.fetchval(
+                "SELECT has_server_privilege($1, 'cli_vec_srv', 'USAGE')",
+                self.role,
+            )
+        )
+        self.assertFalse(
+            await self.owner.fetchval(
+                "SELECT has_foreign_data_wrapper_privilege($1, 'other_preexisting_fdw', 'USAGE')",
+                self.role,
+            )
+        )
+        self.assertFalse(
+            await self.owner.fetchval(
+                "SELECT has_server_privilege($1, 'other_preexisting_srv', 'USAGE')",
+                self.role,
+            )
+        )
+
         # Digit-leading bucket wrapper name works cleanly.
         ensure_digit_sql = storage_policies.rewrite_policy_statements(
             storage_policies.prepare_policy_statements(
@@ -862,6 +922,39 @@ class VectorFdwGuardDatabaseTests(unittest.IsolatedAsyncioTestCase):
             project_id=self.project["name"],
         )
         await self.tenant.execute(ensure_digit_sql)
+
+        # Format-string %%1$s smuggling inside DO $$ execute format(...) cannot escape CREATE SERVER or break out of quotes.
+        fmt_smuggle_sql = storage_policies.rewrite_policy_statements(
+            storage_policies.prepare_policy_statements(
+                """DO $$
+                DECLARE
+                  v text := 'ignored" FOREIGN DATA WRAPPER "2026_docs_fdw" OPTIONS (endpoint_' || 'url ''http://storage:5001'', aws_region ''us-east-1''); --';
+                BEGIN
+                  execute format(
+                    E'create server "srv_%%1$s" foreign data wrapper "2026_docs_fdw" options (vault_access_key_id %L, endpoint_url %L);',
+                    v, 'http://evil'
+                  );
+                END $$;""",
+                project_id=self.project["name"],
+            ),
+            self.project["tenant_uuid"],
+            project_id=self.project["name"],
+        )
+        await self.tenant.execute(fmt_smuggle_sql)
+        self.assertEqual(
+            await self.owner.fetchval(
+                "SELECT count(*) FROM pg_foreign_server WHERE srvname = 'srv_%1$s'"
+            ),
+            1,
+        )
+        smuggled_opts = await self.owner.fetchval(
+            "SELECT srvoptions FROM pg_foreign_server WHERE srvname = 'srv_%1$s'"
+        )
+        self.assertIn(
+            f"endpoint_url=http://supabase-nginx-{self.project['name']}:8081/vector",
+            smuggled_opts,
+        )
+        self.assertNotIn("endpoint_url=http://storage:5001", smuggled_opts)
 
         # Dynamic SQL string-concatenation SSRF bypasses inside DO $$ and CREATE FUNCTION are blocked by EVENT TRIGGER.
         with self.assertRaises(asyncpg.InsufficientPrivilegeError):
@@ -970,6 +1063,44 @@ class VectorFdwGuardDatabaseTests(unittest.IsolatedAsyncioTestCase):
                     await clone_owner.fetchval(
                         "SELECT has_schema_privilege($1, 'studio_vector_fdw_guard', 'USAGE')",
                         self.role,
+                    )
+                )
+                # Clone grants USAGE on pre-existing CLI vector FDW/server to clone role and revokes from source role,
+                # while keeping non-vector FDW/server untouched.
+                self.assertTrue(
+                    await clone_owner.fetchval(
+                        "SELECT has_foreign_data_wrapper_privilege($1, 'cli_vec_fdw', 'USAGE')",
+                        clone_role,
+                    )
+                )
+                self.assertTrue(
+                    await clone_owner.fetchval(
+                        "SELECT has_server_privilege($1, 'cli_vec_srv', 'USAGE')",
+                        clone_role,
+                    )
+                )
+                self.assertFalse(
+                    await clone_owner.fetchval(
+                        "SELECT has_foreign_data_wrapper_privilege($1, 'cli_vec_fdw', 'USAGE')",
+                        self.role,
+                    )
+                )
+                self.assertFalse(
+                    await clone_owner.fetchval(
+                        "SELECT has_server_privilege($1, 'cli_vec_srv', 'USAGE')",
+                        self.role,
+                    )
+                )
+                self.assertFalse(
+                    await clone_owner.fetchval(
+                        "SELECT has_foreign_data_wrapper_privilege($1, 'other_preexisting_fdw', 'USAGE')",
+                        clone_role,
+                    )
+                )
+                self.assertFalse(
+                    await clone_owner.fetchval(
+                        "SELECT has_server_privilege($1, 'other_preexisting_srv', 'USAGE')",
+                        clone_role,
                     )
                 )
             finally:

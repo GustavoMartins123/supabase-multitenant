@@ -9,6 +9,8 @@ DECLARE
     pinned_endpoint TEXT := current_setting('platform.vector_fdw_endpoint_url');
     pinned_region TEXT := current_setting('platform.vector_fdw_aws_region');
     previous_tenant TEXT;
+    handler_oid OID;
+    obj RECORD;
 BEGIN
     IF tenant_role !~ '^tenant_meta_[0-9a-f]{32}$' THEN
         RAISE EXCEPTION 'Invalid tenant FDW identity';
@@ -39,6 +41,13 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'Untrusted Vector FDW delegation schema';
     END IF;
+    SELECT p.oid INTO handler_oid
+      FROM pg_catalog.pg_proc p
+      JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'extensions'
+       AND p.proname = 's3_vectors_fdw_handler'
+       AND p.pronargs = 0
+     LIMIT 1;
     IF to_regclass('studio_vector_fdw_guard.authorities') IS NOT NULL THEN
         FOR previous_tenant IN
             SELECT role_name FROM studio_vector_fdw_guard.authorities
@@ -48,6 +57,23 @@ BEGIN
                 EXECUTE format('REVOKE ALL ON ALL FUNCTIONS IN SCHEMA studio_vector_fdw_guard FROM %I', previous_tenant);
                 EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA studio_vector_fdw_guard FROM %I', previous_tenant);
                 EXECUTE format('REVOKE ALL ON SCHEMA studio_vector_fdw_guard FROM %I', previous_tenant);
+                IF handler_oid IS NOT NULL THEN
+                    FOR obj IN
+                        SELECT s.srvname
+                          FROM pg_catalog.pg_foreign_server s
+                          JOIN pg_catalog.pg_foreign_data_wrapper w ON w.oid = s.srvfdw
+                         WHERE w.fdwhandler = handler_oid
+                    LOOP
+                        EXECUTE format('REVOKE ALL ON FOREIGN SERVER %I FROM %I', obj.srvname, previous_tenant);
+                    END LOOP;
+                    FOR obj IN
+                        SELECT w.fdwname
+                          FROM pg_catalog.pg_foreign_data_wrapper w
+                         WHERE w.fdwhandler = handler_oid
+                    LOOP
+                        EXECUTE format('REVOKE ALL ON FOREIGN DATA WRAPPER %I FROM %I', obj.fdwname, previous_tenant);
+                    END LOOP;
+                END IF;
             END IF;
         END LOOP;
     END IF;
@@ -314,6 +340,8 @@ $fdw_server_event$;
 DO $fdw_guard_access$
 DECLARE
     tenant_role TEXT := current_setting('platform.meta_role');
+    handler_oid OID;
+    obj RECORD;
 BEGIN
     IF tenant_role !~ '^tenant_meta_[0-9a-f]{32}$' THEN
         RAISE EXCEPTION 'Invalid tenant FDW identity';
@@ -325,6 +353,30 @@ BEGIN
     EXECUTE format('GRANT USAGE ON SCHEMA studio_vector_fdw_guard TO %I', tenant_role);
     EXECUTE format('GRANT EXECUTE ON FUNCTION studio_vector_fdw_guard.ensure_s3_vectors_fdw(TEXT, BIGINT, TEXT) TO %I', tenant_role);
     EXECUTE format('GRANT EXECUTE ON FUNCTION studio_vector_fdw_guard.drop_s3_vectors_fdw(TEXT, BIGINT, TEXT) TO %I', tenant_role);
+    SELECT p.oid INTO handler_oid
+      FROM pg_catalog.pg_proc p
+      JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'extensions'
+       AND p.proname = 's3_vectors_fdw_handler'
+       AND p.pronargs = 0
+     LIMIT 1;
+    IF handler_oid IS NOT NULL THEN
+        FOR obj IN
+            SELECT w.fdwname
+              FROM pg_catalog.pg_foreign_data_wrapper w
+             WHERE w.fdwhandler = handler_oid
+        LOOP
+            EXECUTE format('GRANT USAGE ON FOREIGN DATA WRAPPER %I TO %I', obj.fdwname, tenant_role);
+        END LOOP;
+        FOR obj IN
+            SELECT s.srvname
+              FROM pg_catalog.pg_foreign_server s
+              JOIN pg_catalog.pg_foreign_data_wrapper w ON w.oid = s.srvfdw
+             WHERE w.fdwhandler = handler_oid
+        LOOP
+            EXECUTE format('GRANT USAGE ON FOREIGN SERVER %I TO %I', obj.srvname, tenant_role);
+        END LOOP;
+    END IF;
 END
 $fdw_guard_access$;
 
